@@ -294,11 +294,11 @@ const submission = {
         "expected_output_url": null
     },
     {
-        "description": "Propose a one-hour change to an independently prepared Brooklyn table reservation and apply it only after guest acceptance.",
-        "user_prompt": "At Ember & Slice in Brooklyn, ask the guest on the existing regular table reservation to move their table one hour later. Email the proposal. Keep the original time until they accept.",
+        "description": "Create a regular Brooklyn table reservation, then propose a one-hour change for guest acceptance.",
+        "user_prompt": "Book a regular table for two at Ember & Slice in Brooklyn next Friday at 7 PM for Taylor Review, using the reviewer contact details in the review instructions. Then ask the guest to move it to 8 PM. Email the proposal and keep 7 PM until they accept.",
         "file_attachment_urls": null,
-        "tools_triggered": "list_organizations, list_locations, list_reservation_inquiries, get_calendar, request_table_reservation_change",
-        "expected_output": "Uses the existing Brooklyn regular table reservation for Directory Reviewer and the controlled guest inbox. Emails one proposal for a one-hour-later time while the dashboard keeps the original time and capacity. Guest acceptance updates the reservation once; reopening the guest link or repeating the same proposal causes no duplicate allocation or email.",
+        "tools_triggered": "list_organizations, list_locations, get_booking_policy, get_calendar, create_table_reservation, list_reservation_inquiries, request_table_reservation_change",
+        "expected_output": "Creates one regular table reservation using the actual location policy and controlled reviewer contact details. Emails one proposal for 8 PM while the reservation remains at 7 PM. Guest acceptance updates the same reservation once; reopening the accepted link preserves the accepted state. Experience bookings remain separate. Cancel the review reservation after verification.",
         "expected_output_url": null
     },
     {
@@ -306,7 +306,7 @@ const submission = {
         "user_prompt": "Show Ember & Slice's October payment summary, transactions, balance and recent payouts. Keep each currency separate. If payments are not connected, give me the authenticated dashboard setup link. Don't change anything.",
         "file_attachment_urls": null,
         "tools_triggered": "list_organizations, get_payment_summary, list_payments, get_payment_payouts, get_payments_dashboard_link",
-        "expected_output": "Reads Ember's actual October state. Reports zero returned transactions and zero payouts, distinguishes an unconfigured Stripe account from a zero balance, and returns the authenticated dashboard setup link. Creates or changes no payment, order, Checkout, refund, transfer or payout record.",
+        "expected_output": "Reads Ember's actual October state. Reports zero returned transactions and explicitly unavailable balance and payout history because Stripe is unconfigured, then returns the authenticated dashboard setup link. Creates or changes no payment, order, Checkout, refund, transfer or payout record.",
         "expected_output_url": null
     }
 ],

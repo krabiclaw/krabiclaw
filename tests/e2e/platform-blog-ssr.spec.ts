@@ -186,6 +186,7 @@ test('docs reading header exposes one mobile search shortcut without a second co
   await expect(search).toHaveCount(1)
   await expect(page.locator('main').getByRole('button', { name: /Search/ })).toHaveCount(0)
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
+  await waitForNuxtHydration(page)
   await search.press('Enter')
   await expect(page.getByRole('dialog')).toBeVisible()
   await page.getByRole('dialog').press('Escape')
