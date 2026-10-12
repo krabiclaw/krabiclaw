@@ -112,12 +112,13 @@ async function request<T>(
   const method = options.method ?? 'GET'
   const run = async () => {
     try {
+      const deadline = AbortSignal.timeout(options.timeout)
       const requestOptions: ApiRequestOptions = {
         method,
         headers: options.headers,
         body: options.body as Record<string, unknown> | BodyInit | null | undefined,
         query: options.query,
-        signal: options.signal,
+        signal: options.signal ? AbortSignal.any([options.signal, deadline]) : deadline,
         retry: 0,
         timeout: options.timeout,
       }
