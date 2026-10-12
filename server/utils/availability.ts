@@ -794,6 +794,8 @@ export class CapacityUnavailableError extends Error {
  */
 export interface SessionAllocationInput {
   organizationId: string; productId: string; sessionId: string; partySize: number; now: string
+  /** Publication keeps its page when sale is disabled; bookings require active sale by default. */
+  requireActive?: boolean
   replacingBookingId?: string | null
   /** Only authenticated capture reconciliation supplies this; public callers cannot exclude holds. */
   capturedPaymentId?: string
@@ -813,14 +815,14 @@ export async function sessionAllocationPredicate(db: DbClient, input: SessionAll
           AND s.status = 'scheduled'
           AND EXISTS (SELECT 1 FROM product_booking_configs c JOIN products p ON p.id=c.product_id AND p.organization_id=c.organization_id
             WHERE c.product_id=s.product_id AND c.organization_id=s.organization_id AND c.duration_minutes>0
-              ${input.capturedPaymentId ? '' : 'AND p.active=1'} AND (s.location_id IS NOT NULL OR c.online_timezone=s.timezone))
+              ${input.capturedPaymentId || input.requireActive === false ? '' : 'AND p.active=1'} AND (s.location_id IS NOT NULL OR c.online_timezone=s.timezone))
           AND (${location.query})
           -- The location's own sale switch is part of being bookable: a branch
           -- that has stopped selling this does not take seats for it.
           AND (s.location_id IS NULL OR EXISTS (
             SELECT 1 FROM product_locations pl
              WHERE pl.product_id = s.product_id AND pl.location_id = s.location_id
-               AND pl.active = 1 AND pl.published = 1
+               ${input.requireActive === false ? '' : 'AND pl.active = 1'} AND pl.published = 1
           ))
           AND s.starts_at > ?
           AND NOT ${onlineCalendarConflictSql('s', '?', 'NULL', '?')}

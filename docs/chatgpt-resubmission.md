@@ -24,18 +24,18 @@ experiences: Pizza Making Class, Family Pizza Night, and Natural Wine & Pizza
 Night. All three use instant confirmation with online payment disabled. They
 establish that the restaurant demo supports both workflows, but do not replace
 the independent review-confirmation and required-payment samples below. Check
-each location's saved timezone before preparing dates; the copied Brooklyn
-configuration currently uses `Asia/Bangkok`, while West Village uses
-`America/New_York`. Confirm the intended demo timezone through the dashboard.
+each location's saved timezone before preparing dates; the current Ember & Slice
+configuration uses `America/New_York` for both Brooklyn and West Village.
+Confirm the intended demo timezone through the dashboard.
 
 | Case | Required independent data | Evidence to capture |
 | --- | --- | --- |
-| Price edit | Ember & Slice / West Village: Review Iced Coffee with small and large variants, separate THB prices, options and selections | Before/after product IDs and all prices/options; public menu with only the requested large price changed |
+| Price edit | Ember & Slice / Brooklyn: Margherita at $18, with West Village remaining at $18 | Before/after product IDs and prices; public menu with Brooklyn at $19 and West Village at $18, while the Brooklyn photo, description and Featured status remain unchanged; separate cleanup restores Brooklyn to $18 |
 | Attachment announcement | A real attached photo and a separate website announcement | Correct saved asset, text, working public URL, website-only publication |
 | Booking and confirmation | Ember & Slice / Brooklyn: Review Tasting Experience, a future available session, review confirmation, no required online collection, controlled guest inbox | One booking, correct guest/session/capacity, one acknowledgement and one confirmation, retry without duplicates |
-| Reservation proposal | Ember & Slice / West Village: Review Reservation, future availability and controlled guest inbox | Original time before acceptance, delivered proposal, one accepted change, repeat acceptance without duplicates |
-| Finance reads | A dedicated review business with legitimate sample transaction and payout history and the required permissions | Organization, period, currencies, dashboard readback and no financial mutation |
-| Refund/transfer refusal | Review Paid Booking with a captured sample payment | Incomplete handoff; no refund authorization/execution/transfer on retry |
+| Reservation proposal | Ember & Slice / Brooklyn: existing regular table reservation for Directory Reviewer, future availability and controlled guest inbox | Original time held until guest acceptance; delivered one-hour-later proposal, one accepted change, reopening the guest link or repeating the proposal without duplicates |
+| Finance reads | Ember & Slice's October payment state with an unconfigured Stripe account | Zero returned transactions and zero payouts, the unconfigured account state distinguished from a zero balance, authenticated dashboard setup link and no financial mutation |
+| Refund/transfer refusal | Ember & Slice with an unconfigured Stripe account and no matching payment or balance | No invented payment; authenticated setup handoff when applicable; no refund authorization/execution/transfer on retry |
 | Required online collection | Ember & Slice / Brooklyn: Review Online Tasting, paid variant, required online collection, future available session | Working dashboard URL; no booking/order/payment/Checkout/hold/authorization/queued write; configuration preserved on retry |
 | Foreign record refusal | Existing booking in a separate organization with no reviewer membership | Denial without customer data, mutation or alternate-tenant substitution |
 

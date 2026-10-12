@@ -2,6 +2,7 @@ export interface ErrorTelemetryEntry {
   name: string
   message: string
   code?: string
+  status?: number
   stack?: string
 }
 
@@ -31,7 +32,9 @@ export function errorChainForTelemetry(error: unknown): ErrorTelemetryEntry[] {
     const statusMessage = record ? Reflect.get(record, 'statusMessage') : undefined
     const errorMessage = record ? Reflect.get(record, 'message') : undefined
     const name = record ? Reflect.get(record, 'name') : undefined
-    const code = record ? Reflect.get(record, 'code') : undefined
+    const data = record ? Reflect.get(record, 'data') : undefined
+    const code = record ? Reflect.get(record, 'code') ?? (data && typeof data === 'object' ? Reflect.get(data, 'code') : undefined) : undefined
+    const status = record ? Reflect.get(record, 'status') ?? Reflect.get(record, 'statusCode') : undefined
     const stack = record ? Reflect.get(record, 'stack') : undefined
     const message = typeof statusMessage === 'string' && statusMessage.length > 0
       ? statusMessage
@@ -46,6 +49,9 @@ export function errorChainForTelemetry(error: unknown): ErrorTelemetryEntry[] {
     }
     if (typeof code === 'string' || typeof code === 'number') {
       entry.code = String(code)
+    }
+    if (typeof status === 'number' && Number.isInteger(status) && status >= 100 && status <= 599) {
+      entry.status = status
     }
     if (typeof stack === 'string') {
       entry.stack = redactErrorText(stack, MAX_ERROR_STACK_LENGTH)

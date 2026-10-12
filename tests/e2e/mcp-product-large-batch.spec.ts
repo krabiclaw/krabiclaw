@@ -2,13 +2,14 @@ import { expect, test } from '@playwright/test'
 import { loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { MCP_ORGANIZATION_ID, mcpData, mcpRequest } from './helpers/mcp'
+import type { Product } from '../../server/types/products'
 
 interface CreatedProduct { id: string; name: string; description: string; active: boolean }
 
 test('Product batches validate and commit atomically for a 100-item catalog', async ({ request, baseURL }, testInfo) => {
   const organizationId = MCP_ORGANIZATION_ID
-  // deactivate_missing acts on the whole tenant, and the assertions below name
-  // its whole catalog, so nothing else may write the demo's products meanwhile.
+  // Compare the existing catalog before and after this test's batch, so
+  // nothing else may write the demo's products meanwhile.
   const releaseTenantMutationLock = await acquireTenantMutationLock(testInfo, organizationId)
   try {
     await loginAs(request, baseURL!)
@@ -29,8 +30,14 @@ test('Product batches validate and commit atomically for a 100-item catalog', as
       } while (cursor)
       return products
     }
-    const demoActiveIds = (await listProducts()).filter(product => product.active).map(product => product.id).sort()
+    const demoProducts = await listProducts()
+    const demoIds = new Set(demoProducts.map(product => product.id))
+    const demoActiveIds = demoProducts.filter(product => product.active).map(product => product.id).sort()
     expect(demoActiveIds.length, 'the demo tenant sells products').toBeGreaterThan(0)
+    const editorUrl = `${baseURL}/api/editor/organizations/${organizationId}/products`
+    const beforeEditor = await request.get(editorUrl)
+    expect(beforeEditor.status(), await beforeEditor.text()).toBe(200)
+    const demoDetails = (await beforeEditor.json()).products as Product[]
 
     const collectionIds: string[] = []
     let created: CreatedProduct[] = []
@@ -65,7 +72,7 @@ test('Product batches validate and commit atomically for a 100-item catalog', as
       // Nothing from the refused batch landed, and the demo's catalog is untouched.
       const afterInvalid = await listProducts()
       expect(afterInvalid.filter(product => product.name.startsWith('Batch Product '))).toEqual([])
-      expect(afterInvalid.filter(product => product.active).map(product => product.id).sort()).toEqual(demoActiveIds)
+      expect(afterInvalid).toEqual(demoProducts)
 
       const validCreate = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'batch_create_products',
@@ -117,31 +124,58 @@ test('Product batches validate and commit atomically for a 100-item catalog', as
         args: { organization_id: organizationId, product_id: created[0]!.id, location_id: locationId, active: true, published: true },
       })
 
-      const desired = created.slice(0, 95).map((product, index) => ({ kind: 'dish',
+      const desired = created.map((product, index) => ({ kind: 'dish',
         product_id: product.id,
+        active: index < 95,
         name: `Batch Product ${String(index + 1).padStart(3, '0')}`,
         description: index === 0 ? 'Updated atomically' : `Original ${index + 1}`,
         variants: [{ name: 'Standard', prices: [{ unit_amount: (100 + index) * 100, currency: 'USD' }] }],
       }))
+      // Whole-catalog omission cannot partially deactivate existing offerings
+      // when a supplied row is invalid. The positive write below names only
+      // this test's products instead of disabling unrelated demo experiences.
+      const beforeRejected = await request.get(editorUrl)
+      expect(beforeRejected.status(), await beforeRejected.text()).toBe(200)
+      const catalogBeforeRejected = await beforeRejected.json()
+      const invalidReconcile = await mcpRequest(request, baseURL!, {
+        method: 'tools/call', toolName: 'reconcile_products',
+        args: { organization_id: organizationId, idempotency_key: crypto.randomUUID(), deactivate_missing: true,
+          products: desired.map((product, index) => index === 99 ? { ...product,
+            variants: [{ name: 'Standard', prices: [{ ...product.variants[0]!.prices[0]!, compare_at_unit_amount: product.variants[0]!.prices[0]!.unit_amount }] }],
+          } : product) },
+      })
+      const rejected = (await invalidReconcile.json()).result
+      expect(rejected.isError).toBe(true)
+      expect(rejected.structuredContent).toBeUndefined()
+      expect(JSON.parse(rejected.content[0].text)).toEqual({ status: 400, message: 'variants[0].prices[0]: compare_at_unit_amount must exceed unit_amount' })
+      const afterRejected = await request.get(editorUrl)
+      expect(afterRejected.status(), await afterRejected.text()).toBe(200)
+      expect(await afterRejected.json()).toEqual(catalogBeforeRejected)
       const reconcileResponse = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'reconcile_products',
-        args: { organization_id: organizationId, idempotency_key: crypto.randomUUID(), products: desired, deactivate_missing: true },
+        args: { organization_id: organizationId, idempotency_key: crypto.randomUUID(), products: desired },
       })
       const reconciled = mcpData<{ products: CreatedProduct[] }>(await reconcileResponse.json()).products
+      expect(reconciled).toHaveLength(100)
       expect(reconciled.find(product => product.id === created[0]!.id)?.description).toBe('Updated atomically')
-      // deactivate_missing covers the whole tenant: every active product the
-      // request omitted has its sale switch turned off — the five batch products
-      // left out and every product the demo already sold. Nothing is deleted and
-      // nothing claims to be sold out.
-      const omitted = [...created.slice(95).map(product => product.id), ...demoActiveIds].sort()
-      expect(reconciled.filter(product => !product.active).map(product => product.id).sort()).toEqual(omitted)
+      // Disable only this batch's five named products. An unrelated offering
+      // remains untouched, including its publication and booking configuration.
+      expect(reconciled.filter(product => !product.active).map(product => product.id).sort())
+        .toEqual(created.slice(95).map(product => product.id).sort())
       expect(reconciled.filter(product => product.active).map(product => product.id).sort())
         .toEqual(created.slice(0, 95).map(product => product.id).sort())
+      const afterReconcile = await listProducts()
+      expect(afterReconcile.filter(product => demoIds.has(product.id))).toEqual(demoProducts)
+      expect(afterReconcile.filter(product => created.some(item => item.id === product.id)).map(product => ({ id: product.id, active: product.active })))
+        .toEqual(reconciled.map(product => ({ id: product.id, active: product.active })))
+      const afterEditor = await request.get(editorUrl)
+      expect(afterEditor.status(), await afterEditor.text()).toBe(200)
+      const afterDetails = (await afterEditor.json()).products as Product[]
+      expect(afterDetails.filter(product => demoIds.has(product.id))).toEqual(demoDetails)
+      expect(afterDetails.find(product => product.id === created[0]!.id)).toMatchObject({ description: 'Updated atomically', active: true })
     } finally {
-      // Put the demo back the way the CMS would: its own partial update flips
-      // the sale switch and restates nothing else. Every step runs, and the ones
-      // that failed are reported together, so one failure cannot leave the rest
-      // of the demo half-restored.
+      // Delete only this test's products and collections. Every cleanup step
+      // runs and reports its failure without rewriting existing offerings.
       const failures: string[] = []
       const step = async (name: string, run: () => Promise<boolean>) => {
         try {
@@ -149,9 +183,6 @@ test('Product batches validate and commit atomically for a 100-item catalog', as
         } catch (error) {
           failures.push(`${name}: ${error instanceof Error ? error.message : String(error)}`)
         }
-      }
-      for (const productId of demoActiveIds) {
-        await step(`restore ${productId}`, async () => (await request.patch(`${baseURL}/api/editor/organizations/${organizationId}/products/${productId}`, { data: { active: true } })).status() === 200)
       }
       for (const product of created) {
         await step(`delete product ${product.id}`, async () => mcpData<{ deleted: boolean }>(await (await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'delete_product', args: { organization_id: organizationId, product_id: product.id } })).json()).deleted)
@@ -162,8 +193,10 @@ test('Product batches validate and commit atomically for a 100-item catalog', as
       expect(failures, 'demo tenant cleanup').toEqual([])
     }
     const restored = await listProducts()
-    expect(restored.filter(product => product.active).map(product => product.id).sort()).toEqual(demoActiveIds)
-    expect(restored.filter(product => product.name.startsWith('Batch Product '))).toEqual([])
+    expect(restored).toEqual(demoProducts)
+    const restoredEditor = await request.get(editorUrl)
+    expect(restoredEditor.status(), await restoredEditor.text()).toBe(200)
+    expect((await restoredEditor.json()).products).toEqual(demoDetails)
   } finally {
     await releaseTenantMutationLock()
   }

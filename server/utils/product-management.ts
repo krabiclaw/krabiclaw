@@ -839,14 +839,14 @@ function productWrites(
   // Prices are rewritten only by a caller that actually supplied variants.
   // Saving a description restates nothing about money, and must not retire and
   // remint every offer a product has.
-  options: { writePrices: boolean; priceIds?: ReadonlySet<string>; writeOptions?: boolean; variantIds?: ReadonlySet<string> } = { writePrices: true },
+  options: { writePrices: boolean; priceIds?: ReadonlySet<string>; writeOptions?: boolean; variantIds?: ReadonlySet<string>; expectedUpdatedAt?: string } = { writePrices: true },
 ): BatchQuery[] {
   const upsert = mode === 'upsert'
   const writes: BatchQuery[] = [{
     query: upsert
       ? `INSERT INTO products (id, organization_id, name, slug, description, active, order_url, unit_label,
              marketing_features, metadata, tax_code, source, kind, details_json, created_at, updated_at, created_by, updated_by)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${options.expectedUpdatedAt === undefined ? '?' : 'CASE WHEN EXISTS (SELECT 1 FROM products WHERE organization_id=? AND id=? AND updated_at=?) THEN ? ELSE NULL END'}, ?, ?)
            ON CONFLICT (id) DO UPDATE SET name = excluded.name, slug = excluded.slug, description = excluded.description,
              active = excluded.active, order_url = excluded.order_url, unit_label = excluded.unit_label,
              marketing_features = excluded.marketing_features, metadata = excluded.metadata,
@@ -857,7 +857,8 @@ function productWrites(
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     params: [planned.id, organizationId, planned.name, planned.slug, planned.description, planned.active ? 1 : 0,
       planned.order_url, planned.unit_label, JSON.stringify(planned.marketing_features),
-      JSON.stringify(planned.metadata), planned.tax_code, planned.source, planned.kind, JSON.stringify(planned.details), now, now, actor.actorId, actor.actorId],
+      JSON.stringify(planned.metadata), planned.tax_code, planned.source, planned.kind, JSON.stringify(planned.details), now,
+      ...(options.expectedUpdatedAt === undefined ? [] : [organizationId, planned.id, options.expectedUpdatedAt]), now, actor.actorId, actor.actorId],
   }]
 
   for (const option of options.writeOptions === false ? [] : planned.options) {
@@ -1230,6 +1231,8 @@ async function planProductUpdate(db: DbClient, input: {
   patch: UpdateProductInput
   actor: Actor
   now: string
+  env?: CloudflareEnv
+  booking?: ProductBookingSetupInput
   defaultCurrency?: CurrencyCode | null
   takenSlugs?: Set<string>
   idOwners?: SuppliedIdOwners
@@ -1282,6 +1285,13 @@ async function planProductUpdate(db: DbClient, input: {
   planned.source = current.source
   assertVariantPricesConsistent(planned)
 
+  const guardPublication = !input.booking && planned.kind === 'experience' && !planned.order_url
+  let readiness: Awaited<ReturnType<typeof productBookingReadiness>> | undefined
+  if (guardPublication && current.publications.some(publication => publication.organization_id === organizationId && publication.published)) {
+    readiness = await productBookingReadiness(db, organizationId, { ...current, ...planned }, { env: input.env, prepareAllocation: true })
+    if (!readiness.ready) throw new HTTPError({ statusCode: 409, statusMessage: 'This offering needs booking and payment setup before it can be published', data: { code: 'EXPERIENCE_BOOKING_INCOMPLETE', product_id: current.id, missing: readiness.missing } })
+  }
+
   const keptOptions = d1JsonArray(planned.options.map(option => option.id))
   const keptValues = d1JsonArray(planned.options.flatMap(option => option.values.map(value => value.id)))
   const keptVariants = d1JsonArray(planned.variants.map(variant => variant.id))
@@ -1320,7 +1330,12 @@ async function planProductUpdate(db: DbClient, input: {
     { query: 'DELETE FROM product_options WHERE organization_id = ? AND product_id = ? AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, productId, keptOptions] },
     ...productWrites(organizationId, planned, input.actor, input.now, 'upsert', {
       writePrices: writesPrices, priceIds, writeOptions: patch.options !== undefined, variantIds,
+      expectedUpdatedAt: planned.kind === 'experience' && !planned.order_url ? current.updated_at : undefined,
     }),
+    ...(guardPublication ? [{
+      query: `UPDATE products SET updated_at=CASE WHEN NOT EXISTS (SELECT 1 FROM product_publications WHERE organization_id=? AND product_id=? AND published=1) ${readiness?.allocation ? `OR (${readiness.allocation.query})` : ''} THEN updated_at ELSE NULL END WHERE organization_id=? AND id=?`,
+      params: [organizationId, productId, ...(readiness?.allocation?.params ?? []), organizationId, productId],
+    }] : []),
     ...input.cacheInvalidations,
   ]
   return { writes, keptVariants, product: planned }
@@ -1414,6 +1429,7 @@ export async function updateProduct(db: DbClient, input: {
   productId: string
   patch: UpdateProductInput
   actor: Actor
+  env?: CloudflareEnv
   booking?: { data: ProductBookingSetupInput; env: CloudflareEnv }
   idempotencyKey?: string
 }): Promise<Product> {
@@ -1433,6 +1449,7 @@ export async function updateProduct(db: DbClient, input: {
   const now = new Date().toISOString()
   const { writes, keptVariants, product: planned } = await planProductUpdate(db, {
     organizationId: input.organizationId, current, patch: input.patch, actor: input.actor, now,
+    env: input.env ?? input.booking?.env, booking: input.booking?.data,
     cacheInvalidations: await productCacheInvalidations(db, input.organizationId, input.productId, 'product_updated'),
   })
 
@@ -1457,6 +1474,10 @@ export async function updateProduct(db: DbClient, input: {
   // it was, and the merchant is told why rather than reading a constraint name.
   await executeBatch(db, writes, { operation: 'Update product' }).catch(async (error: unknown) => {
     if (isUniqueDedupeConflict(error) && await replay()) return
+    if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) {
+      if (await replay()) return
+      throw new HTTPError({ statusCode: 409, statusMessage: 'The offering or its availability changed while you were editing. Nothing was changed; read its current state and retry.', data: { code: 'PRODUCT_UPDATE_CONFLICT', product_id: input.productId }, cause: error })
+    }
     if (input.booking) {
       const { bookingConfigurationWriteError } = await import('~/server/utils/availability')
       const configurationError = bookingConfigurationWriteError(error)
@@ -1531,7 +1552,7 @@ async function productCacheInvalidations(db: DbClient, organizationId: string, p
  * is per-location visibility. A withheld product is not sold out and a
  * disabled product is not unpublished.
  */
-export async function productBookingReadiness(db: DbClient, organizationId: string, product: Product, options: { requireAllocation?: boolean; prepareAllocation?: boolean; requireActive?: boolean; locationId?: string; activeLocationIds?: ReadonlySet<string>; env?: CloudflareEnv; paymentSetup?: () => ReturnType<typeof readStripeCheckoutSetup> } = {}): Promise<{ ready: boolean; missing: string[]; allocation?: BatchQuery }> {
+export async function productBookingReadiness(db: DbClient, organizationId: string, product: Pick<Product, 'id' | 'active' | 'order_url' | 'booking' | 'locations'> & Pick<PlannedProduct, 'variants'>, options: { requireAllocation?: boolean; prepareAllocation?: boolean; requireActive?: boolean; locationId?: string; activeLocationIds?: ReadonlySet<string>; env?: CloudflareEnv; paymentSetup?: () => ReturnType<typeof readStripeCheckoutSetup> } = {}): Promise<{ ready: boolean; missing: string[]; allocation?: BatchQuery }> {
   const missing: string[] = []
   const requireActive = options.requireAllocation || options.requireActive
   const locations = product.locations.filter(location => (options.locationId === undefined || location.location_id === options.locationId) && (!options.activeLocationIds || options.activeLocationIds.has(location.location_id)))
@@ -1569,7 +1590,7 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
     if (!candidate) missing.push('booking.schedule')
     return { ready: missing.length === 0, missing }
   }
-  const allocation = candidate ? await sessionAllocationPredicate(db, { organizationId, productId: product.id, sessionId: candidate.id, partySize: 0, now: new Date().toISOString() }) : undefined
+  const allocation = candidate ? await sessionAllocationPredicate(db, { organizationId, productId: product.id, sessionId: candidate.id, partySize: 0, now: new Date().toISOString(), requireActive: Boolean(requireActive) }) : undefined
   if (allocation) {
     allocation.query = `(${allocation.query}) AND EXISTS (SELECT 1 FROM organization WHERE id=? AND default_currency=?)
       AND EXISTS (SELECT 1 FROM product_booking_configs WHERE organization_id=? AND product_id=? AND online_timezone IS ? AND online_payment_required=?)
@@ -1830,6 +1851,7 @@ async function planProductReconciliation(db: DbClient, input: {
   organizationId: string
   products: Array<ReconcileProductInput | (MenuSectionInput['items'][number] & { kind: 'dish' })>
   actor: Actor
+  env?: CloudflareEnv
   deactivateMissing?: boolean
 }): Promise<{ touched: string[]; perProduct: BatchQuery[][]; now: string; products: PlannedProduct[] }> {
   if (!Array.isArray(input.products)) invalid('products must be an array')
@@ -1875,6 +1897,7 @@ async function planProductReconciliation(db: DbClient, input: {
     if (current) {
       const planned = await planProductUpdate(db, {
         organizationId: input.organizationId, current, patch: rest, actor: input.actor, now,
+        env: input.env,
         defaultCurrency, takenSlugs: taken, idOwners, knownSlugs,
         // One invalidation per site at the end of the batch, not one per product.
         cacheInvalidations: [],
@@ -1928,7 +1951,7 @@ async function planProductReconciliation(db: DbClient, input: {
 }
 
 export async function reconcileProducts(db: DbClient, input: {
-  organizationId: string; products: ReconcileProductInput[]; actor: Actor; deactivateMissing?: boolean; idempotencyKey?: string
+  organizationId: string; products: ReconcileProductInput[]; actor: Actor; env?: CloudflareEnv; deactivateMissing?: boolean; idempotencyKey?: string
 }): Promise<Product[]> {
   const dedupeKey = input.idempotencyKey ? `catalog-reconcile:${input.organizationId}:${input.idempotencyKey}` : null
   const requestHash = dedupeKey ? await creationRequestHash({ products: input.products, deactivateMissing: input.deactivateMissing ?? false }) : null
@@ -1950,10 +1973,12 @@ export async function reconcileProducts(db: DbClient, input: {
   writes.push(organizationEventQuery({ organizationId: input.organizationId, actorId: input.actor.actorId, eventType: 'product.updated', entityType: 'catalog', entityId: input.organizationId, ...(dedupeKey ? { dedupeKey } : {}), metadata: { request_hash: requestHash, product_ids: answered } }))
   if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This catalog exceeds one atomic write; submit smaller batches')
   try { await executeBatch(db, writes, { operation: 'Reconcile products' }) } catch (error) {
-    if (isUniqueDedupeConflict(error)) {
+    const stale = /NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))
+    if (stale || isUniqueDedupeConflict(error)) {
       const concurrent = await replayCatalogWrite(db, input.organizationId, dedupeKey, requestHash)
       if (concurrent) return concurrent
     }
+    if (stale) throw new HTTPError({ statusCode: 409, statusMessage: 'The catalog or its availability changed while you were editing. Nothing was changed; read its current state and retry.', data: { code: 'PRODUCT_UPDATE_CONFLICT' }, cause: error })
     throw error
   }
   return readProductBatch(db, input.organizationId, answered)
