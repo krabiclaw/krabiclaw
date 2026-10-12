@@ -380,7 +380,7 @@ const bookingLabel = computed(() => props.vertical === 'service'
 const { trackProductOrder, trackProductView } = useOrganizationConversionTracking()
 const { localePath, t } = useI18n()
 const collectionLabel = computed(() => {
-  if (!props.location && props.vertical === 'service') return t('blawby.footer.services')
+  if (props.vertical === 'service' && (props.pageDocument || !props.location)) return t('blawby.footer.services')
   if (props.presentation.locationCollectionSegment === 'menu') return t('saya.footer.menu')
   return props.presentation.locationCollectionSegment === 'experiences'
     ? t('saya.footer.experiences')

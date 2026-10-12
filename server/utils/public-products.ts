@@ -20,6 +20,7 @@ import { publicTenantVisibilitySql } from '~/server/utils/public-base'
 import { refreshProductBusy } from '~/server/domain/member-scheduling'
 import { selectProductCollectionSiblings, type ProductCollectionSibling } from '~/utils/product-seo'
 import { getPublicTenantPageForPath } from '~/server/utils/public-tenant-pages'
+import { getPublishedTenantPage } from '~/server/utils/content/pages'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
 
@@ -322,9 +323,13 @@ export async function loadPublicPageProductDetail(
   requestedScope?: string | null,
 ): Promise<PublicProductDetail | null> {
   locale ??= await getSourceLocale(db, organizationId)
-  const page = await getPublicTenantPageForPath(env, db, organizationId, pagePath, { locale, preview: previewAuthorized })
+  const page = previewAuthorized
+    ? await getPublicTenantPageForPath(env, db, organizationId, pagePath, { locale, preview: true })
+    : await getPublishedTenantPage(db, organizationId, pagePath, locale)
+  if (page && !previewAuthorized && page.id !== page.page_id) await loadExactPublicLocalizations(env, db, organizationId, page.locale)
   if (!page?.product_id) return null
   const product = await getProduct(db, organizationId, page.product_id)
+  if (!product.locations.some(location => location.published) && !product.booking?.online_timezone && !product.order_url) return null
   const collection = await loadPublicProductCollection(db, organizationId, productSurfaceOf(null, product), previewAuthorized, undefined, env)
   const found = collection?.products.find(product => product.id === page.product_id)
   if (!collection || !found) return null
