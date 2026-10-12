@@ -217,13 +217,16 @@ export async function getPublicCompliance(db: DbClient, organizationId: string):
 
 
 export async function getPublicBlawbyIdentity(db: DbClient, organizationId: string): Promise<PublicBlawbyIdentity> {
-  const row = await queryFirst<ApiRecord>(db, `
+  const [row, placements] = await Promise.all([
+    queryFirst<ApiRecord>(db, `
     SELECT s.name, s.brand_description, s.contact_phone
       FROM organization s
      WHERE s.id = ?
      LIMIT 1
-  `, [organizationId])
-  const socialMedia = (await loadPublicSocialMedia(db, organizationId, 'organization', [organizationId])).get(organizationId)
+    `, [organizationId]),
+    loadPublicSocialMedia(db, organizationId, 'organization', [organizationId]),
+  ])
+  const socialMedia = placements.get(organizationId)
 
   return {
     name: requiredText(row?.name, `organization ${organizationId}.name`),
@@ -237,9 +240,9 @@ export async function getPublicBlawbyIdentity(db: DbClient, organizationId: stri
 export async function getPublicBlawbyShellData(
   db: DbClient,
   organizationId: string,
+  sourceLocale: string,
   options: { previewAuthorized?: boolean; locale?: string | null; localizations?: readonly ExactPublicLocalization[]; env?: CloudflareEnv } = {},
 ): Promise<PublicBlawbyShellData> {
-  const sourceLocale = await getSourceLocale(db, organizationId)
   const locale = options.locale ?? sourceLocale
   const localizations = options.localizations ?? []
   const organizationLocalization = localizations.find(item => item.resourceType === 'organization' && item.resourceId === organizationId) ?? null
@@ -322,10 +325,10 @@ export async function getPublicBlawbyDocumentData(
     ? []
     : await loadExactPublicLocalizations(env, db, organizationId, locale)
 
-  const shellData = getPublicBlawbyShellData(db, organizationId, { previewAuthorized: options.previewAuthorized, locale, localizations, env })
+  const shellData = getPublicBlawbyShellData(db, organizationId, sourceLocale, { previewAuthorized: options.previewAuthorized, locale, localizations, env })
   const [shell, route] = await Promise.all([
     shellData,
-    getPublicBlawbyRouteData(db, organizationId, recipe, { ...options, locale, localizations, hydrationResources: { blawbyShell: shellData } }, env),
+    getPublicBlawbyRouteData(db, organizationId, recipe, sourceLocale, { ...options, locale, localizations, hydrationResources: { blawbyShell: shellData } }, env),
   ])
   // Which path each recipe's document lives at is declared once, per template,
   // in utils/template-registry.ts; 'page' names its own path.
@@ -386,12 +389,12 @@ export async function getPublicBlawbyRouteData(
   db: DbClient,
   organizationId: string,
   recipe: PublicBlawbyRouteData['recipe'],
+  sourceLocale: string,
   options: { previewAuthorized?: boolean; slug?: string | null; locale?: string | null; localizations?: readonly ExactPublicLocalization[]; hydrationResources?: PublicTenantPageHydrationResources } = {},
   env: CloudflareEnv,
 ): Promise<PublicBlawbyRouteData> {
   // Declared once, per template, in utils/template-registry.ts.
   const pagePath = recipe === 'page' ? options.slug ?? null : BLAWBY_TEMPLATE.pageDocuments.recipes[recipe] ?? null
-  const sourceLocale = await getSourceLocale(db, organizationId)
   const localized = options.locale != null && options.locale !== sourceLocale
 
   const page = pagePath

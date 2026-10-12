@@ -51,7 +51,7 @@ export async function useBlawbyDocument(
   const key = () => `blawby-document-${organizationId}-${recipe}-${normalizedSlug || 'index'}-${locale.value}`
   const asyncData = await useAsyncData<BlawbyDocumentPayload>(
     key,
-    async () => {
+    async (_nuxtApp, { signal }) => {
       if (import.meta.server) {
         const requestEvent = useRequestEvent()
         if (!requestEvent) throw createError({ statusCode: 500, statusMessage: 'Request context unavailable' })
@@ -61,11 +61,13 @@ export async function useBlawbyDocument(
           previewAuthorized: Boolean(requestEvent.context.previewAuthorized),
           locale: locale.value,
           mutateResponseHeaders: false,
+          signal,
         })
       }
       // The preview cookie travels with this request, so the API resolves the
       // same authorization the server render used.
       return await publicApiRequest<BlawbyDocumentPayload>('/api/public/blawby/document', {
+        signal,
         query: { recipe, locale: locale.value, ...(normalizedSlug ? { slug: normalizedSlug } : {}) },
         validate: value => isBlawbyDocumentPayload(value, recipe),
       })
