@@ -78,7 +78,7 @@ export async function usePublicProductDetail(routeKind: ProductSurface) {
   const scope = computed(() => typeof route.query.location_id === 'string' ? route.query.location_id : null)
   const locale = typeof route.params.locale === 'string' ? route.params.locale : useState<string>('public-locale').value
   const localeRepresentations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
-  if (!organizationId || !productSlug || (!organizationWideExperience && !locationSlug)) throw createError({ statusCode: 404, statusMessage: 'Product not found' })
+  if (!organizationId || !productSlug || (!organizationWideExperience && !locationSlug)) throw createError({ statusCode: 404, statusMessage: 'Product not found', fatal: true })
 
   const { data, error } = await useAsyncData<PublicProductDetailPayload | null>(
     () => `public-product-${organizationId}-${locale}-${locationSlug}-${productSlug}-${scope.value ?? ''}`,
@@ -110,8 +110,8 @@ export async function usePublicProductDetail(routeKind: ProductSurface) {
     },
     { server: true, lazy: false },
   )
-  if (error.value) throw error.value
-  if (!data.value) throw createError({ statusCode: 404, statusMessage: 'Product not found' })
+  if (error.value) throw createError({ ...error.value, message: error.value.message, fatal: true })
+  if (!data.value) throw createError({ statusCode: 404, statusMessage: 'Product not found', fatal: true })
   localeRepresentations.value = data.value.localeRepresentations
   return { organizationId, detail: data as Ref<PublicProductDetailPayload> }
 }
@@ -141,6 +141,6 @@ export async function usePublicPageProduct(pagePath: ComputedRef<string>, locale
       })
     },
   )
-  if (error.value) throw error.value
+  if (error.value) throw createError({ ...error.value, message: error.value.message, fatal: true })
   return data
 }

@@ -181,10 +181,16 @@ export async function loadPublicProductCollection(
   }
   // Location publication is the public gate here: a product carried by the
   // site but withheld at this branch is absent, not shown greyed out.
-  const perLocation = await Promise.all(locations.map(location =>
-    listLocationProducts(db, { organizationId: resolved.organization.id, locationId: location.id, kind, publishedOnly: true, env, paymentSetup })))
-  const onlineProducts = locationSlug ? [] : (await listOrganizationProducts(db, { organizationId, kind, publishedOnly: true, env, paymentSetup }))
-    .filter(product => Boolean(product.booking?.online_timezone || product.order_url))
+  const [perLocation, onlineCandidates, collectionRows] = await Promise.all([
+    Promise.all(locations.map(location =>
+      listLocationProducts(db, { organizationId: resolved.organization.id, locationId: location.id, kind, publishedOnly: true, env, paymentSetup }))),
+    locationSlug ? [] : listOrganizationProducts(db, { organizationId, kind, publishedOnly: true, env, paymentSetup }),
+    Promise.all([
+      listCollections(db, { organizationId: resolved.organization.id, locationId: null }),
+      ...locations.map(location => listCollections(db, { organizationId: resolved.organization.id, locationId: location.id })),
+    ]),
+  ])
+  const onlineProducts = onlineCandidates.filter(product => Boolean(product.booking?.online_timezone || product.order_url))
   const seen = new Set<string>()
   // Collections and detail routes use the same explicit product kind.
   const products = await hydrateProductMedia(db, organizationId, [...perLocation.flat(), ...onlineProducts].filter((product) => {
@@ -192,10 +198,7 @@ export async function loadPublicProductCollection(
     seen.add(product.id)
     return productSurfaceOf(resolved.organization.vertical, product) === routeKind
   }))
-  const collections = (await Promise.all([
-    listCollections(db, { organizationId: resolved.organization.id, locationId: null }),
-    ...locations.map(location => listCollections(db, { organizationId: resolved.organization.id, locationId: location.id })),
-  ])).flat()
+  const collections = collectionRows.flat()
   return { ...resolved, locations, products, collections }
 }
 
@@ -223,7 +226,7 @@ export async function loadPublicProductDetail(
     const publishedHere = found?.publications.some(entry => entry.organization_id === organizationId && entry.published)
     const onThisSurface = found ? productSurfaceOf(collection.organization.vertical, found) === routeKind : false
     if (!found || !offeredHere || !publishedHere || !onThisSurface) return null
-    const [product] = await hydrateProductMedia(db, organizationId, [found])
+    const product = found
     if (!product) return null
     const localeRepresentations = await listPublicLocaleRepresentations(env, db, {
       organizationId: collection.organization.id,
@@ -304,12 +307,15 @@ export async function loadPublicExperienceDetail(
   locale?: string,
   requestedScope?: string | null,
 ): Promise<PublicProductDetail | null> {
-  locale ??= await getSourceLocale(db, organizationId)
-  const collection = await loadPublicProductCollection(db, organizationId, 'experiences', previewAuthorized, undefined, env)
+  const [sourceLocale, collection] = await Promise.all([
+    getSourceLocale(db, organizationId),
+    loadPublicProductCollection(db, organizationId, 'experiences', previewAuthorized, undefined, env),
+  ])
+  locale ??= sourceLocale
   if (!collection) return null
   const found = collection.products.find(product => product.slug === productSlug && isExperience(product))
   if (!found) return null
-  return projectPublicOffering(env, db, collection, found, locale, requestedScope, collection.presentation.productPath('', found.slug))
+  return projectPublicOffering(env, db, collection, found, locale, requestedScope, collection.presentation.productPath('', found.slug), sourceLocale)
 }
 
 /** An authored page binds its offer by product ID, independent of the theme. */
@@ -344,6 +350,7 @@ async function projectPublicOffering(
   locale: string,
   requestedScope: string | null | undefined,
   sourcePath: string,
+  sourceLocale?: string,
 ): Promise<PublicProductDetail | null> {
   const organizationId = collection.organization.id
   const offeredAt = new Set(found.locations.filter(entry => entry.published && entry.active).map(entry => entry.location_id))
@@ -361,7 +368,7 @@ async function projectPublicOffering(
   let localizedLocations = locations
   let products = collection.products
   let collections = collection.collections
-  if (locale !== await getSourceLocale(db, organizationId)) {
+  if (locale !== (sourceLocale ?? await getSourceLocale(db, organizationId))) {
     const localizations = await loadExactPublicLocalizations(env, db, organizationId, locale)
     const localized = localizations.find(item => item.resourceType === 'product' && item.resourceId === found.id)
     if (!localized) return null
@@ -387,12 +394,16 @@ async function projectPublicOffering(
 export async function publicProductDetailPayload(db: DbClient, env: CloudflareEnv, detail: PublicProductDetail): Promise<PublicProductDetailPayload> {
   const memberships = new Set(detail.product.collections.map(entry => entry.collection_id))
   const collection = detail.collections.find(collection => memberships.has(collection.id))
+  const [reviews, sessions] = await Promise.all([
+    loadPublicProductReviews(db, detail),
+    loadPublicProductSessions(db, detail, env),
+  ])
   return {
     product: detail.product, location: detail.location, locations: detail.locations,
     scopeRequired: detail.scopeRequired, onlineAvailable: detail.onlineAvailable,
     currency: detail.currency, vertical: detail.organization.vertical, brandName: detail.organization.name,
-    reviews: await loadPublicProductReviews(db, detail),
-    booking: detail.booking, sessions: await loadPublicProductSessions(db, detail, env),
+    reviews,
+    booking: detail.booking, sessions,
     collectionName: collection?.name ?? '',
     collectionSiblings: collection ? selectProductCollectionSiblings(detail.products, detail.product, collection.id, { currency: detail.currency, location_id: detail.location?.id ?? null, at: new Date().toISOString() }) : [],
     localeRepresentations: detail.localeRepresentations,
