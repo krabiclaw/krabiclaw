@@ -4,6 +4,8 @@ import { loginAs } from './helpers/auth'
 import { MCP_ORGANIZATION_ID, mcpRequest, mcpData } from './helpers/mcp'
 import { E2E_POTTERY_ORGANIZATION_ID, tenantTestExtraHeaders } from './test-env'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
+import { generateReservationTimes, type OpeningHours, type SpecialHours } from '../../shared/reservation-hours'
+import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/timezone'
 
 // Split out of mcp.spec.ts (owner tool-coverage tests) — see helpers/mcp.ts
 // for why. This group covers the bulk of an owner's MCP tool surface: site
@@ -207,16 +209,6 @@ test.describe('stateless MCP server', () => {
       const organizationId = MCP_ORGANIZATION_ID
 
       const locationId = 'loc-demo'
-      const locationSetup = await mcpRequest(request, baseURL!, {
-        method: 'tools/call', toolName: 'update_location',
-        args: {
-          organization_id: organizationId, location_id: locationId, timezone: 'Asia/Bangkok',
-          opening_hours: { periods: Array.from({ length: 7 }, (_, day) => ({
-            open: { day, hour: 12, minute: 0 }, close: { day, hour: 22, minute: 0 },
-          })) },
-        },
-      })
-      expect(mcpData<{ ok: boolean }>(await locationSetup.json()).ok).toBe(true)
 
       // Creating the policy is what lets a location take reservations: there is
       // no site-level default underneath it, so a guest cannot book until the
@@ -905,8 +897,16 @@ test.describe('stateless MCP server', () => {
         }
         await page.reload()
         await expect(page.getByText(movedDish.name, { exact: true })).toHaveCount(1)
-        const start = new Date(Date.now() + 28 * 86400000)
-        start.setUTCHours(7, 0, 0, 0)
+        const { location } = await call<{ location: { timezone: string; opening_hours: OpeningHours; special_hours: SpecialHours } }>('get_location', { location_id: locationId })
+        let seating: { date: string; time: string } | undefined
+        const today = localDateAt(new Date(), location.timezone)
+        for (let offset = 28; offset < 35 && !seating; offset++) {
+          const date = addLocalDays(today, offset)
+          const time = generateReservationTimes(location.opening_hours, date, { lastSeatingBufferMinutes: 60, specialHours: location.special_hours })[0]
+          if (time) seating = { date, time }
+        }
+        expect(seating, 'the existing location has an open one-hour seating within the chosen week').toBeTruthy()
+        const start = localDateTimeToInstant(seating!.date, seating!.time, location.timezone)
         const name = `Omakase ${stamp}`
         const creation = { kind: 'experience', name, idempotency_key: crypto.randomUUID(), variants: [{ name: 'Per person', prices: [{ unit_amount: 13000, currency: settings.settings.default_currency }] }],
           booking: { location_id: locationId, duration_minutes: 60, default_capacity: 6, confirmation_mode: 'review', online_payment_required: false,

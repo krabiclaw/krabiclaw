@@ -112,7 +112,11 @@ export const isInternalSelfFetch = (event: H3Event): boolean =>
 
 export const cloudflareEnv = (event: H3Event): CloudflareEnv => {
   const processEnv: Record<string, string | undefined> = typeof process === 'undefined' ? {} : process.env
-  const rawRuntimeEnv = event.req.runtime?.cloudflare?.env as Record<string, unknown> | undefined
+  // Nuxt's internal error render preserves headers but has no Worker runtime.
+  const contextBindings = event.context.cloudflare
+  const rawRuntimeEnv = (event.req.runtime?.cloudflare?.env
+    ?? (event.context.nuxt?.['~internal'] && event.context.nuxt['~rendering-error'] && contextBindings && typeof contextBindings === 'object'
+      ? Reflect.get(contextBindings, 'env') : undefined)) as Record<string, unknown> | undefined
   const runtimeEnv = (() => {
     const env = rawRuntimeEnv
     const requiredBindings = ['DB', 'MEDIA_BUCKET', 'ORGANIZATION_CACHE', 'AI'] as const

@@ -514,6 +514,7 @@ export async function handleProductsTools(ctx: McpExecutorContext) {
       if (booking?.location_id) await authorizeLocation(ctx, booking.location_id)
       return await productResponse(ctx, await updateProduct(organization.db, {
         ...scope, productId, patch: omit(args, ['product_id', 'booking', 'idempotency_key']) as unknown as UpdateProductInput, actor,
+        env: organization.env,
         ...(booking ? { booking: { data: booking, env: organization.env } } : {}),
         ...(args.idempotency_key ? { idempotencyKey: requiredString(args, 'idempotency_key') } : {}),
       }))
@@ -579,6 +580,7 @@ export async function handleProductsTools(ctx: McpExecutorContext) {
       return {
         products: (await hydrateProductMedia(organization.db, organization.organizationId, await reconcileProducts(organization.db, {
           ...scope,
+          env: organization.env,
           products: objectArray(args.products, 'products') as unknown as ReconcileProductInput[],
           actor,
           deactivateMissing: args.deactivate_missing === true,

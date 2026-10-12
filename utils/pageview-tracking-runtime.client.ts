@@ -126,7 +126,7 @@ export function registerPageviewTracking() {
       eventId, path: target.path, fullPath: target.fullPath, enteredAt: Date.now(),
       durationSent: false, pageview: null, pageviewReady: Promise.resolve(false),
     }
-    if (!isTracked(target.path)) return page
+    if (!isTracked(target.path) || nuxtApp.payload.error) return page
     const attribution = readAttributionParams(new URL(target.fullPath, window.location.origin).searchParams)
     const referrerHost = initial ? normalizeReferrerHost(document.referrer) : null
     page.pageview = {
@@ -166,6 +166,14 @@ export function registerPageviewTracking() {
   remember(currentPage)
   if (currentPage.pageview) currentPage.pageviewReady = deliverPageview(Promise.resolve(true), currentPage)
   settleRegistration()
+
+  // clearError clears the native payload only after its redirect has finished.
+  watch(() => nuxtApp.payload.error, (error) => {
+    if (error || currentPage.pageview) return
+    currentPage = observe(router.currentRoute.value, false)
+    remember(currentPage)
+    if (currentPage.pageview) currentPage.pageviewReady = deliverPageview(Promise.resolve(true), currentPage)
+  })
 
   router.afterEach((to, from, failure) => {
     if (failure || to.fullPath === from.fullPath || to.fullPath === currentPage.fullPath) return

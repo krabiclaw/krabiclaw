@@ -1,6 +1,6 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:49af575c752619e4ec148e49b09faa738aacc8fa7021b4f4a82279b87880fdc4",
+  "fingerprint": "sha256:5ce8c9bd67f41160bcadb5cedf62ea8beb3cc034a154c8696de8cdf421f7b47c",
   "tools": [
     {
       "name": "append_content_block",
@@ -36639,6 +36639,11 @@
       "outputSchema": {
         "$defs": {},
         "properties": {
+          "current_local_date": {
+            "description": "Current date in the location timezone.",
+            "format": "date",
+            "type": "string"
+          },
           "location": {
             "properties": {
               "address": {

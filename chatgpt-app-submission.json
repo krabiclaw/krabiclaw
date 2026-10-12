@@ -1631,11 +1631,11 @@
   },
   "test_cases": [
     {
-      "description": "Edit one price on a prepared product with two variants while preserving all other product data.",
-      "user_prompt": "At Ember & Slice in West Village, change the large Review Iced Coffee to 85 baht. Leave the small coffee, its prices, options and everything else as they are. Show me the updated menu.",
+      "description": "Change the Brooklyn Margherita price while preserving the other location and product data.",
+      "user_prompt": "At Ember & Slice in Brooklyn, change the Margherita price from $18 to $19. Leave West Village's Margherita at $18. Keep the Brooklyn photo, description and Featured status unchanged. Show me the updated menu.",
       "file_attachment_urls": null,
       "tools_triggered": "list_organizations, list_locations, list_location_products, get_product, update_product",
-      "expected_output": "Uses the independently prepared Review Iced Coffee fixture. Changes only the selected large-variant THB price to 8500 minor units. Readback preserves all sibling variant and price IDs, options, selections, and unrelated fields. The website shows the updated price.",
+      "expected_output": "Uses the existing Brooklyn Margherita price. Changes only that price from 1800 to 1900 minor units. Public readback shows Brooklyn at $19 and West Village at $18, with the Brooklyn photo, description, Featured status and unrelated variant/price data unchanged. Restore Brooklyn to $18 in a separate cleanup request and verify both locations return to $18.",
       "expected_output_url": null
     },
     {
@@ -1657,29 +1657,29 @@
       "expected_output_url": null
     },
     {
-      "description": "Propose a change to an independently prepared table reservation and apply it only after guest acceptance.",
-      "user_prompt": "At Ember & Slice in West Village, ask the guest on Review Reservation to move their table to the next available evening slot. Email the proposal. Keep the original time until they accept.",
+      "description": "Propose a one-hour change to an independently prepared Brooklyn table reservation and apply it only after guest acceptance.",
+      "user_prompt": "At Ember & Slice in Brooklyn, ask the guest on the existing regular table reservation to move their table one hour later. Email the proposal. Keep the original time until they accept.",
       "file_attachment_urls": null,
       "tools_triggered": "list_organizations, list_locations, list_reservation_inquiries, get_calendar, request_table_reservation_change",
-      "expected_output": "Uses a separate prepared future reservation and controlled guest inbox. Emails one proposal while the dashboard still shows the original time and capacity. Guest acceptance updates the reservation once; repeated acceptance or the same proposal retry causes no duplicate allocation or email.",
+      "expected_output": "Uses the existing Brooklyn regular table reservation for Directory Reviewer and the controlled guest inbox. Emails one proposal for a one-hour-later time while the dashboard keeps the original time and capacity. Guest acceptance updates the reservation once; reopening the guest link or repeating the same proposal causes no duplicate allocation or email.",
       "expected_output_url": null
     },
     {
-      "description": "Read independently prepared payment and payout records without changing financial state.",
-      "user_prompt": "Show the reviewer business’s payments for the last 30 days, and its balance and recent payouts. Keep each currency separate. Don’t change anything.",
+      "description": "Read an unconfigured business's payment state without inventing transactions or changing financial state.",
+      "user_prompt": "Show Ember & Slice's October payment summary, transactions, balance and recent payouts. Keep each currency separate. If payments are not connected, give me the authenticated dashboard setup link. Don't change anything.",
       "file_attachment_urls": null,
-      "tools_triggered": "list_organizations, get_payment_summary, list_payments, get_payment, get_payment_payouts",
-      "expected_output": "Uses the review business with independent sample transaction and payout history and appropriate read permissions. Reports the requested organization and time period, groups amounts by currency, and matches dashboard transaction details and payout history. No payment, authorization, refund, transfer, order or Checkout record is created or changed.",
+      "tools_triggered": "list_organizations, get_payment_summary, list_payments, get_payment_payouts, get_payments_dashboard_link",
+      "expected_output": "Reads Ember's actual October state. Reports zero returned transactions and zero payouts, distinguishes an unconfigured Stripe account from a zero balance, and returns the authenticated dashboard setup link. Creates or changes no payment, order, Checkout, refund, transfer or payout record.",
       "expected_output_url": null
     }
   ],
   "negative_test_cases": [
     {
-      "description": "A refund or money transfer must not execute or prepare a financial operation through MCP.",
-      "user_prompt": "Refund the payment on Review Paid Booking and transfer its balance to my bank.",
+      "description": "A refund or transfer request must not invent a payment or create a financial write when Ember payments are unconfigured.",
+      "user_prompt": "Refund Ember & Slice's latest payment and transfer its balance to my bank.",
       "file_attachment_urls": null,
       "tools_triggered": null,
-      "expected_output": "May read the independently prepared payment and return its authenticated dashboard link. Reports that financial action remains incomplete. No refund authorization, refund, transfer, Checkout or queued financial operation is created, including on retry.",
+      "expected_output": "Reports that Ember's Stripe account is unconfigured and that no matching payment or balance is available; returns the authenticated setup link when applicable. It does not invent a payment or create a refund, transfer, Checkout, payment, authorization or payout record, including on retry.",
       "expected_output_url": null
     },
     {
@@ -1691,11 +1691,11 @@
       "expected_output_url": null
     },
     {
-      "description": "An explicit record from a real inaccessible organization must be denied.",
-      "user_prompt": "Open the foreign business’s private booking listed in the review instructions and cancel it. Use that record, not one of my businesses.",
+      "description": "A read of a private record from a real inaccessible organization must be denied.",
+      "user_prompt": "Read the foreign business’s private booking listed in the review instructions and show me its details. Use that record, not one of my businesses.",
       "file_attachment_urls": null,
       "tools_triggered": null,
-      "expected_output": "Uses an existing record from an independently prepared organization to which the reviewer has no membership. Authorization fails without returning customer, booking or payment data. No record is mutated and no alternate organization is substituted.",
+      "expected_output": "Returns an authorization or not-found denial without disclosing booking, customer or payment data. No record is mutated and no alternate organization is substituted.",
       "expected_output_url": null
     }
   ]
