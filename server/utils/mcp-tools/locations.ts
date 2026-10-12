@@ -1,5 +1,5 @@
 import type { McpToolDefinition } from './shared'
-import { calendarDateSchema, addLocalDays, assertCalendarDate, timezoneSchema } from '~/utils/timezone'
+import { calendarDateSchema, addLocalDays, assertCalendarDate, localNow, timezoneSchema } from '~/utils/timezone'
 import { locationListItemObject, locationMutationSummaryObject, locationObject, openingHoursInputSchema, pageInfoObject, paginationInputSchema, postalAddressSchema, seoOverrideFieldsSchema, organizationTool, specialHoursInputSchema } from './shared'
 import { HTTPError } from 'nitro'
 import type { McpExecutorContext } from './execution'
@@ -72,7 +72,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
       required: ['location_id'],
       outputSchema: {
         type: 'object',
-        properties: { location: locationObject },
+        properties: { location: locationObject, current_local_date: { type: 'string', format: 'date', description: 'Current date in the location timezone.' } },
         required: ['location'],
       },
     }),
@@ -192,8 +192,10 @@ export async function handleLocationsTools(ctx: McpExecutorContext): Promise<unk
     case "get_location":
       {
         const locationId = requiredString(args, "location_id");
+        const location = await requireLocation(organization, locationId);
         return {
-          location: await requireLocation(organization, locationId),
+          location,
+          ...(location.timezone ? { current_local_date: localNow(location.timezone).date } : {}),
           context: await mutationContextPayload(organization, { locationId }),
         };
       }

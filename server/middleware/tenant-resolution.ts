@@ -229,7 +229,8 @@ export default defineHandler(async (event) => {
   // tenant context downstream handlers rely on — the real inbound request
   // already resolved tenant type/host before triggering these. Skip the DB
   // lookup and host parsing entirely rather than redoing it per phantom request.
-  if (isInternalSelfFetch(event)) {
+  // The native error render still needs this host's tenant branding.
+  if (isInternalSelfFetch(event) && !(event.context.nuxt?.['~internal'] && event.context.nuxt['~rendering-error'])) {
     return;
   }
 

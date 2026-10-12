@@ -11,13 +11,13 @@ export default defineHandler(async (event) => {
   if (!organizationId || !productId) return jsonResponse({ error: 'Organization ID and product ID are required' }, { status: 400 })
   try {
     const body = await readRequiredBody<UpdateProductInput>(event)
-    const { db, session, organization } = await requireProductAccess(event, organizationId, productId, body as unknown as Record<string, unknown>)
+    const { env, db, session, organization } = await requireProductAccess(event, organizationId, productId, body as unknown as Record<string, unknown>)
     // Authorizing this site does not authorize a product id in the path: the
     // catalog is organization-wide, and an editor scoped to one site must not
     // reach another site's product through it.
     await requireOrganizationProduct(db, { organizationId: organization.id, productId })
     const product = await updateProduct(db, {
-      organizationId: organization.id, productId, patch: body, actor: { actorId: session.user.id },
+      organizationId: organization.id, productId, patch: body, actor: { actorId: session.user.id }, env,
     })
     return jsonResponse({ success: true, product })
   } catch (error) {
