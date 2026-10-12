@@ -255,11 +255,22 @@ async function hydrateBlocks(
   const defaultLocationGrid = (pagePath === '/' && template.slug !== 'platform' || defaultContact) && !blocks.some(block => block.type === 'location_grid')
   const addressVisible = template.slug !== 'blawby' || organizationRow.address_visibility === 'visible'
   const articlePrefix = template.serviceRoutes.articleDetailPrefix
-  const sourcePages = pageIds.size
-    ? resources.pages
-      ? (await resources.pages).filter(page => pageIds.has(page.id))
-      : await listPublicTenantPageReferenceRows(db, organizationId, [...pageIds], locale)
-    : []
+  const [sourcePages, qaItemsBySource, sourceReviewRows, sourcePostRows] = await Promise.all([
+    pageIds.size
+      ? resources.pages
+        ? resources.pages.then(pages => pages.filter(page => pageIds.has(page.id)))
+        : listPublicTenantPageReferenceRows(db, organizationId, [...pageIds], locale)
+      : [],
+    Promise.all([...qaSources].map(async source => [source, faqItems(await listFaqBlockQa(db, organizationId, pagePath, source, locale))] as const)).then(entries => new Map(entries)),
+    hasReviewSource ? listOrganizationReviews(db, organizationId, { publishedOnly: true }) : [],
+    hasPostSource ? queryAll<{ id: string; title: string; slug: string; excerpt: string | null; cover_asset_id: string | null; cover_public_url: string | null; cover_thumbnail_url: string | null; cover_kind: string | null; cover_alt_text: string | null; cover_width: number | null; cover_height: number | null }>(db, `
+      SELECT p.id, p.title, p.slug, p.summary AS excerpt, ${COVER_SELECT}
+        FROM content_documents root JOIN content_documents p ON COALESCE(p.root_id,p.id) = root.id AND p.locale = ?
+        ${coverJoinSql('p')}
+       WHERE root.kind = 'article' AND root.row_role = 'root' AND p.organization_id = ? AND root.status = 'published' AND root.visibility = 'listed'
+       ORDER BY root.published_at IS NULL, root.published_at DESC, p.id DESC
+    `, [locale, organizationId]) : [],
+  ])
   // Each grid gets the products it named, and only those. Keyed by collection
   // rather than flattened into one list: two grids on a page name two different
   // collections, and a flat union rendered both collections in both grids.
@@ -369,17 +380,6 @@ async function hydrateBlocks(
       resource: `public-posts:${organizationId}:${locale}:${locationId ?? ''}` })
     return [block.id, feed] as const
   })))
-  const [qaItemsBySource, sourceReviewRows, sourcePostRows] = await Promise.all([
-    Promise.all([...qaSources].map(async source => [source, faqItems(await listFaqBlockQa(db, organizationId, pagePath, source, locale))] as const)).then(entries => new Map(entries)),
-    hasReviewSource ? listOrganizationReviews(db, organizationId, { publishedOnly: true }) : Promise.resolve([]),
-    hasPostSource ? queryAll<{ id: string; title: string; slug: string; excerpt: string | null; cover_asset_id: string | null; cover_public_url: string | null; cover_thumbnail_url: string | null; cover_kind: string | null; cover_alt_text: string | null; cover_width: number | null; cover_height: number | null }>(db, `
-      SELECT p.id, p.title, p.slug, p.summary AS excerpt, ${COVER_SELECT}
-        FROM content_documents root JOIN content_documents p ON COALESCE(p.root_id,p.id) = root.id AND p.locale = ?
-        ${coverJoinSql('p')}
-       WHERE root.kind = 'article' AND root.row_role = 'root' AND p.organization_id = ? AND root.status = 'published' AND root.visibility = 'listed'
-       ORDER BY root.published_at IS NULL, root.published_at DESC, p.id DESC
-    `, [locale, organizationId]) : Promise.resolve([]),
-  ])
   const reviewRows = sourceReviewRows
   const postRows = sourcePostRows
   // A page's translation is its representation row, loaded by locale in the
@@ -562,7 +562,7 @@ export async function getPublicTenantPageForPath(
     : options.localizations ?? await loadExactPublicLocalizations(env, db, page.organization_id, page.locale)
   // The home page has no card of its own: it is the organization's page, and
   // its image is the organization's.
-  const [blocks, media] = await Promise.all([
+  const [blocks, media, localeRepresentations] = await Promise.all([
     hydrateBlocks(env, db, organizationId, page.path, page.locale, page.blocks, options.hydrationResources, localizations),
     page.path === '/'
       ? loadPublicSocialMedia(db, organizationId, 'organization', [organizationId]).then(organization => new Map([[page.id, {
@@ -570,7 +570,11 @@ export async function getPublicTenantPageForPath(
           social_image: organization.get(organizationId)?.social_image ?? null,
         }]]))
       : loadPublicSocialMedia(db, organizationId, 'content_document', [page.id]),
-
+    resolvePublicDocumentSourcePath(db, organizationId, page.page_id).then(sourcePath => listPublicLocaleRepresentations(env, db, {
+      organizationId: page.organization_id,
+      sourcePath,
+      documentId: page.page_id,
+    })),
   ])
   const localizedMedia = page.id === page.page_id
     ? media.get(page.id) ?? { media: [], social_image: null }
@@ -586,12 +590,6 @@ export async function getPublicTenantPageForPath(
       )
     }
   }
-  const localeRepresentations = await listPublicLocaleRepresentations(env, db, {
-    organizationId: page.organization_id,
-    
-    sourcePath: await resolvePublicDocumentSourcePath(db, organizationId, page.page_id),
-    documentId: page.page_id,
-  })
   return mapPage(page, blocks, localizedMedia, localeRepresentations)
 }
 
