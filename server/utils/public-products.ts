@@ -181,16 +181,17 @@ export async function loadPublicProductCollection(
   }
   // Location publication is the public gate here: a product carried by the
   // site but withheld at this branch is absent, not shown greyed out.
-  const [perLocation, onlineCandidates, collectionRows] = await Promise.all([
-    Promise.all(locations.map(location =>
-      listLocationProducts(db, { organizationId: resolved.organization.id, locationId: location.id, kind, publishedOnly: true, env, paymentSetup }))),
-    locationSlug ? [] : listOrganizationProducts(db, { organizationId, kind, publishedOnly: true, env, paymentSetup }),
-    Promise.all([
-      listCollections(db, { organizationId: resolved.organization.id, locationId: null }),
-      ...locations.map(location => listCollections(db, { organizationId: resolved.organization.id, locationId: location.id })),
-    ]),
+  const [catalogProducts, allCollections] = await Promise.all([
+    locationSlug
+      ? listLocationProducts(db, { organizationId, locationId: locations[0]!.id, kind, publishedOnly: true, env, paymentSetup })
+      : listOrganizationProducts(db, { organizationId, kind, publishedOnly: true, env, paymentSetup }),
+    listCollections(db, { organizationId }),
   ])
-  const onlineProducts = onlineCandidates.filter(product => Boolean(product.booking?.online_timezone || product.order_url))
+  // Hydrated products already include their location publication flags. Reuse
+  // that one catalog rather than hydrating and checking it again per branch.
+  const perLocation = locationSlug ? [catalogProducts] : locations.map(location =>
+    catalogProducts.filter(product => product.locations.some(entry => entry.location_id === location.id && entry.published)))
+  const onlineProducts = locationSlug ? [] : catalogProducts.filter(product => Boolean(product.booking?.online_timezone || product.order_url))
   const seen = new Set<string>()
   // Collections and detail routes use the same explicit product kind.
   const products = await hydrateProductMedia(db, organizationId, [...perLocation.flat(), ...onlineProducts].filter((product) => {
@@ -198,7 +199,10 @@ export async function loadPublicProductCollection(
     seen.add(product.id)
     return productSurfaceOf(resolved.organization.vertical, product) === routeKind
   }))
-  const collections = collectionRows.flat()
+  const collections = [
+    ...allCollections.filter(collection => collection.location_id === null),
+    ...locations.flatMap(location => allCollections.filter(collection => collection.location_id === location.id)),
+  ]
   return { ...resolved, locations, products, collections }
 }
 
