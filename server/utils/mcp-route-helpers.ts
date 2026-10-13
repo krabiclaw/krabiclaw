@@ -3,6 +3,7 @@ import { setResponseHeader } from 'nitro/h3';
 import { mcpErrorRecoveryDetails } from '~/server/utils/mcp-protocol'
 import { APIError, isAPIError } from 'better-auth/api'
 import { createResourceServerChallenge } from '@better-auth/oauth-provider'
+import { bearerAuthChallengeResponse, OAuthError, OAuthErrorCode } from '@modelcontextprotocol/server'
 
 export function buildMcpOAuthChallenge(options: {
   resourceUrl: string
@@ -19,6 +20,13 @@ export function setMcpAuthChallenge(event: H3Event, challenge: string) {
 }
 
 export function mcpAuthRequiredResult(options: { challenge: string; message: string }) {
+  let challenge = options.challenge
+  // Tool-level OAuth requires error parameters even when the HTTP challenge is bare.
+  if (!/(?:^\S+\s+|,\s*)error=/.test(challenge)) {
+    const errorChallenge = bearerAuthChallengeResponse(new OAuthError(OAuthErrorCode.InvalidToken, options.message)).headers.get('WWW-Authenticate')
+    if (!errorChallenge?.startsWith('Bearer ')) throw new Error('MCP SDK did not provide a Bearer authentication challenge')
+    challenge += `, ${errorChallenge.slice('Bearer '.length)}`
+  }
   return {
     isError: true,
     content: [
@@ -28,7 +36,7 @@ export function mcpAuthRequiredResult(options: { challenge: string; message: str
       },
     ],
     _meta: {
-      'mcp/www_authenticate': [options.challenge],
+      'mcp/www_authenticate': [challenge],
     },
   }
 }

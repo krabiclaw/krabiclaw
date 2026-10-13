@@ -519,7 +519,7 @@ test.describe('OAuth discovery endpoints', () => {
     expect(body.result?.isError).toBe(true)
     const resourceMetadata = new URL('/.well-known/oauth-protected-resource/api/mcp', baseURL!).href
     expect(body.result?._meta?.['mcp/www_authenticate']).toEqual([
-      `Bearer resource_metadata="${resourceMetadata}"`,
+      `Bearer resource_metadata="${resourceMetadata}", error="invalid_token", error_description="Authentication required: connect KrabiClaw to continue."`,
     ])
   })
 
