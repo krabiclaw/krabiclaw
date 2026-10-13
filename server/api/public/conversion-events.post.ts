@@ -5,6 +5,7 @@ import { queryAll, queryFirst } from '~/server/db'
 import { cleanString, cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { HOUR_MS, getClientIp, hashClientIp, incrementHourlyRateLimit } from '~/server/utils/hourly-rate-limit'
 import { recordOrganizationConversionEvent, type ConversionEntityType, type ConversionStage } from '~/server/utils/organization-conversions'
+import { PUBLIC_PRODUCT_SQL } from '~/server/utils/product-management'
 import { BROWSER_INTERACTION_EVENT_NAMES, CONVERSION_EVENT_CATALOG, type OrganizationConversionEventName } from '~/utils/organization-conversion-events'
 import { normalizeVertical } from '~/utils/vertical-copy'
 import { defineHandler } from 'nitro'
@@ -110,15 +111,18 @@ export default defineHandler(async (event) => {
     locationId = cleanString(body.location_id, 120) || null
     entityId = cleanString(body.product_id, 120) || null
     if (!entityId) return jsonResponse({ error: 'product_id is required' }, { status: 400 })
-    // A public online service has no physical location; both contexts require
-    // this tenant's active, published Product and its actual offering scope.
+    // Publication controls visibility; availability controls starting checkout.
+    // A view can precede choosing a scope, so preserve its explicit null location.
+    const requiresAvailability = eventName === 'checkout_start'
+    const locationScope = `EXISTS (SELECT 1 FROM product_locations pl JOIN business_locations bl ON bl.id = pl.location_id AND bl.organization_id = pl.organization_id
+      WHERE pl.product_id = p.id AND pl.organization_id = p.organization_id${locationId ? ' AND pl.location_id = ?' : ''}
+        AND pl.published = 1${requiresAvailability ? ' AND pl.active = 1' : ''} AND bl.status = 'active')`
+    const onlineScope = `(p.order_url IS NOT NULL OR EXISTS (SELECT 1 FROM product_booking_configs cfg WHERE cfg.product_id = p.id AND cfg.organization_id = p.organization_id AND cfg.held_online = 1))`
     const product = await queryFirst<{ id: string }>(db, `
       SELECT p.id FROM products p
-      JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id AND pub.organization_id = ? AND pub.published = 1
-      WHERE p.id = ? AND p.active = 1 AND ${locationId
-        ? `EXISTS (SELECT 1 FROM product_locations pl JOIN business_locations bl ON bl.id = pl.location_id AND bl.organization_id = pl.organization_id
-             WHERE pl.product_id = p.id AND pl.organization_id = p.organization_id AND pl.location_id = ? AND pl.published = 1 AND pl.active = 1 AND bl.status = 'active')`
-        : `(p.order_url IS NOT NULL OR EXISTS (SELECT 1 FROM product_booking_configs cfg WHERE cfg.product_id = p.id AND cfg.organization_id = p.organization_id AND cfg.held_online = 1))`}
+      JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id AND pub.organization_id = ?
+      WHERE p.id = ? AND (${PUBLIC_PRODUCT_SQL})${requiresAvailability ? ' AND p.active = 1' : ''}
+        AND ${locationId ? locationScope : requiresAvailability ? onlineScope : `(${locationScope} OR ${onlineScope})`}
       LIMIT 1`, [organizationId, entityId, ...(locationId ? [locationId] : [])])
     if (!product) return jsonResponse({ error: 'Product not found' }, { status: 404 })
     entityType = 'product'; pageType = 'product'

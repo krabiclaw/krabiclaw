@@ -1,4 +1,4 @@
-import { errorChainForTelemetry } from "~/server/utils/error-telemetry";
+import { errorChainForTelemetry } from "~/shared/error-telemetry";
 import { HTTPError } from 'nitro';
 import type { H3Event } from 'nitro';
 import { queryFirst } from "~/server/db";

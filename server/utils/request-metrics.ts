@@ -1,7 +1,7 @@
 import type { H3Event } from 'nitro';
 import type { HTTPEvent } from 'nitro/h3';
 import {  getResponseHeader, setHeader } from 'nitro/h3';
-import { errorChainForTelemetry } from '~/server/utils/error-telemetry'
+import { errorChainForTelemetry } from '~/shared/error-telemetry'
 
 export interface RequestDataMetrics {
   requestId: string
@@ -39,7 +39,7 @@ type D1MetaSummary = {
   timings?: { sql_duration_ms?: number }
 }
 
-export function getRequestDataMetrics(event: H3Event): RequestDataMetrics {
+export function getRequestDataMetrics(event: HTTPEvent): RequestDataMetrics {
   let metrics = metricsByEvent.get(event)
   if (!metrics) {
     metrics = {

@@ -7,6 +7,8 @@ import { observeAttribution, resolveAttributionTouch, type AttributionParams, ty
 import { resolveTenantLocalePath } from '~/utils/tenant-locale-path'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { findPublishedProductAtRoute, getOrganizationVertical, parseProductRouteSegments, resolveLocalizedPublicRoute } from '~/server/utils/localization'
+import { listPublicLocaleRepresentations } from '~/server/utils/public-locale-representations'
+import { allowsMissingLocalizedTenantPage, routeSourcePath } from '~/shared/public-locale-routes'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { publicTemplateRegistry, resolvePublicTemplate } from '~/utils/template-registry'
 import type { PublicTemplateDefinition } from '~/utils/template-registry'
@@ -108,6 +110,25 @@ export async function resolvePublicPageIdentity(env: CloudflareEnv, db: AppDb, i
     if (input.requestedLocale && input.requestedLocale !== routing.localeSegment) return null
     let route: Awaited<ReturnType<typeof resolveLocalizedPublicRoute>>
     try {
+      const template = resolvePublicTemplate({ themeId: input.themeId, vertical: input.vertical })
+      const page = routing.sourcePath === '/' ? 'home' : routing.sourcePath.slice(1)
+      const documentPath = template.pageDocuments.recipes[page]
+      const publishedLocaleRoute = template.slug === 'saya'
+        && template.sitemap.exactPaths.includes(routing.sourcePath)
+        && routeSourcePath(page) === routing.sourcePath
+        && (!documentPath || allowsMissingLocalizedTenantPage(page))
+      // Saya's catalogue routes and optional page overlays are complete routes in their
+      // own right. Their locale identity comes from the same published-language routes
+      // the renderer exposes; a translated page, when present, keeps its own identity.
+      if (publishedLocaleRoute && (!documentPath || !await resolveCanonicalTenantPageIdentity(db, organizationId, documentPath, routing.localeSegment))) {
+        const representations = await listPublicLocaleRepresentations(env, db, {
+          organizationId, sourcePath: routing.sourcePath, publishedLocaleRoute: true,
+        })
+        const representation = representations.find(representation => representation.source === 'localized'
+          && representation.locale === routing.localeSegment && representation.route_path === pagePath)
+        if (!representation) return null
+        return { ...base, locale: representation.locale, pageId: null, pageType: null, recipe: null, documentId: null, productId: null }
+      }
       route = await resolveLocalizedPublicRoute(env, db, organizationId, pagePath)
     } catch (error) {
       // The route resolver answers 404 for "this is not a published localized route"; that is the

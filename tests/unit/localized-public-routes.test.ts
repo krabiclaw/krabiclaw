@@ -4,6 +4,16 @@ import { validateLocaleCatalog } from '../../shared/platform-locale-catalog.ts'
 import { projectExactLocalizedResource } from '../../server/utils/public-localization.ts'
 import { resolveTenantLocalePath } from '../../utils/tenant-locale-path.ts'
 import { tenantBlogPostPath } from '../../utils/tenant-blog-route.ts'
+import { isTrackablePath } from '../../utils/pageview-path.ts'
+
+test('private OAuth and invitation workflows cannot produce public pageviews', () => {
+  for (const path of ['/oauth', '/oauth/consent', '/oauth/callback', '/accept-invitation', '/accept-invitation/invitation-id']) {
+    assert.equal(isTrackablePath(path), false, path)
+  }
+  for (const path of ['/login', '/signup', '/oauth-guide', '/accept-invitation-guide']) {
+    assert.equal(isTrackablePath(path), true, path)
+  }
+})
 
 test('catch-all locale classification uses the tenant published-locale set', () => {
   assert.deepEqual(resolveTenantLocalePath('/th/contact', ['th']), {

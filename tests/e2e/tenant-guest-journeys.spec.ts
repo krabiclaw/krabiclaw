@@ -298,6 +298,51 @@ for (const target of [
       const saved = await request.get(`${target.base}${target.experience ? `/api/public/experiences/${product.slug}` : `/api/public/locations/${target.locationSlug}/products/${product.slug}`}`, { headers: target.headers })
       expect(saved.status(), await saved.text()).toBe(200)
       expect((await saved.json()).product.order_url).toBe(externalUrl)
+      const visitPausedProduct = async (expectedLocationId: string | null) => {
+        const pausedView = page.waitForResponse(response => new URL(response.url()).pathname === '/api/public/conversion-events'
+          && response.request().postDataJSON()?.event_name === 'product_view'
+          && response.request().postDataJSON()?.product_id === product.id)
+        await openTenantPage(page, `${target.base}${publicPath}`, target.headers)
+        await expect(page.getByRole('heading', { name: product.name, level: 1, exact: true })).toBeVisible()
+        await expect(page.getByText(detail, { exact: true })).toBeVisible()
+        await expect(page.locator(`a[href="${externalUrl}"]:visible`)).toHaveCount(0)
+        await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', `${target.base}${publicPath}`)
+        const viewed = await pausedView
+        expect(viewed.status(), await viewed.text()).toBe(201)
+        const viewedEventId = viewed.request().postDataJSON().event_id
+        expect(viewed.request().postDataJSON().location_id).toBe(expectedLocationId)
+        expect(await viewed.json()).toEqual({ success: true, id: viewedEventId, recorded: true })
+        const views = mcpData<{ rows: Array<Record<string, unknown>> }>(await (await mcpRequest(page.request, baseURL!, {
+          method: 'tools/call', toolName: 'query_organization_analytics',
+          args: { organization_id: target.org, mode: 'events', filters: { event_name: 'product_view', entity_id: product.id } },
+        })).json()).rows
+        expect(views.filter(row => row.event_id === viewedEventId)).toEqual([expect.objectContaining({
+          event_id: viewedEventId, event_name: 'product_view', stage: 'viewed', location_id: expectedLocationId,
+          subject: { type: 'product', id: product.id },
+        })])
+        const rejectedCheckout = await request.post(`${target.base}/api/public/conversion-events`, {
+          headers: target.headers,
+          data: { event_name: 'checkout_start', product_id: product.id, location_id: target.location },
+        })
+        expect(rejectedCheckout.status()).toBe(404)
+        expect(await rejectedCheckout.json()).toEqual({ error: 'Product not found' })
+        const checkouts = mcpData<{ rows: Array<Record<string, unknown>> }>(await (await mcpRequest(page.request, baseURL!, {
+          method: 'tools/call', toolName: 'query_organization_analytics',
+          args: { organization_id: target.org, mode: 'events', filters: { event_name: 'checkout_start', entity_id: product.id } },
+        })).json()).rows
+        expect(checkouts).toEqual([])
+      }
+      if (!target.experience) {
+        const pausedLocation = await page.request.put(`${editor}/${product.id}/locations/${target.location}`, { data: { active: false } })
+        expect(pausedLocation.status(), await pausedLocation.text()).toBe(200)
+        const scoped = mcpData<{ product: { active: boolean; locations: Array<{ location_id: string; active: boolean; published: boolean }> } }>(await (await mcpRequest(page.request, baseURL!, {
+          method: 'tools/call', toolName: 'get_product', args: { organization_id: target.org, product_id: product.id },
+        })).json()).product
+        expect(scoped.active).toBe(true)
+        expect(scoped.locations).toContainEqual(expect.objectContaining({ location_id: target.location, active: false, published: true }))
+        await visitPausedProduct(target.location)
+        expect((await page.request.put(`${editor}/${product.id}/locations/${target.location}`, { data: { active: true } })).status()).toBe(200)
+      }
       await page.goto(`/dashboard/${target.slug}/products/${product.id}/publication/availability`)
       const availability = page.getByRole('switch', { name: target.experience ? 'Accept bookings' : 'Accept orders', exact: true })
       await expect(availability).toHaveAttribute('aria-checked', 'true')
@@ -307,11 +352,13 @@ for (const target of [
       const paused = mcpData<{ product: { active: boolean; publications: Array<{ organization_id: string; published: boolean }> } }>(await (await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: target.org, product_id: product.id } })).json()).product
       expect(paused.active).toBe(false)
       expect(paused.publications).toContainEqual(expect.objectContaining({ organization_id: target.org, published: true }))
-      await openTenantPage(page, `${target.base}${publicPath}`, target.headers)
-      await expect(page.getByRole('heading', { name: product.name, level: 1, exact: true })).toBeVisible()
-      await expect(page.getByText(detail, { exact: true })).toBeVisible()
-      await expect(page.locator(`a[href="${externalUrl}"]:visible`)).toHaveCount(0)
-      await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', `${target.base}${publicPath}`)
+      await visitPausedProduct(target.location)
+      if (target.experience) {
+        // With no active physical offering, the experience page keeps its
+        // information and its view has no selected scope.
+        expect((await page.request.put(`${editor}/${product.id}/locations/${target.location}`, { data: { active: false } })).status()).toBe(200)
+        await visitPausedProduct(null)
+      }
     } finally {
       expect((await page.request.delete(`${editor}/${product.id}`)).status()).toBe(200)
     }

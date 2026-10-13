@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { describeErrorForTelemetry, errorChainForTelemetry } from "../../server/utils/error-telemetry.ts";
+import { describeErrorForTelemetry, errorChainForTelemetry } from "../../shared/error-telemetry.ts";
 import { mcpDiagnosticPayload, summarizeForTelemetry } from "../../server/utils/mcp-telemetry.ts";
 
 test('startup diagnostics preserve workflow content and redact credentials in both structured data and MCP text', () => {

@@ -1,4 +1,4 @@
-import { errorChainForTelemetry } from '~/server/utils/error-telemetry'
+import { errorChainForTelemetry } from '~/shared/error-telemetry'
 
 function bucket(env: ApiRecord): R2Bucket {
   if (!env.MEDIA_BUCKET) throw new Error('MEDIA_BUCKET binding not available')

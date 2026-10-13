@@ -20,6 +20,7 @@ import { organizationSocialMediaFromJson } from '~/server/utils/public-social-im
 import { resolveOrganizationFontPreset } from '~/shared/organization-fonts'
 import { isPaletteTemplate, parseSitePalette, resolveSitePalette } from '~/shared/site-palette'
 import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION, parseLogoPresentation, type SiteLogo } from '~/shared/media-placement-contract'
+import { BROWSER_ERROR_PATH } from '~/shared/error-telemetry'
 
 interface TenantRow {
   id: string;
@@ -236,6 +237,8 @@ export default defineHandler(async (event) => {
 
   const url = event.url;
   const tenantPath = normalizedPath(url.pathname);
+  // Diagnostics must still reach operational logs when tenant/D1 resolution fails.
+  if (tenantPath === BROWSER_ERROR_PATH) return;
   if (tenantPath === "/api/auth" || tenantPath.startsWith("/api/auth/")) return;
   // `/api/public/**` used to be skipped here because each of those routes
   // carried its own site id in the path. That id was a second answer to "which

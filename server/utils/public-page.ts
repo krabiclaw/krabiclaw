@@ -41,7 +41,7 @@ import type { LocalizedResourceType } from '~/server/utils/localization-registry
 import { listPublicLocaleRepresentations } from '~/server/utils/public-locale-representations'
 import { normalizeVertical } from '~/utils/vertical-copy'
 import { resolvePublicTemplate } from '~/utils/template-registry'
-import { isPublicSourceRouteRoot } from '~/shared/public-locale-routes'
+import { allowsMissingLocalizedTenantPage, routeSourcePath } from '~/shared/public-locale-routes'
 import { templateRendersPageDocumentAt } from '~/shared/tenant-page-paths'
 import { parsePostalAddress } from '~/utils/postal-address'
 import { getSourceLocale } from '~/server/utils/organization-locales'
@@ -120,24 +120,6 @@ type ProductMediaRow = MediaAsset & { product_id: string; slot: 'image' | 'galle
 interface PublicPageLoadOptions {
   mutateResponseHeaders?: boolean
   signal?: AbortSignal
-}
-
-/**
- * The canonical source path of this route, which is what a locale
- * representation is keyed by. Every published locale route has one, whether or
- * not it carries a tenant page document: /menu and /locations render products
- * and locations, and still have /th/menu and /th/locations.
- *
- * Where the *document* lives is a different question, answered per template in
- * utils/template-registry.ts. Collapsing the two is what made /th/menu 404.
- */
-function routeSourcePath(page: string | null): string | null {
-  if (!page) return null
-  if (page === 'home') return '/'
-  // A location detail route is its business_locations row, not a page.
-  if (page === 'locations') return '/locations'
-  if (isPublicSourceRouteRoot(page)) return `/${page}`
-  return null
 }
 
 function tenantPageToContentRows(page: PublicTenantPage): OrganizationContent[] {
@@ -557,11 +539,7 @@ async function loadPublicPageSource(
   const tenantPage = contentPagePath
     ? await getPublicTenantPageForPath(env, db, organizationId, contentPagePath, tenantPageOptions)
     : null
-  // These complete built-in routes may display an optional CMS content overlay.
-  // The route remains valid when that optional overlay has no translated page.
-  const allowsMissingLocalizedTenantPage = page === 'location' || page === 'contact'
-    || page === 'reservations'
-  if (contentPagePath && !tenantPage && locale && locale !== sourceLocale && !isPreviewAuthorized && !allowsMissingLocalizedTenantPage) {
+  if (contentPagePath && !tenantPage && locale && locale !== sourceLocale && !isPreviewAuthorized && !allowsMissingLocalizedTenantPage(page)) {
     throw new HTTPError({ statusCode: 404, statusMessage: 'Localized page was not found' })
   }
   const contentRows: OrganizationContent[] = tenantPage ? tenantPageToContentRows(tenantPage) : []

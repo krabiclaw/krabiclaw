@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { creationRequestHash, readCreationRecord } from '~/server/utils/organization-events'
 // Canonical media-asset creation from resolved bytes for MCP and dashboard uploads.
-import { errorChainForTelemetry } from "~/server/utils/error-telemetry";
+import { errorChainForTelemetry } from "~/shared/error-telemetry";
 import type { DbClient } from "~/server/db";
 import { uploadImageBuffer, deleteImage } from "~/server/utils/cloudflare-images";
 import { uploadToR2, buildR2Key, deleteFromR2 } from "~/server/utils/cloudflare-r2";
