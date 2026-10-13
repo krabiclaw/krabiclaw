@@ -9,7 +9,7 @@
 
         <div class="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
           <p v-if="restoreError" class="py-16 text-sm text-error" role="alert">{{ getErrorMessage(restoreError, 'Your saved answers could not be loaded.') }}</p>
-          <NuxtPage v-else />
+          <NuxtPage v-else @advance="goNext" />
         </div>
 
         <div v-if="currentStep && !restoreError" class="shrink-0 border-t border-default px-6 py-4">
