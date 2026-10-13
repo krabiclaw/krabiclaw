@@ -141,7 +141,7 @@ export const locationObject = {
     created_at: { type: 'string' },
     updated_at: { type: 'string' },
   },
-  required: ['id', 'slug', 'title', 'status', 'created_at', 'updated_at', 'media'],
+  required: ['id', 'slug', 'title', 'status', 'timezone', 'created_at', 'updated_at', 'media'],
 }
 
 export const locationMutationResultObject = {

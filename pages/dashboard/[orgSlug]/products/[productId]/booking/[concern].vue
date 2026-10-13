@@ -1,7 +1,7 @@
 <template>
-  <DashboardLeafPanel :id="`booking-${concern}`" :title="setting.title" :lead="setting.lead" :saving="p.saving.value" :disabled="!p.product.value || !valid || !form?.dirty" :error="p.loadError.value ?? p.saveError.value ?? ''" @cancel="p.revert" @save="form?.submit()">
+  <DashboardLeafPanel :id="`booking-${concern}`" :title="setting.title" :lead="setting.lead" :saving="p.saving.value" :disabled="!p.product.value || !valid || !form?.dirty" :error="p.loadError.value ?? p.saveError.value ?? ''" @cancel="reset" @save="form?.submit()">
     <!-- Nuxt UI's form state says whether the owner changed anything; Save waits for it. -->
-    <UForm v-if="p.product.value" ref="form" :state="p.form" @submit="save">
+    <UForm v-if="p.product.value" :key="formKey" ref="form" :state="p.form" @submit="save">
       <SettingRow v-if="concern === 'enabled'" v-model="p.form.bookable" label="Use a booking calendar" />
       <UFormField v-else-if="concern === 'duration'" label="Duration in minutes" required>
         <UInput v-model="p.form.booking_duration" inputmode="numeric" pattern="[0-9]*" class="w-full" />
@@ -74,8 +74,10 @@ watchEffect(() => {
 })
 const capacityOptions = [{ value: 'one', label: 'One guest' }, { value: 'group', label: 'A group of guests' }, { value: 'unlimited', label: 'No guest limit' }, { value: 'closed', label: 'Closed to new guests' }]
 const capacityChoice = ref('unlimited')
+const formKey = ref(0)
 function reset() {
   p.revert()
+  formKey.value++
   capacityChoice.value = p.form.booking_capacity === '' ? 'unlimited' : p.form.booking_capacity === '1' ? 'one' : p.form.booking_capacity === '0' ? 'closed' : 'group'
 }
 watch([concern, p.product], reset, { immediate: true })

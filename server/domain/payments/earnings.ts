@@ -67,7 +67,7 @@ export interface EarningsPerformance {
 export async function paymentPerformance(db: DbClient, principal: FinancialPrincipal, year: number, month: string): Promise<EarningsPerformance> {
   await authorizePayments(principal, 'read')
   if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new HTTPError({ statusCode: 400, statusMessage: 'Valid year is required' })
-  if (!/^\d{4}-\d{2}$/.test(month)) throw new HTTPError({ statusCode: 400, statusMessage: 'Valid month is required' })
+  if (!/^\d{4}-\d{2}$/.test(month) || !month.startsWith(`${year}-`)) throw new HTTPError({ statusCode: 400, statusMessage: 'Valid month within the requested year is required' })
   const rows = await queryAll<{ month: string; currency: string; paid: number; refunded: number }>(db, `SELECT strftime('%Y-%m', created_at) AS month, currency, SUM(captured_amount) AS paid, SUM(refunded_amount) AS refunded FROM payments WHERE organization_id = ? AND created_at >= ? AND created_at < ? GROUP BY 1, 2 ORDER BY 1`, [principal.organizationId, `${year}-01-01T00:00:00.000Z`, `${year + 1}-01-01T00:00:00.000Z`])
   const currencies = [...new Set(rows.map(row => row.currency))]
   if (currencies.length > 1) throw new HTTPError({ statusCode: 409, statusMessage: 'Earnings in more than one currency cannot be charted together' })

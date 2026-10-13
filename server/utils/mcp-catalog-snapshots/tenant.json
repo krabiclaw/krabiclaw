@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:5e10c34d44058556cfa5297ad818a67a43559ffb50c19f6c79f554441e717b93",
-  "documentationFingerprint": "sha256:74af9102c8401d462f94e19f300d695163cd7ec04114897a1210f2325d654aa5",
+  "fingerprint": "sha256:002f179813758f70bba2feaf47076337482e367ecb42cb96015e67565046faef",
+  "documentationFingerprint": "sha256:46d6a832fc2dc54b278a8894f3a8f854748934f70d822b77ed2fbb58d6ccf182",
   "tools": [
     {
       "name": "append_content_block",
@@ -14359,6 +14359,7 @@
               "slug",
               "title",
               "status",
+              "timezone",
               "created_at",
               "updated_at",
               "media"
@@ -37211,6 +37212,7 @@
               "slug",
               "title",
               "status",
+              "timezone",
               "created_at",
               "updated_at",
               "media"
@@ -37219,7 +37221,8 @@
           }
         },
         "required": [
-          "location"
+          "location",
+          "current_local_date"
         ],
         "type": "object"
       },
@@ -39227,7 +39230,9 @@
             },
             "required": [
               "id",
-              "subdomain"
+              "subdomain",
+              "default_currency",
+              "timezone"
             ],
             "type": "object"
           }
@@ -101251,7 +101256,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:010b4cb1cd55f355ae72e255d70c3f17cecb18a68daf4345dee1774638635a7b",
-        "get_location": "sha256:a8822b12de508e31adb30460970582285a96b479043ba04021d00227d6491cd5",
+        "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_product": "sha256:68ec0688bc6c4811b074ee2bdf50bb9e83bc41760adba313030339156e6cbe46",
         "get_site_page": "sha256:eedb5ddc2727ef220891d589484efbe691ea56485f5e2a4f2313e0a780ba8609",
@@ -101294,7 +101299,7 @@
         "text": "Use get_workspace_context, list_products, get_product and list_product_booking_sessions to read the public offering, booking readiness and actual availability. Use list_locations, get_location and get_reservation_policy for location hours and table reservation setup. Identify what prevents guests from booking and ask for missing business facts. Use update_product with booking setup, set_product_booking_config, replace_product_weekly_schedule or update_reservation_policy for the changes the user requests. Read back readiness, available times and the public result."
       },
       "toolContracts": {
-        "get_location": "sha256:a8822b12de508e31adb30460970582285a96b479043ba04021d00227d6491cd5",
+        "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
         "get_product": "sha256:68ec0688bc6c4811b074ee2bdf50bb9e83bc41760adba313030339156e6cbe46",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
@@ -101355,7 +101360,7 @@
       "slug": "what-you-can-edit-through-chatgpt",
       "contentHash": "sha256:c7ab225c2c7ef78e2bedbb829ffea80ea2a606ee180c054ca788dd598d827ea7",
       "toolContracts": {
-        "create_location": "sha256:48fa42f9621ff05d2c9cef6f7eebe4d9237e85c27410be49227d5a09b838b819",
+        "create_location": "sha256:ae5b3985d3356a979f678e6a24ed16b56719d1c28a8c5a7072c1d0b528c43cfe",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_guest_conversation": "sha256:4d6462fe91c70c95f5028b0593d026fa32ba54ef84d5be113995f58c56571adf",
         "invite_organization_member": "sha256:5292b1c13581efbb2b4b575b88b15d31dc92278c94f57dfcf795274120bcdf89",

@@ -112,7 +112,7 @@ export async function buildPublicShellPayload(
       longitude: location.longitude,
       opening_hours: parseOpeningHours(location.opening_hours ? JSON.parse(String(location.opening_hours)) : null),
       special_hours: parseSpecialHours(location.special_hours ? JSON.parse(String(location.special_hours)) : null),
-      timezone: String(location.timezone),
+      timezone: requireLocationString(location.timezone, 'timezone'),
       rating: location.rating,
       review_count: location.review_count,
       status: location.status,

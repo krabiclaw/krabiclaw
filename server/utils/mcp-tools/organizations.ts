@@ -253,7 +253,7 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
               created_at: { type: 'string' },
               updated_at: { type: 'string' },
             },
-            required: ['id', 'subdomain'],
+            required: ['id', 'subdomain', 'default_currency', 'timezone'],
           },
         },
         required: ['settings'],

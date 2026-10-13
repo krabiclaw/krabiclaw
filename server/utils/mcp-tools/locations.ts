@@ -73,7 +73,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
       outputSchema: {
         type: 'object',
         properties: { location: locationObject, current_local_date: { type: 'string', format: 'date', description: 'Current date in the location timezone.' } },
-        required: ['location'],
+        required: ['location', 'current_local_date'],
       },
     }),
   organizationTool({

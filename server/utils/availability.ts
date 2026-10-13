@@ -462,20 +462,22 @@ export async function materializeSessions(db: DbClient, input: {
   actorId: string
 }): Promise<MaterializeSessionsResult> {
   const config = await requireBookingConfig(db, input.organizationId, input.productId)
+  let providerCreated = 0
   // No location named, or the online one: the providers' hours. A location: its weekly rules.
   if (config.held_online && !input.locationId) {
-    await executeBatch(db, await prepareProviderHoursSessions(db, config, { actorId: input.actorId, now: new Date().toISOString() }), { operation: 'Materialize provider hours' })
+    const results = await executeBatch(db, await prepareProviderHoursSessions(db, config, { actorId: input.actorId, now: new Date().toISOString() }), { operation: 'Materialize provider hours' })
+    providerCreated = results.reduce((sum, result) => sum + (result.meta?.changes ?? 0), 0)
   }
   const rules = (await listAvailabilityRules(db, input.organizationId, input.productId))
     .filter(rule => input.locationId === undefined || rule.location_id === input.locationId)
-  if (rules.length === 0) return { created: 0, existing: 0, skipped: [] }
+  if (rules.length === 0) return { created: providerCreated, existing: 0, skipped: [] }
 
   const locations = await queryAll<SessionLocation>(db, 'SELECT id,timezone,status,opening_hours,special_hours FROM business_locations WHERE organization_id=? AND id IN (SELECT value FROM json_each(?))', [input.organizationId, JSON.stringify([...new Set(rules.map(rule => rule.location_id))])])
   const { queries: writes, planned, skipped } = prepareSessionMaterialization(input, config, rules, new Map(locations.map(location => [location.id, location])), await sessionProviders(db, config))
-  if (writes.length === 0) return { created: 0, existing: 0, skipped }
+  if (writes.length === 0) return { created: providerCreated, existing: 0, skipped }
   const results = await executeBatch(db, writes, { operation: 'Materialize product sessions' })
   const created = results.reduce((sum, result) => sum + (result.meta?.changes ?? 0), 0)
-  return { created, existing: planned - created, skipped }
+  return { created: providerCreated + created, existing: planned - created, skipped }
 }
 
 export async function materializeMemberSessions(db: DbClient, input: { organizationId: string; userId: string; actorId: string }) {

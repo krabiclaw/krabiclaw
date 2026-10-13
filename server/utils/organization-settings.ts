@@ -348,9 +348,10 @@ async function attemptOrganizationUpdate(
     params.push(currency)
   }
   if (updates.timezone !== undefined) {
-    if (!isValidTimezone(updates.timezone)) return { status: 400, data: { error: 'timezone must be an IANA time zone' } }
+    const timezone = typeof updates.timezone === 'string' ? updates.timezone.trim() : null
+    if (!isValidTimezone(timezone)) return { status: 400, data: { error: 'timezone must be an IANA time zone' } }
     setParts.push('timezone = ?')
-    params.push(updates.timezone)
+    params.push(timezone)
   }
   if (updates.status !== undefined) {
     // Draft and Live are the tenant's to move between. 'suspended' is the
