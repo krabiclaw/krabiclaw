@@ -9,7 +9,7 @@ import {
 
 // JSON-RPC envelope parsing, protocol-version negotiation, and JSON-RPC
 // argument-shape validation moved to @modelcontextprotocol/server (see
-// server/api/mcp.post.ts) — that coverage now lives in the e2e suite
+// server/api/mcp.ts) — that coverage now lives in the e2e suite
 // (tests/e2e/mcp-*.spec.ts, tests/e2e/oauth-discovery.spec.ts) against the
 // real SDK behavior rather than as unit tests of hand-rolled parsing here.
 // asMcpError/mcpProtocolError remain ours: every tool executor throws

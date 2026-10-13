@@ -143,7 +143,7 @@ export default defineHandler(async (event) => {
   // tap it directly from emails/WhatsApp messages instead of copying it.
   // Send browsers (GET requesting HTML) to the docs page explaining what this
   // URL is for; leave POST and non-browser GET clients (MCP probes) alone so
-  // they still reach server/api/mcp.post.ts.
+  // they still reach server/api/mcp.ts.
   if (
     normalizedPathname === '/api/mcp' &&
     event.req.method === 'GET' &&

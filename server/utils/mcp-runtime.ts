@@ -1,8 +1,8 @@
-// Pre-dispatch credential-presence check shared by server/api/mcp.post.ts.
+// Pre-dispatch credential-presence check shared by server/api/mcp.ts.
 // The seven standard non-tool-call JSON-RPC methods this file used to
 // dispatch (ping, resources/*, prompts/*, server/discover,
 // notifications/initialized) are now @modelcontextprotocol/server's own —
-// see server/api/mcp.post.ts for what's left in our hands.
+// see server/api/mcp.ts for what's left in our hands.
 import type { H3Event } from 'nitro';
 import { readBody } from 'nitro/h3';
 

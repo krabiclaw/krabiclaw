@@ -320,6 +320,7 @@ export default defineHandler(async (event) => {
   if (rejectedHost) return rejectedHost;
   const rejectedOrigin = originValidationResponse(webRequest, allowedOriginHostnames);
   if (rejectedOrigin) return rejectedOrigin;
+  if (webRequest.method !== "POST") return mcpHandler.fetch(webRequest);
 
   const tenantAuthOptions = { audiences: [`${baseUrl}/api/mcp`], requiredScopes: ["tenant"] };
   const runtimeDeps = {

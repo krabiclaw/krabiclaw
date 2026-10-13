@@ -7,7 +7,7 @@ through it with the same tools.
 
 - Endpoint: `/api/mcp`
 - Protected resource: `/.well-known/oauth-protected-resource`
-- Server entrypoint: `server/api/mcp.post.ts`
+- Server entrypoint: `server/api/mcp.ts`
 - Scope: `tenant`
 - Exposes: existing-tenant content management, menus, experiences, posts, articles
   (blog and, on Krabiclaw's own site, documentation), media, reviews,

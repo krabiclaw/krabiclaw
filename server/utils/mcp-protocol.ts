@@ -1,7 +1,7 @@
-// Error-shaping shared between the MCP route (server/api/mcp.post.ts) and
+// Error-shaping shared between the MCP route (server/api/mcp.ts) and
 // every tool executor. JSON-RPC envelope parsing, protocol-version
 // negotiation, and the standard non-tool-call methods now belong to
-// @modelcontextprotocol/server (see server/api/mcp.post.ts) — this file only
+// @modelcontextprotocol/server (see server/api/mcp.ts) — this file only
 // keeps the pieces executors and the route still need: a typed error shape
 // business logic can throw, and the two envelope builders used for the
 // handful of responses the route still builds by hand (credential-missing,

@@ -458,6 +458,44 @@ test.describe('OAuth discovery endpoints', () => {
     expect(replayBody.error_description).toMatch(/assertion|replay|already/i)
   })
 
+  for (const method of ['GET', 'DELETE', 'HEAD']) {
+    for (const modern of [false, true]) {
+      test(`MCP ${method} returns SDK method rejection${modern ? ' with forged modern tool headers' : ''}`, async ({ request, baseURL }) => {
+        const response = await request.fetch(`${baseURL}/api/mcp`, {
+          method,
+          headers: {
+            accept: 'text/event-stream',
+            ...(modern ? {
+              'mcp-protocol-version': '2026-07-28',
+              'mcp-method': 'tools/call',
+              'mcp-name': 'list_organizations',
+            } : {}),
+          },
+        })
+        expect(response.status()).toBe(405)
+        expect(response.headers()['content-type']).toContain('application/json')
+        if (method === 'HEAD') expect(await response.text()).toBe('')
+        else expect(await response.json()).toEqual({
+          jsonrpc: '2.0',
+          id: null,
+          error: { code: -32000, message: 'Method not allowed.' },
+        })
+      })
+    }
+  }
+
+  test('MCP GET still rejects an untrusted Origin before method dispatch', async ({ request, baseURL }) => {
+    const response = await request.get(`${baseURL}/api/mcp`, {
+      headers: { accept: 'text/event-stream', origin: 'https://untrusted.example' },
+    })
+    expect(response.status()).toBe(403)
+    expect(await response.json()).toEqual({
+      jsonrpc: '2.0',
+      id: null,
+      error: { code: -32000, message: 'Invalid Origin: untrusted.example' },
+    })
+  })
+
   test('unauthenticated modern MCP probe returns OAuth challenge before version validation', async ({ request, baseURL }) => {
     const MCP_VERSION = '2026-07-28'
     const res = await request.post(`${baseURL}/api/mcp`, {
