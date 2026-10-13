@@ -474,6 +474,10 @@
   --tw-prose-invert-td-borders: var(--ui-border);
 }
 
+.blog-article .prose [id] {
+  scroll-margin-top: 7rem;
+}
+
 .prose code {
   white-space: pre-wrap;
   overflow-wrap: anywhere;

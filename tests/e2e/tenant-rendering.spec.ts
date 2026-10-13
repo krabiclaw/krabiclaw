@@ -173,7 +173,10 @@ for (const width of [390, 1440]) {
     for (const name of [toolNames[0]!, toolNames.at(-1)!]) {
       await article.locator(`a[href="#${name}"]`).first().click()
       expect(new URL(page.url()).hash).toBe(`#${name}`)
-      await expect(article.locator(`h3`).filter({ hasText: new RegExp(` — ${name}$`) })).toBeVisible()
+      const heading = article.locator('h3').filter({ hasText: new RegExp(` — ${name}$`) })
+      await expect(heading).toBeVisible()
+      const headerBottom = await page.locator('header').first().evaluate(element => Math.ceil(element.getBoundingClientRect().bottom))
+      await expect.poll(() => heading.evaluate(element => Math.floor(element.getBoundingClientRect().top)), 'Tool anchors must land below the sticky site header').toBeGreaterThanOrEqual(headerBottom)
     }
     const menuHeading = article.locator('h3').filter({ hasText: / — update_menu$/ })
     await menuHeading.evaluate(element => element.scrollIntoView({ block: 'start' }))
