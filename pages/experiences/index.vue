@@ -1,6 +1,6 @@
 <template>
   <NuxtLayout :name="template.layout">
-    <TenantPublicPage v-if="isPlatform" :path="documentPath" />
+    <TenantPublicPage v-if="isPlatform" path="/experiences" />
     <LazySayaExperienceCatalog v-else />
   </NuxtLayout>
 </template>
@@ -8,6 +8,6 @@
 <script setup lang="ts">
 definePageMeta({ layout: false })
 
-const { isPlatform, template } = useTenantOrganization()
-const documentPath = template.pageDocuments.paths.find(p => p === '/experiences') ?? '/experiences'
+const { template } = useTenantOrganization().organization
+const isPlatform = template.slug === 'platform'
 </script>

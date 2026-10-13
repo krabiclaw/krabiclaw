@@ -163,6 +163,7 @@
     "@vue-email/text": "0.0.3",
     "better-auth": "patch:better-auth@npm%3A1.7.5#~/patches/better-auth-npm-1.7.5.patch",
     "cookie-es": "^3.1.1",
+    "devalue": "5.9.4",
     "drizzle-orm": "^0.45.2",
     "email-reply-parser": "2.3.9",
     "eventsource-parser": "^4.1.0",

@@ -4,8 +4,8 @@ import { isPublicProduct } from '~/utils/public-resource-contracts'
 import { isRecord, publicApiRequest } from '~/utils/api-clients'
 export async function useConsultationProducts() {
   const { locale } = useI18n()
-  const { organizationId, organization } = useTenantOrganization()
-  if (!organizationId || !organization?.name) throw createError({ statusCode: 404, statusMessage: 'Organization not found' })
+  const { organization } = useTenantOrganization()
+  const { id: organizationId } = organization
   const organizationName = organization.name
   const { data, pending, error } = await useAsyncData(() => `consultation-products:${organizationId}:${locale.value}`, async (_nuxtApp, { signal }) => {
     if (import.meta.server) {

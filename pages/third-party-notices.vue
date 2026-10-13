@@ -1,13 +1,12 @@
 <template>
   <NuxtLayout name="blawby">
-    <BlawbyTenantPage :path="documentPath" />
+    <BlawbyTenantPage path="/third-party-notices" />
   </NuxtLayout>
 </template>
 
 <script setup lang="ts">
-const { template } = useTenantOrganization()
+const { template } = useTenantOrganization().organization
 if (template.slug !== 'blawby') throw createError({ statusCode: 404 })
-const documentPath = template.pageDocuments.recipes['third-party-notices'] || '/third-party-notices'
 
 definePageMeta({ layout: false })
 </script>

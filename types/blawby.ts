@@ -88,13 +88,6 @@ export interface PublicBlawbyPageLink {
 }
 
 
-export interface PublicOrganizationQa {
-  id: string
-  question: string
-  answer: string | null
-  sort_order: number
-}
-
 export interface PublicOrganizationReview {
   source: string | null
   original_reference: string | null
@@ -149,7 +142,6 @@ export interface PublicBlawbyRouteData {
   recipe: BlawbyRouteRecipe
   localeRepresentations: PublicLocaleRepresentation[]
   page: PublicTenantPage | null
-  qa: PublicOrganizationQa[]
 }
 
 export type PublicTenantPage = import('~/server/utils/public-tenant-pages').PublicTenantPage

@@ -37,18 +37,18 @@
 </template>
 
 <script setup lang="ts">
-import { TENANT_TYPES } from '~/utils/tenant-routing'
 import { ApiClientError, publicApiRequest } from '~/utils/api-clients'
 import { isPublicLinksPayload, isPublicLinksResponse, type PublicLinksItem, type PublicLinksPayload } from '~/utils/public-links-contract'
 
 definePageMeta({ layout: false })
 
-const { isTenant, organizationId, template } = useTenantOrganization()
+const { id: organizationId, template, social_image: organizationSocialImage } = useTenantOrganization().organization
+const isTenant = template.slug !== 'platform'
 const route = useRoute()
 const { localePath } = useI18n()
 const locale = typeof route.params.locale === 'string' ? route.params.locale : 'en'
 const requestEvent = useRequestEvent()
-if (!isTenant || !organizationId) {
+if (!isTenant) {
   throw createError({ statusCode: 404, statusMessage: 'Links page not found' })
 }
 
@@ -122,13 +122,11 @@ function trackLinkClick(item: PublicLinksItem) {
 }
 
 // A page about the business: its image is the organization's.
-const { socialImage: organizationSocialImage } = useTenantOrganization()
 useSocialMetadata(() => ({
   path: '/links',
   socialImage: organizationSocialImage,
   title: linksPage.value?.page.title || brandName.value,
   description: linksPage.value?.organization.brand_description || '',
   discoverability: 'unlisted',
-  brand: { organizationName: brandName.value },
 }))
 </script>

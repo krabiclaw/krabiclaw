@@ -52,6 +52,20 @@ export interface TenantPageBlock {
   media: TenantPageMedia[]
 }
 
+export interface TenantPageHowToStep {
+  name: string
+  text?: string | null
+}
+
+export interface TenantPageHowToData extends Record<string, unknown> {
+  title?: string | null
+  description?: string | null
+  estimated_time?: string | null
+  tool_items?: string[]
+  supply_items?: string[]
+  steps: TenantPageHowToStep[]
+}
+
 export interface TenantPageMedia {
   asset_id: string
   slot: string
@@ -106,7 +120,7 @@ export interface TenantPageField {
   options?: readonly { value: string; label: string; platformOnly?: boolean }[]
   /** A list's item shape, or a record's fields. Absent means a list of plain strings. */
   of?: Readonly<Record<string, TenantPageField>>
-  /** A number's bounds. */
+  /** A number's bounds, or a list's item count. */
   min?: number
   max?: number
   /** Which canonical record a reference selects. */
@@ -247,7 +261,7 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
     tool_items: { kind: 'list', label: 'Tools', section: 'materials' },
     supply_items: { kind: 'list', label: 'Supplies', section: 'materials' },
     steps: {
-      kind: 'list', label: 'Steps', section: 'steps',
+      kind: 'list', label: 'Steps', required: true, min: 1, section: 'steps',
       of: { name: text('Name', { required: true }), text: prose('Text') },
     },
   }, { accessibility: 'required', seo: 'structured' }),
@@ -654,14 +668,6 @@ function blockDefinitionWithMetadata(
 }
 
 
-const STRING_FIELDS = new Set([
-  'eyebrow', 'title', 'subtitle', 'text', 'markdown', 'caption', 'description',
-  'label', 'url', 'body', 'tone', 'cta_label', 'cta_url', 'source',
-  'source_url', 'effective_date', 'field', 'section', 'destination',
-  'video_url', 'video_title', 'upload_date',
-])
-const ARRAY_FIELDS = new Set(['page_ids', 'product_ids', 'location_ids'])
-
 export function validateContentBlockData(type: string, data: Record<string, unknown>): Record<string, unknown> {
   const fields = TENANT_PAGE_BLOCK_REGISTRY[type as TenantPageBlockType]?.fields
   if (!fields) throw new Error(`Block type ${type} is not registered.`)
@@ -670,33 +676,35 @@ export function validateContentBlockData(type: string, data: Record<string, unkn
     if (!field || field.kind === 'media' || field.store === 'level') throw new Error(`${type}.${key} is not a stored field.`)
   }
   assertNoEmbeddedMediaFields(data, type)
-  if (type === 'image' && 'url' in data) throw new Error('image.url must use the block media array.')
-  for (const key of STRING_FIELDS) {
-    if (data[key] !== undefined && data[key] !== null && typeof data[key] !== 'string') {
+  for (const [key, field] of Object.entries(fields)) {
+    const value = data[key]
+    if (value === undefined && !field.required) continue
+    if (['text', 'markdown', 'url', 'enum'].includes(field.kind) && value !== undefined && value !== null && typeof value !== 'string') {
       throw new Error(`${type}.${key} must be a string.`)
     }
-  }
-  for (const key of ARRAY_FIELDS) {
-    if (data[key] !== undefined && (!Array.isArray(data[key]) || data[key].some(item => typeof item !== 'string'))) {
-      throw new Error(`${type}.${key} must be an array of strings.`)
+    if (field.kind === 'reference') {
+      if (key.endsWith('_ids')) {
+        if (value !== undefined && (!Array.isArray(value) || value.some(item => typeof item !== 'string'))) throw new Error(`${type}.${key} must be an array of strings.`)
+      } else if (value !== undefined && value !== null && typeof value !== 'string') throw new Error(`${type}.${key} must be a string.`)
     }
-  }
-  for (const key of ['items', 'buttons', 'tiers', 'steps']) {
-    if (data[key] === undefined) continue
-    if (!Array.isArray(data[key]) || data[key].some(item => !item || typeof item !== 'object' || Array.isArray(item))) {
-      throw new Error(`${type}.${key} must be an array of objects.`)
+    if (field.kind !== 'list') continue
+    if (field.required && (!Array.isArray(value) || value.length < (field.min ?? 1))) throw new Error(`${type}.${key} requires at least ${field.min ?? 1} item.`)
+    if (value === undefined) continue
+    if (!Array.isArray(value)) throw new Error(`${type}.${key} must be an array.`)
+    if (!field.of) {
+      if (value.some(item => typeof item !== 'string')) throw new Error(`${type}.${key} must be an array of strings.`)
+      continue
     }
-  }
-  if (type === 'showcase' || type === 'language_reach' || type === 'steps') {
-    const fields = TENANT_PAGE_BLOCK_REGISTRY[type].fields.items!.of!
-    for (const [index, item] of (data.items as Record<string, unknown>[] | undefined ?? []).entries()) {
-      for (const [key, field] of Object.entries(fields)) {
-        const value = item[key]
-        if (field.required && (typeof value !== 'string' || !value.trim())) {
-          throw new Error(`${type}.items[${index}].${key} is required.`)
+    if (value.some(item => !item || typeof item !== 'object' || Array.isArray(item))) throw new Error(`${type}.${key} must be an array of objects.`)
+    for (const [index, item] of (value as Record<string, unknown>[]).entries()) {
+      for (const [itemKey, itemField] of Object.entries(field.of)) {
+        const itemValue = item[itemKey]
+        if (itemField.required && (typeof itemValue !== 'string' || !itemValue.trim())) throw new Error(`${type}.${key}[${index}].${itemKey} is required.`)
+        if (itemValue !== undefined && itemValue !== null && ['text', 'markdown', 'url', 'enum'].includes(itemField.kind) && typeof itemValue !== 'string') {
+          throw new Error(`${type}.${key}[${index}].${itemKey} must be a string.`)
         }
-        if (field.kind === 'enum' && !field.options?.some(option => option.value === value)) {
-          throw new Error(`${type}.items[${index}].${key} must be one of: ${field.options?.map(option => option.value).join(', ')}.`)
+        if (itemField.kind === 'enum' && itemField.options && !itemField.options.some(option => option.value === itemValue)) {
+          throw new Error(`${type}.${key}[${index}].${itemKey} must be one of: ${itemField.options.map(option => option.value).join(', ')}.`)
         }
       }
     }
@@ -740,14 +748,6 @@ export function validateContentBlockData(type: string, data: Record<string, unkn
   }
   if ((type === 'video' || type === 'video_feature') && data.upload_date && !videoUploadDate(data.upload_date)) {
     throw new Error(`${type}.upload_date must be a date written YYYY-MM-DD.`)
-  }
-  if (type === 'how_to' && Array.isArray(data.steps)) {
-    for (const [index, step] of data.steps.entries()) {
-      const record = step as Record<string, unknown>
-      for (const field of ['name', 'text']) {
-        if (record[field] !== undefined && record[field] !== null && typeof record[field] !== 'string') throw new Error(`${type}.steps[${index}].${field} must be a string.`)
-      }
-    }
   }
   return { ...data }
 }

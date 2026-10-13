@@ -57,8 +57,6 @@ import { shallowRef } from 'vue'
 import ArticleBreadcrumb from '~/components/blog/ArticleBreadcrumb.vue'
 import ArticleToc from '~/components/blog/ArticleToc.vue'
 import BlogArticleRenderer from '~/components/blog/BlogArticleRenderer.vue'
-import { useContentPageSchema } from '~/composables/useContentPageSchema'
-import { structuredComponentsFromBlocks } from '~/utils/blog-editor'
 import { headingAnchor, renderMarkdownToHtml, sanitizeHtmlForSsr } from '~/utils/markdown'
 import { loadDomPurify } from '~/utils/dom-purify-loader'
 import { resolveSocialImageUrl } from '~/utils/social-metadata'
@@ -71,7 +69,8 @@ const props = defineProps<{ collection: ArticleCollection }>()
 const DOMPurify = import.meta.client ? await loadDomPurify() : { sanitize: sanitizeHtmlForSsr }
 const route = useRoute()
 const { t, localePath } = useI18n()
-const { template, organization, logoUrl } = useTenantOrganization()
+const { organization } = useTenantOrganization()
+const { template } = organization
 const locale = useState<string>('public-locale', () => 'en')
 
 const slug = computed(() => String(route.params.slug || '').trim())
@@ -79,7 +78,7 @@ if (!slug.value) throw createError({ statusCode: 404, statusMessage: 'Article no
 const post = await usePublishedArticle(props.collection, slug)
 const { readingOrder: articles, categories } = await usePublishedArticles(props.collection)
 
-const organizationName = computed(() => organization?.name?.trim() || null)
+const organizationName = organization.name
 const authorName = computed(() => post.value.author?.name ?? null)
 // Each collection's index is at its own prefix on every template; only a blog article's own path varies (/blog or /article).
 const indexPath = computed(() => localePath(ARTICLE_COLLECTIONS[props.collection].pathPrefix))
@@ -112,52 +111,34 @@ const hasToc = computed(() => /<h[23]\b[^>]*\bid="[^"]+"/.test(tocHtml.value))
 const articleBodyRef = shallowRef<Element | null>(null)
 useCopyableCodeBlocks(articleBodyRef, computed(() => post.value.content_blocks))
 
-const requestURL = useRequestURL()
-const runtimeConfig = useRuntimeConfig()
-const origin = computed(() => template.value.slug === 'platform' ? runtimeConfig.public.siteUrl : requestURL.origin)
-const resolvedSeo = computed(() => resolveBlogSeo({
-  title: post.value.title, excerpt: post.value.excerpt, slug: post.value.slug,
-  baseUrl: origin.value, publicPath: articlePath.value, organizationName: organizationName.value ?? '',
-}))
-const { canonicalUrl } = useSocialMetadata(() => ({
-  schema: false,
-  pageType: 'article' as const,
-  title: resolvedSeo.value.title,
-  description: resolvedSeo.value.description,
-  path: resolvedSeo.value.canonicalUrl,
-  brand: { organizationName: organizationName.value ?? '' },
-  author: authorName.value,
-  publishedAt: post.value.published_at || null,
-  discoverability: post.value.visibility === 'unlisted' ? 'unlisted' : 'listed',
-  socialImage: post.value.social_image ?? null,
-}))
+useSocialMetadata(() => {
+  return {
+    pageType: 'article',
+    title: post.value.title,
+    description: post.value.excerpt,
+    path: articlePath.value,
+    author: authorName.value,
+    publishedAt: post.value.published_at,
+    discoverability: post.value.visibility,
+    socialImage: post.value.social_image,
+    breadcrumbs: breadcrumbs.value,
+    contentBlocks: post.value.content_blocks,
+    article: {
+      type: props.collection === 'docs' ? 'TechArticle' : 'BlogPosting',
+      imageUrl: resolveSocialImageUrl(post.value.cover ?? null),
+      imageWidth: post.value.cover?.width,
+      imageHeight: post.value.cover?.height,
+      dateModified: post.value.updated_at,
+      articleSection: post.value.category?.name,
+      keywords: post.value.seo_keywords,
+      inLanguage: locale.value === 'en' ? 'en-US' : locale.value,
+    },
+  }
+})
 
 useHead(() => ({
   meta: post.value.seo_keywords?.trim() ? [{ name: 'keywords', content: post.value.seo_keywords.trim() }] : [],
 }))
-
-useVideoSchema(() => post.value.content_blocks, canonicalUrl)
-
-useContentPageSchema(computed(() => ({
-  articleType: props.collection === 'docs' ? 'TechArticle' as const : 'BlogPosting' as const,
-  url: canonicalUrl.value,
-  title: post.value.title,
-  description: resolvedSeo.value.description,
-  imageUrl: resolveSocialImageUrl(post.value.cover ?? null) || undefined,
-  imageWidth: post.value.cover?.width ?? undefined,
-  imageHeight: post.value.cover?.height ?? undefined,
-  datePublished: post.value.published_at,
-  dateModified: post.value.updated_at,
-  authorName: authorName.value,
-  articleSection: post.value.category?.name || undefined,
-  keywords: post.value.seo_keywords || undefined,
-  inLanguage: locale.value === 'en' ? 'en-US' : locale.value,
-  breadcrumbs: breadcrumbs.value,
-  components: structuredComponentsFromBlocks(post.value.content_blocks),
-  organizationName: organizationName.value,
-  organizationLogoUrl: logoUrl || undefined,
-  organizationDescription: organization?.brand_description || undefined,
-})))
 </script>
 
 <style scoped>

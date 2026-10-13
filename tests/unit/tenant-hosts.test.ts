@@ -183,7 +183,7 @@ test('environment tenant aliases use first-level staging hostnames', () => {
     environmentTenantAliasSlug('pottery-house-staging.krabiclaw.com', stagingEnv),
     'pottery-house',
   )
-  assert.equal(environmentTenantAliasSlug('staging.krabiclaw.com', stagingEnv), '')
-  assert.equal(environmentTenantAliasSlug('pottery-house-preview.krabiclaw.com', stagingEnv), '')
-  assert.equal(environmentTenantAliasSlug('unknown.example.com', stagingEnv), '')
+  assert.equal(environmentTenantAliasSlug('staging.krabiclaw.com', stagingEnv), null)
+  assert.equal(environmentTenantAliasSlug('pottery-house-preview.krabiclaw.com', stagingEnv), null)
+  assert.equal(environmentTenantAliasSlug('unknown.example.com', stagingEnv), null)
 })

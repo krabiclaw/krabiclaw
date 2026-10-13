@@ -64,7 +64,7 @@ const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 const { localePath, locale, t } = useI18n()
 const { organization } = useTenantOrganization()
 
-const homeCopy = computed(() => getVerticalCopy(organization?.vertical, locale.value))
+const homeCopy = computed(() => getVerticalCopy(organization.vertical, locale.value))
 const items = computed(() => blockRecords(props.block.data.items).map((item) => {
   const media = blockRecords(item.media)[0] ?? null
   return {

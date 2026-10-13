@@ -24,7 +24,7 @@ export const articleNavKey = Symbol('article-nav') as InjectionKey<ComputedRef<A
 export async function useArticleNav() {
   const route = useRoute()
   const { t } = useI18n()
-  const { template } = useTenantOrganization()
+  const { template } = useTenantOrganization().organization
   const publicLocale = useState<string>('public-locale', () => 'en')
   const collection = computed(() => route.meta.articleCollection === 'docs' ? 'docs' as const : 'blog' as const)
   const { categoryTree } = await usePublishedArticles(collection)

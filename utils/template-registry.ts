@@ -1,10 +1,11 @@
+import type { LayoutKey } from 'nuxt/app'
 import type { PlatformIconName } from '~/components/platform/PlatformIcon.vue'
 export type PublicTemplateSlug = 'saya' | 'blawby' | 'platform'
 
 export interface PublicTemplateDefinition {
   slug: PublicTemplateSlug
   themeId: string
-  layout: string
+  layout: LayoutKey
   verticals: string[]
   serviceRoutes: {
     offeringsIndex: string | null
@@ -36,7 +37,7 @@ export interface PublicTemplateDefinition {
    * like any other (#903).
    */
   pageDocuments: {
-    recipes: Record<string, string>
+    recipes: Record<string, string> & { home: string }
     paths: string[]
     patterns?: string[]
     prefixes: string[]

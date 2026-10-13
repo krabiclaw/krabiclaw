@@ -8,5 +8,5 @@
 import GuestCancelPage from '~/components/booking/GuestCancelPage.vue'
 
 definePageMeta({ layout: false })
-const { template } = useTenantOrganization()
+const { template } = useTenantOrganization().organization
 </script>

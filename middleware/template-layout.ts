@@ -4,6 +4,6 @@
  * page's own metadata is the last word.
  */
 export default defineNuxtRouteMiddleware(() => {
-  const { template } = useTenantOrganization()
-  return setPageLayout(template.layout as any)
+  const { template } = useTenantOrganization().organization
+  return setPageLayout(template.layout)
 })

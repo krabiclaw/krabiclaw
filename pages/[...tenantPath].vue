@@ -20,7 +20,7 @@ import { resolveTenantLocalePath, splitLocalePrefix } from '~/utils/tenant-local
 definePageMeta({ layout: false })
 
 const route = useRoute()
-const { isPlatform, template, organizationId } = useTenantOrganization()
+const { template, id: organizationId } = useTenantOrganization().organization
 // An unclaimed path is a page document on whichever site resolved, Krabiclaw's
 
 const segments = route.params.tenantPath
@@ -69,17 +69,14 @@ const localizedData = localeSegment.value
   ? await useAsyncData<{ route: LocalizedPublicRoute }>(`localized-route-${organizationId}-${pagePath.value}`, async (_nuxtApp, { signal }) => {
       if (import.meta.server) {
         if (!requestEvent) throw createError({ statusCode: 500, statusMessage: 'Request context unavailable' })
-        const [{ cloudflareEnv }, { queryFirst }, { resolveLocalizedPublicRoute }] = await Promise.all([
+        const [{ cloudflareEnv }, { resolveLocalizedPublicRoute }] = await Promise.all([
           import('~/server/utils/api-response'),
-          import('~/server/db'),
           import('~/server/utils/localization'),
         ])
         const env = cloudflareEnv(requestEvent)
         const db = env.db
         if (!db) throw createError({ statusCode: 503, statusMessage: 'Database unavailable' })
-        const organization = await queryFirst<{ id: string }>(db, 'SELECT id FROM organization WHERE id = ? AND status = \'active\' LIMIT 1', [organizationId])
-        if (!organization) throw createError({ statusCode: 404, statusMessage: 'Organization not found' })
-        return { route: await resolveLocalizedPublicRoute(env, db, organization.id, pagePath.value) }
+        return { route: await resolveLocalizedPublicRoute(env, db, organizationId, pagePath.value) }
       }
       const endpoint: string = `/api/public/localized-route`
       return await publicApiRequest(endpoint, {

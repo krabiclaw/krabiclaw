@@ -20,10 +20,10 @@
         <li v-for="member in members" :key="member.id" class="border-b border-default py-6 last:border-b-0">
           <div class="flex items-center justify-between gap-4">
             <div class="flex min-w-0 items-center gap-3">
-              <UAvatar :src="member.image || undefined" :alt="member.name || member.email" icon="i-lucide-user" size="lg" />
+              <UAvatar :src="member.user.image || undefined" :alt="member.user.name || member.user.email" icon="i-lucide-user" size="lg" />
               <div class="min-w-0">
-                <p class="truncate text-base text-highlighted">{{ member.name || member.email }}</p>
-                <p class="truncate text-sm text-muted">{{ member.email }}</p>
+                <p class="truncate text-base text-highlighted">{{ member.user.name || member.user.email }}</p>
+                <p class="truncate text-sm text-muted">{{ member.user.email }}</p>
                 <!-- Your own row opens your availability, where you connect your Google Calendar; anyone else's is the admin view. -->
                 <UButton color="neutral" variant="link" :to="memberAvailabilityPath(member)">Profile, hours &amp; Calendar</UButton>
               </div>
@@ -32,11 +32,11 @@
               <USelect
                 v-if="canEditMemberRole(member)"
                 :model-value="member.role"
-                :items="roleOptionsFor(member)"
+                :items="roleOptions"
                 variant="soft"
                 size="sm"
                 :ui="{ base: 'rounded-full capitalize' }"
-                :aria-label="`Role for ${member.name || member.email}`"
+                :aria-label="`Role for ${member.user.name || member.user.email}`"
                 :loading="roleUpdatingId === member.id"
                 @update:model-value="value => onRoleSelected(member, String(value))"
               />
@@ -48,7 +48,7 @@
                 variant="ghost"
                 size="sm"
                 :loading="removingMemberId === member.id"
-                :aria-label="`Remove ${member.name || member.email}`"
+                :aria-label="`Remove ${member.user.name || member.user.email}`"
                 @click="removeMember(member.id)"
               />
             </div>
@@ -105,7 +105,10 @@ import { formatTimestamp } from '~/utils/timezone'
 
 import { authClient } from '~/lib/auth-client'
 import { getErrorMessage } from '~/utils/errors'
-import { isOrganizationMembersData, organizationMembersKey } from '~/utils/organization-members'
+import { isOrganizationMembersData, organizationMembersKey, type OrganizationMembersData } from '~/utils/organization-members'
+
+type MemberRow = OrganizationMembersData['members'][number]
+type InvitationRow = OrganizationMembersData['invitations'][number]
 
 const route = useRoute()
 const dashboardApi = useDashboardApi()
@@ -121,10 +124,7 @@ const invitations = computed(() => data.value?.invitations ?? [])
 
 const session = authClient.useSession()
 const currentUser = computed(() => session.value.data?.user ?? null)
-const currentUserRole = computed(() => {
-  const match = members.value.find(member => member.userId === currentUser.value?.id)
-  return match?.role ?? null
-})
+const currentUserRole = computed(() => dashboard.organization.value?.role)
 const isOwner = computed(() => currentUserRole.value === 'owner')
 
 function memberAvailabilityPath(member: MemberRow) {
@@ -144,10 +144,6 @@ const BASE_ROLE_OPTIONS = [
 const roleOptions = computed(() => (
   isOwner.value ? [...BASE_ROLE_OPTIONS, { label: 'Owner', value: 'owner' }] : BASE_ROLE_OPTIONS
 ))
-
-function roleOptionsFor(member: MemberRow) {
-  return isOwner.value || member.role !== 'owner' ? roleOptions.value : BASE_ROLE_OPTIONS
-}
 
 function canEditMemberRole(member: MemberRow): boolean {
   if (currentUserRole.value !== 'owner' && currentUserRole.value !== 'admin') return false
@@ -178,16 +174,26 @@ async function submitRoleChange(member: MemberRow, role: string) {
   roleUpdateError.value = null
   roleUpdateErrorMemberId.value = null
   try {
-    await dashboardApi(`/api/dashboard/organizations/members/${member.id}/role`, {
-      method: 'POST',
-      body: { role },
-      validate: (value): value is { success: true } => isRecord(value) && value.success === true,
-    })
+    const organizationId = dashboard.organization.value?.id
+    if (!organizationId) throw new Error('Organization context is unavailable')
+    const result = await authClient.organization.updateMemberRole({ organizationId, memberId: member.id, role })
+    if (result.error) throw new Error(result.error.message)
+    if (member.userId === currentUser.value?.id) {
+      await dashboard.refresh()
+      if (dashboard.error.value) throw dashboard.error.value
+      if (dashboard.organization.value?.role !== role) throw new Error('Your role change could not be verified')
+      const permission = await authClient.organization.hasPermission({ organizationId, permissions: { members: ['read'] } })
+      if (permission.error) throw new Error(permission.error.message)
+      if (!permission.data.success) {
+        await navigateTo(memberAvailabilityPath(member))
+        return
+      }
+    }
     await refresh()
+    if (loadError.value) throw loadError.value
+    if (data.value?.members.find(saved => saved.id === member.id)?.role !== role) throw new Error('The member role change could not be verified')
   } catch (err: unknown) {
-    roleUpdateError.value = err instanceof ApiClientError && typeof err.data.error === 'string'
-      ? err.data.error
-      : err instanceof Error ? err.message : 'Failed to update member role.'
+    roleUpdateError.value = getErrorMessage(err, 'Failed to update member role.')
     roleUpdateErrorMemberId.value = member.id
   } finally {
     roleUpdatingId.value = null
@@ -214,7 +220,7 @@ async function cancelInvitation(invitationId: string) {
   }
 }
 
-async function resendInvitation(invitation: DashboardInvitationRow) {
+async function resendInvitation(invitation: InvitationRow) {
   resendingInviteId.value = invitation.id
   pendingInvitationError.value = null
   try {

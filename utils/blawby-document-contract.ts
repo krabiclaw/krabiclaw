@@ -62,5 +62,4 @@ export const isBlawbyDocumentPayload = (
   && RECIPES.has(value.route.recipe)
   && value.route.recipe === expectedRecipe
   && Array.isArray(value.route.localeRepresentations)
-  && Array.isArray(value.route.qa)
   && hasRequiredRouteContent(value.route)

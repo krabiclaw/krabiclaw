@@ -7,7 +7,7 @@ import ProductCollectionPage from '~/components/products/ProductCollectionPage.v
 import { isCurrencyCode } from '~/shared/currencies'
 import { presentationForSurface } from '~/utils/product-presentation'
 
-const { template, socialImage } = useTenantOrganization()
+const { template, social_image: socialImage } = useTenantOrganization().organization
 if (template.slug === 'blawby') throw createError({ statusCode: 404 })
 const { t } = useI18n()
 const { products, collections, locations, config, organization, data: pagePayload } = await usePublicPageData({ lazy: false })
@@ -33,5 +33,5 @@ const brandName = String(organization.value?.name ?? '').trim()
 const collectionTitle = computed(() => t('saya.products.collection_title', { organization: brandName }))
 const productLocations = computed(() => locations.value.map(location => ({ id: String(location.id), slug: String(location.slug), title: String(location.title) })))
 // A page about the business: its image is the organization's.
-useSocialMetadata(() => presentation && ({ socialImage, path: presentation.collectionPath, title: collectionTitle.value, description: t('saya.products.meta_description', { organization: brandName }), brand: { organizationName: brandName } }))
+useSocialMetadata(() => presentation && ({ socialImage, path: presentation.collectionPath, title: collectionTitle.value, description: t('saya.products.meta_description', { organization: brandName }) }))
 </script>

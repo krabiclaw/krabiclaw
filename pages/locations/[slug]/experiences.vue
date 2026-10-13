@@ -10,7 +10,7 @@ import { isCurrencyCode } from '~/shared/currencies'
 import { EXPERIENCE_PRESENTATION, isExperience, resolveProductPresentation } from '~/utils/product-presentation'
 
 definePageMeta({ layout: false })
-const { template } = useTenantOrganization()
+const { template } = useTenantOrganization().organization
 const { products, collections, locations, location, config, organization, data: pagePayload } = await usePublicPageData({ lazy: false })
 const currentLocation = location.value
 if (!currentLocation) throw createError({ statusCode: 404, statusMessage: 'Location not found' })
@@ -38,7 +38,6 @@ useSocialMetadata(() => ({
   title: collectionTitle.value,
   description: t('saya.experiences.meta_description', { organization: currentLocation.title }),
   socialImage: currentLocation.social_image ?? null,
-  brand: { organizationName: brandName },
   breadcrumbs: [
     { name: 'Locations', url: '/locations' },
     { name: currentLocation.title, url: `/locations/${encodeURIComponent(currentLocation.slug)}` },

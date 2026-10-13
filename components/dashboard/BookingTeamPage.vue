@@ -8,7 +8,7 @@
     <UForm ref="form" :key="revision" :state="{ name, included }" @submit="save">
       <UInput v-if="concern === 'name'" v-model="name" aria-label="Team name" variant="none" autofocus class="w-full" :ui="{ base: 'px-0 text-2xl md:text-2xl' }" />
       <template v-else>
-        <SettingRow v-for="member in data?.members ?? []" :key="member.userId" :model-value="included.includes(member.userId)" :label="member.name" @update:model-value="value => toggle(member.userId, value)" />
+        <SettingRow v-for="member in data?.members ?? []" :key="member.userId" :model-value="included.includes(member.userId)" :label="member.user.name" @update:model-value="value => toggle(member.userId, value)" />
       </template>
     </UForm>
   </DashboardLeafPanel>

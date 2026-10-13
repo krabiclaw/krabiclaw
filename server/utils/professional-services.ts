@@ -30,7 +30,6 @@ import type {
   PublicCompliance,
   PublicComplianceContactPoint,
   PublicConsultationSettings,
-  PublicOrganizationQa,
   PublicTenantPage,
 } from '~/types/blawby'
 
@@ -374,17 +373,6 @@ export async function resolvePublicBlawbyDocumentOrThrow(
   return { success: true, ...document }
 }
 
-function faqBlockQa(page: { blocks: Array<{ type: string; data: Record<string, unknown> }> } | null): PublicOrganizationQa[] {
-  const block = page?.blocks.find(candidate => candidate.type === 'faq')
-  if (!block || !Array.isArray(block.data.items)) return []
-  return block.data.items.flatMap((item, index) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return []
-    const record = item as Record<string, unknown>
-    if (typeof record.id !== 'string' || typeof record.title !== 'string') return []
-    return [{ id: record.id, question: record.title, answer: typeof record.description === 'string' ? record.description : null, sort_order: index }]
-  })
-}
-
 export async function getPublicBlawbyRouteData(
   db: DbClient,
   organizationId: string,
@@ -404,14 +392,10 @@ export async function getPublicBlawbyRouteData(
         hydrationResources: options.hydrationResources,
       })
     : null
-  // The Blawby layouts render one FAQ section, from the page's FAQ block; the
-  // route data carries that block's items, as its declared source resolved them.
-  const qa = faqBlockQa(page)
   return {
     recipe,
     localeRepresentations: [],
     page,
-    qa,
   }
 }
 

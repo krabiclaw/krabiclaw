@@ -79,7 +79,7 @@ const isDashboardLocation = (value: unknown): value is DashboardLocation =>
   && typeof value.slug === 'string'
   && typeof value.title === 'string'
   && typeof value.status === 'string'
-  && (value.timezone === null || typeof value.timezone === 'string')
+  && typeof value.timezone === 'string'
   && isSocialImage(value.social_image)
   && (value.picture_url === null || typeof value.picture_url === 'string')
   && isMediaList(value.media)

@@ -1,12 +1,11 @@
 import type { OrganizationSettings } from '../../shared/organization-settings'
-import { INTEGRATION_PROVIDERS } from '../../shared/organization-settings'
+import { INTEGRATION_PROVIDERS, NONPROFIT_STATUS_CANONICAL } from '../../shared/organization-settings'
 import type { MediaCategory } from '~/shared/media-placement-contract'
 import { sql } from "drizzle-orm"
 import { sqliteTable, integer, text, real, unique, uniqueIndex, index, check, foreignKey, primaryKey } from "drizzle-orm/sqlite-core"
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
 import type { CONTENT_DOCUMENT_KINDS } from "../../shared/content-registries"
 import { NOTIFICATION_CATEGORIES, type NotificationCategory } from "../../shared/notification-categories"
-import { NONPROFIT_STATUS_CANONICAL } from "../../utils/professional-service-schema"
 
 export const account = sqliteTable("account", {
 	id: text().primaryKey(),

@@ -9,25 +9,21 @@
 
 <script setup lang="ts">
 import { buildTenantHeadLinks } from '~/utils/tenant-head'
-import { TENANT_TYPES } from '~/utils/tenant-routing'
 
-const { tenantType, isPlatform, template, organization } = useTenantOrganization()
-if (tenantType === TENANT_TYPES.TENANT_404) {
-  throw createError({
-    statusCode: 404,
-    statusMessage: 'Site Not Found',
-  })
-}
+const { organization } = useTenantOrganization()
+const { template } = organization
+const isPlatform = template.slug === 'platform'
 
 const organizationShell = template.slug === 'blawby' ? null : useOrganizationShellState()
+if (import.meta.server) await organizationShell?.ready
+if (organizationShell?.error.value) throw createError(organizationShell.error.value)
 const config = organizationShell?.config
-const organizationMedia = computed(() => organization?.media ?? organizationShell?.organization.value?.media ?? [])
 useHead(() => {
   const verification = config?.value.search_console_verification
   return {
     link: buildTenantHeadLinks({
       isPlatform,
-      organizationMedia: organizationMedia.value,
+      organizationMedia: organization.media,
     }),
     // Google fetches the organization's domain to verify Search Console
     // ownership (server/utils/google-search-console.ts); every public layout

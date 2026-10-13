@@ -2,10 +2,10 @@ import { computed, toValue, type MaybeRefOrGetter } from 'vue'
 import { collectionCategoryPath, type ArticleCollection } from '~/utils/article-collections'
 import { isRecord, publicApiRequest } from '~/utils/api-clients'
 import { validateApiShape } from '~/utils/api-validation'
-import { resolveSeoUrl } from '~/composables/useSeoUrls'
+import { resolveSeoUrl } from '~/utils/social-metadata'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import type { SocialImageSource } from '~/utils/social-metadata'
-import type { BlogEditorBlock } from '~/lib/components/workspace/blog/types'
+import type { ContentBlockSnapshot } from '~/server/utils/content/documents'
 import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
 
 export interface PublishedArticle {
@@ -75,8 +75,7 @@ export function categorySubtree(category: PublishedArticleCategory): PublishedAr
  */
 export async function usePublishedArticles(collection: MaybeRefOrGetter<ArticleCollection>) {
   const requestEvent = useRequestEvent()
-  const { organizationId, template } = useTenantOrganization()
-  if (!organizationId) throw createError({ statusCode: 404, statusMessage: 'Unknown tenant' })
+  const { id: organizationId, template } = useTenantOrganization().organization
   const { localePath } = useI18n()
   const locale = useState<string>('public-locale', () => 'en')
 
@@ -161,8 +160,8 @@ export interface PublishedArticleDetail {
   updated_at?: string | null
   author?: { id: string; name: string | null; image: string | null } | null
   cover?: PublishedArticle['cover']
-  social_image?: SocialImageSource | null
-  content_blocks: BlogEditorBlock[]
+  social_image: SocialImageSource | null
+  content_blocks: ContentBlockSnapshot[]
   localeRepresentations: PublicLocaleRepresentation[]
 }
 
@@ -179,8 +178,7 @@ const isArticleResponse = (value: unknown): value is { post: PublishedArticleDet
  */
 export async function usePublishedArticle(collection: ArticleCollection, slug: MaybeRefOrGetter<string>) {
   const requestEvent = useRequestEvent()
-  const { organizationId } = useTenantOrganization()
-  if (!organizationId) throw createError({ statusCode: 404, statusMessage: 'Unknown tenant' })
+  const { id: organizationId } = useTenantOrganization().organization
   const locale = useState<string>('public-locale', () => 'en')
   // Taken before the read: after an await the component's context is gone.
   const localeRepresentations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
@@ -222,13 +220,12 @@ export async function usePublishedArticle(collection: ArticleCollection, slug: M
  * pages publish their lists this way too (a product collection's ItemList).
  */
 export function useArticleItemList(listPath: MaybeRefOrGetter<string>, name: MaybeRefOrGetter<string>, articles: MaybeRefOrGetter<readonly PublishedArticle[]>) {
-  const { template } = useTenantOrganization()
+  const { template } = useTenantOrganization().organization
   const requestURL = useRequestURL()
   const runtimeConfig = useRuntimeConfig()
   return computed(() => {
     const origin = template.slug === 'platform' ? runtimeConfig.public.siteUrl : requestURL.origin
     return {
-      '@context': 'https://schema.org',
       '@type': 'ItemList',
       '@id': `${resolveSeoUrl(toValue(listPath), origin)}#articles`,
       url: resolveSeoUrl(toValue(listPath), origin),

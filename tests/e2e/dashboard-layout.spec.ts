@@ -95,6 +95,69 @@ test.describe('dashboard pane hierarchy', () => {
     }
   })
 
+  test('Team changes member roles through Better Auth, and self-demotion refreshes context before leaving Team', async ({ page, baseURL, browser }) => {
+    test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'Role writes use local D1 only.')
+    const organizationId = 'org-demo'
+    const before = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
+    expect(before.status(), await before.text()).toBe(200)
+    const members = (await before.json() as { members: Array<{ id: string; userId: string; role: string; user: { name: string } }> }).members
+    const member = members.find(item => item.userId === 'user-e2e-demo-role-owner')
+    expect(member).toBeDefined()
+    expect(member!.role).toBe('owner')
+    expect(members.some(item => item.id !== member!.id && item.role === 'owner'), 'self-demotion requires another existing owner').toBe(true)
+    const ownerContext = await browser.newContext({ baseURL, viewport: NARROW })
+    try {
+      await open(page, `${ORG}/team`)
+      const role = page.getByRole('combobox', { name: `Role for ${member!.user.name}`, exact: true })
+      await role.click()
+      await page.getByRole('option', { name: 'Admin', exact: true }).click()
+      await expect(role).toContainText('Admin')
+      const persisted = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
+      expect(persisted.status(), await persisted.text()).toBe(200)
+      expect((await persisted.json() as { members: Array<{ id: string; role: string }> }).members.find(item => item.id === member!.id)?.role).toBe('admin')
+      await page.reload()
+      await waitForNuxtHydration(page)
+      await expect(page.getByRole('combobox', { name: `Role for ${member!.user.name}`, exact: true })).toContainText('Admin')
+
+      const restoredOwner = await page.request.post('/api/auth/organization/update-member-role', { headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: member!.id, role: member!.role } })
+      expect(restoredOwner.status(), await restoredOwner.text()).toBe(200)
+      await loginAs(ownerContext.request, baseURL!, member!.userId)
+      const ownerPage = await ownerContext.newPage()
+      const pageErrors: string[] = []
+      ownerPage.on('pageerror', error => pageErrors.push(error.message))
+      await open(ownerPage, `${ORG}/team`)
+      const selfRole = ownerPage.getByRole('combobox', { name: `Role for ${member!.user.name}`, exact: true })
+      await expect(selfRole).toContainText('Owner')
+      const contextRefresh = ownerPage.waitForResponse(response => {
+        const url = new URL(response.url())
+        return url.pathname === '/api/dashboard/context' && url.searchParams.get('org') === 'ember-slice-demo'
+      })
+      await selfRole.click()
+      await ownerPage.getByRole('option', { name: 'Member', exact: true }).click()
+      const refreshed = await contextRefresh
+      expect(refreshed.status(), await refreshed.text()).toBe(200)
+      expect(await refreshed.json()).toMatchObject({ organization: { id: organizationId, role: 'member' } })
+      await expect(ownerPage).toHaveURL('/dashboard/account/profile/calendar/org-demo')
+      await expect(ownerPage.locator('#dashboard-panel-member-availability').getByRole('heading', { name: 'Your availability', exact: true })).toBeVisible()
+      await expect(ownerPage.locator('#dashboard-panel-member-availability').getByRole('link', { name: /^Hours/ })).toHaveAttribute('href', '/dashboard/account/profile/calendar/org-demo/hours')
+      await expect(ownerPage.locator('#dashboard-panel-organization-members')).toHaveCount(0)
+      const independentRead = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
+      expect(independentRead.status(), await independentRead.text()).toBe(200)
+      expect((await independentRead.json() as { members: Array<{ id: string; role: string }> }).members.find(item => item.id === member!.id)?.role).toBe('member')
+      expect(pageErrors).toEqual([])
+    } finally {
+      try {
+        const restored = await page.request.post('/api/auth/organization/update-member-role', { headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: member!.id, role: member!.role } })
+        expect(restored.status(), await restored.text()).toBe(200)
+        const read = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
+        expect(read.status()).toBe(200)
+        expect((await read.json() as { members: Array<{ id: string; role: string }> }).members.find(item => item.id === member!.id)?.role).toBe('owner')
+      } finally {
+        await ownerContext.close()
+      }
+    }
+  })
+
   test('Website opens Pages, and Catalog is a root that selects nothing', async ({ page }) => {
     await page.setViewportSize(WIDE)
     await open(page, `${ORG}/website`)

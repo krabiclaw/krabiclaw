@@ -33,7 +33,6 @@ import { authClient } from '~/lib/auth-client'
 import { validatePassword } from '~/utils/password-validation'
 
 useSocialMetadata({
-  template: 'platform',
   schema: false,
   path: '/reset-password',
   title: 'Choose a new password',

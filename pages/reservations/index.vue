@@ -174,7 +174,8 @@ definePageMeta({ layout: 'saya' })
 
 // The tenant is the organization; `site` is only the shape this composable
 // still returns it under.
-const { organization: organization, organizationId } = useTenantOrganization()
+const { organization } = useTenantOrganization()
+const { id: organizationId } = organization
 const { locale, localePath, t } = useI18n()
 const resCopy = computed(() => getVerticalCopy((organization as ApiValue)?.vertical, locale.value))
 const { locations, config, getField, reservationPolicyByLocation } = await usePublicPageData()
@@ -451,15 +452,11 @@ const requestUrl = useRequestURL()
 
 const brandName = computed(() => String((organization as ApiValue)?.name ?? '').trim())
 // A page about the business: its image is the organization's.
-const { socialImage: organizationSocialImage } = useTenantOrganization()
 useSocialMetadata(() => ({
   path: '/reservations',
-  socialImage: organizationSocialImage,
+  socialImage: organization.social_image,
   title: `${brandName.value} | ${resCopy.value.reserveCta}`,
   description: resCopy.value.seoReservationDescription(brandName.value),
-  brand: {
-    organizationName: brandName.value,
-  },
   breadcrumbs: [
     { name: 'Home', url: '/' },
     { name: 'Reservations', url: '/reservations' },

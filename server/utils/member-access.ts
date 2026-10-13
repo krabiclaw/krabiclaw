@@ -249,7 +249,7 @@ export async function resolveUserOrganization(
 // complete membership (not just a bounded page for display) must walk every
 // page via its own total, or a large organization silently loses members
 // past the first 100.
-async function listAllOrganizationMembers(adapter: OrganizationAdapter, organizationId: string) {
+export async function listAllOrganizationMembers(adapter: OrganizationAdapter, organizationId: string) {
   const pageSize = 100
   const firstPage = await adapter.listMembers({ organizationId, limit: pageSize, offset: 0, sortBy: 'createdAt', sortOrder: 'asc' })
   const members = [...firstPage.members]
@@ -341,28 +341,8 @@ export async function listUserOrganizations(env: CloudflareEnv, userId: string) 
   return await adapter.listOrganizations(userId)
 }
 
-export async function findOrganizationMemberById(
-  env: CloudflareEnv,
-  memberId: string,
-): Promise<{ id: string; userId: string; organizationId: string; role: string } | null> {
-  const adapter = await organizationAdapter(env)
-  const member = await adapter.findMemberById(memberId)
-  if (!member) return null
-  return {
-    id: member.id,
-    userId: member.userId,
-    organizationId: member.organizationId,
-    role: String(member.role),
-  }
-}
-
 export async function findOrganizationById(env: CloudflareEnv, organizationId: string) {
   return await organizationAdapter(env).then(adapter => adapter.findOrganizationById(organizationId))
-}
-
-export async function listOrganizationMembers(env: CloudflareEnv, organizationId: string) {
-  const adapter = await organizationAdapter(env)
-  return await listAllOrganizationMembers(adapter, organizationId)
 }
 
 /**

@@ -6,7 +6,7 @@ import { HTTPError, defineHandler  } from 'nitro';
 import type { H3Event } from 'nitro';
 import { redirect } from 'nitro/h3';
 import { queryFirst, type DbClient } from "~/server/db";
-import { TENANT_TYPES, type TenantType } from "~/utils/tenant-routing";
+import { TENANT_TYPES } from "~/utils/tenant-routing";
 import { cloudflareEnv, isInternalSelfFetch } from "../utils/api-response";
 import {
   environmentTenantAliasSlug,
@@ -30,6 +30,7 @@ interface TenantRow {
   onboarding_status: string;
   canonical_domain: string | null;
   name: string;
+  brand_description: string | null;
   media_json: string;
   vertical: string | null;
   facebook_page_id: string | null;
@@ -53,7 +54,7 @@ const TENANT_MEDIA_SELECT_SQL = `(SELECT COALESCE(json_group_array(json_object(
 ) ordered)`
 
 const TENANT_SELECT_SQL = `SELECT o.id, o.theme_id, o.subdomain, o.status, o.onboarding_status,
-             o.name, ${TENANT_MEDIA_SELECT_SQL} AS media_json, o.vertical,
+             o.name, o.brand_description, ${TENANT_MEDIA_SELECT_SQL} AS media_json, o.vertical,
              (SELECT i.target_id FROM organization_integrations i WHERE i.organization_id = o.id AND i.provider = 'facebook') AS facebook_page_id,
              (SELECT i.target_name FROM organization_integrations i WHERE i.organization_id = o.id AND i.provider = 'instagram') AS instagram_username,
              EXISTS (SELECT 1 FROM content_documents d WHERE d.organization_id = o.id AND d.kind = 'page' AND d.row_role = 'root' AND d.path = '/policies/privacy') AS privacy_policy,
@@ -114,10 +115,6 @@ function isSpentSubdomainResolution(
   value: TenantRow | SpentSubdomainResolution,
 ): value is SpentSubdomainResolution {
   return 'spent' in value
-}
-
-function setTenantType(event: H3Event, tenantType: TenantType) {
-  event.context.tenantType = tenantType;
 }
 
 function normalizedPath(pathname: string) {
@@ -209,27 +206,19 @@ function setResolvedTenantContext(
 
   event.context.organizationId = tenant.id
   event.context.themeId = metadata.themeId
-  event.context.onboardingStatus = tenant.onboarding_status
-  setTenantType(event, isPlatform ? TENANT_TYPES.PLATFORM : TENANT_TYPES.TENANT)
+  event.context.tenantType = isPlatform ? TENANT_TYPES.PLATFORM : TENANT_TYPES.TENANT
   event.context.tenantHost = hostnameOf(host)
   event.context.canonicalDomain = canonicalDomain
-  event.context.templateSlug = templateSlug
-  event.context.logoUrl = logoUrl
-  event.context.socialImage = socialMedia.social_image ?? null
-  event.context.fontPreset = fontPreset
-  event.context.logos = logos
-  event.context.palette = palette
   event.context.organization = {
     id: tenant.id,
     name: metadata.name,
+    brand_description: tenant.brand_description,
     theme_id: metadata.themeId,
     vertical: metadata.vertical,
     template: resolvedTemplate,
     fontPreset,
     palette,
     logos,
-    logoUrl,
-    socialImage: socialMedia.social_image ?? null,
     social_profiles: connectedSocialProfiles(tenant),
     policies: [
       ...(tenant.privacy_policy ? ['privacy' as const] : []),
@@ -244,8 +233,9 @@ export default defineHandler(async (event) => {
   // tenant context downstream handlers rely on — the real inbound request
   // already resolved tenant type/host before triggering these. Skip the DB
   // lookup and host parsing entirely rather than redoing it per phantom request.
-  // The native error render still needs this host's tenant branding.
-  if (isInternalSelfFetch(event) && !(event.context.nuxt?.['~internal'] && event.context.nuxt['~rendering-error'])) {
+  // Nuxt carries the resolved public organization in its native error payload.
+  // Error rendering must not repeat the operation that produced the error.
+  if (isInternalSelfFetch(event)) {
     return;
   }
 
@@ -263,56 +253,19 @@ export default defineHandler(async (event) => {
   const host = (event.req.headers.get("host")) || "";
   const env = cloudflareEnv(event);
 
-  // Local hosts cannot express tenant identity in their hostname, so their test
-  // harness carries it explicitly. Deployed staging uses direct environment
-  // aliases below.
+  // The local harness and the staging alias name the tenant explicitly.
+  // An unresolvable selector must never become the platform's homepage.
   const previewSlug = usesTenantHeader(host) ? event.req.headers.get("x-preview-tenant") : null
-  if (previewSlug !== null) {
-    // The header names a tenant, so this request is that tenant's or it is
-    // nothing. Falling through on an unresolvable slug reached the platform-host
-    // branch below and answered 200 with Krabiclaw's own homepage — a request
-    // for one site served a different site. Same refusal as an environment
-    // alias that does not resolve.
-    const tenant = env.db && /^[a-z0-9-]+$/.test(previewSlug)
-      ? await resolveRegisteredSubdomainTenant(env.db, previewSlug)
-      : null
-    if (tenant && await authorizeTenant(event, tenant)) {
-      setResolvedTenantContext(event, tenant, host, hostnameOf(host))
-      return;
-    }
-    setTenantType(event, TENANT_TYPES.TENANT_404)
-    event.context.organizationId = null
-    return
-  }
-
   const aliasSlug = environmentTenantAliasSlug(host, env)
-  if (aliasSlug) {
-    const tenant = env.db
-      ? await resolveRegisteredSubdomainTenant(env.db, aliasSlug)
+  const requestedSlug = previewSlug ?? aliasSlug
+  const isPlatformRequest = requestedSlug === null && isPlatformHost(host, env)
+  const tenant = requestedSlug !== null
+    ? env.db && /^[a-z0-9-]+$/.test(requestedSlug)
+      ? await resolveRegisteredSubdomainTenant(env.db, requestedSlug)
       : null
-    if (tenant && await authorizeTenant(event, tenant)) {
-      setResolvedTenantContext(event, tenant, host, hostnameOf(host))
-      return
-    }
-    setTenantType(event, TENANT_TYPES.TENANT_404)
-    event.context.organizationId = null
-    return
-  }
-
-  // A platform host serves Krabiclaw's own tenant. Tenant hosts own their public
-  // route families. The platform is live, so authorization only settles preview:
-  // an unpublished doc or article is previewed here like on any other site.
-  if (isPlatformHost(host, env)) {
-    const tenant = env.db ? await resolvePlatformTenant(env.db) : null
-    if (!tenant || !await authorizeTenant(event, tenant)) {
-      throw new HTTPError({ statusCode: 500, statusMessage: 'No active organization runs the platform template', data: { code: 'PLATFORM_TENANT_MISSING' } })
-    }
-    setResolvedTenantContext(event, tenant, host, tenant.canonical_domain)
-    return;
-  }
-
-  // Tenant resolution by host
-  const tenant = await resolveTenant(host, event);
+    : isPlatformRequest
+      ? env.db ? await resolvePlatformTenant(env.db) : null
+      : await resolveTenant(host, event)
 
   if (tenant && isSpentSubdomainResolution(tenant)) {
     if (tenant.successorDomain) {
@@ -322,13 +275,24 @@ export default defineHandler(async (event) => {
   }
 
   if (tenant && await authorizeTenant(event, tenant)) {
-    setResolvedTenantContext(event, tenant, host, tenant.canonical_domain || null)
-    return;
+    try {
+      setResolvedTenantContext(event, tenant, host, requestedSlug !== null ? hostnameOf(host) : tenant.canonical_domain)
+    } catch (error) {
+      if (HTTPError.isError(error)) throw error
+      throw new HTTPError({
+        statusCode: 500,
+        statusMessage: 'Tenant metadata is invalid',
+        cause: error,
+        data: { code: 'TENANT_METADATA_INVALID', reason: error instanceof Error ? error.message : String(error) },
+      })
+    }
+    return
   }
 
-  // No tenant found - this is an unknown subdomain/custom domain
-  setTenantType(event, TENANT_TYPES.TENANT_404);
-  event.context.organizationId = null;
+  if (isPlatformRequest) {
+    throw new HTTPError({ statusCode: 500, statusMessage: 'No active organization runs the platform template', data: { code: 'PLATFORM_TENANT_MISSING' } })
+  }
+  throw new HTTPError({ statusCode: 404, statusMessage: 'Organization Not Found' })
 });
 
 export async function resolveTenant(

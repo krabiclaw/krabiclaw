@@ -37,7 +37,7 @@ const heroData = computed(() => {
     reserveCta: blockText(props.block.data.cta_label),
     viewMenuRoute: blockText(props.block.data.secondary_url),
     viewMenuCta: blockText(props.block.data.secondary_label),
-    vertical: organization?.vertical ?? undefined,
+    vertical: organization.vertical,
   }
 })
 </script>

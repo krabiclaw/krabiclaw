@@ -80,7 +80,7 @@ const emit = defineEmits<{
 
 const inputClass = FORM_INPUT_CLASS
 // The help form is the Krabiclaw site's contact form: it files into that site's inbox like every tenant's.
-const { organizationId } = useTenantOrganization()
+const { id: organizationId } = useTenantOrganization().organization
 const { locale } = useI18n()
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const form = ref({

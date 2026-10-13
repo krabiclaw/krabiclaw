@@ -227,6 +227,9 @@ export default defineNuxtConfig({
       claimedPageRoutes = claimedRoutesFromPages(pages)
     },
     'nitro:config'(nitroConfig) {
+      if (typeof nitroConfig.errorHandler !== 'string') throw new Error('Nuxt must provide one native error handler')
+      nitroConfig.alias = { ...nitroConfig.alias, '#nuxt-native-error-handler': nitroConfig.errorHandler }
+      nitroConfig.errorHandler = resolve(import.meta.dirname, 'server/error-handler.ts')
       nitroConfig.handlers = nitroConfig.handlers?.filter(
         handler => handler.route !== '/api/_nuxt_icon/:collection',
       )
@@ -266,6 +269,7 @@ export default defineNuxtConfig({
 
   schemaOrg: {
     defaults: false,
+    reactive: true,
   },
 
   // Crawler guidance. @nuxtjs/robots owns /robots.txt and the X-Robots-Tag
@@ -300,8 +304,6 @@ export default defineNuxtConfig({
           '/reset-password',
           '/signup',
           '/tenant-404',
-          '/tenant-setup-incomplete',
-          '/tenant-setup-pending',
         ],
       },
     ],

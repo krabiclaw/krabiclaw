@@ -11,7 +11,7 @@ import { EXPERIENCE_PRESENTATION } from '~/utils/product-presentation'
 import { composeProductSeoDescription } from '~/utils/product-seo'
 
 definePageMeta({ layout: false })
-const { template } = useTenantOrganization()
+const { template } = useTenantOrganization().organization
 const resolved = await usePublicProductDetail('experiences')
 const organizationId = resolved.organizationId
 const detail = computed(() => resolved.detail.value)
@@ -34,7 +34,6 @@ useSocialMetadata(() => ({
     priceSelection: priceSelection.value,
   }, t),
   socialImage: detail.value.product.social_image,
-  brand: { organizationName: detail.value.brandName },
   breadcrumbs: detail.value.location ? [
     { name: 'Locations', url: '/locations' },
     { name: detail.value.location.title, url: `/locations/${detail.value.location.slug}` },

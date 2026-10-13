@@ -295,11 +295,9 @@ const { resolveMedia } = useMedia()
 definePageMeta({ layout: 'saya' })
 
 const route = useRoute()
-const { organizationId, organization } = useTenantOrganization()
+const { organization } = useTenantOrganization()
 const { locale, localePath, t } = useI18n()
 const locationIndexCopy = computed(() => getVerticalCopy((organization as ApiValue)?.vertical, locale.value))
-if (!organizationId) throw createError({ statusCode: 404 })
-
 const slug = computed(() => String(route.params.slug))
 const organizationName = computed(() => String((organization as ApiValue)?.name ?? '').trim())
 
@@ -508,9 +506,6 @@ useSocialMetadata(() => ({
   title: location.value?.seo_title || location.value?.title || '',
   description: location.value?.seo_description || '',
   socialImage: locationSocialCard.value,
-  brand: {
-    organizationName: organizationName.value,
-  },
   breadcrumbs: [
     { name: t('saya.header.locations'), url: '/locations' },
     { name: location.value?.title ?? slug.value, url: `/locations/${slug.value}` },

@@ -39,14 +39,15 @@ import { articleNavKey } from '~/composables/useArticleNav'
 const { t } = useI18n()
 const route = useRoute()
 const isDocs = computed(() => route.meta.articleCollection === 'docs')
-const { template } = useTenantOrganization()
+const { organization } = useTenantOrganization()
+const { template } = organization
 const nav = await useArticleNav()
 provide(articleNavKey, nav)
 const searchLabel = computed(() => t('saya.search.dialog_title', { surface: nav.value.indexLabel }))
 
 // The sidebar shows exactly where the template's header stops collapsing:
 // Krabiclaw's header at `nav` (1080px), the tenant templates' at `lg`.
-const split = computed(() => template.value.slug === 'platform'
+const split = computed(() => template.slug === 'platform'
   ? { grid: isDocs.value ? 'nav:grid nav:grid-cols-[280px_minmax(0,1fr)] nav:gap-10' : 'nav:grid nav:grid-cols-[220px_minmax(0,1fr)] nav:gap-12', aside: 'nav:sticky nav:top-28 nav:block nav:h-fit nav:max-h-[calc(100vh-8rem)] nav:overflow-y-auto' }
   : { grid: isDocs.value ? 'lg:grid lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-10' : 'lg:grid lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-10', aside: 'lg:sticky lg:top-28 lg:block lg:h-fit lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto' })
 </script>

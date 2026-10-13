@@ -43,7 +43,7 @@ import GuestAccountPrompt from '~/components/booking/GuestAccountPrompt.vue'
 definePageMeta({ layout: false })
 
 const { t } = useI18n()
-const { template } = useTenantOrganization()
+const { template } = useTenantOrganization().organization
 
 // Always shows a generic success state rather than gating on the sessionStorage
 // handoff — a missing handoff (private browsing, storage quota, etc.) doesn't

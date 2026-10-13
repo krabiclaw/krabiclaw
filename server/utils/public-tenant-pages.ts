@@ -414,7 +414,7 @@ async function hydrateBlocks(
     }
   })
   return blocks.map(block => {
-    if (block.type === 'showcase' || block.type === 'language_reach' || block.type === 'steps') validateContentBlockData(block.type, block.data)
+    if (block.type === 'showcase' || block.type === 'language_reach' || block.type === 'steps' || block.type === 'how_to') validateContentBlockData(block.type, block.data)
     const data = { ...block.data }
     if (block.type === 'page_grid' && Array.isArray(data.page_ids)) {
       data.items = data.page_ids.map((id) => {

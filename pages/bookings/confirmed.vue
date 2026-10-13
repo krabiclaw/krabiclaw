@@ -59,13 +59,14 @@ definePageMeta({ layout: false })
 const { locale, localePath, t } = useI18n()
 const route = useRoute()
 const justCopied = ref(false)
-const { organizationId, template, organization } = useTenantOrganization()
+const { organization } = useTenantOrganization()
+const { id: organizationId, template } = organization
 
 const confirmation = ref<BookingConfirmationData | null>(null)
 const pending = ref(true)
 const loadError = ref<string | null>(null)
 const copy = computed(() => getVerticalCopy((organization as { vertical?: string | null } | null)?.vertical, locale.value))
-const presentation = computed(() => confirmation.value?.productKind ? presentationForProduct(organization?.vertical, { kind: confirmation.value.productKind }) : null)
+const presentation = computed(() => confirmation.value?.productKind ? presentationForProduct(organization.vertical, { kind: confirmation.value.productKind }) : null)
 // Back to where the guest booked from: this location's own catalogue when the
 // booking names one, otherwise the site's.
 const browseHref = computed(() => {

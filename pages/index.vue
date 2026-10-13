@@ -13,13 +13,10 @@
 <script setup lang="ts">
 definePageMeta({ layout: false })
 
-const { isPlatform, organizationId, template } = useTenantOrganization()
-const homePath = template.pageDocuments.recipes.home || '/'
+const { template } = useTenantOrganization().organization
+const isPlatform = template.slug === 'platform'
+const homePath = template.pageDocuments.recipes.home
 const layout = template.layout
-
-if (!isPlatform && !organizationId) {
-  throw createError({ statusCode: 404, statusMessage: 'Site not found' })
-}
 
 // A signed-in owner has no use for the platform's own sales pitch, and showing
 // it to them is how a returning owner ends up clicking "Start free" and opening

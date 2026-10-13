@@ -43,6 +43,12 @@ export const E2E_AUTH_FIXTURES: readonly E2eAuthFixture[] = [
     memberships: [{ organizationId: 'org-demo', role: 'owner' }],
   },
   {
+    id: 'user-e2e-demo-role-owner',
+    name: 'E2E Demo Role Owner',
+    email: 'demo-role-owner@playwright.example',
+    memberships: [{ organizationId: 'org-demo', role: 'owner' }],
+  },
+  {
     id: 'user-e2e-pottery-owner',
     name: 'E2E Pottery Owner',
     email: 'pottery-owner@playwright.example',

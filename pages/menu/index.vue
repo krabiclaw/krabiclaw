@@ -8,7 +8,7 @@ import { isCurrencyCode } from '~/shared/currencies'
 import { presentationForSurface } from '~/utils/product-presentation'
 
 definePageMeta({ layout: 'saya' })
-const { template } = useTenantOrganization()
+const { template, social_image: organizationSocialImage } = useTenantOrganization().organization
 if (template.slug === 'blawby') throw createError({ statusCode: 404 })
 const { products, collections, locations, config, organization } = await usePublicPageData({ lazy: false })
 // What the merchant sells over the counter. Anything a guest books a seat on
@@ -24,13 +24,11 @@ const brandName = organization.value?.name
 if (typeof brandName !== 'string' || brandName.trim().length === 0) throw createError({ statusCode: 500, statusMessage: 'Organization brand is unavailable' })
 const productLocations = computed(() => locations.value.map(location => ({ id: location.id, slug: location.slug, title: location.title })))
 // A page about the business: its image is the organization's.
-const { socialImage: organizationSocialImage } = useTenantOrganization()
 useSocialMetadata(() => ({
   socialImage: organizationSocialImage,
   path: presentation.collectionPath,
   title: `${brandName} Menu`,
   description: `Full menu at ${brandName}.`,
-  brand: { organizationName: brandName },
   breadcrumbs: [
     { name: 'Menu', url: presentation.collectionPath },
   ],
