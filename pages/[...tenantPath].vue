@@ -15,7 +15,7 @@
 <script setup lang="ts">
 import type { LocalizedPublicRoute } from '~/server/utils/localization'
 import { isRecord, publicApiRequest } from '~/utils/api-clients'
-import { resolveTenantLocalePath } from '~/utils/tenant-locale-path'
+import { resolveTenantLocalePath, splitLocalePrefix } from '~/utils/tenant-locale-path'
 
 definePageMeta({ layout: false })
 
@@ -38,9 +38,9 @@ const requestEvent = useRequestEvent()
 const isPublicLocalesResponse = (value: unknown): value is { locales: Array<{ code: string; status: string; is_source: boolean }> } =>
   isRecord(value) && Array.isArray(value.locales) && value.locales.every(item => isRecord(item)
     && typeof item.code === 'string' && typeof item.status === 'string' && typeof item.is_source === 'boolean')
-const { data: publishedLocales, error: publishedLocalesError } = await useAsyncData(
+const publishedLocalesData = splitLocalePrefix(pagePath.value).localeSegment ? await useAsyncData(
   `published-locales-${organizationId}`,
-  async () => {
+  async (_nuxtApp, { signal }) => {
     if (import.meta.server) {
       if (!requestEvent) throw createError({ statusCode: 500, statusMessage: 'Request context unavailable' })
       const [{ cloudflareEnv }, { queryAll }] = await Promise.all([
@@ -57,20 +57,21 @@ const { data: publishedLocales, error: publishedLocalesError } = await useAsyncD
       return rows.map(row => row.locale)
     }
     const response = await publicApiRequest(`/api/public/locales`, {
+      signal,
       validate: isPublicLocalesResponse,
     })
     return response.locales.filter(item => !item.is_source && item.status === 'published').map(item => item.code)
   },
-  { server: true, lazy: false },
-)
-if (publishedLocalesError.value) throw publishedLocalesError.value
-const localePath = computed(() => resolveTenantLocalePath(pagePath.value, publishedLocales.value ?? []))
+  { server: true, lazy: false, dedupe: 'defer' },
+) : null
+if (publishedLocalesData?.error.value) throw publishedLocalesData.error.value
+const localePath = computed(() => resolveTenantLocalePath(pagePath.value, publishedLocalesData?.data.value ?? []))
 const localeSegment = computed(() => localePath.value.localeSegment)
 const tenantPagePath = computed(() => localePath.value.sourcePath)
 const isLocalizedRouteResponse = (value: unknown): value is { route: LocalizedPublicRoute } =>
   isRecord(value) && isRecord(value.route) && typeof value.route.locale === 'string'
 const localizedData = localeSegment.value
-  ? await useAsyncData<{ route: LocalizedPublicRoute }>(`localized-route-${organizationId}-${pagePath.value}`, async () => {
+  ? await useAsyncData<{ route: LocalizedPublicRoute }>(`localized-route-${organizationId}-${pagePath.value}`, async (_nuxtApp, { signal }) => {
       if (import.meta.server) {
         if (!requestEvent) throw createError({ statusCode: 500, statusMessage: 'Request context unavailable' })
         const [{ cloudflareEnv }, { queryFirst }, { resolveLocalizedPublicRoute }] = await Promise.all([
@@ -87,10 +88,11 @@ const localizedData = localeSegment.value
       }
       const endpoint: string = `/api/public/localized-route`
       return await publicApiRequest(endpoint, {
+        signal,
         query: { path: pagePath.value },
         validate: isLocalizedRouteResponse,
       })
-    }, { server: true, lazy: false })
+    }, { server: true, lazy: false, dedupe: 'defer' })
   : null
 if (localizedData?.error.value) throw localizedData.error.value
 const localizedRoute = computed(() => localizedData?.data.value?.route ?? null)
