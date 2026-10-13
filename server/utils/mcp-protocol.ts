@@ -3,9 +3,8 @@
 // negotiation, and the standard non-tool-call methods now belong to
 // @modelcontextprotocol/server (see server/api/mcp.ts) — this file only
 // keeps the pieces executors and the route still need: a typed error shape
-// business logic can throw, and the two envelope builders used for the
-// handful of responses the route still builds by hand (credential-missing,
-// pre-dispatch auth failures) before handing off to the SDK.
+// business logic can throw, and the error envelope for pre-dispatch HTTP
+// auth failures. Every tool result is encoded by the SDK.
 
 import { isAPIError } from 'better-auth/api'
 
@@ -32,14 +31,6 @@ export const MCP_ERROR = {
   invalidParams: -32602,
   internal: -32603,
 } as const
-
-export function mcpSuccess(id: JsonRpcId | undefined, result: unknown) {
-  return {
-    jsonrpc: '2.0',
-    id: id ?? null,
-    result,
-  }
-}
 
 export function mcpFailure(id: JsonRpcId | undefined, error: McpErrorShape) {
   return {

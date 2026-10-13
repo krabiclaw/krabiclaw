@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { createHash } from 'node:crypto'
 import { decodeProtectedHeader, importJWK, SignJWT } from 'jose'
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 import { loginAs } from './helpers/auth'
 import { mcpJson } from './helpers/mcp'
 
@@ -135,7 +136,7 @@ test.describe('OAuth discovery endpoints', () => {
     expect(authorizationServerBody.code_challenge_methods_supported as string[]).toContain('S256')
   })
 
-  test('public CIMD exchanges codes once, rotates refresh grants and reuses remembered consent', async ({ request, baseURL }) => {
+  test('public CIMD exchanges codes once, rotates refresh grants and enforces tenant scope', async ({ request, baseURL }) => {
     await loginAs(request, baseURL!, 'user-e2e-oauth-cimd')
 
     const cimdClientId = process.env.MCP_CIMD_CLIENT_URL!
@@ -250,6 +251,7 @@ test.describe('OAuth discovery endpoints', () => {
 
     const secondAuthorize = await request.get(oauthAuthorizeUrl(baseURL!, {
       ...authorizeParams,
+      scope: 'openid offline_access',
       state: 'second-pass',
     }), { maxRedirects: 0 })
     expect(secondAuthorize.status()).toBe(302)
@@ -261,6 +263,58 @@ test.describe('OAuth discovery endpoints', () => {
     expect(secondRedirect.origin + secondRedirect.pathname).toBe(redirectUri)
     expect(secondRedirect.searchParams.get('code')).toBeTruthy()
     expect(secondRedirect.searchParams.get('state')).toBe('second-pass')
+
+    const limitedToken = await request.post(`${baseURL}/api/auth/oauth2/token`, {
+      headers: { Origin: baseURL! },
+      form: {
+        grant_type: 'authorization_code', client_id: cimdClientId,
+        code: secondRedirect.searchParams.get('code')!, redirect_uri: redirectUri,
+        code_verifier: verifier, resource: `${baseURL}/api/mcp`,
+      },
+    })
+    expect(limitedToken.status()).toBe(200)
+    const limitedGrant = await limitedToken.json() as { access_token: string; scope: string }
+    expect(limitedGrant.scope.split(' ')).not.toContain('tenant')
+    const limitedHeaders = {
+      Authorization: `Bearer ${limitedGrant.access_token}`, Cookie: '',
+      Accept: 'application/json, text/event-stream',
+    }
+    const limitedList = await request.post(`${baseURL}/api/mcp`, {
+      headers: limitedHeaders,
+      data: { jsonrpc: '2.0', id: 'limited-list', method: 'tools/list', params: {} },
+    })
+    expect(limitedList.status()).toBe(403)
+    const scopeChallenge = limitedList.headers()['www-authenticate']!
+    expect(scopeChallenge).toContain('error="insufficient_scope"')
+    expect(scopeChallenge).toContain('scope="tenant"')
+    const limitedCall = await request.post(`${baseURL}/api/mcp`, {
+      headers: { ...limitedHeaders, 'MCP-Protocol-Version': '2026-07-28', 'Mcp-Method': 'tools/call', 'Mcp-Name': 'list_organizations' },
+      data: { jsonrpc: '2.0', id: 'limited-call', method: 'tools/call', params: {
+        name: 'list_organizations', arguments: {},
+        _meta: { 'io.modelcontextprotocol/protocolVersion': '2026-07-28', 'io.modelcontextprotocol/clientCapabilities': {} },
+      } },
+    })
+    expect(limitedCall.status()).toBe(200)
+    const limitedResult = await mcpJson<{ result: { resultType: string; isError: boolean; structuredContent?: unknown; _meta: Record<string, unknown> } }>(limitedCall)
+    expect(limitedResult.result.resultType).toBe('complete')
+    expect(limitedResult.result.isError).toBe(true)
+    expect(limitedResult.result.structuredContent).toBeUndefined()
+    expect(limitedResult.result._meta['mcp/www_authenticate']).toEqual([scopeChallenge])
+
+    const clientHeaders = new Headers({ Authorization: `Bearer ${refreshedBody.access_token}` })
+    const client = new Client({ name: 'krabiclaw-scope-check', version: '1.0.0' }, {
+      versionNegotiation: { mode: { pin: '2026-07-28' } },
+    })
+    try {
+      await client.connect(new StreamableHTTPClientTransport(new URL(`${baseURL}/api/mcp`), { requestInit: { headers: clientHeaders } }))
+      clientHeaders.set('Authorization', `Bearer ${limitedGrant.access_token}`)
+      const denied = await client.callTool({ name: 'list_organizations', arguments: {} })
+      expect(denied.isError).toBe(true)
+      expect(denied.structuredContent).toBeUndefined()
+      expect(denied._meta?.['mcp/www_authenticate']).toEqual([scopeChallenge])
+    } finally {
+      await client.close()
+    }
   })
 
   test('requesting the email scope makes email and email_verified available through UserInfo', async ({ request, baseURL }) => {
@@ -523,42 +577,55 @@ test.describe('OAuth discovery endpoints', () => {
     expect(wwwAuth).toContain('/.well-known/oauth-protected-resource')
   })
 
-  test('unauthenticated MCP tool call returns mcp/www_authenticate challenge', async ({ request, baseURL }) => {
-    const MCP_VERSION = '2025-06-18'
-    const res = await request.post(`${baseURL}/api/mcp`, {
-      headers: {
-        'content-type': 'application/json',
-        'mcp-protocol-version': MCP_VERSION,
-        'mcp-method': 'tools/call',
-        'mcp-name': 'list_organizations',
-      },
-      data: {
-        jsonrpc: '2.0',
-        id: 'auth-tool-check',
-        method: 'tools/call',
-        params: {
-          name: 'list_organizations',
-          arguments: {},
+  for (const credential of ['missing', 'invalid'] as const) {
+    test(`${credential} MCP credential returns a current-protocol auth tool result`, async ({ request, baseURL }) => {
+      const MCP_VERSION = '2026-07-28'
+      const res = await request.post(`${baseURL}/api/mcp`, {
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json, text/event-stream',
+          'mcp-protocol-version': MCP_VERSION,
+          'mcp-method': 'tools/call',
+          'mcp-name': 'list_organizations',
+          ...(credential === 'invalid' ? { authorization: 'Bearer invalid-mcp-e2e-token' } : {}),
         },
-        _meta: {
-          'io.modelcontextprotocol/version': MCP_VERSION,
-          'io.modelcontextprotocol/method': 'tools/call',
-          'io.modelcontextprotocol/name': 'list_organizations',
+        data: {
+          jsonrpc: '2.0',
+          id: 'auth-tool-check',
+          method: 'tools/call',
+          params: {
+            name: 'list_organizations',
+            arguments: {},
+            _meta: {
+              'io.modelcontextprotocol/protocolVersion': MCP_VERSION,
+              'io.modelcontextprotocol/clientCapabilities': {},
+            },
+          },
         },
-      },
+      })
+      expect(res.status()).toBe(200)
+      const body = await mcpJson<{
+        result?: {
+          resultType?: string
+          isError?: boolean
+          structuredContent?: unknown
+          _meta?: Record<string, unknown>
+        }
+      }>(res)
+      expect(body.result?.resultType).toBe('complete')
+      expect(body.result?.isError).toBe(true)
+      expect(body.result?.structuredContent).toBeUndefined()
+      expect(body.result?._meta?.['io.modelcontextprotocol/serverInfo']).toEqual({ name: 'krabiclaw-mcp', version: 'phase-5' })
+      const resourceMetadata = new URL('/.well-known/oauth-protected-resource/api/mcp', baseURL!).href
+      const challenges = body.result?._meta?.['mcp/www_authenticate'] as string[]
+      expect(challenges).toHaveLength(1)
+      expect(challenges[0]).toContain(`resource_metadata="${resourceMetadata}"`)
+      expect(challenges[0]).toContain('error="invalid_token"')
+      expect(challenges[0]).toContain('error_description=')
+      if (credential === 'missing') expect(challenges).toEqual([
+        `Bearer resource_metadata="${resourceMetadata}", error="invalid_token", error_description="Authentication required: connect KrabiClaw to continue."`,
+      ])
     })
-    expect(res.status()).toBe(200)
-    const body = await res.json() as {
-      result?: {
-        isError?: boolean
-        _meta?: Record<string, unknown>
-      }
-    }
-    expect(body.result?.isError).toBe(true)
-    const resourceMetadata = new URL('/.well-known/oauth-protected-resource/api/mcp', baseURL!).href
-    expect(body.result?._meta?.['mcp/www_authenticate']).toEqual([
-      `Bearer resource_metadata="${resourceMetadata}", error="invalid_token", error_description="Authentication required: connect KrabiClaw to continue."`,
-    ])
-  })
+  }
 
 })

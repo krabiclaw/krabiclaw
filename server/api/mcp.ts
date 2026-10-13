@@ -1,5 +1,5 @@
 import { HTTPError, defineHandler } from 'nitro';
-import { readBody } from 'nitro/h3';
+import { getEventContext, readBody } from 'nitro/h3';
 import type { H3Event } from "nitro";
 import { createParser } from 'eventsource-parser';
 import {
@@ -12,11 +12,11 @@ import {
   originValidationResponse,
   localhostAllowedHostnames,
   localhostAllowedOrigins,
-  type AuthInfo,
+  type CallToolResult,
   type ListToolsResult,
   type McpRequestContext,
 } from "@modelcontextprotocol/server";
-import { asMcpError, mcpSuccess, mcpFailure, MCP_ERROR, type JsonRpcId } from "~/server/utils/mcp-protocol";
+import { asMcpError, mcpFailure, MCP_ERROR, type JsonRpcId } from "~/server/utils/mcp-protocol";
 import { catalogFingerprint, catalogMeta } from "~/server/utils/mcp-catalog";
 import { executeMcpToolCall, mcpToolInputSchema, MCP_PUBLIC_TOOLS, MCP_TOOLS } from "~/server/utils/mcp-tools";
 import { isMcpRenderResponse } from "~/server/utils/mcp-render";
@@ -66,19 +66,20 @@ function resolveTenantToolMeta(toolName: string | null): McpToolMeta {
 
 const MCP_INSTRUCTIONS = `Manage the selected business. Read current state and preserve unrelated values. Ask for missing business facts; never invent prices or booking details. Finish website changes and verify returned public URLs. Keep menu sections and order; experiences need bookings. Use revision and retry keys, and follow pagination. Publish or message only requested destinations. Payment reports are read-only; financial_action_required means the action remains incomplete. Report tool errors and partial outcomes plainly.`;
 
-// Per-request domain context, threaded through
-// `AuthInfo.extra` since `McpServerFactory` only receives an `McpRequestContext`.
+// H3's request context follows the SDK's original requestInfo into the factory.
 interface McpFactoryContext {
   event: H3Event;
-  mcpUser: McpUserContext | undefined;
+  mcpUser?: McpUserContext;
   cfEnv: ReturnType<typeof cloudflareEnv>;
   requestId: JsonRpcId | undefined;
+  toolResult?: CallToolResult;
 }
 
 function factoryContextFrom(ctx: McpRequestContext): McpFactoryContext {
-  const extra = ctx.authInfo?.extra as McpFactoryContext | undefined;
-  if (!extra) throw new ProtocolError(MCP_ERROR.internal, "Missing authenticated MCP request context.");
-  return extra;
+  if (!ctx.requestInfo) throw new ProtocolError(MCP_ERROR.internal, "Missing MCP request context.");
+  const context = getEventContext({ req: ctx.requestInfo as H3Event['req'] }).mcpFactoryContext as McpFactoryContext | undefined;
+  if (!context) throw new ProtocolError(MCP_ERROR.internal, "Missing MCP request context.");
+  return context;
 }
 
 // A fresh SDK registry per exchange keeps schemas and execution together.
@@ -88,6 +89,12 @@ function createTenantMcpServer(ctx: McpRequestContext): McpServer {
     { capabilities: { tools: {}, prompts: {} }, instructions: MCP_INSTRUCTIONS },
   );
   const server = mcpServer.server;
+  const context = factoryContextFrom(ctx);
+  const toolResult = context.toolResult;
+  if (toolResult) {
+    server.setRequestHandler("tools/call", async () => toolResult);
+    return mcpServer;
+  }
 
   for (const prompt of MCP_PROMPTS) {
     mcpServer.registerPrompt(prompt.name, {
@@ -269,8 +276,9 @@ function createTenantMcpServer(ctx: McpRequestContext): McpServer {
 
     // Our own McpToolDefinition types inputSchema/outputSchema as a loose
     // Record<string, unknown>; every entry in mcp-tools/*.ts is a real JSON
-    // Schema object (validated by yarn mcp:catalog), just not provably so to
-    // TS against the SDK's stricter Tool type.
+    // Schema object; yarn mcp:catalog checks the catalog snapshot, not schema
+    // validity. These loose records are not provably assignable to the SDK's
+    // stricter Tool type.
     return { tools, _meta: catalogMeta(MCP_PUBLIC_TOOLS) } as unknown as ListToolsResult;
   });
 
@@ -331,20 +339,25 @@ export default defineHandler(async (event) => {
   let requestMethod: string | undefined;
 
   try {
+    const body = await readBody(event);
+    requestMethod = peekMcpMethod(event, body);
+    requestId = peekMcpId(body);
+    const respondWithToolResult = (toolResult: CallToolResult) => {
+      event.context.mcpFactoryContext = { event, cfEnv, requestId, toolResult } satisfies McpFactoryContext;
+      return mcpHandler.fetch(webRequest, { parsedBody: body });
+    };
     // Return 401 with WWW-Authenticate before any protocol parsing so OAuth
     // clients (e.g. ChatGPT) can discover the authorization server on first touch.
     // Session-cookie requests (dashboard, E2E tests) have a Cookie header and skip this.
-    const missingCredential = await resolveMissingMcpCredential(event, runtimeDeps, baseUrl);
+    const missingCredential = await resolveMissingMcpCredential(event, runtimeDeps, baseUrl, body);
     if (missingCredential.handled) {
       requestMethod = missingCredential.requestMethod;
       console.warn("[MCP_AUTH]", JSON.stringify({
         event: "credential_missing", ray_id: (event.req.headers.get("cf-ray")) ?? null, mcp_method: mcpTelemetryMethod(requestMethod), tool_name: MCP_TOOLS.find(tool => tool.name === missingCredential.requestToolName)?.name ?? null, }));
-      return missingCredential.response;
+      return 'toolResult' in missingCredential
+        ? await respondWithToolResult(missingCredential.toolResult)
+        : missingCredential.response;
     }
-
-    const body = await readBody(event);
-    requestMethod = peekMcpMethod(event, body);
-    requestId = peekMcpId(body);
 
     console.info('[MCP_REQUEST]', JSON.stringify({
       event: 'mcp_request_started', request_id: getRequestDataMetrics(event).requestId,
@@ -370,13 +383,13 @@ export default defineHandler(async (event) => {
             resourceUrl: resourceUrl(baseUrl), defaultDescription: TENANT_AUTH_DESCRIPTION, });
           logMcpEventDetached(event, cfEnv.DB, {
             requestId: null, method: requestMethod ?? "unknown", status: "auth_required", errorCode: mcpError.code, errorMessage: describeMcpAuthTelemetryError(error), httpStatus: isToolCall ? 200 : authStatus, });
-          if (isToolCall) return mcpSuccess(requestId, mcpAuthRequiredResult({ challenge: authChallenge, message: TENANT_AUTH_REQUIRED_TEXT }));
+          if (isToolCall) return await respondWithToolResult(mcpAuthRequiredResult({ challenge: authChallenge, message: TENANT_AUTH_REQUIRED_TEXT }));
           event.res.status = authStatus;
           setMcpAuthChallenge(event, authChallenge);
           return mcpFailure(requestId, mcpError);
         }
         if (mcpError.kind === "forbidden" && isToolCall) {
-          return mcpSuccess(requestId, mcpToolErrorResult(mcpError.message));
+          return await respondWithToolResult(mcpToolErrorResult(mcpError.message));
         }
         const status = mcpError.kind === "forbidden" ? 403 : 500;
         if (status >= 500) console.error(error instanceof Error ? error.stack ?? error.message : error);
@@ -385,13 +398,8 @@ export default defineHandler(async (event) => {
       }
     }
 
-    const factoryContext: McpFactoryContext = { event, mcpUser, cfEnv, requestId };
-    const authInfo: AuthInfo = {
-      token: "resolved", clientId: mcpUser?.oauthClientId ?? "session", scopes: mcpUser?.scopes ?? [],
-      extra: factoryContext as unknown as Record<string, unknown>,
-    };
-
-    const response = await mcpHandler.fetch(webRequest, { authInfo, parsedBody: body });
+    event.context.mcpFactoryContext = { event, mcpUser, cfEnv, requestId } satisfies McpFactoryContext;
+    const response = await mcpHandler.fetch(webRequest, { parsedBody: body });
     if (requestMethod === 'tools/call') {
       type Wire = { id?: JsonRpcId; result?: { isError?: boolean; content?: Array<{ type: string; text?: string }> }; error?: { code: number; message: string } };
       let wire: Wire | undefined;

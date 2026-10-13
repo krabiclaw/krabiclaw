@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { authHeaders, BASE_URL, credentialsConfigured, expectStatus, fail, finish, pass, request, run, skip } from './utils/mcp-check.mjs'
+import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client'
 
 const MCP_VERSION = process.env.MCP_PROTOCOL_VERSION ?? '2025-06-18'
 
@@ -56,12 +57,43 @@ async function main() {
     if (hasTenantOauth && metaMatches) pass(`${tool.name} declares tenant OAuth security scheme`)
     else fail(`${tool.name} missing tenant OAuth security scheme`, { securitySchemes, metaSecuritySchemes })
   }
-  const welcome = await request('tools/call', { name: 'list_organizations', arguments: {} }, headers)
-  expectStatus('list_organizations tools/call succeeds', welcome, 200)
-  if (welcome.body?.result?.structuredContent && Array.isArray(welcome.body.result.structuredContent.organizations)) {
-    pass('list_organizations returns structuredContent.organizations')
-  } else {
-    fail('list_organizations missing structuredContent.organizations', welcome.body)
+  const client = new Client({ name: 'krabiclaw-contract-check', version: '0.1.0' }, {
+    versionNegotiation: { mode: { pin: '2026-07-28' } },
+  })
+  const credentialHeaders = new Headers(headers)
+  let toolStatus
+  const transport = new StreamableHTTPClientTransport(new URL(`${BASE_URL}/api/mcp`), {
+    requestInit: { headers: credentialHeaders },
+    fetch: async (url, init) => {
+      const response = await fetch(url, init)
+      if (new Headers(init?.headers).get('Mcp-Method') === 'tools/call') toolStatus = response.status
+      return response
+    },
+  })
+  try {
+    await client.connect(transport)
+    const welcome = await client.callTool({ name: 'list_organizations', arguments: {} })
+    if (toolStatus === 200 && !welcome.isError && Array.isArray(welcome.structuredContent?.organizations) && welcome.structuredContent.organizations.length > 0) {
+      pass('current MCP client decodes authenticated list_organizations with tenant data')
+    } else fail('current MCP client did not receive organizations', { status: toolStatus, result: welcome })
+
+    for (const [label, credentials] of [
+      ['missing credentials', {}],
+      ['invalid bearer token', { authorization: 'Bearer invalid-mcp-contract-token' }],
+    ]) {
+      credentialHeaders.delete('authorization')
+      credentialHeaders.delete('cookie')
+      for (const [name, value] of Object.entries(credentials)) credentialHeaders.set(name, value)
+      const result = await client.callTool({ name: 'list_organizations', arguments: {} })
+      const challenge = result._meta?.['mcp/www_authenticate']?.[0] ?? ''
+      if (toolStatus === 200 && result.isError === true && result.structuredContent === undefined
+        && challenge.includes(`resource_metadata="${BASE_URL}/.well-known/oauth-protected-resource/api/mcp"`)
+        && challenge.includes('error="invalid_token"') && challenge.includes('error_description=')) {
+        pass(`current MCP client decodes ${label} as auth error without tenant data`)
+      } else fail(`current MCP client received invalid ${label} result`, { status: toolStatus, result })
+    }
+  } finally {
+    await client.close()
   }
 
   const malformedCall = await request('tools/call', { name: 'save_media_attachment', arguments: null }, headers)

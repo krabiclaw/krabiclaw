@@ -3,7 +3,7 @@ import { setResponseHeader } from 'nitro/h3';
 import { mcpErrorRecoveryDetails } from '~/server/utils/mcp-protocol'
 import { APIError, isAPIError } from 'better-auth/api'
 import { createResourceServerChallenge } from '@better-auth/oauth-provider'
-import { bearerAuthChallengeResponse, OAuthError, OAuthErrorCode } from '@modelcontextprotocol/server'
+import { bearerAuthChallengeResponse, OAuthError, OAuthErrorCode, type CallToolResult } from '@modelcontextprotocol/server'
 
 export function buildMcpOAuthChallenge(options: {
   resourceUrl: string
@@ -19,7 +19,7 @@ export function setMcpAuthChallenge(event: H3Event, challenge: string) {
   setResponseHeader(event, 'WWW-Authenticate', challenge)
 }
 
-export function mcpAuthRequiredResult(options: { challenge: string; message: string }) {
+export function mcpAuthRequiredResult(options: { challenge: string; message: string }): CallToolResult {
   let challenge = options.challenge
   // Tool-level OAuth requires error parameters even when the HTTP challenge is bare.
   if (!/(?:^\S+\s+|,\s*)error=/.test(challenge)) {
