@@ -152,6 +152,20 @@ export function useDashboardOrganization() {
   const organizationId = computed(() => organization.value?.id ?? null)
   const locations = computed(() => state.value?.locations ?? [])
 
+  const organizationPaths = computed(() => {
+    const organizationSlug = scope.value?.orgSlug
+    if (!organizationSlug) return null
+    const base = `/dashboard/${encodeURIComponent(organizationSlug)}`
+    return {
+      catalog: `${base}/products`,
+      newLocation: `${base}/locations/new`,
+      posts: `${base}/website/posts`,
+      pages: `${base}/website/pages`,
+      blog: `${base}/website/blog`,
+      qa: `${base}/website/qa`,
+    }
+  })
+
   return {
     state,
     error,
@@ -160,6 +174,7 @@ export function useDashboardOrganization() {
     organization,
     organizationId,
     locations,
+    organizationPaths,
     /** Re-runs the context request. For an explicit reload after a mutation. */
     refresh: () => refreshNuxtData(contextKey.value),
   }

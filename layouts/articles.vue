@@ -39,7 +39,7 @@ import { articleNavKey } from '~/composables/useArticleNav'
 const { t } = useI18n()
 const route = useRoute()
 const isDocs = computed(() => route.meta.articleCollection === 'docs')
-const { template } = usePublicTemplate()
+const { template } = useTenantOrganization()
 const nav = await useArticleNav()
 provide(articleNavKey, nav)
 const searchLabel = computed(() => t('saya.search.dialog_title', { surface: nav.value.indexLabel }))

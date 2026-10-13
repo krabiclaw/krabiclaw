@@ -141,7 +141,7 @@ function todayHours(location: ApiRecord): string {
 const organizationName = computed(() => unref(organization)?.name || '')
 
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
+const { socialImage: organizationSocialImage } = useTenantOrganization()
 useSocialMetadata(() => ({
   path: '/locations',
   socialImage: organizationSocialImage,

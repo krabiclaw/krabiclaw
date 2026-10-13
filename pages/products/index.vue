@@ -8,6 +8,6 @@
 <script setup lang="ts">
 import TenantProductCatalog from '~/components/products/TenantProductCatalog.vue'
 definePageMeta({ layout: false })
-const { isPlatform } = useTenantOrganization()
-const documentPath = useTenantPageDocumentPath('/products', 'path')
+const { isPlatform, template } = useTenantOrganization()
+const documentPath = template.pageDocuments.paths.find(p => p === '/products') ?? '/products'
 </script>

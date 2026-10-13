@@ -20,11 +20,17 @@ import SettingRow from '~/components/dashboard/SettingRow.vue'
 import { authClient } from '~/lib/auth-client'
 import { getErrorMessage } from '~/utils/errors'
 
+import { isOrganizationMembersData, organizationMembersKey } from '~/utils/organization-members'
+
 const props = defineProps<{ concern?: string }>()
 const route = useRoute()
 const level = useRouteLevel()
 const dashboard = useDashboardOrganization()
-const { data, error: loadError, refresh } = await useOrganizationMembers()
+const dashboardApi = useDashboardApi()
+const { data, error: loadError, refresh } = await useAsyncData(
+  () => organizationMembersKey(String(route.params.orgSlug)),
+  () => dashboardApi('/api/dashboard/members', { validate: isOrganizationMembersData }),
+)
 const teamId = computed(() => String(route.params.teamId))
 const creating = computed(() => teamId.value === 'new')
 const team = computed(() => data.value?.teams.find(team => team.id === teamId.value))

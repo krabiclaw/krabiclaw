@@ -5,9 +5,9 @@
 </template>
 
 <script setup lang="ts">
-const { isBlawby } = usePublicTemplate()
-const documentPath = useTenantPageDocumentPath('third-party-notices')
-if (!isBlawby.value) throw createError({ statusCode: 404 })
+const { template } = useTenantOrganization()
+if (template.slug !== 'blawby') throw createError({ statusCode: 404 })
+const documentPath = template.pageDocuments.recipes['third-party-notices'] || '/third-party-notices'
 
 definePageMeta({ layout: false })
 </script>

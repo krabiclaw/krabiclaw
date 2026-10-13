@@ -1,5 +1,5 @@
 <template>
-  <NuxtLayout :name="isPlatform ? 'platform' : isBlawby ? 'blawby' : 'saya'">
+  <NuxtLayout :name="template.layout">
     <!--
       A localized home is its page document too: the `/` branch here rendered a
       template's own home component instead, which is how /th/ reached a
@@ -20,13 +20,8 @@ import { resolveTenantLocalePath, splitLocalePrefix } from '~/utils/tenant-local
 definePageMeta({ layout: false })
 
 const route = useRoute()
-const { isPlatform, organizationId } = useTenantOrganization()
-const { isBlawby } = usePublicTemplate()
+const { isPlatform, template, organizationId } = useTenantOrganization()
 // An unclaimed path is a page document on whichever site resolved, Krabiclaw's
-// own included: its marketing pages are ordinary documents now, and this is the
-// route that serves the ones no named route owns (#903). A path with no
-// published document still 404s here — there is nothing to fall back to.
-if (!organizationId) throw showNotFound()
 
 const segments = route.params.tenantPath
 const pagePath = computed(() => {

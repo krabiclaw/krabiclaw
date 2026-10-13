@@ -60,7 +60,7 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'saya' })
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
+const { socialImage: organizationSocialImage } = useTenantOrganization()
 useSocialMetadata({
   schema: false,
   path: '/tenant-setup-pending',

@@ -47,14 +47,14 @@
 
 <script setup lang="ts">
 import OnlineConsultationBooking from '~/components/booking/OnlineConsultationBooking.vue'
-import type { PublicOrganizationQa } from '~/types/blawby'
-import { findTenantPageBlock } from '~/utils/tenant-page-blocks'
+import type { BlawbyDocumentPayload } from '~/utils/blawby-document-contract'
 
-const { data, error, shell } = await useBlawbyRoute('schedule')
-if (error.value) throw error.value
-const routeData = computed(() => data.value)
+const document = inject<Ref<BlawbyDocumentPayload> | null>('blawby-document', null)
+if (!document) throw createError({ statusCode: 500, statusMessage: 'Blawby layout did not provide the requested page' })
+const routeData = computed(() => document.value.route)
 const page = computed(() => routeData.value.page!)
 if (!routeData.value.page) throw createError({ statusCode: 404, statusMessage: 'Schedule content not found' })
+const shell = computed(() => document.value.shell)
 const identity = computed(() => shell.value.identity)
 const consultation = computed(() => shell.value.consultation)
 const { localePath, t } = useI18n()
@@ -102,10 +102,10 @@ function trackConsultation(pageType: string, destination: string) {
 }
 
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
+const { socialImage } = useTenantOrganization()
 useSocialMetadata(() => ({
   path: '/schedule',
-  socialImage: organizationSocialImage,
+  socialImage,
   title: `${page.value.title || 'Consultation'} | ${identity.value.name}`,
   description: page.value.summary || '',
   brand: {

@@ -105,12 +105,16 @@ import { formatTimestamp } from '~/utils/timezone'
 
 import { authClient } from '~/lib/auth-client'
 import { getErrorMessage } from '~/utils/errors'
-import type { DashboardMemberRow as MemberRow, DashboardInvitationRow } from '~/server/utils/dashboard-members'
+import { isOrganizationMembersData, organizationMembersKey } from '~/utils/organization-members'
 
+const route = useRoute()
 const dashboardApi = useDashboardApi()
 
 const dashboard = useDashboardOrganization()
-const { data, error: loadError, refresh } = await useOrganizationMembers()
+const { data, error: loadError, refresh } = await useAsyncData(
+  () => organizationMembersKey(String(route.params.orgSlug)),
+  () => dashboardApi('/api/dashboard/members', { validate: isOrganizationMembersData }),
+)
 
 const members = computed(() => data.value?.members ?? [])
 const invitations = computed(() => data.value?.invitations ?? [])

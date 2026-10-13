@@ -198,30 +198,44 @@ function setResolvedTenantContext(
 ) {
   const metadata = requireTenantMetadata(tenant, tenant.id)
   const socialMedia = publicTenantMedia(tenant)
+  const resolvedTemplate = resolvePublicTemplate({ themeId: metadata.themeId, vertical: metadata.vertical })
+  const templateSlug = resolvedTemplate.slug
+  const isPlatform = templateSlug === 'platform'
+  const logos = siteLogos(tenant.media_json)
+  const fontPreset = resolveOrganizationFontPreset(tenant.font_preset_type === null ? undefined : tenant.font_preset)
+  const palette = isPaletteTemplate(templateSlug)
+    ? resolveSitePalette(templateSlug, tenant.palette === null ? undefined : parseSitePalette(JSON.parse(tenant.palette)))
+    : null
+
   event.context.organizationId = tenant.id
   event.context.themeId = metadata.themeId
   event.context.onboardingStatus = tenant.onboarding_status
-  setTenantType(event, resolvePublicTemplate({ themeId: metadata.themeId }).slug === 'platform' ? TENANT_TYPES.PLATFORM : TENANT_TYPES.TENANT)
+  setTenantType(event, isPlatform ? TENANT_TYPES.PLATFORM : TENANT_TYPES.TENANT)
   event.context.tenantHost = hostnameOf(host)
   event.context.canonicalDomain = canonicalDomain
-  // Every public layout renders the site's font from here, the platform's included.
-  event.context.fontPreset = resolveOrganizationFontPreset(tenant.font_preset_type === null ? undefined : tenant.font_preset)
-  event.context.logos = siteLogos(tenant.media_json)
-  // Saya and Blawby render the site's palette (or their own); the platform's is fixed.
-  const template = resolvePublicTemplate({ themeId: metadata.themeId }).slug
-  event.context.palette = isPaletteTemplate(template)
-    ? resolveSitePalette(template, tenant.palette === null ? undefined : parseSitePalette(JSON.parse(tenant.palette)))
-    : null
+  event.context.templateSlug = templateSlug
+  event.context.logoUrl = logoUrl
+  event.context.socialImage = socialMedia.social_image ?? null
+  event.context.fontPreset = fontPreset
+  event.context.logos = logos
+  event.context.palette = palette
   event.context.organization = {
+    id: tenant.id,
     name: metadata.name,
-    ...socialMedia,
+    theme_id: metadata.themeId,
     vertical: metadata.vertical,
+    template: resolvedTemplate,
+    fontPreset,
+    palette,
+    logos,
+    logoUrl,
+    socialImage: socialMedia.social_image ?? null,
     social_profiles: connectedSocialProfiles(tenant),
-    // A site states a policy by publishing it; one that has not links to none.
     policies: [
       ...(tenant.privacy_policy ? ['privacy' as const] : []),
       ...(tenant.terms_policy ? ['terms' as const] : []),
     ],
+    ...socialMedia,
   }
 }
 

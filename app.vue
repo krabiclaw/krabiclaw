@@ -11,7 +11,7 @@
 import { buildTenantHeadLinks } from '~/utils/tenant-head'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
 
-const { tenantType, isPlatform, organization } = useTenantOrganization()
+const { tenantType, isPlatform, template, organization } = useTenantOrganization()
 if (tenantType === TENANT_TYPES.TENANT_404) {
   throw createError({
     statusCode: 404,
@@ -19,10 +19,9 @@ if (tenantType === TENANT_TYPES.TENANT_404) {
   })
 }
 
-const { isBlawby } = usePublicTemplate()
-const organizationShell = isBlawby.value ? null : useOrganizationShellState()
+const organizationShell = template.slug === 'blawby' ? null : useOrganizationShellState()
 const config = organizationShell?.config
-const organizationMedia = computed(() => organizationShell?.organization.value?.media ?? organization?.media ?? [])
+const organizationMedia = computed(() => organization?.media ?? organizationShell?.organization.value?.media ?? [])
 useHead(() => {
   const verification = config?.value.search_console_verification
   return {

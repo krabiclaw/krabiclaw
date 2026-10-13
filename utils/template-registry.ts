@@ -180,13 +180,6 @@ export function resolvePublicTemplate(input: {
   return match
 }
 
-export function isBlawbyTemplate(input: {
-  themeId?: string | null
-  vertical?: string | null
-}) {
-  return resolvePublicTemplate(input).slug === 'blawby'
-}
-
 // The public Blawby API routes are a security gate, not just a rendering-path
 // decision, so they require both a supported vertical and the exact theme id.
 export function organizationSupportsBlawbyTemplate(input: {

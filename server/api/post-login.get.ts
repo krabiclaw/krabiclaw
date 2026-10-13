@@ -3,8 +3,9 @@ import { HTTPError, defineHandler  } from 'nitro';
 // GET /api/post-login — server-side redirect after OAuth / sign-in.
 import { getQuery, redirect } from 'nitro/h3';
 import { cloudflareEnv } from '~/server/utils/api-response'
-import { createAuth, getAuthSession } from '~/server/utils/auth'
+import { getAuthSession } from '~/server/utils/auth'
 import { resolvePostLoginRoute } from '~/server/utils/post-login-routing'
+import { activateSessionOrganization } from '~/server/utils/session-organization'
 import { isNewSalePlan } from '~/shared/billing-model'
 import { buildLoginUrl, buildPostLoginUrl, validatedInternalPath } from '~/shared/auth/return-target'
 
@@ -37,22 +38,7 @@ export default defineHandler(async (event) => {
     // holds the authenticated request headers, and routing first would leave
     // the session with no active organization for the account pages to read.
     if (route.kind === 'activate') {
-      // `createAuth` caches its instance as `unknown` and casts it back to the
-      // bare `betterAuth` type, which erases every plugin endpoint from `api`.
-      // The route exists — organization() is registered — so the shape is named
-      // here rather than restructuring the auth builder inside a routing change.
-      const auth = createAuth(env) as unknown as {
-        api: { setActiveOrganization: (input: { body: { organizationId: string }, headers: Headers }) => Promise<unknown> }
-      }
-      // Routing without activating is the failure #905 names, so a refusal
-      // stops here rather than entering an organization the session is not in.
-      const activated = await auth.api.setActiveOrganization({
-        body: { organizationId: route.organizationId },
-        headers: event.req.headers,
-      })
-      if (!activated) {
-        throw new HTTPError({ statusCode: 502, message: 'Could not activate the organization for this session' })
-      }
+      await activateSessionOrganization(event, env, route.organizationId)
     }
 
     if (plan) {

@@ -1,6 +1,6 @@
 <template>
-  <NuxtLayout :name="isBlawby ? 'blawby' : 'saya'">
-    <BlawbyContact v-if="isBlawby" />
+  <NuxtLayout :name="template.layout">
+    <BlawbyContact v-if="template.slug === 'blawby'" />
 
     <!-- Brand contact page (tenant sites only — the platform marketing contact page was retired in favor of /help) -->
     <div v-else>
@@ -232,9 +232,8 @@ import type { SubmissionMeasurement } from '~/composables/useOrganizationConvers
 
 definePageMeta({ layout: false })
 
-const { isPlatform, organizationId, previewAuthorized, organization } = useTenantOrganization()
-const { isBlawby } = usePublicTemplate()
-if (isPlatform || !organizationId) throw createError({ statusCode: 404 })
+const { isPlatform, template, organizationId, previewAuthorized, organization } = useTenantOrganization()
+if (isPlatform) throw createError({ statusCode: 404 })
 
 const { locale, localePath, t } = useI18n()
 const vertCopy = computed(() => getVerticalCopy(organization?.vertical, locale.value))
@@ -364,7 +363,7 @@ const handleTenantContact = async () => {
 
 // ── SEO ──────────────────────────────────────────────────
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
+const { socialImage: organizationSocialImage } = useTenantOrganization()
 useSocialMetadata(() => ({
   path: '/contact',
   socialImage: organizationSocialImage,

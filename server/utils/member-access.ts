@@ -365,10 +365,6 @@ export async function listOrganizationMembers(env: CloudflareEnv, organizationId
   return await listAllOrganizationMembers(adapter, organizationId)
 }
 
-export async function deleteOrganization(env: CloudflareEnv, organizationId: string): Promise<void> {
-  await organizationAdapter(env).then(adapter => adapter.deleteOrganization(organizationId))
-}
-
 /**
  * Organization-wide management access, which is now the only kind.
  *

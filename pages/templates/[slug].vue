@@ -311,7 +311,7 @@ const organizationUrl = config.public.siteUrl
 // platform page describing the template product itself, so it is reused by
 // reference here, not duplicated.
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
+const { socialImage: organizationSocialImage } = useTenantOrganization()
 useSocialMetadata({
   template: 'platform',
   path: `/templates/${template.slug}`,

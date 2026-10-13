@@ -71,8 +71,7 @@ const props = defineProps<{ collection: ArticleCollection }>()
 const DOMPurify = import.meta.client ? await loadDomPurify() : { sanitize: sanitizeHtmlForSsr }
 const route = useRoute()
 const { t, localePath } = useI18n()
-const { template } = usePublicTemplate()
-const { organization } = useTenantOrganization()
+const { template, organization, logoUrl } = useTenantOrganization()
 const locale = useState<string>('public-locale', () => 'en')
 
 const slug = computed(() => String(route.params.slug || '').trim())
@@ -85,7 +84,7 @@ const authorName = computed(() => post.value.author?.name ?? null)
 // Each collection's index is at its own prefix on every template; only a blog article's own path varies (/blog or /article).
 const indexPath = computed(() => localePath(ARTICLE_COLLECTIONS[props.collection].pathPrefix))
 const indexLabel = computed(() => props.collection === 'docs' ? t('saya.footer.docs') : t('saya.footer.blog'))
-const articlePath = computed(() => localePath(tenantBlogPostPath(template.value, post.value.slug, props.collection)))
+const articlePath = computed(() => localePath(tenantBlogPostPath(template, post.value.slug, props.collection)))
 // The index, the article's category, the article: the category is a page of its own.
 const breadcrumbs = computed(() => [
   { name: indexLabel.value, url: indexPath.value },
@@ -156,7 +155,7 @@ useContentPageSchema(computed(() => ({
   breadcrumbs: breadcrumbs.value,
   components: structuredComponentsFromBlocks(post.value.content_blocks),
   organizationName: organizationName.value,
-  organizationLogoUrl: organization?.media?.find(item => item.slot === 'logo')?.public_url || undefined,
+  organizationLogoUrl: logoUrl || undefined,
   organizationDescription: organization?.brand_description || undefined,
 })))
 </script>

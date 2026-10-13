@@ -286,8 +286,10 @@ import { isCurrencyCode } from '~/shared/currencies'
 import type { Product } from '~/server/types/products'
 import { resolveSocialImageUrl } from '~/utils/social-metadata'
 import { addressPlaceName, formatPostalAddress, schemaPostalAddress, type PostalAddress } from '~/utils/postal-address'
+import { loadDomPurify } from '~/utils/dom-purify-loader'
+import { sanitizeHtmlForSsr } from '~/utils/markdown'
 
-const DOMPurify = useHtmlSanitizer()
+const DOMPurify = import.meta.client ? await loadDomPurify() : { sanitize: sanitizeHtmlForSsr }
 
 const { resolveMedia } = useMedia()
 definePageMeta({ layout: 'saya' })

@@ -451,7 +451,7 @@ const requestUrl = useRequestURL()
 
 const brandName = computed(() => String((organization as ApiValue)?.name ?? '').trim())
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
+const { socialImage: organizationSocialImage } = useTenantOrganization()
 useSocialMetadata(() => ({
   path: '/reservations',
   socialImage: organizationSocialImage,

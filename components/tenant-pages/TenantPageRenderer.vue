@@ -236,14 +236,17 @@ const props = withDefaults(defineProps<{ page: PublicTenantPage; template?: Publ
  * page for a template other than the host's — pages/contact/index.vue renders a
  * Saya section on a Blawby host — and the resolved template is the default.
  */
-const { template: resolvedTemplate } = usePublicTemplate()
-const template = computed<PublicTemplateSlug>(() => props.template ?? resolvedTemplate.value.slug)
+const { template: resolvedTemplate } = useTenantOrganization()
+const template = computed<PublicTemplateSlug>(() => props.template ?? resolvedTemplate.slug)
 const platformHome = computed(() => template.value === 'platform' && props.page.path === '/')
 
 function presentationOf(block: TenantPageBlock): Component | null {
   return tenantPageBlockPresentation(template.value, block.type)
 }
-const sanitizer = useHtmlSanitizer()
+import { loadDomPurify } from '~/utils/dom-purify-loader'
+import { sanitizeHtmlForSsr } from '~/utils/markdown'
+
+const DOMPurify = import.meta.client ? await loadDomPurify() : { sanitize: sanitizeHtmlForSsr }
 const { t } = useI18n()
 /**
  * The page's blocks, in the order the page carries them — less the one the
@@ -269,7 +272,7 @@ function text(value: unknown): string {
 }
 
 function sanitize(value: string): string {
-  return sanitizer.sanitize(value)
+  return DOMPurify.sanitize(value)
 }
 
 /**

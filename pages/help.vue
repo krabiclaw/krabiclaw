@@ -30,7 +30,7 @@ import { PUBLIC_SUPPORT_FAQ_ENTRIES } from '~/utils/public-support'
 definePageMeta({ layout: 'standalone' })
 
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
+const { socialImage: organizationSocialImage } = useTenantOrganization()
 useSocialMetadata({
   template: 'platform',
   path: '/help',

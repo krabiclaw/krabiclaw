@@ -13,13 +13,9 @@
 <script setup lang="ts">
 definePageMeta({ layout: false })
 
-const { isPlatform, organizationId } = useTenantOrganization()
-const { template } = usePublicTemplate()
-// Where this template keeps its home document. Krabiclaw's own homepage is an
-// ordinary published page on the platform site, read by the same loader every
-// customer site uses (#903).
-const homePath = useTenantPageDocumentPath('home')
-const layout = computed(() => template.value!.layout as 'saya' | 'blawby' | 'platform')
+const { isPlatform, organizationId, template } = useTenantOrganization()
+const homePath = template.pageDocuments.recipes.home || '/'
+const layout = template.layout
 
 if (!isPlatform && !organizationId) {
   throw createError({ statusCode: 404, statusMessage: 'Site not found' })

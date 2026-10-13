@@ -27,7 +27,7 @@ import { buildPostLoginUrl, validatedInternalPath } from '~/shared/auth/return-t
 
 definePageMeta({ layout: 'access', auth: false })
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
+const { socialImage: organizationSocialImage } = useTenantOrganization()
 useSocialMetadata({
   template: 'platform',
   schema: false,

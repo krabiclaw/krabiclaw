@@ -24,7 +24,7 @@ export const articleNavKey = Symbol('article-nav') as InjectionKey<ComputedRef<A
 export async function useArticleNav() {
   const route = useRoute()
   const { t } = useI18n()
-  const { template } = usePublicTemplate()
+  const { template } = useTenantOrganization()
   const publicLocale = useState<string>('public-locale', () => 'en')
   const collection = computed(() => route.meta.articleCollection === 'docs' ? 'docs' as const : 'blog' as const)
   const { categoryTree } = await usePublishedArticles(collection)
@@ -33,8 +33,8 @@ export async function useArticleNav() {
     categories: categoryTree.value,
     indexLabel: collection.value === 'docs' ? t('saya.footer.docs') : t('saya.footer.blog'),
     // Krabiclaw searches its own blog and docs; a site searches its articles, in English only.
-    search: template.value.slug === 'platform'
+    search: template.slug === 'platform'
       ? { surface: collection.value, variant: 'platform' }
-      : publicLocale.value === 'en' ? { surface: 'tenant_blog', variant: template.value.slug } : null,
+      : publicLocale.value === 'en' ? { surface: 'tenant_blog', variant: template.slug } : null,
   }))
 }

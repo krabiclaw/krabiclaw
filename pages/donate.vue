@@ -5,9 +5,9 @@
 </template>
 
 <script setup lang="ts">
-const { isBlawby } = usePublicTemplate()
-const documentPath = useTenantPageDocumentPath('donate')
-if (!isBlawby.value) throw createError({ statusCode: 404 })
+const { template } = useTenantOrganization()
+if (template.slug !== 'blawby') throw createError({ statusCode: 404 })
+const documentPath = template.pageDocuments.recipes.donate || '/donate'
 
 definePageMeta({ layout: false })
 </script>

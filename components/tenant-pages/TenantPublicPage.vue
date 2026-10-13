@@ -33,9 +33,7 @@ import type { ProfessionalServiceRecipe } from '~/utils/professional-service-sch
 
 const props = defineProps<{ path: string; locale?: string | null }>()
 const config = useRuntimeConfig()
-const requestURL = useRequestURL()
-const { organizationId, isPlatform, previewAuthorized, organization } = useTenantOrganization()
-const { isBlawby } = usePublicTemplate()
+const { organizationId, isPlatform, previewAuthorized, organization, template } = useTenantOrganization()
 const { locale: i18nLocale, localePath } = useI18n()
 // Page ownership is a resolved site, not a tenant type. Krabiclaw's own site is
 // a site row with page documents like any other, and requiring `isTenant` here
@@ -66,7 +64,7 @@ const isPageResponse = (value: unknown): value is { success: true; page: PublicT
 const requestEvent = useRequestEvent()
 const blawbyDocument = inject<Ref<BlawbyDocumentPayload> | null>('blawby-document', null)
 const { data, error, status, execute } = await useAsyncData(key, async () => {
-  if (isBlawby.value) {
+  if (template.slug === 'blawby') {
     const page = blawbyDocument?.value.route.page
     if (!page || page.locale !== activeLocale.value
       || resolveTenantLocalePath(page.path, [activeLocale.value]).sourcePath !== pagePath.value) {
@@ -275,7 +273,7 @@ const { canonicalUrl } = useSocialMetadata(() => page.value && ({
     { name: isPlatform ? 'Home' : (organization?.name || 'Home'), url: '/' },
     { name: page.value.title, url: page.value.path },
   ],
-  professionalService: (isBlawby.value && schemaContext && schemaOrg.value?.name) ? {
+  professionalService: (template.slug === 'blawby' && schemaContext && schemaOrg.value?.name) ? {
     recipe: schemaRecipe.value,
     org: schemaOrg.value,
     items: serviceItems.value,

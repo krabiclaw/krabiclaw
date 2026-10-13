@@ -137,7 +137,7 @@ function trustSummary(qa: number, reviews: number, organizationQa: number): stri
 interface HubCard { id: string; title: string; description: string; to: string; image?: string }
 
 const router = useRouter()
-const { organizationPaths: organizationLinks } = useDashboardOrganizationLinks()
+const organizationLinks = dashboard.organizationPaths
 /** One of the organization's managers, scoped to this location by its id. */
 function scopedToLocation(path: string | undefined): string {
   if (!path || !locationId.value) return locationPath.value

@@ -172,7 +172,10 @@
 import { formatOpeningHours, getIsOpenNow } from '~/utils/formatters'
 import { getTodayHoursLabel, schemaOpeningHours } from '~/shared/reservation-hours'
 import { addressPlaceName, formatPostalAddress, schemaPostalAddress, type PostalAddress } from '~/utils/postal-address'
-const DOMPurify = useHtmlSanitizer()
+import { loadDomPurify } from '~/utils/dom-purify-loader'
+import { sanitizeHtmlForSsr } from '~/utils/markdown'
+
+const DOMPurify = import.meta.client ? await loadDomPurify() : { sanitize: sanitizeHtmlForSsr }
 
 definePageMeta({ layout: 'saya' })
 

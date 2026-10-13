@@ -75,9 +75,8 @@ export function categorySubtree(category: PublishedArticleCategory): PublishedAr
  */
 export async function usePublishedArticles(collection: MaybeRefOrGetter<ArticleCollection>) {
   const requestEvent = useRequestEvent()
-  const { organizationId } = useTenantOrganization()
+  const { organizationId, template } = useTenantOrganization()
   if (!organizationId) throw createError({ statusCode: 404, statusMessage: 'Unknown tenant' })
-  const { template } = usePublicTemplate()
   const { localePath } = useI18n()
   const locale = useState<string>('public-locale', () => 'en')
 
@@ -110,7 +109,7 @@ export async function usePublishedArticles(collection: MaybeRefOrGetter<ArticleC
   )
   const posts = computed<PublishedArticle[]>(() => (data.value?.posts ?? []).map(post => ({
     ...post,
-    path: localePath(tenantBlogPostPath(template.value, post.slug, toValue(collection))),
+    path: localePath(tenantBlogPostPath(template, post.slug, toValue(collection))),
     category: post.category ? { ...post.category, path: localePath(collectionCategoryPath(toValue(collection), post.category.slug)) } : null,
   })))
 
@@ -223,11 +222,11 @@ export async function usePublishedArticle(collection: ArticleCollection, slug: M
  * pages publish their lists this way too (a product collection's ItemList).
  */
 export function useArticleItemList(listPath: MaybeRefOrGetter<string>, name: MaybeRefOrGetter<string>, articles: MaybeRefOrGetter<readonly PublishedArticle[]>) {
-  const { template } = usePublicTemplate()
+  const { template } = useTenantOrganization()
   const requestURL = useRequestURL()
   const runtimeConfig = useRuntimeConfig()
   return computed(() => {
-    const origin = template.value.slug === 'platform' ? runtimeConfig.public.siteUrl : requestURL.origin
+    const origin = template.slug === 'platform' ? runtimeConfig.public.siteUrl : requestURL.origin
     return {
       '@context': 'https://schema.org',
       '@type': 'ItemList',

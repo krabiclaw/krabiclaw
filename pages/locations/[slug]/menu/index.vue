@@ -8,8 +8,8 @@ import { isCurrencyCode } from '~/shared/currencies'
 import { presentationForSurface } from '~/utils/product-presentation'
 
 definePageMeta({ layout: 'saya' })
-const { isBlawby } = usePublicTemplate()
-if (isBlawby.value) throw createError({ statusCode: 404 })
+const { template } = useTenantOrganization()
+if (template.slug === 'blawby') throw createError({ statusCode: 404 })
 const { products, collections, locations, location, config, organization } = await usePublicPageData({ lazy: false })
 // What the merchant sells over the counter. Anything a guest books a seat on
 // is an Experience and has its own surface, so it is not listed twice.

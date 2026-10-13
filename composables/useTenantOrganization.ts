@@ -4,25 +4,39 @@ import type { SocialImageSource } from '~/utils/social-metadata'
 import type { OrganizationFontPreset } from '~/shared/organization-fonts'
 import type { SitePalette } from '~/shared/site-palette'
 import type { SiteLogo } from '~/shared/media-placement-contract'
+import { publicTemplateRegistry, type PublicTemplateDefinition, type PublicTemplateSlug } from '~/utils/template-registry'
 
-interface TenantOrganizationState {
-  tenantType: TenantType | null
+export interface TenantContext {
+  tenantType: TenantType
+  isPlatform: boolean
+  isTenant: boolean
   previewAuthorized: boolean
-  organizationId: string | null
-  themeId: string | null
+  organizationId: string
+  themeId: string
+  templateSlug: PublicTemplateSlug
+  template: PublicTemplateDefinition
   fontPreset: OrganizationFontPreset
-  /** The colors a Saya or Blawby site renders; null on the platform. */
   palette: SitePalette | null
   logos: SiteLogo[]
-  organization: TenantOrganizationInfo | null
+  logoUrl: string | null
+  socialImage: SocialImageSource | null
+  organization: TenantOrganizationInfo
 }
 
-interface TenantOrganizationInfo {
-  name?: string | null
+export interface TenantOrganizationInfo {
+  id: string
+  name: string
+  theme_id: string
+  vertical: string | null
+  template: PublicTemplateDefinition
+  fontPreset: OrganizationFontPreset
+  palette: SitePalette | null
+  logos: SiteLogo[]
+  logoUrl: string | null
+  socialImage: SocialImageSource | null
   brand_description?: string | null
   media?: Array<{ asset_id: string; slot: string; public_url: string | null; thumbnail_url: string | null; kind: string; mime_type: string | null }>
   social_image?: SocialImageSource | null
-  vertical?: string | null
   social_profiles?: Array<{ network: 'facebook' | 'instagram'; url: string }>
   policies?: Array<'privacy' | 'terms'>
   config?: {
@@ -30,50 +44,49 @@ interface TenantOrganizationInfo {
   } | null
 }
 
-// The rendering tenant, resolved from the host by tenant-resolution. There used
-// to be a `organizationId` beside `organizationId` here, and every public request
-// carried both: they named the same tenant, and a route that took the id from
-// its path could be asked for one tenant on another's domain.
-export const useTenantOrganization = () => {
+// The rendering tenant, resolved from the host by tenant-resolution.
+export const useTenantOrganization = (): TenantContext => {
   const event = useRequestEvent()
 
-  // Get tenant context from middleware on the server, then reuse the serialized
-  // Nuxt state on the client so SSR and hydration choose the same site shell.
-  const tenantContext = useState<TenantOrganizationState>('tenant-context', () => {
-    if (event) {
-      return {
-        tenantType: (event.context.tenantType as TenantType | undefined) ?? null,
-        previewAuthorized: event.context.previewAuthorized === true,
-        organizationId: typeof event.context.organizationId === 'string' ? event.context.organizationId : null,
-        themeId: typeof event.context.themeId === 'string' ? event.context.themeId : null,
-        fontPreset: (event.context.fontPreset as OrganizationFontPreset | undefined) ?? 'default',
-        palette: (event.context.palette as SitePalette | null | undefined) ?? null,
-        logos: (event.context.logos as SiteLogo[] | undefined) ?? [],
-        organization: (event.context.organization as TenantOrganizationInfo | null | undefined) ?? null
-      }
+  const tenantContext = useState<TenantContext>('tenant-context', () => {
+    if (!event?.context.organization || !event.context.tenantType) {
+      throw createError({
+        statusCode: 500,
+        statusMessage: 'Tenant context unavailable',
+        fatal: true,
+      })
     }
+
+    const ctx = event.context
+    const org = ctx.organization as TenantOrganizationInfo
+    const template = org.template ?? publicTemplateRegistry[ctx.templateSlug as PublicTemplateSlug] ?? publicTemplateRegistry.saya
+    const isPlatform = template.slug === 'platform'
+
     return {
-      tenantType: null,
-      previewAuthorized: false,
-      organizationId: null,
-      themeId: null,
-      fontPreset: 'default',
-      palette: null,
-      logos: [],
-      organization: null
+      tenantType: isPlatform ? TENANT_TYPES.PLATFORM : TENANT_TYPES.TENANT,
+      isPlatform,
+      isTenant: !isPlatform,
+      previewAuthorized: ctx.previewAuthorized === true,
+      organizationId: org.id,
+      themeId: org.theme_id,
+      templateSlug: template.slug,
+      template,
+      fontPreset: org.fontPreset ?? 'default',
+      palette: org.palette ?? null,
+      logos: org.logos ?? [],
+      logoUrl: org.logoUrl ?? null,
+      socialImage: org.socialImage ?? null,
+      organization: org,
     }
   })
 
-  return {
-    tenantType: tenantContext.value.tenantType,
-    isPlatform: tenantContext.value.tenantType === TENANT_TYPES.PLATFORM,
-    isTenant: tenantContext.value.tenantType === TENANT_TYPES.TENANT,
-    previewAuthorized: tenantContext.value.previewAuthorized,
-    organizationId: tenantContext.value.organizationId,
-    themeId: tenantContext.value.themeId,
-    fontPreset: tenantContext.value.fontPreset,
-    palette: tenantContext.value.palette,
-    logos: tenantContext.value.logos,
-    organization: tenantContext.value.organization
+  if (!tenantContext.value) {
+    throw createError({
+      statusCode: 500,
+      statusMessage: 'Tenant context uninitialized',
+      fatal: true,
+    })
   }
+
+  return tenantContext.value
 }

@@ -8,7 +8,6 @@ import {
   type SocialPageType,
   type SocialTemplate,
 } from '~/utils/social-metadata'
-import { resolvePublicTemplate } from '~/utils/template-registry'
 import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
 import { isDemoHost, isDemoOrg } from '~/shared/demo'
 import {
@@ -94,7 +93,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
   const normalized = computed(() => {
     const value = toValue(input)
     if (!value) return null
-    const template = value.template ?? resolvePublicTemplate({ themeId: tenant.themeId }).slug
+    const template = value.template ?? tenant.template.slug
     const origin = template === 'platform'
       ? config.public.siteUrl
       : requestURL.origin
@@ -213,7 +212,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
     const publisherName = template === 'platform' ? PLATFORM_NAME : tenant.organization?.name?.trim()
     if (!publisherName) throw new Error('Structured schema requires the organization or platform name')
     const publisherDescription = template === 'platform' ? PLATFORM_DESCRIPTION : tenant.organization?.brand_description || undefined
-    const publisherLogo = template === 'platform' ? `${organizationRoot}/krabi-claw-logo.png` : tenant.organization?.media?.find(item => item.slot === 'logo')?.public_url
+    const publisherLogo = template === 'platform' ? `${organizationRoot}/krabi-claw-logo.png` : tenant.logoUrl
 
     graph.push({
       '@type': 'Organization',
