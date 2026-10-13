@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c27cd70e-f227-49b7-861e-8398884dcefd",
+  "id": "ab2c44d7-ecd3-4f79-bf1a-10a8d76f74b5",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -1595,7 +1595,7 @@
           "name": "timezone",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "max_capacity": {
@@ -1682,6 +1682,10 @@
         "business_locations_special_hours_check": {
           "name": "business_locations_special_hours_check",
           "value": "special_hours IS NULL OR (json_valid(special_hours) AND json_type(special_hours) IS 'array')"
+        },
+        "business_locations_timezone_check": {
+          "name": "business_locations_timezone_check",
+          "value": "timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'"
         }
       }
     },
@@ -5826,7 +5830,7 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false,
-          "default": "'{\"config\":{\"default_timezone\":\"UTC\"}}'"
+          "default": "'{}'"
         },
         "theme_id": {
           "name": "theme_id",
@@ -5868,7 +5872,14 @@
           "name": "default_currency",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "timezone": {
+          "name": "timezone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         },
         "status": {
@@ -6021,9 +6032,13 @@
           "name": "organization_config_careers_email_check",
           "value": "json_type(settings_json, '$.config.careers_email') IS NULL OR json_type(settings_json, '$.config.careers_email') IS 'text'"
         },
-        "organization_config_default_timezone_check": {
-          "name": "organization_config_default_timezone_check",
-          "value": "json_type(settings_json, '$.config.default_timezone') IS 'text' AND length(json_extract(settings_json, '$.config.default_timezone')) > 0"
+        "organization_default_currency_check": {
+          "name": "organization_default_currency_check",
+          "value": "length(default_currency) = 3 AND default_currency = upper(default_currency) AND default_currency NOT GLOB '*[^A-Z]*'"
+        },
+        "organization_timezone_check": {
+          "name": "organization_timezone_check",
+          "value": "timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'"
         },
         "organization_compliance_metadata_check": {
           "name": "organization_compliance_metadata_check",
@@ -7325,13 +7340,6 @@
           "notNull": true,
           "autoincrement": false
         },
-        "calendar_group": {
-          "name": "calendar_group",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "starts_at": {
           "name": "starts_at",
           "type": "text",
@@ -7400,16 +7408,6 @@
           ],
           "isUnique": false
         },
-        "payment_holds_calendar_idx": {
-          "name": "payment_holds_calendar_idx",
-          "columns": [
-            "organization_id",
-            "calendar_group",
-            "status",
-            "expires_at"
-          ],
-          "isUnique": false
-        },
         "payment_holds_reservation_idx": {
           "name": "payment_holds_reservation_idx",
           "columns": [
@@ -7459,7 +7457,7 @@
         },
         "payment_holds_subject_check": {
           "name": "payment_holds_subject_check",
-          "value": "(product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL AND converted_reservation_id IS NULL) OR (product_id IS NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND calendar_group IS NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL)"
+          "value": "(product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL AND converted_reservation_id IS NULL) OR (product_id IS NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL)"
         }
       }
     },
@@ -9082,7 +9080,7 @@
           "name": "location_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
         "timezone": {
@@ -9197,19 +9195,7 @@
             "start_time",
             "interval_weeks"
           ],
-          "isUnique": true,
-          "where": "location_id IS NOT NULL"
-        },
-        "product_availability_rules_neutral_slot_unique": {
-          "name": "product_availability_rules_neutral_slot_unique",
-          "columns": [
-            "product_id",
-            "weekday",
-            "start_time",
-            "interval_weeks"
-          ],
-          "isUnique": true,
-          "where": "location_id IS NULL"
+          "isUnique": true
         },
         "product_availability_rules_product_idx": {
           "name": "product_availability_rules_product_idx",
@@ -9366,19 +9352,13 @@
           "autoincrement": false,
           "default": false
         },
-        "online_timezone": {
-          "name": "online_timezone",
-          "type": "text",
+        "held_online": {
+          "name": "held_online",
+          "type": "integer",
           "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "calendar_group": {
-          "name": "calendar_group",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
         },
         "scheduling_mode": {
           "name": "scheduling_mode",
@@ -9524,9 +9504,9 @@
           "name": "product_booking_configs_payment_check",
           "value": "online_payment_required IN (0, 1)"
         },
-        "product_booking_configs_calendar_check": {
-          "name": "product_booking_configs_calendar_check",
-          "value": "calendar_group IS NULL OR length(trim(calendar_group)) > 0"
+        "product_booking_configs_held_online_check": {
+          "name": "product_booking_configs_held_online_check",
+          "value": "held_online IN (0, 1) AND (held_online = 0 OR (scheduling_mode = 'provider' AND (assigned_member_id IS NOT NULL OR assigned_team_id IS NOT NULL)))"
         }
       }
     },
@@ -10205,15 +10185,6 @@
           "isUnique": true,
           "where": "location_id IS NOT NULL AND assigned_member_id IS NULL"
         },
-        "product_sessions_neutral_instant_unique": {
-          "name": "product_sessions_neutral_instant_unique",
-          "columns": [
-            "product_id",
-            "starts_at"
-          ],
-          "isUnique": true,
-          "where": "location_id IS NULL AND assigned_member_id IS NULL"
-        },
         "product_sessions_provider_location_instant_unique": {
           "name": "product_sessions_provider_location_instant_unique",
           "columns": [
@@ -10353,6 +10324,10 @@
         "product_sessions_timezone_check": {
           "name": "product_sessions_timezone_check",
           "value": "timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'"
+        },
+        "product_sessions_online_provider_check": {
+          "name": "product_sessions_online_provider_check",
+          "value": "location_id IS NOT NULL OR assigned_member_id IS NOT NULL"
         }
       }
     },

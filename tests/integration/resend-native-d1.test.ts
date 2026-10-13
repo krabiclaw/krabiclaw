@@ -198,7 +198,7 @@ test('Resend delivery events move a guest-thread delivery forward only and publi
   fakeResend(t)
   const { runtime, db, hubs } = await runtimeWithSchema()
   try {
-    await db.prepare("INSERT INTO organization (id, name, slug, subdomain) VALUES ('org-proof', 'Proof', 'proof', 'proof')").run()
+    await db.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES ('org-proof', 'Proof', 'proof', 'proof', 'USD', 'UTC')").run()
     const now = new Date().toISOString()
     const opening = requestInsertQueries({ id: 'thread-proof', kind: 'contact', organization_id: 'org-proof', location_id: null, user_id: null, review_id: null, conversation_state: 'needs_attention', resolved_at: null, payload: { guest: { name: 'Guest', email: 'guest@provider-proof.com', phone: null }, subject: null, message: 'Hello', consent_at: null, ip_hash: null }, created_at: now, updated_at: now })
     await db.batch(opening.map(write => db.prepare(write.query).bind(...write.params)))
@@ -382,7 +382,7 @@ test('an article is announced once as a native Broadcast whose id is stored befo
     await seedUsers(db)
     const published = new Date(Date.now() - 60_000).toISOString()
     for (const statement of [
-      "INSERT INTO organization (id, name, slug, subdomain, theme_id, status) VALUES ('org-platform', 'KrabiClaw', 'krabiclaw', 'krabiclaw', 'krabiclaw-theme-v1', 'active')",
+      "INSERT INTO organization (id, name, slug, subdomain, theme_id, status, default_currency, timezone) VALUES ('org-platform', 'KrabiClaw', 'krabiclaw', 'krabiclaw', 'krabiclaw-theme-v1', 'active', 'USD', 'UTC')",
       "INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('locale-platform-en', 'org-platform', 'en', 1, 'published')",
       `INSERT INTO content_documents (id, organization_id, kind, row_role, locale, title, slug, summary, status, visibility, published_at, first_published_at, metadata_json)
        VALUES ('article-proof', 'org-platform', 'article', 'root', 'en', 'Proof article', 'proof-article', 'Why proof matters', 'published', 'listed', '${published}', '${published}', '{"collection":"blog"}')`,

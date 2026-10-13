@@ -162,10 +162,12 @@
 </template>
 
 <script setup lang="ts">
+import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import SettingRow from '~/components/dashboard/SettingRow.vue'
 import { formatTimestamp } from '~/utils/timezone'
 const dashboardApi = useDashboardApi()
 definePageMeta({ layout: 'dashboard' })
+const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 
 
 type DomainStatus = 'pending' | 'verifying' | 'active' | 'blocked' | 'failed' | 'disabled' | 'deleted'
@@ -435,7 +437,7 @@ async function makePrimary(group: DomainGroup) {
 
 async function deleteGroup(group: DomainGroup) {
   if (!organizationId.value || !group.primary_domain_id || deletingGroupId.value) return
-  if (!confirm(`Remove ${group.domain} from this organization?`)) return
+  if (!await confirmDialog.open({ title: `Remove ${group.domain}`, description: 'The domain stops serving this site.', confirmLabel: 'Remove domain', cancelLabel: 'Keep domain' })) return
   deletingGroupId.value = group.id
   actionError.value = null
   try {

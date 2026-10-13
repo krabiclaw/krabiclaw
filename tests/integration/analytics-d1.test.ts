@@ -16,8 +16,8 @@ test('analytics preserves duplicate, attribution, summary semantics on D1', { ti
     const db = await runtime.getD1Database('DB')
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
-    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, analytics_data_start_at)
-      VALUES ('org-proof', 'Proof', 'proof', 'proof', '{"config":{"default_timezone":"Asia/Bangkok"}}', '2026-09-04T17:00:00.000Z')`).run()
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, analytics_data_start_at, default_currency, timezone)
+      VALUES ('org-proof', 'Proof', 'proof', 'proof', '{}', '2026-09-04T17:00:00.000Z', 'USD', 'Asia/Bangkok')`).run()
     const input: TenantPageviewInput = {
       eventId: 'event-first', organizationId: 'org-proof', pagePath: '/menu', locale: 'en',
       referrerHost: 'google.com', attribution: { utm_source: 'google', utm_medium: 'cpc', utm_campaign: 'first' },

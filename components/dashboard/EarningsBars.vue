@@ -4,7 +4,7 @@
     rest outlined, a dotted baseline and the amounts on the right. Drawn as
     boxes so it reads in both themes and needs no library.
   -->
-  <div class="flex h-56 items-end gap-2 border-b border-default pb-2" role="img" :aria-label="`Earnings by month: ${months.map(m => `${monthLabel(m.month)} ${paymentMoney(m.paid - m.refunded, currency ?? 'USD')}`).join(', ')}`">
+  <div class="flex h-56 items-end gap-2 border-b border-default pb-2" role="img" :aria-label="`Earnings by month: ${months.map(m => `${monthLabel(m.month)} ${paymentMoney(m.paid - m.refunded, currency)}`).join(', ')}`">
     <button
       v-for="row in months"
       :key="row.month"
@@ -27,7 +27,7 @@
 import { paymentMoney } from '~/shared/payment-display'
 import { formatCalendarDate } from '~/utils/timezone'
 
-const props = defineProps<{ months: Array<{ month: string; paid: number; refunded: number }>; selected: string; currency: string | null }>()
+const props = defineProps<{ months: Array<{ month: string; paid: number; refunded: number }>; selected: string; currency: string }>()
 defineEmits<{ select: [month: string] }>()
 
 const top = computed(() => Math.max(1, ...props.months.map(row => row.paid - row.refunded)))

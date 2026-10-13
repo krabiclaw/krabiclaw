@@ -1,6 +1,7 @@
 <template>
-  <DashboardLeafPanel :id="`booking-${concern}`" :title="setting.title" :lead="setting.lead" :saving="p.saving.value" :disabled="!p.product.value || !valid || !dirty" :error="p.loadError.value ?? p.saveError.value ?? ''" @cancel="p.revert" @save="save">
-    <template v-if="p.product.value">
+  <DashboardLeafPanel :id="`booking-${concern}`" :title="setting.title" :lead="setting.lead" :saving="p.saving.value" :disabled="!p.product.value || !valid || !form?.dirty" :error="p.loadError.value ?? p.saveError.value ?? ''" @cancel="p.revert" @save="form?.submit()">
+    <!-- Nuxt UI's form state says whether the owner changed anything; Save waits for it. -->
+    <UForm v-if="p.product.value" ref="form" :state="p.form" @submit="save">
       <SettingRow v-if="concern === 'enabled'" v-model="p.form.bookable" label="Use a booking calendar" />
       <UFormField v-else-if="concern === 'duration'" label="Duration in minutes" required>
         <UInput v-model="p.form.booking_duration" inputmode="numeric" pattern="[0-9]*" class="w-full" />
@@ -27,7 +28,7 @@
         <SettingRow v-model="p.form.held_online" :disabled="p.form.scheduling_mode !== 'provider' && !p.form.held_online" label="Held online" />
         <UButton v-if="p.form.scheduling_mode !== 'provider'" class="mt-4" variant="outline" :to="`${level.to.value}/assignment`">Choose who guests meet</UButton>
       </div>
-    </template>
+    </UForm>
   </DashboardLeafPanel>
 </template>
 
@@ -92,19 +93,7 @@ const valid = computed(() => {
   if (concern.value === 'payment') return !p.form.online_payment_required || paymentEntitled.value
   return true
 })
-const dirty = computed(() => {
-  const config = p.product.value?.booking
-  switch (concern.value) {
-    case 'enabled': return p.form.bookable !== Boolean(config)
-    case 'duration': return Number(p.form.booking_duration) !== config?.duration_minutes
-    case 'capacity': return (p.form.booking_capacity === '' ? null : Number(p.form.booking_capacity)) !== config?.default_capacity
-    case 'confirmation': return p.form.confirmation_mode !== config?.confirmation_mode
-    case 'assignment': return p.form.assigned_member_id !== (config?.assigned_member_id ?? '') || p.form.assigned_team_id !== (config?.assigned_team_id ?? '') || p.form.scheduling_mode !== config?.scheduling_mode
-    case 'payment': return p.form.online_payment_required !== config?.online_payment_required
-    case 'location': return p.form.held_online !== config?.held_online
-    default: return false
-  }
-})
+const form = useTemplateRef('form')
 function save() { return p.save(level.to.value ?? undefined, concern.value as BookingConcern) }
 onBeforeRouteLeave(() => { p.revert() })
 </script>

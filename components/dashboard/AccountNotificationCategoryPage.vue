@@ -1,5 +1,6 @@
 <template>
-  <div v-if="setting" class="space-y-6">
+  <!-- A new revision is a fresh form: Cancel puts the draft back and clears what the form saw as changed. -->
+  <UForm v-if="setting" ref="form" :key="revision" :state="draft" class="space-y-6" @submit="save">
     <UAlert v-if="failure" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="failure" />
 
     <div>
@@ -10,8 +11,7 @@
     <NuxtLink v-if="!phoneVerified" to="/dashboard/account/profile/personal" class="block text-sm text-muted underline underline-offset-2">
       Add a WhatsApp number
     </NuxtLink>
-
-  </div>
+  </UForm>
 </template>
 
 <script setup lang="ts">
@@ -25,7 +25,7 @@ const props = defineProps<{ category: NotificationCategory }>()
 
 const session = authClient.useSession()
 const sessionData = computed(() => session.value.data)
-const { preferences, save } = useNotificationPreferences(() => sessionData.value?.user?.id)
+const { preferences, save: savePreferences } = useNotificationPreferences(() => sessionData.value?.user?.id)
 
 if (!isNotificationCategory(props.category)) throw createError({ statusCode: 404, statusMessage: 'Page not found' })
 
@@ -46,21 +46,23 @@ watchEffect(() => {
   draft.whatsapp = current.whatsapp
 })
 
-const dirty = computed(() => Boolean(setting.value) && (draft.email !== setting.value!.email || draft.whatsapp !== setting.value!.whatsapp))
+const form = useTemplateRef('form')
+const revision = ref(0)
+const dirty = computed(() => Boolean(form.value?.dirty))
 
 function cancel() {
   if (!setting.value) return
   draft.email = setting.value.email
   draft.whatsapp = setting.value.whatsapp
   failure.value = ''
+  revision.value += 1
 }
 
-async function commit() {
-  if (!dirty.value) return
+async function save() {
   saving.value = true
   failure.value = ''
   try {
-    await save(props.category, { email: draft.email, whatsapp: draft.whatsapp })
+    await savePreferences(props.category, { email: draft.email, whatsapp: draft.whatsapp })
   } catch (cause) {
     failure.value = cause instanceof Error ? cause.message : 'Saving failed. Please try again.'
   } finally {
@@ -69,5 +71,5 @@ async function commit() {
 }
 
 // The page it sits in owns the Cancel/Save row, so every leaf commits the same way.
-defineExpose({ dirty, saving, cancel, commit })
+defineExpose({ dirty, saving, cancel, commit: () => form.value?.submit() })
 </script>

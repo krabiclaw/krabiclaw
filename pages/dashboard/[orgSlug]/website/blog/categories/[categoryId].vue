@@ -3,10 +3,10 @@
     id="organization-blog-category"
     :title="category?.name ?? 'Category'"
     :saving="saving"
-    :disabled="!dirty || !name.trim()"
+    :disabled="!form?.dirty || !name.trim()"
     :error="actionError || loadFailure"
-    @cancel="reset"
-    @save="save"
+    @cancel="reset(); revision += 1"
+    @save="form?.submit()"
   >
     <template v-if="category" #right>
       <DashboardResourceLocalization
@@ -18,7 +18,7 @@
         :language-settings-path="`/dashboard/${route.params.orgSlug}/website/localization`"
       />
     </template>
-    <div v-if="category" class="space-y-6">
+    <UForm v-if="category" ref="form" :key="revision" :state="{ name, description, parent }" class="space-y-6" @submit="save">
       <UFormField label="Name" required>
         <UInput v-model="name" autofocus class="w-full" />
       </UFormField>
@@ -29,7 +29,7 @@
       <UFormField label="Parent" help="Categories nest up to three levels deep.">
         <USelect v-model="parent" :items="parentOptions" value-key="value" class="w-full" />
       </UFormField>
-    </div>
+    </UForm>
   </DashboardLeafPanel>
 </template>
 
@@ -82,9 +82,9 @@ function reset() {
   parent.value = category.value?.parent_id ?? TOP_LEVEL
 }
 watch(category, reset, { immediate: true })
-const dirty = computed(() => !!category.value && (name.value.trim() !== category.value.name
-  || (description.value.trim() || null) !== category.value.description
-  || (parent.value || null) !== category.value.parent_id))
+const form = useTemplateRef('form')
+// Cancel restores the draft; a new revision is a fresh form, so nothing reads as changed.
+const revision = ref(0)
 
 const saving = ref(false)
 const actionError = ref('')

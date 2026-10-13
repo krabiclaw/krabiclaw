@@ -234,7 +234,7 @@ CREATE TABLE `business_locations` (
 	`google_review_url` text,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
-	`timezone` text,
+	`timezone` text NOT NULL,
 	`max_capacity` integer,
 	`seo_title` text,
 	`seo_description` text,
@@ -244,7 +244,8 @@ CREATE TABLE `business_locations` (
 	CONSTRAINT "business_locations_address_check" CHECK(address IS NULL OR (json_valid(address) AND json_type(address) IS 'object' AND json_type(address, '$.regionCode') IS 'text' AND trim(address ->> '$.regionCode') <> '' AND json_type(address, '$.addressLines') IS 'array' AND json_array_length(address, '$.addressLines') > 0 AND (json_type(address, '$.languageCode') IS NULL OR json_type(address, '$.languageCode') IS 'text') AND (json_type(address, '$.locality') IS NULL OR json_type(address, '$.locality') IS 'text') AND (json_type(address, '$.sublocality') IS NULL OR json_type(address, '$.sublocality') IS 'text') AND (json_type(address, '$.administrativeArea') IS NULL OR json_type(address, '$.administrativeArea') IS 'text') AND (json_type(address, '$.postalCode') IS NULL OR json_type(address, '$.postalCode') IS 'text'))),
 	CONSTRAINT "business_locations_categories_check" CHECK(categories IS NULL OR (json_valid(categories) AND json_type(categories) IS 'array')),
 	CONSTRAINT "business_locations_opening_hours_check" CHECK(opening_hours IS NULL OR (json_valid(opening_hours) AND json_type(opening_hours) IS 'object' AND json_type(opening_hours, '$.periods') IS 'array')),
-	CONSTRAINT "business_locations_special_hours_check" CHECK(special_hours IS NULL OR (json_valid(special_hours) AND json_type(special_hours) IS 'array'))
+	CONSTRAINT "business_locations_special_hours_check" CHECK(special_hours IS NULL OR (json_valid(special_hours) AND json_type(special_hours) IS 'array')),
+	CONSTRAINT "business_locations_timezone_check" CHECK(timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*')
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `business_locations_organization_id_slug_unique` ON `business_locations` (`organization_id`,`slug`);--> statement-breakpoint
@@ -837,13 +838,14 @@ CREATE TABLE `organization` (
 	`createdAt` integer DEFAULT (unixepoch()) NOT NULL,
 	`logo` text,
 	`consultation_settings_json` text,
-	`settings_json` text DEFAULT '{"config":{"default_timezone":"UTC"}}' NOT NULL,
+	`settings_json` text DEFAULT '{}' NOT NULL,
 	`theme_id` text DEFAULT 'saya-theme-v1' NOT NULL,
 	`subdomain` text,
 	`brand_description` text,
 	`contact_email` text,
 	`contact_phone` text,
-	`default_currency` text,
+	`default_currency` text NOT NULL,
+	`timezone` text NOT NULL,
 	`status` text DEFAULT 'active' NOT NULL,
 	`onboarding_status` text DEFAULT 'pending' NOT NULL,
 	`url_structure` text DEFAULT 'location_subdirectories' NOT NULL,
@@ -864,7 +866,8 @@ CREATE TABLE `organization` (
 	CONSTRAINT "organization_config_partnerships_email_check" CHECK(json_type(settings_json, '$.config.partnerships_email') IS NULL OR json_type(settings_json, '$.config.partnerships_email') IS 'text'),
 	CONSTRAINT "organization_config_catering_email_check" CHECK(json_type(settings_json, '$.config.catering_email') IS NULL OR json_type(settings_json, '$.config.catering_email') IS 'text'),
 	CONSTRAINT "organization_config_careers_email_check" CHECK(json_type(settings_json, '$.config.careers_email') IS NULL OR json_type(settings_json, '$.config.careers_email') IS 'text'),
-	CONSTRAINT "organization_config_default_timezone_check" CHECK(json_type(settings_json, '$.config.default_timezone') IS 'text' AND length(json_extract(settings_json, '$.config.default_timezone')) > 0),
+	CONSTRAINT "organization_default_currency_check" CHECK(length(default_currency) = 3 AND default_currency = upper(default_currency) AND default_currency NOT GLOB '*[^A-Z]*'),
+	CONSTRAINT "organization_timezone_check" CHECK(timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'),
 	CONSTRAINT "organization_compliance_metadata_check" CHECK(json_type(settings_json, '$.compliance.metadata_json') IS NULL OR json_type(settings_json, '$.compliance.metadata_json') IN ('null', 'object')),
 	CONSTRAINT "organization_config_object_check" CHECK(json_type(settings_json, '$.config') IS NULL OR json_type(settings_json, '$.config') IS 'object'),
 	CONSTRAINT "organization_compliance_object_check" CHECK(json_type(settings_json, '$.compliance') IS NULL OR json_type(settings_json, '$.compliance') IS 'object'),
@@ -1064,7 +1067,6 @@ CREATE TABLE `payment_checkout_holds` (
 	`quantity` integer NOT NULL,
 	`amount` integer NOT NULL,
 	`currency` text NOT NULL,
-	`calendar_group` text,
 	`starts_at` text NOT NULL,
 	`ends_at` text NOT NULL,
 	`status` text DEFAULT 'active' NOT NULL,
@@ -1075,12 +1077,11 @@ CREATE TABLE `payment_checkout_holds` (
 	FOREIGN KEY (`buyer_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
 	FOREIGN KEY (`payment_id`) REFERENCES `payments`(`id`) ON UPDATE no action ON DELETE restrict,
 	CONSTRAINT "payment_holds_quantity_check" CHECK(quantity > 0 AND amount > 0),
-	CONSTRAINT "payment_holds_subject_check" CHECK((product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL AND converted_reservation_id IS NULL) OR (product_id IS NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND calendar_group IS NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL))
+	CONSTRAINT "payment_holds_subject_check" CHECK((product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL AND converted_reservation_id IS NULL) OR (product_id IS NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL))
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `payment_checkout_holds_payment_id_unique` ON `payment_checkout_holds` (`payment_id`);--> statement-breakpoint
 CREATE INDEX `payment_holds_capacity_idx` ON `payment_checkout_holds` (`session_id`,`status`,`expires_at`);--> statement-breakpoint
-CREATE INDEX `payment_holds_calendar_idx` ON `payment_checkout_holds` (`organization_id`,`calendar_group`,`status`,`expires_at`);--> statement-breakpoint
 CREATE INDEX `payment_holds_reservation_idx` ON `payment_checkout_holds` (`organization_id`,`location_id`,`starts_at`,`status`,`expires_at`);--> statement-breakpoint
 CREATE TABLE `payment_claims` (
 	`token_hash` text PRIMARY KEY NOT NULL,
@@ -1317,7 +1318,7 @@ CREATE TABLE `product_availability_rules` (
 	`id` text PRIMARY KEY NOT NULL,
 	`organization_id` text NOT NULL,
 	`product_id` text NOT NULL,
-	`location_id` text,
+	`location_id` text NOT NULL,
 	`timezone` text NOT NULL,
 	`weekday` integer NOT NULL,
 	`start_time` text NOT NULL,
@@ -1347,8 +1348,7 @@ CREATE TABLE `product_availability_rules` (
 	CONSTRAINT "product_availability_rules_timezone_check" CHECK(timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*')
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `product_availability_rules_slot_unique` ON `product_availability_rules` (`product_id`,`location_id`,`weekday`,`start_time`,`interval_weeks`) WHERE location_id IS NOT NULL;--> statement-breakpoint
-CREATE UNIQUE INDEX `product_availability_rules_neutral_slot_unique` ON `product_availability_rules` (`product_id`,`weekday`,`start_time`,`interval_weeks`) WHERE location_id IS NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX `product_availability_rules_slot_unique` ON `product_availability_rules` (`product_id`,`location_id`,`weekday`,`start_time`,`interval_weeks`);--> statement-breakpoint
 CREATE INDEX `product_availability_rules_product_idx` ON `product_availability_rules` (`product_id`,`weekday`,`start_time`);--> statement-breakpoint
 CREATE UNIQUE INDEX `product_availability_rules_org_id_unique` ON `product_availability_rules` (`organization_id`,`id`);--> statement-breakpoint
 CREATE TABLE `product_booking_configs` (
@@ -1358,8 +1358,7 @@ CREATE TABLE `product_booking_configs` (
 	`default_capacity` integer,
 	`confirmation_mode` text DEFAULT 'instant' NOT NULL,
 	`online_payment_required` integer DEFAULT 0 NOT NULL,
-	`online_timezone` text,
-	`calendar_group` text,
+	`held_online` integer DEFAULT 0 NOT NULL,
 	`scheduling_mode` text DEFAULT 'legacy' NOT NULL,
 	`assigned_member_id` text,
 	`assigned_team_id` text,
@@ -1376,7 +1375,7 @@ CREATE TABLE `product_booking_configs` (
 	CONSTRAINT "product_booking_configs_capacity_check" CHECK(default_capacity IS NULL OR default_capacity >= 0),
 	CONSTRAINT "product_booking_configs_confirmation_check" CHECK(confirmation_mode IN ('instant', 'review')),
 	CONSTRAINT "product_booking_configs_payment_check" CHECK(online_payment_required IN (0, 1)),
-	CONSTRAINT "product_booking_configs_calendar_check" CHECK(calendar_group IS NULL OR length(trim(calendar_group)) > 0)
+	CONSTRAINT "product_booking_configs_held_online_check" CHECK(held_online IN (0, 1) AND (held_online = 0 OR (scheduling_mode = 'provider' AND (assigned_member_id IS NOT NULL OR assigned_team_id IS NOT NULL))))
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `product_booking_configs_org_product_unique` ON `product_booking_configs` (`organization_id`,`product_id`);--> statement-breakpoint
@@ -1477,12 +1476,12 @@ CREATE TABLE `product_sessions` (
 	CONSTRAINT "product_sessions_interval_check" CHECK(ends_at > starts_at),
 	CONSTRAINT "product_sessions_status_check" CHECK(status IN ('scheduled', 'cancelled')),
 	CONSTRAINT "product_sessions_capacity_check" CHECK(capacity IS NULL OR capacity >= 0),
-	CONSTRAINT "product_sessions_timezone_check" CHECK(timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*')
+	CONSTRAINT "product_sessions_timezone_check" CHECK(timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'),
+	CONSTRAINT "product_sessions_online_provider_check" CHECK(location_id IS NOT NULL OR assigned_member_id IS NOT NULL)
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `product_sessions_occurrence_unique` ON `product_sessions` (`product_id`,`source_occurrence_key`) WHERE source_occurrence_key IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX `product_sessions_location_instant_unique` ON `product_sessions` (`product_id`,`location_id`,`starts_at`) WHERE location_id IS NOT NULL AND assigned_member_id IS NULL;--> statement-breakpoint
-CREATE UNIQUE INDEX `product_sessions_neutral_instant_unique` ON `product_sessions` (`product_id`,`starts_at`) WHERE location_id IS NULL AND assigned_member_id IS NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX `product_sessions_provider_location_instant_unique` ON `product_sessions` (`product_id`,`location_id`,`starts_at`,`assigned_member_id`) WHERE location_id IS NOT NULL AND assigned_member_id IS NOT NULL;--> statement-breakpoint
 CREATE UNIQUE INDEX `product_sessions_provider_neutral_instant_unique` ON `product_sessions` (`product_id`,`starts_at`,`assigned_member_id`) WHERE location_id IS NULL AND assigned_member_id IS NOT NULL;--> statement-breakpoint
 CREATE INDEX `product_sessions_product_start_idx` ON `product_sessions` (`product_id`,`starts_at`,`status`);--> statement-breakpoint
