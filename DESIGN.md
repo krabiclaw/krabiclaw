@@ -318,7 +318,7 @@ field does not stretch to the pane. A leaf that needs more width is a grid
 editor and says so. An index that is a column rather than a list — Menu,
 Catalog, a booking's notes — is `DashboardIndexPanel column`: the same width,
 its title heading the column as a leaf's does, its footer keeping the column's
-edges. A page never narrows itself.
+edges.
 
 **Short text is bare.** A name, title, headline, slug or link renders as a
 borderless 22–26px field with a counter, the way Airbnb's title and custom

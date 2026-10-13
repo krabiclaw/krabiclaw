@@ -8,7 +8,7 @@
   <DashboardIndexPanel
     :id="personalScope ? 'account-calendar' : 'org-calendar'"
     title="Calendar"
-    :navbar-ui="personalScope ? undefined : { title: 'sr-only', root: 'h-(--ui-header-height) shrink-0 flex items-center justify-between px-4 sm:px-6 gap-1.5', center: 'flex min-w-0 flex-1 items-center' }"
+    :navbar-ui="personalScope ? undefined : { title: 'sr-only', center: 'flex min-w-0 flex-1 items-center' }"
   >
     <!-- Which location the calendar is: Airbnb names the listing in its header, and tapping it switches. An account has no branch to choose. -->
     <template v-if="!personalScope" #center>

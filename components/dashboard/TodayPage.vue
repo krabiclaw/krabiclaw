@@ -2,7 +2,7 @@
   <DashboardIndexPanel
     :id="personalScope ? 'account-today' : 'org-today'"
     title="Today"
-    :navbar-ui="{ title: 'sr-only', root: 'h-(--ui-header-height) shrink-0 flex items-center justify-between px-4 sm:px-6 gap-1.5', center: 'flex flex-1 items-center justify-center' }"
+    :navbar-ui="{ title: 'sr-only', center: 'flex flex-1 items-center justify-center' }"
   >
     <!--
       The title is announced but not drawn: the pills say which range is on
@@ -24,7 +24,7 @@
         </div>
     </template>
 
-    <div class="mx-auto w-full max-w-[var(--ws-page-reading,56rem)] pb-24">
+    <div class="mx-auto w-full max-w-4xl pb-24">
       <UAlert
         v-if="realtime.status.value === 'failed'"
         class="mb-6"
