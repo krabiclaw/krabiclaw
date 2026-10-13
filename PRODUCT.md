@@ -33,7 +33,7 @@ not establish Checkout, refund or buyer-account availability.
 
 ## Plans
 
-Runtime identities are `free` and `growth`; one organization subscription covers
+Runtime identities are `free`, `growth` and `commerce`; one organization subscription covers
 its sites. Customer display names, Stripe product IDs, price IDs and lookup keys
 are separate concepts. Renaming a plan label does not authorize an ID migration.
 
@@ -42,14 +42,20 @@ are separate concepts. Renaming a plan label does not authorize an ID migration.
 | Paid plan name, description, image, marketing bullets | Stripe Product: `name`, `description`, `images`, `marketing_features` |
 | Paid amount, currency and cadence | Stripe recurring Prices, validated by the application catalog contract |
 | Paid display metadata | Stripe Product metadata read by `server/utils/billing-plans.ts` |
-| Starter presentation and CTAs | `server/utils/billing-plans.ts`; Starter has no Stripe subscription product |
+| Basic presentation and CTAs | `server/utils/billing-plans.ts`; the free plan has no Stripe subscription product |
 | Runtime entitlement policy | `server/utils/billing-entitlements.ts` |
 | Current organization access | Better Auth subscription rows read by `server/utils/billing-access.ts`, then the actual operation gate |
-| Free/Growth comparison rows | `shared/pricing-comparison.ts`, reading the runtime entitlement policy |
+| Basic/Growth/Commerce comparison rows | `shared/pricing-comparison.ts`, reading the runtime entitlement policy |
 
 Paid billing surfaces consume `/api/billing/plans`. Entitlements grant capability,
 not presentation copy. An active/trialing subscription must satisfy the canonical
 billing projection; a declaration is not proof that a send or write enforces it.
+
+Commerce enables online payments; Basic and Growth retain bookings without
+online payment. Payments also requires the merchant's Stripe setup and the
+relevant product booking/payment configuration. The production pricing page
+and Payments help category were read in Chrome on 2026-10-07; this was a
+read-only availability/copy check, not a new transaction qualification.
 
 ## Decisions still open
 

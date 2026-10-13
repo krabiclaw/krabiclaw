@@ -14,7 +14,7 @@ Source reconciliation: 2026-10-04 against staging `baa1bd2ee`, current PRODUCT.m
 | Start date | May 2026 | First repository commit that renamed the project to KrabiClaw: 2026-05-03 |
 | Initial commitment | Full time | Confirmed by the owner on 2026-09-07 |
 | Product type | Web SaaS | Product contract and pricing model |
-| Business model | Free Starter and paid subscription | PRODUCT.md; paid display name and prices belong to Stripe |
+| Business model | Free Basic and paid Growth/Commerce subscriptions | PRODUCT.md; current production pricing read 2026-10-07; paid display name and prices belong to Stripe |
 | Primary audience | Restaurants, experience operators, and professional-service businesses | `PRODUCT.md` and `CONTEXT.md` |
 | MCP endpoint | https://krabiclaw.com/api/mcp | `docs/mcp.md` |
 | MCP registry identity | io.github.paulchrisluke/krabiclaw | Historical listing; re-verify live status before reuse (#941) |
@@ -33,7 +33,7 @@ The next restaurant campaign should show a supported task being completed: the r
 
 ### Claims that remain unresolved
 
-[PRODUCT.md](../../PRODUCT.md) owns current product policy; read its open decisions before any plan comparison. Paid names, amounts, currency and cadence come from the current `/api/billing/plans` Stripe-backed response, not this profile or an old snapshot. Never infer an annual amount, substitute an interval or turn missing data into zero. Starter is the free/no-subscription contract.
+[PRODUCT.md](../../PRODUCT.md) owns current product policy; read its open decisions before any plan comparison. Paid names, amounts, currency and cadence come from the current `/api/billing/plans` Stripe-backed response, not this profile or an old snapshot. Never infer an annual amount, substitute an interval or turn missing data into zero. Basic is the current free/no-subscription display name; its runtime identity remains `free`. Commerce enables online payments, while Basic and Growth retain bookings without online payment. Verify merchant readiness and product configuration before promising a paid booking.
 
 Review-request sending is currently paid, with the Free decision open. WhatsApp business notifications require paid messaging; authentication OTP is separate. Saya/Blawby provisioning and Growth marketing disagree. Community/Priority support copy does not establish a service promise. Do not publish settled comparison claims until these discrepancies are resolved. Customer GA4/Search Console integration, automatic social synchronization and ranking guarantees are not established by internal analytics or a tool name.
 
