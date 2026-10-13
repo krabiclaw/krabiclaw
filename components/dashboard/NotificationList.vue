@@ -12,7 +12,7 @@
       />
     </div>
 
-    <div class="mx-auto w-full max-w-[var(--ws-page-narrow,45rem)]">
+    <div>
       <UAlert
         v-if="loadError || realtimeFailed"
         color="warning"

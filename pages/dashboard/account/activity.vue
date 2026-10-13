@@ -5,9 +5,9 @@
     bottom, as Airbnb's "Canceled reservations" does. A row on Menu, so it
     renders beside Menu and Back returns there.
   -->
-  <DashboardIndexPanel id="account-activity" title="Past activity">
+  <DashboardIndexPanel id="account-activity" title="Past activity" column="reading">
     <UAlert v-if="error" color="error" title="Past activity could not be loaded" :description="getErrorMessage(error, 'Activity request failed.')" />
-    <div v-else-if="data" class="mx-auto max-w-3xl space-y-10 pb-6">
+    <div v-else-if="data" class="space-y-10 pb-6">
       <section v-for="section in sections" :key="section.label">
         <h2 class="mb-4 flex items-center gap-4 text-sm text-muted after:h-px after:flex-1 after:bg-border">{{ section.label }}</h2>
         <div class="space-y-4"><AccountActivityCard v-for="item in section.items" :key="`${item.kind}:${item.id}`" :item="item" /></div>

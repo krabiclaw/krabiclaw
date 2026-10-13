@@ -1,6 +1,5 @@
 <template>
-  <!-- A menu is a column, not the page: alone on a wide screen it keeps a phone's measure. -->
-  <div class="mx-auto w-full max-w-xl space-y-6">
+  <div class="space-y-6">
 
     <!--
       Airbnb's hosting Menu leads with two square cards — Earnings and Insights,

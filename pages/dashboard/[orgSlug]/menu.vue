@@ -12,7 +12,8 @@
     Menu tab's own list. The header carries the avatar from `md` up, where
     Airbnb's does too.
   -->
-  <DashboardIndexPanel id="organization-settings" title="Menu">
+  <!-- A menu is a column, not the page: alone on a wide screen it keeps a phone's measure. -->
+  <DashboardIndexPanel id="organization-settings" title="Menu" column="leaf">
     <template #right>
       <UButton
         icon="i-lucide-search"

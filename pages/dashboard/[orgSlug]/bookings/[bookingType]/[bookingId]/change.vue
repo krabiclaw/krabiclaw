@@ -4,15 +4,17 @@
     and nothing persists until Send. That is why the field leaves have no Save
     of their own — the commit is this level's footer.
   -->
-  <DashboardIndexPanel id="booking-change" :title="`Change ${b.noun.value}`" :auto-open="firstField">
-    <div v-if="b.booking.value" class="mx-auto w-full max-w-md">
+  <DashboardIndexPanel
+    id="booking-change"
+    title="What do you want to change?"
+    :lead="b.booking.value ? `${b.firstName(b.booking.value.guestName ?? '')} confirms the change before anything moves.` : undefined"
+    :auto-open="firstField"
+    column="leaf"
+  >
+    <div v-if="b.booking.value">
       <UAlert v-if="b.changeError.value" class="mb-6" color="error" variant="soft" icon="i-lucide-circle-alert" :description="b.changeError.value" />
-      <h1 class="text-[32px] font-semibold leading-tight text-highlighted">What do you want to change?</h1>
-      <p class="mt-2 text-base text-muted">
-        {{ b.firstName(b.booking.value.guestName ?? '') }} confirms the change before anything moves.
-      </p>
 
-      <div class="mt-6 flex items-center gap-4 border-t border-default pt-6">
+      <div class="flex items-center gap-4 border-t border-default pt-6">
         <img v-if="b.changeLocation.value?.imageUrl" :src="b.changeLocation.value.imageUrl" alt="" class="size-14 shrink-0 rounded-xl object-cover">
         <p class="min-w-0 flex-1 text-base font-medium text-highlighted">{{ b.changeLocation.value?.title }}</p>
         <UButton
@@ -47,6 +49,7 @@
 
     <template #footer>
       <DashboardPanelFooter
+        column="leaf"
         save-label="Send request"
         :loading="b.changeSaving.value"
         :disabled="!b.changeValid.value || !b.changeDirty.value"

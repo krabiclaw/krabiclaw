@@ -3,8 +3,8 @@
     A day is a level with children: the bookings on it open as leaves of the
     day, so Back from one is the day and the Calendar tab stays lit.
   -->
-  <DashboardIndexPanel :id="personalScope ? 'account-calendar-day' : 'calendar-day'" :title="title">
-    <div class="mx-auto w-full max-w-md space-y-6">
+  <DashboardIndexPanel :id="personalScope ? 'account-calendar-day' : 'calendar-day'" :title="title" column="leaf">
+    <div class="space-y-6">
       <UAlert v-if="errorMessage" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="errorMessage" />
       <!--
         Airbnb's day sheet leads with the date's state and why, and the one

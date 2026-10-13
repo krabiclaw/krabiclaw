@@ -5,8 +5,8 @@
     and what, the amount — a total and Export CSV at the foot. A line opens the
     record it paid for.
   -->
-  <DashboardIndexPanel id="earnings-transactions" title="Transactions">
-    <div class="mx-auto w-full max-w-3xl pb-24">
+  <DashboardIndexPanel id="earnings-transactions" title="Transactions" column="reading">
+    <div class="pb-24">
       <div class="flex flex-wrap items-center gap-2">
         <UDropdownMenu :items="monthItems" :content="{ align: 'start' }" :ui="{ content: 'w-56' }">
           <UButton :label="periodLabel" trailing-icon="i-lucide-chevron-down" color="neutral" :variant="from ? 'solid' : 'soft'" class="rounded-full" />

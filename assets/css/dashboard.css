@@ -40,20 +40,6 @@
 .platform-theme {
   --kc-dashboard-top-nav: 4.5rem;
   --kc-dashboard-bottom-nav: calc(4.5rem + env(safe-area-inset-bottom));
-  /* Shared by the top nav and every panel navbar. One gutter, one alignment. */
-  --kc-nav-gutter: 1rem;
-}
-
-@media (width >= 40rem) {
-  .platform-theme {
-    --kc-nav-gutter: 1.5rem;
-  }
-}
-
-@media (width >= 64rem) {
-  .platform-theme {
-    --kc-nav-gutter: 2rem;
-  }
 }
 
 /*
@@ -69,23 +55,3 @@
   }
 }
 
-/*
- * The dashboard's type is measured against Airbnb's host tools: 16px body,
- * 14px muted. base.css scales the platform root to 106% for the marketing
- * site, which made every dashboard control 17px. Scoped with :has so the rule
- * leaves with the dashboard on a client-side navigation to another surface.
- */
-:root:has([data-surface="dashboard"]) {
-  font-size: 100%;
-}
-
-.w-\(--width\) {
-  width: var(--width);
-}
-
-@media (width >= 1024px) {
-  /* stylelint-disable-next-line selector-class-pattern -- utility mirrors Nuxt UI's generated class */
-  .lg\:w-\(--width\) {
-    width: var(--width);
-  }
-}
