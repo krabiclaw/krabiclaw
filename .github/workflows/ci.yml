@@ -202,6 +202,9 @@ jobs:
           https://pottery-house-staging.krabiclaw.com
           https://kikuzuki-krabi-thailand-staging.krabiclaw.com
           https://ncls-staging.krabiclaw.com
+          https://staging.krabiclaw.com
+      - name: Verify published MCP documentation
+        run: yarn mcp:catalog --check-live-docs --base-url https://staging.krabiclaw.com
       - name: Run read-only tenant rendering
         run: yarn test:e2e:tenant-rendering
       - name: Upload staging Playwright report
@@ -277,19 +280,13 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: corepack yarn wrangler deploy --strict
-      - name: Refresh production search index
-        env:
-          PLATFORM_SEARCH_REINDEX_SECRET: ${{ secrets.PLATFORM_SEARCH_REINDEX_SECRET }}
-          SEARCH_BASE_SHA: ${{ github.event.before }}
-          SEARCH_HEAD_SHA: ${{ github.sha }}
-        run: yarn ai-search:sync:prod --changed-since "$SEARCH_BASE_SHA" --changed-until "$SEARCH_HEAD_SHA"
-
   verify-production:
     name: Verify production
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: deploy-production
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
+    environment: production
     env:
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
       STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
@@ -309,6 +306,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
+          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24.18.1"
@@ -327,6 +325,15 @@ jobs:
           https://www.potteryhousekrabi.com
           https://www.kikuzuki-thailand.com
           https://www.northcarolinalegalservices.org
+          https://krabiclaw.com
+      - name: Verify published MCP documentation
+        run: yarn mcp:catalog --check-live-docs --base-url https://krabiclaw.com
+      - name: Refresh production search index
+        env:
+          PLATFORM_SEARCH_REINDEX_SECRET: ${{ secrets.PLATFORM_SEARCH_REINDEX_SECRET }}
+          SEARCH_BASE_SHA: ${{ github.event.before }}
+          SEARCH_HEAD_SHA: ${{ github.sha }}
+        run: yarn ai-search:sync:prod --changed-since "$SEARCH_BASE_SHA" --changed-until "$SEARCH_HEAD_SHA"
       - name: Run read-only production tenant rendering
         run: yarn test:e2e:tenant-rendering
       - name: Upload production Playwright report

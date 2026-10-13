@@ -33,15 +33,13 @@
   --font-jost: "Jost", sans-serif;
   --font-display: "Jost", sans-serif;
 
+  /* Tailwind's own sm, md, lg, xl and 2xl stand. These add names beside them;
+     redefining a standard one moved every `sm:` and `lg:` away from the 40rem
+     and 64rem that handwritten media queries and Nuxt UI's themes assume. */
   --breakpoint-xs: 375px;
-  --breakpoint-sm: 576px;
-  --breakpoint-md: 768px;
-  --breakpoint-lg: 992px;
   /* The public shell swaps between the desktop nav pill and the shared
      hamburger here; header, mobile nav and footer all key off it. */
   --breakpoint-nav: 1080px;
-  --breakpoint-xl: 1200px;
-  --breakpoint-2xl: 1366px;
   --breakpoint-3xl: 1600px;
 
   /* Control radius for the public shell (nav menu items, mobile rows,
@@ -123,9 +121,6 @@
 
 /* ── Krabiclaw brand palette ──────────────────────────────── */
 :root {
-  /* Global type scaling belongs at the root so rem-based sizing stays predictable. */
-  font-size: 106%;
-
   /* Script fallbacks every font stack ends with. A site's chosen family draws
      the characters it has; Thai and Vietnamese fall through to these, and
      Japanese pages add their own (assets/css/japanese-fonts.css). A face
@@ -474,9 +469,18 @@
   --tw-prose-invert-td-borders: var(--ui-border);
 }
 
+.blog-article .prose [id] {
+  scroll-margin-top: 7rem;
+}
+
 .prose code {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.prose code::before,
+.prose code::after {
+  content: none;
 }
 
 .prose table {
@@ -487,13 +491,18 @@
 }
 
 .prose :where(td, th) code {
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 
 .prose th,
 .prose td {
-  word-break: break-word;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.prose th {
+  white-space: nowrap;
 }
 
 .gallery-dot {

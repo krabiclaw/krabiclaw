@@ -1,4 +1,5 @@
 import { definePlugin } from 'nitro'
+import { resolve } from 'node:path'
 import type { PlatformProxy, Unstable_DevWorker } from 'wrangler'
 
 let platformProxy: Promise<PlatformProxy> | undefined
@@ -14,12 +15,18 @@ async function loadWrangler() {
 // reaches by script_name through Wrangler's dev registry. It must be up before
 // the proxy resolves the binding.
 async function startGuestInboxHubWorker() {
-  const { unstable_dev } = await loadWrangler()
+  const { unstable_dev, unstable_readConfig } = await loadWrangler()
+  const config = unstable_readConfig({ config: 'wrangler.toml', env: 'dev' }, { hideWarnings: true })
   return await unstable_dev('server/cloudflare/dev/guest-inbox-hub.worker.ts', {
     config: 'server/cloudflare/dev/wrangler.toml',
+    envFiles: [resolve('.env')],
+    persistTo: resolve('.wrangler/state'),
     local: true,
     logLevel: 'warn',
-    experimental: { disableExperimentalWarning: true },
+    experimental: {
+      d1Databases: config.d1_databases,
+      disableExperimentalWarning: true,
+    },
   })
 }
 

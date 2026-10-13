@@ -6,13 +6,13 @@
     every organization has all three, whatever its template. Each opens a
     view suited to its task; every offering opens the one Product editor.
   -->
-  <DashboardIndexPanel id="catalog" title="Catalog">
+  <DashboardIndexPanel id="catalog" title="Catalog" column="leaf">
     <template #right>
       <UButton :to="`${level.path.value}/new/kind`" icon="i-lucide-plus" color="neutral" variant="soft" square aria-label="Add" data-testid="catalog-add" />
     </template>
 
     <UAlert v-if="loadError" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Catalog could not be loaded" :description="loadError" />
-    <div v-else class="mx-auto w-full max-w-xl space-y-6">
+    <div v-else class="space-y-6">
       <div class="grid grid-cols-3 gap-3">
         <NuxtLink
           v-for="entry in entries"

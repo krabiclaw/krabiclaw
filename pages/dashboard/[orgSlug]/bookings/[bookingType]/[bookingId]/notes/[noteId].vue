@@ -2,13 +2,13 @@
   <DashboardLeafPanel
     id="booking-note"
     title="Edit note"
+    lead="Only your team can see these notes."
     :saving="b.noteSaving.value"
     :disabled="!b.noteDraft.value.trim() || b.noteDraft.value === b.selectedNote.value?.body"
     :error="b.noteError.value ?? ''"
     @save="save"
   >
-    <div class="mx-auto w-full max-w-md space-y-6">
-      <p class="text-base text-muted">Only your team can see these notes.</p>
+    <div class="space-y-6">
       <UFormField label="Note">
         <UTextarea v-model="b.noteDraft.value" :rows="10" maxlength="2000" autofocus class="w-full" placeholder="Add a note to yourself" />
       </UFormField>

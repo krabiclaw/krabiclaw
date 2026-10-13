@@ -84,10 +84,6 @@
   --ui-text-inverted:     var(--site-text);
 }
 
-html.blawby-document {
-  font-size: 100%;
-}
-
 .blawby-container {
   margin-inline: auto;
   max-width: 80rem;

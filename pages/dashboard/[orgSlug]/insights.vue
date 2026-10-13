@@ -1,6 +1,6 @@
 <template>
-  <DashboardIndexPanel id="organization-insights" title="Insights">
-    <div class="mx-auto w-full max-w-5xl space-y-6 pb-10">
+  <DashboardIndexPanel id="organization-insights" title="Insights" column="wide">
+    <div class="space-y-6 pb-10">
       <UAlert
         v-if="loadError"
         color="error"

@@ -6,7 +6,7 @@ import type { SitePalette } from '~/shared/site-palette'
 import type { SiteLogo } from '~/shared/media-placement-contract'
 
 interface TenantOrganizationState {
-  tenantType: TenantType
+  tenantType: TenantType | null
   previewAuthorized: boolean
   organizationId: string | null
   themeId: string | null
@@ -42,7 +42,7 @@ export const useTenantOrganization = () => {
   const tenantContext = useState<TenantOrganizationState>('tenant-context', () => {
     if (event) {
       return {
-        tenantType: (event.context.tenantType as TenantType | undefined) || TENANT_TYPES.PLATFORM,
+        tenantType: (event.context.tenantType as TenantType | undefined) ?? null,
         previewAuthorized: event.context.previewAuthorized === true,
         organizationId: typeof event.context.organizationId === 'string' ? event.context.organizationId : null,
         themeId: typeof event.context.themeId === 'string' ? event.context.themeId : null,
@@ -53,7 +53,7 @@ export const useTenantOrganization = () => {
       }
     }
     return {
-      tenantType: TENANT_TYPES.PLATFORM,
+      tenantType: null,
       previewAuthorized: false,
       organizationId: null,
       themeId: null,

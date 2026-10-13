@@ -1,5 +1,5 @@
 <template>
-  <DashboardIndexPanel id="organization-notifications" title="Notifications">
+  <DashboardIndexPanel id="organization-notifications" title="Notifications" column="reading">
     <NotificationList />
   </DashboardIndexPanel>
 </template>

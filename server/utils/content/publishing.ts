@@ -9,8 +9,6 @@ import {
   formatBlockOutline,
   prepareContentDocumentDeletion,
   getContentBlocksForDocument,
-  getContentOutline,
-  getContentDocumentById,
   listBlocksForDocument,
   updateContentDocument,
   type ContentDocumentChanges,
@@ -47,6 +45,7 @@ import { createPreviewToken, PREVIEW_TOKEN_QUERY, PREVIEW_TOKEN_TTL_MS } from '~
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { getPublishedTenantPage } from '~/server/utils/content/pages'
 import { ARTICLE_CATEGORY_SELECT, articleCategoryJoinSql, articleCategoryMembershipQuery, attachArticleCategory, localizeArticleCategories } from '~/server/utils/content/article-categories'
+import { renderContentBlocksForLlm } from '~/server/utils/platform-llm'
 
 const BLOG_TITLE_MAX = 200
 const BLOG_EXCERPT_MAX = 500
@@ -567,21 +566,20 @@ async function getPublicOrganizationBlogPost(db: DbClient, organizationId: strin
 
   if (!post) return null
 
-  const contentDocument = await getContentDocumentById(db, String(post.id))
-  if (!contentDocument) throw new HTTPError({ statusCode: 500, statusMessage: 'Blog content document is missing' })
-  const [loadedBlocks, rawBlocks, organization] = await Promise.all([
+  const [loadedBlocks, organization] = await Promise.all([
     getContentBlocksForDocument(db, String(post.id)),
-    listBlocksForDocument(db, contentDocument.id),
     loadOrganizationTemplate(db, organizationId),
   ])
+  if (!loadedBlocks) throw new HTTPError({ statusCode: 500, statusMessage: 'Blog content document is missing' })
   const articlePath = tenantBlogPostPath(organization.template, slug, collection)
-  const contentBlocks = loadedBlocks ? await attachPageQa(db, organizationId, articlePath, loadedBlocks) : loadedBlocks
+  const contentBlocks = await attachPageQa(db, organizationId, articlePath, loadedBlocks)
   const socialMedia = (await loadPublicSocialMedia(db, organizationId, 'content_document', [String(post.id)])).get(String(post.id))
   const { author_id: authorId, ...postRecord } = post
   const authors = await findAuthUsersByIds(env, [authorId as string | null])
   const author = typeof authorId === 'string' ? authors.get(authorId) ?? null : null
   return {
-    ...attachArticleCategory(attachCoverMedia({ ...postRecord, content_blocks: contentBlocks ?? [], body: renderContentBlocksToMarkdown(rawBlocks) })),
+    ...attachArticleCategory(attachCoverMedia({ ...postRecord, content_blocks: contentBlocks,
+      body: renderContentBlocksForLlm(contentBlocks) })),
     media: socialMedia?.media ?? [],
     social_image: socialMedia?.social_image ?? null,
     author: author ? { id: author.id, name: author.name, image: author.image } : null,
@@ -633,16 +631,18 @@ export async function getPublishedBlogPost(
   if (!row) return null
   const canonical = await getPublicOrganizationBlogPost(db, organizationId, collection, row.source_slug, env, previewAuthorized)
   if (!canonical) return null
-  const [outlineBlocks, rawBlocks, social] = await Promise.all([
-    getContentOutline(db, row.id), listBlocksForDocument(db, row.id),
+  const [outlineBlocks, social] = await Promise.all([
+    getContentBlocksForDocument(db, row.id),
     loadPublicSocialMedia(db, organizationId, 'content_document', [row.id]),
   ])
-  const contentBlocks = await attachPageQa(db, organizationId, pathOf(row.source_slug), outlineBlocks, locale)
+  if (!outlineBlocks) throw new HTTPError({ statusCode: 500, statusMessage: 'Documentation content document is missing' })
+  const contentBlocks = (await attachPageQa(db, organizationId, pathOf(row.source_slug), outlineBlocks, locale))
+    .map(block => ({ ...block, media: projectLocalizedMediaAlt(block.media.map(item => ({ ...item, alt_text: item.alt_text ?? null })), localizations) }))
   return { ...canonical, id: row.id, title: row.title, excerpt: row.summary, slug,
     seo_keywords: row.seo_keywords,
     category: (await localizeArticleCategories(env, db, organizationId, locale, [canonical]))[0]!.category,
-    updated_at: row.updated_at, body: renderContentBlocksToMarkdown(rawBlocks),
-    content_blocks: contentBlocks.map(block => ({ ...block, media: projectLocalizedMediaAlt(block.media.map(item => ({ ...item, alt_text: item.alt_text ?? null })), localizations) })),
+    updated_at: row.updated_at, body: renderContentBlocksForLlm(contentBlocks),
+    content_blocks: contentBlocks,
     media: projectLocalizedMediaAlt(social.get(row.id)?.media ?? [], localizations),
     social_image: social.get(row.id)?.social_image ?? null,
     localeRepresentations: await listPublicLocaleRepresentations(env, db, { organizationId,

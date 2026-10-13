@@ -100,15 +100,11 @@ export default defineAppConfig({
     card: {
       slots: { root: 'rounded-2xl', body: 'p-6 sm:p-6' }
     },
-    // Every nav bar shares one horizontal gutter so the top nav's logo, the
-    // panel navbar's back control and the page body all start on the same line.
-    // The left slot used to be a centred 45rem column, which put the back arrow
-    // and the title at a different inset from everything above and below them.
+    // The navbar keeps Nuxt UI's `px-4 sm:px-6`, the panel body's and footer's
+    // gutter, so the top nav (which uses the same) and every pane start on one line.
     dashboardNavbar: {
       slots: {
-        // Both variants: Nuxt UI's base is `px-4 sm:px-6`, and an unprefixed
-        // override does not outrank a `sm:` one in tailwind-merge.
-        root: 'px-(--kc-nav-gutter) sm:px-(--kc-nav-gutter) border-b-0',
+        root: 'border-b-0',
         toggle: 'hidden'
       }
     },

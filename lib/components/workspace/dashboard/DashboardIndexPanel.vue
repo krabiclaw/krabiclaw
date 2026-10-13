@@ -7,7 +7,7 @@
     :ui="ui"
   >
     <template #header>
-      <UDashboardNavbar :title="title" :toggle="false" :ui="navbarUi">
+      <UDashboardNavbar :title="heading ? undefined : title" :toggle="false" :ui="navbarUi">
         <template #leading>
           <DashboardNavbarLeading />
         </template>
@@ -25,8 +25,16 @@
 
     <template #body>
       <!-- Alone it uses the frame, as Airbnb's listing grid does; beside a child it is a column. -->
-      <div class="mx-auto w-full" :class="[pair ? 'max-w-2xl' : undefined, fill ? 'flex min-h-0 flex-1 flex-col' : undefined]">
-        <slot />
+      <div class="mx-auto w-full" :class="[width, fill ? 'flex min-h-0 flex-1 flex-col' : undefined]">
+        <!-- A column's title heads the column, as a leaf's does, so the two start on one line. -->
+        <template v-if="heading">
+          <h1 class="text-2xl font-semibold text-highlighted lg:text-[32px] lg:leading-tight">{{ title }}</h1>
+          <p v-if="lead" class="mt-2 text-base text-muted">{{ lead }}</p>
+          <div class="mt-8">
+            <slot />
+          </div>
+        </template>
+        <slot v-else />
       </div>
     </template>
 
@@ -57,7 +65,7 @@
   choosing a child would leave the mode; it opens one when the mode closes.
 */
 import type { RouteLocationRaw } from 'vue-router'
-import { dashboardPanelActionsKey } from './dashboardPanelContext'
+import { dashboardColumnWidths, dashboardPanelActionsKey, type DashboardColumn } from './dashboardPanelContext'
 
 const props = defineProps<{
   id: string
@@ -68,10 +76,26 @@ const props = defineProps<{
   navbarUi?: Record<string, string>
   /** The level is exactly the panel's height and scrolls inside itself: a conversation with its composer at the foot. */
   fill?: boolean
+  /** The level is a column at every width rather than the frame: a menu, a statement, a calendar. */
+  column?: DashboardColumn
+  /** A column's one muted sentence under its title, as a leaf's `lead`. */
+  lead?: string
 }>()
 
 const level = useRouteLevel()
 const pair = computed(() => level.mode.value === 'pair')
+// Beside a child, a column wider than a leaf narrows to the pair's index column.
+const width = computed((): string | undefined => {
+  const column: DashboardColumn | undefined = props.column
+  if (column && (column === 'leaf' || !pair.value)) return dashboardColumnWidths[column]
+  return pair.value ? 'max-w-2xl' : undefined
+})
+// A navbar that names what the level shows — Today's range — keeps the title, announced beside it.
+const slots = useSlots()
+const heading = computed((): boolean => {
+  const column: DashboardColumn | undefined = props.column
+  return Boolean(column) && !slots.center
+})
 // Read through the instance: vue-tsc cannot type `props.id` here (TS2590), and the id is a plain string.
 const instance = getCurrentInstance()
 // Not prefixed `dashboard-panel-`: that prefix names panes, and this is a slot inside one.

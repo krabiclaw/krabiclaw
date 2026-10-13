@@ -1,6 +1,6 @@
 <template>
-  <DashboardIndexPanel id="location-photos" title="Photos">
-    <div class="mx-auto w-full max-w-3xl">
+  <DashboardIndexPanel id="location-photos" title="Photos" column="reading">
+    <div>
       <div class="space-y-6">
 
       <DashboardGridEditor

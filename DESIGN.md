@@ -315,7 +315,13 @@ above or below it. A row carries one line of sub-label. A counter
 
 **Leaf width is fixed.** The shell's content column is `max-w-xl`, and a
 field does not stretch to the pane. A leaf that needs more width is a grid
-editor and says so.
+editor and says so. An index that is a column rather than the frame names
+which column in `DashboardIndexPanel column`: `leaf` (Menu, Catalog, a
+booking's notes), `reading` (Earnings, Payments, Past activity) or `wide`
+(Insights, Today, Calendar). The widths live in `dashboardColumnWidths`; a page
+never states one. A column's title heads it, as a leaf's does, unless the
+navbar names what the level shows — Today's range — and the footer keeps the
+column's edges.
 
 **Short text is bare.** A name, title, headline, slug or link renders as a
 borderless 22–26px field with a counter, the way Airbnb's title and custom
