@@ -3,7 +3,7 @@ import { queryAll } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { runCalendarCleanupJobs, syncCalendarOrganization } from '~/server/utils/google-calendar'
 import { defineScheduledTask } from '~/server/utils/scheduled-task'
-import { describeErrorForTelemetry } from '~/server/utils/error-telemetry'
+import { describeErrorForTelemetry } from '~/shared/error-telemetry'
 
 export default defineScheduledTask({
   meta: { name: 'google-calendar-sync', description: 'Reconcile committed bookings and retained Calendar cleanup intents' },

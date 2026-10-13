@@ -56,7 +56,17 @@ event (delivered with keepalive) but no GA copy.
 | --- | --- | --- |
 | `product_view`, `checkout_start` | `ProductDetailPage.vue` via `useOrganizationConversionTracking` | `view_item`, `begin_checkout` |
 | `consultation_cta_click`, `product_order_external_click`, `link_click`, `donation_click` | `useOrganizationConversionTracking` | same name |
-| `organization_created`, `domain_connected`, `subscription_upgrade`, `subscription_downgrade`, `subscription_checkout_success`, `post_created`, `post_published`, `image_uploaded`, `video_uploaded`, `media_library_viewed`, `dashboard_visited`, `error_encountered` | `useAnalytics` (measured on the platform organization; subject is the organization worked on, actor is the user; only the catalog's allowlisted scalar `properties` are kept) | same name |
+| `organization_created`, `domain_connected`, `subscription_upgrade`, `subscription_downgrade`, `subscription_checkout_success`, `post_created`, `post_published`, `image_uploaded`, `video_uploaded`, `media_library_viewed`, `dashboard_visited` | `useAnalytics` (measured on the platform organization; subject is the organization worked on, actor is the user; only the catalog's allowlisted scalar `properties` are kept) | same name |
+
+Browser failures use operational logging independently of analytics, authentication,
+consent and tenant database resolution. The early error-tracking plugin reports
+Nuxt, Vue, chunk, browser and unhandled-rejection errors to same-origin
+`POST /api/browser-errors`, which awaits Nitro's canonical error hook and emits
+`[CLIENT_ERROR]` in Cloudflare observability. Reports contain bounded, redacted
+error/cause diagnostics, the page pathname and existing request correlation IDs;
+they contain no page query, cookies or form payload. Collector failures stay
+visible as browser rejections without recursively reporting themselves. Historical
+`error_encountered` analytics events remain queryable but are no longer produced.
 
 Server-owned outcomes (`sign_up`, `onboarding_complete`, submissions, payments,
 refunds) are never emitted by the browser.

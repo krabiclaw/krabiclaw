@@ -19,7 +19,7 @@ import { creationRequestHash } from '~/server/utils/organization-events'
 import { guestPresentation } from '~/server/utils/notifications'
 import { platformLocale } from '~/shared/platform-locales'
 import { formatTimestamp } from '~/utils/timezone'
-import { describeErrorForTelemetry } from '~/server/utils/error-telemetry'
+import { describeErrorForTelemetry } from '~/shared/error-telemetry'
 import type {
   GuestThreadDeliveryProvider,
   GuestThreadDeliveryRow,
