@@ -2,6 +2,7 @@
 import { chromium } from '@playwright/test'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import sharp from 'sharp'
 import {
   environmentTenantAliasHostname,
   usesTenantHeader,
@@ -336,6 +337,7 @@ try {
         : undefined,
     })
     const page = await context.newPage()
+    const captureSession = await context.newCDPSession(page)
     const pageErrors = []
     const failedFirstParty = []
     const consoleErrors = []
@@ -390,7 +392,19 @@ try {
             .map(image => ({ src: image.currentSrc || image.src, complete: image.complete, naturalWidth: image.naturalWidth }))
         }, new URL(args.url).origin)
       }
-      await page.screenshot({ path: filePath, fullPage: true })
+      const { cssContentSize } = await captureSession.send('Page.getLayoutMetrics')
+      const dimensions = { width: Math.ceil(cssContentSize.width), height: Math.ceil(cssContentSize.height) }
+      const clips = []
+      // Keep native compositor surfaces below its texture limit without changing the document viewport.
+      for (let top = 0; top < dimensions.height; top += 8_192) {
+        const height = Math.min(8_192, dimensions.height - top)
+        const input = await page.screenshot({ fullPage: true, clip: { x: 0, y: top, width: dimensions.width, height } })
+        if (input.readUInt32BE(16) !== dimensions.width || input.readUInt32BE(20) !== height) {
+          throw new Error(`${routeConfig.path} screenshot clip geometry mismatch at ${viewportName}, row ${top}`)
+        }
+        clips.push({ input, top, left: 0 })
+      }
+      await sharp({ create: { ...dimensions, channels: 3, background: 'white' } }).composite(clips).png().toFile(filePath)
       if (inventoryMode) {
         const mainText = await page.locator('main').innerText().catch(async error => {
           throw new Error(`${routeConfig.path} could not read main content at ${viewportName} (${page.url()}): ${JSON.stringify(await failureDetails())}`, { cause: error })
@@ -401,6 +415,7 @@ try {
         }
         manifest.screenshots.push({ route_name: routeName, route: routeConfig.path, viewport: viewportName,
           status: response.status(), file: portablePath(args.outDir, filePath),
+          contentSize: cssContentSize, imageSize: dimensions,
           pageErrors: [...pageErrors], failedFirstParty: [...failedFirstParty], consoleErrors: [...consoleErrors],
           requestFailures: [...requestFailures], failedMedia: [...failedMedia] })
         continue

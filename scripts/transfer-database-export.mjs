@@ -717,6 +717,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
           }
           const sessionColumns = columns(target, 'product_sessions')
           const insert = target.prepare(`INSERT INTO product_sessions (${sessionColumns.map(qi).join(',')}) VALUES (${sessionColumns.map(() => '?').join(',')})`)
+          const sourceOccurrence = target.prepare('SELECT id FROM product_sessions WHERE product_id = ? AND starts_at = ? AND assigned_member_id = ? AND location_id IS NULL LIMIT 1')
           const held = new Set(configs.map(config => config.product_id))
           let retained = 0
           target.transaction(() => {
@@ -725,6 +726,8 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
               assert(row && row.location_id === null && row.assigned_member_id !== null
                 && row.source_occurrence_key === `hours:${row.assigned_member_id}:${row.starts_at}`, `Invalid initial provider-hours session: ${id}`)
               if (!held.has(row.product_id) || !currentProvider.get(row.id, row.organization_id, row.product_id, row.assigned_member_id)) continue
+              const occupied = sourceOccurrence.get(row.product_id, row.starts_at, row.assigned_member_id)
+              assert(!occupied, `Source session ${occupied?.id} occupies initial derived session ${id}; explicitly reconcile this occurrence before a creations-only delta. No replacement rows were overwritten.`)
               insert.run(...sessionColumns.map(name => row[name]))
               retained++
             }

@@ -320,8 +320,21 @@ test('a v15 export transfers into the v16 baseline: required clocks and currenci
     hoursTarget.close()
     const collision = new Database(sourcePath)
     collision.prepare("INSERT INTO product_sessions (id, organization_id, product_id, assigned_member_id, source_occurrence_key, timezone, starts_at, ends_at, created_by, updated_by) VALUES ('source-created', 'org', 'consult', 'member-1', ?, 'America/New_York', ?, ?, 'user-1', 'user-1')").run(`hours:member-1:${occurrence.starts_at}`, occurrence.starts_at, occurrence.ends_at)
+    collision.prepare("INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size) VALUES ('source-created-booking', 'org', 'consult', 'source-created', 'consult-default', 1)").run()
     collision.close()
-    await assert.rejects(() => transferDatabaseExport(sourcePath, join(directory, 'conflict.sqlite'), { payloadPath: join(directory, 'conflict.sql'), deltaFrom: targetPath }), /UNIQUE constraint failed: product_sessions.product_id, product_sessions.starts_at, product_sessions.assigned_member_id/)
+    await assert.rejects(() => transferDatabaseExport(sourcePath, join(directory, 'conflict.sqlite'), { payloadPath: join(directory, 'conflict.sql'), deltaFrom: targetPath }),
+      error => error instanceof Error && error.message === `Source session source-created occupies initial derived session ${manifest.provider_hours_session_ids[0]}; explicitly reconcile this occurrence before a creations-only delta. No replacement rows were overwritten.`)
+    const freshPath = join(directory, 'fresh-source.sqlite')
+    const fresh = await transferDatabaseExport(sourcePath, freshPath, { payloadPath: join(directory, 'fresh-source.sql') })
+    assert.equal(fresh.provider_hours_session_ids.length, 59, 'a full preflight retains the source-owned occurrence instead of deriving its identity')
+    const freshTarget = new Database(freshPath, { readonly: true })
+    try {
+      assert.deepEqual(freshTarget.prepare("SELECT id, starts_at, ends_at, assigned_member_id, status FROM product_sessions WHERE id = 'source-created'").get(),
+        { id: 'source-created', ...occurrence, assigned_member_id: 'member-1', status: 'scheduled' })
+      assert.deepEqual(freshTarget.prepare("SELECT product_session_id, party_size FROM bookings WHERE id = 'source-created-booking'").get(),
+        { product_session_id: 'source-created', party_size: 1 })
+      assert.deepEqual(freshTarget.pragma('foreign_key_check'), [])
+    } finally { freshTarget.close() }
     for (const team of [false, true]) {
       const label = team ? 'team-removal' : 'reassignment'
       const sourcePath = export15(`${label}.sqlite`, { secondProvider: true, team })
