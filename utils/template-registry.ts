@@ -38,6 +38,8 @@ export interface PublicTemplateDefinition {
    */
   pageDocuments: {
     recipes: Record<string, string> & { home: string }
+    /** Complete built-in routes whose authored overlay may lack a translation. */
+    optionalLocalizedPaths: string[]
     paths: string[]
     patterns?: string[]
     prefixes: string[]
@@ -67,6 +69,7 @@ export const publicTemplateRegistry: Record<PublicTemplateSlug, PublicTemplateDe
     // authored page overlay. Catalog and other location routes own their data.
     pageDocuments: {
       recipes: { home: '/', about: '/about', contact: '/contact', reservations: '/reservations' },
+      optionalLocalizedPaths: ['/contact', '/reservations'],
       paths: [],
       patterns: ['/locations/:slug()'],
       prefixes: [],
@@ -100,6 +103,7 @@ export const publicTemplateRegistry: Record<PublicTemplateSlug, PublicTemplateDe
         privacy: '/policies/privacy', terms: '/policies/terms',
         'third-party-notices': '/third-party-notices',
       },
+      optionalLocalizedPaths: [],
       paths: [],
       prefixes: ['/services/'],
       catchAll: true,
@@ -135,6 +139,7 @@ export const publicTemplateRegistry: Record<PublicTemplateSlug, PublicTemplateDe
     // at one of them would never be shown.
     pageDocuments: {
       recipes: { home: '/', about: '/about', pricing: '/pricing' },
+      optionalLocalizedPaths: [],
       // Only a path a route file still claims needs naming here. /experiences is
       // the Saya catalog's route on a customer host and Krabiclaw's own page on
       // this one. Everything else Krabiclaw publishes is an unclaimed path the

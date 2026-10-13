@@ -10,6 +10,9 @@ import { findPublishedProductAtRoute, getOrganizationVertical, parseProductRoute
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { publicTemplateRegistry, resolvePublicTemplate } from '~/utils/template-registry'
 import type { PublicTemplateDefinition } from '~/utils/template-registry'
+import { templateRendersPageDocumentAt } from '~/shared/tenant-page-paths'
+import { listPublicLocaleRepresentations } from '~/server/utils/public-locale-representations'
+import { isLocalizedPublicAliasPath } from '~/shared/public-locale-routes'
 export { isTrackablePath, PAGEVIEW_SKIP_PREFIXES } from '~/utils/pageview-path'
 
 export const VISITOR_COOKIE = 'kc_visitor_id'
@@ -106,6 +109,21 @@ export async function resolvePublicPageIdentity(env: CloudflareEnv, db: AppDb, i
 
   if (routing.localeSegment) {
     if (input.requestedLocale && input.requestedLocale !== routing.localeSegment) return null
+    const template = resolvePublicTemplate({ themeId: input.themeId, vertical: input.vertical })
+    const derivesLocaleRoute = isLocalizedPublicAliasPath(routing.sourcePath)
+      && (template.sitemap.exactPaths.includes(routing.sourcePath)
+      || template.nonIndexableExactPaths.includes(routing.sourcePath))
+      && (!templateRendersPageDocumentAt(template, routing.sourcePath)
+        || template.pageDocuments.optionalLocalizedPaths.includes(routing.sourcePath))
+    if (derivesLocaleRoute) {
+      const representations = await listPublicLocaleRepresentations(env, db, {
+        organizationId, sourcePath: routing.sourcePath, publishedLocaleRoute: true,
+      })
+      if (!representations.some(item => item.locale === routing.localeSegment && item.route_path === pagePath)) return null
+      const page = await resolveCanonicalTenantPageIdentity(db, organizationId, routing.sourcePath, routing.localeSegment)
+      return { ...base, locale: routing.localeSegment, pageId: page?.page_id ?? null,
+        documentId: page?.id ?? null, pageType: page?.page_type ?? null, recipe: page?.recipe ?? null, productId: null }
+    }
     let route: Awaited<ReturnType<typeof resolveLocalizedPublicRoute>>
     try {
       route = await resolveLocalizedPublicRoute(env, db, organizationId, pagePath)

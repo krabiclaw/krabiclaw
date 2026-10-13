@@ -14,11 +14,14 @@
 
     <div class="space-y-10 pb-10">
       <UAlert v-if="error" color="error" variant="soft" title="Earnings could not be loaded" :description="getErrorMessage(error, 'Earnings request failed')" />
-      <section v-else class="rounded-3xl bg-elevated/50 px-6 py-8 shadow-sm ring ring-default">
+      <UAlert v-else-if="payoutsError" color="error" variant="soft" title="Payouts could not be loaded" :description="getErrorMessage(payoutsError, 'Payouts request failed')" />
+      <p v-else-if="!performance || !payouts" role="status" class="text-muted">Loading earnings…</p>
+      <template v-else>
+      <section class="rounded-3xl bg-elevated/50 px-6 py-8 shadow-sm ring ring-default">
         <p class="text-center text-sm font-medium text-highlighted">Performance</p>
         <p class="mt-2 text-center text-5xl font-semibold tracking-tight text-highlighted">{{ total }}</p>
-        <p class="mt-2 text-center text-sm text-muted">Total for {{ monthName }}{{ performance?.currency ? ` (${performance.currency})` : '' }}</p>
-        <div v-if="performance" class="mx-auto mt-8 flex h-48 w-40 items-end justify-center gap-3" role="img" :aria-label="`${monthName}: paid ${total}, upcoming ${upcoming}`">
+        <p class="mt-2 text-center text-sm text-muted">Total for {{ monthName }} ({{ performance.currency }})</p>
+        <div class="mx-auto mt-8 flex h-48 w-40 items-end justify-center gap-3" role="img" :aria-label="`${monthName}: paid ${total}, upcoming ${upcoming}`">
           <span class="w-16 rounded-xl bg-primary transition-[height]" :style="{ height: `${barHeight(paidAmount)}%` }" />
           <span class="w-16 rounded-xl ring-2 ring-inset ring-primary transition-[height]" :style="{ height: `${barHeight(upcomingAmount)}%` }" />
         </div>
@@ -31,8 +34,7 @@
 
       <section>
         <h2 class="text-xl font-semibold text-highlighted">Upcoming</h2>
-        <UAlert v-if="payoutsError" class="mt-4" color="error" variant="soft" title="Payouts could not be loaded" :description="getErrorMessage(payoutsError, 'Payouts request failed')" />
-        <div v-else-if="upcomingPayouts.length" class="mt-4 space-y-4">
+        <div v-if="upcomingPayouts.length" class="mt-4 space-y-4">
           <PayoutCard v-for="row in upcomingPayouts" :key="row.id" :payout="row" :items="payouts?.items?.[row.id]" :to="`${level.path.value}/payouts/${encodeURIComponent(row.id)}`" />
         </div>
         <div v-else-if="clearing.length" class="mt-4 space-y-4">
@@ -73,6 +75,7 @@
         </div>
         <UButton class="mt-4" color="neutral" variant="soft" label="View all reports" :to="`${level.path.value}/performance`" />
       </section>
+      </template>
       <PaymentsHelp />
     </div>
   </DashboardIndexPanel>
@@ -116,7 +119,7 @@ const clearing = computed(() => [
   ...(payouts.value?.balance?.available ?? []).map(row => ({ amount: row.amount, currency: row.currency.toUpperCase(), label: 'Ready to send' })),
   ...(payouts.value?.balance?.pending ?? []).map(row => ({ amount: row.amount, currency: row.currency.toUpperCase(), label: 'Clearing' })),
 ].filter(row => row.amount !== 0))
-// One currency on the card: the performance currency, USD until it is known.
+// One currency on the card: the loaded performance currency.
 const shownCurrency = computed(() => performance.value!.currency.toUpperCase())
 const upcomingAmount = computed(() => clearing.value.filter(row => row.currency === shownCurrency.value).reduce((sum, row) => sum + row.amount, 0) + upcomingPayouts.value.filter(row => row.currency.toUpperCase() === shownCurrency.value).reduce((sum, row) => sum + row.amount, 0))
 const upcoming = computed(() => money(upcomingAmount.value))

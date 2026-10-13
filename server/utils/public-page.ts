@@ -519,8 +519,8 @@ async function loadPublicPageSource(
     : null
   // These complete built-in routes may display an optional CMS content overlay.
   // The route remains valid when that optional overlay has no translated page.
-  const allowsMissingLocalizedTenantPage = page === 'location' || page === 'contact'
-    || page === 'reservations'
+  const allowsMissingLocalizedTenantPage = page === 'location'
+    || Boolean(contentPagePath && template.pageDocuments.optionalLocalizedPaths.includes(contentPagePath))
   if (contentPagePath && !tenantPage && locale && locale !== sourceLocale && !isPreviewAuthorized && !allowsMissingLocalizedTenantPage) {
     throw new HTTPError({ statusCode: 404, statusMessage: 'Localized page was not found' })
   }

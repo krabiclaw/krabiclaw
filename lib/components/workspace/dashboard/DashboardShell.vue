@@ -127,8 +127,6 @@
     />
 
     <DashboardMenuSlideover v-model:open="menuOpen" />
-
-    <BillingServiceUpsellModal />
     </div>
   </UApp>
 </template>
