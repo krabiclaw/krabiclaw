@@ -1,8 +1,11 @@
 <template>
-  <div class="flex shrink-0 items-center justify-between gap-4 border-t border-default px-4 py-3 sm:px-6">
-    <!-- Cancel reads as text; Save is the only filled control on screen. -->
-    <UButton color="neutral" variant="link" :label="cancelLabel" class="px-0 font-semibold text-highlighted underline-offset-4 hover:underline" :class="leaf ? 'lg:invisible' : undefined" @click="$emit('cancel')" />
-    <UButton :label="saveLabel || 'Save'" size="xl" :loading="loading" :disabled="disabled" @click="$emit('save')" />
+  <div class="shrink-0 border-t border-default px-4 py-3 sm:px-6">
+    <!-- Over a column the controls keep its edges, not the panel's. -->
+    <div class="mx-auto flex w-full items-center justify-between gap-4" :class="leaf || column ? 'max-w-xl' : undefined">
+      <!-- Cancel reads as text; Save is the only filled control on screen. -->
+      <UButton color="neutral" variant="link" :label="cancelLabel" class="px-0 font-semibold text-highlighted underline-offset-4 hover:underline" :class="leaf ? 'lg:invisible' : undefined" @click="$emit('cancel')" />
+      <UButton :label="saveLabel || 'Save'" size="xl" :loading="loading" :disabled="disabled" @click="$emit('save')" />
+    </div>
   </div>
 </template>
 
@@ -20,7 +23,9 @@ withDefaults(defineProps<{
   disabled?: boolean
   /** A leaf's footer: its Cancel exists only where the leaf is a sheet, never beside its index. */
   leaf?: boolean
-}>(), { saveLabel: 'Save', cancelLabel: 'Cancel', loading: false, disabled: false, leaf: false })
+  /** The footer of an index that keeps a leaf's column (`DashboardIndexPanel column`). */
+  column?: boolean
+}>(), { saveLabel: 'Save', cancelLabel: 'Cancel', loading: false, disabled: false, leaf: false, column: false })
 
 defineEmits<{ cancel: []; save: [] }>()
 

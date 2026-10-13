@@ -5,7 +5,6 @@
 }
 
 html {
-  font-size: 106%;
   -webkit-text-size-adjust: 100%;
 }
 
@@ -188,17 +187,17 @@ button {
   margin-top: 2.5rem;
 }
 
-@media (width >= 576px) {
+@media (width >= 640px) {
+  .blawby-container {
+    padding-inline: 1.5rem;
+  }
+
   [data-blawby-critical-hero] h1 {
     font-size: 4.5rem;
   }
 }
 
 @media (width >= 768px) {
-  .blawby-container {
-    padding-inline: 1.5rem;
-  }
-
   [data-blawby-critical-header] nav > div:first-child {
     column-gap: 3rem;
   }
@@ -209,7 +208,7 @@ button {
 
 }
 
-@media (width >= 992px) {
+@media (width >= 1024px) {
   .blawby-container {
     padding-inline: 2rem;
   }
@@ -221,9 +220,7 @@ button {
   [data-blawby-critical-hero-actions] {
     width: 40%;
   }
-}
 
-@media (width >= 1024px) {
   [data-blawby-critical-header] nav > div:last-child > div:first-child {
     display: flex;
     align-items: center;

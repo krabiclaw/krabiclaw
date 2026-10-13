@@ -168,14 +168,14 @@ video {
   text-wrap: balance;
 }
 
-@media (min-width: 576px) {
+@media (min-width: 640px) {
   [data-saya-critical-header-inner],
   [data-saya-critical-hero-content] {
     padding-inline: 1.5rem;
   }
 }
 
-@media (min-width: 992px) {
+@media (min-width: 1024px) {
   [data-saya-critical-header-inner],
   [data-saya-critical-hero-content] {
     padding-inline: 2rem;

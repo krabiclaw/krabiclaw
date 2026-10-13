@@ -611,7 +611,7 @@ test.describe('stateless MCP server', () => {
       const general = await page.request.get(qaUrl)
       expect(general.status()).toBe(200)
       expect((await general.json()).qa.map((row: { id: string }) => row.id)).not.toContain(createdId)
-      await page.setViewportSize({ width: 1000, height: 800 })
+      await page.setViewportSize({ width: 1024, height: 800 })
       const freshRecord = await openTenantPage(page, `${baseURL}/dashboard/${encodeURIComponent(slug)}/website/qa/${createdId}?page_path=${encodeURIComponent(pagePath)}`, {})
       expect(freshRecord?.status()).toBe(200)
       await expect(page).toHaveURL(url => url.pathname === `/dashboard/${encodeURIComponent(slug)}/website/qa/${createdId}/question` && url.searchParams.get('page_path') === pagePath)

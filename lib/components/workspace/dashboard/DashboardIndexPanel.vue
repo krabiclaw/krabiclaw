@@ -7,7 +7,7 @@
     :ui="ui"
   >
     <template #header>
-      <UDashboardNavbar :title="title" :toggle="false" :ui="navbarUi">
+      <UDashboardNavbar :title="column ? undefined : title" :toggle="false" :ui="navbarUi">
         <template #leading>
           <DashboardNavbarLeading />
         </template>
@@ -25,8 +25,16 @@
 
     <template #body>
       <!-- Alone it uses the frame, as Airbnb's listing grid does; beside a child it is a column. -->
-      <div class="mx-auto w-full" :class="[pair ? 'max-w-2xl' : undefined, fill ? 'flex min-h-0 flex-1 flex-col' : undefined]">
-        <slot />
+      <div class="mx-auto w-full" :class="[column ? 'max-w-xl' : pair ? 'max-w-2xl' : undefined, fill ? 'flex min-h-0 flex-1 flex-col' : undefined]">
+        <!-- A column's title heads the column, as a leaf's does, so the two start on one line. -->
+        <template v-if="column">
+          <h1 class="text-2xl font-semibold text-highlighted lg:text-[32px] lg:leading-tight">{{ title }}</h1>
+          <p v-if="lead" class="mt-2 text-base text-muted">{{ lead }}</p>
+          <div class="mt-8">
+            <slot />
+          </div>
+        </template>
+        <slot v-else />
       </div>
     </template>
 
@@ -68,6 +76,10 @@ const props = defineProps<{
   navbarUi?: Record<string, string>
   /** The level is exactly the panel's height and scrolls inside itself: a conversation with its composer at the foot. */
   fill?: boolean
+  /** The level keeps a leaf's column at every width — a menu, the catalog's entries — rather than using the frame. */
+  column?: boolean
+  /** A column's one muted sentence under its title, as a leaf's `lead`. */
+  lead?: string
 }>()
 
 const level = useRouteLevel()

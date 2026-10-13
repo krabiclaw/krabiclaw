@@ -1,6 +1,6 @@
 <template>
   <header
-    class="fixed inset-x-0 top-0 z-30 h-(--kc-dashboard-top-nav) items-center gap-4 border-b border-default bg-default px-(--kc-nav-gutter)"
+    class="fixed inset-x-0 top-0 z-30 h-(--kc-dashboard-top-nav) items-center gap-4 border-b border-default bg-default px-4 sm:px-6"
     :class="items.length
       ? 'hidden md:grid md:grid-cols-[1fr_auto_1fr]'
       : 'grid grid-cols-[1fr_auto]'"
