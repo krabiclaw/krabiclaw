@@ -23,11 +23,10 @@
           <UButton class="mt-3" :to="`/dashboard/${route.params.orgSlug}/payments?tab=plan`" variant="outline">View plans</UButton>
         </template>
       </div>
-      <LocationTimezoneField v-else-if="concern === 'location'" v-model="onlineTimezone" />
-      <UFormField v-else-if="concern === 'calendar'" label="Calendar name" hint="Optional">
-        <p class="mb-3 text-sm text-muted">{{ p.form.calendar_group.length }}/64</p>
-        <UInput v-model="p.form.calendar_group" :maxlength="64" variant="none" :ui="{ base: 'px-0 text-2xl md:text-2xl' }" class="w-full" />
-      </UFormField>
+      <div v-else-if="concern === 'location'">
+        <SettingRow v-model="p.form.held_online" :disabled="p.form.scheduling_mode !== 'provider' && !p.form.held_online" label="Held online" />
+        <UButton v-if="p.form.scheduling_mode !== 'provider'" class="mt-4" variant="outline" :to="`${level.to.value}/assignment`">Choose who guests meet</UButton>
+      </div>
     </template>
   </DashboardLeafPanel>
 </template>
@@ -35,8 +34,6 @@
 <script setup lang="ts">
 import SettingRow from '~/components/dashboard/SettingRow.vue'
 import { productEditorKey, type BookingConcern } from '~/components/dashboard/ProductEditorPage.vue'
-import LocationTimezoneField from '~/lib/components/workspace/location/LocationTimezoneField.vue'
-import { isValidTimezone } from '~/utils/timezone'
 import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
 
 definePageMeta({ layout: 'dashboard' })
@@ -51,8 +48,7 @@ const settings = {
   confirmation: { title: 'Confirmation', lead: 'Confirm bookings as soon as guests reserve, or review each request before confirming.' },
   assignment: { title: 'Who guests meet', lead: 'Choose whose availability guests can book.' },
   payment: { title: 'Payment', lead: 'Guests pay before their booking is made. Free sessions remain bookable.' },
-  location: { title: 'Meeting location', lead: 'Choose a city for your online schedule; times follow its time zone and daylight saving is handled automatically.' },
-  calendar: { title: 'Shared availability', lead: 'Use the same calendar name for online services that cannot run at the same time. Leave it empty for an independent schedule.' },
+  location: { title: 'Meeting location', lead: 'Online, guests book in the working hours of whoever provides it, shown in their own time zone.' },
 }
 const dashboard = useDashboardOrganization()
 const paymentEntitled = computed(() => {
@@ -73,7 +69,7 @@ const memberOptions = computed(() => [{ label: 'Use the business schedule', valu
 const setting = computed(() => settings[concern.value as keyof typeof settings] ?? { title: '', lead: '' })
 watchEffect(() => {
   if (level.mode.value === 'yield') return
-  if ((['location', 'calendar'].includes(concern.value) && p.locationId.value) || (concern.value === 'calendar' && p.product.value && !p.loadError.value && !p.product.value.booking?.online_timezone) || !(concern.value in settings) || (concern.value !== 'enabled' && p.product.value && !p.loadError.value && !p.product.value.booking)) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
+  if ((concern.value === 'location' && p.locationId.value) || !(concern.value in settings) || (concern.value !== 'enabled' && p.product.value && !p.loadError.value && !p.product.value.booking)) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
 })
 const capacityOptions = [{ value: 'one', label: 'One guest' }, { value: 'group', label: 'A group of guests' }, { value: 'unlimited', label: 'No guest limit' }, { value: 'closed', label: 'Closed to new guests' }]
 const capacityChoice = ref('unlimited')
@@ -88,12 +84,11 @@ watch(capacityChoice, choice => {
   else if (choice === 'closed') p.form.booking_capacity = '0'
   else if (Number(p.form.booking_capacity) < 2) p.form.booking_capacity = ''
 })
-const onlineTimezone = computed({ get: () => p.form.online_timezone, set: value => { p.form.online_timezone = value; p.form.online_schedule = Boolean(value) } })
 const valid = computed(() => {
   if (concern.value === 'assignment') return membersStatus.value === 'success'
   if (concern.value === 'duration') return Number.isSafeInteger(Number(p.form.booking_duration)) && Number(p.form.booking_duration) > 0
   if (concern.value === 'capacity') return capacityChoice.value !== 'group' || (Number.isSafeInteger(Number(p.form.booking_capacity)) && Number(p.form.booking_capacity) >= 2)
-  if (concern.value === 'location') return isValidTimezone(p.form.online_timezone)
+  if (concern.value === 'location') return !p.form.held_online || p.form.scheduling_mode === 'provider'
   if (concern.value === 'payment') return !p.form.online_payment_required || paymentEntitled.value
   return true
 })
@@ -106,8 +101,7 @@ const dirty = computed(() => {
     case 'confirmation': return p.form.confirmation_mode !== config?.confirmation_mode
     case 'assignment': return p.form.assigned_member_id !== (config?.assigned_member_id ?? '') || p.form.assigned_team_id !== (config?.assigned_team_id ?? '') || p.form.scheduling_mode !== config?.scheduling_mode
     case 'payment': return p.form.online_payment_required !== config?.online_payment_required
-    case 'location': return (p.form.online_schedule ? p.form.online_timezone : null) !== config?.online_timezone
-    case 'calendar': return (p.form.calendar_group.trim() || null) !== config?.calendar_group
+    case 'location': return p.form.held_online !== config?.held_online
     default: return false
   }
 })

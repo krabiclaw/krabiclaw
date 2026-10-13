@@ -4,7 +4,8 @@ import { getPublicCompliance, getPublicConsultationSettings } from '~/server/uti
 import { deleteConfig, getConfig, setConfig } from '~/server/utils/organization-config'
 import { createSystemSubdomain, isSystemSubdomainSpent } from '~/server/utils/domains'
 import { reconcileZarazAnalytics } from '~/server/utils/zaraz-analytics'
-import { isCurrencyCode } from '~/shared/currencies'
+import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
+import { isValidTimezone } from '~/utils/timezone'
 import { ORGANIZATION_FONT_PRESETS, isOrganizationFontPreset, resolveOrganizationFontPreset } from '~/shared/organization-fonts'
 import { purgeOrganizationCaches, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import type { UpdateOrganizationSettingsRequest } from '~/server/types/organization'
@@ -35,7 +36,8 @@ interface OrganizationSettingsRow {
 interface FullOrganizationRow extends OrganizationSettingsRow {
   public_url: string | null
   custom_domain_status: string | null
-  default_currency: string | null
+  default_currency: CurrencyCode
+  timezone: string
   brand_description: string | null
   announcement_json: string | null
   announcement_media_id: string | null
@@ -80,7 +82,7 @@ export async function loadSettingsPayload(
 ) {
   const updatedOrganization = await queryFirst<FullOrganizationRow & { vertical: string; theme_id: string; locations_json: string }>(db, `
     SELECT organization.id, subdomain, organization.status,
-           (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url, COALESCE((SELECT status FROM organization_domains WHERE organization_id = organization.id AND type = 'custom' AND status NOT IN ('deleted', 'disabled') ORDER BY role = 'canonical' DESC, created_at, id LIMIT 1), 'none') AS custom_domain_status, default_currency,
+           (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url, COALESCE((SELECT status FROM organization_domains WHERE organization_id = organization.id AND type = 'custom' AND status NOT IN ('deleted', 'disabled') ORDER BY role = 'canonical' DESC, created_at, id LIMIT 1), 'none') AS custom_domain_status, default_currency, timezone,
            name, brand_description,
            json_extract(organization.settings_json, '$.config.announcement') AS announcement_json,
            amp.asset_id AS announcement_media_id, ama.public_url AS announcement_public_url,
@@ -188,6 +190,7 @@ export async function loadSettingsPayload(
     palette_source: isPaletteTemplate(template) ? (siteConfig.palette ? 'custom' : 'template') : null,
     font_preset: resolveOrganizationFontPreset(siteConfig.font_preset),
     default_currency: updatedOrganization.default_currency,
+    timezone: updatedOrganization.timezone,
     press_email: siteConfig.press_email || '',
     partnerships_email: siteConfig.partnerships_email || '',
     catering_email: siteConfig.catering_email || '',
@@ -343,6 +346,11 @@ async function attemptOrganizationUpdate(
     }
     setParts.push('default_currency = ?')
     params.push(currency)
+  }
+  if (updates.timezone !== undefined) {
+    if (!isValidTimezone(updates.timezone)) return { status: 400, data: { error: 'timezone must be an IANA time zone' } }
+    setParts.push('timezone = ?')
+    params.push(updates.timezone)
   }
   if (updates.status !== undefined) {
     // Draft and Live are the tenant's to move between. 'suspended' is the

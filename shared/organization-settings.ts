@@ -73,7 +73,6 @@ export interface OrganizationSettings {
     partnerships_email?: string
     catering_email?: string
     careers_email?: string
-    default_timezone?: string
     whatsapp_phone?: string
   }
   consultation?: Omit<import('../types/blawby').PublicConsultationSettings, 'contact_form_enabled' | 'metadata'> & {

@@ -30,7 +30,7 @@ export interface DashboardLocation {
   slug: string
   title: string
   status: string
-  timezone: string | null
+  timezone: string
   city: string | null
   address: PostalAddress | null
   media: Array<{ asset_id: string; slot: string; public_url: string | null; thumbnail_url: string | null; kind: string | null }>

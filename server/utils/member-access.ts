@@ -396,14 +396,14 @@ export const ASSIGNED_SERVICE_SQL = `p.kind = 'service' AND EXISTS (
 export async function assertProductAccess(db: DbClient, input: MemberAccessPrincipal & { productId: string; patch?: Record<string, unknown> }): Promise<void> {
   if (await roleAllows({ ...input, permissions: { products: ['update'] } })) return
   await assertRoleAllows({ ...input, permissions: { products: ['assigned'] } })
-  const assigned = await queryFirst<Record<string, unknown>>(db, `SELECT c.scheduling_mode, c.assigned_member_id, c.assigned_team_id, c.calendar_group
+  const assigned = await queryFirst<Record<string, unknown>>(db, `SELECT c.scheduling_mode, c.assigned_member_id, c.assigned_team_id, c.held_online
     FROM products p JOIN product_booking_configs c ON c.product_id = p.id AND c.organization_id = p.organization_id
     WHERE p.organization_id = ? AND p.id = ? AND (${ASSIGNED_SERVICE_SQL})`, [input.organizationId, input.productId, input.userId, input.userId])
   if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Service not found or access denied' })
   if (input.patch?.kind !== undefined && input.patch.kind !== 'service') throw new HTTPError({ statusCode: 403, message: 'Service kind requires admin access' })
   const booking = input.patch?.booking && typeof input.patch.booking === 'object' ? input.patch.booking as Record<string, unknown> : input.patch
-  for (const field of ['scheduling_mode', 'assigned_member_id', 'assigned_team_id', 'calendar_group']) {
-    if (booking?.[field] !== undefined && booking[field] !== assigned[field]) throw new HTTPError({ statusCode: 403, message: 'Service assignment requires admin access' })
+  for (const field of ['scheduling_mode', 'assigned_member_id', 'assigned_team_id', 'held_online']) {
+    if (booking?.[field] !== undefined && booking[field] !== (field === 'held_online' ? assigned[field] === 1 : assigned[field])) throw new HTTPError({ statusCode: 403, message: 'Service assignment requires admin access' })
   }
   if (input.patch?.booking !== undefined) throw new HTTPError({ statusCode: 403, message: 'Offering creation requires admin access; edit saved booking settings and schedule separately' })
 }

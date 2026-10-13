@@ -141,7 +141,8 @@ async function goNext() {
   const step = currentStep.value
   if (!step || !canAdvance.value) return
 
-  if (!['type', 'language', 'business'].includes(step.id) && !await draft.save()) return
+  // The first save creates the site, so it waits for the currency and the clock the site cannot exist without.
+  if (!['type', 'language', 'business', 'location', 'hours'].includes(step.id) && !await draft.save()) return
 
   if (step.action === 'commit') {
     if (!await draft.activate()) return

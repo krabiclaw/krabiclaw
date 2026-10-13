@@ -1,13 +1,14 @@
 import { currencyForCountry, type CurrencyCode } from '~/shared/currencies'
 import type { PostalAddress } from '~/utils/postal-address'
+import { isValidTimezone } from '~/utils/timezone'
 import type { OpeningHours, SpecialHours } from '~/shared/reservation-hours'
 import type { OrganizationVertical } from '~/utils/vertical-copy'
 import type { DraftBrandForm } from '~/lib/components/workspace/onboarding/DraftBrandCard.vue'
 
 export type OnboardingStepId =
   | 'type' | 'language' | 'business'
-  | 'location' | 'contact' | 'hours'
-  | 'currency' | 'products' | 'look'
+  | 'location' | 'hours' | 'currency'
+  | 'contact' | 'products' | 'look'
   | 'review'
 
 export type OnboardingSectionId = 'business' | 'place' | 'offer' | 'review'
@@ -137,29 +138,30 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     optional: true,
   },
   {
-    id: 'contact', section: 'place', flows: ['new-site', 'add-location'],
-    title: () => 'What is your business contact number?',
-    complete: state => state.details.phone.trim().length > 0,
-    optional: true,
-  },
-  {
+    // The location's clock, and the site's: required before the first save,
+    // which creates the site. The hours themselves stay optional.
     id: 'hours', section: 'place', flows: ['new-site', 'add-location'],
     title: () => 'When are you open?',
-    complete: state => state.hours.timezone.trim().length > 0,
-    optional: true,
+    complete: state => isValidTimezone(state.hours.timezone.trim()),
     nextLabel: () => 'Save hours',
   },
   {
-    // Before products, because products are priced. Only the new-site flow asks:
-    // a location added to an existing site prices in the currency that site
-    // already has.
-    id: 'currency', section: 'offer', flows: ['new-site'],
+    // Before the first save, because a site cannot exist without the currency
+    // it sells in. Only the new-site flow asks: a location added to an existing
+    // site prices in the currency that site already has.
+    id: 'currency', section: 'place', flows: ['new-site'],
     advanceOnChoice: true,
     title: () => 'What currency do you price in?',
     lede: state => currencyForCountry(state.details.country)
       ? 'Taken from the country you gave. Change it if that is not what you charge in.'
       : 'We could not tell from the country you gave, so pick the one you charge in.',
     complete: state => state.details.currency !== null,
+  },
+  {
+    id: 'contact', section: 'place', flows: ['new-site', 'add-location'],
+    title: () => 'What is your business contact number?',
+    complete: state => state.details.phone.trim().length > 0,
+    optional: true,
   },
   {
     id: 'products', section: 'offer', flows: ['new-site'],

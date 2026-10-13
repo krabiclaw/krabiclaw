@@ -38,8 +38,8 @@ function mcpBookingProvenance(provenance: ThreadPayload['provenance'] | null) {
 }
 
 export const BOOKINGS_TOOLS: McpToolDefinition[] = [
-  organizationTool({ name: 'create_product_session', domain: 'bookings', minimumRole: 'member', description: 'Add a dated time for an existing bookable offering using its actual start and end. An assigned team gets one session per member.',
-    inputSchema: { product_id: text, location_id: { ...nullableText, description: 'Session location; null for online.' }, starts_at: { type: 'string', format: 'date-time' }, ends_at: { type: 'string', format: 'date-time' }, capacity: { type: ['integer', 'null'], minimum: 0 }, idempotency_key: key }, required: ['product_id', 'location_id', 'starts_at', 'ends_at', 'idempotency_key'],
+  organizationTool({ name: 'create_product_session', domain: 'bookings', minimumRole: 'member', description: 'Add a dated time at a location for an existing bookable offering using its actual start and end. An assigned team gets one session per member. Online offerings take no dated sessions: they are booked in their provider\'s working hours.',
+    inputSchema: { product_id: text, location_id: { ...text, description: 'Session location.' }, starts_at: { type: 'string', format: 'date-time' }, ends_at: { type: 'string', format: 'date-time' }, capacity: { type: ['integer', 'null'], minimum: 0 }, idempotency_key: key }, required: ['product_id', 'location_id', 'starts_at', 'ends_at', 'idempotency_key'],
     outputSchema: { type: 'object', properties: { sessions: { type: 'array', items: session, minItems: 1 } }, required: ['sessions'] },
   }),
   organizationTool({ name: 'update_product_session', domain: 'bookings', minimumRole: 'member', description: 'Edit one session’s time, capacity or state using its current timestamp. Committed bookings or checkout holds prevent time or state changes; use the guest booking-change workflow.',
@@ -100,11 +100,12 @@ export async function handleBookingsTools(ctx: McpExecutorContext): Promise<unkn
     const productId = requiredString(args, 'product_id')
     await assertProductAccess(db, { ...principal, productId })
     const current = toolName === 'update_product_session' ? await getSessionAvailability(db, organizationId, productId, requiredString(args, 'session_id')) : null
-    const locationId = current ? current.location_id : args.location_id === null ? null : requiredString(args, 'location_id')
+    const locationId = current ? current.location_id : requiredString(args, 'location_id')
     if (managesBookings) await assertResourceAccess(db, { ...principal, resourceLocationId: locationId })
     if (current) {
       return { session: await updateSession(db, { organizationId, productId, sessionId: current.id, actorId: organization.userId, expectedUpdatedAt: requiredString(args, 'expected_updated_at'), startsAt: optionalString(args, 'starts_at') ?? undefined, endsAt: optionalString(args, 'ends_at') ?? undefined, capacity: args.capacity as number | null | undefined, status: args.status as 'scheduled' | 'cancelled' | undefined }) }
     }
+    if (locationId === null) throw new HTTPError({ statusCode: 400, statusMessage: 'Online sessions come from the provider\'s working hours' })
     return { sessions: await createSession(db, { organizationId, productId, locationId, actorId: organization.userId, startsAt: requiredString(args, 'starts_at'), endsAt: requiredString(args, 'ends_at'), capacity: args.capacity as number | null | undefined, idempotencyKey: requiredString(args, 'idempotency_key') }) }
   }
 

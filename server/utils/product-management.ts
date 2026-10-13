@@ -195,7 +195,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY location_id`, params: [organizationId, ids] },
     { query: `SELECT product_id, collection_id, sort_order FROM collection_products
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY collection_id`, params: [organizationId, ids] },
-    { query: `SELECT product_id, duration_minutes, default_capacity, confirmation_mode, online_payment_required, online_timezone, calendar_group, scheduling_mode, assigned_member_id, assigned_team_id FROM product_booking_configs
+    { query: `SELECT product_id, duration_minutes, default_capacity, confirmation_mode, online_payment_required, held_online, scheduling_mode, assigned_member_id, assigned_team_id FROM product_booking_configs
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
@@ -226,7 +226,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       duration_minutes: row.duration_minutes === null ? null : Number(row.duration_minutes),
       default_capacity: row.default_capacity === null ? null : Number(row.default_capacity),
       confirmation_mode: row.confirmation_mode as 'instant' | 'review', online_payment_required: Number(row.online_payment_required) === 1,
-      online_timezone: row.online_timezone === null ? null : String(row.online_timezone), calendar_group: row.calendar_group === null ? null : String(row.calendar_group),
+      held_online: Number(row.held_online) === 1,
       scheduling_mode: row.scheduling_mode as 'legacy' | 'provider', assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
       assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
     }
@@ -1564,7 +1564,7 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
   const { listSessions, sessionAllocationPredicate } = await import('~/server/utils/availability')
   const sessions = (await listSessions(db, { organizationId, productId: product.id, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 400 * 86_400_000).toISOString() }))
     .filter(session => session.location_id === null
-      ? options.locationId === undefined && Boolean(product.booking?.online_timezone)
+      ? options.locationId === undefined && Boolean(product.booking?.held_online)
       : locations.some(location => location.location_id === session.location_id && location.published && (!requireActive || location.active)))
   // Scheduled seats prove the booking capability even while full or closed.
   // Publication additionally guards a real allocation in its atomic write.
@@ -1572,7 +1572,7 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
     ?? sessions.find(session => session.capacity === null || session.capacity > 0)
   const scopes = [...new Set([
     ...locations.filter(location => location.published && (!requireActive || location.active)).map(location => location.location_id),
-    ...(options.locationId === undefined && product.booking?.online_timezone ? [null] : []),
+    ...(options.locationId === undefined && product.booking?.held_online ? [null] : []),
   ])]
   const variants = product.variants.filter(variant => variant.active)
   const prices = currency ? scopes.flatMap(locationId => variants.map(variant => selectPrice(variant.prices, { currency, location_id: locationId }))) : []
@@ -1593,11 +1593,11 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
   const allocation = candidate ? await sessionAllocationPredicate(db, { organizationId, productId: product.id, sessionId: candidate.id, partySize: 0, now: new Date().toISOString(), requireActive: Boolean(requireActive) }) : undefined
   if (allocation) {
     allocation.query = `(${allocation.query}) AND EXISTS (SELECT 1 FROM organization WHERE id=? AND default_currency=?)
-      AND EXISTS (SELECT 1 FROM product_booking_configs WHERE organization_id=? AND product_id=? AND online_timezone IS ? AND online_payment_required=?)
+      AND EXISTS (SELECT 1 FROM product_booking_configs WHERE organization_id=? AND product_id=? AND held_online=? AND online_payment_required=?)
       AND (SELECT COUNT(*) FROM product_locations WHERE organization_id=? AND product_id=?)=?
       AND NOT EXISTS (SELECT 1 FROM product_locations pl WHERE pl.organization_id=? AND pl.product_id=? AND NOT EXISTS (
         SELECT 1 FROM json_each(?) expected WHERE json_extract(expected.value,'$.location_id')=pl.location_id AND json_extract(expected.value,'$.active')=pl.active AND json_extract(expected.value,'$.published')=pl.published))`
-    allocation.params = [...allocation.params!, organizationId, currency, organizationId, product.id, product.booking?.online_timezone ?? null, product.booking?.online_payment_required ? 1 : 0,
+    allocation.params = [...allocation.params!, organizationId, currency, organizationId, product.id, product.booking?.held_online ? 1 : 0, product.booking?.online_payment_required ? 1 : 0,
       organizationId, product.id, product.locations.length, organizationId, product.id, JSON.stringify(product.locations)]
   }
   // A location's prospective flags are written before this predicate in the

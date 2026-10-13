@@ -22,7 +22,7 @@ const route = useRoute()
 const level = useRouteLevel()
 const day = computed(() => p.weekdays.find(day => day.label.toLowerCase() === route.params.weekday))
 const slots = computed(() => day.value ? p.slotsFor(day.value.value) : [])
-const lead = computed(() => `Choose when sessions start${!p.locationId.value && p.product.value?.booking?.online_timezone ? ` in ${timezoneLabel(p.product.value.booking.online_timezone)}` : ' in your venue’s time zone'}. Removing a time leaves appointments with booking history unchanged.`)
+const lead = computed(() => `Choose when sessions start${p.location.value ? ` in ${timezoneLabel(p.location.value.timezone)}` : ''}. Removing a time leaves appointments with booking history unchanged.`)
 const valid = computed(() => slots.value.every(slot => MINUTE_TIME_PATTERN.test(slot.start_time)) && new Set(slots.value.map(slot => slot.start_time)).size === slots.value.length)
 const dirty = computed(() => day.value && JSON.stringify(slots.value) !== JSON.stringify(p.savedSlotsFor(day.value.value)))
 watchEffect(() => {

@@ -38,7 +38,7 @@ import type { DashboardLocation } from '~/composables/useDashboardOrganization'
 
 export const SECTION_KEYS = ['photo', 'kind', 'name', 'price', 'description', 'page', 'options', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections'] as const
 export type SectionKey = typeof SECTION_KEYS[number]
-export type BookingConcern = 'enabled' | 'duration' | 'capacity' | 'confirmation' | 'payment' | 'location' | 'calendar' | 'assignment' | number
+export type BookingConcern = 'enabled' | 'duration' | 'capacity' | 'confirmation' | 'payment' | 'location' | 'assignment' | number
 
 /** Where the product is offered and shown, per location, as its Locations leaf edits it. */
 export interface ProductLocationDraft { active: boolean; published: boolean }
@@ -91,9 +91,8 @@ export interface ProductForm {
   assigned_member_id: string
   assigned_team_id: string
   online_payment_required: boolean
-  online_timezone: string
-  calendar_group: string
-  online_schedule: boolean
+  /** Held online: booked in the provider's working hours rather than weekly times at a location. */
+  held_online: boolean
   image_asset_id: string | null
 }
 
@@ -285,9 +284,9 @@ async function reload() {
 const isRuleList = (value: unknown): value is { success: true; rules: Array<{ weekday: number; start_time: string }> } =>
   isRecord(value) && Array.isArray(value.rules)
 const scheduleUrl = () => `/api/editor/organizations/${organizationId}/products/${productId.value}/availability`
-/** An online schedule runs in the product's own time zone; until it has one there is no schedule to read. */
-const scheduleUnplaced = computed(() => Boolean(product.value?.booking) && !locationId.value && !product.value?.booking?.online_timezone)
-const scheduleReadable = computed(() => Boolean(product.value?.booking) && !scheduleUnplaced.value)
+/** Weekly times belong to a location. Online, the provider's working hours are the schedule, so there are none to read. */
+const scheduleUnplaced = computed(() => Boolean(product.value?.booking) && !locationId.value && !product.value?.booking?.held_online)
+const scheduleReadable = computed(() => Boolean(product.value?.booking) && Boolean(locationId.value))
 // The start times in this scope, read before the level renders, beside the
 // product they belong to. A product without a booking calendar, or an online
 // one without a time zone, has none; the key says which, so the read follows
@@ -296,13 +295,13 @@ const { data: scheduleData, error: scheduleFailure, refresh: refreshSchedule } =
   () => `dashboard-product-schedule:${organizationId}:${locationId.value ?? 'online'}:${productId.value}:${scheduleReadable.value ? 'readable' : 'none'}`,
   async () => {
     if (!scheduleReadable.value) return null
-    const { rules } = await dashboardApi(`${scheduleUrl()}?location_id=${encodeURIComponent(locationId.value ?? 'online')}`, { validate: isRuleList })
+    const { rules } = await dashboardApi(`${scheduleUrl()}?location_id=${encodeURIComponent(locationId.value!)}`, { validate: isRuleList })
     return rules.map(rule => ({ weekday: rule.weekday, start_time: rule.start_time.slice(0, 5) }))
   },
 )
 const savedSchedule = computed<ScheduleSlotDraft[]>(() => scheduleData.value ?? [])
 const scheduleError = computed(() => scheduleUnplaced.value
-  ? 'Choose a time zone in Meeting location before adding start times.'
+  ? 'Choose a location, or hold it online, in Meeting location before adding start times.'
   : scheduleFailure.value ? getErrorMessage(scheduleFailure.value, 'Could not load the weekly schedule') : null)
 function savedSlotsFor(weekday: number) { return savedSchedule.value.filter(slot => slot.weekday === weekday) }
 // The draft the weekday leaves edit, seeded from every read of the schedule.
@@ -330,7 +329,7 @@ const draft = useState<ProductForm>(draftKey, () => ({
   collection_ids: [] as string[],
   bookable: false,
   booking_duration: '',
-  booking_capacity: '', scheduling_mode: 'legacy', assigned_member_id: '', assigned_team_id: '', confirmation_mode: 'instant', online_payment_required: false, online_timezone: '', calendar_group: '', online_schedule: false,
+  booking_capacity: '', scheduling_mode: 'legacy', assigned_member_id: '', assigned_team_id: '', confirmation_mode: 'instant', online_payment_required: false, held_online: false,
   image_asset_id: null as string | null,
 }))
 const form = reactive(draft.value)
@@ -388,9 +387,7 @@ function loadForm(row: Product) {
   form.assigned_member_id = row.booking?.assigned_member_id ?? ''
   form.assigned_team_id = row.booking?.assigned_team_id ?? ''
   form.online_payment_required = row.booking?.online_payment_required ?? false
-  form.online_timezone = row.booking?.online_timezone ?? ''
-  form.calendar_group = row.booking?.calendar_group ?? ''
-  form.online_schedule = Boolean(row.booking?.online_timezone)
+  form.held_online = row.booking?.held_online ?? false
   form.booking_capacity = row.booking?.default_capacity === null || row.booking === null ? '' : String(row.booking.default_capacity)
   loadedCatalogShape.value = catalogShapeOf()
 }
@@ -869,8 +866,7 @@ async function saveBooking(concern: BookingConcern) {
     : concern === 'confirmation' ? { confirmation_mode: form.confirmation_mode }
     : concern === 'assignment' ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id || null, assigned_team_id: form.assigned_team_id || null }
     : concern === 'payment' ? { online_payment_required: form.online_payment_required }
-    : concern === 'location' ? { online_timezone: form.online_timezone }
-    : concern === 'calendar' ? { calendar_group: form.calendar_group.trim() || null }
+    : concern === 'location' ? { held_online: form.held_online }
     : {}
   await dashboardApi(url, { method: 'PUT', body, validate: isRecord })
 }

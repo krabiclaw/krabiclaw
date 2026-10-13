@@ -53,7 +53,7 @@ interface LocationOverview {
   address: PostalAddress | null
   rating: number | null
   google_place_id: string | null
-  timezone?: string | null
+  timezone: string
   opening_hours?: OpeningHours
 }
 

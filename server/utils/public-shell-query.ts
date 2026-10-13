@@ -52,7 +52,7 @@ export function appendPublicShellQueries(
     config: push(`SELECT setting.key, setting.value
                 FROM organization s, json_each(s.settings_json, '$.config') setting
                WHERE s.id = ?
-                 AND setting.key IN ('press_email', 'partnerships_email', 'catering_email', 'careers_email', 'default_timezone')
+                 AND setting.key IN ('press_email', 'partnerships_email', 'catering_email', 'careers_email')
               `, [organizationId]),
     productLocations: push(`SELECT DISTINCT pl.location_id
                               FROM product_locations pl
@@ -112,7 +112,7 @@ export async function buildPublicShellPayload(
       longitude: location.longitude,
       opening_hours: parseOpeningHours(location.opening_hours ? JSON.parse(String(location.opening_hours)) : null),
       special_hours: parseSpecialHours(location.special_hours ? JSON.parse(String(location.special_hours)) : null),
-      timezone: location.timezone ?? null,
+      timezone: String(location.timezone),
       rating: location.rating,
       review_count: location.review_count,
       status: location.status,

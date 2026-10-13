@@ -1,5 +1,5 @@
 <template>
-  <DashboardLeafPanel id="product-session" :title="isNew ? 'Add a session' : 'Edit session'" :lead="timezone ? `Times are in ${timezone}.` : 'Choose a location or set the online time zone first.'" :saving="saving" :disabled="pending || !valid || (!isNew && !dirty)" :error="saveError ?? p.loadError.value ?? (error ? getErrorMessage(error, 'Session could not be loaded') : '')" :save-label="isNew ? 'Add session' : 'Save'" @cancel="reset" @save="save">
+  <DashboardLeafPanel id="product-session" :title="isNew ? 'Add a session' : 'Edit session'" :lead="timezone ? `Times are in ${timezone}.` : 'Choose a location first; online times come from the provider\'s working hours.'" :saving="saving" :disabled="pending || !valid || (!isNew && !dirty)" :error="saveError ?? p.loadError.value ?? (error ? getErrorMessage(error, 'Session could not be loaded') : '')" :save-label="isNew ? 'Add session' : 'Save'" @cancel="reset" @save="save">
     <div class="space-y-6">
       <UFormField label="Starts" required><UInput v-model="startsAt" type="datetime-local" step="60" class="w-full" :disabled="hasGuests" /></UFormField>
       <UFormField label="Ends" required><UInput v-model="endsAt" type="datetime-local" step="60" class="w-full" :disabled="hasGuests" /></UFormField>
@@ -29,7 +29,7 @@ const { data, error, pending } = await useAsyncData(
   () => `product-session:${p.organizationId}:${route.params.productId}:${sessionId.value}`,
   async () => isNew.value ? null : dashboardApi(`${endpoint.value}/${sessionId.value}`, { validate: isSessionResponse }),
 )
-const timezone = computed(() => data.value?.session.timezone ?? (p.locationId.value ? p.location.value?.timezone : p.product.value?.booking?.online_timezone))
+const timezone = computed(() => data.value?.session.timezone ?? p.location.value?.timezone)
 const startsAt = ref('')
 const endsAt = ref('')
 const capacity = ref<number | undefined>()
