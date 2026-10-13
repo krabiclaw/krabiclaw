@@ -49,6 +49,8 @@ test('NCLS home → services → service detail', async ({ page }) => {
   })
 })
 
+// These browser cases verify collector transport and source context. Native log
+// recording is checked independently in the suite's PLAYWRIGHT_SERVER_LOGS output.
 test('anonymous tenant detail failures reach browser error collection with their source request and no private data', async ({ page }) => {
   await openTenantPage(page, `${potteryHouseBaseURL}/experiences`, potteryHouseExtraHeaders)
   await expect(page.locator('main').getByRole('heading').first()).toHaveText(/Pottery House Krabi Experiences/i)

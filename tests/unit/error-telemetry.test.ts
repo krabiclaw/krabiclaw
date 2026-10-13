@@ -65,13 +65,16 @@ test('empty rejection reasons are represented and oversized cyclic error chains 
 
   const chain = errorChainForTelemetry(error)
 
-  assert.ok(chain.length > 1 && chain.length <= 4)
+  assert.equal(chain.length, 4)
   assert.ok(chain[0]!.name.length <= 100)
   assert.ok(chain[0]!.message.length <= 1000)
   assert.ok(chain[0]!.code!.length <= 100)
   assert.ok(chain[0]!.stack!.length <= 4000)
   assert.match(chain[0]!.message, /\[truncated\]$/)
   assert.match(chain[0]!.stack!, /\[truncated\]$/)
+  const selfCause = new Error('Self cause')
+  selfCause.cause = selfCause
+  assert.deepEqual(errorChainForTelemetry(selfCause).map(entry => entry.message), ['Self cause'])
   assert.equal(redactErrorText('Short failure', 1000), 'Short failure')
   assert.deepEqual(errorChainForTelemetry(undefined), [{ name: 'undefined', message: 'undefined' }])
   assert.deepEqual(errorChainForTelemetry(null), [{ name: 'object', message: 'null' }])
