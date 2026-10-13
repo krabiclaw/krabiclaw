@@ -498,16 +498,7 @@ export async function getTenantPageForEditor(db: DbClient, variantId: string, sc
 }
 
 export async function getPublishedTenantPage(db: DbClient, organizationId: string, path: string, locale?: string | null): Promise<TenantPageDto | null> {
-  const resolvedLocale = await resolveLocale(db, organizationId, locale)
-  const normalizedPath = normalizeTenantPagePath(path)
-  const selectPublished = async (candidateLocale: string) => await queryFirst<PageRepresentationRow | null>(db, [
-    'SELECT v.id, COALESCE(v.root_id, v.id) AS page_id, v.organization_id, v.locale, v.path,',
-    '       v.title, v.summary, p.product_id,',
-    `       json_extract(p.metadata_json, '$.page_type') AS page_type, json_extract(p.metadata_json, '$.recipe') AS recipe, p.sort_order, v.updated_at`,
-    `  FROM content_documents v JOIN content_documents p ON p.id = COALESCE(v.root_id, v.id) AND p.row_role = 'root' AND p.kind = 'page'`,
-    ` WHERE v.row_role IN ('root','representation') AND v.kind = 'page' AND v.organization_id = ? AND v.locale = ? AND v.path = ? AND ${publicTenantPageSql('p')} LIMIT 1`,
-  ].join('\n'), [organizationId, candidateLocale, normalizedPath])
-  const row = await selectPublished(resolvedLocale)
+  const row = await resolvePublishedTenantPageIdentity(db, organizationId, path, locale)
   if (!row) return null
   return pageDto(row, documentOf(row), await tenantPageBlocks(db, organizationId, row.id))
 }
@@ -520,21 +511,16 @@ export async function resolvePublishedTenantPageIdentity(
 ) {
   const resolvedLocale = await resolveLocale(db, organizationId, locale)
   const normalizedPath = normalizeTenantPagePath(path)
-  const selectPublished = async (candidateLocale: string) => await queryFirst<{
-    page_id: string
-    page_type: TenantPageType
-    recipe: string | null
-    locale: string
-  } | null>(db, `
-    SELECT p.id AS page_id, json_extract(p.metadata_json, '$.page_type') AS page_type, json_extract(p.metadata_json, '$.recipe') AS recipe, v.locale
+  return await queryFirst<PageRepresentationRow | null>(db, `
+    SELECT v.id, p.id AS page_id, v.organization_id, v.locale, v.path,
+           v.title, v.summary, p.product_id,
+           json_extract(p.metadata_json, '$.page_type') AS page_type, json_extract(p.metadata_json, '$.recipe') AS recipe, p.sort_order, v.updated_at
       FROM content_documents v
       JOIN content_documents p ON p.id = COALESCE(v.root_id, v.id) AND p.row_role = 'root' AND p.kind = 'page'
      WHERE v.row_role IN ('root','representation') AND v.kind = 'page' AND v.organization_id = ? AND v.locale = ? AND v.path = ?
        AND ${publicTenantPageSql('p')}
       LIMIT 1
-  `, [organizationId, candidateLocale, normalizedPath])
-  const page = await selectPublished(resolvedLocale)
-  return page
+  `, [organizationId, resolvedLocale, normalizedPath])
 }
 
 export async function createTenantPagesBatch(

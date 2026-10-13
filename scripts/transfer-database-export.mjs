@@ -18,15 +18,19 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { register } from 'node:module'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
+import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { CONTENT_DOCUMENT_SCOPE_QUERY, MEDIA_PLACEMENT_OWNER_AUDIT_QUERY } from './audit-orphaned-media-placements.mjs'
 import { isSupportedMediaPlacement } from '../shared/media-placement-contract.ts'
 import { organizationRoles } from '../utils/organization-access.ts'
 import { validateProductDetails, assertProductKind } from '../shared/product-details.ts'
 import { TEMPLATE_PALETTES, parseSitePalette } from '../shared/site-palette.ts'
 import { getDarkModeVariant } from '../utils/color-utils.ts'
+
+register('../tests/unit/support/alias-hooks.mjs', import.meta.url)
 
 /** The roles the access matrix declares. Anything else evaluates to no permissions. */
 const DECLARED_ORGANIZATION_ROLES = new Set(Object.keys(organizationRoles))
@@ -416,7 +420,7 @@ export const SCHEMA_OBJECTS_QUERY = "SELECT type, name, sql FROM sqlite_schema W
  * @typedef {{ table: string, source_rows: number, target_rows: number }} TableTransfer
  * @typedef {{ baseline_sha256: string, source_migrations: string[], tables: TableTransfer[], transforms: Array<{ name: string, changes: number, sql_sha256: string }>,
  *   invariants: Array<{ name: string, violations: number, sql_sha256: string }>, payload?: { tables: number, statements: number, delta?: Record<string, number>, left_behind?: Record<string, { changed: string[], deleted: string[] }> },
- *   schema?: Array<{ type: string, name: string, sql: string }> }} TransferManifest
+ *   provider_hours_session_ids: string[], provider_hours_session_source_hashes: Record<string, string>, schema?: Array<{ type: string, name: string, sql: string }> }} TransferManifest
  */
 
 /**
@@ -428,9 +432,9 @@ export const SCHEMA_OBJECTS_QUERY = "SELECT type, name, sql FROM sqlite_schema W
  * @param {string} sourcePath
  * @param {string} targetPath
  * @param {{ payloadPath?: string | null, withoutJwks?: boolean, deltaFrom?: string | null }} [options]
- * @returns {TransferManifest}
+ * @returns {Promise<TransferManifest>}
  */
-export function transferDatabaseExport(sourcePath, targetPath, { payloadPath = null, withoutJwks = false, deltaFrom = null } = {}) {
+export async function transferDatabaseExport(sourcePath, targetPath, { payloadPath = null, withoutJwks = false, deltaFrom = null } = {}) {
   assert(!existsSync(targetPath), `Target already exists: ${targetPath}`)
   assert(!deltaFrom || payloadPath, 'A delta is a payload; pass --payload with --delta-from')
   const files = readdirSync(resolve(MIGRATIONS_DIRECTORY)).filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort()
@@ -445,7 +449,7 @@ export function transferDatabaseExport(sourcePath, targetPath, { payloadPath = n
   const target = new Database(targetPath)
   /** @type {TransferManifest} */
   const manifest = {
-    baseline_sha256: hash(baseSql), source_migrations: [], tables: [], transforms: [], invariants: [],
+    baseline_sha256: hash(baseSql), source_migrations: [], tables: [], transforms: [], invariants: [], provider_hours_session_ids: [], provider_hours_session_source_hashes: {},
   }
   try {
     const hasLedger = source.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE type = 'table' AND name = 'd1_migrations'").get().n === 1
@@ -681,6 +685,87 @@ export function transferDatabaseExport(sourcePath, targetPath, { payloadPath = n
       assert(count(target, 'organization_integrations') === integrations.length, 'organization_integrations differs from the connections it maps')
       manifest.transforms.push({ name: 'integrations_json_to_organization_integrations', changes: integrations.length })
     }
+    if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
+      const configs = target.prepare('SELECT * FROM product_booking_configs WHERE held_online = 1 ORDER BY product_id').all()
+      const previousSourceRows = new Map()
+      if (deltaFrom) {
+        const { sessionMemberSql } = await import('../server/utils/provider-allocation.ts')
+        const currentProvider = target.prepare(`WITH candidate AS (SELECT ? AS id, ? AS organization_id, ? AS product_id, ? AS assigned_member_id)
+          SELECT 1 FROM candidate JOIN member_scheduling ms ON ms.member_id=candidate.assigned_member_id AND ms.organization_id=candidate.organization_id
+            JOIN member m ON m.id=ms.member_id AND m.organizationId=ms.organization_id
+          WHERE ${sessionMemberSql('candidate')} IS candidate.assigned_member_id`)
+        // These rows were derived on the replacement, never held by the old
+        // source. Seed their canonical occurrences before regeneration so the
+        // native unique index retains their identities across a final delta.
+        // Real source sessions are not inventoried, so their deletions remain
+        // visible in the payload audit rather than being restored here.
+        const previous = JSON.parse(readFileSync(`${deltaFrom}.manifest.json`, 'utf8'))
+        assert(previous.baseline_sha256 === manifest.baseline_sha256, 'The initial transfer was built from another baseline')
+        assert(Array.isArray(previous.provider_hours_session_ids) && previous.provider_hours_session_ids.every(id => typeof id === 'string')
+          && new Set(previous.provider_hours_session_ids).size === previous.provider_hours_session_ids.length,
+        'The initial transfer has no valid provider-hours session inventory; repeat the initial preflight before deriving a delta')
+        assert(previous.provider_hours_session_source_hashes && typeof previous.provider_hours_session_source_hashes === 'object'
+          && !Array.isArray(previous.provider_hours_session_source_hashes) && Object.values(previous.provider_hours_session_source_hashes).every(value => typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value)),
+        'The initial transfer has no valid provider-hours source signatures; repeat the initial preflight before deriving a delta')
+        const earlier = new Database(deltaFrom, { readonly: true, fileMustExist: true })
+        try {
+          assert(sameSchema(earlier, target), 'The initial transfer schema differs from the current target')
+          for (const [id, signature] of Object.entries(previous.provider_hours_session_source_hashes)) {
+            const row = earlier.prepare('SELECT * FROM product_sessions WHERE id = ?').get(id)
+            assert(row, `Initial provider-hours source session is missing: ${id}`)
+            previousSourceRows.set(id, { row, signature })
+          }
+          const sessionColumns = columns(target, 'product_sessions')
+          const insert = target.prepare(`INSERT INTO product_sessions (${sessionColumns.map(qi).join(',')}) VALUES (${sessionColumns.map(() => '?').join(',')})`)
+          const held = new Set(configs.map(config => config.product_id))
+          let retained = 0
+          target.transaction(() => {
+            for (const id of previous.provider_hours_session_ids) {
+              const row = earlier.prepare('SELECT * FROM product_sessions WHERE id = ?').get(id)
+              assert(row && row.location_id === null && row.assigned_member_id !== null
+                && row.source_occurrence_key === `hours:${row.assigned_member_id}:${row.starts_at}`, `Invalid initial provider-hours session: ${id}`)
+              if (!held.has(row.product_id) || !currentProvider.get(row.id, row.organization_id, row.product_id, row.assigned_member_id)) continue
+              insert.run(...sessionColumns.map(name => row[name]))
+              retained++
+            }
+          })()
+          manifest.transforms.push({ name: 'provider_hours_session_identities_retained', changes: retained })
+        } finally { earlier.close() }
+      }
+      if (configs.length) {
+        const { prepareProviderHoursSessions } = await import('../server/utils/availability.ts')
+        const db = drizzle(target)
+        const before = new Map(target.prepare('SELECT * FROM product_sessions').all().map(row => [row.id, row]))
+        const now = new Date().toISOString()
+        const queries = []
+        for (const config of configs) queries.push(...await prepareProviderHoursSessions(db, config, { actorId: 'system', now }))
+        const changes = target.transaction(() => queries.reduce((total, { query, params }) => total + target.prepare(query).run(...params).changes, 0))()
+        const sourceSessions = new Map(source.prepare('SELECT * FROM product_sessions').all().map(row => [row.id, hash(JSON.stringify(row))]))
+        const sessions = target.prepare('SELECT * FROM product_sessions ORDER BY id').all()
+        const retainTimestamp = target.prepare('UPDATE product_sessions SET updated_at = ?, updated_by = ? WHERE id = ?')
+        target.transaction(() => {
+          for (const row of sessions.filter(row => sourceSessions.has(row.id))) {
+            const original = before.get(row.id)
+            const signature = sourceSessions.get(row.id)
+            const previous = previousSourceRows.get(row.id)
+            // A raw source may still say scheduled where the canonical
+            // horizon cancels the slot. Rebuilding that unchanged source must
+            // not invent a new audit time for identical derived facts. Only
+            // the metadata is retained, after the generator has respected the
+            // current source's bookings/holds and provider configuration.
+            if (previous?.signature === signature && Object.keys(row).every(name => ['updated_at', 'updated_by'].includes(name) || row[name] === previous.row[name])) {
+              retainTimestamp.run(previous.row.updated_at, previous.row.updated_by, row.id)
+              row.updated_at = previous.row.updated_at
+              row.updated_by = previous.row.updated_by
+            }
+            if (JSON.stringify(row) !== JSON.stringify(original)) manifest.provider_hours_session_source_hashes[row.id] = signature
+          }
+        })()
+        manifest.provider_hours_session_ids = sessions.filter(row => !sourceSessions.has(row.id)).map(row => row.id)
+        const created = sessions.filter(row => !before.has(row.id)).length
+        manifest.transforms.push({ name: 'online_provider_hours_sessions_created', changes: created }, { name: 'online_provider_hours_sessions_updated', changes: changes - created })
+      }
+    }
     manifest.tables = names.map(table => ({ table, source_rows: sourceTables.includes(table) ? count(source, table) : 0, target_rows: count(target, table) }))
     const violations = target.pragma('foreign_key_check')
     assert(violations.length === 0, `Foreign key violations after transfer (${violations.length}): ${JSON.stringify(violations.slice(0, 8))}`)
@@ -727,6 +812,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const deltaFrom = option('--delta-from')
   const [sourcePath, targetPath] = args
   if (!sourcePath || !targetPath) throw new Error('Usage: transfer-database-export.mjs <source.sql|source.sqlite> <target.sqlite> [--payload <payload.sql>] [--without-jwks] [--delta-from <earlier-target.sqlite>]')
-  printTransferReport(transferDatabaseExport(sourcePath, targetPath, { payloadPath, withoutJwks, deltaFrom }))
+  printTransferReport(await transferDatabaseExport(sourcePath, targetPath, { payloadPath, withoutJwks, deltaFrom }))
   console.log('Transfer passed.')
 }

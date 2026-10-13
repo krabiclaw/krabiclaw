@@ -202,7 +202,7 @@ try {
 
   const targetPath = values.out ? resolve(values.out) : join(directory, 'target.sqlite')
   const payloadPath = values.out ? `${targetPath}.payload.sql` : join(directory, 'payload.sql')
-  const manifest = transferDatabaseExport(values['source-file'] ? resolve(values['source-file']) : dumpPath, targetPath, { payloadPath, withoutJwks: omitJwks, deltaFrom })
+  const manifest = await transferDatabaseExport(values['source-file'] ? resolve(values['source-file']) : dumpPath, targetPath, { payloadPath, withoutJwks: omitJwks, deltaFrom })
   printTransferReport(manifest)
   const rows = manifest.tables.reduce((total, table) => total + table.target_rows, 0)
   if (target === 'out') {

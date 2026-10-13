@@ -1,8 +1,10 @@
+import { HTTPError } from 'nitro'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { parseGoogleReviewMetadata, type GoogleReviewMetadata } from '~/shared/google-review'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { bookingWindow, listSessions } from '~/server/utils/availability'
-import { getProduct, getProductBySlug, hydrateProductMedia, listCollections, listLocationProducts, listOrganizationProducts } from '~/server/utils/product-management'
+import { getProductBySlug, hydrateProductMedia, listCollections, listLocationProducts, listOrganizationProducts } from '~/server/utils/product-management'
+import { assertProductKind } from '~/shared/product-details'
 import type { Collection, Product, ProductBookingConfig, ProductPresentation, ProductSurface } from '~/server/types/products'
 import { isExperience, productSurfaceOf, resolveProductPresentation, presentationForSurface } from '~/utils/product-presentation'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
@@ -20,7 +22,7 @@ import { publicTenantVisibilitySql } from '~/server/utils/public-base'
 import { refreshProductBusy } from '~/server/domain/member-scheduling'
 import { selectProductCollectionSiblings, type ProductCollectionSibling } from '~/utils/product-seo'
 import { getPublicTenantPageForPath } from '~/server/utils/public-tenant-pages'
-import { getPublishedTenantPage } from '~/server/utils/content/pages'
+import { resolvePublishedTenantPageIdentity } from '~/server/utils/content/pages'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
 
@@ -161,15 +163,17 @@ export async function loadPublicProductCollection(
   locationSlug?: string | null,
   env?: CloudflareEnv,
 ): Promise<PublicProductCollection | null> {
-  const resolved = await loadProductOrganization(db, organizationId, routeKind, previewAuthorized)
+  const [resolved, locationRows] = await Promise.all([
+    loadProductOrganization(db, organizationId, routeKind, previewAuthorized),
+    queryAll<PublicProductLocationRow>(db, `
+      SELECT id, slug, title, timezone, address, phone, maps_url, latitude, longitude
+        FROM business_locations
+       WHERE organization_id = ? AND status = 'active'
+         ${locationSlug ? 'AND slug = ?' : ''}
+       ORDER BY title, id
+    `, [organizationId, ...(locationSlug ? [locationSlug] : [])]).then(rows => rows.map(publicProductLocation)),
+  ])
   if (!resolved) return null
-  const locationRows = (await queryAll<PublicProductLocationRow>(db, `
-    SELECT id, slug, title, timezone, address, phone, maps_url, latitude, longitude
-      FROM business_locations
-     WHERE organization_id = ? AND status = 'active'
-       ${locationSlug ? 'AND slug = ?' : ''}
-     ORDER BY title, id
-  `, [organizationId, ...(locationSlug ? [locationSlug] : [])])).map(publicProductLocation)
   if (locationSlug && locationRows.length !== 1) return null
   const locations = locationRows
   if (locationSlug && locations.length !== 1) return null
@@ -332,18 +336,23 @@ export async function loadPublicPageProductDetail(
   locale?: string,
   requestedScope?: string | null,
 ): Promise<PublicProductDetail | null> {
-  locale ??= await getSourceLocale(db, organizationId)
-  const page = previewAuthorized
-    ? await getPublicTenantPageForPath(env, db, organizationId, pagePath, { locale, preview: true })
-    : await getPublishedTenantPage(db, organizationId, pagePath, locale)
+  const [sourceLocale, page] = await Promise.all([
+    getSourceLocale(db, organizationId),
+    previewAuthorized
+      ? getPublicTenantPageForPath(env, db, organizationId, pagePath, { locale, preview: true })
+      : resolvePublishedTenantPageIdentity(db, organizationId, pagePath, locale),
+  ])
+  locale ??= sourceLocale
   if (page && !previewAuthorized && page.id !== page.page_id) await loadExactPublicLocalizations(env, db, organizationId, page.locale)
   if (!page?.product_id) return null
-  const product = await getProduct(db, organizationId, page.product_id)
-  if (!product.locations.some(location => location.published) && !product.booking?.held_online && !product.order_url) return null
-  const collection = await loadPublicProductCollection(db, organizationId, productSurfaceOf(null, product), previewAuthorized, undefined, env)
+  // Only the kind selects the public surface; the canonical catalog below
+  // hydrates and checks the offering once, including its publication/readiness.
+  const product = await queryFirst<{ kind: string }>(db, 'SELECT kind FROM products WHERE organization_id = ? AND id = ?', [organizationId, page.product_id])
+  if (!product) throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found' })
+  const collection = await loadPublicProductCollection(db, organizationId, productSurfaceOf(null, { kind: assertProductKind(product.kind) }), previewAuthorized, undefined, env)
   const found = collection?.products.find(product => product.id === page.product_id)
   if (!collection || !found) return null
-  return projectPublicOffering(env, db, collection, found, locale, requestedScope, product.page?.path ?? pagePath)
+  return projectPublicOffering(env, db, collection, found, locale, requestedScope, found.page?.path ?? pagePath, sourceLocale)
 }
 
 async function projectPublicOffering(

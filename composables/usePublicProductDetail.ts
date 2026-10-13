@@ -64,6 +64,7 @@ export function isPublicProductDetailPayload(value: unknown): value is PublicPro
 }
 
 export async function usePublicProductDetail(routeKind: ProductSurface) {
+  const nuxtApp = useNuxtApp()
   const route = useRoute()
   const requestEvent = useRequestEvent()
   const { id: organizationId } = useTenantOrganization().organization
@@ -110,7 +111,14 @@ export async function usePublicProductDetail(routeKind: ProductSurface) {
     },
     { server: true, lazy: false },
   )
-  if (error.value) throw createError({ ...error.value, message: error.value.message, fatal: true })
+  if (error.value) {
+    const failure = error.value
+    if (import.meta.server) throw failure
+    throw nuxtApp.runWithContext(() => showError(failure))
+  }
+  watch(error, (failure) => {
+    if (failure) nuxtApp.runWithContext(() => showError(failure))
+  }, { flush: 'sync' })
   if (!data.value) throw createError({ statusCode: 404, statusMessage: 'Product not found', fatal: true })
   localeRepresentations.value = data.value.localeRepresentations
   return { organizationId, detail: data as Ref<PublicProductDetailPayload> }
@@ -118,6 +126,7 @@ export async function usePublicProductDetail(routeKind: ProductSurface) {
 
 /** The same public offering behind a page's explicit product binding. */
 export async function usePublicPageProduct(pagePath: ComputedRef<string>, locale: ComputedRef<string>, productId: ComputedRef<string | null>) {
+  const nuxtApp = useNuxtApp()
   const route = useRoute()
   const event = useRequestEvent()
   const { id: organizationId } = useTenantOrganization().organization
@@ -141,6 +150,13 @@ export async function usePublicPageProduct(pagePath: ComputedRef<string>, locale
       })
     },
   )
-  if (error.value) throw createError({ ...error.value, message: error.value.message, fatal: true })
+  if (error.value) {
+    const failure = error.value
+    if (import.meta.server) throw failure
+    throw nuxtApp.runWithContext(() => showError(failure))
+  }
+  watch(error, (failure) => {
+    if (failure) nuxtApp.runWithContext(() => showError(failure))
+  }, { flush: 'sync' })
   return data
 }
