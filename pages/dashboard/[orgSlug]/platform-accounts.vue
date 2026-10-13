@@ -1,6 +1,6 @@
 <template>
-  <DashboardIndexPanel id="platform-accounts" title="Platform accounts">
-    <div class="mx-auto w-full max-w-3xl">
+  <DashboardIndexPanel id="platform-accounts" title="Platform accounts" column="reading">
+    <div>
       <div class="space-y-6">
         <p class="text-sm text-muted">
           Every account on the platform. Impersonating opens that person's dashboard exactly as they see it; use their

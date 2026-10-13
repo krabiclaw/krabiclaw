@@ -8,6 +8,7 @@
   <DashboardIndexPanel
     :id="personalScope ? 'account-calendar' : 'org-calendar'"
     title="Calendar"
+    column="wide"
     :navbar-ui="personalScope ? undefined : { title: 'sr-only', center: 'flex min-w-0 flex-1 items-center' }"
   >
     <!-- Which location the calendar is: Airbnb names the listing in its header, and tapping it switches. An account has no branch to choose. -->
@@ -54,7 +55,7 @@
       </div>
     </template>
 
-    <div class="mx-auto w-full max-w-5xl pb-28">
+    <div class="pb-28">
       <UAlert
         v-if="locationError"
         class="mb-6"

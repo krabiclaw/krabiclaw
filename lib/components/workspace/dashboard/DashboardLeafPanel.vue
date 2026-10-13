@@ -25,7 +25,7 @@
 
     <template #body>
       <!-- One column width for every leaf: fields do not stretch to the pane. -->
-      <div class="mx-auto w-full max-w-xl">
+      <div class="mx-auto w-full" :class="dashboardColumnWidths.leaf">
         <h1 class="flex items-center gap-3 text-2xl font-semibold text-highlighted lg:text-[32px] lg:leading-tight">
           <UIcon v-if="icon" :name="icon" class="size-8 shrink-0" />
           {{ title }}
@@ -63,6 +63,8 @@
 </template>
 
 <script setup lang="ts">
+import { dashboardColumnWidths } from './dashboardPanelContext'
+
 /*
   A leaf: one thing, its own column, Cancel and Save in the panel's footer —
   Airbnb's editor-leaf shape, and on a phone the sheet that covers the list it

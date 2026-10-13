@@ -6,7 +6,7 @@
     every organization has all three, whatever its template. Each opens a
     view suited to its task; every offering opens the one Product editor.
   -->
-  <DashboardIndexPanel id="catalog" title="Catalog" column>
+  <DashboardIndexPanel id="catalog" title="Catalog" column="leaf">
     <template #right>
       <UButton :to="`${level.path.value}/new/kind`" icon="i-lucide-plus" color="neutral" variant="soft" square aria-label="Add" data-testid="catalog-add" />
     </template>

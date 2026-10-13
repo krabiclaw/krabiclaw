@@ -2,6 +2,7 @@
   <DashboardIndexPanel
     :id="personalScope ? 'account-today' : 'org-today'"
     title="Today"
+    column="wide"
     :navbar-ui="{ title: 'sr-only', center: 'flex flex-1 items-center justify-center' }"
   >
     <!--
@@ -24,7 +25,7 @@
         </div>
     </template>
 
-    <div class="mx-auto w-full max-w-4xl pb-24">
+    <div class="pb-24">
       <UAlert
         v-if="realtime.status.value === 'failed'"
         class="mb-6"

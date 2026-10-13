@@ -5,14 +5,14 @@
     and Paid payouts as cards, and monthly Reports. The cog opens Payments
     (payouts, plan, fees). A card on Menu, so Back returns there.
   -->
-  <DashboardIndexPanel id="earnings" title="Earnings">
+  <DashboardIndexPanel id="earnings" title="Earnings" column="reading">
     <template #right>
       <UDropdownMenu :items="settingsItems" :content="{ align: 'end' }" :ui="{ content: 'w-60' }">
         <UButton icon="i-lucide-settings" color="neutral" variant="ghost" size="sm" square aria-label="Settings and documents" />
       </UDropdownMenu>
     </template>
 
-    <div class="mx-auto w-full max-w-2xl space-y-10 pb-10">
+    <div class="space-y-10 pb-10">
       <UAlert v-if="error" color="error" variant="soft" title="Earnings could not be loaded" :description="getErrorMessage(error, 'Earnings request failed')" />
       <section v-else class="rounded-3xl bg-elevated/50 px-6 py-8 shadow-sm ring ring-default">
         <p class="text-center text-sm font-medium text-highlighted">Performance</p>

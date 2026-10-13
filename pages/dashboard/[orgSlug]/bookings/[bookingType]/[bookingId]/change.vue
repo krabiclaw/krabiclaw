@@ -9,7 +9,7 @@
     title="What do you want to change?"
     :lead="b.booking.value ? `${b.firstName(b.booking.value.guestName ?? '')} confirms the change before anything moves.` : undefined"
     :auto-open="firstField"
-    column
+    column="leaf"
   >
     <div v-if="b.booking.value">
       <UAlert v-if="b.changeError.value" class="mb-6" color="error" variant="soft" icon="i-lucide-circle-alert" :description="b.changeError.value" />
@@ -49,7 +49,7 @@
 
     <template #footer>
       <DashboardPanelFooter
-        column
+        column="leaf"
         save-label="Send request"
         :loading="b.changeSaving.value"
         :disabled="!b.changeValid.value || !b.changeDirty.value"

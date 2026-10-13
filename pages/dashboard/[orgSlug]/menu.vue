@@ -13,7 +13,7 @@
     Airbnb's does too.
   -->
   <!-- A menu is a column, not the page: alone on a wide screen it keeps a phone's measure. -->
-  <DashboardIndexPanel id="organization-settings" title="Menu" column>
+  <DashboardIndexPanel id="organization-settings" title="Menu" column="leaf">
     <template #right>
       <UButton
         icon="i-lucide-search"

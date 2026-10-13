@@ -4,8 +4,8 @@
     on the right, a total and Export CSV at the foot. Upcoming payouts head the
     list. A payout opens as a leaf of this level.
   -->
-  <DashboardIndexPanel id="earnings-payouts" title="Paid">
-    <div class="mx-auto w-full max-w-3xl pb-24">
+  <DashboardIndexPanel id="earnings-payouts" title="Paid" column="reading">
+    <div class="pb-24">
       <UAlert v-if="error" color="error" :description="error.message" />
       <template v-else-if="data">
         <template v-if="data.configured === false">

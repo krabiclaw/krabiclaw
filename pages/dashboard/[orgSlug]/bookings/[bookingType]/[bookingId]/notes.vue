@@ -3,7 +3,7 @@
     Your team's notes on this record: the ones written, each a leaf below, and
     the one being written, which this level's own footer saves.
   -->
-  <DashboardIndexPanel id="booking-notes" title="Your notes" lead="Only your team can see these notes." column>
+  <DashboardIndexPanel id="booking-notes" title="Your notes" lead="Only your team can see these notes." column="leaf">
     <div class="space-y-6">
       <UAlert v-if="b.noteError.value" color="error" variant="soft" icon="i-lucide-circle-alert" :description="b.noteError.value" />
       <UFormField label="New note">
@@ -24,7 +24,7 @@
     </div>
 
     <template #footer>
-      <DashboardPanelFooter column :loading="b.noteSaving.value" :disabled="!b.noteDraft.value.trim()" @cancel="cancel" @save="save" />
+      <DashboardPanelFooter column="leaf" :loading="b.noteSaving.value" :disabled="!b.noteDraft.value.trim()" @cancel="cancel" @save="save" />
     </template>
   </DashboardIndexPanel>
 </template>

@@ -1,5 +1,5 @@
 <template>
-  <DashboardIndexPanel id="account-menu" title="Menu" column>
+  <DashboardIndexPanel id="account-menu" title="Menu" column="leaf">
     <DashboardMenuContent />
   </DashboardIndexPanel>
 </template>
