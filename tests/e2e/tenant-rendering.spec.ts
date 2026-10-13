@@ -1,9 +1,13 @@
 import { expect, test, type Page } from '@playwright/test'
+import { marked } from 'marked'
 import {
   blawbyBaseURL, blawbyExtraHeaders,
   openTenantPage, potteryHouseBaseURL, potteryHouseExtraHeaders, waitForNuxtHydration,
 } from './helpers'
 import { testBaseUrl } from './test-env'
+import { loginAs } from './helpers/auth'
+import { mcpData, mcpRequest } from './helpers/mcp'
+import mcpCatalog from '../../server/utils/mcp-catalog-snapshots/tenant.json' with { type: 'json' }
 
 // Two tenants stand in for the two shells this renderer produces: Pottery
 // House on .tenant-layout and NCLS on .blawby-shell. Kikuzuki renders through
@@ -89,6 +93,130 @@ test('Krabiclaw pricing retains its billing plans after hydration', async ({ pag
 })
 
 for (const width of [390, 1440]) {
+  test(`Krabiclaw MCP reference has usable anchors and contained tables at ${width}px`, async ({ page, request }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 })
+    const baseURL = testBaseUrl()
+    let referenceURL = `${baseURL}/docs/mcp-tool-reference`
+    // Local PR data can carry the real unpublished article. Its signed CMS
+    // preview exercises the renderer without publishing or creating test state.
+    // Deployed qualification always exercises the anonymous public route.
+    if (!process.env.PLAYWRIGHT_PREVIEW_URL) {
+      await loginAs(request, baseURL)
+      const read = await mcpRequest(request, baseURL, {
+        method: 'tools/call', toolName: 'get_blog_post',
+        args: { organization_id: 'platform', post_id: 'mcp-tool-reference' },
+      })
+      expect(read.status()).toBe(200)
+      const { post } = mcpData<{ post: { collection: string; status: string; public_url: string | null; preview_url: string | null } }>(await read.json())
+      expect(post.collection).toBe('docs')
+      const destination = post.status === 'draft' ? post.preview_url : post.public_url
+      if (post.status !== 'draft') expect(post.status).toBe('published')
+      expect(destination).toBeTruthy()
+      referenceURL = destination!
+      expect(new URL(referenceURL).origin).toBe(new URL(baseURL).origin)
+    }
+    const response = await openTenantPage(page, referenceURL, {})
+    expect(response?.status()).toBe(200)
+    await waitForNuxtHydration(page)
+    const article = page.locator('article.blog-article')
+    await expect(article.getByRole('heading', { name: 'MCP tool reference', exact: true, level: 1 })).toBeVisible()
+    // The catalog guard checks this canonical snapshot against the registry.
+    await expect(article).toContainText(`Tools: ${mcpCatalog.tools.length}.`)
+    await expect(article).toContainText(`Reference fingerprint: ${mcpCatalog.documentationFingerprint}`)
+    const toolNames = mcpCatalog.tools.map(tool => tool.name).sort()
+    expect((await article.locator('h3 code').allTextContents()).sort()).toEqual(toolNames)
+    const anchorFailures = await article.evaluate((element, names) => {
+      const ids = [...element.querySelectorAll('[id]')].map(target => target.id)
+      const failures = names.filter(name => ids.filter(id => id === name).length !== 1)
+      for (const link of element.querySelectorAll<HTMLAnchorElement>('a[href^="#"]')) {
+        const id = decodeURIComponent(link.hash.slice(1))
+        if (!id || !element.contains(document.getElementById(id))) failures.push(link.getAttribute('href')!)
+      }
+      return failures
+    }, toolNames)
+    expect(anchorFailures, 'Every tool and nested-shape link must resolve inside the rendered article').toEqual([])
+    expect(await page.evaluate(() => window.innerWidth)).toBe(width)
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    const tables = article.locator('table')
+    expect(await tables.count()).toBeGreaterThan(0)
+    const tableFailures = await tables.evaluateAll(elements => elements.flatMap((table, index) => {
+      const bounds = table.getBoundingClientRect()
+      const failures: string[] = []
+      if (Math.floor(bounds.left) < 0 || Math.ceil(bounds.right) > window.innerWidth) failures.push(`table ${index} escapes the viewport`)
+      for (const cell of table.querySelectorAll('th, td:first-child code')) {
+        const text = document.createRange()
+        text.selectNodeContents(cell)
+        if (text.getClientRects().length !== 1) failures.push(`table ${index} wraps identifier/header: ${cell.textContent}`)
+      }
+      for (const code of table.querySelectorAll('code')) {
+        if (getComputedStyle(code, '::before').content !== 'none' || getComputedStyle(code, '::after').content !== 'none') {
+          failures.push(`table ${index} adds decorative code characters`)
+        }
+      }
+      return failures
+    }))
+    expect(tableFailures).toEqual([])
+    const horizontalScroll = await tables.evaluateAll(elements => {
+      const table = elements.find(element => element.scrollWidth > element.clientWidth)
+      if (!table) return null
+      table.scrollLeft = table.scrollWidth
+      const result = { tableMoved: table.scrollLeft > 0, pageLeft: window.scrollX }
+      table.scrollLeft = 0
+      return result
+    })
+    if (width === 390) expect(horizontalScroll, 'Narrow tables must remain independently scrollable').not.toBeNull()
+    if (horizontalScroll) expect(horizontalScroll).toEqual({ tableMoved: true, pageLeft: 0 })
+    for (const name of [toolNames[0]!, toolNames.at(-1)!]) {
+      await article.locator(`a[href="#${name}"]`).first().click()
+      expect(new URL(page.url()).hash).toBe(`#${name}`)
+      await expect(article.locator(`h3`).filter({ hasText: new RegExp(` — ${name}$`) })).toBeVisible()
+    }
+    const menuHeading = article.locator('h3').filter({ hasText: / — update_menu$/ })
+    await menuHeading.evaluate(element => element.scrollIntoView({ block: 'start' }))
+    await page.screenshot({ path: testInfo.outputPath(`mcp-reference-${width}px.png`), animations: 'disabled' })
+    await menuHeading.locator('xpath=following-sibling::table[1]').screenshot({ path: testInfo.outputPath(`mcp-reference-menu-table-${width}px.png`), animations: 'disabled' })
+  })
+
+  for (const { slug } of mcpCatalog.publicDocumentation) {
+    test(`Krabiclaw workflow ${slug} renders its guidance and media at ${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 })
+      const source = await page.request.get(`${testBaseUrl()}/api/public/blog/${slug}?collection=docs`)
+      expect(source.status()).toBe(200)
+      const { post } = await source.json() as { post: { title: string; content_blocks: Array<{ type: string; data: Record<string, unknown>; media: Array<{ alt_text: string; public_url: string }> }> } }
+      const markdown = post.content_blocks.filter(block => block.type === 'markdown').map(block => String(block.data.markdown)).join('\n\n')
+      const authored = await page.evaluate(html => {
+        const document = new DOMParser().parseFromString(html, 'text/html')
+        return {
+          intro: document.querySelector('p')?.textContent ?? '',
+          images: [...document.querySelectorAll('img')].map(image => ({
+            alt: image.alt,
+            caption: image.parentElement?.nextElementSibling?.tagName === 'P' ? image.parentElement.nextElementSibling.textContent ?? '' : '',
+          })),
+        }
+      }, marked.parse(markdown, { async: false }))
+      const images = [...authored.images, ...post.content_blocks.filter(block => block.type === 'image').map(block => ({
+        alt: block.media[0]!.alt_text, caption: String(block.data.caption ?? ''),
+      }))]
+      expect(authored.intro.length, 'A workflow needs substantive opening guidance').toBeGreaterThan(60)
+      const response = await openTenantPage(page, `${testBaseUrl()}/docs/${slug}`, {})
+      expect(response?.status()).toBe(200)
+      await waitForNuxtHydration(page)
+      const article = page.locator('article.blog-article')
+      await expect(article.getByRole('heading', { name: post.title, exact: true, level: 1 })).toBeVisible()
+      await expect(article.locator('.prose').first()).toContainText(authored.intro)
+      await expect(article.locator('a[href^="/docs/mcp-tool-reference"]').first()).toBeVisible()
+      await expect(article.locator('figure img, .prose img')).toHaveCount(images.length)
+      for (const image of images) {
+        expect(image.alt.trim()).not.toBe('')
+        const picture = article.getByRole('img', { name: image.alt, exact: true })
+        await expect(picture).toBeVisible()
+        await expect.poll(() => picture.evaluate(element => (element as HTMLImageElement).naturalWidth)).toBeGreaterThan(0)
+        if (image.caption) await expect(article.getByText(image.caption, { exact: true })).toBeVisible()
+      }
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    })
+  }
+
   test(`Krabiclaw policies render their own headers and body at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     const errors: string[] = []

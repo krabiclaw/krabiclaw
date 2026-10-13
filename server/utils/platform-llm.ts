@@ -168,6 +168,10 @@ function serializeAiAssistanceMarkdown(block: LlmContentBlock) {
   return normalizeWhitespace(lines.join('\n'))
 }
 
+function literalMarkdown(value: unknown) {
+  return String(value || '').trim().replace(/[\\`*_[\]{}()#+\-.!|<>&]/g, '\\$&')
+}
+
 export function renderContentBlocksForLlm(blocks: LlmContentBlock[]) {
   return normalizeWhitespace([...blocks].sort((a, b) => a.position - b.position).map((block) => {
     if (block.data.status === 'inactive' || block.data.render_enabled === false) return ''
@@ -177,7 +181,19 @@ export function renderContentBlocksForLlm(blocks: LlmContentBlock[]) {
     if (block.type === 'faq') return serializeFaqMarkdown(block)
     if (block.type === 'how_to') return serializeHowToMarkdown(block)
     if (block.type === 'ai_assistance') return serializeAiAssistanceMarkdown(block)
-    if (block.type === 'image' || block.type === 'gallery') return block.media.map(item => item.public_url ? `![${item.alt_text || ''}](${item.public_url})${item.caption ? `\n\n${item.caption}` : ''}` : '').filter(Boolean).join('\n\n')
+    if (block.type === 'callout') {
+      // Article callouts render title/body as literal text, including punctuation and line breaks.
+      const title = literalMarkdown(block.data.title)
+      const body = literalMarkdown(block.data.body)
+      const content = [title ? `### ${title}` : '', body].filter(Boolean).join('\n\n')
+      return content ? content.split('\n').map(line => `> ${line}`).join('\n') : ''
+    }
+    if (block.type === 'image' || block.type === 'gallery') {
+      const images = block.media.map(item => item.public_url
+        ? `![${literalMarkdown(item.alt_text)}](${item.public_url})${block.type === 'gallery' && item.caption ? `\n\n${literalMarkdown(item.caption)}` : ''}`
+        : '').filter(Boolean).join('\n\n')
+      return [images, block.type === 'image' ? literalMarkdown(block.data.caption) : ''].filter(Boolean).join('\n\n')
+    }
     const video = blockVideo(block)
     if (video) {
       const videoId = youTubeVideoId(video.url)

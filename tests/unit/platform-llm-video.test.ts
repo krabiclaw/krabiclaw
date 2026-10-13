@@ -1,6 +1,24 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildLlmsTxt, renderContentBlocksForLlm } from '../../server/utils/platform-llm.ts'
+import { htmlToPlainText, renderMarkdownToHtml } from '../../utils/markdown.ts'
+
+test('LLM callouts retain the article title and literal body across Markdown rendering', () => {
+  const markdown = renderContentBlocksForLlm([{ type: 'callout', position: 0, level: null, media: [],
+    data: { title: 'Changes after publication', body: 'Keep **literal** text and <private>.\nLine two.' } }])
+  const html = renderMarkdownToHtml(markdown)
+  assert.match(html, /Changes after publication/)
+  assert.match(htmlToPlainText(html), /Keep \*\*literal\*\* text and <private>\.\nLine two\./)
+  assert.doesNotMatch(html, /<strong>literal<\/strong>|<private>/)
+})
+
+test('LLM image captions come from the article block and keep literal text', () => {
+  const markdown = renderContentBlocksForLlm([{ type: 'image', position: 0, level: null,
+    data: { caption: 'The [current] upload control.' }, media: [{ public_url: 'https://example.com/screen.png', alt_text: 'Upload [control]' }] }])
+  const html = renderMarkdownToHtml(markdown)
+  assert.match(html, /alt="Upload \[control\]"/)
+  assert.match(htmlToPlainText(html), /The \[current\] upload control\./)
+})
 
 test('LLM video rendering uses a plain watch URL without a name and keeps descriptions', () => {
   const url = 'https://youtu.be/abc123DEF45'

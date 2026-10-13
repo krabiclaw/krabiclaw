@@ -31,9 +31,15 @@ if (changedSince) {
     'server/utils/public-search.ts',
     'server/utils/platform-llm.ts',
     'server/utils/content/documents.ts',
+    'server/utils/content/publishing.ts',
     'server/utils/platform-organization.ts',
+    'server/utils/mcp-documentation.ts',
+    'server/utils/mcp-catalog.ts',
+    'server/utils/mcp-catalog-snapshots/tenant.json',
   ])
-  const changedInputs = changedFiles.filter(file => indexInputs.has(file))
+  // Published MCP reference text is projected from the deployed registry. The
+  // catalog snapshot also catches schema fragments imported from other modules.
+  const changedInputs = changedFiles.filter(file => indexInputs.has(file) || file.startsWith('server/utils/mcp-tools/'))
   if (changedInputs.length === 0) {
     console.log('AI Search refresh skipped: indexed content definitions and rendering are unchanged.')
     process.exit(0)
