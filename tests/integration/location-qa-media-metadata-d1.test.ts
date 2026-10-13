@@ -25,8 +25,8 @@ async function boot() {
   const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
   await db.batch(statements.map(statement => db.prepare(statement)))
   for (const org of [ORG, OTHER_ORG]) {
-    await db.prepare(`INSERT INTO organization (id, name, slug, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at)
-      VALUES (?, 'Org', ?, '{"config":{"default_timezone":"Asia/Bangkok"}}', 'saya-theme-v1', 'THB', 'active', 'complete', 'flat', 'restaurant', ?)`).bind(org, org, NOW).run()
+    await db.prepare(`INSERT INTO organization (id, name, slug, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
+      VALUES (?, 'Org', ?, '{}', 'saya-theme-v1', 'THB', 'active', 'complete', 'flat', 'restaurant', ?, 'Asia/Bangkok')`).bind(org, org, NOW).run()
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES (?, ?, 'en', 1, 'published')")
       .bind(`locale-${org}`, org).run()
   }

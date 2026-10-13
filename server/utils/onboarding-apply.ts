@@ -28,6 +28,7 @@ import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cach
 import type { CloudflareEnv } from '~/server/utils/auth'
 import type { OrganizationVertical } from '~/utils/vertical-copy'
 import type { CurrencyCode } from '~/shared/currencies'
+import { isValidTimezone } from '~/utils/timezone'
 import { starterPalette } from '~/shared/site-palette'
 import { resolveOrganizationFontPreset } from '~/shared/organization-fonts'
 import { parseLogoPresentation } from '~/shared/media-placement-contract'
@@ -41,6 +42,9 @@ export interface OnboardingTarget {
   subdomain: string
   locationId: string
   locationSlug: string | null
+  /** The two answers a site cannot exist without, checked before it was created. */
+  defaultCurrency: CurrencyCode
+  timezone: string
 }
 
 /** A draft's answers, as they are stored while the owner is still answering. */
@@ -52,7 +56,8 @@ export interface OnboardingDraftRow {
   vertical: OrganizationVertical
   subdomain_candidate: string
   source_locale: string | null
-  default_currency?: CurrencyCode | null
+  default_currency: CurrencyCode | null
+  timezone: string | null
 }
 
 export async function saveOnboardingDraft(env: CloudflareEnv, db: D1Database, userId: string, input: OnboardingDraftInput) {
@@ -91,12 +96,11 @@ export async function saveOnboardingDraft(env: CloudflareEnv, db: D1Database, us
     id: draft.id, updated_at: draft.updatedAt, organization_id: draft.organizationId,
     name: draft.payload.preview.brandName, vertical: draft.payload.preview.vertical,
     subdomain_candidate: draft.subdomainCandidate, source_locale: draft.payload.source.details.sourceLocale,
-    default_currency: draft.payload.source.details.currency,
+    default_currency: draft.payload.source.details.currency, timezone: draft.payload.source.details.timezone,
   })
   if ('error' in target) throw new HTTPError({ statusCode: target.status, statusMessage: target.error, data: { ...target.data, draft_id: draft.id } })
   const applied = await applyOnboardingDraft(env, db, {
     userId, target: target.target, payload: draft.payload,
-    defaultCurrency: draft.payload.source.details.currency, timezone: draft.payload.source.details.timezone,
     draft: { id: draft.id, user_id: userId, updated_at: draft.updatedAt },
   })
   if ('error' in applied) throw new HTTPError({ statusCode: applied.status, statusMessage: applied.error, data: { draft_id: draft.id } })
@@ -137,10 +141,10 @@ export async function activateOnboardingDraft(env: CloudflareEnv, db: D1Database
   }
   try {
     if (!live) {
-      const target = await ensureOnboardingTarget(env, db, input.userId, { ...draft, source_locale: sourceLocale, default_currency: currency })
+      const target = await ensureOnboardingTarget(env, db, input.userId, { ...draft, source_locale: sourceLocale, default_currency: currency, timezone })
       if ('error' in target) throw new HTTPError({ statusCode: target.status, statusMessage: target.error, data: target.data })
       organizationId = target.target.organizationId
-      const applied = await applyOnboardingDraft(env, db, { userId: input.userId, target: target.target, payload, defaultCurrency: currency, timezone, draft, activate: true })
+      const applied = await applyOnboardingDraft(env, db, { userId: input.userId, target: target.target, payload, draft, activate: true })
       if ('error' in applied) throw new HTTPError({ statusCode: applied.status, statusMessage: applied.error })
     }
     if (!organizationId) throw new Error('Activated website has no organization')
@@ -201,12 +205,15 @@ export async function ensureOnboardingTarget(
   draft: OnboardingDraftRow,
 ): Promise<{ target: OnboardingTarget } | { error: string; status: number; data?: Record<string, unknown> }> {
   if (!draft.source_locale) return { status: 400, error: 'Choose a supported website language' }
+  // The site is created here, and it cannot exist without these two answers.
+  if (!draft.default_currency) return { status: 400, error: 'Choose the currency you price in', data: { missing_fields: ['currency'] } }
+  if (!isValidTimezone(draft.timezone)) return { status: 400, error: 'Choose your timezone', data: { missing_fields: ['timezone'] } }
   const revision = { id: draft.id, user_id: userId, updated_at: draft.updated_at }
   const writeGuard = onboardingDraftWriteGuard(revision)
   await executeBatch(db, [writeGuard])
   let organizationId = draft.organization_id
   if (!organizationId) {
-    const created = await createOrganization(env, userId, draft.name, { draftId: draft.id, slug: draft.subdomain_candidate })
+    const created = await createOrganization(env, userId, draft.name, { draftId: draft.id, slug: draft.subdomain_candidate }, { defaultCurrency: draft.default_currency, timezone: draft.timezone })
     await executeBatch(db, [writeGuard, {
       query: 'UPDATE onboarding_drafts SET organization_id = ? WHERE id = ? AND user_id = ? AND organization_id IS NULL',
       params: [created.organizationId, draft.id, userId],
@@ -233,7 +240,6 @@ export async function ensureOnboardingTarget(
     name: draft.name,
     subdomain: draft.subdomain_candidate,
     vertical: draft.vertical,
-    defaultCurrency: draft.default_currency ?? null,
     sourceLocale: draft.source_locale,
     activate: false,
     origin: null,
@@ -273,6 +279,8 @@ export async function ensureOnboardingTarget(
       subdomain,
       locationId: locations[0]!.id,
       locationSlug: locations[0]!.slug,
+      defaultCurrency: draft.default_currency,
+      timezone: draft.timezone,
     },
   }
 }
@@ -285,17 +293,14 @@ export async function applyOnboardingDraft(
     userId: string
     target: OnboardingTarget
     payload: OnboardingDraftPayload
-    // Both are the owner's answers and arrive part-way through the wizard. Until
-    // they do they stay null on the organization, which is what "not answered
-    // yet" looks like — never a currency or a zone nobody chose.
-    defaultCurrency: CurrencyCode | null
-    timezone: string | null
     draft: Pick<SavedOnboardingDraft, 'id' | 'user_id' | 'updated_at'>
     activate?: boolean
   },
 ): Promise<{ locationSlug: string | null } | { error: string; status: number }> {
-  const { userId, payload, defaultCurrency, timezone } = input
-  const { organizationId } = input.target
+  const { userId, payload } = input
+  // The organization was created with these answers; a later save while the
+  // site is pending writes a changed answer back.
+  const { organizationId, defaultCurrency, timezone } = input.target
   const writeGuard = onboardingDraftWriteGuard(input.draft, organizationId)
   const locationRow = { id: input.target.locationId }
   const organization = await queryFirst<{ onboarding_status: string | null; has_bookings: number }>(db, `
@@ -307,17 +312,11 @@ export async function applyOnboardingDraft(
     throw new HTTPError({ statusCode: 409, statusMessage: 'Onboarding can only replace a pending site with no bookings', data: { code: 'ONBOARDING_REBUILD_NOT_ALLOWED' } })
   }
 
-  const settingsQueries: BatchQuery[] = []
-  if (defaultCurrency) settingsQueries.push({ query: `
+  const settingsQueries: BatchQuery[] = [{ query: `
       UPDATE organization
-      SET default_currency = ?, updated_at = ?
+      SET default_currency = ?, timezone = ?, updated_at = ?
       WHERE id = ?
-    `, params: [defaultCurrency, new Date().toISOString(), organizationId] })
-
-  if (timezone) settingsQueries.push({ query: `
-      UPDATE organization SET settings_json = json_set(settings_json, '$.config.default_timezone', ?)
-      WHERE id = ?
-    `, params: [timezone, organizationId] })
+    `, params: [defaultCurrency, timezone, new Date().toISOString(), organizationId] }]
 
   // The look the owner chose in the brand step: a starter palette and a font,
   // written to the site so the preview and the launched site both wear them.

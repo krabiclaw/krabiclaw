@@ -23,7 +23,7 @@ test('public discovery resolves translations through current publication owners'
     await db.batch(statements.map(statement => db.prepare(statement)))
     for (const id of ['platform', 'tenant', 'other']) {
       // Krabiclaw's own organization is the one running the platform template.
-      await db.prepare('INSERT INTO organization (id,name,slug,subdomain,theme_id,vertical) VALUES (?,?,?,?,?,?)')
+      await db.prepare(`INSERT INTO organization (id,name,slug,subdomain,theme_id,vertical, default_currency, timezone) VALUES (?,?,?,?,?,?, 'USD', 'UTC')`)
         .bind(id, id, id, id, id === 'platform' ? 'krabiclaw-theme-v1' : 'saya-theme-v1', id === 'platform' ? 'service' : 'restaurant').run()
       for (const locale of ['en', 'th']) await db.prepare('INSERT INTO organization_locales (id,organization_id,locale,is_source,status) VALUES (?,?,?,?,?)')
         .bind(id + locale, id, locale, Number(locale === 'en'), 'published').run()

@@ -3,31 +3,31 @@ import {paymentMoney} from './payment-display'
 
 /** What `/api/dashboard/payments` answers for a period with no `view`: the summary the Menu's Earnings card shows. */
 export interface EarningsAmount { currency:string; captured_amount:number; refunded_amount:number; disputed_amount:number }
-export interface EarningsSummary { summary:{ amounts:EarningsAmount[]; refreshed_at:string } }
+export interface EarningsSummary { summary:{ amounts:EarningsAmount[]; refreshed_at:string }; currency:string }
 export function isEarningsSummary(value:unknown):value is EarningsSummary {
  if(!value||typeof value!=='object'||!('summary' in value)||!value.summary||typeof value.summary!=='object')return false
  const summary=value.summary as Record<string,unknown>
- return typeof summary.refreshed_at==='string'&&Array.isArray(summary.amounts)&&summary.amounts.every((row:unknown)=>!!row&&typeof row==='object'&&isCurrencyCode((row as Record<string,unknown>).currency)&&['captured_amount','refunded_amount','disputed_amount'].every(field=>Number.isSafeInteger((row as Record<string,unknown>)[field])))
+ return isCurrencyCode((value as Record<string,unknown>).currency)&&typeof summary.refreshed_at==='string'&&Array.isArray(summary.amounts)&&summary.amounts.every((row:unknown)=>!!row&&typeof row==='object'&&isCurrencyCode((row as Record<string,unknown>).currency)&&['captured_amount','refunded_amount','disputed_amount'].every(field=>Number.isSafeInteger((row as Record<string,unknown>)[field])))
 }
 /** Money kept this period — paid less refunded — per currency, as Airbnb's "Total for October". */
 export function earningsPaid(summary:EarningsSummary|null|undefined):Array<{currency:string;amount:number}> {
  return (summary?.summary.amounts??[]).map(row=>({currency:row.currency,amount:row.captured_amount-row.refunded_amount}))
 }
-/** The one figure a card shows: the first currency's total, or nothing earned. */
-export function earningsFigure(summary:EarningsSummary|null|undefined):string {
+/** The one figure a card shows: what was earned, or nothing yet in the currency the business sells in. */
+export function earningsFigure(summary:EarningsSummary):string {
  const paid=earningsPaid(summary)
- return paid.length?paid.map(row=>paymentMoney(row.amount,row.currency)).join(' · '):summary?'$0':''
+ return paid.length?paid.map(row=>paymentMoney(row.amount,row.currency)).join(' · '):paymentMoney(0,summary.currency)
 }
 
 /** What `view=performance` answers: the year by month and one month by what was sold. */
 export interface EarningsPerformance {
- currency:string|null
+ currency:string
  months:Array<{month:string;paid:number;refunded:number}>
  items:Array<{title:string;imageUrl:string|null;paid:number;count:number}>
 }
 const record=(value:unknown):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value)
 export function isEarningsPerformance(value:unknown):value is EarningsPerformance {
- return record(value)&&(value.currency===null||isCurrencyCode(value.currency))
+ return record(value)&&isCurrencyCode(value.currency)
   &&Array.isArray(value.months)&&value.months.length===12&&value.months.every(row=>record(row)&&typeof row.month==='string'&&/^\d{4}-\d{2}$/.test(row.month)&&Number.isSafeInteger(row.paid)&&Number.isSafeInteger(row.refunded))
   &&Array.isArray(value.items)&&value.items.every(row=>record(row)&&typeof row.title==='string'&&(row.imageUrl===null||typeof row.imageUrl==='string')&&Number.isSafeInteger(row.paid)&&Number.isSafeInteger(row.count))
 }

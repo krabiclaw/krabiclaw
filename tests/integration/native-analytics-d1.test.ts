@@ -43,8 +43,8 @@ function pageview(over: Partial<TenantPageviewInput> & { eventId: string; sessio
 test('native analytics: producers → D1 → MCP query contract', { timeout: 120_000 }, async () => {
   const { runtime, db } = await openDb()
   try {
-    const settings = '{"config":{"default_timezone":"Asia/Bangkok"}}'
-    for (const id of [ORG, OTHER]) await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json) VALUES (?, ?, ?, ?, ?)`).bind(id, id, id, id, settings).run()
+    const settings = '{}'
+    for (const id of [ORG, OTHER]) await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, default_currency, timezone) VALUES (?, ?, ?, ?, ?, 'USD', 'Asia/Bangkok')`).bind(id, id, id, id, settings).run()
     const range = { start_date: '2026-09-10', end_date: '2026-09-12' }
 
     // Campaign A then B in one session; B partial (campaign only, no source).
@@ -176,8 +176,8 @@ test('native analytics: producers → D1 → MCP query contract', { timeout: 120
 test('native analytics: rates share one population, cursors survive attribution changes, summaries page completely, origins keep their own path and context', { timeout: 120_000 }, async () => {
   const { runtime, db } = await openDb()
   try {
-    const settings = '{"config":{"default_timezone":"Asia/Bangkok"}}'
-    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json) VALUES (?, ?, ?, ?, ?)`).bind(ORG, ORG, ORG, ORG, settings).run()
+    const settings = '{}'
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, default_currency, timezone) VALUES (?, ?, ?, ?, ?, 'USD', 'Asia/Bangkok')`).bind(ORG, ORG, ORG, ORG, settings).run()
     const day2 = { start_date: '2026-09-11', end_date: '2026-09-11' }
 
     // Two sessions view a page just before Bangkok midnight (17:00Z) and convert just after; a third only views after midnight.

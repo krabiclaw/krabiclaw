@@ -18,11 +18,15 @@ test('committed consultation projection is tenant scoped, private, idempotent an
     const db = await mf.getD1Database('DB')
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
-    await db.prepare("INSERT INTO organization(id,name,slug) VALUES('org','Org','org'),('other','Other','other')").run()
+    await db.prepare("INSERT INTO organization(id,name,slug, default_currency, timezone) VALUES('org','Org','org', 'USD', 'UTC'),('other','Other','other', 'USD', 'UTC')").run()
     await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('service','p','org','Consultation','consultation','actor','actor'),('experience','class','org','Class','class','actor','actor')").run()
     await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('v','org','p','Consultation','actor','actor')").run()
-    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,calendar_group,online_timezone,confirmation_mode,created_by,updated_by) VALUES('p','org',30,'consultations','America/New_York','review','actor','actor'),('class','org',30,NULL,'America/New_York','instant','actor','actor')").run()
-    await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES('s','org','p','America/New_York','2099-11-01T14:00:00.000Z','2099-11-01T14:30:00.000Z',1,'actor','actor')").run()
+    // Held online by a provider whose hours cover the sessions.
+    await db.prepare("INSERT OR IGNORE INTO user(id,name,email,emailVerified) VALUES('host','Host','host@example.test',1)").run()
+    await db.prepare("INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES(?,?,'host','member',1)").bind('host-org', 'org').run()
+    await db.prepare(`INSERT INTO member_scheduling(member_id,organization_id,timezone,weekly_json,time_off_json,windows_json,windows_until,calendar_revision,updated_at,updated_by) VALUES(?,?,'UTC','[]','[]','[{"start":"2099-01-01T00:00:00.000Z","end":"2100-01-01T00:00:00.000Z"}]','2100-01-01T00:00:00.000Z','r1','2099-01-01T00:00:00.000Z','host')`).bind('host-org', 'org').run()
+    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,held_online,scheduling_mode,assigned_member_id,confirmation_mode,created_by,updated_by) VALUES('p','org',30,1,'provider','host-org','review','actor','actor'),('class','org',30,1,'provider','host-org','instant','actor','actor')").run()
+    await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES('s','org','p','host-org','America/New_York','2099-11-01T14:00:00.000Z','2099-11-01T14:30:00.000Z',1,'actor','actor')").run()
     await db.prepare(`INSERT INTO requests(id,kind,organization_id,conversation_state,payload_json) VALUES('thread','booking','org','needs_attention','{"guest":{"name":"Jane Doe","email":"private@example.test","phone":null},"notes":"PRIVATE MATTER"}')`).run()
     const { bookingId } = await claimSessionCapacity(db, { organizationId: 'org', productId: 'p', sessionId: 's', productVariantId: 'v', partySize: 1, requestId: 'thread' })
     await storeCalendarSelection(db, 'org', { account_id: 'linked-account', calendar_id: 'chosen', calendar_name: 'Calendar' })
@@ -71,7 +75,7 @@ test('committed consultation projection is tenant scoped, private, idempotent an
     assert.equal(event.summary, 'Pending booking — Jane Doe')
     assert.deepEqual(event.start, { dateTime: '2099-11-01T14:00:00.000Z', timeZone: 'America/New_York' })
     assert.equal(event.attendees, undefined)
-    assert.equal(event.description, 'Status: pending\nhttps://krabiclaw.test/dashboard/org/messages/thread')
+    assert.equal(event.description, 'Status: pending\nTeam member: Host\nhttps://krabiclaw.test/dashboard/org/messages/thread')
     assert.ok(!JSON.stringify(event).includes('PRIVATE MATTER'))
     assert.ok(!JSON.stringify(event).includes('private@example.test'))
     await setBookingStatus(db, { organizationId: 'org', bookingId, status: 'confirmed' })
@@ -162,14 +166,18 @@ test('bounded Calendar backfill resumes and cancelled historical Sessions are cl
     const db = await mf.getD1Database('DB')
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
-    await db.prepare("INSERT INTO organization(id,name,slug) VALUES('org','Org','org')").run()
+    await db.prepare("INSERT INTO organization(id,name,slug, default_currency, timezone) VALUES('org','Org','org', 'USD', 'UTC')").run()
     await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('service','p','org','Consultation','consultation','actor','actor')").run()
-    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,calendar_group,online_timezone,confirmation_mode,created_by,updated_by) VALUES('p','org',30,NULL,'UTC','review','actor','actor')").run()
+    // Held online by a provider whose hours cover the sessions.
+    await db.prepare("INSERT OR IGNORE INTO user(id,name,email,emailVerified) VALUES('host','Host','host@example.test',1)").run()
+    await db.prepare("INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES(?,?,'host','member',1)").bind('host-org', 'org').run()
+    await db.prepare(`INSERT INTO member_scheduling(member_id,organization_id,timezone,weekly_json,time_off_json,windows_json,windows_until,calendar_revision,updated_at,updated_by) VALUES(?,?,'UTC','[]','[]','[{"start":"2099-01-01T00:00:00.000Z","end":"2100-01-01T00:00:00.000Z"}]','2100-01-01T00:00:00.000Z','r1','2099-01-01T00:00:00.000Z','host')`).bind('host-org', 'org').run()
+    await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,held_online,scheduling_mode,assigned_member_id,confirmation_mode,created_by,updated_by) VALUES('p','org',30,1,'provider','host-org','review','actor','actor')").run()
     await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES('v','org','p','Consultation','actor','actor')").run()
     const bookings: string[] = []
     for (let i = 0; i < 55; i++) {
       const start = Date.parse('2099-11-01T00:00:00.000Z') + i * 3600_000
-      await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES(?,'org','p','UTC',?,?,1,'actor','actor')").bind(`s${i.toString().padStart(2, '0')}`, new Date(start).toISOString(), new Date(start + 1800_000).toISOString()).run()
+      await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES(?,'org','p','host-org','UTC',?,?,1,'actor','actor')").bind(`s${i.toString().padStart(2, '0')}`, new Date(start).toISOString(), new Date(start + 1800_000).toISOString()).run()
       bookings.push((await claimSessionCapacity(db, { organizationId: 'org', productId: 'p', sessionId: `s${i.toString().padStart(2, '0')}`, productVariantId: 'v', partySize: 1 })).bookingId)
     }
     const env = { DB: db, NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test' } as CloudflareEnv
@@ -197,7 +205,7 @@ test('bounded Calendar backfill resumes and cancelled historical Sessions are cl
     // Drain the bounded queue through the provider boundary.
     for (let i = 0; i < 3; i++) await syncCalendarOrganization(env, 'org', 25, provider)
     assert.equal(events.size, 55)
-    for(const event of events.values())assert.equal((event as {description:string}).description,'Status: pending','a booking without a guest thread has no fabricated dashboard link')
+    for(const event of events.values())assert.equal((event as {description:string}).description,'Status: pending\nTeam member: Host','a booking without a guest thread has no fabricated dashboard link')
     await setBookingStatus(db, { organizationId: 'org', bookingId: bookings[0]!, status: 'confirmed' })
     for (let i = 0; i < 3; i++) await syncCalendarOrganization(env, 'org', 25, provider)
     // Imported historical state, independently of the live change workflow.
@@ -222,11 +230,15 @@ test('scheduled Calendar sync reports thrown and event failures while projecting
     const accessToken = await symmetricEncrypt({ key: env.BETTER_AUTH_SECRET!, data: 'calendar-task-token' })
     await db.prepare("INSERT INTO account(id,accountId,providerId,userId,scope,accessToken) VALUES('linked','google-subject','google','actor',?,?)").bind(INTEGRATION_SCOPES['google-calendar'].join(' '), accessToken).run()
     for (const org of ['a-broken', 'b-failed', 'c-healthy']) {
-      await db.prepare('INSERT INTO organization(id,name,slug) VALUES(?,?,?)').bind(org, org, org).run()
+      await db.prepare(`INSERT INTO organization(id,name,slug, default_currency, timezone) VALUES(?,?,?, 'USD', 'UTC')`).bind(org, org, org).run()
       await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('service',?,?,?,'consultation','actor','actor')").bind(org, org, org).run()
-      await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,calendar_group,online_timezone,created_by,updated_by) VALUES(?,?,30,'consultations','UTC','actor','actor')").bind(org, org).run()
+    // Held online by a provider whose hours cover the sessions.
+      await db.prepare("INSERT OR IGNORE INTO user(id,name,email,emailVerified) VALUES('host','Host','host@example.test',1)").run()
+      await db.prepare("INSERT INTO member(id,organizationId,userId,role,createdAt) VALUES(?,?,'host','member',1)").bind(`host-${org}`, org).run()
+      await db.prepare(`INSERT INTO member_scheduling(member_id,organization_id,timezone,weekly_json,time_off_json,windows_json,windows_until,calendar_revision,updated_at,updated_by) VALUES(?,?,'UTC','[]','[]','[{"start":"2099-01-01T00:00:00.000Z","end":"2100-01-01T00:00:00.000Z"}]','2100-01-01T00:00:00.000Z','r1','2099-01-01T00:00:00.000Z','host')`).bind(`host-${org}`, org).run()
+      await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,duration_minutes,held_online,scheduling_mode,assigned_member_id,created_by,updated_by) VALUES(?,?,30,1,'provider',?,'actor','actor')").bind(org, org, `host-${org}`).run()
       await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by) VALUES(?,?,?,'Consultation','actor','actor')").bind(org, org, org).run()
-      await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES(?,?,?,'UTC','2099-11-01T10:00:00.000Z','2099-11-01T10:30:00.000Z',1,'actor','actor')").bind(org, org, org).run()
+      await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by) VALUES(?,?,?,?,'UTC','2099-11-01T10:00:00.000Z','2099-11-01T10:30:00.000Z',1,'actor','actor')").bind(org, org, org, `host-${org}`).run()
       await claimSessionCapacity(db, { organizationId: org, productId: org, sessionId: org, productVariantId: org, partySize: 1 })
       await storeCalendarSelection(db, org, { account_id: 'linked', calendar_id: org, calendar_name: org })
     }
@@ -264,7 +276,7 @@ test('automatic Calendar connection recovers a hidden calendar after ambiguous c
  try {
   const db=await runtime.getD1Database('DB')
   await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}),await generateSQLiteDrizzleJson(schema))).map(sql=>db.prepare(sql)))
-  await db.prepare("INSERT INTO organization(id,name,slug)VALUES('org','Org','org')").run()
+  await db.prepare("INSERT INTO organization(id,name,slug, default_currency, timezone)VALUES('org','Org','org', 'USD', 'UTC')").run()
   const calendars:{id:string;summary:string;description:string;accessRole:string;hidden:boolean}[]=[]
   let inserts=0, visible=false
   t.mock.method(globalThis,'fetch',async(input,init)=>{

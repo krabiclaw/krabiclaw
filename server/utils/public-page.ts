@@ -585,7 +585,7 @@ async function loadPublicPageSource(
     const canonical = await listOrganizationProducts(db, { organizationId: orgId, kind: page === 'experiences' ? 'experience' : page === 'menu' ? 'dish' : undefined, publishedOnly: true, env })
     products = canonical.filter(product => product.locations.some(location => location.published
       && activeLocationIds.has(location.location_id) && (!locationSlug || location.location_id === locationId))
-      || (!locationSlug && Boolean(product.order_url || product.booking?.online_timezone))).map((product) => {
+      || (!locationSlug && Boolean(product.order_url || product.booking?.held_online))).map((product) => {
       const media = mediaByProduct.get(product.id) ?? []
       const image = media.find(item => item.slot === 'image')
       return {

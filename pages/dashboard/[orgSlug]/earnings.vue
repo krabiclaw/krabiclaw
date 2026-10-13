@@ -106,7 +106,7 @@ const [{ data: performance, error }, { data: payouts, error: payoutsError }] = a
   ),
   useAsyncData(() => `earnings-payouts:${route.params.orgSlug}`, () => api<PayoutsView>('/api/dashboard/payments', { query: { view: 'payouts', with_items: '1' }, validate: isPayoutsView })),
 ])
-const money = (amount: number) => paymentMoney(amount, performance.value?.currency ?? 'USD')
+const money = (amount: number) => paymentMoney(amount, performance.value!.currency)
 const monthRow = (month: string) => performance.value?.months.find(row => row.month === month)
 const paidAmount = computed(() => { const row = monthRow(thisMonthKey); return row ? row.paid - row.refunded : 0 })
 const total = computed(() => money(paidAmount.value))
@@ -117,7 +117,7 @@ const clearing = computed(() => [
   ...(payouts.value?.balance?.pending ?? []).map(row => ({ amount: row.amount, currency: row.currency.toUpperCase(), label: 'Clearing' })),
 ].filter(row => row.amount !== 0))
 // One currency on the card: the performance currency, USD until it is known.
-const shownCurrency = computed(() => (performance.value?.currency ?? 'USD').toUpperCase())
+const shownCurrency = computed(() => performance.value!.currency.toUpperCase())
 const upcomingAmount = computed(() => clearing.value.filter(row => row.currency === shownCurrency.value).reduce((sum, row) => sum + row.amount, 0) + upcomingPayouts.value.filter(row => row.currency.toUpperCase() === shownCurrency.value).reduce((sum, row) => sum + row.amount, 0))
 const upcoming = computed(() => money(upcomingAmount.value))
 // Two bars share one scale; an empty month still draws a short stub, as Airbnb's does.

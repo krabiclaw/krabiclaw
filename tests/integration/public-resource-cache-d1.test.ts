@@ -56,8 +56,8 @@ async function migratedCacheD1(context: TestContext) {
       await db.prepare(statement).run()
     }
   }
-  await db.prepare("INSERT INTO organization (id, name, slug, subdomain) VALUES ('org', 'Org', 'org', 'org')").run()
-  await db.prepare("INSERT INTO organization (id, name, slug, subdomain, theme_id) VALUES ('platform', 'Platform', 'platform', 'platform', 'krabiclaw-theme-v1')").run()
+  await db.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES ('org', 'Org', 'org', 'org', 'USD', 'UTC')").run()
+  await db.prepare("INSERT INTO organization (id, name, slug, subdomain, theme_id, default_currency, timezone) VALUES ('platform', 'Platform', 'platform', 'platform', 'krabiclaw-theme-v1', 'USD', 'UTC')").run()
   return { db, kv }
 }
 
@@ -81,7 +81,7 @@ async function insertInvalidation(
 
 test('a sync reports an accepted, unindexed item as pending instead of waiting on it', async (t) => {
   const { db } = await migratedCacheD1(t)
-  await db.prepare("INSERT INTO business_locations (id, organization_id, slug, title) VALUES ('location', 'org', 'location', 'Location')").run()
+  await db.prepare("INSERT INTO business_locations (id, organization_id, slug, title, timezone) VALUES ('location', 'org', 'location', 'Location', 'UTC')").run()
   const records = expandDocumentsForSurfaces(await buildOrganizationDocuments(db, 'org'))
   assert.equal(records.length, 1)
   const record = records[0]!
@@ -267,7 +267,7 @@ test('nonproduction drains cache invalidations without AI Search', async (t) => 
 
 test('an organization write purges that organization despite an older invalidation for another', async (t) => {
   const { db, kv } = await migratedCacheD1(t)
-  await db.prepare("INSERT INTO organization (id, name, slug, subdomain) VALUES ('changed', 'Changed', 'changed', 'changed')").run()
+  await db.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES ('changed', 'Changed', 'changed', 'changed', 'USD', 'UTC')").run()
   await insertInvalidation(db, {
     id: 'older-other-org', status: 'pending', attemptCount: 0, createdAt: '2026-01-01T00:00:00.000Z',
   })
@@ -317,7 +317,7 @@ test('a complete fresh reconciliation clears older terminal work, but no work ca
 
 test('a global drain reports one failed organization after processing other organizations', async (t) => {
   const { db, kv } = await migratedCacheD1(t)
-  await db.prepare("INSERT INTO organization (id, name, slug, subdomain) VALUES ('changed', 'Changed', 'changed', 'changed')").run()
+  await db.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES ('changed', 'Changed', 'changed', 'changed', 'USD', 'UTC')").run()
   await insertInvalidation(db, {
     id: 'first', status: 'pending', attemptCount: 0, createdAt: '2026-09-29T04:00:00.000Z',
   })
@@ -403,7 +403,7 @@ test('a drain syncs search once and leaves its continuation to the next run', as
   for (const outcome of ['completed', 'skipped'] as const) {
     await t.test(outcome, async (t) => {
       const { db, kv } = await migratedCacheD1(t)
-      await db.prepare("INSERT INTO business_locations (id, organization_id, slug, title) VALUES ('first-location', 'org', 'first-location', 'First'), ('second-location', 'org', 'second-location', 'Second')").run()
+      await db.prepare("INSERT INTO business_locations (id, organization_id, slug, title, timezone) VALUES ('first-location', 'org', 'first-location', 'First', 'UTC'), ('second-location', 'org', 'second-location', 'Second', 'UTC')").run()
       const records = expandDocumentsForSurfaces(await buildOrganizationDocuments(db, 'org'))
       assert.equal(records.length, 2)
       const [queued, missing] = records

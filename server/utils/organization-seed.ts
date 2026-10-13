@@ -48,10 +48,11 @@ export async function seedNewOrganization(
   if (!locations.length) statements.push({
     query: `
     INSERT OR IGNORE INTO business_locations
-      (id, organization_id, slug, title, rating, review_count, status)
-    VALUES (?, ?, 'main', ?, 0, 0, 'active')
+      (id, organization_id, slug, title, rating, review_count, status, timezone)
+    SELECT ?, id, 'main', ?, 0, 0, 'active', timezone FROM organization WHERE id = ?
   `,
-    params: [locationId, organizationId, name],
+    // The first location starts on the clock the owner gave the business.
+    params: [locationId, name, organizationId],
   });
 
 

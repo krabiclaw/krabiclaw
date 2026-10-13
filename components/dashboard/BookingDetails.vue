@@ -11,11 +11,12 @@
     the thread's drawer there is no column to own, so it is the body alone.
   -->
   <component :is="embedded ? 'div' : DashboardIndexPanel" v-bind="chrome">
-    <div v-if="error" class="p-5 sm:p-8">
+    <!-- The panel body pads and scrolls its level; only the drawer, which has no panel, needs its own. -->
+    <div v-if="error" :class="embedded ? 'p-5 sm:p-8' : undefined">
       <UAlert color="error" variant="soft" title="Booking details could not be loaded" :description="getErrorMessage(error, 'Booking request failed')" />
     </div>
     <template v-else>
-      <div class="min-h-0 flex-1 overflow-y-auto p-5 sm:p-8">
+      <div :class="embedded ? 'min-h-0 flex-1 overflow-y-auto p-5 sm:p-8' : undefined">
         <UAlert
           v-if="actionError"
           class="mb-5"
@@ -38,7 +39,7 @@
           </template>
         </UAlert>
         <template v-if="booking">
-          <div class="mx-auto w-full max-w-md">
+          <div class="mx-auto w-full" :class="dashboardColumnWidths.leaf">
           <img
             v-if="bookingImageUrl"
             :src="bookingImageUrl"
@@ -287,6 +288,7 @@ import { NuxtLink } from '#components'
 import { formatCalendarDate, formatTime, formatTimestamp } from '~/utils/timezone'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
+import { dashboardColumnWidths } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import { getErrorMessage } from '~/utils/errors'
 
 const props = defineProps<{
@@ -309,7 +311,7 @@ const editorPath = computed(() => props.editorPath)
 // Owning the column means owning its header; inside the drawer it is a plain body.
 const chrome = computed(() => (props.embedded
   ? { class: 'flex min-h-0 flex-1 flex-col' }
-  : { id: props.personalScope ? 'account-booking-details' : 'booking-details', title: pageTitle.value, ui: { body: 'p-0 sm:p-0' } }))
+  : { id: props.personalScope ? 'account-booking-details' : 'booking-details', title: pageTitle.value }))
 /** Which note a leaf is editing, or none for a new one. */
 const openNoteId = ref<string | null>(null)
 const selectedNote = computed(() => booking.value?.notes.find(note => note.id === openNoteId.value))

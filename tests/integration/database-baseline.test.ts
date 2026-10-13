@@ -18,8 +18,11 @@ test('the migration chain applies from zero and builds every table the schema de
       .map(row => row.name)
     assert.deepEqual(built, declared)
     const consultation = { mode: 'native', cta_label: 'Book', schedule_path: '/schedule', confirmation_path: '/confirmed', tracking_enabled: true, metadata_json: {} }
-    database.prepare('INSERT INTO organization (id, name, slug, consultation_settings_json) VALUES (?, ?, ?, ?)').run('tenant-a', 'A', 'tenant-a', JSON.stringify(consultation))
-    database.prepare("INSERT INTO organization (id, name, slug) VALUES ('tenant-b', 'B', 'tenant-b')").run()
+    database.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone, consultation_settings_json) VALUES (?, ?, ?, 'USD', 'America/New_York', ?)").run('tenant-a', 'A', 'tenant-a', JSON.stringify(consultation))
+    database.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('tenant-b', 'B', 'tenant-b', 'THB', 'Asia/Bangkok')").run()
+    // A business cannot be stored without the currency it sells in and the clock it reports in.
+    assert.throws(() => database.prepare("INSERT INTO organization (id, name, slug, timezone) VALUES ('no-currency', 'C', 'no-currency', 'Asia/Bangkok')").run(), /NOT NULL constraint failed: organization.default_currency/)
+    assert.throws(() => database.prepare("INSERT INTO organization (id, name, slug, default_currency) VALUES ('no-clock', 'C', 'no-clock', 'USD')").run(), /NOT NULL constraint failed: organization.timezone/)
     for (const invalid of [{ ...consultation, mode: 'unknown' }, { ...consultation, tracking_enabled: 'true' }, { ...consultation, metadata_json: [] }, { ...consultation, schedule_path: 'schedule' }, { mode: 'native' }]) {
       assert.throws(() => database.prepare("UPDATE organization SET consultation_settings_json = ? WHERE id = 'tenant-a'").run(JSON.stringify(invalid)), /organization_consultation_settings_check/)
     }
@@ -46,7 +49,7 @@ test('a v7 export transfers into the current baseline, its connections into orga
     for (const file of v7) source.exec(readFileSync(`migrations-history/v7/${file}`, 'utf8'))
     source.exec(`CREATE TABLE "d1_migrations"(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);
       ${v7.map(file => `INSERT INTO d1_migrations (name) VALUES ('${file}');`).join('\n')}`)
-    source.prepare("INSERT INTO organization (id, name, slug, subdomain, integrations_json) VALUES ('org', 'Org', 'org', 'org', ?)").run(JSON.stringify(integrations))
+    source.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, settings_json, integrations_json) VALUES ('org', 'Org', 'org', 'org', 'USD', '{\"config\":{\"default_timezone\":\"America/New_York\"}}', ?)").run(JSON.stringify(integrations))
     source.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', 'org', 'en', 1, 'published')").run()
     source.close()
     return path
@@ -98,7 +101,7 @@ test('a v11 export transfers into the v12 baseline, which has no capability over
     for (const file of v11) source.exec(readFileSync(`migrations-history/v11/${file}`, 'utf8'))
     source.exec(`CREATE TABLE "d1_migrations"(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);
       ${v11.map(file => `INSERT INTO d1_migrations (name) VALUES ('${file}');`).join('\n')}`)
-    source.prepare("INSERT INTO organization (id, name, slug, subdomain, feature_overrides) VALUES ('org', 'Org', 'org', 'org', ?)").run(overrides)
+    source.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, settings_json, feature_overrides) VALUES ('org', 'Org', 'org', 'org', 'USD', '{\"config\":{\"default_timezone\":\"America/New_York\"}}', ?)").run(overrides)
     source.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', 'org', 'en', 1, 'published')").run()
     source.close()
     return path
@@ -136,9 +139,9 @@ test('a v12 export transfers into the v13 baseline with one site palette and log
     for (const file of v12) source.exec(readFileSync(`migrations-history/v12/${file}`, 'utf8'))
     source.exec(`CREATE TABLE "d1_migrations"(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);
       ${v12.map(file => `INSERT INTO d1_migrations (name) VALUES ('${file}');`).join('\n')}`)
-    const organization = source.prepare('INSERT INTO organization (id, name, slug, subdomain, theme_id, settings_json) VALUES (?, ?, ?, ?, ?, ?)')
-    organization.run('saya', 'Saya', 'saya', 'saya', 'saya-theme-v1', JSON.stringify({ config: { default_timezone: 'UTC', brand_color: '#96826a' } }))
-    organization.run('blawby', 'Blawby', 'blawby', 'blawby', 'blawby-theme-v1', JSON.stringify({ config: { default_timezone: 'UTC' }, theme_by_template: { blawby: { tokens, status: 'active', created_at: '2026-07-14 02:32:27', updated_at: '2026-07-14 02:32:27', updated_by: null } } }))
+    const organization = source.prepare("INSERT INTO organization (id, name, slug, subdomain, theme_id, default_currency, settings_json) VALUES (?, ?, ?, ?, ?, 'USD', ?)")
+    organization.run('saya', 'Saya', 'saya', 'saya', 'saya-theme-v1', JSON.stringify({ config: { default_timezone: 'Asia/Bangkok', brand_color: '#96826a' } }))
+    organization.run('blawby', 'Blawby', 'blawby', 'blawby', 'blawby-theme-v1', JSON.stringify({ config: { default_timezone: 'America/New_York' }, theme_by_template: { blawby: { tokens, status: 'active', created_at: '2026-07-14 02:32:27', updated_at: '2026-07-14 02:32:27', updated_by: null } } }))
     for (const id of ['saya', 'blawby']) {
       source.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES (?, ?, 'en', 1, 'published')").run(`${id}-en`, id)
       source.prepare("INSERT INTO media_assets (id, organization_id, kind, provider, source, public_url, status) VALUES (?, ?, 'image', 'cloudflare_images', 'uploaded', 'https://imagedelivery.net/h/logo/public', 'active')").run(`${id}-logo`, id)
@@ -178,6 +181,52 @@ test('a v12 export transfers into the v13 baseline with one site palette and log
   }
 })
 
+test('a v15 export transfers into the v16 baseline: required clocks and currencies, online offerings held by their providers', async () => {
+  const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
+  const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-v15-transfer-'))
+  const v15 = JSON.parse(readFileSync('migrations-history/v15/meta/_journal.json', 'utf8')).entries.map((entry: { tag: string }) => `${entry.tag}.sql`) as string[]
+  const export15 = (name: string, { timezone = 'America/New_York', currency = 'USD' as string | null, member = 'member-1' as string | null } = {}) => {
+    const path = join(directory, name)
+    const source = new Database(path)
+    for (const file of v15) source.exec(readFileSync(`migrations-history/v15/${file}`, 'utf8'))
+    source.exec(`CREATE TABLE "d1_migrations"(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);
+      ${v15.map(file => `INSERT INTO d1_migrations (name) VALUES ('${file}');`).join('\n')}`)
+    source.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, settings_json) VALUES ('org', 'Org', 'org', 'org', ?, ?)").run(currency, JSON.stringify({ config: { default_timezone: timezone } }))
+    source.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', 'org', 'en', 1, 'published')").run()
+    source.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('user-1', 'Provider', 'p@example.com', 1, 1, 1)").run()
+    source.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('member-1', 'org', 'user-1', 'owner', 1)").run()
+    source.prepare("INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES ('consult', 'org', 'service', 'Consult', 'consult', 'user-1', 'user-1')").run()
+    source.prepare("INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES ('consult-default', 'org', 'consult', 'Consult', 'user-1', 'user-1')").run()
+    source.prepare("INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, online_timezone, scheduling_mode, assigned_member_id, created_by, updated_by) VALUES ('consult', 'org', 30, 'America/New_York', ?, ?, 'user-1', 'user-1')").run(member ? 'provider' : 'legacy', member)
+    source.prepare("INSERT INTO product_availability_rules (id, organization_id, product_id, location_id, timezone, weekday, start_time, created_by, updated_by) VALUES ('rule', 'org', 'consult', NULL, 'America/New_York', 1, '09:00', 'user-1', 'user-1')").run()
+    source.prepare("INSERT INTO product_sessions (id, organization_id, product_id, location_id, availability_rule_id, source_occurrence_key, timezone, starts_at, ends_at, status, created_by, updated_by) VALUES ('session', 'org', 'consult', NULL, 'rule', 'rule:2026-11-02:09:00', 'America/New_York', '2026-11-02T14:00:00.000Z', '2026-11-02T14:30:00.000Z', 'scheduled', 'user-1', 'user-1')").run()
+    source.close()
+    return path
+  }
+  try {
+    const targetPath = join(directory, 'v16.sqlite')
+    transferDatabaseExport(export15('v15.sqlite'), targetPath)
+    const target = new Database(targetPath, { readonly: true })
+    try {
+      assert.deepEqual(target.pragma('foreign_key_check'), [])
+      assert.deepEqual(target.prepare("SELECT default_currency, timezone, settings_json FROM organization WHERE id = 'org'").get(), { default_currency: 'USD', timezone: 'America/New_York', settings_json: '{"config":{}}' })
+      assert.deepEqual(target.prepare("SELECT held_online FROM product_booking_configs WHERE product_id = 'consult'").get(), { held_online: 1 })
+      // The session and its time survive; its provider and provider-hours identity are explicit.
+      assert.deepEqual(target.prepare("SELECT assigned_member_id, availability_rule_id, source_occurrence_key, starts_at FROM product_sessions WHERE id = 'session'").get(),
+        { assigned_member_id: 'member-1', availability_rule_id: null, source_occurrence_key: 'hours:member-1:2026-11-02T14:00:00.000Z', starts_at: '2026-11-02T14:00:00.000Z' })
+      assert.equal((target.prepare('SELECT count(*) AS n FROM product_availability_rules').get() as { n: number }).n, 0)
+    } finally {
+      target.close()
+    }
+    // A value nobody chose, a missing one, or an online offering nobody provides stops the transfer.
+    assert.throws(() => transferDatabaseExport(export15('utc.sqlite', { timezone: 'UTC' }), join(directory, 'target-utc.sqlite')), /without their own currency or timezone/)
+    assert.throws(() => transferDatabaseExport(export15('no-currency.sqlite', { currency: null }), join(directory, 'target-currency.sqlite')), /without their own currency or timezone/)
+    assert.throws(() => transferDatabaseExport(export15('unprovided.sqlite', { member: null }), join(directory, 'target-unprovided.sqlite')), /Online offerings with nobody to provide them: consult/)
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})
+
 test('consultation settings move preserves every value with one canonical source and referenced organization', () => {
   const db = new Database(':memory:')
   db.pragma('foreign_keys = ON')
@@ -202,7 +251,7 @@ test('snapshot payload preserves destination signing keys for refreshes and carr
   const schema = journal.entries.map(entry => readFileSync(`migrations/${entry.tag}.sql`, 'utf8')).join('\n')
   const source = new Database(':memory:')
   source.exec(schema)
-  source.prepare("INSERT INTO organization (id, name, slug, subdomain) VALUES ('org', 'Refreshed content', 'org', 'org')").run()
+  source.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES ('org', 'Refreshed content', 'org', 'org', 'USD', 'America/New_York')").run()
   source.prepare('INSERT INTO jwks (id, publicKey, privateKey, createdAt) VALUES (?, ?, ?, ?)').run('source', 'fixture-public-source', 'fixture-private-source', 1)
   try {
     for (const withoutJwks of [true, false]) {

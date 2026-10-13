@@ -206,7 +206,7 @@ async function setUp() {
   const later = Math.floor(Date.now() / 1000) + 60 * 24 * 60 * 60
   const run = (sql: string) => db.prepare(sql).run()
   for (const organization of ['org-a', 'org-b']) {
-    await run(`INSERT INTO organization (id, name, slug, subdomain, status, onboarding_status) VALUES ('${organization}', '${organization}', '${organization}', '${organization}', 'active', 'active')`)
+    await run(`INSERT INTO organization (id, name, slug, subdomain, status, onboarding_status, default_currency, timezone) VALUES ('${organization}', '${organization}', '${organization}', '${organization}', 'active', 'active', 'USD', 'UTC')`)
     await run(`INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('domain-${organization}', '${organization}', '${organization}.krabiclaw.test', 'subdomain', 'canonical', 'active')`)
     await run(`INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('${organization}-en', '${organization}', 'en', 1, 'published')`)
     await run(`INSERT INTO subscription (id, plan, referenceId, status) VALUES ('sub-${organization}', 'growth', '${organization}', 'active')`)
@@ -660,7 +660,7 @@ for (const method of ['GET', 'DELETE']) {
 test('Instagram insights read the connected account and its posts for the organization range, and name every state without a report', async () => {
   const { runtime, env, meta, run, restore } = await setUp()
   try {
-    await run(`UPDATE organization SET settings_json = '{"config":{"default_timezone":"Asia/Bangkok"}}' WHERE id IN ('org-a', 'org-b')`)
+    await run(`UPDATE organization SET timezone = 'Asia/Bangkok' WHERE id IN ('org-a', 'org-b')`)
     const range = { startDate: '2026-09-28', endDate: '2026-09-30' }
     assert.equal((await loadInstagramInsights(env, 'org-a', range)).status, 'permission_missing')
     assert.equal(meta.requests.length, 0)

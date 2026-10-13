@@ -39,8 +39,8 @@ async function boot() {
   const db = await runtime.getD1Database('DB')
   const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
   await db.batch(statements.map(statement => db.prepare(statement)))
-  await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at)
-    VALUES (?, 'Org', 'org', 'org', '{"config":{"default_timezone":"Asia/Bangkok"}}', 'saya-theme-v1', 'THB', 'active', 'active', 'flat', 'restaurant', ?)`)
+  await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
+    VALUES (?, 'Org', 'org', 'org', '{}', 'saya-theme-v1', 'THB', 'active', 'active', 'flat', 'restaurant', ?, 'Asia/Bangkok')`)
     .bind(ORG, NOW).run()
   await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Actor', 'actor@example.test', 0, 0, 0)").bind(ACTOR.actorId).run()
   for (const loc of ['loc-a', 'loc-b']) {
@@ -362,8 +362,8 @@ test('editing a product keeps variant identity, so bookings survive', { timeout:
     } })
     await db.prepare(`INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, created_by, updated_by)
       VALUES (?, ?, 60, 5, 'a', 'a')`).bind(product.id, ORG).run()
-    await db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, timezone, starts_at, ends_at, capacity, status, created_by, updated_by)
-      VALUES ('s1', ?, ?, 'Asia/Bangkok', '2099-01-01T00:00:00.000Z', '2099-01-01T01:00:00.000Z', 5, 'scheduled', 'a', 'a')`).bind(ORG, product.id).run()
+    await db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, location_id, timezone, starts_at, ends_at, capacity, status, created_by, updated_by)
+      VALUES ('s1', ?, ?, 'loc-a', 'Asia/Bangkok', '2099-01-01T00:00:00.000Z', '2099-01-01T01:00:00.000Z', 5, 'scheduled', 'a', 'a')`).bind(ORG, product.id).run()
     await db.prepare(`INSERT INTO bookings (id, organization_id, product_id, product_session_id, product_variant_id, party_size, status)
       VALUES ('b1', ?, ?, 's1', 'var-adult', 2, 'confirmed')`).bind(ORG, product.id).run()
 
@@ -589,7 +589,7 @@ test('two options can offer the same value label without colliding', { timeout: 
 test('an id from another tenant is refused, not upserted onto', { timeout: 120_000 }, async () => {
   const { runtime, db } = await boot()
   try {
-    await db.prepare("INSERT INTO organization (id, name, slug) VALUES ('org-other', 'Other', 'other')").run()
+    await db.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('org-other', 'Other', 'other', 'USD', 'UTC')").run()
     await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('actor-other', 'Other', 'other@example.test', 0, 0, 0)").run()
     await db.prepare(`INSERT INTO products (kind, id, organization_id, name, slug, created_by, updated_by) VALUES ('item', 'prod-other','org-other','Their Product','their-product','actor-other','actor-other')`).run()
     await db.prepare(`INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES ('var-other','org-other','prod-other','Their Variant','actor-other','actor-other')`).run()

@@ -84,7 +84,7 @@ test('inbox publication failures are visible and reservation receipts reflect cu
     }), /Failed query/)
 
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
-    await db.prepare("INSERT INTO organization (id,name,slug) VALUES ('healthy','Healthy','healthy')").run()
+    await db.prepare("INSERT INTO organization (id,name,slug, default_currency, timezone) VALUES ('healthy','Healthy','healthy', 'USD', 'UTC')").run()
     const notification = {
       scope: 'organization' as const, organizationId: 'healthy', template: 'payments.usage_invoice_paid',
       title: 'Payments invoice paid', message: '$1.40 USD paid', idempotencyKey: 'native-invoice-paid',

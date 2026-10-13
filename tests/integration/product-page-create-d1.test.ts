@@ -29,8 +29,8 @@ async function boot(plan: 'growth' | null) {
     const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example' } as CloudflareEnv
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
-    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at)
-      VALUES (?, 'Legal Services', 'legal-services', 'legal-services', '{"config":{"default_timezone":"America/New_York"}}', 'blawby-theme-v1', 'USD', 'active', 'complete', 'flat', 'service', ?)`).bind(ORG, NOW).run()
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
+      VALUES (?, 'Legal Services', 'legal-services', 'legal-services', '{}', 'blawby-theme-v1', 'USD', 'active', 'complete', 'flat', 'service', ?, 'America/New_York')`).bind(ORG, NOW).run()
     await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Owner', 'owner@proof.example', 0, 0, 0)").bind(ACTOR.actorId).run()
     await db.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES ('member-owner', ?, ?, 'owner')").bind(ORG, ACTOR.actorId).run()
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('locale-en', ?, 'en', 1, 'published')").bind(ORG).run()

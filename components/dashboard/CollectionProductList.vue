@@ -48,20 +48,10 @@
       @save="moveSelected"
     >
       <UFormField label="Choose a section">
-        <div class="space-y-2">
-          <label
-            v-for="option in moveTargets"
-            :key="option.id"
-            class="flex cursor-pointer items-center gap-3 rounded-lg border border-default px-3 py-2"
-            :class="moveTargetId === option.id ? 'border-primary' : ''"
-          >
-            <input v-model="moveTargetId" type="radio" :value="option.id" :name="`move-target`">
-            <span class="text-sm text-highlighted">{{ option.name }}</span>
-          </label>
-          <p v-if="!moveTargets.length" class="text-sm text-muted">
-            There is nowhere else to move these yet. Add another section first.
-          </p>
-        </div>
+        <URadioGroup v-if="moveTargets.length" v-model="moveTargetId" :items="moveTargets.map(option => ({ value: option.id, label: option.name }))" variant="card" />
+        <p v-else class="text-sm text-muted">
+          There is nowhere else to move these yet. Add another section first.
+        </p>
       </UFormField>
     </DashboardListItemDialog>
     <UAlert v-if="orderError" color="error" variant="soft" icon="i-lucide-circle-alert" :description="orderError" class="mt-4" />

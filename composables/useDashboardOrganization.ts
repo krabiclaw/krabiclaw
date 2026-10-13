@@ -21,7 +21,7 @@ export interface DashboardOrganization {
   status: string
   onboarding_status: string
   effective_plan: string
-  default_currency: string | null
+  default_currency: string
   media: Array<{ asset_id: string; slot: string; public_url: string | null; thumbnail_url: string | null; kind: string | null }>
 }
 
@@ -30,7 +30,7 @@ export interface DashboardLocation {
   slug: string
   title: string
   status: string
-  timezone: string | null
+  timezone: string
   city: string | null
   address: PostalAddress | null
   media: Array<{ asset_id: string; slot: string; public_url: string | null; thumbnail_url: string | null; kind: string | null }>
@@ -70,7 +70,7 @@ const isDashboardOrganization = (value: unknown): value is DashboardOrganization
   && (value.public_url === null || typeof value.public_url === 'string')
   && typeof value.status === 'string'
   && typeof value.onboarding_status === 'string'
-  && (value.default_currency === null || typeof value.default_currency === 'string')
+  && typeof value.default_currency === 'string'
   && isMediaList(value.media)
 
 const isDashboardLocation = (value: unknown): value is DashboardLocation =>

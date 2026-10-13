@@ -60,7 +60,7 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
   const allowTimezoneSelection = computed(() => !showPartySize.value && context.value.location === null)
   const guestTimezone = ref<string | null>(null)
   const bookingTimezone = computed(() => allowTimezoneSelection.value && guestTimezone.value
-    ? guestTimezone.value : sessions.value[0]?.timezone ?? context.value.product.booking?.online_timezone ?? null)
+    ? guestTimezone.value : sessions.value[0]?.timezone ?? null)
   const timezoneOptions = computed(() => [...new Set(['UTC', sessions.value[0]?.timezone, bookingTimezone.value, ...TIMEZONE_OPTIONS].filter((zone): zone is string => Boolean(zone)))].sort())
   onMounted(() => {
     if (allowTimezoneSelection.value) guestTimezone.value = new Intl.DateTimeFormat().resolvedOptions().timeZone

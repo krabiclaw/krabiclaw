@@ -4,11 +4,13 @@
     <EditorNavigationList :groups="groups" :active-item="level.child.value" />
     <UButton v-if="team" class="mt-8" color="error" variant="ghost" :loading="saving" @click="remove">Delete team</UButton>
   </DashboardIndexPanel>
-  <DashboardLeafPanel v-else id="booking-team-setting" :title="concern === 'name' ? 'Team name' : 'Team members'" :lead="concern === 'members' ? 'Bookings can use the working hours of any included member.' : undefined" :save-label="creating ? 'Create team' : 'Save'" :saving="saving" :disabled="Boolean(loadError) || !dirty || !valid" :error="saveError ?? (loadError ? getErrorMessage(loadError, 'Booking team could not be loaded') : '')" @cancel="reset" @save="save">
-    <UInput v-if="concern === 'name'" v-model="name" aria-label="Team name" variant="none" autofocus class="w-full" :ui="{ base: 'px-0 text-2xl md:text-2xl' }" />
-    <template v-else>
-      <SettingRow v-for="member in data?.members ?? []" :key="member.userId" :model-value="included.includes(member.userId)" :label="member.name" @update:model-value="value => toggle(member.userId, value)" />
-    </template>
+  <DashboardLeafPanel v-else id="booking-team-setting" :title="concern === 'name' ? 'Team name' : 'Team members'" :lead="concern === 'members' ? 'Bookings can use the working hours of any included member.' : undefined" :save-label="creating ? 'Create team' : 'Save'" :saving="saving" :disabled="Boolean(loadError) || !form?.dirty || !valid" :error="saveError ?? (loadError ? getErrorMessage(loadError, 'Booking team could not be loaded') : '')" @cancel="reset(); revision += 1" @save="form?.submit()">
+    <UForm ref="form" :key="revision" :state="{ name, included }" @submit="save">
+      <UInput v-if="concern === 'name'" v-model="name" aria-label="Team name" variant="none" autofocus class="w-full" :ui="{ base: 'px-0 text-2xl md:text-2xl' }" />
+      <template v-else>
+        <SettingRow v-for="member in data?.members ?? []" :key="member.userId" :model-value="included.includes(member.userId)" :label="member.name" @update:model-value="value => toggle(member.userId, value)" />
+      </template>
+    </UForm>
   </DashboardLeafPanel>
 </template>
 
@@ -43,7 +45,9 @@ function reset() { name.value = team.value?.name ?? ''; included.value = [...(te
 watch([team, () => props.concern], reset, { immediate: true })
 function toggle(userId: string, value: boolean) { included.value = value ? [...new Set([...included.value, userId])] : included.value.filter(id => id !== userId) }
 const valid = computed(() => props.concern !== 'name' || Boolean(name.value.trim()))
-const dirty = computed(() => props.concern === 'name' ? name.value.trim() !== (team.value?.name ?? '') : JSON.stringify([...included.value].sort()) !== JSON.stringify([...(team.value?.member_user_ids ?? [])].sort()))
+const form = useTemplateRef('form')
+// Cancel restores the draft; a new revision is a fresh form, so nothing reads as changed.
+const revision = ref(0)
 function organizationId() {
   const id = dashboard.organization.value?.id
   if (!id) throw new Error('Organization context is unavailable')

@@ -44,7 +44,7 @@ test('MCP telemetry stores only operational facts and the daily task deletes rec
     assert.equal(JSON.parse(diagnostic.result_summary_json).data.content[0].text, 'FOREIGN KEY constraint failed')
     assert.equal(diagnostic.error_message, 'FOREIGN KEY constraint failed')
     assert.doesNotMatch(JSON.stringify(diagnostic), /private-diagnostic-token/)
-    await db.prepare("INSERT INTO organization (id, name, slug) VALUES ('telemetry-site', 'Telemetry site', 'telemetry-site')").run()
+    await db.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('telemetry-site', 'Telemetry site', 'telemetry-site', 'USD', 'UTC')").run()
     for (let call = 0; call < 2; call++) {
       await logMcpToolCallEvent(db, { organizationId: 'telemetry-site', requestId: 1,
         method: 'tools/call', toolName: 'list_products', status: 'success' })

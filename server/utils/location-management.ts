@@ -39,7 +39,8 @@ export interface CreateLocationInput {
   price_level?: string | null;
   rating?: number | null;
   review_count?: number | null;
-  timezone?: string | null;
+  /** The location's IANA timezone. Required — a missing one is refused, never defaulted: every session here is offered in it. */
+  timezone: string | null;
   max_capacity?: number | null;
   seo_title?: string | null;
   seo_description?: string | null;
@@ -70,7 +71,7 @@ export interface LocationRecord {
   opening_hours?: string | null;
   special_hours?: string | null;
   price_level?: string | null;
-  timezone?: string | null;
+  timezone: string;
   max_capacity?: number | null;
   seo_title?: string | null;
   seo_description?: string | null;
@@ -259,14 +260,11 @@ export async function createLocation(
     };
   }
 
-  const normalizedTimezone = input.timezone === undefined
-    ? undefined
-    : normalizeTimezone(input.timezone);
-
-  if (normalizedTimezone !== undefined && normalizedTimezone !== null && !isValidTimezone(normalizedTimezone)) {
+  const normalizedTimezone = normalizeTimezone(input.timezone);
+  if (!isValidTimezone(normalizedTimezone)) {
     return {
       status: 400,
-      data: { error: "timezone must be a valid IANA time zone identifier." },
+      data: { error: "timezone is required and must be a valid IANA time zone identifier." },
     };
   }
 
@@ -322,7 +320,7 @@ export async function createLocation(
           input.rating ?? null,
           input.review_count ?? null,
           input.price_level ?? null,
-          normalizedTimezone ?? null,
+          normalizedTimezone,
           input.max_capacity ?? null,
           input.seo_title ?? null,
           input.seo_description ?? null,
@@ -442,10 +440,10 @@ export async function updateLocation(
     ? undefined
     : normalizeTimezone(input.timezone);
 
-  if (normalizedTimezone !== undefined && normalizedTimezone !== null && !isValidTimezone(normalizedTimezone)) {
+  if (normalizedTimezone !== undefined && !isValidTimezone(normalizedTimezone)) {
     return {
       status: 400,
-      data: { error: "timezone must be a valid IANA time zone identifier." },
+      data: { error: "timezone must be a valid IANA time zone identifier; a location cannot be without one." },
     };
   }
 

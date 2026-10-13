@@ -1,6 +1,6 @@
 import type Stripe from 'stripe'
 import { HTTPError } from 'nitro'
-import { queryAll, type DbClient } from '~/server/db'
+import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { getStripeConnectedAccount, stripeLivemodeFromKey } from '~/server/utils/stripe-connect'
 import { createStripeClient } from '~/server/utils/stripe-client'
@@ -55,7 +55,8 @@ export async function paymentPictures(db: DbClient, organizationId: string, paym
 
 export interface MonthEarnings { month: string; paid: number; refunded: number }
 export interface EarningsPerformance {
-  currency: string | null
+  /** What was earned in; with nothing earned yet, the currency the business sells in. */
+  currency: string
   /** Twelve months of the year, every month present. */
   months: MonthEarnings[]
   /** The selected month by what was sold, largest first. */
@@ -66,7 +67,7 @@ export interface EarningsPerformance {
 export async function paymentPerformance(db: DbClient, principal: FinancialPrincipal, year: number, month: string): Promise<EarningsPerformance> {
   await authorizePayments(principal, 'read')
   if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new HTTPError({ statusCode: 400, statusMessage: 'Valid year is required' })
-  if (!/^\d{4}-\d{2}$/.test(month)) throw new HTTPError({ statusCode: 400, statusMessage: 'Valid month is required' })
+  if (!/^\d{4}-\d{2}$/.test(month) || !month.startsWith(`${year}-`)) throw new HTTPError({ statusCode: 400, statusMessage: 'Valid month within the requested year is required' })
   const rows = await queryAll<{ month: string; currency: string; paid: number; refunded: number }>(db, `SELECT strftime('%Y-%m', created_at) AS month, currency, SUM(captured_amount) AS paid, SUM(refunded_amount) AS refunded FROM payments WHERE organization_id = ? AND created_at >= ? AND created_at < ? GROUP BY 1, 2 ORDER BY 1`, [principal.organizationId, `${year}-01-01T00:00:00.000Z`, `${year + 1}-01-01T00:00:00.000Z`])
   const currencies = [...new Set(rows.map(row => row.currency))]
   if (currencies.length > 1) throw new HTTPError({ statusCode: 409, statusMessage: 'Earnings in more than one currency cannot be charted together' })
@@ -87,7 +88,9 @@ export async function paymentPerformance(db: DbClient, principal: FinancialPrinc
     entry.count += 1
     byTitle.set(picture.title, entry)
   }
-  return { currency: currencies[0] ?? null, months, items: [...byTitle.values()].sort((a, b) => b.paid - a.paid) }
+  const currency = currencies[0] ?? (await queryFirst<{ default_currency: string }>(db, 'SELECT default_currency FROM organization WHERE id = ?', [principal.organizationId]))?.default_currency
+  if (!currency) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
+  return { currency, months, items: [...byTitle.values()].sort((a, b) => b.paid - a.paid) }
 }
 
 export interface PayoutItem { paymentId: string; title: string; imageUrl: string | null; amount: number; currency: string; startsAt: string | null; endsAt: string | null; timeZone: string | null; subjectTitle: string | null }

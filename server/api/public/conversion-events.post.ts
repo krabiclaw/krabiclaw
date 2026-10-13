@@ -118,7 +118,7 @@ export default defineHandler(async (event) => {
       WHERE p.id = ? AND p.active = 1 AND ${locationId
         ? `EXISTS (SELECT 1 FROM product_locations pl JOIN business_locations bl ON bl.id = pl.location_id AND bl.organization_id = pl.organization_id
              WHERE pl.product_id = p.id AND pl.organization_id = p.organization_id AND pl.location_id = ? AND pl.published = 1 AND pl.active = 1 AND bl.status = 'active')`
-        : `(p.order_url IS NOT NULL OR EXISTS (SELECT 1 FROM product_booking_configs cfg WHERE cfg.product_id = p.id AND cfg.organization_id = p.organization_id AND cfg.online_timezone IS NOT NULL))`}
+        : `(p.order_url IS NOT NULL OR EXISTS (SELECT 1 FROM product_booking_configs cfg WHERE cfg.product_id = p.id AND cfg.organization_id = p.organization_id AND cfg.held_online = 1))`}
       LIMIT 1`, [organizationId, entityId, ...(locationId ? [locationId] : [])])
     if (!product) return jsonResponse({ error: 'Product not found' }, { status: 404 })
     entityType = 'product'; pageType = 'product'

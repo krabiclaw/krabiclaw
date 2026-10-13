@@ -236,7 +236,7 @@ test('MCP online collection returns the real Payments setup handoff without chan
     for (let retry = 0; retry < 2; retry++) {
       const response = await mcpRequest(request, baseURL!, {
         method: 'tools/call', toolName: 'set_product_booking_config',
-        args: { organization_id: organizationId, product_id: productId, duration_minutes: 60, default_capacity: 2, online_timezone: 'UTC', online_payment_required: true },
+        args: { organization_id: organizationId, product_id: productId, duration_minutes: 60, default_capacity: 2, online_payment_required: true },
       })
       expect(response.status(), await response.text()).toBe(200)
       const result = (await response.json()).result

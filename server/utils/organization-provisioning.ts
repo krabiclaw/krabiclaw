@@ -38,6 +38,8 @@ interface CreateOrganizationApi {
       userId: string
       keepCurrentActiveOrganization: true
       metadata: Record<string, string>
+      default_currency: CurrencyCode
+      timezone: string
     }
   }): Promise<{ id: string }>
 }
@@ -85,12 +87,11 @@ export async function provisionOrganization(
   env: SetupEnv,
   db: D1Database,
   userId: string,
-  // `defaultCurrency` is the owner's answer or null. A tenant that goes live on
-  // creation has to carry one; onboarding's first save has not asked yet, and
-  // stores null until the currency step answers it.
-  params: { organizationId: string; name: string; subdomain: string; vertical: OrganizationVertical; defaultCurrency: CurrencyCode | null; sourceLocale: string; activate?: boolean; origin: { headers: Headers } | null; writeGuard?: BatchQuery },
+  // The currency and the clock arrive with the organization itself (Better
+  // Auth requires both at creation), so provisioning never writes them.
+  params: { organizationId: string; name: string; subdomain: string; vertical: OrganizationVertical; sourceLocale: string; activate?: boolean; origin: { headers: Headers } | null; writeGuard?: BatchQuery },
 ): Promise<OrganizationProvisioningResult> {
-  const { organizationId, name, vertical, defaultCurrency } = params
+  const { organizationId, name, vertical } = params
   const normalizedSubdomain = params.subdomain.toLowerCase()
   const source = platformLocale(params.sourceLocale)
   if (!source) return { status: 400, data: { error: 'Choose a supported website language' } }
@@ -128,8 +129,8 @@ export async function provisionOrganization(
       // stale default (theme_id='saya-theme-v1', vertical='restaurant') —
       // correct both here so a professional-service retry can never be left on Saya.
       await executeBatch(db, [writeGuard, {
-        query: "UPDATE organization SET theme_id = ?, vertical = ?, default_currency = COALESCE(?, default_currency), onboarding_status = 'pending', updated_at = ? WHERE id = ? AND onboarding_status IN ('pending', 'failed')",
-        params: [themeId, vertical, defaultCurrency, now, organizationId],
+        query: "UPDATE organization SET theme_id = ?, vertical = ?, onboarding_status = 'pending', updated_at = ? WHERE id = ? AND onboarding_status IN ('pending', 'failed')",
+        params: [themeId, vertical, now, organizationId],
       }])
       return await performSeeding(env, db, organizationId, name, vertical, normalizedSubdomain, params.activate !== false, params.origin, writeGuard, linkedDraft)
     }
@@ -156,12 +157,12 @@ export async function provisionOrganization(
         {
           query: `
             UPDATE organization
-               SET theme_id = ?, vertical = ?, subdomain = ?, default_currency = ?,
+               SET theme_id = ?, vertical = ?, subdomain = ?,
                    status = 'active', onboarding_status = 'pending',
                    analytics_data_start_at = COALESCE(analytics_data_start_at, ?), updated_at = ?
              WHERE id = ? AND onboarding_status IN ('pending', 'failed')
           `,
-          params: [themeId, vertical, normalizedSubdomain, defaultCurrency, now, now, organizationId],
+          params: [themeId, vertical, normalizedSubdomain, now, now, organizationId],
         },
         {
           query: `
@@ -288,7 +289,7 @@ export async function findOnboardingOrganization(env: CloudflareEnv, userId: str
   return { organizationId: existing.id }
 }
 
-export async function createOrganization(env: CloudflareEnv, userId: string, name: string, identity: { draftId: string; slug: string }) {
+export async function createOrganization(env: CloudflareEnv, userId: string, name: string, identity: { draftId: string; slug: string }, facts: { defaultCurrency: CurrencyCode; timezone: string }) {
   const auth = createAuth(env)
   const organizationApi = auth.api as unknown as CreateOrganizationApi
   const existing = await findOnboardingOrganization(env, userId, identity)
@@ -301,6 +302,8 @@ export async function createOrganization(env: CloudflareEnv, userId: string, nam
         userId,
         keepCurrentActiveOrganization: true,
         metadata: { [ONBOARDING_ORGANIZATION_MARKER]: identity.draftId },
+        default_currency: facts.defaultCurrency,
+        timezone: facts.timezone,
       },
     })
     const created = await findOnboardingOrganization(env, userId, identity)

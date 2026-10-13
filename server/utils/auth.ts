@@ -15,6 +15,8 @@ import { createDb, execute, executeBatch, queryAll, queryFirst, schema, type Bat
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { sendWhatsAppOtp } from '~/server/utils/whatsapp'
 import { parsePhoneOrThrow } from '~/utils/phone'
+import { isCurrencyCode } from '~/shared/currencies'
+import { isValidTimezone } from '~/utils/timezone'
 import { createCanonicalNotification, notifyNewUserSignup } from '~/server/utils/notification-center'
 import { measurementOutcome, readPageEventId, recordAndDeliverConversion } from '~/server/utils/organization-conversions'
 import { getPlatformOrganization } from '~/server/utils/platform-organization'
@@ -73,7 +75,22 @@ export const organizationOptions = {
   ac: organizationAccessControl,
   roles: organizationRoles,
   teams: { enabled: true, defaultTeam: { enabled: false }, allowRemovingAllTeams: true },
+  // A business cannot exist without the currency it sells in and the clock it
+  // reports in, so Better Auth requires both when the organization is created.
+  schema: {
+    organization: {
+      additionalFields: {
+        default_currency: { type: 'string', required: true, input: true },
+        timezone: { type: 'string', required: true, input: true },
+      },
+    },
+  },
 } as const
+
+function assertOrganizationFacts(data: { default_currency?: unknown; timezone?: unknown }) {
+  if (data.default_currency !== undefined && !isCurrencyCode(data.default_currency)) throw new APIError('BAD_REQUEST', { message: 'default_currency must be a supported ISO 4217 currency' })
+  if (data.timezone !== undefined && !isValidTimezone(typeof data.timezone === 'string' ? data.timezone : null)) throw new APIError('BAD_REQUEST', { message: 'timezone must be an IANA time zone' })
+}
 
 
 /**
@@ -249,6 +266,8 @@ function buildAuth(env: CloudflareEnv) {
   const configuredOrganizationOptions = {
     ...organizationOptions,
     organizationHooks: {
+      beforeCreateOrganization: async ({ organization }: { organization: Record<string, unknown> }) => assertOrganizationFacts(organization),
+      beforeUpdateOrganization: async ({ organization }: { organization: Record<string, unknown> }) => assertOrganizationFacts(organization),
       afterAddTeamMember: async ({ team, user }: { team: { organizationId: string }; user: { id: string } }) => {
         const { materializeMemberSessions } = await import('~/server/utils/availability')
         await materializeMemberSessions(db, { organizationId: team.organizationId, userId: user.id, actorId: 'system' })

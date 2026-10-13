@@ -167,7 +167,7 @@ export async function listPublicTenantPageProductRows(
   return selected.flatMap(product => {
     const offered = product.locations.filter(location => location.published && locations.has(location.location_id))
     if (collection?.location_id && !offered.some(location => location.location_id === collection.location_id)) return []
-    const online = Boolean(product.booking?.online_timezone || product.order_url)
+    const online = Boolean(product.booking?.held_online || product.order_url)
     if (!offered.length && !online) return []
     const locationId = collection?.location_id ?? (offered.length === 1 && !online ? offered[0]!.location_id : null)
     const scopes = locationId ? [locationId] : [...offered.map(location => location.location_id), ...(online ? [null] : [])]

@@ -52,7 +52,9 @@ export const business_locations = sqliteTable("business_locations", {
 	google_review_url: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
-	timezone: text(),
+	// The listing's own clock: every in-person session and reservation here is
+	// offered and shown in it, whatever the guest's device says.
+	timezone: text().notNull(),
 	max_capacity: integer(),
 	seo_title: text(),
 	seo_description: text(),
@@ -69,6 +71,7 @@ export const business_locations = sqliteTable("business_locations", {
 	unique("business_locations_organization_id_id_unique").on(table.organization_id, table.id),
 	check("business_locations_opening_hours_check", sql`opening_hours IS NULL OR (json_valid(opening_hours) AND json_type(opening_hours) IS 'object' AND json_type(opening_hours, '$.periods') IS 'array')`),
 	check("business_locations_special_hours_check", sql`special_hours IS NULL OR (json_valid(special_hours) AND json_type(special_hours) IS 'array')`),
+	check("business_locations_timezone_check", sql`timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'`),
 ]);
 
 
@@ -708,8 +711,9 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 	default_capacity: integer(),
 	confirmation_mode: text().default("instant").notNull(),
 	online_payment_required: integer({ mode: "boolean" }).default(false).notNull(),
-	online_timezone: text(),
-	calendar_group: text(),
+	// Held online: its sessions come from each provider's working hours, in
+	// that provider's timezone, rather than from weekly slots at a location.
+	held_online: integer({ mode: "boolean" }).default(false).notNull(),
 	scheduling_mode: text().default("legacy").notNull(),
 	assigned_member_id: text(),
 	assigned_team_id: text().references(() => team.id, { onDelete: "set null" }),
@@ -728,7 +732,7 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 	check("product_booking_configs_capacity_check", sql`default_capacity IS NULL OR default_capacity >= 0`),
 	check("product_booking_configs_confirmation_check", sql`confirmation_mode IN ('instant', 'review')`),
 	check("product_booking_configs_payment_check", sql`online_payment_required IN (0, 1)`),
-	check("product_booking_configs_calendar_check", sql`calendar_group IS NULL OR length(trim(calendar_group)) > 0`),
+	check("product_booking_configs_held_online_check", sql`held_online IN (0, 1) AND (held_online = 0 OR (scheduling_mode = 'provider' AND (assigned_member_id IS NOT NULL OR assigned_team_id IS NOT NULL)))`),
 ]);
 
 // Typed weekly recurrence. This replaces the `recurring_slots` JSON map; it is
@@ -740,8 +744,9 @@ export const product_booking_configs = sqliteTable("product_booking_configs", {
 //   do not. Session instants are stored in UTC. Nonexistent and ambiguous
 //   local times (spring-forward gaps, fall-back repeats) have defined
 //   behavior in server/utils/availability.ts with real coverage.
-// Null semantics: location_id NULL means the rule is not location-specific.
-//   duration_minutes / capacity NULL defer to product_booking_configs.
+// A rule is always at a location, in that location's timezone. An online
+//   offering has no rules: its sessions come from its providers' hours.
+// Null semantics: duration_minutes / capacity NULL defer to product_booking_configs.
 //   effective_from_date / effective_until_date NULL mean open-ended.
 // Deletion: cascades from Product and location. Sessions already generated
 //   keep their own times and capacity — deleting a rule does not delete or
@@ -752,7 +757,7 @@ export const product_availability_rules = sqliteTable("product_availability_rule
 	id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	product_id: text().notNull(),
-	location_id: text(),
+	location_id: text().notNull(),
 	// IANA zone name, e.g. 'Asia/Bangkok'.
 	timezone: text().notNull(),
 	// 0 = Sunday .. 6 = Saturday.
@@ -779,14 +784,10 @@ export const product_availability_rules = sqliteTable("product_availability_rule
 	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_booking_configs.organization_id, product_booking_configs.product_id], name: "product_availability_rules_config_scope_fk" }).onDelete("cascade"),
 	foreignKey({ columns: [table.organization_id, table.location_id], foreignColumns: [business_locations.organization_id, business_locations.id], name: "product_availability_rules_location_scope_fk" }).onDelete("cascade"),
 	unique("product_availability_rules_org_id_unique").on(table.organization_id, table.id),
-	// SQLite UNIQUE treats NULLs as distinct, so a single key over the nullable
-	// location_id would let a location-neutral rule be inserted repeatedly —
-	// the common case. Two partial indexes instead, one per location state.
 	// effective_from_date is deliberately NOT part of the key: two rules for the
 	// same weekday and time differing only by effective window are an ambiguity
 	// about which one governs, not two distinct slots.
-	uniqueIndex("product_availability_rules_slot_unique").on(table.product_id, table.location_id, table.weekday, table.start_time, table.interval_weeks).where(sql`location_id IS NOT NULL`),
-	uniqueIndex("product_availability_rules_neutral_slot_unique").on(table.product_id, table.weekday, table.start_time, table.interval_weeks).where(sql`location_id IS NULL`),
+	uniqueIndex("product_availability_rules_slot_unique").on(table.product_id, table.location_id, table.weekday, table.start_time, table.interval_weeks),
 	index("product_availability_rules_product_idx").on(table.product_id, table.weekday, table.start_time),
 	check("product_availability_rules_weekday_check", sql`weekday BETWEEN 0 AND 6`),
 	check("product_availability_rules_start_time_check", sql`start_time GLOB '[0-2][0-9]:[0-5][0-9]' AND start_time < '24:00'`),
@@ -808,7 +809,7 @@ export const product_availability_rules = sqliteTable("product_availability_rule
 // rule that generated one is provenance, not authority.
 // Row meaning: this Product runs at this instant, seating this many.
 // Null semantics: availability_rule_id NULL is a legitimate one-off session,
-//   not an orphan. location_id NULL means the session is not location-bound.
+//   not an orphan. location_id NULL means it is held online, by its assigned member.
 //   capacity NULL means unlimited; capacity = 0 means no seats. These are
 //   different and both are tested.
 // `source_occurrence_key` is the stable generation identity (rule + intended
@@ -861,7 +862,6 @@ export const product_sessions = sqliteTable("product_sessions", {
 	// sharing this session, never a session each. Partial indexes again, because
 	// location_id is nullable and NULLs are distinct under UNIQUE.
 	uniqueIndex("product_sessions_location_instant_unique").on(table.product_id, table.location_id, table.starts_at).where(sql`location_id IS NOT NULL AND assigned_member_id IS NULL`),
-	uniqueIndex("product_sessions_neutral_instant_unique").on(table.product_id, table.starts_at).where(sql`location_id IS NULL AND assigned_member_id IS NULL`),
 	uniqueIndex("product_sessions_provider_location_instant_unique").on(table.product_id, table.location_id, table.starts_at, table.assigned_member_id).where(sql`location_id IS NOT NULL AND assigned_member_id IS NOT NULL`),
 	uniqueIndex("product_sessions_provider_neutral_instant_unique").on(table.product_id, table.starts_at, table.assigned_member_id).where(sql`location_id IS NULL AND assigned_member_id IS NOT NULL`),
 	index("product_sessions_product_start_idx").on(table.product_id, table.starts_at, table.status),
@@ -870,6 +870,8 @@ export const product_sessions = sqliteTable("product_sessions", {
 	check("product_sessions_status_check", sql`status IN ('scheduled', 'cancelled')`),
 	check("product_sessions_capacity_check", sql`capacity IS NULL OR capacity >= 0`),
 	check("product_sessions_timezone_check", sql`timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'`),
+	// An online session is a provider's: it is held in their hours and their timezone.
+	check("product_sessions_online_provider_check", sql`location_id IS NOT NULL OR assigned_member_id IS NOT NULL`),
 ]);
 
 // A claim on seats of one session.
@@ -1352,13 +1354,17 @@ export const organization = sqliteTable("organization", {
 
 	// ── Formerly `organizations`. ────────────────────────────────────────────────────
 	consultation_settings_json: text({ mode: "json" }).$type<OrganizationSettings["consultation"]>(),
-	settings_json: text({ mode: "json" }).$type<OrganizationSettings>().default({ config: { default_timezone: 'UTC' } }).notNull(),
+	settings_json: text({ mode: "json" }).$type<OrganizationSettings>().default({}).notNull(),
 	theme_id: text().default("saya-theme-v1").notNull(),
 	subdomain: text().unique(),
 	brand_description: text(),
 	contact_email: text(),
 	contact_phone: text(),
-	default_currency: text(),
+	// Better Auth additional fields (server/utils/auth.ts): required at creation.
+	default_currency: text().notNull(),
+	// The business's reporting clock — analytics days. Bookings use their
+	// location's timezone or their provider's, never this.
+	timezone: text().notNull(),
 	status: text().default("active").notNull(),
 	onboarding_status: text().default("pending").notNull(),
 	url_structure: text().default("location_subdirectories").notNull(),
@@ -1388,7 +1394,8 @@ export const organization = sqliteTable("organization", {
 	check("organization_config_partnerships_email_check", sql`json_type(settings_json, '$.config.partnerships_email') IS NULL OR json_type(settings_json, '$.config.partnerships_email') IS 'text'`),
 	check("organization_config_catering_email_check", sql`json_type(settings_json, '$.config.catering_email') IS NULL OR json_type(settings_json, '$.config.catering_email') IS 'text'`),
 	check("organization_config_careers_email_check", sql`json_type(settings_json, '$.config.careers_email') IS NULL OR json_type(settings_json, '$.config.careers_email') IS 'text'`),
-	check("organization_config_default_timezone_check", sql`json_type(settings_json, '$.config.default_timezone') IS 'text' AND length(json_extract(settings_json, '$.config.default_timezone')) > 0`),
+	check("organization_default_currency_check", sql`length(default_currency) = 3 AND default_currency = upper(default_currency) AND default_currency NOT GLOB '*[^A-Z]*'`),
+	check("organization_timezone_check", sql`timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'`),
 	check("organization_compliance_metadata_check", sql`json_type(settings_json, '$.compliance.metadata_json') IS NULL OR json_type(settings_json, '$.compliance.metadata_json') IN ('null', 'object')`),
 	check("organization_config_object_check", sql`json_type(settings_json, '$.config') IS NULL OR json_type(settings_json, '$.config') IS 'object'`),
 	check("organization_compliance_object_check", sql`json_type(settings_json, '$.compliance') IS NULL OR json_type(settings_json, '$.compliance') IS 'object'`),
@@ -2339,7 +2346,6 @@ export const payment_checkout_holds = sqliteTable("payment_checkout_holds", {
  quantity: integer().notNull(),
  amount: integer().notNull(),
  currency: text().notNull(),
- calendar_group: text(),
  starts_at: text().notNull(),
  ends_at: text().notNull(),
  status: text().$type<'active' | 'converted' | 'released'>().default("active").notNull(),
@@ -2349,10 +2355,9 @@ export const payment_checkout_holds = sqliteTable("payment_checkout_holds", {
  converted_reservation_id: text(),
 }, t => [
  index("payment_holds_capacity_idx").on(t.session_id, t.status, t.expires_at),
- index("payment_holds_calendar_idx").on(t.organization_id, t.calendar_group, t.status, t.expires_at),
  index("payment_holds_reservation_idx").on(t.organization_id, t.location_id, t.starts_at, t.status, t.expires_at),
  check("payment_holds_quantity_check", sql`quantity > 0 AND amount > 0`),
- check("payment_holds_subject_check", sql`(product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL AND converted_reservation_id IS NULL) OR (product_id IS NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND calendar_group IS NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL)`),
+ check("payment_holds_subject_check", sql`(product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL AND converted_reservation_id IS NULL) OR (product_id IS NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL)`),
 ]);
 
 export const payment_orders = sqliteTable("payment_orders", {

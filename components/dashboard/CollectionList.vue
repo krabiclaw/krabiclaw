@@ -42,6 +42,7 @@
 // because order, Add and reorder each belong to exactly one scope. A section is
 // the menu's word for a collection; this list never calls it anything else.
 import DashboardListEditor from '~/components/dashboard/DashboardListEditor.vue'
+import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import DashboardMediaThumb from '~/components/dashboard/DashboardMediaThumb.vue'
 import type { Collection, Product } from '~/server/types/products'
 import type { ResolvedMediaAsset } from '~/server/utils/media-asset-manager'
@@ -101,6 +102,7 @@ const localOrder = ref<CollectionRow[] | null>(null)
 const collections = computed<CollectionRow[]>(() => localOrder.value ?? catalogRows.value)
 const editing = ref(false)
 const removingId = ref<string | null>(null)
+const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 const deleteError = ref<string | null>(null)
 const orderError = ref<string | null>(null)
 
@@ -131,10 +133,11 @@ function openNew() {
 async function removeCollection(item: { row: CollectionRow }) {
   const count = item.row.product_count
   // Deleting a section never deletes what was in it; the items stay in the catalog.
-  const warning = count
-    ? `Delete the section "${item.row.name}"? Its ${count === 1 ? 'item stays' : `${count} items stay`} in your catalog.`
-    : `Delete the section "${item.row.name}"?`
-  if (!confirm(warning)) return
+  if (!await confirmDialog.open({
+    title: `Delete ${item.row.name}`,
+    description: count ? `Its ${count === 1 ? 'item stays' : `${count} items stay`} in your catalog.` : 'The section is empty.',
+    confirmLabel: 'Delete section', cancelLabel: 'Keep section',
+  })) return
   removingId.value = item.row.id
   deleteError.value = null
   try {

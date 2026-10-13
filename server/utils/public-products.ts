@@ -37,7 +37,7 @@ export interface PublicProductLocation {
   slug: string
   title: string
   /** The zone this branch states its times in — what turns a session into a wall clock. */
-  timezone: string | null
+  timezone: string
   /**
    * Where a guest turns up. Parsed at the row boundary, because a localized
    * page lays its translated address parts over this one and needs an object
@@ -191,7 +191,7 @@ export async function loadPublicProductCollection(
   // that one catalog rather than hydrating and checking it again per branch.
   const perLocation = locationSlug ? [catalogProducts] : locations.map(location =>
     catalogProducts.filter(product => product.locations.some(entry => entry.location_id === location.id && entry.published)))
-  const onlineProducts = locationSlug ? [] : catalogProducts.filter(product => Boolean(product.booking?.online_timezone || product.order_url))
+  const onlineProducts = locationSlug ? [] : catalogProducts.filter(product => Boolean(product.booking?.held_online || product.order_url))
   const seen = new Set<string>()
   // Collections and detail routes use the same explicit product kind.
   const products = await hydrateProductMedia(db, organizationId, [...perLocation.flat(), ...onlineProducts].filter((product) => {
@@ -339,7 +339,7 @@ export async function loadPublicPageProductDetail(
   if (page && !previewAuthorized && page.id !== page.page_id) await loadExactPublicLocalizations(env, db, organizationId, page.locale)
   if (!page?.product_id) return null
   const product = await getProduct(db, organizationId, page.product_id)
-  if (!product.locations.some(location => location.published) && !product.booking?.online_timezone && !product.order_url) return null
+  if (!product.locations.some(location => location.published) && !product.booking?.held_online && !product.order_url) return null
   const collection = await loadPublicProductCollection(db, organizationId, productSurfaceOf(null, product), previewAuthorized, undefined, env)
   const found = collection?.products.find(product => product.id === page.product_id)
   if (!collection || !found) return null
@@ -359,7 +359,7 @@ async function projectPublicOffering(
   const organizationId = collection.organization.id
   const offeredAt = new Set(found.locations.filter(entry => entry.published && entry.active).map(entry => entry.location_id))
   const locations = collection.locations.filter(location => offeredAt.has(location.id))
-  const onlineAvailable = Boolean(found.booking?.online_timezone)
+  const onlineAvailable = Boolean(found.booking?.held_online)
   let location: PublicProductLocation | null = null
   if (requestedScope && requestedScope !== 'online') {
     location = locations.find(entry => entry.id === requestedScope) ?? null
@@ -479,12 +479,11 @@ export async function loadPublicProductSessions(
   // A branch with no zone cannot state when anything starts, so it offers
   // nothing here rather than a time in a zone nobody chose.
   if (!detail.location) {
-    if (!detail.booking.online_timezone) return []
+    if (!detail.booking.held_online) return []
     const { listPublicBookingSessions } = await import('~/server/utils/public-session-booking')
     return (await listPublicBookingSessions(db, detail.organization.id, detail.product.slug, env, 'online')).sessions.filter(session => !session.is_full)
   }
   if (!detail.product.locations.some(location => location.location_id === detail.location!.id && location.active && location.published)) return []
-  if (!detail.location.timezone) return []
   await refreshProductBusy(db,env,detail.organization.id,detail.product.id)
   const window = bookingWindow(detail.location.timezone)
   const sessions = await listSessions(db, {
