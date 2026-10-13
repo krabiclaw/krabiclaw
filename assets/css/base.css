@@ -479,6 +479,11 @@
   overflow-wrap: anywhere;
 }
 
+.prose code::before,
+.prose code::after {
+  content: none;
+}
+
 .prose table {
   display: block;
   max-width: 100%;
@@ -487,13 +492,18 @@
 }
 
 .prose :where(td, th) code {
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 
 .prose th,
 .prose td {
-  word-break: break-word;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.prose th {
+  white-space: nowrap;
 }
 
 .gallery-dot {

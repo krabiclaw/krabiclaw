@@ -6,6 +6,7 @@ import { bytesToHex } from '@noble/hashes/utils.js'
 import { queryAll, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { getPlatformOrganization } from '~/server/utils/platform-organization'
+import { resolveMcpDocumentationBlocks } from '~/server/utils/mcp-documentation'
 import {
   PLATFORM_KNOWLEDGE_FAQ_ENTRIES,
   PLATFORM_KNOWLEDGE_PAGE_ENTRIES,
@@ -112,10 +113,10 @@ async function loadContentBodies(db: DbClient, platformOrganizationId: string, p
       AND (cd.organization_id = ?) = ?${organizationId ? ' AND cd.organization_id = ?' : ''}
     ORDER BY cd.id, cb.position
   `, [platformOrganizationId, platform ? 1 : 0, ...(organizationId ? [organizationId] : [])])
-  return renderBodiesByDocument(rows)
+  return await renderBodiesByDocument(db, rows)
 }
 
-function renderBodiesByDocument(rows: ContentBlockBodyRow[] | null | undefined) {
+async function renderBodiesByDocument(db: DbClient, rows: ContentBlockBodyRow[] | null | undefined) {
   const blocks = new Map<string, Array<{ type: string; position: number; level: number | null; data: Record<string, unknown>; media: [] }>>()
   for (const row of rows ?? []) {
     const key = row.id
@@ -123,7 +124,9 @@ function renderBodiesByDocument(rows: ContentBlockBodyRow[] | null | undefined) 
     items.push({ type: row.type, position: row.position, level: row.level, data: JSON.parse(row.data_json) as Record<string, unknown>, media: [] })
     blocks.set(key, items)
   }
-  return new Map([...blocks].map(([key, items]) => [key, renderContentBlocksForLlm(items)]))
+  return new Map(await Promise.all([...blocks].map(async ([key, items]) => [key,
+    renderContentBlocksForLlm(await resolveMcpDocumentationBlocks(db, key, items)),
+  ] as const)))
 }
 
 function platformKnowledgeInstanceId(env: CloudflareEnv) {
@@ -549,7 +552,7 @@ export async function buildWorkspaceDocuments(db: DbClient, organizationId?: str
       WHERE ma.status = 'active'${organizationWhere}
     `, organizationParams),
   ])
-  const bodies = renderBodiesByDocument(blockRows)
+  const bodies = await renderBodiesByDocument(db, blockRows)
   const records: PlatformKnowledgeDocument[] = []
 
   for (const row of locations ?? []) {

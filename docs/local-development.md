@@ -22,6 +22,11 @@ Durable Object whose class lives in the proxied Worker, so under `nuxt dev` the
 through Wrangler's dev registry instead. The built Worker (`yarn dev:worker`,
 staging, production) exports the class itself and never uses it.
 
+The auxiliary Worker loads the same root `.env`, derives its database binding
+from the root Wrangler `dev` environment, and shares the root local persistence
+directory. Its broadcasts authorize connected members through Better Auth
+against the same local database as the application.
+
 That covers every server-side call to the hub, so opening a conversation with
 unread notifications works under `yarn dev`. The dashboard's live inbox socket
 does not: Nitro's dev server answers the WebSocket upgrade with a plain 200,

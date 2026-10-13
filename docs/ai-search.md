@@ -89,9 +89,11 @@ This calls only the named organization's production slice; it does not rebuild
 the platform or other businesses.
 
 Production CI (`.github/workflows/ci.yml`) runs a blocking rebuild when a file
-that defines the indexed corpus or its rendering changes. A failed rebuild fails
-the deploy job. Nonproduction drains purge caches only; they do not access or
-require AI Search.
+that defines the indexed corpus or its rendering changes, including the MCP
+registry behind the generated tool reference. Production verification waits for
+the deployed build and assets to converge, checks the published MCP documentation,
+then rebuilds the search index. A failed rebuild fails production verification.
+Nonproduction drains purge caches only; they do not access or require AI Search.
 
 ## Environment expectations
 

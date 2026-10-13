@@ -1,5 +1,6 @@
 import { markdownRequiresSourceMode } from '~/shared/markdown-editor-mode'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
+import { resolveMcpDocumentationBlocks } from '~/server/utils/mcp-documentation'
 import { HTTPError } from 'nitro';
 
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '../../db/index.ts'
@@ -702,7 +703,7 @@ export async function getContentBlocksForDocument(db: DbClient, documentId: stri
   const document = await getContentDocumentById(db, documentId)
   if (!document) return null
   const blocks = await listBlocksForDocument(db, document.id)
-  return await attachContentBlockMedia(db, document.id, blocks.map(b => ({
+  const outlined = await attachContentBlockMedia(db, document.id, blocks.map(b => ({
     id: b.id,
     source_block_id: b.source_block_id,
     parent_block_id: b.parent_block_id,
@@ -713,6 +714,7 @@ export async function getContentBlocksForDocument(db: DbClient, documentId: stri
     created_at: b.created_at,
     updated_at: b.updated_at
   })))
+  return await resolveMcpDocumentationBlocks(db, document.id, outlined)
 }
 
 
