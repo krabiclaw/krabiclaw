@@ -112,8 +112,12 @@ for (const width of [390, 1440]) {
       const destination = post.status === 'draft' ? post.preview_url : post.public_url
       if (post.status !== 'draft') expect(post.status).toBe('published')
       expect(destination).toBeTruthy()
-      referenceURL = destination!
-      expect(new URL(referenceURL).origin).toBe(new URL(baseURL).origin)
+      const returned = new URL(destination!)
+      expect(returned.pathname).toBe('/docs/mcp-tool-reference')
+      if (post.status === 'draft') expect(returned.searchParams.get('preview_token')).toBeTruthy()
+      // Copied organizations retain their canonical public hostname. Only the
+      // transport host changes; the returned draft route and token stay intact.
+      referenceURL = new URL(`${returned.pathname}${returned.search}`, baseURL).href
     }
     const response = await openTenantPage(page, referenceURL, {})
     expect(response?.status()).toBe(200)
