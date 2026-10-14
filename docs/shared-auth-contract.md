@@ -1,6 +1,6 @@
 # Shared authentication contract: Krabiclaw identity for the Bookyboo native app
 
-Status: **proposed; D1, D2, D4, D6, D9 agreed by the owner on 2026-10-14; D3, D5, D7, D8, D10 open.** Deliverable for krabiclaw#1370 under krabiclaw#1357 and bookyboo#11. Nothing in this document is implemented.
+Status: **accepted decisions D1–D10 recorded by the owner on 2026-10-14; implementation may cite this revision.** Bundle id and hostnames are placeholders until the separate rebrand PR merges; rebase then. Deliverable for krabiclaw#1370 under krabiclaw#1357 and bookyboo#11. Nothing in this document is implemented.
 
 Revisions inspected: Krabiclaw `staging` @ `1e1c24d`; Bookyboo `main` @ `fc3841d`. Installed Better Auth: Krabiclaw `1.7.5` (type-only patch in `patches/better-auth-npm-1.7.5.patch`), Bookyboo `1.7.2`. Provider docs read on 2026-10-14: Better Auth [Apple](https://better-auth.com/docs/authentication/apple), [Bearer](https://better-auth.com/docs/plugins/bearer), [Session management](https://better-auth.com/docs/concepts/session-management), [Organization](https://better-auth.com/docs/plugins/organization), [Admin](https://better-auth.com/docs/plugins/admin), [API Key](https://better-auth.com/docs/plugins/api-key).
 
@@ -51,7 +51,7 @@ Principal column: **U** = the end user's Krabiclaw bearer session; **S** = Booky
 | Native action | Owner | Endpoint (Krabiclaw unless noted) | Principal | Org scope | Notes |
 |---|---|---|---|---|---|
 | Sign in with Apple (fresh or repeat) | Krabiclaw | `POST /api/auth/sign-in/social` `{provider:"apple", idToken:{token, nonce}}` | — | n/a | Response header `set-auth-token` is the session bearer. **[verified]** mechanism; **[proposed]** config in §4. |
-| Existing Krabiclaw account entry | Krabiclaw | `POST /api/auth/sign-in/email` | — | n/a | Native email+password form (already enabled in Krabiclaw). **[decision D3]** |
+| Existing Krabiclaw account entry | Krabiclaw | `POST /api/auth/sign-in/email` | — | n/a | Native email+password form (already enabled in Krabiclaw) (D3). |
 | Link Apple to existing account | Krabiclaw | `POST /api/auth/link-social` with Apple `idToken` | U | n/a | Verify `link-social` accepts `idToken` in installed 1.7.5 before relying on it; otherwise use the web `linkSocial` redirect flow in an `ASWebAuthenticationSession`. **[verify]** |
 | Restore session on launch | Krabiclaw via Bookyboo | any Bookyboo request | U | header | Bookyboo validates (§5); 401 → sign-in. |
 | Session renewal | Krabiclaw | implicit (`updateAge`) | U | n/a | Token does not rotate; expiry extends on use. iOS stores any `set-auth-token` it receives. |
@@ -59,9 +59,9 @@ Principal column: **U** = the end user's Krabiclaw bearer session; **S** = Booky
 | Revoke other sessions / list sessions | Krabiclaw | `POST /api/auth/revoke-other-sessions`, `GET /api/auth/list-sessions` | U | n/a | |
 | Profile read | Krabiclaw | `GET /api/auth/get-session` | U | n/a | `user.name`, `email`, `image`, `role`; `session.impersonatedBy`. |
 | Profile edit (name) | Krabiclaw | `POST /api/auth/update-user` | U | n/a | |
-| Profile photo | Krabiclaw | Krabiclaw media path (Cloudflare Images) | U | n/a | Bookyboo's JPEG data-URL image is dropped. **[decision D7]** |
+| Profile photo | Krabiclaw | new `POST /api/account/image` (Cloudflare Images) → sets `user.image` | U | n/a | Replaces the JPEG data-URL path (D7). |
 | List my organizations with role | Krabiclaw | `GET /api/auth/organization/list` + `GET /api/auth/organization/get-full-organization?organizationId=` | U | explicit | Or one new read, §6. |
-| Create organization | Krabiclaw | `POST /api/auth/organization/create` `{name, slug, default_currency, timezone}` | U | n/a | `default_currency` and `timezone` must be collected natively. Result is pending/siteless; no website, Stripe or purchase step. Vertical: **[decision D5]** |
+| Create organization | Krabiclaw | `POST /api/auth/organization/create` `{name, slug, default_currency, timezone}` | U | n/a | `default_currency` and `timezone` must be collected natively. Send `vertical: 'lodging'` (D5). Result is pending/siteless; no website, Stripe or purchase step. |
 | Select organization | Bookyboo | header `x-organization-id: <orgId>` on every lodging request | U | explicit | Bookyboo no longer reads `activeOrganizationId`. Native may also call `organization/set-active` so the Krabiclaw dashboard agrees, but Bookyboo never trusts it. **[decision D1]** |
 | Invite a member (link) | Krabiclaw | new: `POST /api/organizations/:id/invite-links` → `{url}`; `POST /api/invite-links/:token/accept` (server calls `auth.api.addMember`) | U | explicit | Replaces Bookyboo `workspace_invites`. Needed because Better Auth email invitations cannot target an Apple private-relay address the inviter does not know. **[decision D4]** |
 | Change role / remove member | Krabiclaw | `POST /api/auth/organization/update-member-role`, `/remove-member` | U | explicit | Permission from `organization-access.ts` (admin may invite/update admin; Bookyboo's owner-only rule is dropped unless D4 says otherwise). |
@@ -69,7 +69,7 @@ Principal column: **U** = the end user's Krabiclaw bearer session; **S** = Booky
 | Lodging reads/writes | Bookyboo | `/api/v1/properties`, `/channex`, `/messages`, `/turnovers`, `/live` | U | explicit | §5. |
 | Push registration | Bookyboo | `POST/DELETE /api/v1/devices` | U | n/a | Row stores Krabiclaw `user_id`, `session_id`, token. |
 | Push delivery, scheduled sends, webhook fan-out | Bookyboo | internal, reads Krabiclaw membership via **S** | S | explicit | §6, §7. |
-| Support impersonation | Krabiclaw | `POST /api/auth/admin/impersonate-user`, `/stop-impersonating` | U (platform admin) | n/a | Bookyboo surfaces `impersonatedBy` and keeps its 403 restrictions on identity mutations. Duration becomes Krabiclaw's 3600 s unless changed. **[decision D8]** |
+| Support impersonation | Krabiclaw | `POST /api/auth/admin/impersonate-user`, `/stop-impersonating` | U (platform admin) | n/a | Bookyboo surfaces `impersonatedBy` and keeps its 403 restrictions on identity mutations. Duration 900 s (D8). |
 | Delete account | Krabiclaw | `POST /api/auth/delete-user` | U | n/a | Krabiclaw `user.delete.before` must (a) revoke the Apple grant, (b) call Bookyboo cleanup via **S**, fail-closed. **[decision D6]** |
 | Delete organization | Krabiclaw | `authClient.organization.delete` | U (owner) | explicit | `beforeDeleteOrganization` calls Bookyboo cleanup via **S** (Channex group/properties, R2, local rows), fail-closed. **[decision D6]** |
 | Disconnect lodging (Airbnb) | Bookyboo | existing `POST /api/v1/airbnb/connection/disconnect` | U | explicit | Distinct from account/org deletion; unchanged. |
@@ -85,7 +85,7 @@ Principal column: **U** = the end user's Krabiclaw bearer session; **S** = Booky
    - `POST /api/internal/lodging/members` (principal **S**): body `{organizationId, userIds?}` → `[{userId, memberId, role, sessionIds:[…live ids]}]`. Used only for push/background recipient filtering and socket re-validation. Returns facts, grants nothing.
    - `POST /api/organizations/:id/invite-links` and `POST /api/invite-links/:token/accept` (D4).
 5. Lifecycle hooks: `user.delete.before` → Apple token revocation + `DELETE <LODGING_API_URL>/internal/users/:id` (S); `organizationHooks.beforeDeleteOrganization` → `DELETE <LODGING_API_URL>/internal/organizations/:id` (S); `afterRemoveMember` / `afterUpdateMemberRole` → `POST <LODGING_API_URL>/internal/membership-changed` (S) so Bookyboo closes sockets and drops assignments immediately. All fail-closed; a Bookyboo 5xx aborts the Krabiclaw operation and surfaces the error (AGENTS "Failure reporting").
-6. Optional: `vertical` value for lodging (D5).
+6. `lodging` vertical (D5); `impersonationSessionDuration: 900` (D8); profile image upload endpoint (D7).
 7. No schema change for Apple itself (uses `account` rows). Invite links and the lodging-hook configuration need `LODGING_API_URL` + `LODGING_SERVICE_SECRET` env; invite links need a small table or reuse of `invitation` with a token column — resolve in #1371 against the installed plugin.
 
 ## 5. Bookyboo authorization boundary (bookyboo#13) [proposed]
@@ -135,14 +135,14 @@ Fresh Apple sign-in; repeat sign-in (no email claim); private-relay user; existi
 
 - **D1 Organization scope.** **Agreed 2026-10-14:** explicit `x-organization-id` header on every lodging request; `session.activeOrganizationId` is never trusted by the lodging service. (Header and env names are brand-neutral because the native app is being rebranded to Krabiclaw in a separate PR; the socket's existing `x-bookyboo-workspace` header is renamed with it.)
 - **D2 Service credential.** **Agreed 2026-10-14:** shared-secret internal routes (existing pattern); no API Key plugin.
-- **D3 Existing-account entry and linking.** Native email+password form for existing Krabiclaw users (recommended; already enabled) vs. web sheet for Google. Whether `apple` joins `trustedProviders` (auto-link by matching email). Recommended: **not** trusted; link only explicitly from a signed-in session.
+- **D3 Existing-account entry and linking.** **Agreed:** native email+password form (`POST /api/auth/sign-in/email`) for existing Krabiclaw users, then explicit Apple linking from the signed-in session. `apple` is **not** added to `trustedProviders`; no email-based auto-linking. Google entry in the native app is deferred.
 - **D4 Invitations.** **Agreed 2026-10-14:** Krabiclaw-owned invite links, and Krabiclaw's permission model applies unchanged (an admin may invite or promote an admin; Bookyboo's owner-only rule is dropped). Alternatives considered: vs. Better Auth email invitations (breaks for private relay) vs. keeping Bookyboo `workspace_invites` with a service-side `addMember` call (keeps a second membership writer). Also: keep Bookyboo's owner-only admin invites, or adopt Krabiclaw's admin-may-invite-admin.
-- **D5 Vertical.** Add a `lodging` vertical in Krabiclaw (schema CHECK may require the D1 replacement procedure) vs. accept default `restaurant` with an org metadata marker.
+- **D5 Vertical.** **Agreed:** Krabiclaw adds a `lodging` vertical in #1371 (`utils/vertical-copy.ts`, schema default/CHECK; follow the D1 replacement procedure if the CHECK requires it). Native organization creation sends `vertical: 'lodging'`.
 - **D6 Deletion semantics.** Krabiclaw `deleteUser` has no owned-org guard. Options: (a) add a guard requiring ownership transfer or org deletion first; (b) keep Bookyboo's rule (delete every owned org on account deletion) implemented as a Krabiclaw `user.delete.before` step; (c) allow owner-less orgs. **Agreed 2026-10-14:** Krabiclaw adds the owned-organization guard (a) and Apple token revocation in `user.delete.before`; Bookyboo's native deletion screen explains the prerequisite.
-- **D7 Profile photo.** Krabiclaw media (recommended) vs. dropping native photo edit this phase.
-- **D8 Support impersonation.** Which Krabiclaw accounts hold the platform `admin` role for Bookyboo support; keep 3600 s or configure 900 s.
+- **D7 Profile photo.** **Agreed:** Krabiclaw media. #1371 exposes an upload for the session user via the existing Cloudflare Images path and sets `user.image` to the URL; the native app drops the JPEG data-URL path.
+- **D8 Support impersonation.** **Agreed:** only accounts with the Krabiclaw platform `admin` role; `impersonationSessionDuration` becomes 900 s (applies to the web dashboard too).
 - **D9 Local development identity.** **Agreed 2026-10-14:** Debug builds authenticate against Krabiclaw **staging** with local actor accounts (`POST /api/auth/sign-in/email`); the `-local-api` flag switches only the lodging URL. `DEV_SIGN_IN` and `@bookyboo.test` are deleted.
-- **D10 Development data.** Inventory dev D1, Channex staging group/properties and Apple configuration before the switch; choose retain vs. reset explicitly. Not authorized by this document.
+- **D10 Development data.** **Agreed: reset everything** at the development switch — fresh lodging dev D1 and fresh Channex staging group/properties, re-imported from the Airbnb test accounts. Execution still requires a separate explicit go when the switch lands; this document records the decision only.
 
 ## 11. Review gate (from krabiclaw#1370)
 
