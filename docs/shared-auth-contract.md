@@ -1,6 +1,6 @@
 # Shared authentication contract: Krabiclaw identity for the Bookyboo native app
 
-Status: **proposed, not accepted.** Deliverable for krabiclaw#1370 under krabiclaw#1357 and bookyboo#11. Nothing in this document is implemented.
+Status: **proposed; D1, D2, D4, D6, D9 agreed by the owner on 2026-10-14; D3, D5, D7, D8, D10 open.** Deliverable for krabiclaw#1370 under krabiclaw#1357 and bookyboo#11. Nothing in this document is implemented.
 
 Revisions inspected: Krabiclaw `staging` @ `1e1c24d`; Bookyboo `main` @ `fc3841d`. Installed Better Auth: Krabiclaw `1.7.5` (type-only patch in `patches/better-auth-npm-1.7.5.patch`), Bookyboo `1.7.2`. Provider docs read on 2026-10-14: Better Auth [Apple](https://better-auth.com/docs/authentication/apple), [Bearer](https://better-auth.com/docs/plugins/bearer), [Session management](https://better-auth.com/docs/concepts/session-management), [Organization](https://better-auth.com/docs/plugins/organization), [Admin](https://better-auth.com/docs/plugins/admin), [API Key](https://better-auth.com/docs/plugins/api-key).
 
@@ -36,7 +36,7 @@ Bookyboo stops running Better Auth. Its `user`, `session`, `account`, `verificat
 ### Bookyboo [verified]
 
 - Apple native idToken flow against its own Better Auth (`src/lib/auth/index.ts:26`, `src/api/v1/auth/index.ts:8-19`); iOS stores only the signed bearer token in Keychain (`KeychainStore.swift:5,18`), sends `Authorization: Bearer` + `Origin` on every request, ephemeral URLSession, no cookies (`APIClient.swift:9-10,188-190`).
-- Active org read from `session.activeOrganizationId` only (`src/middleware/tenancy.ts:7-12`); the live socket also requires `x-bookyboo-workspace` (`src/api/v1/live/index.ts`).
+- Active org read from `session.activeOrganizationId` only (`src/middleware/tenancy.ts:7-12`); the live socket also requires `x-organization-id` (`src/api/v1/live/index.ts`).
 - Membership checked per request from the local `member` table (`tenancy.ts:9`; DO `fetch`/`publish` `src/realtime/foreground-events.ts:21-63`; `src/modules/airbnb/service.ts:26-27`). The DO stores the raw `Authorization` header in the socket attachment and re-validates on every publish (`:46-63`).
 - Push recipients = `device_tokens` ⋈ live `session` ⋈ `member` (`src/db/notification-repository.ts:41-52`); guest-message pushes go to owner/admin only (`webhook.ts:62`).
 - Identity writers: `/sign-in/social`, Better Auth passthrough used by iOS for `organization/create`, `organization/set-active`, `organization/remove-member`, `sign-out`, `revoke-other-sessions`, `delete-user`, `admin/impersonate-user`, `admin/stop-impersonating`, `list-accounts`, `admin/list-users`; `PUT /api/v1/me` (name + JPEG data-URL image); `workspace_invites` link invites accepted via `auth.api.addMember` (`src/api/v1/team/invites.ts:16-43`); `POST /api/v1/dev/sign-in` (`DEV_SIGN_IN=enabled` on localhost, `@bookyboo.test`); `beforeAccountDeletion` deleting owned workspaces including Channex groups/properties (`src/lib/auth/delete-account.ts:13-51`, `delete-workspace.ts:9-55`). Standalone org deletion is disabled.
@@ -62,7 +62,7 @@ Principal column: **U** = the end user's Krabiclaw bearer session; **S** = Booky
 | Profile photo | Krabiclaw | Krabiclaw media path (Cloudflare Images) | U | n/a | Bookyboo's JPEG data-URL image is dropped. **[decision D7]** |
 | List my organizations with role | Krabiclaw | `GET /api/auth/organization/list` + `GET /api/auth/organization/get-full-organization?organizationId=` | U | explicit | Or one new read, §6. |
 | Create organization | Krabiclaw | `POST /api/auth/organization/create` `{name, slug, default_currency, timezone}` | U | n/a | `default_currency` and `timezone` must be collected natively. Result is pending/siteless; no website, Stripe or purchase step. Vertical: **[decision D5]** |
-| Select organization | Bookyboo | header `x-bookyboo-workspace: <orgId>` on every lodging request | U | explicit | Bookyboo no longer reads `activeOrganizationId`. Native may also call `organization/set-active` so the Krabiclaw dashboard agrees, but Bookyboo never trusts it. **[decision D1]** |
+| Select organization | Bookyboo | header `x-organization-id: <orgId>` on every lodging request | U | explicit | Bookyboo no longer reads `activeOrganizationId`. Native may also call `organization/set-active` so the Krabiclaw dashboard agrees, but Bookyboo never trusts it. **[decision D1]** |
 | Invite a member (link) | Krabiclaw | new: `POST /api/organizations/:id/invite-links` → `{url}`; `POST /api/invite-links/:token/accept` (server calls `auth.api.addMember`) | U | explicit | Replaces Bookyboo `workspace_invites`. Needed because Better Auth email invitations cannot target an Apple private-relay address the inviter does not know. **[decision D4]** |
 | Change role / remove member | Krabiclaw | `POST /api/auth/organization/update-member-role`, `/remove-member` | U | explicit | Permission from `organization-access.ts` (admin may invite/update admin; Bookyboo's owner-only rule is dropped unless D4 says otherwise). |
 | Assign homes to a member; team threads | Bookyboo | existing `/api/v1/team/*` | U | explicit | Application rules layered on current membership; participants validated against Krabiclaw membership at write time. |
@@ -84,13 +84,13 @@ Principal column: **U** = the end user's Krabiclaw bearer session; **S** = Booky
    - `GET /api/lodging/principal?organizationId=` (principal **U**): returns `{ user:{id,name,email,image}, session:{id,expiresAt,impersonatedBy}, organization:{id,slug,name,default_currency,timezone}, member:{id,role} }`. Errors: 401 no/invalid session; 400 `organizationId` missing; 403 not a member; 404 unknown org. One round trip replaces Bookyboo's `getSession` + `member` read.
    - `POST /api/internal/lodging/members` (principal **S**): body `{organizationId, userIds?}` → `[{userId, memberId, role, sessionIds:[…live ids]}]`. Used only for push/background recipient filtering and socket re-validation. Returns facts, grants nothing.
    - `POST /api/organizations/:id/invite-links` and `POST /api/invite-links/:token/accept` (D4).
-5. Lifecycle hooks: `user.delete.before` → Apple token revocation + `DELETE <BOOKYBOO_API_URL>/internal/users/:id` (S); `organizationHooks.beforeDeleteOrganization` → `DELETE <BOOKYBOO_API_URL>/internal/organizations/:id` (S); `afterRemoveMember` / `afterUpdateMemberRole` → `POST <BOOKYBOO_API_URL>/internal/membership-changed` (S) so Bookyboo closes sockets and drops assignments immediately. All fail-closed; a Bookyboo 5xx aborts the Krabiclaw operation and surfaces the error (AGENTS "Failure reporting").
+5. Lifecycle hooks: `user.delete.before` → Apple token revocation + `DELETE <LODGING_API_URL>/internal/users/:id` (S); `organizationHooks.beforeDeleteOrganization` → `DELETE <LODGING_API_URL>/internal/organizations/:id` (S); `afterRemoveMember` / `afterUpdateMemberRole` → `POST <LODGING_API_URL>/internal/membership-changed` (S) so Bookyboo closes sockets and drops assignments immediately. All fail-closed; a Bookyboo 5xx aborts the Krabiclaw operation and surfaces the error (AGENTS "Failure reporting").
 6. Optional: `vertical` value for lodging (D5).
-7. No schema change for Apple itself (uses `account` rows). Invite links and the lodging-hook configuration need `BOOKYBOO_API_URL` + `BOOKYBOO_SERVICE_SECRET` env; invite links need a small table or reuse of `invitation` with a token column — resolve in #1371 against the installed plugin.
+7. No schema change for Apple itself (uses `account` rows). Invite links and the lodging-hook configuration need `LODGING_API_URL` + `LODGING_SERVICE_SECRET` env; invite links need a small table or reuse of `invitation` with a token column — resolve in #1371 against the installed plugin.
 
 ## 5. Bookyboo authorization boundary (bookyboo#13) [proposed]
 
-- Middleware chain becomes `authenticate` → `authorizeOrganization` → (`requireManager`): one call to `GET /api/lodging/principal?organizationId=<x-bookyboo-workspace>` forwarding the caller's `Authorization` header verbatim. Allowed Krabiclaw origin is the configured `KRABICLAW_API_URL` for the environment only; redirects are not followed.
+- Middleware chain becomes `authenticate` → `authorizeOrganization` → (`requireManager`): one call to `GET /api/lodging/principal?organizationId=<x-organization-id>` forwarding the caller's `Authorization` header verbatim. Allowed Krabiclaw origin is the configured `KRABICLAW_API_URL` for the environment only; redirects are not followed.
 - Freshness: **no caching** in Bookyboo; every HTTP request validates. Sockets: validate on upgrade and on every `publish` (today's semantics) using the stored bearer; additionally close on `membership-changed` (§4.5).
 - Error mapping (unchanged codes where they exist today):
   - Krabiclaw 401 → 401 `UNAUTHORIZED` (iOS clears Keychain).
@@ -99,16 +99,16 @@ Principal column: **U** = the end user's Krabiclaw bearer session; **S** = Booky
   - Role not owner/admin → 403 `WORKSPACE_ROLE_REQUIRED`.
   - Krabiclaw unreachable, timeout, 5xx, or malformed body → 503 `IDENTITY_UNAVAILABLE` with `details.upstreamStatus`. Never served from stale data; never falls back to a local table.
 - Role mapping: Krabiclaw `owner`/`admin` → Bookyboo manager; `member` → assigned-homes only. Financial/pricing surfaces stay manager-only; nothing is inferred from property assignment.
-- Schema: drop all Better Auth tables and FKs; keep `user_id`/`organization_id` text columns. Replace cascades with explicit cleanup endpoints (§4.5) called by Krabiclaw: `/internal/users/:id`, `/internal/organizations/:id`, `/internal/membership-changed`, authenticated by `BOOKYBOO_SERVICE_SECRET` (constant-time compare, same pattern as Krabiclaw `internal-secret.ts`).
+- Schema: drop all Better Auth tables and FKs; keep `user_id`/`organization_id` text columns. Replace cascades with explicit cleanup endpoints (§4.5) called by Krabiclaw: `/internal/users/:id`, `/internal/organizations/:id`, `/internal/membership-changed`, authenticated by `LODGING_SERVICE_SECRET` (constant-time compare, same pattern as Krabiclaw `internal-secret.ts`).
 - Delete identity writers: `src/lib/auth/*`, `src/api/v1/auth`, `src/api/v1/dev`, `PUT /api/v1/me` image path, `workspace_invites` + `/api/v1/invites`, `/api/v1/team/invites`; iOS passthrough calls move to `KRABICLAW_API_URL`.
-- Secrets removed from Bookyboo: `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `APPLE_BUNDLE_ID`, `APPLE_SIGN_IN_*`, `DEV_SIGN_IN`. Added: `KRABICLAW_API_URL`, `BOOKYBOO_SERVICE_SECRET`.
+- Secrets removed from Bookyboo: `BETTER_AUTH_SECRET`, `BETTER_AUTH_URL`, `APPLE_BUNDLE_ID`, `APPLE_SIGN_IN_*`, `DEV_SIGN_IN`. Added: `KRABICLAW_API_URL`, `LODGING_SERVICE_SECRET`.
 - AGENTS.md rule "Local Better Auth organizations and properties own tenancy" is rewritten: Krabiclaw organizations own tenancy; Bookyboo properties own lodging scope.
 
 ## 6. Service credential and background work [proposed]
 
 Bookyboo's scheduled sends, webhook fan-out and push delivery have no user. They need current membership facts without a persisted user bearer.
 
-- Mechanism: shared secret `BOOKYBOO_SERVICE_SECRET` sent as `x-krabiclaw-lodging-secret` to `POST /api/internal/lodging/members`. This mirrors Krabiclaw's existing documented internal-route pattern and adds no new plugin. The API Key plugin was considered and rejected for this phase: not installed, keys are user- or org-owned, and it would add a second mechanism for one caller. **[decision D2]**
+- Mechanism: shared secret `LODGING_SERVICE_SECRET` sent as `x-krabiclaw-lodging-secret` to `POST /api/internal/lodging/members`. This mirrors Krabiclaw's existing documented internal-route pattern and adds no new plugin. The API Key plugin was considered and rejected for this phase: not installed, keys are user- or org-owned, and it would add a second mechanism for one caller. **[decision D2]**
 - Recipient rule at delivery time: a device receives a notification only if its `user_id` is a current member returned by Krabiclaw with the required role, and its `session_id` is in that user's live `sessionIds`. Membership removal → immediate. Session revocation → immediate for delivery decisions; notifications already handed to APNs cannot be recalled (recorded limitation).
 - Fail-closed: if Krabiclaw is unavailable, delivery is deferred and the scheduled message enters the existing `needs_review`/retry path with a visible failure; no send proceeds on stale data.
 
@@ -133,15 +133,15 @@ Fresh Apple sign-in; repeat sign-in (no email claim); private-relay user; existi
 
 ## 10. Decisions required [decision]
 
-- **D1 Organization scope.** Explicit `x-bookyboo-workspace` header on every lodging request (recommended) vs. continuing to trust `session.activeOrganizationId`.
+- **D1 Organization scope.** **Agreed 2026-10-14:** explicit `x-organization-id` header on every lodging request; `session.activeOrganizationId` is never trusted by the lodging service. (Header and env names are brand-neutral because the native app is being rebranded to Krabiclaw in a separate PR; the socket's existing `x-bookyboo-workspace` header is renamed with it.)
 - **D2 Service credential.** **Agreed 2026-10-14:** shared-secret internal routes (existing pattern); no API Key plugin.
 - **D3 Existing-account entry and linking.** Native email+password form for existing Krabiclaw users (recommended; already enabled) vs. web sheet for Google. Whether `apple` joins `trustedProviders` (auto-link by matching email). Recommended: **not** trusted; link only explicitly from a signed-in session.
-- **D4 Invitations.** **Agreed 2026-10-14:** Krabiclaw-owned invite links. Open sub-question: owner-only admin invites vs. Krabiclaw's admin-may-invite-admin. Alternatives considered: vs. Better Auth email invitations (breaks for private relay) vs. keeping Bookyboo `workspace_invites` with a service-side `addMember` call (keeps a second membership writer). Also: keep Bookyboo's owner-only admin invites, or adopt Krabiclaw's admin-may-invite-admin.
+- **D4 Invitations.** **Agreed 2026-10-14:** Krabiclaw-owned invite links, and Krabiclaw's permission model applies unchanged (an admin may invite or promote an admin; Bookyboo's owner-only rule is dropped). Alternatives considered: vs. Better Auth email invitations (breaks for private relay) vs. keeping Bookyboo `workspace_invites` with a service-side `addMember` call (keeps a second membership writer). Also: keep Bookyboo's owner-only admin invites, or adopt Krabiclaw's admin-may-invite-admin.
 - **D5 Vertical.** Add a `lodging` vertical in Krabiclaw (schema CHECK may require the D1 replacement procedure) vs. accept default `restaurant` with an org metadata marker.
 - **D6 Deletion semantics.** Krabiclaw `deleteUser` has no owned-org guard. Options: (a) add a guard requiring ownership transfer or org deletion first; (b) keep Bookyboo's rule (delete every owned org on account deletion) implemented as a Krabiclaw `user.delete.before` step; (c) allow owner-less orgs. **Agreed 2026-10-14:** Krabiclaw adds the owned-organization guard (a) and Apple token revocation in `user.delete.before`; Bookyboo's native deletion screen explains the prerequisite.
 - **D7 Profile photo.** Krabiclaw media (recommended) vs. dropping native photo edit this phase.
 - **D8 Support impersonation.** Which Krabiclaw accounts hold the platform `admin` role for Bookyboo support; keep 3600 s or configure 900 s.
-- **D9 Local development identity.** Point Debug builds at Krabiclaw **staging** with local actor accounts (recommended; one less local server) vs. running Krabiclaw locally. The `-local-api` flag then switches only the lodging URL.
+- **D9 Local development identity.** **Agreed 2026-10-14:** Debug builds authenticate against Krabiclaw **staging** with local actor accounts (`POST /api/auth/sign-in/email`); the `-local-api` flag switches only the lodging URL. `DEV_SIGN_IN` and `@bookyboo.test` are deleted.
 - **D10 Development data.** Inventory dev D1, Channex staging group/properties and Apple configuration before the switch; choose retain vs. reset explicitly. Not authorized by this document.
 
 ## 11. Review gate (from krabiclaw#1370)
