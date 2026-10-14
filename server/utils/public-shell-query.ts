@@ -80,6 +80,8 @@ export async function buildPublicShellPayload(
   results: BatchResult[],
   indexes: PublicShellQueryIndexes,
   env?: CloudflareEnv,
+  /** The bookable experiences, when the caller read them beside the shell rows. */
+  experiences?: Product[],
 ): Promise<PublicShellPayload> {
   const rawLocations = (results[indexes.locations]?.results ?? []) as Record<string, unknown>[]
   const placements = (results[indexes.media]?.results ?? []) as Array<PublicMediaPlacement & { owner_type: string; owner_id: string }>
@@ -142,7 +144,7 @@ export async function buildPublicShellPayload(
 
   const activeLocationIds = new Set(rawLocations.map(location => String(location.id)))
   const productLocationRows = (results[indexes.productLocations]?.results ?? []) as Array<{ location_id: string }>
-  const experiences = await listOrganizationProducts(db, { organizationId: organization.id, kind: 'experience', publishedOnly: true, bookableOnly: true, env })
+  experiences ??= await listOrganizationProducts(db, { organizationId: organization.id, kind: 'experience', publishedOnly: true, bookableOnly: true, env })
 
   return {
     platformMessages: null,

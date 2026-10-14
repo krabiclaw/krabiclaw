@@ -8,6 +8,7 @@ import { executeBatch, queryAll, type BatchQuery } from '~/server/db'
 import { buildPublicResourceCacheKey, getPublicResourceCache, putPublicResourceCache } from '~/server/utils/public-resource-cache'
 import { loadPublicBase } from '~/server/utils/public-base'
 import { appendPublicShellQueries, buildPublicShellPayload } from '~/server/utils/public-shell-query'
+import { listOrganizationProducts } from '~/server/utils/product-management'
 import { previewSecretOf, resolvePreviewAuthorization } from '~/server/utils/preview-token'
 import { isNonProductionHost } from '~/server/utils/tenant-hosts'
 import { recordRequestPhase } from '~/server/utils/request-metrics'
@@ -82,15 +83,19 @@ export async function loadPublicShellSource(
     loadPublicBase(event, organizationId, { previewAuthorized }),
     getSourceLocale(db, organizationId),
   ])
-  const entitlement = await assertPublicOrganizationLanguageEntitlement(env, db, organization.id, locale ?? sourceLocale)
-  options.signal?.throwIfAborted()
   const shellQueries: BatchQuery[] = []
   const shellIndexes = appendPublicShellQueries(shellQueries, organization.id)
-  const shellResults = await executeBatch(db, shellQueries)
+  // The entitlement, the shell rows and the bookable experiences depend on the
+  // site alone; they were three sequential round trips on every cold shell.
+  const [entitlement, shellResults, experiences] = await Promise.all([
+    assertPublicOrganizationLanguageEntitlement(env, db, organization.id, locale ?? sourceLocale),
+    executeBatch(db, shellQueries),
+    listOrganizationProducts(db, { organizationId: organization.id, kind: 'experience', publishedOnly: true, bookableOnly: true, env }),
+  ])
   options.signal?.throwIfAborted()
   const payload = {
     success: true,
-    ...(await buildPublicShellPayload(db, organization, shellResults, shellIndexes, env)),
+    ...(await buildPublicShellPayload(db, organization, shellResults, shellIndexes, env, experiences)),
     count: shellResults[shellIndexes.locations]?.results?.length ?? 0,
     platformMessages: entitlement.platform_messages,
   }
