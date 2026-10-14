@@ -15,6 +15,7 @@ const NAMES: Record<IntegrationProvider, string> = {
   instagram: 'Instagram connection',
   discord: 'Discord connection',
   google_analytics: 'Google Analytics connection',
+  google_ads: 'Google Ads connection',
   google_search_console: 'Search Console connection',
 }
 
@@ -24,6 +25,7 @@ const TARGETS: Record<IntegrationProvider, string> = {
   instagram: 'That Instagram account',
   discord: 'That Discord channel',
   google_analytics: 'That Google Analytics property',
+  google_ads: 'That Google Ads account',
   google_search_console: 'That Search Console site',
 }
 

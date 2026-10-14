@@ -22,6 +22,7 @@ import { reconcileZarazAnalytics } from './zaraz-analytics'
 export type IntegrationProduct =
   | 'google-analytics'
   | 'google-search-console'
+  | 'google-ads'
   | 'facebook'
   | 'instagram'
   | 'discord'
@@ -35,6 +36,7 @@ export interface ReleaseIntegrationResult {
 const PROVIDER: Record<IntegrationProduct, IntegrationProvider> = {
   'google-analytics': 'google_analytics',
   'google-search-console': 'google_search_console',
+  'google-ads': 'google_ads',
   'facebook': 'facebook',
   'instagram': 'instagram',
   'discord': 'discord',
