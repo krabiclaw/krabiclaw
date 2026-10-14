@@ -77,6 +77,10 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     // Guests book through an external link until direct stays exist.
     await assert.rejects(setProductPublication(db, { organizationId: ORG, productId: cabin.id, published: true, actor: { actorId: OWNER } }), /link where guests book/)
     const edited = await updateProduct(db, { organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { max_guests: 6 } } })
+    // A save that does not name stay settings leaves them as stored, even if they changed meanwhile.
+    await db.prepare('UPDATE product_stay_configs SET min_nights = 5 WHERE product_id = ?').bind(cabin.id).run()
+    await updateProduct(db, { organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { name: 'Cliff Cabin' } })
+    assert.equal((await getProduct(db, ORG, cabin.id)).stay?.min_nights, 5)
     assert.equal(edited.stay?.max_guests, 6)
     assert.equal(edited.stay?.location_id, 'cabin-site')
   } finally {

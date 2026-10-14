@@ -1099,7 +1099,8 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 //   from the home's defaults. Absence of a row is the default: open, at the
 //   base nightly price, with the home's minimum stay.
 // A night is bookable when it is not closed and no stay_nights row claims it;
-//   occupancy is never stored here.
+//   occupancy is never stored here. These rules are what guests and channels
+//   are offered; a stay the host enters themselves is not refused by them.
 // price_minor NULL means the base nightly price applies.
 // `source`: 'host' (edited in Krabiclaw) or 'import' (read from a channel when
 //   the home was connected).

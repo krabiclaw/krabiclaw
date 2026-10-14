@@ -244,7 +244,8 @@ team who look after it; it has no Scheduling or Locations rows. Its price row
 is the base nightly price. Its stays are on Today and the Calendar, on the day
 guests arrive and the day they leave, and open at the booking route as
 `bookings/stay/:stayId`. A stay taken by the host records offline payments and
-is cancelled there; a stay from Airbnb or another channel is read-only and
+is cancelled there, and is not refused by closed nights or minimum stays —
+those are what guests and channels are offered; a stay from Airbnb or another channel is read-only and
 changes on that channel. A place to stay is shown on the website only with its
 booking link until direct stays exist.
 

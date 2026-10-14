@@ -910,7 +910,7 @@ function productWrites(
   // Prices are rewritten only by a caller that actually supplied variants.
   // Saving a description restates nothing about money, and must not retire and
   // remint every offer a product has.
-  options: { writePrices: boolean; priceIds?: ReadonlySet<string>; writeOptions?: boolean; variantIds?: ReadonlySet<string>; expectedUpdatedAt?: string } = { writePrices: true },
+  options: { writePrices: boolean; priceIds?: ReadonlySet<string>; writeOptions?: boolean; variantIds?: ReadonlySet<string>; expectedUpdatedAt?: string; writeStay?: boolean } = { writePrices: true },
 ): BatchQuery[] {
   const upsert = mode === 'upsert'
   const writes: BatchQuery[] = [{
@@ -932,7 +932,9 @@ function productWrites(
       ...(options.expectedUpdatedAt === undefined ? [] : [organizationId, planned.id, options.expectedUpdatedAt]), now, actor.actorId, actor.actorId],
   }]
 
-  if (planned.stay) {
+  // Stay settings are written when created or when an edit names them, so an
+  // unrelated save never restates settings someone else changed.
+  if (planned.stay && options.writeStay !== false) {
     // The location relationship first: the stay settings name it, so a home's one
     // location is the relationship its config holds.
     writes.push({
@@ -1428,7 +1430,7 @@ async function planProductUpdate(db: DbClient, input: {
     { query: 'DELETE FROM product_option_values WHERE organization_id = ? AND product_id = ? AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, productId, keptValues] },
     { query: 'DELETE FROM product_options WHERE organization_id = ? AND product_id = ? AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, productId, keptOptions] },
     ...productWrites(organizationId, planned, input.actor, input.now, 'upsert', {
-      writePrices: writesPrices, priceIds, writeOptions: patch.options !== undefined, variantIds,
+      writePrices: writesPrices, priceIds, writeOptions: patch.options !== undefined, variantIds, writeStay: patch.stay !== undefined,
       expectedUpdatedAt: planned.kind === 'experience' && !planned.order_url ? current.updated_at : undefined,
     }),
     ...(guardPublication ? [{

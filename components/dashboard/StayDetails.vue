@@ -129,6 +129,7 @@ const busy = ref<string | null>(null)
 // The payment day defaults to today where the home is; one key per payment being entered, kept across retries.
 const homeToday = () => stay.value ? localDateAt(new Date(), stay.value.timezone) : ''
 const draft = reactive({ amount: '', method: 'cash' as StayPaymentMethod, paid_on: homeToday(), reference: '', key: crypto.randomUUID() })
+watch(stay, () => { if (!draft.paid_on) draft.paid_on = homeToday() })
 
 async function run(key: string, action: () => Promise<unknown>, failure: string) {
   busy.value = key

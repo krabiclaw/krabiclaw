@@ -327,6 +327,9 @@ function stayFields(input: Record<string, unknown>, home: StayHome): StayFields 
 /**
  * Add a stay the host took themselves (phone, walk-in, repeat guest). It holds
  * its nights or is refused with STAY_OVERLAP; it never lands on a held night.
+ * Closed nights, minimum nights and per-night stay rules are what the host
+ * offers guests and channels; a stay the host enters is the host's own
+ * decision, so those rules do not refuse it. Only another stay does.
  */
 export async function createStay(db: DbClient, access: StayAccess, input: Record<string, unknown> & { product_id: string; idempotency_key: string }): Promise<StayDetail> {
   requireManager(access)
