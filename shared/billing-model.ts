@@ -7,9 +7,10 @@
 export const STARTER_PLAN_ID = 'free' as const
 export const GROWTH_PLAN_ID = 'growth' as const
 export const COMMERCE_PLAN_ID = 'commerce' as const
+export const MARKETING_PLAN_ID = 'marketing' as const
 
 /** Paid plans that may be purchased or attached to a new handoff. */
-export const NEW_SALE_PAID_PLAN_IDS = Object.freeze([GROWTH_PLAN_ID, COMMERCE_PLAN_ID] as const)
+export const NEW_SALE_PAID_PLAN_IDS = Object.freeze([GROWTH_PLAN_ID, COMMERCE_PLAN_ID, MARKETING_PLAN_ID] as const)
 
 /** Recurring plan identities accepted by runtime billing projections. */
 export const KNOWN_RECURRING_PLAN_IDS = Object.freeze([
@@ -25,6 +26,7 @@ export type BillingPlanId = StarterPlanId | KnownRecurringPlanId
 export const PAID_PLAN_PRICES: Readonly<Record<NewSalePlanId, { monthly: number; annual?: number }>> = Object.freeze({
   [GROWTH_PLAN_ID]: Object.freeze({ monthly: 4900, annual: 58800 }),
   [COMMERCE_PLAN_ID]: Object.freeze({ monthly: 8900 }),
+  [MARKETING_PLAN_ID]: Object.freeze({ monthly: 9900 }),
 })
 
 /** Locations every plan's price includes. */

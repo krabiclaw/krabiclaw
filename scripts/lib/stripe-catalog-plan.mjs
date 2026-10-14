@@ -79,6 +79,21 @@ export const PLAN_DEFINITIONS = Object.freeze([
     ],
   },
   {
+    name: 'Marketing',
+    description: 'Everything in Commerce, plus Google Ads campaigns and omnichannel launches run from your dashboard and ChatGPT.',
+    planId: 'marketing',
+    amountCents: PAID_PLAN_PRICES.marketing.monthly,
+    perLocation: true,
+    highlighted: false,
+    features: [
+      'Everything in Commerce',
+      'Create, clone, pause and budget Google Ads search campaigns',
+      'Launch one campaign across Google Ads, Instagram, Facebook, Discord and your site',
+      'Ad spend, clicks, impressions and conversions in your analytics',
+      '10% of monthly ad spend for campaigns we manage, billed with your Payments fees.',
+    ],
+  },
+  {
     name: 'Site Language',
     description: 'One manually localized language for one Growth site.',
     planId: 'site_language',
