@@ -19,10 +19,12 @@ went wrong.
 yarn wrangler ai-search create <AI_SEARCH_INSTANCE_ID> --namespace default --type builtin
 ```
 
-`ensurePlatformKnowledgeInstance()` then re-asserts the retrieval configuration
+`ensurePlatformKnowledgeInstance()` then checks the retrieval configuration
 (`platformKnowledgeInstanceConfig()` in `server/utils/public-search.ts`) at the start of
 every rebuild, so index method, fusion, tokenizer, and the custom metadata schema always
-match the code that queries them.
+match the code that queries them. It writes the configuration only when a value differs:
+AI Search restarts a full resync on every configuration update, so an unconditional write
+on each pass of a rebuild kept the indexing queue from ever draining.
 
 Krabiclaw uses the native production `AI_SEARCH` Workers namespace binding for
 instance management, indexing, and search queries in the built-in `default` namespace.
