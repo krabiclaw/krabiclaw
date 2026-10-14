@@ -97,11 +97,11 @@ export async function paymentSummary(db: DbClient, principal: FinancialPrincipal
 export type RefundAuthorizationAction = 'refund' | 'reject_booking' | 'cancel_booking' | 'cancel_reservation'
 /** How long a business has to approve a refund it asked for. */
 export const AUTHORIZATION_WINDOW_SECONDS = 600
-export async function requestRefundAuthorization(db: DbClient, principal: FinancialPrincipal, paymentId: string, amount: number, action: RefundAuthorizationAction = 'refund', note?: string) {
+export async function requestRefundAuthorization(db: DbClient, principal: FinancialPrincipal, paymentId: string, amount: number | null, action: RefundAuthorizationAction = 'refund', note?: string) {
   await authorizePayments(principal, 'refund')
-  assertMinorAmount(amount)
+  if (amount !== null) assertMinorAmount(amount)
   const payment = await requirePayment(db, principal.organizationId, paymentId)
-  if (amount > payment.captured_amount - payment.refunded_amount) throw new HTTPError({ statusCode: 409, statusMessage: 'Amount exceeds refundable principal' })
+  if (!payment.stripe_payment_intent_id || payment.captured_amount === 0) throw new HTTPError({ statusCode: 409, statusMessage: 'Payment has no captured provider object' })
   const id = crypto.randomUUID()
   await execute(db, `INSERT INTO payment_authorizations(id,organization_id,user_id,payment_id,action,amount,note,expires_at) VALUES(?,?,?,?,?,?,?,?)`, [id, principal.organizationId, principal.userId, paymentId, action, amount, note?.trim() || null, new Date(Date.now()+AUTHORIZATION_WINDOW_SECONDS*1000).toISOString()])
   return { authorization_id: id, payment_id: paymentId, amount, currency: payment.currency, confirmation_required: true }
@@ -118,47 +118,41 @@ export async function approveRefundAuthorization(db: DbClient, principal: Financ
 export async function refundPayment(db: DbClient, stripe: Stripe, principal: FinancialPrincipal, authorizationId: string, env: CloudflareEnv) {
   await authorizePayments(principal, 'refund')
   // Expiry prevents a new financial instruction; an already-authorized durable intent still needs recovery.
-  const authorization = await queryFirst<{payment_id:string;amount:number;note:string|null}>(db, `SELECT a.payment_id,a.amount,a.note FROM payment_authorizations a WHERE a.id=? AND a.organization_id=? AND a.user_id=? AND a.action='refund' AND a.approved_at IS NOT NULL AND (a.expires_at>? OR a.consumed_at IS NOT NULL OR EXISTS(SELECT 1 FROM payment_refunds r WHERE r.payment_id=a.payment_id AND r.idempotency_key='approved:'||a.id AND r.amount=a.amount AND r.created_by=a.user_id AND r.created_at>=a.approved_at AND r.created_at<=a.expires_at))`, [authorizationId,principal.organizationId,principal.userId,new Date().toISOString()])
+  const authorization = await queryFirst<{payment_id:string;amount:number|null;note:string|null}>(db, `SELECT a.payment_id,a.amount,a.note FROM payment_authorizations a WHERE a.id=? AND a.organization_id=? AND a.user_id=? AND a.action='refund' AND a.approved_at IS NOT NULL AND (a.expires_at>? OR a.consumed_at IS NOT NULL)`, [authorizationId, principal.organizationId, principal.userId, new Date().toISOString()])
   if (!authorization) throw new HTTPError({ statusCode: 403, statusMessage: 'Explicit browser financial approval is required' })
   return await executeRefund(db,stripe,await requirePayment(db,principal.organizationId,authorization.payment_id),authorization.amount,`approved:${authorizationId}`,'requested_by_customer',principal.userId,env,authorization.note)
 }
-/** Private financial boundary used by merchant approval and automatic unfulfillable capture recovery. */
-export async function executeRefund(db: DbClient, stripe: Stripe, payment: Payment, amount: number, key: string, reason: Stripe.RefundCreateParams.Reason, actor: string | null, env: CloudflareEnv, note: string | null = null) {
-  assertMinorAmount(amount)
+/** Stripe keeps an idempotency key for at least this long; after it, a lost response can no longer be matched to its refund. */
+const REFUND_IDEMPOTENCY_WINDOW_MS = 24 * 60 * 60 * 1000
+/**
+ * The one financial boundary that moves money back: merchant approval, a
+ * declined or cancelled paid visit, a guest's own cancellation and the recovery
+ * of a capture nothing could be fulfilled for. `amount` null is Stripe's
+ * full-remaining refund: no local balance decides what is left, Stripe does.
+ * Every call is one native request under a stable idempotency key, so a lost
+ * response is retried against Stripe's own record of the first attempt.
+ */
+export async function executeRefund(db: DbClient, stripe: Stripe, payment: Payment, amount: number | null, key: string, reason: Stripe.RefundCreateParams.Reason, actor: string | null, env: CloudflareEnv, note: string | null = null) {
+  if (amount !== null) assertMinorAmount(amount)
   if (!payment.stripe_payment_intent_id) throw new HTTPError({ statusCode: 409, statusMessage: 'Payment has no captured provider object' })
-  const existing = await queryFirst<{id:string;stripe_refund_id:string|null;amount:number;attempted_at:string|null;note:string|null}>(db,'SELECT id,stripe_refund_id,amount,attempted_at,note FROM payment_refunds WHERE payment_id=? AND idempotency_key=?',[payment.id,key])
-  if(existing && existing.amount!==amount) throw new HTTPError({statusCode:409,statusMessage:'Refund retry amount differs from durable intent'})
+  const existing = await queryFirst<{id:string;stripe_refund_id:string|null;amount:number|null;attempted_at:string|null;note:string|null}>(db,'SELECT id,stripe_refund_id,amount,attempted_at,note FROM payment_refunds WHERE payment_id=? AND idempotency_key=?',[payment.id,key])
   if (existing?.stripe_refund_id) return await reconcileRefundState(db,stripe,payment,existing.stripe_refund_id,env)
-  const now = new Date().toISOString(), id = existing?.id ?? crypto.randomUUID()
-  if (!existing) {
-    const result = await execute(db, `INSERT INTO payment_refunds(id,payment_id,idempotency_key,amount,reason,note,status,created_by,created_at,updated_at)
-      SELECT ?,?,?,?,?,?, 'creating',?,?,? WHERE ? <= (SELECT captured_amount-refunded_amount-COALESCE((SELECT SUM(amount) FROM payment_refunds WHERE payment_id=? AND status IN ('queued','creating','pending','requires_action')),0) FROM payments WHERE id=?)`, [id,payment.id,key,amount,reason,note,actor,now,now,amount,payment.id,payment.id])
-    if (result.meta.changes !== 1) throw new HTTPError({ statusCode: 409, statusMessage: 'Refund exceeds remaining principal' })
+  if (existing && existing.amount !== amount) throw new HTTPError({statusCode:409,statusMessage:'Refund retry amount differs from durable intent'})
+  if (existing?.attempted_at && Date.now() - Date.parse(existing.attempted_at) > REFUND_IDEMPOTENCY_WINDOW_MS) {
+    throw new HTTPError({ statusCode: 409, statusMessage: 'An earlier refund request for this payment got no answer and is past Stripe’s idempotency window. Check the payment’s refunds in Stripe before refunding it again.' })
   }
-  let refund:Stripe.Refund|undefined
+  const now = new Date().toISOString(), id = existing?.id ?? crypto.randomUUID()
+  if (!existing) await execute(db, `INSERT INTO payment_refunds(id,payment_id,idempotency_key,amount,reason,note,status,created_by,created_at,updated_at) VALUES(?,?,?,?,?,?,'creating',?,?,?)`, [id,payment.id,key,amount,reason,note,actor,now,now])
+  let refund:Stripe.Refund
   try {
-    if(existing?.attempted_at){
-      let after:string|undefined
-      for(let page=0;page<100;page++){
-        const list=await stripe.refunds.list({payment_intent:payment.stripe_payment_intent_id,limit:100,...(after?{starting_after:after}:{})},{stripeAccount:payment.stripe_account_id})
-        const matches=list.data.filter(row=>row.metadata?.krabiclaw_refund_id===id)
-        if(matches.length>1)throw new Error('Provider contains duplicate refunds for one durable intent')
-        if(matches[0]){refund=matches[0];break}
-        if(!list.has_more)break
-        after=list.data.at(-1)?.id
-        if(page===99)throw new Error('Native refund history requires bounded operator reconciliation')
-      }
-    }
-    if(!refund){
-      await execute(db,"UPDATE payment_refunds SET status='creating',attempted_at=COALESCE(attempted_at,?),updated_at=? WHERE id=?",[now,now,id])
-      const message=existing?.note??note
-      refund=await stripe.refunds.create({payment_intent:payment.stripe_payment_intent_id,amount,reason,metadata:{krabiclaw_refund_id:id,...(message?{note:message.slice(0,500)}:{})}},{stripeAccount:payment.stripe_account_id,idempotencyKey:`krabiclaw-refund:${payment.id}:${key}`})
-    }
+    await execute(db,"UPDATE payment_refunds SET status='creating',attempted_at=COALESCE(attempted_at,?),updated_at=? WHERE id=?",[now,now,id])
+    const message=existing?.note??note
+    refund=await stripe.refunds.create({payment_intent:payment.stripe_payment_intent_id,...(amount===null?{}:{amount}),reason,metadata:{krabiclaw_refund_id:id,...(message?{note:message.slice(0,500)}:{})}},{stripeAccount:payment.stripe_account_id,idempotencyKey:`krabiclaw-refund:${payment.id}:${key}`})
   }catch(error){
     await execute(db,'UPDATE payment_refunds SET error=?,updated_at=? WHERE id=?',[error instanceof Error?error.message:String(error),new Date().toISOString(),id])
     throw error
   }
-  if (refund.currency.toUpperCase() !== payment.currency || refund.amount !== amount) throw new Error('Stripe refund financial scope mismatch')
+  if (refund.currency.toUpperCase() !== payment.currency || (amount !== null && refund.amount !== amount)) throw new Error('Stripe refund financial scope mismatch')
   return await reconcileRefundState(db,stripe,payment,refund,env)
 }
 
@@ -168,14 +162,14 @@ export async function reconcileRefundState(db:DbClient,stripe:Stripe,payment:Pay
  const intentId=typeof refund.payment_intent==='string'?refund.payment_intent:refund.payment_intent?.id
  if(!env.STRIPE_SECRET_KEY||stripeLivemodeFromKey(env.STRIPE_SECRET_KEY)!==Boolean(payment.livemode)||(typeof source==='string'&&refund.id!==source)||refund.currency.toUpperCase()!==payment.currency||intentId!==payment.stripe_payment_intent_id)throw new Error('Native refund identity does not match payment')
  assertMinorAmount(refund.amount)
- if(refund.amount>payment.captured_amount)throw new Error('Native refund exceeds captured payment')
  const kind=refund.status==='pending'||refund.status==='requires_action'?'refund_pending':refund.status==='succeeded'?'refund_succeeded':refund.status==='failed'?'refund_failed':refund.status==='canceled'?'refund_canceled':null
  if(!kind)throw new Error('Native refund status is missing or unsupported')
- const matched=await queryFirst<{id:string;amount:number}>(db,'SELECT id,amount FROM payment_refunds WHERE payment_id=? AND (stripe_refund_id=? OR id=?)',[payment.id,refund.id,refund.metadata?.krabiclaw_refund_id??''])
- if(matched&&matched.amount!==refund.amount)throw new Error('Native refund amount changed from authorized intent')
+ const matched=await queryFirst<{id:string;amount:number|null}>(db,'SELECT id,amount FROM payment_refunds WHERE payment_id=? AND (stripe_refund_id=? OR id=?)',[payment.id,refund.id,refund.metadata?.krabiclaw_refund_id??''])
+ // A partial refund was approved at one amount; a full-remaining one takes whatever Stripe returned.
+ if(matched&&matched.amount!==null&&matched.amount!==refund.amount)throw new Error('Native refund amount changed from authorized intent')
  const id=matched?.id??crypto.randomUUID(),now=new Date().toISOString()
  await executeBatch(db,[
-  {query:`INSERT INTO payment_refunds(id,payment_id,idempotency_key,stripe_refund_id,amount,reason,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET stripe_refund_id=excluded.stripe_refund_id,status=excluded.status,error=NULL,updated_at=excluded.updated_at`,params:[id,payment.id,`provider:${payment.stripe_account_id}:${payment.livemode}:${refund.id}`,refund.id,refund.amount,refund.reason??'provider',refund.status,now,now]},
+  {query:`INSERT INTO payment_refunds(id,payment_id,idempotency_key,stripe_refund_id,amount,reason,status,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET stripe_refund_id=excluded.stripe_refund_id,amount=excluded.amount,status=excluded.status,error=NULL,updated_at=excluded.updated_at`,params:[id,payment.id,`provider:${payment.stripe_account_id}:${payment.livemode}:${refund.id}`,refund.id,refund.amount,refund.reason??'provider',refund.status,now,now]},
   {query:"UPDATE payments SET refunded_amount=(SELECT COALESCE(SUM(amount),0) FROM payment_refunds WHERE payment_id=? AND status='succeeded'),updated_at=? WHERE id=?",params:[payment.id,now,payment.id]},
   {query:"UPDATE payments SET state=CASE WHEN refunded_amount=captured_amount AND captured_amount>0 THEN 'refunded' ELSE state END WHERE id=?",params:[payment.id]},
   {query:`UPDATE payment_authorizations SET consumed_at=COALESCE(consumed_at,?) WHERE payment_id=? AND approved_at IS NOT NULL AND action='refund' AND EXISTS(SELECT 1 FROM payment_refunds r WHERE r.id=? AND r.payment_id=payment_authorizations.payment_id AND r.idempotency_key='approved:'||payment_authorizations.id AND r.amount=payment_authorizations.amount AND r.created_by=payment_authorizations.user_id)`,params:[now,payment.id,id]},

@@ -42,7 +42,7 @@ export default defineHandler(async (event) => {
 
   const tokenHash = await hashReservationCancelToken(token)
   const now = new Date().toISOString()
-  const cancelled = await cancelBookingRequest(db, { id: requestId, organizationId, kind: existing.kind, tokenHash, now })
+  const cancelled = await cancelBookingRequest(db, { id: requestId, organizationId, kind: existing.kind, tokenHash, now, env })
   if (!cancelled) return jsonResponse({ error: 'Booking not found or already cancelled' }, { status: 404 })
 
   await notifyGuestCancellation(env, db, cancelled)

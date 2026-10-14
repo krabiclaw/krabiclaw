@@ -2407,7 +2407,8 @@ export const payment_refunds = sqliteTable("payment_refunds", {
  payment_id: text().notNull().references(() => payments.id, { onDelete: "restrict" }),
  idempotency_key: text().notNull().unique(),
  stripe_refund_id: text(),
- amount: integer().notNull(),
+ /** Stripe's refunded amount once it answers; NULL while a full-remaining refund is still with Stripe. */
+ amount: integer(),
  reason: text().notNull(),
  /** What the business told the buyer when it sent the money, as Airbnb's refund carries a message. */
  note: text(),
@@ -2417,7 +2418,7 @@ export const payment_refunds = sqliteTable("payment_refunds", {
  created_by: text().references(() => user.id, { onDelete: "set null" }),
  created_at: text().notNull(),
  updated_at: text().notNull(),
-}, t => [unique("payment_refunds_provider_unique").on(t.payment_id,t.stripe_refund_id),check("payment_refunds_amount_check", sql`amount > 0`)]);
+}, t => [unique("payment_refunds_provider_unique").on(t.payment_id,t.stripe_refund_id),check("payment_refunds_amount_check", sql`amount IS NULL OR amount > 0`)]);
 export const payment_disputes = sqliteTable("payment_disputes", {
  id: text().primaryKey(),
  payment_id: text().notNull().references(() => payments.id, { onDelete: "restrict" }),
@@ -2465,7 +2466,8 @@ export const payment_authorizations = sqliteTable("payment_authorizations", {
  user_id: text().references(() => user.id, { onDelete: "set null" }),
  payment_id: text().notNull().references(() => payments.id, { onDelete: "restrict" }),
  action: text().notNull(),
- amount: integer().notNull(),
+ /** A partial refund's amount; NULL approves whatever Stripe still holds for the payment. */
+ amount: integer(),
  note: text(),
  expires_at: text().notNull(),
  approved_at: text(),
