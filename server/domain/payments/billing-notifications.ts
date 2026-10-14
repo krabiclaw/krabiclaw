@@ -11,7 +11,7 @@ type InvoiceNotificationKind = 'usage_invoice_paid' | 'usage_invoice_payment_fai
 
 async function notifyInvoice(
   db: DbClient, stripe: Stripe, env: CloudflareEnv, organizationId: string,
-  nativeInvoiceId?: string, eventKind?: InvoiceNotificationKind,
+  nativeInvoiceId: string, eventKind: InvoiceNotificationKind,
 ): Promise<void> {
   const status = await paymentsUsageStatus(db, env, organizationId)
   if (!status.configured) throw new Error('Payments invoice notification requires its native billing mapping')
@@ -21,7 +21,7 @@ async function notifyInvoice(
   let matched = false
   for (const invoice of status.invoices) {
     const collection = invoice.collection_invoice
-    if (!collection || (nativeInvoiceId && collection.id !== nativeInvoiceId)) continue
+    if (!collection || collection.id !== nativeInvoiceId) continue
     matched = true
     const native = await stripe.invoices.retrieve(collection.id)
     if (native.id !== collection.id || native.metadata?.metronome_id !== invoice.id
@@ -46,7 +46,7 @@ async function notifyInvoice(
       }),
     })
   }
-  if (nativeInvoiceId && !matched) throw new Error('Stripe invoice is absent from its native Metronome contract')
+  if (!matched) throw new Error('Stripe invoice is absent from its native Metronome contract')
 }
 
 /** Better Auth Stripe keeps subscription lifecycle; this hook adds status mail. */
@@ -72,7 +72,3 @@ export async function notifyPaymentsInvoiceEvent(db: DbClient, stripe: Stripe, e
   if (kind === 'usage_invoice_paid') await recordPaymentsFeeInvoicePaid(db, { organizationId: mappings[0].organization_id, invoiceId: object.id, amountPaid: object.amount_paid, currency: object.currency.toUpperCase() })
 }
 
-/** Read native paid invoices to recover missed status alerts, without collecting. */
-export async function reconcilePaymentsInvoiceNotifications(db: DbClient, stripe: Stripe, env: CloudflareEnv, organizationId: string): Promise<void> {
-  await notifyInvoice(db, stripe, env, organizationId)
-}

@@ -17,7 +17,6 @@ import { listGuestThreads } from '../../server/domain/guest-threads/repository.t
 import { receiveGuestWebReply } from '../../server/domain/guest-threads/inbound-email.ts'
 import { acknowledgeBuyerThreadEntries } from '../../server/utils/notification-acknowledgement.ts'
 import { retainPaymentsForTenantDeletion } from '../../server/domain/payments/retention.ts'
-import paymentsReconcile from '../../server/tasks/payments-reconcile.ts'
 import { deliverPaymentsUsage, paymentsUsageStatus, reconcileNativeBillingCredit } from '../../server/domain/payments/usage.ts'
 import { getStripe } from '../../server/utils/billing.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
@@ -443,7 +442,6 @@ test('tenant deletion retains its connected account for servicing before any cap
   assert.deepEqual(retained.results,[{organization_id:ORG,stripe_account_id:'acct_no_payments',livemode:0}])
   assert.equal(await db.prepare('SELECT COUNT(*) n FROM payments').first('n'),0)
   assert.equal(await db.prepare('SELECT COUNT(*) n FROM stripe_connected_accounts').first('n'),0)
-  await assert.rejects(()=>paymentsReconcile.run({name:'payments:reconcile',payload:{},context:{cloudflare:{env:{DB:db}}}}),/Stripe configuration is required for outstanding Payments reconciliation/u)
  }finally{await runtime.dispose()}
 })
 
@@ -462,61 +460,12 @@ test('tenant deletion refuses a connected account retained for another tenant wi
  }finally{await runtime.dispose()}
 })
 
-test('reconciliation releases expired capacity and reports missing provider configuration for outstanding work', {timeout:120000},async()=>{
+test('an expired payment hold no longer consumes session capacity', {timeout:120000},async()=>{
  const {db,runtime}=await boot();try{
   await payable(db,'expired','2000-01-01T00:00:00.000Z')
-  await assert.rejects(()=>paymentsReconcile.run({name:'payments:reconcile',payload:{},context:{cloudflare:{env:{DB:db}}}}),/Stripe configuration is required for outstanding Payments reconciliation/u)
-  assert.equal(await db.prepare("SELECT status FROM payment_checkout_holds WHERE payment_id='expired'").first('status'),'released')
   const booking=await claimSessionCapacity(db,{organizationId:ORG,productId:'product',sessionId:'session',productVariantId:'variant',partySize:1})
   assert.equal(await db.prepare('SELECT party_size FROM bookings WHERE id=?').bind(booking.bookingId).first('party_size'),1)
- }finally{await runtime.dispose()}
-})
-
-test('failed historical reconciliation rotates later payments while reporting every Stripe failure', {timeout:120000},async(t)=>{
- const {db,runtime}=await boot();try{
-  const historical=Array.from({length:26},(_,index)=>({id:`historical-${String(index).padStart(2,'0')}`,intent:`pi_historical_${String(index).padStart(2,'0')}`,updatedAt:new Date(Date.parse(NOW)+index*1000).toISOString()}))
-  await db.batch(historical.map(payment=>db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,currency,amount,captured_amount,state,stripe_payment_intent_id,price_snapshot_json,created_at,updated_at)VALUES(?,?,'guest','acct_seller',0,'order','USD',10000,10000,'captured',?,?,?,?)").bind(payment.id,ORG,payment.intent,JSON.stringify({price:{unit_amount:10000,currency:'USD'},quantity:1}),NOW,payment.updatedAt)))
-  const before=(await db.prepare('SELECT * FROM payments ORDER BY id').all()).results
-  assert.equal(before.length,26)
-  assert.deepEqual(before.map(payment=>({id:payment.id,intent:payment.stripe_payment_intent_id,updatedAt:payment.updated_at})),historical)
-  const requests:string[]=[],originalFetch=globalThis.fetch
-  t.mock.method(globalThis,'fetch',async(input,init)=>{
-   const url=new URL(input instanceof Request?input.url:String(input))
-   if(url.origin!=='https://api.stripe.com')return originalFetch(input,init)
-   assert.equal(init?.method,'GET')
-   assert.equal(new Headers(init?.headers).get('stripe-account'),'acct_seller')
-   assert.match(url.pathname,/^\/v1\/payment_intents\/pi_historical_\d{2}$/u)
-   const intent=url.pathname.split('/').at(-1)!
-   requests.push(intent)
-   return Response.json({error:{type:'invalid_request_error',code:'resource_missing',message:`No such payment_intent: '${intent}'`}},{status:404,headers:{'stripe-should-retry':'false'}})
-  })
-  const run={name:'payments:reconcile',payload:{},context:{cloudflare:{env:{DB:db,STRIPE_SECRET_KEY:'sk_test_reconciliation_boundary'}}}}
-  const snapshots=[before]
-  for(let pass=0;pass<2;pass++){
-   const started=Date.now(),offset=requests.length
-   await assert.rejects(()=>paymentsReconcile.run(run),error=>{
-    assert.ok(error instanceof AggregateError)
-    assert.equal(error.message,'Payments reconciliation has unresolved provider failures')
-    assert.equal(error.errors.length,25)
-    for(const failure of error.errors){assert.ok(failure instanceof Stripe.errors.StripeInvalidRequestError);assert.equal(failure.code,'resource_missing')}
-    return true
-   })
-   const finished=Date.now(),requested=requests.slice(offset)
-   if(pass===0)assert.deepEqual(requested,historical.slice(0,25).map(payment=>payment.intent))
-   else{assert.equal(requested.length,25);assert.equal(requested[0],historical[25]!.intent)}
-   const after=(await db.prepare('SELECT * FROM payments ORDER BY id').all()).results
-   assert.equal(after.length,26)
-   assert.deepEqual(after.map(({updated_at,...payment})=>payment),before.map(({updated_at,...payment})=>payment))
-   for(const [index,payment] of after.entries()){
-    const previous=snapshots[pass]![index]!
-    if(!requested.includes(String(payment.stripe_payment_intent_id))){assert.equal(payment.updated_at,previous.updated_at);continue}
-    assert.equal(typeof payment.updated_at,'string')
-    const updated=Date.parse(String(payment.updated_at))
-    assert.ok(updated>=started&&updated<=finished)
-    assert.ok(updated>Date.parse(String(previous.updated_at)))
-   }
-   snapshots.push(after)
-  }
+  assert.equal(await db.prepare("SELECT status FROM payment_checkout_holds WHERE payment_id='expired'").first('status'),'active')
  }finally{await runtime.dispose()}
 })
 

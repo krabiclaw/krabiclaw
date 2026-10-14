@@ -72,7 +72,7 @@ function providerId(result:Record<string,unknown>):string {
 /**
  * Payments fees are billed by a Metronome contract on the business's own Stripe
  * customer. A business gets it when its plan includes Payments: on the Stripe
- * subscription event that grants it, and the hourly reconciliation for any it missed.
+ * subscription event that grants it. Stripe redelivers that event until set-up succeeds.
  */
 export async function setUpPaymentsBilling(db:DbClient,stripe:Stripe,env:CloudflareEnv,organizationId:string) {
  const existing=await queryFirst<BillingAccount>(db,'SELECT * FROM payment_billing_accounts WHERE organization_id=?',[organizationId])
