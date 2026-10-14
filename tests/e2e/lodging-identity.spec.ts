@@ -64,7 +64,7 @@ test.describe('lodging identity boundary', () => {
         const service = { 'x-krabiclaw-lodging-secret': lodgingSecret }
         const facts = await api.post('/api/internal/lodging/members', { headers: service, data: { organizationId: organization.id } })
         expect(facts.status(), await facts.text()).toBe(200)
-        expect(await facts.json()).toEqual([{ userId: fixture.id, memberId: body.member.id, role: 'owner', sessionIds: expect.arrayContaining([body.session.id]) }])
+        expect(await facts.json()).toEqual([{ userId: fixture.id, memberId: body.member.id, role: 'owner', name: fixture.name, email: fixture.email, image: null, sessionIds: expect.arrayContaining([body.session.id]) }])
         expect((await api.post('/api/internal/lodging/members', { headers: { ...bearer }, data: { organizationId: organization.id } })).status()).toBe(401)
 
         // Deleting the only owner would orphan the organization.

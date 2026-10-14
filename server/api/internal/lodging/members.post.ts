@@ -8,7 +8,7 @@ import { organizationAdapter } from '~/server/utils/member-access'
 
 const PAGE = 100
 
-// Current members of one organization and each one's live session ids, for the
+// Current members of one organization, who each one is, and their live session ids, for the
 // lodging service's background work (push recipients, scheduled sends, socket
 // re-validation), which runs with no user. It states facts; it grants nothing.
 export default defineHandler(async (event) => {
@@ -28,7 +28,7 @@ export default defineHandler(async (event) => {
   if (!await adapter.findOrganizationById(organizationId)) return jsonResponse({ error: 'Organization not found' }, { status: 404 })
 
   const filter = userIds ? { field: 'userId', operator: 'in' as const, value: userIds as string[] } : undefined
-  const members: { id: string; userId: string; role: string }[] = []
+  const members: { id: string; userId: string; role: string; user: { name: string; email: string; image?: string | null } }[] = []
   for (let offset = 0; ; offset += PAGE) {
     const page = await adapter.listMembers({ organizationId, filter, limit: PAGE, offset })
     members.push(...page.members)
@@ -51,6 +51,9 @@ export default defineHandler(async (event) => {
     userId: member.userId,
     memberId: member.id,
     role: member.role,
+    name: member.user.name,
+    email: member.user.email,
+    image: member.user.image ?? null,
     sessionIds: sessions.filter(session => session.userId === member.userId).map(session => session.id),
   })))
 })
