@@ -233,26 +233,11 @@ async function hydrateBlocks(
   // The site this page belongs to. Its template decides where an article
   // lives, its vertical decides where a product lives, and its currency
   // decides which offers apply.
-  const organizationRow = await queryFirst<{ theme_id: string | null; vertical: string | null; default_currency: string | null; address_visibility: string | null }>(
-    db, "SELECT theme_id, vertical, default_currency, json_extract(settings_json, '$.compliance.address_visibility') AS address_visibility FROM organization WHERE id = ? LIMIT 1", [organizationId])
-  if (!organizationRow) throw new HTTPError({ statusCode: 500, statusMessage: 'Tenant page site is unavailable' })
-  const template = resolvePublicTemplate({ themeId: organizationRow.theme_id, vertical: organizationRow.vertical })
-  const defaultServices = pagePath === '/services' && template.slug === 'blawby' && blocks.length === 1 && blocks[0]?.type === 'hero'
-  if (defaultServices) {
-    const services = await listOrganizationProducts(db, { organizationId, kind: 'service', publishedOnly: true, env })
-    for (const service of services) {
-      if (!service.page) throw new HTTPError({ statusCode: 500, statusMessage: 'Published service page is unavailable', data: { code: 'SERVICE_PAGE_MISSING', product_id: service.id } })
-      productIds.add(service.id)
-    }
-    if (productIds.size) blocks = [...blocks, {
-      id: 'services-list', type: 'product_grid', position: blocks.length,
-      data: { product_ids: [...productIds] }, media: [],
-    }]
-  }
-  const defaultLocationGrid = pagePath === '/' && template.slug !== 'platform' && !blocks.some(block => block.type === 'location_grid')
-  const addressVisible = template.slug !== 'blawby' || organizationRow.address_visibility === 'visible'
-  const articlePrefix = template.serviceRoutes.articleDetailPrefix
-  const [sourcePages, qaItemsBySource, sourceReviewRows, sourcePostRows] = await Promise.all([
+  // The reads a block names (pages, FAQ, reviews, posts) depend on the blocks
+  // alone, so they travel with the site row rather than after it.
+  const [organizationRow, sourcePages, qaItemsBySource, sourceReviewRows, sourcePostRows] = await Promise.all([
+    queryFirst<{ theme_id: string | null; vertical: string | null; default_currency: string | null; address_visibility: string | null }>(
+      db, "SELECT theme_id, vertical, default_currency, json_extract(settings_json, '$.compliance.address_visibility') AS address_visibility FROM organization WHERE id = ? LIMIT 1", [organizationId]),
     pageIds.size
       ? resources.pages
         ? resources.pages.then(pages => pages.filter(page => pageIds.has(page.id)))
@@ -268,13 +253,42 @@ async function hydrateBlocks(
        ORDER BY root.published_at IS NULL, root.published_at DESC, p.id DESC
     `, [locale, organizationId]) : [],
   ])
+  if (!organizationRow) throw new HTTPError({ statusCode: 500, statusMessage: 'Tenant page site is unavailable' })
+  const template = resolvePublicTemplate({ themeId: organizationRow.theme_id, vertical: organizationRow.vertical })
+  const defaultServices = pagePath === '/services' && template.slug === 'blawby' && blocks.length === 1 && blocks[0]?.type === 'hero'
+  const defaultLocationGrid = pagePath === '/' && template.slug !== 'platform' && !blocks.some(block => block.type === 'location_grid')
+  const addressVisible = template.slug !== 'blawby' || organizationRow.address_visibility === 'visible'
+  const articlePrefix = template.serviceRoutes.articleDetailPrefix
   // Each grid gets the products it named, and only those. Keyed by collection
   // rather than flattened into one list: two grids on a page name two different
   // collections, and a flat union rendered both collections in both grids.
   const currency = organizationRow.default_currency
   const homepage = pagePath === '/' && template.slug !== 'platform'
   const homepageMenu = homepage && template.slug === 'saya'
-  const productCatalog = collectionIds.size || productIds.size || homepage ? await loadTenantPageProductCatalog(db, organizationId, locale, localizations, env) : undefined
+  // The default services list, the catalog and the branches all follow from the
+  // template alone; one round trip reads the three.
+  const [services, productCatalog, sourceLocations] = await Promise.all([
+    defaultServices ? listOrganizationProducts(db, { organizationId, kind: 'service', publishedOnly: true, env }) : [],
+    collectionIds.size || productIds.size || homepage || defaultServices ? loadTenantPageProductCatalog(db, organizationId, locale, localizations, env) : undefined,
+    locationIds.size || defaultLocationGrid
+      ? queryAll<{ id: string; title: string; slug: string; address: string | null; description: string | null; short_description: string | null; asset_id: string | null; public_url: string | null; thumbnail_url: string | null; kind: string | null; alt_text: string | null }>(db, `
+          SELECT bl.id, bl.title, bl.slug, bl.address, bl.description, bl.short_description, ma.id AS asset_id, ma.public_url, ma.thumbnail_url, ma.kind, ma.alt_text
+            FROM business_locations bl
+            LEFT JOIN media_placements mp ON mp.organization_id = bl.organization_id AND mp.owner_type = 'business_location' AND mp.owner_id = bl.id AND mp.slot = 'hero' AND mp.sort_order = 0 AND mp.status = 'active'
+            LEFT JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = bl.organization_id AND ma.status = 'active'
+           WHERE bl.organization_id = ? AND bl.status = 'active' AND (? = 1 OR bl.id IN (SELECT value FROM json_each(?)))
+           ORDER BY bl.title, bl.id
+        `, [organizationId, defaultLocationGrid ? 1 : 0, d1JsonStringSet([...locationIds])])
+      : [],
+  ])
+  for (const service of services) {
+    if (!service.page) throw new HTTPError({ statusCode: 500, statusMessage: 'Published service page is unavailable', data: { code: 'SERVICE_PAGE_MISSING', product_id: service.id } })
+    productIds.add(service.id)
+  }
+  if (defaultServices && productIds.size) blocks = [...blocks, {
+    id: 'services-list', type: 'product_grid', position: blocks.length,
+    data: { product_ids: [...productIds] }, media: [],
+  }]
   const homepageDishes = homepageMenu ? productCatalog!.products.filter(product => product.kind === 'dish') : []
   const defaultMenuGrid = homepageMenu && blocks.some(block => block.type === 'product_grid'
     && !(Array.isArray(block.data.product_ids) && block.data.product_ids.length) && !block.data.collection_id)
@@ -312,16 +326,6 @@ async function hydrateBlocks(
     position: Math.max(-1, ...blocks.map(block => block.position)) + 1,
     data: { title: getVerticalCopy(organizationRow.vertical, locale).experiencesPageTitle, product_ids: missingExperiences.map(product => product.id) }, media: [],
   }]
-  const sourceLocations = locationIds.size || defaultLocationGrid
-    ? await queryAll<{ id: string; title: string; slug: string; address: string | null; description: string | null; short_description: string | null; asset_id: string | null; public_url: string | null; thumbnail_url: string | null; kind: string | null; alt_text: string | null }>(db, `
-        SELECT bl.id, bl.title, bl.slug, bl.address, bl.description, bl.short_description, ma.id AS asset_id, ma.public_url, ma.thumbnail_url, ma.kind, ma.alt_text
-          FROM business_locations bl
-          LEFT JOIN media_placements mp ON mp.organization_id = bl.organization_id AND mp.owner_type = 'business_location' AND mp.owner_id = bl.id AND mp.slot = 'hero' AND mp.sort_order = 0 AND mp.status = 'active'
-          LEFT JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = bl.organization_id AND ma.status = 'active'
-         WHERE bl.organization_id = ? AND bl.status = 'active' AND (? = 1 OR bl.id IN (SELECT value FROM json_each(?)))
-         ORDER BY bl.title, bl.id
-      `, [organizationId, defaultLocationGrid ? 1 : 0, d1JsonStringSet([...locationIds])])
-    : []
   // The row stores the address as text and a translation carries only the parts
   // that are words, so the canonical one is read first: the overlay then merges
   // the translated parts onto it and keeps the region code and postcode. Left as

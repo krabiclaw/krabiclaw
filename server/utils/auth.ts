@@ -147,6 +147,7 @@ export interface CloudflareEnv {
   STRIPE_WEBHOOK_SECRET?: string
   STRIPE_CONNECT_WEBHOOK_SECRET?: string
   GA4_API_SECRET?: string
+  GOOGLE_ADS_DEVELOPER_TOKEN?: string
   AI_SEARCH?: AiSearchNamespace
   AI_SEARCH_INSTANCE_ID?: string
   PLATFORM_SEARCH_REINDEX_SECRET?: string
@@ -406,7 +407,7 @@ function buildAuth(env: CloudflareEnv) {
         const callback = new URL(state.callbackURL, authBaseUrl)
         // Only a successful integration link continues to resource selection.
         if (new URL(location, authBaseUrl).href !== callback.href) return
-        const integration = callback.pathname.match(/^\/dashboard\/[^/]+\/integrations\/(facebook|instagram|discord|google-analytics|google-search-console|google-calendar)$/)?.[1]
+        const integration = callback.pathname.match(/^\/dashboard\/[^/]+\/integrations\/(facebook|instagram|discord|google-analytics|google-search-console|google-calendar|google-ads)$/)?.[1]
           ?? (/^\/dashboard\/[^/]+\/calendar\/settings\/availability\/google-calendar$/.test(callback.pathname) || /^\/dashboard\/account\/profile\/calendar\/[^/]+\/google-calendar$/.test(callback.pathname) ? 'google-calendar' : undefined)
         if (!integration) return
         const provider = integration.startsWith('google-') ? 'google' : integration

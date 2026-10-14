@@ -26,8 +26,8 @@
           </h1>
           <p class="text-[15px] leading-relaxed text-toned">
             <template v-if="onPaidPlan">
-              Your plan covers {{ locations.covered }} locations and your site has {{ locations.used }}.
-              {{ INCLUDED_LOCATIONS }} locations are included, then {{ locationPrice }}.
+              Your site has {{ locations.used }} locations, and your plan covers {{ locations.covered }}.
+              Plans include {{ INCLUDED_LOCATIONS }}, then {{ locationPrice }}.
               Stripe shows what changes on your bill before you confirm.
             </template>
             <template v-else>

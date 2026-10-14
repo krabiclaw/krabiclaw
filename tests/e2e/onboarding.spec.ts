@@ -392,7 +392,7 @@ test('a location beyond the ones the plan pays for is refused until the plan cov
 
   await page.goto('/dashboard/ember-slice-demo/locations/new')
   const limit = page.locator('[data-location-limit]')
-  await expect(limit).toContainText('Your plan covers 2 locations and your site has 2. 2 locations are included, then $49 per additional location per month.')
+  await expect(limit).toContainText('Your site has 2 locations, and your plan covers 2. Plans include 2, then $49 per additional location per month.')
   await expect(limit.getByRole('button', { name: 'Add a location to your plan', exact: true })).toBeVisible()
   await expect(page.locator('[data-onboarding-step="business"]')).toHaveCount(0)
 })

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f5224a9d-832c-4a5c-bfd7-d51dbe509764",
+  "id": "3d25b32d-2e3f-43eb-87b6-0c87235c2b43",
   "prevId": "496f0d51-8677-4b04-9af9-e410f8e41f7a",
   "tables": {
     "account": {
@@ -6611,7 +6611,7 @@
       "checkConstraints": {
         "organization_integrations_provider_check": {
           "name": "organization_integrations_provider_check",
-          "value": "provider IN ('facebook', 'instagram', 'discord', 'google_analytics', 'google_search_console', 'google_calendar')"
+          "value": "provider IN ('facebook', 'instagram', 'discord', 'google_analytics', 'google_ads', 'google_search_console', 'google_calendar')"
         },
         "organization_integrations_values_check": {
           "name": "organization_integrations_values_check",
@@ -6632,144 +6632,6 @@
         "organization_integrations_instants_check": {
           "name": "organization_integrations_instants_check",
           "value": "strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at"
-        }
-      }
-    },
-    "organization_invite_links": {
-      "name": "organization_invite_links",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "role": {
-          "name": "role",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "token_hash": {
-          "name": "token_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "inviter_id": {
-          "name": "inviter_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "used_at": {
-          "name": "used_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "used_by_user_id": {
-          "name": "used_by_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
-        }
-      },
-      "indexes": {
-        "organization_invite_links_token_hash_unique": {
-          "name": "organization_invite_links_token_hash_unique",
-          "columns": [
-            "token_hash"
-          ],
-          "isUnique": true
-        },
-        "organization_invite_links_organization_id_idx": {
-          "name": "organization_invite_links_organization_id_idx",
-          "columns": [
-            "organization_id"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "organization_invite_links_organization_id_organization_id_fk": {
-          "name": "organization_invite_links_organization_id_organization_id_fk",
-          "tableFrom": "organization_invite_links",
-          "tableTo": "organization",
-          "columnsFrom": [
-            "organization_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "organization_invite_links_inviter_id_user_id_fk": {
-          "name": "organization_invite_links_inviter_id_user_id_fk",
-          "tableFrom": "organization_invite_links",
-          "tableTo": "user",
-          "columnsFrom": [
-            "inviter_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        },
-        "organization_invite_links_used_by_user_id_user_id_fk": {
-          "name": "organization_invite_links_used_by_user_id_user_id_fk",
-          "tableFrom": "organization_invite_links",
-          "tableTo": "user",
-          "columnsFrom": [
-            "used_by_user_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "set null",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "organization_invite_links_instants_check": {
-          "name": "organization_invite_links_instants_check",
-          "value": "strftime('%Y-%m-%dT%H:%M:%fZ', expires_at, '+0 days') IS expires_at AND (used_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', used_at, '+0 days') IS used_at) AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at"
-        },
-        "organization_invite_links_role_check": {
-          "name": "organization_invite_links_role_check",
-          "value": "role IN ('admin', 'member')"
         }
       }
     },

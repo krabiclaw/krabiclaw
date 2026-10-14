@@ -39,6 +39,7 @@ export interface IntegrationsSummary {
   }>
   google_calendar: { account_id: string; calendar_name: string; status: 'active' | 'disabled' | 'error'; connected_at: string } | null
   google_analytics: ConnectedIntegration | null
+  google_ads: ConnectedIntegration | null
   google_search_console: ConnectedIntegration | null
   facebook: ConnectedIntegration | null
   instagram: ConnectedIntegration | null
@@ -91,6 +92,8 @@ const items = computed<EditorNavigationItem[]>(() => {
         : { summary: 'No locations yet' }) },
     { id: 'google-analytics', label: 'Google Analytics', lead: { icon: 'i-logos-google-analytics' }, to: `${base.value}/google-analytics`,
       ...connection(s?.google_analytics ?? null) },
+    { id: 'google-ads', label: 'Google Ads', lead: { icon: 'i-logos-google-ads' }, to: `${base.value}/google-ads`,
+      ...connection(s?.google_ads ?? null) },
     { id: 'google-search-console', label: 'Google Search Console', lead: { icon: 'i-logos-google-search-console' }, to: `${base.value}/google-search-console`,
       ...connection(s?.google_search_console ?? null) },
     { id: 'google-calendar', label: 'Google Calendar', lead: { icon: 'i-logos-google-calendar' }, to: `${base.value}/google-calendar`,

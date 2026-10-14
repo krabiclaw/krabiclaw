@@ -14,6 +14,7 @@
 export const INTEGRATION_SCOPES = {
   'google-calendar': ['https://www.googleapis.com/auth/calendar.calendarlist.readonly', 'https://www.googleapis.com/auth/calendar.app.created'],
   'google-analytics': ['https://www.googleapis.com/auth/analytics.readonly'],
+  'google-ads': ['https://www.googleapis.com/auth/adwords'],
   'google-search-console': [
     'https://www.googleapis.com/auth/webmasters',
     'https://www.googleapis.com/auth/siteverification',
@@ -28,7 +29,7 @@ export const INTEGRATION_SCOPES = {
 } as const satisfies Record<string, readonly string[]>
 
 /** The providers an organization connects, one of each. */
-export const INTEGRATION_PROVIDERS = ['facebook', 'instagram', 'discord', 'google_analytics', 'google_search_console', 'google_calendar'] as const
+export const INTEGRATION_PROVIDERS = ['facebook', 'instagram', 'discord', 'google_analytics', 'google_ads', 'google_search_console', 'google_calendar'] as const
 export type IntegrationProvider = typeof INTEGRATION_PROVIDERS[number]
 
 /** One row of `organization_integrations`. */

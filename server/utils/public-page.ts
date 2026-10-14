@@ -518,18 +518,14 @@ async function loadPublicPageSource(
   // pull a story teaser out of it; the home document carries its own
   // image-with-text block now, so the extra D1 round trip on every home
   // request is gone with it.
-  const tenantPage = contentPagePath
-    ? await getPublicTenantPageForPath(env, db, organizationId, contentPagePath, tenantPageOptions)
-    : null
-  // These complete built-in routes may display an optional CMS content overlay.
-  // The route remains valid when that optional overlay has no translated page.
-  const allowsMissingLocalizedTenantPage = page === 'location'
-    || Boolean(contentPagePath && template.pageDocuments.optionalLocalizedPaths.includes(contentPagePath))
-  if (contentPagePath && !tenantPage && locale && locale !== sourceLocale && !isPreviewAuthorized && !allowsMissingLocalizedTenantPage) {
-    throw new HTTPError({ statusCode: 404, statusMessage: 'Localized page was not found' })
-  }
-  const contentRows: OrganizationContent[] = tenantPage ? tenantPageToContentRows(tenantPage) : []
-
+  //
+  // The page document, the shell, the catalog and the collections depend on
+  // the resolved tenant and locale, not on one another, so they are read
+  // together. Serial D1 round trips made a full menu exceed the public request
+  // deadline even though its SQL completed quickly.
+  const tenantPagePromise = contentPagePath
+    ? getPublicTenantPageForPath(env, db, organizationId, contentPagePath, tenantPageOptions)
+    : Promise.resolve(null)
   const postRow = idxBlogPost >= 0
     ? (batchResults[idxBlogPost] as { results: ApiRecord[] })?.results?.[0]
     : undefined
@@ -552,10 +548,15 @@ async function loadPublicPageSource(
     representationSourcePath = `/locations/${sourceLocationSlug}${routeSuffix}`
     representationResource = { type: 'business_location', id: locationId, routeSuffix }
   }
-  // These canonical reads depend on the resolved tenant and locale, not on
-  // one another. Serial D1 round trips made a full menu exceed the public
-  // request deadline even though its SQL completed quickly.
-  const [sourceShell, canonical, sourceCollections, localeRepresentations] = await Promise.all([
+  const readLocaleRepresentations = () => listPublicLocaleRepresentations(env, db, {
+    organizationId: orgId,
+    sourcePath: representationSourcePath,
+    resource: representationResource,
+    documentId: representationDocumentId,
+    publishedLocaleRoute: !representationResource && !representationDocumentId && Boolean(routePagePath),
+  })
+  const [tenantPage, sourceShell, canonical, sourceCollections, ownRepresentations] = await Promise.all([
+    tenantPagePromise,
     buildPublicShellPayload(db, organization, batchResults, shellIndexes, env),
     includeProducts
       ? listOrganizationProducts(db, { organizationId: orgId, kind: page === 'experiences' ? 'experience' : page === 'menu' ? 'dish' : undefined, publishedOnly: true, env })
@@ -568,16 +569,20 @@ async function loadPublicPageSource(
           ]).then(collections => collections.flat())
         : listCollections(db, { organizationId: orgId })
       : [],
-    !representationResource && tenantPage?.localeRepresentations
-      ? tenantPage.localeRepresentations
-      : listPublicLocaleRepresentations(env, db, {
-          organizationId: orgId,
-          sourcePath: representationSourcePath,
-          resource: representationResource,
-          documentId: representationDocumentId,
-          publishedLocaleRoute: !representationResource && !representationDocumentId && Boolean(routePagePath),
-        }),
+    // A location or article route names its own representations; a page
+    // document route reads them off the document once it has loaded.
+    representationResource ? readLocaleRepresentations() : null,
   ])
+  // These complete built-in routes may display an optional CMS content overlay.
+  // The route remains valid when that optional overlay has no translated page.
+  const allowsMissingLocalizedTenantPage = page === 'location'
+    || Boolean(contentPagePath && template.pageDocuments.optionalLocalizedPaths.includes(contentPagePath))
+  if (contentPagePath && !tenantPage && locale && locale !== sourceLocale && !isPreviewAuthorized && !allowsMissingLocalizedTenantPage) {
+    throw new HTTPError({ statusCode: 404, statusMessage: 'Localized page was not found' })
+  }
+  const contentRows: OrganizationContent[] = tenantPage ? tenantPageToContentRows(tenantPage) : []
+  const localeRepresentations = ownRepresentations
+    ?? (!representationResource && tenantPage?.localeRepresentations ? tenantPage.localeRepresentations : await readLocaleRepresentations())
   options.signal?.throwIfAborted()
   sourceShell.platformMessages = language.platform_messages
   const shell = (() => {

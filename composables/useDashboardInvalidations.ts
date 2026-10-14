@@ -12,6 +12,13 @@ export type DashboardInvalidationStatus = 'closed' | 'connecting' | 'open' | 'fa
 export interface DashboardInvalidationConnection {
   status: Ref<DashboardInvalidationStatus>
   event: Ref<DashboardInvalidation | null>
+  /**
+   * Counts the socket's reopenings after its first open. A consumer refetches
+   * when it changes to catch what was invalidated while the socket was down;
+   * the first open is not such a gap, because every consumer loads its data
+   * at setup, before the socket exists, and refetching on that open sent a
+   * second copy of every boot request.
+   */
   connectionEpoch: Ref<number>
   connect: () => void
 }
@@ -30,6 +37,7 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let healthTimer: ReturnType<typeof setTimeout> | null = null
   let reconnectAttempt = 0
+  let openedOnce = false
   let mounted = false
   let stopped = false
 
@@ -93,7 +101,8 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
       if (socket !== nextSocket) return
       reconnectAttempt = 0
       status.value = 'open'
-      connectionEpoch.value += 1
+      if (openedOnce) connectionEpoch.value += 1
+      openedOnce = true
       scheduleHeartbeat(nextSocket)
     })
 
