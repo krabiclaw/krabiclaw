@@ -50,7 +50,7 @@ export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: C
   let projectionTaxCode: string | null
   let automaticTax: boolean | undefined
   let methodConfigurationId: string | undefined
-  let session: {id:string;location_id:string|null;starts_at:string;ends_at:string;calendar_group:string|null;online_payment_required:number;timezone:string} | null = null
+  let session: {id:string;location_id:string|null;starts_at:string;ends_at:string;online_payment_required:number;timezone:string} | null = null
   if (previous) {
     const frozen = await requirePayment(db,input.organizationId,previous.payment_id)
     const snapshot: unknown = JSON.parse(frozen.price_snapshot_json)
@@ -87,7 +87,7 @@ export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: C
   } else if (input.subjectType === 'booking') {
     const product = await queryFirst<{name:string;tax_code:string|null;currency:string}>(db,`SELECT p.name,p.tax_code,o.default_currency AS currency FROM products p JOIN organization o ON o.id=p.organization_id JOIN product_variants v ON v.product_id=p.id AND v.organization_id=p.organization_id WHERE p.organization_id=? AND p.id=? AND v.id=? AND p.active=1 AND v.active=1`,[input.organizationId,input.productId,input.variantId])
     if (!product || !isCurrencyCode(product.currency)) throw new HTTPError({statusCode:409,statusMessage:'An active offering with a supported currency is required'})
-    session = await queryFirst(db,`SELECT s.*,c.calendar_group,c.online_payment_required FROM product_sessions s JOIN product_booking_configs c ON c.product_id=s.product_id AND c.organization_id=s.organization_id WHERE s.organization_id=? AND s.id=? AND s.product_id=?`,[input.organizationId,input.sessionId,input.productId])
+    session = await queryFirst(db,`SELECT s.*,c.online_payment_required FROM product_sessions s JOIN product_booking_configs c ON c.product_id=s.product_id AND c.organization_id=s.organization_id WHERE s.organization_id=? AND s.id=? AND s.product_id=?`,[input.organizationId,input.sessionId,input.productId])
     if (!session) throw new HTTPError({statusCode:404,statusMessage:'Session not found'})
     if (!session.online_payment_required) throw new HTTPError({statusCode:409,statusMessage:'This offering uses pay-later booking'})
     const rawPrices = await queryAll<Price>(db,'SELECT * FROM prices WHERE organization_id=? AND product_variant_id=?',[input.organizationId,input.variantId])
@@ -139,8 +139,8 @@ export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: C
       if (!session || !catalogPriceId) throw new Error('The selected session or price is missing')
       await refreshProductBusy(db, env, input.organizationId, input.productId)
       const allocation = await sessionAllocationPredicate(db, { organizationId: input.organizationId, productId: input.productId, sessionId: session.id, partySize: input.quantity, now })
-      hold = { query: `INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,buyer_user_id,request_id,payment_id,quantity,amount,currency,calendar_group,starts_at,ends_at,status,expires_at,created_at,assigned_member_id,location_id,timezone)
-        SELECT ?,?,?,?,?,?,?,?,?,?,?,?,c.calendar_group,s.starts_at,s.ends_at,'active',?,?,${sessionMemberSql('s')},s.location_id,s.timezone FROM product_sessions s JOIN product_booking_configs c ON c.product_id=s.product_id AND c.organization_id=s.organization_id WHERE s.id=? AND s.organization_id=? AND s.product_id=? AND ${allocation.query}`,
+      hold = { query: `INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,buyer_user_id,request_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at,assigned_member_id,location_id,timezone)
+        SELECT ?,?,?,?,?,?,?,?,?,?,?,?,s.starts_at,s.ends_at,'active',?,?,${sessionMemberSql('s')},s.location_id,s.timezone FROM product_sessions s JOIN product_booking_configs c ON c.product_id=s.product_id AND c.organization_id=s.organization_id WHERE s.id=? AND s.organization_id=? AND s.product_id=? AND ${allocation.query}`,
         params: [holdId,input.organizationId,input.productId,input.variantId,catalogPriceId,session.id,input.buyerUserId,input.requestId,id,input.quantity,amount,price.currency,expiresAt,now,session.id,input.organizationId,input.productId,...allocation.params!] }
       following.push({ query: "UPDATE product_sessions SET assigned_member_id=(SELECT assigned_member_id FROM payment_checkout_holds WHERE payment_id=?) WHERE id=? AND EXISTS(SELECT 1 FROM payment_checkout_holds WHERE payment_id=? AND status='active')", params:[id,session.id,id] })
     } else {

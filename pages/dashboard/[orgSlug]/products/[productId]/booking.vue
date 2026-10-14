@@ -8,7 +8,6 @@
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationGroup, type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
-import { timezoneLabel } from '~/utils/timezone'
 
 definePageMeta({ layout: 'dashboard' })
 const p = inject(productEditorKey)!
@@ -22,19 +21,23 @@ const groups = computed<EditorNavigationGroup[]>(() => {
   const items: EditorNavigationItem[] = config ? [] : [row('enabled', 'Booking calendar', 'Not set up')]
   if (config) items.push(
     row('duration', 'Duration', config.duration_minutes ? `${config.duration_minutes} minutes` : 'Choose a duration'),
-    p.locationId.value ? { id: 'location', label: 'Meeting location', summary: p.location.value?.title ?? '' } : row('location', 'Meeting location', config.online_timezone ? `Online · ${timezoneLabel(config.online_timezone)}` : 'Choose a time zone'),
+    p.locationId.value ? { id: 'location', label: 'Meeting location', summary: p.location.value?.title ?? '' } : row('location', 'Meeting location', config.held_online ? 'Online' : 'Not set'),
     row('capacity', 'Guest limit', config.default_capacity === null ? 'No guest limit' : config.default_capacity === 1 ? 'One guest per session' : config.default_capacity === 0 ? 'Closed to new guests' : `Up to ${config.default_capacity} guests per session`),
     row('assignment', 'Who guests meet', config.assigned_team_id ? 'Any available member of the assigned team' : config.assigned_member_id ? 'Assigned team member' : 'The business schedule'),
     row('confirmation', 'Confirmation', config.confirmation_mode === 'instant' ? 'Confirm automatically' : 'Review each request'),
-    row('schedule', 'Weekly schedule', p.scheduleError.value ? p.scheduleError.value : p.weekdays.filter(day => p.savedSlotsFor(day.value).length).map(day => day.label).join(', ') || 'No weekly times set'),
-    row('sessions', 'Dated sessions', 'Add or edit individual dates'),
+    // Online, the provider's working hours are the schedule; at a location, its weekly times are.
+    ...(config.held_online
+      ? [{ id: 'hours', label: 'Bookable times', summary: config.assigned_team_id ? 'Each team member\'s working hours' : 'Your provider\'s working hours', to: config.assigned_member_id ? `/dashboard/${route.params.orgSlug}/team/${config.assigned_member_id}/hours` : `/dashboard/${route.params.orgSlug}/team` }]
+      : [
+          row('schedule', 'Weekly schedule', p.scheduleError.value ? p.scheduleError.value : p.weekdays.filter(day => p.savedSlotsFor(day.value).length).map(day => day.label).join(', ') || 'No weekly times set'),
+          row('sessions', 'Dated sessions', 'Add or edit individual dates'),
+        ]),
   )
   // One flat list. Whether guests book on the website at all is the
   // organization's setting, under Website, not this product's.
   if (config) items.push(
     row('enabled', 'Booking calendar', 'Set up'),
     row('payment', 'Payment', config.online_payment_required ? 'Online payment required for paid sessions' : 'No payment collected at booking'),
-    ...(!p.locationId.value && config.online_timezone ? [row('calendar', 'Shared availability', config.calendar_group || 'Independent schedule')] : []),
   )
   return [{ id: 'booking', items }]
 })

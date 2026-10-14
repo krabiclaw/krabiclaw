@@ -118,7 +118,7 @@ export const locationObject = {
     description: { type: ['string', 'null'] },
     short_description: { type: ['string', 'null'] },
     status: { type: 'string' },
-    timezone: { ...timezoneSchema, type: ['string', 'null'] },
+    timezone: timezoneSchema,
     max_capacity: { type: ['number', 'null'], description: 'Stored location capacity metadata; does not limit reservations. Reservation capacity uses location_reservation_configs.slot_capacity.' },
     seo_title: { type: ['string', 'null'] },
     seo_description: { type: ['string', 'null'] },
@@ -141,7 +141,7 @@ export const locationObject = {
     created_at: { type: 'string' },
     updated_at: { type: 'string' },
   },
-  required: ['id', 'slug', 'title', 'status', 'created_at', 'updated_at', 'media'],
+  required: ['id', 'slug', 'title', 'status', 'timezone', 'created_at', 'updated_at', 'media'],
 }
 
 export const locationMutationResultObject = {

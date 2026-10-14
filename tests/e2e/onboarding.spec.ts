@@ -108,15 +108,27 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   await page.getByPlaceholder('Search country...').fill('Thailand')
   await page.getByRole('option', { name: /Thailand/ }).click()
 
-  // The first save creates the organization through Better Auth and then the
-  // site itself — seeded pages, a location, a team and the system subdomain —
-  // before the pane has anything to frame.
-  await advance('Next', 'contact')
+  await advance('Next', 'hours')
+
+  // Hours: the timezone follows the single-zone country the owner named. Zones
+  // read as the city and its current offset, not the IANA identifier.
+  await expect(step('hours')).toContainText('Bangkok · GMT+7')
+  await advance('Save hours', 'currency')
+
+  // Currency: proposed from the country the owner named, and confirmed here
+  // before anything is priced. Thailand prices in baht.
+  await expect(step('currency')).toContainText('Thai Baht (THB)')
+
+  // The first save needs both answers and creates the organization through
+  // Better Auth and its pending site before the pane has anything to frame.
+  await step('currency').getByRole('button', { name: 'Show popup', exact: true }).click()
+  await page.getByRole('option', { name: 'Thai Baht (THB)', exact: true }).click()
+  await expect(step('contact')).toBeVisible()
 
   // The draft holds the typed name as a manual business, with no Google place.
   const saved = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(saved.status(), await saved.text()).toBe(200)
-  expect((await saved.json() as { draft: unknown }).draft).toMatchObject({ sourceType: 'manual', placeId: null, details: { name } })
+  expect((await saved.json() as { draft: unknown }).draft).toMatchObject({ sourceType: 'manual', placeId: null, details: { name, currency: 'THB', timezone: 'Asia/Bangkok' } })
 
   const previewFrame = page.locator('iframe[title="Site preview"]')
   await expect(previewFrame).toHaveAttribute('src', /preview_token=/)
@@ -152,16 +164,6 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   await expect(phone).toBeEnabled()
   await phone.fill('0812345678')
   await expect(phone).toHaveValue('081 234 5678')
-  await advance('Next', 'hours')
-
-  // Hours: the timezone follows the single-zone country the owner named. Zones
-  // read as the city and its current offset, not the IANA identifier.
-  await expect(step('hours')).toContainText('Bangkok · GMT+7')
-  await advance('Save hours', 'currency')
-
-  // Currency: proposed from the country the owner named, and confirmed here
-  // before anything is priced. Thailand prices in baht.
-  await expect(step('currency')).toContainText('Thai Baht (THB)')
   await advance('Next', 'products')
 
   // The menu is optional, but a dish the owner names lands in the section they
@@ -297,20 +299,25 @@ test('a new owner picks their Google listing and it seeds location, contact and 
   await expect(step('location')).toContainText('Thailand')
   await page.getByRole('button', { name: 'Next', exact: true }).click()
 
-  // Contact: Google's national number, read in the place's own country.
-  await expect(step('contact')).toBeVisible()
-  await expect(page.getByPlaceholder('Phone number')).toHaveValue('095 293 2112')
-  await page.getByRole('button', { name: 'Next', exact: true }).click()
-
   // Hours: the place's timezone and its opening hours.
   await expect(step('hours')).toBeVisible()
   await expect(step('hours')).toContainText('Bangkok · GMT+7')
+  await page.getByRole('button', { name: 'Save hours', exact: true }).click()
+
+  // Currency is confirmed before the first save creates the pending site.
+  await expect(step('currency')).toBeVisible()
+  await expect(step('currency')).toContainText('Thai Baht (THB)')
+  await page.getByRole('button', { name: 'Next', exact: true }).click()
+
+  // Contact: Google's national number, read in the place's own country.
+  await expect(step('contact')).toBeVisible()
+  await expect(page.getByPlaceholder('Phone number')).toHaveValue('095 293 2112')
 
   // The saved draft names the Google place, which the server fetched itself.
   const saved = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(saved.status(), await saved.text()).toBe(200)
-  const draft = (await saved.json() as { draft: { sourceType: string; placeId: string; details: { name: string; phone: string; timezone: string; openingHours: { periods: unknown[] } } } }).draft
-  expect(draft).toMatchObject({ sourceType: 'google_places', placeId: KIKUZUKI.placeId, details: { name: KIKUZUKI.name, phone: '+66952932112', timezone: 'Asia/Bangkok' } })
+  const draft = (await saved.json() as { draft: { sourceType: string; placeId: string; details: { name: string; phone: string; timezone: string; currency: string; openingHours: { periods: unknown[] } } } }).draft
+  expect(draft).toMatchObject({ sourceType: 'google_places', placeId: KIKUZUKI.placeId, details: { name: KIKUZUKI.name, phone: '+66952932112', timezone: 'Asia/Bangkok', currency: 'THB' } })
   expect(draft.details.openingHours.periods.length).toBeGreaterThan(0)
 
   const cleared = await page.request.delete('/api/dashboard/onboarding/drafts/active')
@@ -327,7 +334,7 @@ test('deleting a site through Better Auth also deletes the draft that created it
 
   const name = `E2E Deleted ${Date.now().toString(36)}`
   const firstSave = await page.request.post('/api/dashboard/onboarding/drafts/active', {
-    data: { sourceType: 'manual', vertical: 'restaurant', name, details: { sourceLocale: 'en', country: 'TH', city: 'Ao Nang', streetAddress: '88 Moo 2' } },
+    data: { sourceType: 'manual', vertical: 'restaurant', name, details: { sourceLocale: 'en', currency: 'THB', timezone: 'Asia/Bangkok', country: 'TH', city: 'Ao Nang', streetAddress: '88 Moo 2' } },
   })
   expect(firstSave.status(), await firstSave.text()).toBe(200)
   const { organizationId } = await firstSave.json() as { organizationId: string }
@@ -391,12 +398,12 @@ test('add-location and Settings connect a location through the same business pic
   await expect(step('location')).toBeVisible()
   await expect(page.getByPlaceholder('123 Main Street')).toHaveValue('7 Carmine St')
   await next()
-  await expect(step('contact')).toBeVisible()
-  await expect(page.getByPlaceholder('Phone number')).not.toHaveValue('')
-  await next()
   await expect(step('hours')).toBeVisible()
   await expect(step('hours')).toContainText('New York')
   await next('Save hours')
+  await expect(step('contact')).toBeVisible()
+  await expect(page.getByPlaceholder('Phone number')).not.toHaveValue('')
+  await next()
   await expect(step('review')).toBeVisible()
   await next('Add location')
   await expect(page.getByRole('heading', { name: 'Location added' })).toBeVisible()

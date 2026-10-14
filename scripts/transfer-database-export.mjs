@@ -77,6 +77,8 @@ const RETIRED_COLUMNS = {
   organization: ['integrations_json', 'feature_overrides'],
   business_locations: ['description_provenance', 'feature_overrides'],
   products: ['tags'],
+  product_booking_configs: ['online_timezone', 'calendar_group'],
+  payment_checkout_holds: ['calendar_group'],
 }
 
 /**
@@ -453,7 +455,7 @@ export function transferDatabaseExport(sourcePath, targetPath, { payloadPath = n
     let sourceFiles = files
     assert(ledger.length > 0, 'Source migration ledger is missing')
     let recognized = false
-    for (const directory of [MIGRATIONS_DIRECTORY, 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11', 'migrations-history/v10', 'migrations-history/v9', 'migrations-history/v8', 'migrations-history/v7']) {
+    for (const directory of [MIGRATIONS_DIRECTORY, 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11', 'migrations-history/v10', 'migrations-history/v9', 'migrations-history/v8', 'migrations-history/v7']) {
       const candidates = readdirSync(resolve(directory)).filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort()
       if (ledger.length > candidates.length || !ledger.every((name, index) => name === candidates[index])) continue
       const expected = new Database(':memory:')
@@ -556,13 +558,13 @@ export function transferDatabaseExport(sourcePath, targetPath, { payloadPath = n
       stage.exec(normalizedTable)
     }
     // An older archived chain reaches v11 through v11's forward migrations, which the v12 baseline absorbed.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v11').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v11', name), 'utf8'))
       }
     }
     // An older archived chain reaches v12 through v12's forward migrations, which the v13 baseline absorbed.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v12').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v12', name), 'utf8'))
       }
@@ -581,7 +583,7 @@ export function transferDatabaseExport(sourcePath, targetPath, { payloadPath = n
     // start empty; existing booking commitments and source languages keep every
     // recorded fact. The new nullable fields stay unknown until an owner sets
     // them or a native financial event supplies its actual billing basis.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v14', 'migrations-history/v13'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v13').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v13', name), 'utf8'))
       }
@@ -610,10 +612,45 @@ export function transferDatabaseExport(sourcePath, targetPath, { payloadPath = n
     }
     // v15 relaxes the calendar group CHECK only. Older chains still pass
     // through v14's canonical content data migration before the exact copy.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v14'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v15', 'migrations-history/v14'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v14').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v14', name), 'utf8'))
       }
+    }
+    // v16: the facts a business, a location and an online offering cannot run
+    // without are required, and nothing stands in for them. A row without one
+    // fails the transfer rather than receiving a value nobody chose.
+    if (!columns(stage, 'organization').includes('timezone')) {
+      const unanswered = stage.prepare(`SELECT id FROM organization WHERE default_currency IS NULL
+        OR json_type(settings_json, '$.config.default_timezone') IS NOT 'text' OR json_extract(settings_json, '$.config.default_timezone') = 'UTC'`).all()
+      assert(unanswered.length === 0, `Organizations without their own currency or timezone (the retired 'UTC' default is not one): ${unanswered.map(row => row.id).join(', ')}; no rows were copied`)
+      const placeless = stage.prepare('SELECT id FROM business_locations WHERE timezone IS NULL OR timezone = \'\'').all()
+      assert(placeless.length === 0, `Locations without a timezone: ${placeless.map(row => row.id).join(', ')}; no rows were copied`)
+      const grouped = stage.prepare('SELECT (SELECT count(*) FROM product_booking_configs WHERE calendar_group IS NOT NULL) + (SELECT count(*) FROM payment_checkout_holds WHERE calendar_group IS NOT NULL) AS n').get().n
+      assert(grouped === 0, 'Shared online calendars are retired: a provider\'s own hours and bookings exclude overlaps; no rows were copied')
+      // The stage keeps v15's CHECK on the settings key; the target drops the key after the copy.
+      stage.exec(`ALTER TABLE organization ADD COLUMN timezone TEXT;
+        UPDATE organization SET timezone = json_extract(settings_json, '$.config.default_timezone');`)
+      manifest.transforms.push({ name: 'organization_timezone_column', changes: stage.prepare('SELECT count(*) AS n FROM organization').get().n })
+      // An online offering's times are its provider's hours, in the provider's zone.
+      const unprovided = stage.prepare(`SELECT product_id FROM product_booking_configs WHERE online_timezone IS NOT NULL
+        AND NOT (scheduling_mode = 'provider' AND (assigned_member_id IS NOT NULL OR assigned_team_id IS NOT NULL))`).all()
+      assert(unprovided.length === 0, `Online offerings with nobody to provide them: ${unprovided.map(row => row.product_id).join(', ')}; no rows were copied`)
+      const unheld = stage.prepare(`SELECT s.id FROM product_sessions s JOIN product_booking_configs c ON c.product_id = s.product_id AND c.organization_id = s.organization_id
+        WHERE s.location_id IS NULL AND s.assigned_member_id IS NULL AND (c.online_timezone IS NULL OR c.assigned_member_id IS NULL)`).all()
+      assert(unheld.length === 0, `Online sessions without a single provider to hold them: ${unheld.length}; no rows were copied`)
+      stage.exec('ALTER TABLE product_booking_configs ADD COLUMN held_online INTEGER NOT NULL DEFAULT 0')
+      const held = stage.prepare('UPDATE product_booking_configs SET held_online = 1 WHERE online_timezone IS NOT NULL').run().changes
+      const assigned = stage.prepare(`UPDATE product_sessions SET assigned_member_id = (SELECT c.assigned_member_id FROM product_booking_configs c WHERE c.product_id = product_sessions.product_id AND c.organization_id = product_sessions.organization_id)
+        WHERE location_id IS NULL AND assigned_member_id IS NULL`).run().changes
+      // Their weekly rules become provenance only; the sessions they made keep
+      // every booking and take the provider-hours identity the generator uses,
+      // so it reopens or retires them instead of adding a twin beside them.
+      const detached = stage.prepare(`UPDATE product_sessions SET availability_rule_id = NULL,
+          source_occurrence_key = 'hours:' || assigned_member_id || ':' || starts_at
+        WHERE location_id IS NULL`).run().changes
+      const rules = stage.prepare('DELETE FROM product_availability_rules WHERE location_id IS NULL').run().changes
+      manifest.transforms.push({ name: 'online_offerings_held_by_providers', changes: held + assigned + detached + rules })
     }
     if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
       for (const name of files.slice(1)) stage.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8'))
@@ -635,6 +672,8 @@ export function transferDatabaseExport(sourcePath, targetPath, { payloadPath = n
       }
     })
     copy()
+    const retiredSettings = target.prepare("UPDATE organization SET settings_json = json_remove(settings_json, '$.config.default_timezone') WHERE json_type(settings_json, '$.config.default_timezone') IS NOT NULL").run().changes
+    if (retiredSettings) manifest.transforms.push({ name: 'organization_timezone_out_of_settings', changes: retiredSettings })
     if (fromV7) {
       const names = Object.keys(integrations[0] ?? { id: null })
       const insert = target.prepare(`INSERT INTO organization_integrations (${names.map(qi).join(',')}) VALUES (${names.map(() => '?').join(',')})`)

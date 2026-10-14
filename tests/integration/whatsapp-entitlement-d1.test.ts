@@ -34,7 +34,7 @@ test('organization messaging entitlement fences Meta calls while preserving noti
 
     const providerEnv = { ...env, WHATSAPP_DELIVERY_MODE: 'provider', WHATSAPP_PHONE_NUMBER_ID: 'local-proof-phone-id', WHATSAPP_ACCESS_TOKEN: 'local-proof-no-live-token' }
     for (const id of ['free', 'paid']) {
-      await db.prepare('INSERT INTO organization (id,name,slug,subdomain) VALUES (?,?,?,?)').bind(id, id, id, id).run()
+      await db.prepare(`INSERT INTO organization (id,name,slug,subdomain, default_currency, timezone) VALUES (?,?,?,?, 'USD', 'UTC')`).bind(id, id, id, id).run()
       await db.prepare("INSERT INTO organization_locales (id,organization_id,locale,is_source,status) VALUES (?,?,'en',1,'published')").bind(`${id}-en`, id).run()
     }
     await db.prepare("INSERT INTO user (id,name,email,phoneNumber,phoneNumberVerified) VALUES ('owner','Owner','owner@proof.example','+66812345678',1)").run()

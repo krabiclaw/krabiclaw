@@ -29,7 +29,7 @@ import { resolveMissingMcpCredential, type McpToolMeta } from "~/server/utils/mc
 import {
   buildMcpAuthChallengeForError, describeMcpAuthTelemetryError, getCloudflareWaitUntil, isMcpMutatingTool, mcpAuthChallengeFromError, mcpAuthRequiredResult, mcpToolErrorResult, setMcpAuthChallenge, } from "~/server/utils/mcp-route-helpers";
 import { logMcpToolCallEvent, mcpTelemetryMethod } from "~/server/utils/mcp-telemetry";
-import { describeErrorForTelemetry } from "~/server/utils/error-telemetry";
+import { describeErrorForTelemetry } from "~/shared/error-telemetry";
 import { getRequestDataMetrics, recordRequestPhase } from "~/server/utils/request-metrics";
 import { mcpFinancialApprovalErrorResult } from "~/server/utils/mcp-financial-handoff";
 

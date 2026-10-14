@@ -23,7 +23,7 @@ async function withD1(run: (db: D1Database) => Promise<void>) {
     const db = await runtime.getD1Database('DB')
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
-    await db.prepare("INSERT INTO organization(id,name,slug) VALUES('org','Org','org')").run()
+    await db.prepare("INSERT INTO organization(id,name,slug, default_currency, timezone) VALUES('org','Org','org', 'USD', 'UTC')").run()
     await run(db)
   } finally {
     await runtime.dispose()

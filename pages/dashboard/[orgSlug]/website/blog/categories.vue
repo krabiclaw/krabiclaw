@@ -53,6 +53,7 @@
 </template>
 
 <script setup lang="ts">
+import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import DashboardListEditor from '~/components/dashboard/DashboardListEditor.vue'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import { isCategoryResponse, isCategoriesResponse, type DashboardArticleCategory } from '~/composables/useArticleCategories'
@@ -60,6 +61,7 @@ import { ARTICLE_COLLECTIONS, ARTICLE_COLLECTION_SLUGS, type ArticleCollection }
 import { getErrorMessage } from '~/utils/errors'
 
 definePageMeta({ layout: 'dashboard' })
+const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 useSeoMeta({ title: 'Categories | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 
 const dashboardApi = useDashboardApi()
@@ -126,7 +128,7 @@ async function createCategory() {
 
 // A category that still has articles is refused by the server with how many; the owner moves them first.
 async function removeCategory(item: { row: DashboardArticleCategory }) {
-  if (!confirm(`Delete "${item.row.name}"?`)) return
+  if (!await confirmDialog.open({ title: `Delete ${item.row.name}`, description: 'Articles must be moved out of a category before it can be deleted.', confirmLabel: 'Delete category', cancelLabel: 'Keep category' })) return
   removingId.value = item.row.id
   actionError.value = null
   try {

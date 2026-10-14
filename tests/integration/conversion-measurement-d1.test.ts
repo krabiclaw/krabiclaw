@@ -35,9 +35,9 @@ async function openDb() {
 test('conversion measurement: contract, values, idempotency, report and cohort on D1', { timeout: 60_000 }, async () => {
   const { runtime, db } = await openDb()
   try {
-    const settings = '{"config":{"default_timezone":"Asia/Bangkok"}}'
+    const settings = '{}'
     for (const id of ['org-platform', 'org-customer']) {
-      await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json) VALUES (?, ?, ?, ?, ?)`).bind(id, id, id, id, settings).run()
+      await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, default_currency, timezone) VALUES (?, ?, ?, ?, ?, 'USD', 'Asia/Bangkok')`).bind(id, id, id, id, settings).run()
     }
     for (const id of ['user-a', 'user-b']) {
       await db.prepare(`INSERT INTO user (id, name, email) VALUES (?, ?, ?)`).bind(id, id, `${id}@example.com`).run()
@@ -146,9 +146,9 @@ test('conversion measurement: contract, values, idempotency, report and cohort o
 test('attribution rates share one population; cohorts follow the acquiring owner and timing', { timeout: 60_000 }, async () => {
   const { runtime, db } = await openDb()
   try {
-    const settings = '{"config":{"default_timezone":"Asia/Bangkok"}}'
+    const settings = '{}'
     for (const id of ['org-platform', 'org-paying', 'org-new']) {
-      await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json) VALUES (?, ?, ?, ?, ?)`).bind(id, id, id, id, settings).run()
+      await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, default_currency, timezone) VALUES (?, ?, ?, ?, ?, 'USD', 'Asia/Bangkok')`).bind(id, id, id, id, settings).run()
     }
     for (const id of ['owner', 'newcomer', 'founder']) await db.prepare(`INSERT INTO user (id, name, email) VALUES (?, ?, ?)`).bind(id, id, `${id}@example.com`).run()
     const uuid = (n: number) => `${String(n).padStart(8, '0')}-0000-4000-8000-000000000000`
@@ -198,9 +198,9 @@ test('consent is enforced for GA delivery and withdrawal erases stored identifie
   const realFetch = globalThis.fetch
   const sent: string[] = []
   try {
-    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, "stripeCustomerId") VALUES
-      ('org-platform', 'p', 'p', 'p', '{"config":{"default_timezone":"Asia/Bangkok"}}', NULL),
-      ('org-customer', 'c', 'c', 'c', '{"config":{"default_timezone":"Asia/Bangkok"}}', 'cus_1')`).run()
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, "stripeCustomerId", default_currency, timezone) VALUES
+      ('org-platform', 'p', 'p', 'p', '{}', NULL, 'USD', 'Asia/Bangkok'),
+      ('org-customer', 'c', 'c', 'c', '{}', 'cus_1', 'USD', 'Asia/Bangkok')`).run()
     await db.prepare(`INSERT INTO organization_integrations (id, organization_id, provider, account_id, target_id, target_name, measurement_id, revision) VALUES ('ga-platform', 'org-platform', 'google_analytics', 'google-account', '1', 'Platform', 'G-TEST', 'r1')`).run()
     await db.prepare(`INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('d1', 'org-platform', 'platform.example', 'subdomain', 'canonical', 'active')`).run()
     for (const id of ['user-a', 'user-b']) await db.prepare(`INSERT INTO user (id, name, email) VALUES (?, ?, ?)`).bind(id, id, `${id}@example.com`).run()
@@ -294,11 +294,11 @@ test('the Stripe handler records every paid subscription invoice and refund once
   const realFetch = globalThis.fetch
   const sent: string[] = []
   try {
-    const timezone = '{"config":{"default_timezone":"Asia/Bangkok"}}'
-    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, status, onboarding_status) VALUES
-      ('org-platform', 'p', 'p', 'p', ?, ?, 'active', 'active')`).bind(timezone, PLATFORM_TEMPLATE.themeId).run()
+    const timezone = '{}'
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, status, onboarding_status, default_currency, timezone) VALUES
+      ('org-platform', 'p', 'p', 'p', ?, ?, 'active', 'active', 'USD', 'Asia/Bangkok')`).bind(timezone, PLATFORM_TEMPLATE.themeId).run()
     await db.prepare(`INSERT INTO organization_integrations (id, organization_id, provider, account_id, target_id, target_name, measurement_id, revision) VALUES ('ga-platform', 'org-platform', 'google_analytics', 'google-account', '1', 'Platform', 'G-TEST', 'r1')`).run()
-    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json) VALUES ('org-customer', 'c', 'c', 'c', ?)`).bind(timezone).run()
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, default_currency, timezone) VALUES ('org-customer', 'c', 'c', 'c', ?, 'USD', 'Asia/Bangkok')`).bind(timezone).run()
     await db.prepare(`INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('d1', 'org-platform', 'platform.example', 'subdomain', 'canonical', 'active')`).run()
     await db.prepare(`INSERT INTO user (id, name, email) VALUES ('founder', 'f', 'f@example.com')`).run()
     await db.prepare(`INSERT INTO member (id, "organizationId", "userId", role) VALUES ('m1', 'org-customer', 'founder', 'owner')`).run()
@@ -372,10 +372,10 @@ test('Stripe payments keep exact line totals, checkout attribution after expiry,
   const { runtime, db } = await openDb()
   const realFetch = globalThis.fetch
   try {
-    const timezone = '{"config":{"default_timezone":"Asia/Bangkok"}}'
-    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, status, onboarding_status) VALUES
-      ('org-platform', 'p', 'p', 'p', ?, ?, 'active', 'active')`).bind(timezone, PLATFORM_TEMPLATE.themeId).run()
-    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json) VALUES ('org-customer', 'c', 'c', 'c', ?)`).bind(timezone).run()
+    const timezone = '{}'
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, status, onboarding_status, default_currency, timezone) VALUES
+      ('org-platform', 'p', 'p', 'p', ?, ?, 'active', 'active', 'USD', 'Asia/Bangkok')`).bind(timezone, PLATFORM_TEMPLATE.themeId).run()
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, default_currency, timezone) VALUES ('org-customer', 'c', 'c', 'c', ?, 'USD', 'Asia/Bangkok')`).bind(timezone).run()
     for (const id of ['user-a', 'user-b']) await db.prepare(`INSERT INTO user (id, name, email) VALUES (?, ?, ?)`).bind(id, id, `${id}@example.com`).run()
     await db.prepare(`INSERT INTO member (id, "organizationId", "userId", role, "createdAt") VALUES ('m-a', 'org-customer', 'user-a', 'owner', 1000)`).run()
     // The checkout intent is long expired by the time the first payment arrives (a trial), but still names its subscription.
@@ -449,7 +449,7 @@ test('Stripe payments keep exact line totals, checkout attribution after expiry,
 test('conversion session bounds survive out-of-order arrivals on D1', { timeout: 60_000 }, async () => {
   const { runtime, db } = await openDb()
   try {
-    await db.prepare("INSERT INTO organization (id, name, slug) VALUES ('org-bounds', 'Bounds', 'bounds')").run()
+    await db.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('org-bounds', 'Bounds', 'bounds', 'USD', 'Asia/Bangkok')").run()
     const input = { organizationId: 'org-bounds', eventName: 'product_view', stage: 'viewed', surface: 'website', entityType: 'product', entityId: 'product-1' } as const
     for (const hour of ['03', '05', '01', '04']) {
       await recordOrganizationConversionEvent(db, browser, { ...input, occurredAt: `2026-09-10T${hour}:00:00.000Z` })
@@ -466,7 +466,7 @@ test('conversion session bounds survive out-of-order arrivals on D1', { timeout:
 test('checkout attribution uses the newest matching intent even when attribution is absent', { timeout: 60_000 }, async () => {
   const { runtime, db } = await openDb()
   try {
-    await db.prepare("INSERT INTO organization (id, name, slug) VALUES ('org-intents', 'Intents', 'intents')").run()
+    await db.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('org-intents', 'Intents', 'intents', 'USD', 'Asia/Bangkok')").run()
     await db.prepare("INSERT INTO user (id, name, email) VALUES ('intent-user', 'Intent', 'intent@example.com')").run()
     const attribution = { touch: { source: 'meta', medium: 'paid', campaign: 'launch', term: null, content: null, referrerHost: null, gclid: null, gbraid: null, wbraid: null, fbclid: null, msclkid: null }, attributedAt: '2026-09-10T01:00:00.000Z' }
     const insert = (id: string, createdAt: string, value: string | null, action = 'initial_subscription', subscription = 'sub-intents') => db.prepare(`INSERT INTO stripe_ga4_subscription_intents
@@ -495,8 +495,8 @@ test('a completed onboarding emails each operator once, with a link to that cust
     return Response.json({ id: `email-${sent.length}` })
   })
   try {
-    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, theme_id, status) VALUES ('org-platform', 'KrabiClaw', 'krabiclaw', 'www', ?, 'active')`).bind(PLATFORM_TEMPLATE.themeId).run()
-    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, status) VALUES ('org-customer', 'Clay Corner', 'clay-corner', 'clay-corner', 'active')`).run()
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, theme_id, status, default_currency, timezone) VALUES ('org-platform', 'KrabiClaw', 'krabiclaw', 'www', ?, 'active', 'USD', 'Asia/Bangkok')`).bind(PLATFORM_TEMPLATE.themeId).run()
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, status, default_currency, timezone) VALUES ('org-customer', 'Clay Corner', 'clay-corner', 'clay-corner', 'active', 'USD', 'Asia/Bangkok')`).run()
     await db.prepare(`INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('dom-1', 'org-customer', 'clay-corner.krabiclaw.com', 'system', 'canonical', 'active')`).run()
     await db.prepare(`INSERT INTO user (id, name, email) VALUES ('user-owner', 'Mina Park', 'mina@clay-corner.com')`).run()
     await db.prepare(`INSERT INTO member (id, "organizationId", "userId", role) VALUES ('m-owner', 'org-customer', 'user-owner', 'owner')`).run()
@@ -521,7 +521,7 @@ test('a completed onboarding emails each operator once, with a link to that cust
     assert.equal(sent.length, 1)
 
     // An unconfigured operator address fails visibly and does not stop the measurement.
-    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, status) VALUES ('org-second', 'Second', 'second', 'second', 'active')`).run()
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, status, default_currency, timezone) VALUES ('org-second', 'Second', 'second', 'second', 'active', 'USD', 'Asia/Bangkok')`).run()
     await db.prepare(`INSERT INTO member (id, "organizationId", "userId", role) VALUES ('m-second', 'org-second', 'user-owner', 'owner')`).run()
     const unconfigured = await completeOnboarding({ ...env, PLATFORM_OWNER_EMAILS: '' }, db, 'org-second', null)
     assert.deepEqual(unconfigured.operator_email, { status: 'failed', reason: 'PLATFORM_OWNER_EMAILS is not configured' })

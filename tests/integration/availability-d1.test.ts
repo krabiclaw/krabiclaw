@@ -40,8 +40,12 @@ async function boot(legacy = false) {
     : await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
   await db.batch(statements.map(statement => db.prepare(statement)))
   await db.prepare("INSERT INTO user (id,name,email) VALUES (?,'Operator','operator@example.com')").bind(ACTOR).run()
-  await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at)
-    VALUES (?, 'Sessions', 'sessions', 'sessions', '{"config":{"default_timezone":"Asia/Bangkok"}}', 'theme', 'THB', 'active', 'complete', 'flat', 'experience', ?)`)
+  // The archived v11 schema kept the business clock in settings; the current one holds it as a column.
+  await db.prepare(legacy
+    ? `INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at)
+       VALUES (?, 'Sessions', 'sessions', 'sessions', '{"config":{"default_timezone":"Asia/Bangkok"}}', 'theme', 'THB', 'active', 'complete', 'flat', 'experience', ?)`
+    : `INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
+       VALUES (?, 'Sessions', 'sessions', 'sessions', '{}', 'theme', 'THB', 'active', 'complete', 'flat', 'experience', ?, 'Asia/Bangkok')`)
     .bind(ORG, NOW).run()
   await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('sessions-en', ?, 'en', 1, 'published')").bind(ORG).run()
   await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
@@ -57,8 +61,8 @@ async function boot(legacy = false) {
   // location is still offering the product.
   await db.prepare(`INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_by, updated_by)
     VALUES (?, ?, ?, 1, 1, ?, ?)`).bind(ORG, PRODUCT, LOCATION, ACTOR, ACTOR).run()
-  await db.prepare(`INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, online_timezone, created_by, updated_by)
-    VALUES (?, ?, 120, 10, 'Asia/Bangkok', ?, ?)`).bind(PRODUCT, ORG, ACTOR, ACTOR).run()
+  await db.prepare(`INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, created_by, updated_by)
+    VALUES (?, ?, 120, 10, ?, ?)`).bind(PRODUCT, ORG, ACTOR, ACTOR).run()
   return { runtime, db }
 }
 
@@ -137,8 +141,10 @@ test('DST gaps and folds are reported, never silently resolved', { timeout: 120_
     assert(gapDate, 'a spring-forward Sunday exists within the generation window')
     assert(foldDate, 'a fall-back Sunday exists within the generation window')
 
-    await addRule(db, 'rule-gap', { timezone: zone, weekday: 0, start_time: '02:30', location_id: null })
-    await addRule(db, 'rule-fold', { timezone: zone, weekday: 0, start_time: '01:30', location_id: null })
+    // A rule is at a location, in that location's clock.
+    await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at) VALUES ('loc-la', ?, 'la', 'Los Angeles', 'active', ?, ?, ?)`).bind(ORG, zone, NOW, NOW).run()
+    await addRule(db, 'rule-gap', { timezone: zone, weekday: 0, start_time: '02:30', location_id: 'loc-la' })
+    await addRule(db, 'rule-fold', { timezone: zone, weekday: 0, start_time: '01:30', location_id: 'loc-la' })
     const result = await materializeSessions(db, {
       organizationId: ORG, productId: PRODUCT, throughDate: addLocalDays(localNow(zone).date, WINDOW_DAYS), actorId: ACTOR,
     })
@@ -210,18 +216,18 @@ test('concurrent claims cannot exceed capacity, and variants share one pool', { 
 test('capacity cannot be reduced below seats already claimed, and a past session cannot be booked', { timeout: 120_000 }, async () => {
   const { runtime, db } = await boot()
   try {
-    await db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, timezone, starts_at, ends_at, capacity, status, created_by, updated_by)
-      VALUES ('sess-cap', ?, ?, 'Asia/Bangkok', '2099-01-05T07:00:00.000Z', '2099-01-05T09:00:00.000Z', 10, 'scheduled', ?, ?)`)
-      .bind(ORG, PRODUCT, ACTOR, ACTOR).run()
+    await db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, location_id, timezone, starts_at, ends_at, capacity, status, created_by, updated_by)
+      VALUES ('sess-cap', ?, ?, ?, 'Asia/Bangkok', '2099-01-05T07:00:00.000Z', '2099-01-05T09:00:00.000Z', 10, 'scheduled', ?, ?)`)
+      .bind(ORG, PRODUCT, LOCATION, ACTOR, ACTOR).run()
     await claimSessionCapacity(db, { organizationId: ORG, productId: PRODUCT, sessionId: 'sess-cap', productVariantId: 'var-adult', partySize: 6 })
     await assert.rejects(
       updateSession(db, { organizationId: ORG, sessionId: 'sess-cap', actorId: ACTOR, capacity: 4 }),
       /already has 6 seats claimed/, 'reducing capacity below claimed seats is refused, not silently oversold')
     await updateSession(db, { organizationId: ORG, sessionId: 'sess-cap', actorId: ACTOR, capacity: 6 })
 
-    await db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, timezone, starts_at, ends_at, capacity, status, created_by, updated_by)
-      VALUES ('sess-past', ?, ?, 'Asia/Bangkok', '2020-01-05T07:00:00.000Z', '2020-01-05T09:00:00.000Z', 10, 'scheduled', ?, ?)`)
-      .bind(ORG, PRODUCT, ACTOR, ACTOR).run()
+    await db.prepare(`INSERT INTO product_sessions (id, organization_id, product_id, location_id, timezone, starts_at, ends_at, capacity, status, created_by, updated_by)
+      VALUES ('sess-past', ?, ?, ?, 'Asia/Bangkok', '2020-01-05T07:00:00.000Z', '2020-01-05T09:00:00.000Z', 10, 'scheduled', ?, ?)`)
+      .bind(ORG, PRODUCT, LOCATION, ACTOR, ACTOR).run()
     await assert.rejects(
       claimSessionCapacity(db, { organizationId: ORG, productId: PRODUCT, sessionId: 'sess-past', productVariantId: 'var-adult', partySize: 1 }),
       CapacityUnavailableError, 'a session in the past takes no bookings')
@@ -384,14 +390,14 @@ test('unbooked re-add retains the existing cancellation and default-refresh beha
   } finally { await runtime.dispose() }
 })
 
-test('neutral adoption protects cancelled history and a claim racing its atomic write', { timeout: 120_000 }, async () => {
+test('re-adoption protects cancelled history and a claim racing its atomic write', { timeout: 120_000 }, async () => {
   const { runtime, db } = await boot()
   const scope = { organizationId: ORG, productId: PRODUCT, actorId: ACTOR }
   try {
-    await addRule(db, 'neutral-old', { location_id: null })
+    await addRule(db, 'neutral-old')
     const throughDate = addLocalDays(localNow('Asia/Bangkok').date, 31)
     await materializeSessions(db, { ...scope, throughDate })
-    const rows = (await db.prepare('SELECT id FROM product_sessions WHERE location_id IS NULL AND starts_at > ? ORDER BY starts_at').bind(new Date().toISOString()).all<{ id: string }>()).results
+    const rows = (await db.prepare('SELECT id FROM product_sessions WHERE location_id = ? AND starts_at > ? ORDER BY starts_at').bind(LOCATION, new Date().toISOString()).all<{ id: string }>()).results
     assert(rows.length >= 2)
     const protectedId = rows[0]!.id
     const racingId = rows[1]!.id
@@ -406,7 +412,7 @@ test('neutral adoption protects cancelled history and a claim racing its atomic 
       db.prepare("DELETE FROM product_availability_rules WHERE id = 'neutral-old'"),
     ])
     await setProductBookingConfig(db, { ...scope, patch: { duration_minutes: 30, default_capacity: 2 } })
-    await addRule(db, 'neutral-new', { location_id: null })
+    await addRule(db, 'neutral-new')
     const [claim, generation] = await Promise.allSettled([
       claimSessionCapacity(db, { ...scope, sessionId: racingId, productVariantId: 'var-adult', partySize: 6 }),
       materializeSessions(db, { ...scope, throughDate }),
@@ -454,23 +460,29 @@ test('provider additive migration keeps the separately held weekly columns and t
   } finally { await runtime.dispose() }
 })
 
-// Named invariants: review allocations exclude concurrent overlaps across explicitly
-// enrolled Products; confirmation/rejection and replay never allocate a second seat.
-test('one configured online calendar excludes overlapping pending requests and review retries release once', { timeout: 120_000 }, async () => {
+// Named invariants: one provider's online offerings exclude each other's overlapping
+// pending requests; confirmation/rejection and replay never allocate a second seat.
+test('one provider\'s online offerings exclude overlapping pending requests and review retries release once', { timeout: 120_000 }, async () => {
   const { runtime, db } = await boot()
   try {
-    await db.prepare("UPDATE product_booking_configs SET confirmation_mode = 'review', online_timezone = 'America/New_York', calendar_group = 'online' WHERE product_id = ?").bind(PRODUCT).run()
-    for (const [productId, variantId, group] of [['prod-consult', 'var-consult', 'online'], ['prod-independent', 'var-independent', null]]) {
+    // Two providers whose hours cover the day; each holds their own online offerings.
+    for (const provider of ['provider-x', 'provider-y']) {
+      await db.prepare("INSERT INTO user (id, name, email) VALUES (?, ?, ?)").bind(`${provider}-user`, provider, `${provider}@example.com`).run()
+      await db.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES (?, ?, ?, 'member')").bind(provider, ORG, `${provider}-user`).run()
+      await db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, windows_json, windows_until, calendar_revision, updated_at, updated_by) VALUES (?, ?, 'America/New_York', '[]', '[]', '[{"start":"2098-11-02T00:00:00.000Z","end":"2098-11-03T00:00:00.000Z"}]', '2099-01-01T00:00:00.000Z', 'r1', ?, ?)`).bind(provider, ORG, NOW, ACTOR).run()
+    }
+    await db.prepare("UPDATE product_booking_configs SET confirmation_mode = 'review', held_online = 1, scheduling_mode = 'provider', assigned_member_id = 'provider-x' WHERE product_id = ?").bind(PRODUCT).run()
+    for (const [productId, variantId, provider] of [['prod-consult', 'var-consult', 'provider-x'], ['prod-independent', 'var-independent', 'provider-y']]) {
       await db.prepare(`INSERT INTO products (kind, id, organization_id, name, slug, created_by, updated_by) VALUES ('experience', ?, ?, ?, ?, ?, ?)`).bind(productId, ORG, productId, productId, ACTOR, ACTOR).run()
       await db.prepare('INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES (?, ?, ?, ?, ?, ?)').bind(variantId, ORG, productId, variantId, ACTOR, ACTOR).run()
-      await db.prepare("INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, confirmation_mode, online_timezone, calendar_group, created_by, updated_by) VALUES (?, ?, 45, 1, 'review', 'America/New_York', ?, ?, ?)").bind(productId, ORG, group, ACTOR, ACTOR).run()
+      await db.prepare("INSERT INTO product_booking_configs (product_id, organization_id, duration_minutes, default_capacity, confirmation_mode, held_online, scheduling_mode, assigned_member_id, created_by, updated_by) VALUES (?, ?, 45, 1, 'review', 1, 'provider', ?, ?, ?)").bind(productId, ORG, provider, ACTOR, ACTOR).run()
     }
-    for (const [id, productId, start, end] of [
-      ['session-one', PRODUCT, '2098-11-02T15:00:00.000Z', '2098-11-02T16:15:00.000Z'],
-      ['session-two', 'prod-consult', '2098-11-02T15:30:00.000Z', '2098-11-02T16:15:00.000Z'],
-      ['session-adjacent', 'prod-consult', '2098-11-02T16:15:00.000Z', '2098-11-02T17:00:00.000Z'],
-      ['session-independent', 'prod-independent', '2098-11-02T15:30:00.000Z', '2098-11-02T16:15:00.000Z'],
-    ]) await db.prepare("INSERT INTO product_sessions (id, organization_id, product_id, timezone, starts_at, ends_at, capacity, status, created_by, updated_by) VALUES (?, ?, ?, 'America/New_York', ?, ?, 1, 'scheduled', ?, ?)").bind(id, ORG, productId, start, end, ACTOR, ACTOR).run()
+    for (const [id, productId, provider, start, end] of [
+      ['session-one', PRODUCT, 'provider-x', '2098-11-02T15:00:00.000Z', '2098-11-02T16:15:00.000Z'],
+      ['session-two', 'prod-consult', 'provider-x', '2098-11-02T15:30:00.000Z', '2098-11-02T16:15:00.000Z'],
+      ['session-adjacent', 'prod-consult', 'provider-x', '2098-11-02T16:15:00.000Z', '2098-11-02T17:00:00.000Z'],
+      ['session-independent', 'prod-independent', 'provider-y', '2098-11-02T15:30:00.000Z', '2098-11-02T16:15:00.000Z'],
+    ]) await db.prepare("INSERT INTO product_sessions (id, organization_id, product_id, assigned_member_id, timezone, starts_at, ends_at, capacity, status, created_by, updated_by) VALUES (?, ?, ?, ?, 'America/New_York', ?, ?, 1, 'scheduled', ?, ?)").bind(id, ORG, productId, provider, start, end, ACTOR, ACTOR).run()
     for (const id of ['thread-one', 'thread-two']) {
       const queries = requestInsertQueries({ id, kind: 'booking', organization_id: ORG, location_id: null, user_id: null, review_id: null, conversation_state: 'needs_attention', resolved_at: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@example.com' }), created_at: NOW, updated_at: NOW })
       await db.batch(queries.map(query => db.prepare(query.query).bind(...query.params!)))
@@ -491,15 +503,6 @@ test('one configured online calendar excludes overlapping pending requests and r
     assert.equal(listed.find(session => session.id === inputs[1 - index]!.sessionId)?.is_full, true)
     assert.equal(listed.find(session => session.id === 'session-adjacent')?.remaining, 1)
     assert.equal(listed.find(session => session.id === 'session-independent')?.remaining, 1)
-    const losingSession = inputs[1 - index]!.sessionId
-    await db.prepare('UPDATE product_sessions SET location_id=? WHERE id=?').bind(LOCATION, losingSession).run()
-    const inPersonCandidate = await listSessions(db, { organizationId: ORG, fromInstant: '2098-11-02T00:00:00.000Z', toInstant: '2098-11-03T00:00:00.000Z' })
-    assert.equal(inPersonCandidate.find(session => session.id === losingSession)?.remaining, 1, 'online calendar groups do not block an in-person candidate')
-    await db.prepare('UPDATE product_sessions SET location_id=NULL WHERE id=?').bind(losingSession).run()
-    await db.prepare('UPDATE product_sessions SET location_id=? WHERE id=?').bind(LOCATION, winner.sessionId).run()
-    const inPersonBooking = await listSessions(db, { organizationId: ORG, fromInstant: '2098-11-02T00:00:00.000Z', toInstant: '2098-11-03T00:00:00.000Z' })
-    assert.equal(inPersonBooking.find(session => session.id === losingSession)?.remaining, 1, 'in-person bookings do not block an online calendar group')
-    await db.prepare('UPDATE product_sessions SET location_id=NULL WHERE id=?').bind(winner.sessionId).run()
     const env = { NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only' }
     const confirm = { threadId: winner.requestId, organizationId: ORG, action: 'confirm', actorUserId: ACTOR, idempotencyKey: 'confirm-once', env }
     assert.equal((await executeGuestThreadOperation(db, confirm)).ok, true)
@@ -550,12 +553,14 @@ test('provider allocation shares a class Session, excludes distinct overlapping 
   await db.prepare(`INSERT INTO member(id,organizationId,userId,role) VALUES ('provider-one',?,'provider-user','member')`).bind(ORG).run()
   const windows=workingWindows('UTC',Array.from({length:7},(_,weekday)=>({weekday,start:'08:00',end:'18:00'})))
   await db.prepare(`INSERT INTO member_scheduling(member_id,organization_id,timezone,weekly_json,time_off_json,windows_json,windows_until,public_name,public_bio,public_approved,calendar_revision,updated_at,updated_by) VALUES ('provider-one',?,'UTC','[]','[]',?,?, 'Approved public name','Approved public bio',1,'revision',?,?)`).bind(ORG,JSON.stringify(windows.intervals),windows.until,NOW,ACTOR).run()
-  await db.prepare("UPDATE product_booking_configs SET scheduling_mode='provider',assigned_member_id='provider-one',calendar_group='legacy-output',online_timezone='UTC' WHERE product_id=?").bind(PRODUCT).run()
+  await db.prepare("UPDATE product_booking_configs SET scheduling_mode='provider',assigned_member_id='provider-one' WHERE product_id=?").bind(PRODUCT).run()
   const second='second-service'
   await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by)VALUES('service',?,?,'Other service','other-service',?,?)").bind(second,ORG,ACTOR,ACTOR).run()
-  await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,scheduling_mode,assigned_member_id,duration_minutes,default_capacity,online_timezone,calendar_group,created_by,updated_by)VALUES(?,?,'provider','provider-one',60,3,'UTC','legacy-output',?,?)").bind(second,ORG,ACTOR,ACTOR).run()
+  await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,scheduling_mode,assigned_member_id,duration_minutes,default_capacity,created_by,updated_by)VALUES(?,?,'provider','provider-one',60,3,?,?)").bind(second,ORG,ACTOR,ACTOR).run()
+  await db.prepare("INSERT INTO product_locations(organization_id,product_id,location_id,active,published,created_by,updated_by)VALUES(?,?,?,1,1,?,?)").bind(ORG,second,LOCATION,ACTOR,ACTOR).run()
   await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by)VALUES('second-variant',?,?,'Standard',?,?)").bind(ORG,second,ACTOR,ACTOR).run()
-  for(const [id,product]of [['group-session',PRODUCT],['other-session',second]])await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES(?,?,?,'UTC',?,?,3,?,?)").bind(id,ORG,product,start,end,ACTOR,ACTOR).run()
+  // One provider in one place: their two services at the studio cannot overlap.
+  for(const [id,product]of [['group-session',PRODUCT],['other-session',second]])await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,location_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES(?,?,?,?,'UTC',?,?,3,?,?)").bind(id,ORG,product,LOCATION,start,end,ACTOR,ACTOR).run()
   const claims=await Promise.allSettled([
    claimSessionCapacity(db,{organizationId:ORG,productId:PRODUCT,sessionId:'group-session',productVariantId:'var-adult',partySize:1}),
    claimSessionCapacity(db,{organizationId:ORG,productId:second,sessionId:'other-session',productVariantId:'second-variant',partySize:1})
@@ -582,4 +587,49 @@ test('provider allocation shares a class Session, excludes distinct overlapping 
   await db.prepare("UPDATE member_scheduling SET public_approved=0 WHERE member_id='provider-one'").run()
   assert.equal(await publicProductProvider(db,ORG,winner!.product_id,winner!.product_session_id),null,'unapproved/private identity is not public content')
  }finally{await runtime.dispose()}
+})
+
+test('an online offering is booked in its provider\'s hours, in the provider\'s zone, and follows those hours as they change', { timeout: 120_000 }, async () => {
+  const { runtime, db } = await boot()
+  const scope = { organizationId: ORG, productId: PRODUCT, actorId: ACTOR }
+  try {
+    const { workingWindows } = await import('../../server/domain/member-scheduling.ts')
+    const zone = 'America/Los_Angeles'
+    await db.prepare("INSERT INTO user (id, name, email) VALUES ('host-user', 'Host', 'host@example.com')").run()
+    await db.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES ('host', ?, 'host-user', 'member')").bind(ORG).run()
+    const hours = (end: string) => workingWindows(zone, [1, 2, 3, 4, 5].map(weekday => ({ weekday, start: '09:00', end })))
+    const tuesday = (() => { let date = addLocalDays(localNow(zone).date, 2); while (new Date(`${date}T12:00:00Z`).getUTCDay() !== 2) date = addLocalDays(date, 1); return date })()
+    const away = { start: localDateTimeToInstant(tuesday, '09:00', zone).toISOString(), end: localDateTimeToInstant(tuesday, '10:00', zone).toISOString() }
+    const write = (end: string, timeOff: Array<{ start: string; end: string }>) => {
+      const windows = hours(end)
+      return db.prepare(`INSERT INTO member_scheduling (member_id, organization_id, timezone, weekly_json, time_off_json, windows_json, windows_until, calendar_revision, updated_at, updated_by) VALUES ('host', ?, ?, '[]', ?, ?, ?, 'r', ?, ?)
+        ON CONFLICT (member_id) DO UPDATE SET time_off_json = excluded.time_off_json, windows_json = excluded.windows_json`).bind(ORG, zone, JSON.stringify(timeOff), JSON.stringify(windows.intervals), windows.until, NOW, ACTOR).run()
+    }
+    await write('12:00', [away])
+    await db.prepare("UPDATE product_booking_configs SET duration_minutes = 60, default_capacity = 1, held_online = 1, scheduling_mode = 'provider', assigned_member_id = 'host' WHERE product_id = ?").bind(PRODUCT).run()
+    await materializeSessions(db, { ...scope, throughDate: addLocalDays(localNow(zone).date, 30) })
+    const online = async () => (await db.prepare("SELECT id, starts_at, timezone, assigned_member_id, status FROM product_sessions WHERE location_id IS NULL ORDER BY starts_at").all<{ id: string; starts_at: string; timezone: string; assigned_member_id: string; status: string }>()).results
+    const local = (instant: string) => new Intl.DateTimeFormat('en-US', { timeZone: zone, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(instant))
+    const first = await online()
+    assert(first.length > 0)
+    assert(first.every(session => session.timezone === zone && session.assigned_member_id === 'host'), 'each slot is the provider\'s, in their zone')
+    assert.deepEqual([...new Set(first.map(session => local(session.starts_at)))].sort(), ['09:00', '10:00', '11:00'], 'hourly slots across 09:00–12:00 local')
+    assert.equal(first.some(session => session.starts_at === away.start), false, 'time off holds no slot')
+
+    // A guest takes one 11:00 slot; then the provider shortens their day to 10:00.
+    const claimed = first.find(session => local(session.starts_at) === '11:00')!
+    await claimSessionCapacity(db, { ...scope, sessionId: claimed.id, productVariantId: 'var-adult', partySize: 1 })
+    await write('10:00', [away])
+    await materializeSessions(db, { ...scope, throughDate: addLocalDays(localNow(zone).date, 30) })
+    const shorter = await online()
+    assert.equal(shorter.filter(session => session.status === 'scheduled' && local(session.starts_at) === '10:00').length, 0, 'unclaimed slots the hours no longer cover are retired')
+    assert.equal(shorter.find(session => session.id === claimed.id)?.status, 'scheduled', 'a claimed slot is a commitment and stays')
+
+    // The longer day comes back: the retired slots reopen in place rather than gaining twins.
+    await write('12:00', [away])
+    await materializeSessions(db, { ...scope, throughDate: addLocalDays(localNow(zone).date, 30) })
+    const restored = await online()
+    assert.equal(restored.length, shorter.length, 'no duplicate sessions')
+    assert.equal(restored.filter(session => session.status === 'scheduled').length, first.length)
+  } finally { await runtime.dispose() }
 })

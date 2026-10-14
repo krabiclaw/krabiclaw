@@ -214,12 +214,14 @@ export async function listAgenda(
     pictureOwner?: { type: string; id: string }
     resourceTitle?: string
     assignedMember?: string
+    /** The zone the row's instant was offered in; a post has none and reads the business's. */
+    timezone?: string
   } = {}) => `
     SELECT ${enrichment.assignedMember??'NULL'} assigned_member_id, ${enrichment.assignedMember?`(SELECT u.name FROM member m JOIN user u ON u.id=m.userId WHERE m.id=${enrichment.assignedMember} AND m.organizationId=${alias}.organization_id)`:'NULL'} assigned_member_name, ${alias}.id, ${kind === 'booking' ? 'agenda_booking.id' : kind === 'reservation' ? 'agenda_reservation.id' : 'NULL'} AS operational_id, '${kind}' AS kind, ${fields}, ${alias}.organization_id,
            s.name AS organization_name,
            ${alias}.location_id,
            l.title AS location_title,
-           CASE WHEN ${alias}.location_id IS NULL THEN json_extract(s.settings_json, '$.config.default_timezone') ELSE l.timezone END AS timezone,
+           ${enrichment.timezone ?? 's.timezone'} AS timezone,
            ${kind === 'post' ? 'NULL' : `(SELECT u.image FROM user u WHERE u.id = ${alias}.user_id)`} AS guest_image_url,
            ${(enrichment.pictureOwner ?? locationPictureOwner(alias)).type} AS picture_owner_type,
            ${(enrichment.pictureOwner ?? locationPictureOwner(alias)).id} AS picture_owner_id,
@@ -239,6 +241,7 @@ export async function listAgenda(
   if (requestedKinds.has('reservation')) sourceQueries.push(queryAll(db, `${commonSelect('r', 'reservation', `agenda_reservation.starts_at, agenda_reservation.ends_at,
     json_extract(r.payload_json, '$.guest.name') AS title, printf('%d%s guests', agenda_reservation.party_size, CASE json_extract(r.payload_json, '$.party_size_is_minimum') WHEN 1 THEN '+' ELSE '' END) AS subtitle, agenda_reservation.party_size, agenda_reservation.status`, {
     joins: 'JOIN reservations agenda_reservation ON agenda_reservation.request_id = r.id',
+    timezone: 'agenda_reservation.timezone',
   })} AND agenda_reservation.status <> 'cancelled' AND agenda_reservation.starts_at BETWEEN ? AND ?`, [...params(), broadFrom, broadTo]))
   if (requestedKinds.has('booking')) sourceQueries.push(queryAll(db, `${commonSelect('b', 'booking', `agenda_session.starts_at, agenda_session.ends_at,
     json_extract(b.payload_json, '$.guest.name') AS title, printf('%d guests', agenda_booking.party_size) AS subtitle, agenda_booking.party_size AS party_size, agenda_booking.status`, {
@@ -246,6 +249,7 @@ export async function listAgenda(
       JOIN product_sessions agenda_session ON agenda_session.id = agenda_booking.product_session_id
       LEFT JOIN products agenda_product ON agenda_product.id = agenda_booking.product_id AND agenda_product.organization_id = agenda_booking.organization_id`,
     assignedMember:'agenda_booking.assigned_member_id',
+    timezone: 'agenda_session.timezone',
     pictureOwner: { type: `'product'`, id: 'agenda_booking.product_id' },
     resourceTitle: 'COALESCE(agenda_product.name, l.title, s.name, s.subdomain, s.id)',
   })} ${staff ? `AND (${assignedBookingSql('agenda_booking')})` : ''} AND agenda_booking.status <> 'cancelled' AND agenda_session.starts_at BETWEEN ? AND ?`, [...params(), ...(staff ? [staff.userId] : []), broadFrom, broadTo]))

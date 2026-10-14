@@ -202,7 +202,7 @@ export default definePlugin((nitroApp) => {
             LEFT JOIN resource_localizations ll ON ll.resource_type='business_location' AND ll.resource_id=bl.id AND ll.organization_id=rl.organization_id AND ll.locale=rl.locale
            WHERE rl.organization_id = ? AND rl.locale = ? AND rl.resource_type = 'product'
              AND p.id IN (SELECT value FROM json_each(?))
-             AND (bl.id IS NOT NULL OR EXISTS (SELECT 1 FROM product_booking_configs bc WHERE bc.product_id=p.id AND bc.organization_id=p.organization_id AND bc.online_timezone IS NOT NULL) OR p.order_url IS NOT NULL)
+             AND (bl.id IS NOT NULL OR EXISTS (SELECT 1 FROM product_booking_configs bc WHERE bc.product_id=p.id AND bc.organization_id=p.organization_id AND bc.held_online = 1) OR p.order_url IS NOT NULL)
            ORDER BY bl.slug, p.slug
         `, [organizationId, candidate.locale, publicProductIds])
         for (const product of localizedProducts) {
@@ -254,7 +254,7 @@ export default definePlugin((nitroApp) => {
           AND bl.organization_id = p.organization_id
           AND bl.status = 'active'
          WHERE p.organization_id = ? AND p.id IN (SELECT value FROM json_each(?))
-           AND (bl.id IS NOT NULL OR EXISTS (SELECT 1 FROM product_booking_configs bc WHERE bc.product_id = p.id AND bc.organization_id = p.organization_id AND bc.online_timezone IS NOT NULL) OR p.order_url IS NOT NULL)
+           AND (bl.id IS NOT NULL OR EXISTS (SELECT 1 FROM product_booking_configs bc WHERE bc.product_id = p.id AND bc.organization_id = p.organization_id AND bc.held_online = 1) OR p.order_url IS NOT NULL)
          ORDER BY pl.location_id, p.name, p.id`,
         [organizationId, publicProductIds],
       ),

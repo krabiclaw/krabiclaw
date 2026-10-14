@@ -11,14 +11,14 @@ export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organizationId')
   const productId = getRouterParam(event, 'productId')
   if (!organizationId || !productId) return jsonResponse({ error: 'Organization ID and product ID are required' }, { status: 400 })
-  const rawLocation = getQuery(event).location_id
-  const locationId = rawLocation === 'online' ? null : rawLocation
-  if (locationId !== null && (typeof locationId !== 'string' || !locationId)) return jsonResponse({ error: 'location_id is required' }, { status: 400 })
+  // Weekly times belong to a location; an online offering is booked in its provider's hours.
+  const locationId = getQuery(event).location_id
+  if (typeof locationId !== 'string' || !locationId) return jsonResponse({ error: 'location_id is required' }, { status: 400 })
   try {
     const { db, organization } = await requireProductAccess(event, organizationId, productId)
     // A product id in the path is not authorized by the site in the path.
     await requireOrganizationProduct(db, { organizationId: organization.id, productId })
-    if (locationId !== null && !await findLocation(db, { organizationId: organization.id, locationId })) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
+    if (!await findLocation(db, { organizationId: organization.id, locationId })) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
     const rules = (await listAvailabilityRules(db, organization.id, productId)).filter(rule => rule.location_id === locationId)
     return jsonResponse({ success: true, rules })
   } catch (error) {

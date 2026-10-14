@@ -12,7 +12,7 @@ test('a verified account gathers the guest identities that used only its email, 
   try {
     const db = await runtime.getD1Database('DB')
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(sql => db.prepare(sql)))
-    await db.prepare("INSERT INTO organization(id,name,slug,subdomain,status) VALUES('pottery','Pottery','pottery','pottery','active'),('kikuzuki','Kikuzuki','kikuzuki','kikuzuki','active')").run()
+    await db.prepare("INSERT INTO organization(id,name,slug,subdomain,status, default_currency, timezone) VALUES('pottery','Pottery','pottery','pottery','active', 'USD', 'UTC'),('kikuzuki','Kikuzuki','kikuzuki','kikuzuki','active', 'USD', 'UTC')").run()
     const users: Array<[string, string, number, number]> = [
       ['jane', 'Jane@Example.com', 1, 0], ['unverified', 'sam@example.com', 0, 0],
       ['guest-pottery', 'anon-1@customers.krabiclaw.local', 0, 1], ['guest-kikuzuki', 'anon-2@customers.krabiclaw.local', 0, 1],

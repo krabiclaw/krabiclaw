@@ -26,7 +26,7 @@ test('document scopes, translations, block ownership and concurrent edits persis
     const currentSchema = await generateSQLiteDrizzleJson(schema)
     for (const statement of await generateSQLiteMigration(empty, currentSchema)) await db.prepare(statement).run()
     for (const id of ['one', 'two']) {
-      await db.prepare('INSERT INTO organization (id, name, slug, subdomain) VALUES (?, ?, ?, ?)').bind(id, id, id, id).run()
+      await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES (?, ?, ?, ?, 'USD', 'UTC')`).bind(id, id, id, id).run()
       for (const locale of ['en', 'th']) await db.prepare('INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES (?, ?, ?, ?, ?)')
         .bind(id + locale, id, locale, Number(locale === 'en'), 'published').run()
     }
@@ -146,7 +146,7 @@ test('document scopes, translations, block ownership and concurrent edits persis
     assert.deepEqual(await listBlocksForDocument(db, translated.document.id), [])
     assert.deepEqual((await db.prepare('SELECT id FROM media_placements').all()).results, [{ id: 'retained-image' }])
     assert.equal(await db.prepare('SELECT count(*) AS count FROM media_assets').first('count'), 1)
-    await db.prepare("INSERT INTO business_locations (id,organization_id,slug,title) VALUES ('delete-location','one','delete','Delete'),('keep-location','one','keep','Keep')").run()
+    await db.prepare("INSERT INTO business_locations (id,organization_id,slug,title, timezone) VALUES ('delete-location','one','delete','Delete', 'UTC'),('keep-location','one','keep','Keep', 'UTC')").run()
     await db.prepare("INSERT INTO media_assets (id,organization_id,kind,provider,source,status) VALUES ('retained-asset','one','image','cloudflare_r2','uploaded','active')").run()
     const deletion = prepareContentDocumentDeletion({ locationId: 'delete-location', organizationId: 'one' })
     for (const id of ['late-a', 'late-b', 'keep']) {
@@ -163,7 +163,7 @@ test('document scopes, translations, block ownership and concurrent edits persis
         }
       }
     }
-    await assert.rejects(executeBatch(db, [...deletion, { query: "INSERT INTO organization (id,name,slug) VALUES ('invalid',NULL,'invalid')" }]))
+    await assert.rejects(executeBatch(db, [...deletion, { query: "INSERT INTO organization (id,name,slug, default_currency, timezone) VALUES ('invalid',NULL,'invalid', 'USD', 'UTC')" }]))
     assert.equal(await db.prepare("SELECT count(*) AS count FROM media_placements WHERE asset_id='retained-asset'").first('count'), 12)
     await executeBatch(db, [...deletion, { query: "DELETE FROM business_locations WHERE id='delete-location' AND organization_id='one'" }])
     assert.equal(await db.prepare("SELECT count(*) AS count FROM content_documents WHERE id LIKE 'late-%'").first('count'), 0)
@@ -188,7 +188,7 @@ test('category names and hierarchy remain valid during concurrent D1 writes', as
     const db = await miniflare.getD1Database('DB')
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
-    await db.prepare("INSERT INTO organization (id, name, slug) VALUES ('category-org', 'Category org', 'category-org')").run()
+    await db.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('category-org', 'Category org', 'category-org', 'USD', 'UTC')").run()
     await db.prepare("INSERT INTO user (id, name, email) VALUES ('category-author', 'Category author', 'category@example.test')").run()
     const create = (name: string, parentId?: string) => createArticleCategory(db, {
       organizationId: 'category-org', collection: 'blog', name, parentId, actorId: 'category-author',

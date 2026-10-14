@@ -30,7 +30,7 @@ export interface DashboardOrganizationConfig {
   public_url: string | null
   status: string
   onboarding_status: string
-  default_currency: string | null
+  default_currency: string
 }
 
 export type DashboardOrganizationRow = ResolvedMembership & {

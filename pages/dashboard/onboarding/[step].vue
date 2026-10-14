@@ -1,20 +1,14 @@
 <template>
-  <OnboardingStepScreen v-if="step" :step="step" @advance="advance" />
+  <OnboardingStepScreen v-if="step" :step="step" @advance="emit('advance')" />
 </template>
 
 <script setup lang="ts">
 import OnboardingStepScreen from '~/lib/components/workspace/onboarding/OnboardingStepScreen.vue'
-import { onboardingStep, onboardingStepPath, useOnboardingSteps } from '~/composables/useOnboardingFlow'
+import { onboardingStep } from '~/composables/useOnboardingFlow'
 
 definePageMeta({ layout: 'dashboard' })
 
 const route = useRoute()
-const router = useRouter()
-const { nextOf } = useOnboardingSteps()
+const emit = defineEmits<{ advance: [] }>()
 const step = computed(() => onboardingStep(String(route.params.step ?? ''), 'new-site'))
-
-async function advance() {
-  const target = step.value ? nextOf(step.value.id) : null
-  if (target) await router.push(onboardingStepPath(target.id))
-}
 </script>

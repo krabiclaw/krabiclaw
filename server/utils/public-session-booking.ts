@@ -2,7 +2,7 @@ import { refreshProductBusy } from '~/server/domain/member-scheduling'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { HTTPError } from 'nitro'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
-import { bookingWindow, listSessions } from '~/server/utils/availability'
+import { bookingWindow, listSessions, PUBLIC_BOOKING_WINDOW_DAYS } from '~/server/utils/availability'
 import { getProductBySlug, listOrganizationProducts, productBookingReadiness } from '~/server/utils/product-management'
 import { isCurrencyCode } from '~/shared/currencies'
 import { publicTenantVisibilitySql } from '~/server/utils/public-base'
@@ -17,11 +17,11 @@ export async function listPublicBookingSessions(db: DbClient, organizationId: st
 
   // A session belongs to a location, and a branch that has stopped selling
   // this product does not offer its occurrences either.
-  const sellingLocations = new Map((await queryAll<{ location_id: string; timezone: string | null }>(db, `
-    SELECT pl.location_id, l.timezone FROM product_locations pl
+  const sellingLocations = new Set((await queryAll<{ location_id: string }>(db, `
+    SELECT pl.location_id FROM product_locations pl
       JOIN business_locations l ON l.id = pl.location_id AND l.organization_id = ? AND l.status = 'active'
      WHERE pl.product_id = ? AND pl.active = 1 AND pl.published = 1
-  `, [organizationId, product.id])).map(row => [row.location_id, row.timezone]))
+  `, [organizationId, product.id])).map(row => row.location_id))
 
   const onlineOnly = requestedScope === 'online'
   const requestedLocation = typeof requestedScope === 'string' && !onlineOnly ? requestedScope : null
@@ -30,11 +30,10 @@ export async function listPublicBookingSessions(db: DbClient, organizationId: st
   }
 
   await refreshProductBusy(db,env,organizationId,product.id)
-  const zones = requestedLocation ? [sellingLocations.get(requestedLocation)] : onlineOnly ? [product.booking?.online_timezone] : [...sellingLocations.values(), product.booking?.online_timezone].filter(zone => zone != null)
-  if (!zones.length || zones.some(zone => !zone)) throw new HTTPError({ statusCode: 409, statusMessage: 'Set the online or location timezone before offering sessions' })
-  const windows = zones.map(zone => bookingWindow(zone!))
-  const fromInstant = windows.map(window => window.fromInstant).sort()[0]!
-  const toInstant = windows.map(window => window.toInstant).sort().at(-1)!
+  // Each session is offered in its own zone — its location's, or its
+  // provider's online — so the read is broad and each is windowed in its own.
+  const fromInstant = new Date().toISOString()
+  const toInstant = new Date(Date.now() + (PUBLIC_BOOKING_WINDOW_DAYS + 2) * 86_400_000).toISOString()
   const sessions = await listSessions(db, {
     organizationId: product.organization_id, productId: product.id,
     fromInstant, toInstant, statuses: ['scheduled'],
@@ -44,9 +43,9 @@ export async function listPublicBookingSessions(db: DbClient, organizationId: st
     product: { id: product.id, name: product.name, slug },
     sessions: sessions
       .filter(session => { const window = bookingWindow(session.timezone); return session.starts_at >= window.fromInstant && session.starts_at < window.toInstant })
-      .filter(session => onlineOnly ? session.location_id === null : (requestedLocation
+      .filter(session => onlineOnly ? session.location_id === null && product.booking?.held_online : (requestedLocation
         ? session.location_id === requestedLocation
-        : session.location_id === null || sellingLocations.has(session.location_id)))
+        : session.location_id === null ? product.booking?.held_online : sellingLocations.has(session.location_id)))
       .map(session => ({
         id: session.id, starts_at: session.starts_at, ends_at: session.ends_at, location_id: session.location_id,
         timezone: session.timezone, remaining: session.remaining, is_full: session.is_full,
@@ -59,6 +58,6 @@ export async function listPublicOnlineProducts(db: DbClient, organizationId: str
   const organization = await queryFirst<{ default_currency: string }>(db, `SELECT default_currency FROM organization WHERE id = ? AND ${publicTenantVisibilitySql('organization', previewAuthorized)}`, [organizationId])
   if (!organization) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
   if (!isCurrencyCode(organization.default_currency)) throw new HTTPError({ statusCode: 409, statusMessage: 'Configure the organization currency before offering consultations' })
-  const products = (await listOrganizationProducts(db, { organizationId, publishedOnly: true, env })).filter(product => product.active && (product.booking?.online_timezone || product.order_url))
+  const products = (await listOrganizationProducts(db, { organizationId, publishedOnly: true, env })).filter(product => product.active && (product.booking?.held_online || product.order_url))
   return { products, locations: [], currency: organization.default_currency }
 }

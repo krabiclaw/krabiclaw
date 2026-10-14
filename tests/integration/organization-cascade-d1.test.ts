@@ -17,7 +17,7 @@ function tenantGraph(org: string): string[] {
   const guest = `${org}-guest`
   const payload = `'{"guest":{"name":"Guest","email":"guest@example.test","phone":null}}'`
   return [
-    `INSERT INTO organization (id,name,slug) VALUES ('${org}','${org}','${org}')`,
+    `INSERT INTO organization (id,name,slug, default_currency, timezone) VALUES ('${org}','${org}','${org}', 'USD', 'UTC')`,
     `INSERT INTO organization_locales (id,organization_id,locale,label,is_source,status) VALUES ('${org}-en','${org}','en','English',1,'published')`,
     `INSERT INTO user (id,name,email,isAnonymous) VALUES ('${guest}','Guest','${guest}@example.test',1)`,
     `INSERT INTO member (id,organizationId,userId,role,createdAt) VALUES ('${org}-member','${org}','${guest}','owner',0)`,

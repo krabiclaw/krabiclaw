@@ -42,9 +42,9 @@ export interface OrganizationSettings {
   palette: SitePalette | null
   palette_source: 'custom' | 'template' | null
   font_preset: OrganizationFontPreset
-  // null until the owner has chosen one. Surfaces that quote a price refuse to
-  // render rather than showing an amount in a currency nobody picked.
-  default_currency: CurrencyCode | null
+  default_currency: CurrencyCode
+  /** The business's reporting clock: the day boundaries of its analytics. */
+  timezone: string
   google_analytics_measurement_id?: string
   created_at: string
   updated_at: string
@@ -68,6 +68,7 @@ export interface UpdateOrganizationSettingsRequest {
   palette?: SitePalettePatch | null
   font_preset?: OrganizationFontPreset
   default_currency?: CurrencyCode
+  timezone?: string
   press_email?: string
   partnerships_email?: string
   catering_email?: string

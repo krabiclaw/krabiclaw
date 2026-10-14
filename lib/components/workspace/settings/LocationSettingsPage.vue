@@ -50,7 +50,7 @@ export interface BusinessLocation {
   review_count: number | null
   status: string
   last_synced_at: string | null
-  timezone?: string | null
+  timezone: string
 }
 
 /**
@@ -189,7 +189,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     detailsForm.postalCode = loc.address?.postalCode ?? ''
     detailsForm.short_description = loc.short_description ?? ''
     detailsForm.description = loc.description ?? ''
-    hoursForm.value = { timezone: loc.timezone ?? '', hours: parseOpeningHours(loc.opening_hours), specialHours: parseSpecialHours(loc.special_hours) }
+    hoursForm.value = { timezone: loc.timezone, hours: parseOpeningHours(loc.opening_hours), specialHours: parseSpecialHours(loc.special_hours) }
     detailsForm.status = loc.status
     }
 

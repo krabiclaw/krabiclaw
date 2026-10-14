@@ -1,12 +1,12 @@
 <template>
-  <DashboardLeafPanel id="product-session" :title="isNew ? 'Add a session' : 'Edit session'" :lead="timezone ? `Times are in ${timezone}.` : 'Choose a location or set the online time zone first.'" :saving="saving" :disabled="pending || !valid || (!isNew && !dirty)" :error="saveError ?? p.loadError.value ?? (error ? getErrorMessage(error, 'Session could not be loaded') : '')" :save-label="isNew ? 'Add session' : 'Save'" @cancel="reset" @save="save">
-    <div class="space-y-6">
+  <DashboardLeafPanel id="product-session" :title="isNew ? 'Add a session' : 'Edit session'" :lead="timezone ? `Times are in ${timezone}.` : 'Choose a location first; online times come from the provider\'s working hours.'" :saving="saving" :disabled="pending || !valid || (!isNew && !form?.dirty)" :error="saveError ?? p.loadError.value ?? (error ? getErrorMessage(error, 'Session could not be loaded') : '')" :save-label="isNew ? 'Add session' : 'Save'" @cancel="reset(); revision += 1" @save="form?.submit()">
+    <UForm ref="form" :key="revision" :state="{ startsAt, endsAt, capacity, sessionStatus }" class="space-y-6" @submit="save">
       <UFormField label="Starts" required><UInput v-model="startsAt" type="datetime-local" step="60" class="w-full" :disabled="hasGuests" /></UFormField>
       <UFormField label="Ends" required><UInput v-model="endsAt" type="datetime-local" step="60" class="w-full" :disabled="hasGuests" /></UFormField>
       <UFormField label="Guest limit" hint="Blank means no limit"><UInputNumber v-model="capacity" :min="data?.session.claimed ?? 0" class="w-full" /></UFormField>
       <URadioGroup v-if="!isNew" v-model="sessionStatus" :items="[{ label: 'Scheduled', value: 'scheduled' }, { label: 'Cancelled', value: 'cancelled' }]" :disabled="hasGuests" variant="card" />
       <p v-if="hasGuests" class="text-sm text-muted">This session has guests or active checkouts. Manage their bookings before changing its time or cancelling it.</p>
-    </div>
+    </UForm>
   </DashboardLeafPanel>
 </template>
 
@@ -29,7 +29,7 @@ const { data, error, pending } = await useAsyncData(
   () => `product-session:${p.organizationId}:${route.params.productId}:${sessionId.value}`,
   async () => isNew.value ? null : dashboardApi(`${endpoint.value}/${sessionId.value}`, { validate: isSessionResponse }),
 )
-const timezone = computed(() => data.value?.session.timezone ?? (p.locationId.value ? p.location.value?.timezone : p.product.value?.booking?.online_timezone))
+const timezone = computed(() => data.value?.session.timezone ?? p.location.value?.timezone)
 const startsAt = ref('')
 const endsAt = ref('')
 const capacity = ref<number | undefined>()
@@ -61,10 +61,9 @@ const valid = computed(() => {
   try { return Boolean(p.product.value?.booking) && !error.value && instant(endsAt.value, data.value?.session.ends_at) > instant(startsAt.value, data.value?.session.starts_at) && (capacity.value === undefined || (Number.isSafeInteger(capacity.value) && capacity.value >= (data.value?.session.claimed ?? 0))) }
   catch { return false }
 })
-const dirty = computed(() => {
-  const session = data.value?.session
-  return !session || startsAt.value !== localInput(session.starts_at, session.timezone) || endsAt.value !== localInput(session.ends_at, session.timezone) || (capacity.value ?? null) !== session.capacity || sessionStatus.value !== session.status
-})
+const form = useTemplateRef('form')
+// Cancel restores the draft; a new revision is a fresh form, so nothing reads as changed.
+const revision = ref(0)
 async function save() {
   const creating = isNew.value
   saving.value = true

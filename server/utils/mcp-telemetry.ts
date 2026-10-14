@@ -1,5 +1,5 @@
 import { execute, type DbClient } from "~/server/db";
-import { describeErrorForTelemetry } from "~/server/utils/error-telemetry";
+import { describeErrorForTelemetry } from "~/shared/error-telemetry";
 import { anonymizeId } from "~/server/utils/platform-telemetry";
 import { recordUsageEvent } from "~/server/utils/usage-metering";
 import { isRecord } from "~/server/utils/type-guards";

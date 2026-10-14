@@ -41,7 +41,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
         opening_hours: openingHoursInputSchema,
         special_hours: specialHoursInputSchema,
       },
-      required: ['title', 'idempotency_key'],
+      required: ['title', 'idempotency_key', 'timezone'],
       outputSchema: {
         type: 'object',
         properties: { location: locationObject, context: { type: 'object' } },
@@ -73,7 +73,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
       outputSchema: {
         type: 'object',
         properties: { location: locationObject, current_local_date: { type: 'string', format: 'date', description: 'Current date in the location timezone.' } },
-        required: ['location'],
+        required: ['location', 'current_local_date'],
       },
     }),
   organizationTool({
@@ -195,7 +195,7 @@ export async function handleLocationsTools(ctx: McpExecutorContext): Promise<unk
         const location = await requireLocation(organization, locationId);
         return {
           location,
-          ...(location.timezone ? { current_local_date: localNow(location.timezone).date } : {}),
+          current_local_date: localNow(location.timezone).date,
           context: await mutationContextPayload(organization, { locationId }),
         };
       }

@@ -43,5 +43,6 @@ export default defineHandler(async event=>{
   const rows=await queryAll<{id:string}>(db,`SELECT r.*,p.currency,p.subject_type,p.subject_id FROM ${table} r JOIN payments p ON p.id=r.payment_id WHERE p.organization_id=?${cursor?' AND (r.updated_at<? OR (r.updated_at=? AND r.id<?))':''} ORDER BY r.updated_at DESC,r.id DESC LIMIT 101`,[organization.id,...(cursor?[cursor.updated_at,cursor.updated_at,cursor.id]:[])])
   return jsonResponse({rows:rows.slice(0,100),next_cursor:rows.length>100?rows[99]!.id:null,source:'Stripe authenticated projections',refreshed_at:new Date().toISOString()})
  }
- return jsonResponse({summary:await paymentSummary(db,principal,from,to),...await listPayments(db,principal,{from,to,after})})
+ // The business's own currency, which is what a period with nothing earned yet is stated in.
+ return jsonResponse({summary:await paymentSummary(db,principal,from,to),currency:organization.default_currency,...await listPayments(db,principal,{from,to,after})})
 })

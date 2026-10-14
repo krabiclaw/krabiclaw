@@ -329,6 +329,32 @@ Rebinding to v14 after v15 writes is not a data-preserving rollback; preserve
 and reconcile those writes before any such rebind. Older runtime code also
 must not serve physical calendar groups it cannot enforce.
 
+The v15-to-v16 epoch makes the clocks and currencies a business, location and
+online offering cannot run without strictly required, and replaces shared
+calendar groups with provider-owned working hours (the Calendly model):
+
+- `organization.default_currency` is NOT NULL and validated via `organization_default_currency_check`.
+- `organization.timezone` is a new NOT NULL column (`organization_timezone_check`), moved out of `settings_json.config.default_timezone` with no `'UTC'` fallback. Both are Better Auth required organization fields validated in `server/utils/auth.ts`.
+- `business_locations.timezone` is NOT NULL (`business_locations_timezone_check`).
+- `product_booking_configs.held_online` replaces `online_timezone`. Online offerings require `scheduling_mode='provider'` and an assigned member or team (`product_booking_configs_held_online_check`).
+- `calendar_group` is retired everywhere (`product_booking_configs`, `payment_checkout_holds`). Online offering bookable slots are derived dynamically from provider working hours (`member_scheduling.windows_json`) in each provider's timezone.
+- `product_availability_rules.location_id` is NOT NULL; online weekly rule templates are deleted.
+- `product_sessions` enforces `product_sessions_online_provider_check` (`location_id IS NOT NULL OR assigned_member_id IS NOT NULL`). Existing online sessions take their provider's identity and `hours:<member>:<starts_at>` occurrence keys.
+
+The complete applied v15 SQL and Drizzle metadata remain unchanged in
+`migrations-history/v15/`.
+
+Prepared in WNAM on 2026-10-13: production v16
+`754caf79-1e59-4e5e-93d7-18449df90e3b` and staging v16
+`76622a9c-bb92-4c1d-ab2c-206ff2594600`.
+
+```sh
+node --experimental-strip-types scripts/pull-production-snapshot.ts --staging --source krabiclaw-staging-v15 --out staging-v16-initial.sqlite
+node --experimental-strip-types scripts/pull-production-snapshot.ts --production --source krabiclaw-production-v15 --out production-v16-initial.sqlite
+node --experimental-strip-types scripts/pull-production-snapshot.ts --staging --source krabiclaw-staging-v15 --out staging-v16-final.sqlite --delta-from staging-v16-initial.sqlite
+node --experimental-strip-types scripts/pull-production-snapshot.ts --production --source krabiclaw-production-v15 --out production-v16-final.sqlite --delta-from production-v16-initial.sqlite
+```
+
 Before dropping or retiring a legacy table or writer:
 
 - remove every runtime reader and writer;

@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { localDateBounds, parseAnalyticsRange } from '~/server/utils/analytics-calendar'
-import { addLocalDays, localDateAt, isValidTimezone } from '~/utils/timezone'
+import { addLocalDays, localDateAt } from '~/utils/timezone'
 import { CONVERSION_EVENT_CATALOG, ORGANIZATION_CONVERSION_EVENT_NAMES } from '~/utils/organization-conversion-events'
 
 import { analyticsReportSchema, type AnalyticsReport } from '~/shared/analytics-report'
@@ -37,13 +37,12 @@ const OUTCOME_EVENT_SQL_LIST = eventList(definition => definition.outcome)
 const SERVER_DELIVERED_EVENT_SQL_LIST = eventList(definition => definition.ga4 !== null && definition.ga4Sender !== 'browser')
 
 export async function resolveOrganizationAnalyticsContext(db: DbClient, organizationId: string): Promise<OrganizationContext> {
-  const row = await queryFirst<{ organization_id: string; analytics_data_start_at: string | null; timezone: string | null }>(db, `
-    SELECT s.id AS organization_id, s.analytics_data_start_at, json_extract(s.settings_json, '$.config.default_timezone') AS timezone
+  const row = await queryFirst<{ organization_id: string; analytics_data_start_at: string | null; timezone: string }>(db, `
+    SELECT s.id AS organization_id, s.analytics_data_start_at, s.timezone
     FROM organization s
     WHERE s.id = ? LIMIT 1
   `, [organizationId])
   if (!row) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
-  if (!isValidTimezone(row.timezone)) throw new HTTPError({ statusCode: 422, statusMessage: 'Organization default_timezone is missing or invalid' })
   return {
     organizationId: row.organization_id,
     timezone: row.timezone,
@@ -395,10 +394,9 @@ export async function getAnalyticsReport(db: DbClient, input: {
 }
 
 export async function aggregatePreviousLocalDateForAllOrganizations(db: DbClient, now = new Date()): Promise<string[]> {
-  const organizations = await queryAll<{ id: string; timezone: string | null }>(db, `SELECT s.id, json_extract(s.settings_json, '$.config.default_timezone') AS timezone FROM organization s WHERE s.status = 'active'`)
+  const organizations = await queryAll<{ id: string; timezone: string }>(db, `SELECT s.id, s.timezone FROM organization s WHERE s.status = 'active'`)
   const aggregated: string[] = []
   for (const organization of organizations) {
-    if (!isValidTimezone(organization.timezone)) throw new Error(`Organization ${organization.id} default_timezone is missing or invalid`)
     const timezone = organization.timezone
     const date = addLocalDays(localDateAt(now, timezone), -1)
     await aggregateOrganizationAnalyticsDate(db, organization.id, date)

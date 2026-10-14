@@ -1,4 +1,4 @@
-import { assertCalendarDate, localNow, MINUTE_TIME_PATTERN, isValidTimezone } from '~/utils/timezone'
+import { assertCalendarDate, localNow, MINUTE_TIME_PATTERN } from '~/utils/timezone'
 import { HTTPError } from 'nitro'
 import { execute, queryFirst, type DbClient } from '~/server/db'
 import { isOrganizationFontPreset, resolveOrganizationFontPreset, type OrganizationFontPreset } from '~/shared/organization-fonts'
@@ -17,7 +17,6 @@ export interface OrganizationConfig {
    * it is absent from WritableOrganizationConfigKey below.
    */
   google_analytics_measurement_id?: string
-  default_timezone?: string
 }
 
 /**
@@ -39,13 +38,12 @@ export const getConfig = async (
            json_extract(settings_json, '$.config.partnerships_email') AS partnerships_email,
            json_extract(settings_json, '$.config.catering_email') AS catering_email,
            json_extract(settings_json, '$.config.careers_email') AS careers_email,
-           (SELECT i.measurement_id FROM organization_integrations i WHERE i.organization_id = organization.id AND i.provider = 'google_analytics') AS google_analytics_measurement_id,
-           json_extract(settings_json, '$.config.default_timezone') AS default_timezone
+           (SELECT i.measurement_id FROM organization_integrations i WHERE i.organization_id = organization.id AND i.provider = 'google_analytics') AS google_analytics_measurement_id
       FROM organization WHERE id = ?
   `, [organizationId])
   if (!row) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
   const config: OrganizationConfig = {}
-  for (const key of ["press_email","partnerships_email","catering_email","careers_email","google_analytics_measurement_id","default_timezone"] as const) {
+  for (const key of ["press_email","partnerships_email","catering_email","careers_email","google_analytics_measurement_id"] as const) {
     const value = row[key]
     if (value == null) continue
     if (typeof value !== 'string') throw new Error('Invalid stored site setting: ' + key)
@@ -63,10 +61,10 @@ export const resolveLocationTimezone = async (
   organizationId: string,
   locationId: string | null,
 ): Promise<string> => {
-  const location = await queryFirst<{ timezone: string | null }>(db,
+  const location = await queryFirst<{ timezone: string }>(db,
     'SELECT timezone FROM business_locations WHERE id = ? AND organization_id = ?',
     [locationId, organizationId])
-  if (!location?.timezone) throw new HTTPError({ statusCode: 409, statusMessage: 'Set the location timezone before offering bookings' })
+  if (!location) throw new HTTPError({ statusCode: 404, statusMessage: 'Location not found' })
   return location.timezone
 }
 
@@ -92,7 +90,6 @@ export const setConfig = async (
   value: string
 ) => {
   if (key === 'font_preset' && !isOrganizationFontPreset(value)) throw new HTTPError({ statusCode: 422, statusMessage: 'Unsupported organization font preset' })
-  if (key === 'default_timezone' && !isValidTimezone(value)) throw new HTTPError({ statusCode: 422, statusMessage: 'A valid analytics timezone is required' })
   const result = await execute(
     db,
     `UPDATE organization SET settings_json = json_set(settings_json, ?, ?),
@@ -108,7 +105,6 @@ export const deleteConfig = async (
   organizationId: string,
   key: WritableOrganizationConfigKey
 ) => {
-  if (key === 'default_timezone') throw new HTTPError({ statusCode: 422, statusMessage: 'The analytics timezone cannot be removed' })
   const result = await execute(
     db,
     `UPDATE organization SET settings_json = json_remove(settings_json, ?),

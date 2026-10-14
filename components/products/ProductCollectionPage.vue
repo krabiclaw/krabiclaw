@@ -337,7 +337,7 @@ const isAvailable = (product: Product, collectionLocationId: string | null = nul
   const offeredHere = id
     ? product.locations.some(entry => entry.location_id === id && entry.active)
     : product.locations.some(entry => entry.active && entry.published && locationMap.value.has(entry.location_id))
-  if (!offeredHere && !product.booking?.online_timezone && !product.order_url) return false
+  if (!offeredHere && !product.booking?.held_online && !product.order_url) return false
   // On sale means the merchant is selling it here. A product priced in words —
   // "Market price" — is on sale; an amount is what online checkout needs, and
   // that is a different question.
@@ -361,7 +361,7 @@ const priceScopes = (product: Product, collectionLocationId: string | null = nul
   const locationId = productLocationId(product, collectionLocationId)
   return locationId ? [locationId] : [
     ...product.locations.filter(location => location.published && locationMap.value.has(location.location_id)).map(location => location.location_id),
-    ...(product.booking?.online_timezone || product.order_url ? [null] : []),
+    ...(product.booking?.held_online || product.order_url ? [null] : []),
   ]
 }
 const pricesFor = (product: Product, collectionLocationId: string | null = null) => {
