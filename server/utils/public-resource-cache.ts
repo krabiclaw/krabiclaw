@@ -262,7 +262,7 @@ export async function purgePublicResourceCache(kv: KVNamespace, organizationId: 
 }
 
 /**
- * Convenience wrapper for call sites outside /api/editor/organizations/** and mcp.post.ts.
+ * Convenience wrapper for call sites outside /api/editor/organizations/** and mcp.ts.
  * Records a durable invalidation before purging. The caller waits for the purge
  * so a successful write cannot be read back through a stale public cache.
  */

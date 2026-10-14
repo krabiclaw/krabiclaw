@@ -317,7 +317,7 @@ test.describe('stateless MCP server', () => {
     // spec's own initialize -> version-mismatch -> retry negotiation.
     // @modelcontextprotocol/server only wires it up for servers that speak
     // the modern (2026-07-28+) protocol era; this server intentionally only
-    // serves the legacy eras (see server/api/mcp.post.ts), so it falls
+    // serves the legacy eras (see server/api/mcp.ts), so it falls
     // through to the same -32601 fallback as any other unregistered method
     // rather than answering a bespoke, partial handshake.
     const discover = await mcpRequest(request, baseURL!, { method: 'server/discover', id: 'discover-1' })

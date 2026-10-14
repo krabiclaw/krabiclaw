@@ -167,7 +167,7 @@ Durable logging of ChatGPT MCP protocol requests for understanding tool discover
 
 ### What is captured
 
-MCP requests against `server/api/mcp.post.ts` write rows to `mcp_tool_call_events` (`server/db/schema.ts`) via `logMcpToolCallEvent()` in `server/utils/mcp-telemetry.ts`. Writes are fire-and-forget — wrapped in Cloudflare's `waitUntil` when available, or a detached promise otherwise — so telemetry can never add latency to, or fail, an MCP response.
+MCP requests against `server/api/mcp.ts` write rows to `mcp_tool_call_events` (`server/db/schema.ts`) via `logMcpToolCallEvent()` in `server/utils/mcp-telemetry.ts`. Writes are fire-and-forget — wrapped in Cloudflare's `waitUntil` when available, or a detached promise otherwise — so telemetry can never add latency to, or fail, an MCP response.
 
 Captured per row: surface, authorized organization/location/user id, request id, method, tool name + domain, HTTP status, JSON-RPC error code/message, protocol version, hashed session id, hashed OAuth client id, Cloudflare ray id, catalog fingerprint, operational summaries of arguments and result, unknown-tool fields, status (`success` / `error` / `auth_required` / `blocked`), and duration in ms.
 
@@ -243,7 +243,7 @@ ORDER BY occurrences DESC;
 
 ### Adding a new mutating/read tool
 
-Nothing to wire up manually — every tool routed through `executeMcpToolCall()` in `mcp.post.ts`'s `tools/call` handler is logged automatically, using its existing `domain` and `annotations.readOnlyHint` from `server/utils/mcp-tools.ts`. For tool catalog changes and OpenAI app refresh steps, see [docs/mcp.md](mcp.md).
+Nothing to wire up manually — every tool routed through `executeMcpToolCall()` in `mcp.ts`'s `tools/call` handler is logged automatically, using its existing `domain` and `annotations.readOnlyHint` from `server/utils/mcp-tools.ts`. For tool catalog changes and OpenAI app refresh steps, see [docs/mcp.md](mcp.md).
 
 ## MCP tool catalog queries
 
