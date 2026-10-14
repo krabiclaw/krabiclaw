@@ -416,10 +416,14 @@ test('a location is created by walking its own record', async ({ page, baseURL }
 
   const created = await page.request.get(`/api/dashboard/locations?org=${org}`)
   expect(created.status(), await created.text()).toBe(200)
-  const location = ((await created.json()) as { locations: Array<{ id: string; slug: string; title: string; timezone: string }> }).locations
+  const listed = ((await created.json()) as { locations: Array<{ id: string; slug: string }> }).locations
     .find(candidate => candidate.slug === 'raleigh-annex')
-  expect(location).toMatchObject({ title: 'Raleigh Annex', timezone: 'America/New_York' })
-  const deleted = await page.request.delete(`/api/organizations/org-ncls-blawby/locations/${location!.id}`)
+  expect(listed).toBeDefined()
+  const read = await page.request.get(`/api/dashboard/locations/${listed!.id}`)
+  expect(read.status(), await read.text()).toBe(200)
+  expect(((await read.json()) as { location: { title: string; timezone: string } }).location)
+    .toMatchObject({ title: 'Raleigh Annex', timezone: 'America/New_York' })
+  const deleted = await page.request.delete(`/api/organizations/org-ncls-blawby/locations/${listed!.id}`)
   expect(deleted.status(), await deleted.text()).toBe(200)
 })
 
