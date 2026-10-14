@@ -1,6 +1,6 @@
 # Shared authentication contract: Krabiclaw identity for the Bookyboo native app
 
-Status: **accepted decisions D1–D10 recorded by the owner on 2026-10-14; implementation may cite this revision.** Bundle id and hostnames are placeholders until the separate rebrand PR merges; rebase then. Deliverable for krabiclaw#1370 under krabiclaw#1357 and bookyboo#11. Nothing in this document is implemented.
+Status: **accepted decisions D1–D10 recorded by the owner on 2026-10-14; implementation may cite this revision.** The native app's rebrand to Krabiclaw merged on 2026-10-14 (bookyboo `bc345fe`): bundle id `com.krabiclaw.app`, lodging URL setting `KRABICLAW_API_URL`. In this document "Bookyboo" names the lodging repository/Worker, not the product. Deliverable for krabiclaw#1370 under krabiclaw#1357 and bookyboo#11. Nothing in this document is implemented.
 
 Revisions inspected: Krabiclaw `staging` @ `1e1c24d`; Bookyboo `main` @ `fc3841d`. Installed Better Auth: Krabiclaw `1.7.5` (type-only patch in `patches/better-auth-npm-1.7.5.patch`), Bookyboo `1.7.2`. Provider docs read on 2026-10-14: Better Auth [Apple](https://better-auth.com/docs/authentication/apple), [Bearer](https://better-auth.com/docs/plugins/bearer), [Session management](https://better-auth.com/docs/concepts/session-management), [Organization](https://better-auth.com/docs/plugins/organization), [Admin](https://better-auth.com/docs/plugins/admin), [API Key](https://better-auth.com/docs/plugins/api-key).
 
@@ -77,7 +77,7 @@ Principal column: **U** = the end user's Krabiclaw bearer session; **S** = Booky
 
 ## 4. Krabiclaw changes (krabiclaw#1371) [proposed]
 
-1. `socialProviders.apple`: `{ clientId: <web Service ID or bundle id>, clientSecret: <generated ES256>, appBundleIdentifier: 'com.bookyboo.app' }`; `audience`/`clientId` as an array if a web Apple login is added later. Add `https://appleid.apple.com` to `trustedOrigins` only if the web form-post flow is enabled. Env: `APPLE_CLIENT_ID`, `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY`, `APPLE_APP_BUNDLE_ID` in `CloudflareEnv` and `.env.example`. These are also required for token revocation on delete.
+1. `socialProviders.apple`: `{ clientId: <web Service ID or bundle id>, clientSecret: <generated ES256>, appBundleIdentifier: 'com.krabiclaw.app' }`; `audience`/`clientId` as an array if a web Apple login is added later. Add `https://appleid.apple.com` to `trustedOrigins` only if the web form-post flow is enabled. Env: `APPLE_CLIENT_ID`, `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY`, `APPLE_APP_BUNDLE_ID` in `CloudflareEnv` and `.env.example`. These are also required for token revocation on delete.
 2. Extend `loginMethodForPath` for `/sign-in/social` with provider `apple`.
 3. Decide `trustedProviders` membership for `apple` (D3). Apple emits email only on first authorization; Krabiclaw must persist it at `user.create` and must not depend on later tokens.
 4. New endpoints, server-side only, reusing `getAuthSession` and `resolveOrganizationMembership`:
@@ -133,7 +133,7 @@ Fresh Apple sign-in; repeat sign-in (no email claim); private-relay user; existi
 
 ## 10. Decisions required [decision]
 
-- **D1 Organization scope.** **Agreed 2026-10-14:** explicit `x-organization-id` header on every lodging request; `session.activeOrganizationId` is never trusted by the lodging service. (Header and env names are brand-neutral because the native app is being rebranded to Krabiclaw in a separate PR; the socket's existing `x-bookyboo-workspace` header is renamed with it.)
+- **D1 Organization scope.** **Agreed 2026-10-14:** explicit `x-organization-id` header on every lodging request; `session.activeOrganizationId` is never trusted by the lodging service. (Header and env names are brand-neutral because the native app is being rebranded to Krabiclaw in a separate PR; the socket's existing `x-bookyboo-workspace` header is replaced by it.)
 - **D2 Service credential.** **Agreed 2026-10-14:** shared-secret internal routes (existing pattern); no API Key plugin.
 - **D3 Existing-account entry and linking.** **Agreed:** native email+password form (`POST /api/auth/sign-in/email`) for existing Krabiclaw users, then explicit Apple linking from the signed-in session. `apple` is **not** added to `trustedProviders`; no email-based auto-linking. Google entry in the native app is deferred.
 - **D4 Invitations.** **Agreed 2026-10-14:** Krabiclaw-owned invite links, and Krabiclaw's permission model applies unchanged (an admin may invite or promote an admin; Bookyboo's owner-only rule is dropped). Alternatives considered: vs. Better Auth email invitations (breaks for private relay) vs. keeping Bookyboo `workspace_invites` with a service-side `addMember` call (keeps a second membership writer). Also: keep Bookyboo's owner-only admin invites, or adopt Krabiclaw's admin-may-invite-admin.
