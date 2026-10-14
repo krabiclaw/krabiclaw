@@ -10,7 +10,7 @@ import { sessionClaimQuery, sessionAssignmentQuery } from '~/server/utils/availa
 import { processStripeWebhookEvent } from '~/server/utils/stripe-webhook-events'
 import { executeRefund, reconcileRefundState, requirePayment, assertMinorAmount, type Payment } from './index'
 import { notifyPaymentFinancialEvent, reconcilePayoutEvent } from './notifications'
-import { recordCheckoutExpired, recordPaymentPaid } from '~/server/domain/booking-analytics'
+import { recordPaymentPaid } from '~/server/domain/booking-analytics'
 import { raiseSettledFailures } from '~/server/utils/notifications'
 import { paymentsBillingBasis } from './fx'
 import { deliverPaymentsUsage } from './usage'
@@ -37,12 +37,7 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,int
   const snapshot=JSON.parse(payment.price_snapshot_json) as {billing_fx?:unknown}
   const now = new Date().toISOString()
   if (intent.status !== 'succeeded') {
-    if (intent.status === 'canceled') {
-      // Stripe cancelled the intent: abandoned by the sweep once the buyer's time ran out, or declined for good.
-      const abandoned = intent.cancellation_reason === 'abandoned'
-      if (abandoned) await recordCheckoutExpired(db,payment)
-      await executeBatch(db,[{query:"UPDATE payments SET state='failed',updated_at=? WHERE id=? AND captured_amount=0",params:[now,payment.id]},{query:"UPDATE payment_checkout_holds SET status='released' WHERE payment_id=? AND status='active'",params:[payment.id]},{query:"UPDATE payment_attempts SET status=?,updated_at=? WHERE id=? AND status='open'",params:[abandoned?'expired':'failed',now,attempt.id]}])
-    }
+    if (intent.status === 'canceled') await executeBatch(db,[{query:"UPDATE payments SET state='failed',updated_at=? WHERE id=? AND captured_amount=0",params:[now,payment.id]},{query:"UPDATE payment_checkout_holds SET status='released' WHERE payment_id=? AND status='active'",params:[payment.id]}])
     if (intent.status === 'requires_payment_method' && intent.last_payment_error) await notifyPaymentFinancialEvent(db,stripe,env,payment,{kind:'payment_failed',nativeId:intent.id,status:intent.status,amount:intent.amount})
     return
   }
