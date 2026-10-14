@@ -184,10 +184,14 @@ test.describe('lodging identity boundary', () => {
     // The public site, read through the tenant host rather than the API that wrote it.
     const home = await api.get('/', { headers: { 'x-preview-tenant': slug } })
     expect(home.status).toBe(200)
-    const html = await home.text()
-    expect(html).toContain(name)
-    expect(html).toContain('vacation rental sites that run themselves')
-    expect(html).not.toContain('Check availability')
+    expect(await home.text()).toContain(name)
+    // The seeded location is described as a lodging business, and with stays
+    // booked in the lodging service it offers no availability call to action.
+    const location = await api.get('/locations/main', { headers: { 'x-preview-tenant': slug } })
+    expect(location.status).toBe(200)
+    const locationHtml = await location.text()
+    expect(locationHtml).toContain('"LodgingBusiness"')
+    expect(locationHtml).not.toContain('Check availability')
 
     // Its homes live in the lodging service, so deleting it must reach that
     // service first. With none configured here the deletion fails and the
