@@ -153,8 +153,6 @@ export interface PublicConsultationSettings {
   schedule_path: string
   confirmation_path: string
   tracking_enabled: boolean
-  contact_form_enabled: boolean
-  metadata: ApiRecord
 }
 
 export interface PublicComplianceContactPoint {
@@ -191,7 +189,6 @@ export interface PublicCompliance {
   same_as: string[]
   contact_points: PublicComplianceContactPoint[]
   address_visibility: 'visible' | 'hidden'
-  metadata: ApiRecord
 }
 
 export interface PublicBlawbyIdentity {

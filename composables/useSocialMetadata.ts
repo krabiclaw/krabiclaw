@@ -35,9 +35,7 @@ export interface PageProfessionalServiceInput {
   offering?: {
     name: string
     description?: string | null
-    schemaType?: string | null
   }
-  consultationUrl?: string | null
 }
 
 export type PageSocialMetadataInput = Omit<SocialPageMetadataInput, 'template' | 'canonicalUrl' | 'brand'> & {
@@ -269,7 +267,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
         const offering = value.professionalService.offering
         const serviceId = `${url}#service`
         graph.push({
-          '@type': offering.schemaType,
+          '@type': 'Service',
           '@id': serviceId,
           name: offering.name,
           description: offering.description,
@@ -305,10 +303,11 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
         }))
         if (actions.length) webpageNode.potentialAction = actions
       }
-      if (recipe === 'schedule' && value.professionalService?.consultationUrl) {
+      if (recipe === 'schedule' && blawbyDocument.value.shell.canSchedule) {
+        const consultation = blawbyDocument.value.shell.consultation
         webpageNode.potentialAction = {
           '@type': 'ScheduleAction',
-          target: resolveSeoUrl(value.professionalService.consultationUrl, origin),
+          target: consultation.mode === 'external_url' ? consultation.external_url : url,
         }
       }
     }

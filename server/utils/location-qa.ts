@@ -141,7 +141,15 @@ export function listFaqBlockQa(db: DbClient, organizationId: string, pagePath: s
 }
 
 export function faqItems(rows: QaDocument[]) {
-  return rows.map(row => ({ id: String(row.id), title: String(row.question), description: typeof row.answer === 'string' ? row.answer : undefined }))
+  return rows.map(row => {
+    if (typeof row.question !== 'string' || !row.question.trim()) {
+      throw new HTTPError({ statusCode: 500, statusMessage: `Stored Q&A ${row.id} question is missing`, data: { code: 'INVALID_STORED_CONTENT' } })
+    }
+    if (row.answer !== null && typeof row.answer !== 'string') {
+      throw new HTTPError({ statusCode: 500, statusMessage: `Stored Q&A ${row.id} answer is invalid`, data: { code: 'INVALID_STORED_CONTENT' } })
+    }
+    return { id: row.id, title: row.question, description: row.answer ?? undefined }
+  })
 }
 
 /**

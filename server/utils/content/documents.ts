@@ -157,11 +157,13 @@ function mediaFreeBlockData(type: ContentBlockType, value: unknown, field: strin
 
 function parseBlockData(row: Pick<ContentBlockRow, 'data_json' | 'id' | 'type'>) {
   try {
-    return asObject(JSON.parse(row.data_json) as unknown, `content block ${row.id} data`)
+    const data = asObject(JSON.parse(row.data_json) as unknown, `content block ${row.id} data`)
+    if (row.type === 'how_to' || row.type === 'faq' || row.type === 'page_grid') validateContentBlockData(row.type, data)
+    return data
   } catch (error) {
     throw new HTTPError({
       statusCode: 500,
-      statusMessage: `Content block ${row.id} has malformed data_json`,
+      statusMessage: `Content block ${row.id} has invalid stored data`,
       cause: error,
     })
   }
@@ -703,11 +705,7 @@ export async function getContentBlocksForDocument(db: DbClient, documentId: stri
   const document = await getContentDocumentById(db, documentId)
   if (!document) return null
   const blocks = await listBlocksForDocument(db, document.id)
-  const outlined = await attachContentBlockMedia(db, document.id, blocks.map(block => {
-    const outlined = formatBlockOutline(block)
-    if (block.type === 'how_to') validateContentBlockData(block.type, outlined.data)
-    return { ...outlined, created_at: block.created_at }
-  }))
+  const outlined = await attachContentBlockMedia(db, document.id, blocks.map(block => ({ ...formatBlockOutline(block), created_at: block.created_at })))
   return await resolveMcpDocumentationBlocks(db, document.id, outlined)
 }
 

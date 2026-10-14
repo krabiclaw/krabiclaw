@@ -120,8 +120,9 @@ export interface TenantPageField {
   options?: readonly { value: string; label: string; platformOnly?: boolean }[]
   /** A list's item shape, or a record's fields. Absent means a list of plain strings. */
   of?: Readonly<Record<string, TenantPageField>>
-  /** A number's bounds, or a list's item count. */
+  /** A number's lower bound, or a required list's minimum item count. */
   min?: number
+  /** A number's upper bound. */
   max?: number
   /** Which canonical record a reference selects. */
   reference?: 'page' | 'product' | 'collection' | 'location'
@@ -549,7 +550,7 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
     title: text('Section title', { section: 'settings' }),
     accent: text('Emphasised phrase', { section: 'settings' }),
     description: prose('Description', { section: 'settings' }),
-    page_ids: { kind: 'reference', label: 'Pages', translatable: false, section: 'pages', reference: 'page' },
+    page_ids: { kind: 'reference', label: 'Pages', required: true, min: 1, translatable: false, section: 'pages', reference: 'page' },
   }, { allowedPageTypes: ['custom', 'recipe', 'system'] }),
 
   product_grid: blockDefinitionWithMetadata('product_grid', 'Products', 'Cards linking to products.', ['home', 'about', 'pricing', 'custom', 'services', 'menu', 'order', 'products'], {
@@ -684,12 +685,12 @@ export function validateContentBlockData(type: string, data: Record<string, unkn
     }
     if (field.kind === 'reference') {
       if (key.endsWith('_ids')) {
-        if (value !== undefined && (!Array.isArray(value) || value.some(item => typeof item !== 'string'))) throw new Error(`${type}.${key} must be an array of strings.`)
+        if (field.required && (!Array.isArray(value) || value.length < (field.min ?? 1))) throw new Error(`${type}.${key} requires at least ${field.min ?? 1} item.`)
+        if (value !== undefined && (!Array.isArray(value) || value.some(item => typeof item !== 'string' || !item.trim()))) throw new Error(`${type}.${key} must be an array of non-empty strings.`)
       } else if (value !== undefined && value !== null && typeof value !== 'string') throw new Error(`${type}.${key} must be a string.`)
     }
     if (field.kind !== 'list') continue
     if (field.required && (!Array.isArray(value) || value.length < (field.min ?? 1))) throw new Error(`${type}.${key} requires at least ${field.min ?? 1} item.`)
-    if (value === undefined) continue
     if (!Array.isArray(value)) throw new Error(`${type}.${key} must be an array.`)
     if (!field.of) {
       if (value.some(item => typeof item !== 'string')) throw new Error(`${type}.${key} must be an array of strings.`)

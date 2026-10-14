@@ -4,6 +4,12 @@ import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { isAccountActivityResponse } from '../../shared/account-activity'
 import { isBookingDetailsResponse } from '../../composables/useBookingDetails'
+import type { DashboardArticleCategory } from '../../composables/useArticleCategories'
+import type { NotificationPreferenceMap } from '../../composables/useNotificationPreferences'
+import type { SessionAvailability } from '../../server/utils/availability'
+import type { OrganizationMembersData } from '../../utils/organization-members'
+import { localNow } from '../../utils/timezone'
+import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 
 // The dashboard's pane topology is the nested route tree (DESIGN.md, Route
 // hierarchy). On a wide screen a level renders beside the parent its Back goes
@@ -155,6 +161,314 @@ test.describe('dashboard pane hierarchy', () => {
       } finally {
         await ownerContext.close()
       }
+    }
+  })
+
+  test('Booking team forms create, rename and change native Better Auth membership', async ({ page, baseURL, playwright }) => {
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Team writes require isolated local D1.')
+    const organizationId = 'org-demo'
+    const membersResponse = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
+    expect(membersResponse.status(), await membersResponse.text()).toBe(200)
+    const member = (await membersResponse.json() as { members: Array<{ userId: string; user: { name: string } }> }).members.find(row => row.userId === 'user-e2e-demo-role-owner')
+    expect(member).toBeDefined()
+    const readTeams = async () => {
+      const response = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
+      expect(response.status(), await response.text()).toBe(200)
+      return (await response.json() as OrganizationMembersData).teams
+    }
+    const name = `E2E Booking Team ${Date.now().toString(36)}`
+    let teamId: string | null = null
+    try {
+      await page.setViewportSize(NARROW)
+      await open(page, `${ORG}/team/groups/new/name`)
+      const leaf = page.locator('#dashboard-panel-booking-team-setting')
+      await expect(leaf.getByRole('button', { name: 'Create team', exact: true })).toBeDisabled()
+      await leaf.getByRole('textbox', { name: 'Team name', exact: true }).fill(name)
+      const created = page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/organization/create-team' && response.request().method() === 'POST')
+      await leaf.getByRole('button', { name: 'Create team', exact: true }).click()
+      const createdResponse = await created
+      expect(createdResponse.status(), await createdResponse.text()).toBe(200)
+      teamId = (await createdResponse.json() as { id: string }).id
+      await expect(page).toHaveURL(`${ORG}/team/groups/${teamId}`)
+      const original = (await readTeams()).find(row => row.id === teamId)
+      expect(original).toMatchObject({ id: teamId, name, organizationId })
+      expect(original!.members.map(row => row.userId)).not.toContain(member!.userId)
+
+      await open(page, `${ORG}/team/groups/${teamId}/name`)
+      const save = leaf.getByRole('button', { name: 'Save', exact: true })
+      await expect(save).toBeDisabled()
+      const renamed = `${name} renamed`
+      await leaf.getByRole('textbox', { name: 'Team name', exact: true }).fill(renamed)
+      await expect(save).toBeEnabled()
+      await save.click()
+      await expect(page).toHaveURL(`${ORG}/team/groups/${teamId}`)
+      expect((await readTeams()).find(row => row.id === teamId)?.name).toBe(renamed)
+
+      await open(page, `${ORG}/team/groups/${teamId}/members`)
+      const included = leaf.getByRole('switch', { name: member!.user.name, exact: true })
+      await expect(included).not.toBeChecked()
+      await expect(save).toBeDisabled()
+      await included.click()
+      await expect(save).toBeEnabled()
+      await save.click()
+      await expect(page).toHaveURL(`${ORG}/team/groups/${teamId}`)
+      expect((await readTeams()).find(row => row.id === teamId)?.members.map(row => row.userId).sort()).toEqual([...original!.members.map(row => row.userId), member!.userId].sort())
+      const memberReader = await playwright.request.newContext({ baseURL })
+      try {
+        await loginAs(memberReader, baseURL!, member!.userId)
+        const nativeMembers = await memberReader.get('/api/auth/organization/list-team-members', { params: { teamId } })
+        expect(nativeMembers.status(), await nativeMembers.text()).toBe(200)
+        expect((await nativeMembers.json() as OrganizationMembersData['teams'][number]['members']).map(row => row.userId).sort()).toEqual([...original!.members.map(row => row.userId), member!.userId].sort())
+      } finally {
+        await memberReader.dispose()
+      }
+
+      await open(page, `${ORG}/team/groups/${teamId}/members`)
+      await expect(included).toBeChecked()
+      await expect(save).toBeDisabled()
+      await included.click()
+      await save.click()
+      await expect(page).toHaveURL(`${ORG}/team/groups/${teamId}`)
+      expect((await readTeams()).find(row => row.id === teamId)?.members.map(row => row.userId).sort()).toEqual(original!.members.map(row => row.userId).sort())
+    } finally {
+      if (teamId) {
+        const removed = await page.request.post('/api/auth/organization/remove-team', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId } })
+        expect(removed.status(), await removed.text()).toBe(200)
+        expect((await readTeams()).map(row => row.id)).not.toContain(teamId)
+      }
+    }
+  })
+
+  test('Notification form saves each channel and reloads the account preference', async ({ page, baseURL }) => {
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Preference writes require isolated local D1.')
+    await page.context().clearCookies()
+    await loginAs(page.request, baseURL!, 'user-e2e-kikuzuki-owner')
+    const session = await page.request.get('/api/auth/get-session')
+    expect(session.status(), await session.text()).toBe(200)
+    expect((await session.json()).user.phoneNumberVerified).toBe(true)
+    const read = async () => {
+      const response = await page.request.get('/api/user/notification-preferences')
+      expect(response.status(), await response.text()).toBe(200)
+      return (await response.json() as { preferences: NotificationPreferenceMap }).preferences
+    }
+    const before = await read()
+    const category = 'reviews'
+    const wanted = { email: !before[category].email, whatsapp: !before[category].whatsapp }
+    const path = `/dashboard/account/profile/notifications/${category}`
+    const leaf = page.locator('#dashboard-panel-account-notification-category')
+    const save = leaf.getByRole('button', { name: 'Save', exact: true })
+    try {
+      await page.setViewportSize(NARROW)
+      await open(page, path)
+      await expect(save).toBeDisabled()
+      await leaf.getByRole('switch', { name: 'Email', exact: true }).click()
+      await expect(save).toBeEnabled()
+      const emailSaved = page.waitForResponse(response => new URL(response.url()).pathname === '/api/user/notification-preferences' && response.request().method() === 'PATCH')
+      await save.click()
+      const emailResponse = await emailSaved
+      expect(emailResponse.status(), await emailResponse.text()).toBe(200)
+      expect(await read()).toEqual({ ...before, [category]: { ...before[category], email: wanted.email } })
+      await expect(save).toBeDisabled()
+
+      await page.reload()
+      await waitForNuxtHydration(page)
+      await expect(leaf.getByRole('switch', { name: 'Email', exact: true })).toHaveAttribute('aria-checked', String(wanted.email))
+      await expect(save).toBeDisabled()
+      await leaf.getByRole('switch', { name: 'WhatsApp', exact: true }).click()
+      await expect(save).toBeEnabled()
+      const whatsappSaved = page.waitForResponse(response => new URL(response.url()).pathname === '/api/user/notification-preferences' && response.request().method() === 'PATCH')
+      await save.click()
+      const whatsappResponse = await whatsappSaved
+      expect(whatsappResponse.status(), await whatsappResponse.text()).toBe(200)
+      expect(await read()).toEqual({ ...before, [category]: wanted })
+      await expect(save).toBeDisabled()
+    } finally {
+      const restored = await page.request.patch('/api/user/notification-preferences', { data: { category, ...before[category] } })
+      expect(restored.status(), await restored.text()).toBe(200)
+      expect(await read()).toEqual(before)
+      await open(page, path)
+      await expect(leaf.getByRole('switch', { name: 'Email', exact: true })).toHaveAttribute('aria-checked', String(before[category].email))
+      await expect(leaf.getByRole('switch', { name: 'WhatsApp', exact: true })).toHaveAttribute('aria-checked', String(before[category].whatsapp))
+      await expect(save).toBeDisabled()
+    }
+  })
+
+  test('Category form retries a failed write and persists each named field through MCP', async ({ page, baseURL }) => {
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Category writes require isolated local D1.')
+    const read = async () => {
+      const response = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'list_article_categories', args: { organization_id: 'org-demo', collection: 'blog' } })
+      expect(response.status(), await response.text()).toBe(200)
+      return mcpData<{ categories: DashboardArticleCategory[] }>(await response.json()).categories
+    }
+    const before = await read()
+    const category = before.find(row => row.id === 'ad2dd862-18ec-46f5-a601-d653fe223542')
+    const parent = before.find(row => row.id === 'acat_9b2495848c41ed0acff635bb')
+    expect(category).toBeDefined()
+    expect(parent).toBeDefined()
+    expect(category!.parent_id).toBeNull()
+    expect(parent!.parent_id).toBeNull()
+    expect(category!.child_count).toBe(0)
+    expect(category!.sort_order).toBe(Math.max(...before.filter(row => row.parent_id === null).map(row => row.sort_order)))
+    const endpoint = `/api/editor/organizations/org-demo/blog/categories/${category!.id}`
+    const path = `${ORG}/website/blog/categories/${category!.id}`
+    const leaf = page.locator('#dashboard-panel-organization-blog-category')
+    const save = leaf.getByRole('button', { name: 'Save', exact: true })
+    const name = `E2E Category ${Date.now().toString(36)}`
+    const description = 'A category description saved through its native form.'
+    const interceptCategory = (url: URL) => url.pathname === endpoint
+    let failedWrites = 0
+    try {
+      await page.setViewportSize(NARROW)
+      await open(page, path)
+      await expect(save).toBeDisabled()
+      await leaf.getByLabel('Name', { exact: true }).fill(name)
+      await expect(save).toBeEnabled()
+      await page.route(interceptCategory, async route => {
+        if (route.request().method() !== 'PATCH') return await route.continue()
+        failedWrites += 1
+        await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Category write failed for retry verification' }) })
+      })
+      const failed = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
+      await save.click()
+      expect((await failed).status()).toBe(503)
+      await expect(leaf.getByText('Category write failed for retry verification', { exact: true })).toBeVisible()
+      expect((await read()).find(row => row.id === category!.id)?.name).toBe(category!.name)
+      await expect(save).toBeEnabled()
+      expect(failedWrites).toBe(1)
+      await page.unroute(interceptCategory)
+      const retry = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
+      await save.click()
+      const retryResponse = await retry
+      expect(retryResponse.status(), await retryResponse.text()).toBe(200)
+      expect((await read()).find(row => row.id === category!.id)).toMatchObject({ name, slug: category!.slug, description: category!.description, parent_id: category!.parent_id })
+      await expect(save).toBeDisabled()
+
+      await leaf.getByRole('textbox', { name: 'Description', exact: true }).fill(description)
+      await expect(save).toBeEnabled()
+      const descriptionSaved = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
+      await save.click()
+      const descriptionResponse = await descriptionSaved
+      expect(descriptionResponse.status(), await descriptionResponse.text()).toBe(200)
+      expect((await read()).find(row => row.id === category!.id)).toMatchObject({ name, description, parent_id: null })
+      await expect(save).toBeDisabled()
+
+      await leaf.getByRole('combobox', { name: 'Parent', exact: true }).click()
+      await page.getByRole('option', { name: parent!.name, exact: true }).click()
+      await expect(save).toBeEnabled()
+      const parentSaved = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
+      await save.click()
+      const parentResponse = await parentSaved
+      expect(parentResponse.status(), await parentResponse.text()).toBe(200)
+      expect((await read()).find(row => row.id === category!.id)).toMatchObject({ name, description, parent_id: parent!.id, slug: category!.slug })
+      await page.reload()
+      await waitForNuxtHydration(page)
+      await expect(leaf.getByLabel('Name', { exact: true })).toHaveValue(name)
+      await expect(leaf.getByRole('textbox', { name: 'Description', exact: true })).toHaveValue(description)
+      await expect(leaf.getByRole('combobox', { name: 'Parent', exact: true })).toContainText(parent!.name)
+      await expect(save).toBeDisabled()
+
+      await leaf.getByRole('combobox', { name: 'Parent', exact: true }).click()
+      await page.getByRole('option', { name: 'Top level', exact: true }).click()
+      await expect(save).toBeEnabled()
+      const topLevelSaved = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
+      await save.click()
+      const topLevelResponse = await topLevelSaved
+      expect(topLevelResponse.status(), await topLevelResponse.text()).toBe(200)
+      expect(topLevelResponse.request().postDataJSON().parent_id).toBeNull()
+      expect((await read()).find(row => row.id === category!.id)).toMatchObject({ name, description, parent_id: null, sort_order: category!.sort_order })
+      await expect(leaf.getByRole('combobox', { name: 'Parent', exact: true })).toContainText('Top level')
+      await expect(save).toBeDisabled()
+    } finally {
+      await page.unroute(interceptCategory)
+      const restored = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'update_article_category', args: { organization_id: 'org-demo', category_id: category!.id, name: category!.name, description: category!.description, parent_id: category!.parent_id } })
+      expect(restored.status(), await restored.text()).toBe(200)
+      expect(mcpData<{ category: DashboardArticleCategory }>(await restored.json()).category).toMatchObject(category!)
+      expect((await read()).find(row => row.id === category!.id)).toEqual(category)
+      await open(page, path)
+      await expect(leaf.getByLabel('Name', { exact: true })).toHaveValue(category!.name)
+      await expect(save).toBeDisabled()
+    }
+  })
+
+  test('Dated session form saves times, capacity and status and restores the occurrence', async ({ page, baseURL }, testInfo) => {
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Session writes require isolated local D1.')
+    const organizationId = 'org-user-pottery-house'
+    const release = await acquireTenantMutationLock(testInfo, organizationId)
+    try {
+      await page.context().clearCookies()
+      await loginAs(page.request, baseURL!, 'user-e2e-pottery-owner')
+      const productId = 'exp-ph-wheel'
+      const endpoint = `/api/editor/organizations/${organizationId}/products/${productId}/sessions`
+      const from = new Date(Date.now() + 25 * 86_400_000).toISOString()
+      const to = new Date(Date.now() + 40 * 86_400_000).toISOString()
+      const list = async () => {
+        const response = await page.request.get(endpoint, { params: { from, to } })
+        expect(response.status(), await response.text()).toBe(200)
+        return (await response.json() as { sessions: SessionAvailability[] }).sessions
+      }
+      const original = (await list()).find(row => row.location_id === 'loc-pottery-house' && row.status === 'scheduled' && row.claimed === 0 && localNow(row.timezone, new Date(row.starts_at)).time === '11:00')
+      expect(original, 'the seeded product has an unclaimed daytime occurrence in its own location').toBeDefined()
+      expect(original!.capacity).toBe(8)
+      const localInput = (instant: string) => {
+        const value = localNow(original!.timezone, new Date(instant))
+        return `${value.date}T${value.time}`
+      }
+      const startsAt = new Date(Date.parse(original!.starts_at) + 15 * 60_000).toISOString()
+      const endsAt = new Date(Date.parse(original!.ends_at) + 15 * 60_000).toISOString()
+      const sessionListPath = `/dashboard/org-user-pottery-house/products/${productId}/booking/sessions?location_id=${original!.location_id}`
+      const path = `/dashboard/org-user-pottery-house/products/${productId}/booking/sessions/${original!.id}?location_id=${original!.location_id}`
+      const leaf = page.locator('#dashboard-panel-product-session')
+      const save = leaf.getByRole('button', { name: 'Save', exact: true })
+      const commit = async () => {
+        await expect(save).toBeEnabled()
+        const saved = page.waitForResponse(response => new URL(response.url()).pathname === `${endpoint}/${original!.id}` && response.request().method() === 'PATCH')
+        await save.click()
+        const response = await saved
+        expect(response.status(), await response.text()).toBe(200)
+        await expect(page).toHaveURL(sessionListPath)
+      }
+      try {
+        await page.setViewportSize(NARROW)
+        await open(page, path)
+        await expect(save).toBeDisabled()
+        await leaf.getByLabel('Starts', { exact: true }).fill(localInput(startsAt))
+        await commit()
+        expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: original!.ends_at, capacity: 8, status: 'scheduled' })
+
+        await open(page, path)
+        await expect(save).toBeDisabled()
+        await leaf.getByLabel('Ends', { exact: true }).fill(localInput(endsAt))
+        await commit()
+        expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: endsAt, capacity: 8, status: 'scheduled' })
+
+        await open(page, path)
+        await expect(save).toBeDisabled()
+        await leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('9')
+        await leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
+        await commit()
+        expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: endsAt, capacity: 9, status: 'scheduled' })
+
+        await open(page, path)
+        await expect(save).toBeDisabled()
+        await leaf.getByRole('radio', { name: 'Cancelled', exact: true }).click()
+        await commit()
+        expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: endsAt, capacity: 9, status: 'cancelled' })
+      } finally {
+        const current = (await list()).find(row => row.id === original!.id)
+        expect(current).toBeDefined()
+        const restored = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'update_product_session', args: { organization_id: organizationId, product_id: productId, session_id: original!.id, expected_updated_at: current!.updated_at, starts_at: original!.starts_at, ends_at: original!.ends_at, capacity: original!.capacity, status: original!.status } })
+        expect(restored.status(), await restored.text()).toBe(200)
+        expect(mcpData<{ session: SessionAvailability }>(await restored.json()).session).toMatchObject({ id: original!.id, starts_at: original!.starts_at, ends_at: original!.ends_at, capacity: original!.capacity, status: original!.status })
+        expect((await list()).find(row => row.id === original!.id)).toMatchObject({ id: original!.id, starts_at: original!.starts_at, ends_at: original!.ends_at, capacity: original!.capacity, status: original!.status })
+        await open(page, path)
+        await expect(leaf.getByLabel('Starts', { exact: true })).toHaveValue(localInput(original!.starts_at))
+        await expect(leaf.getByLabel('Ends', { exact: true })).toHaveValue(localInput(original!.ends_at))
+        await expect(leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('8')
+        await expect(leaf.getByRole('radio', { name: 'Scheduled', exact: true })).toBeChecked()
+        await expect(save).toBeDisabled()
+      }
+    } finally {
+      await release()
     }
   })
 

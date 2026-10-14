@@ -1,33 +1,39 @@
 <template>
-  <DashboardLeafPanel :id="`booking-${concern}`" :title="setting.title" :lead="setting.lead" :saving="p.saving.value" :disabled="!p.product.value || !valid || !form?.dirty" :error="p.loadError.value ?? p.saveError.value ?? ''" @cancel="reset" @save="form?.submit()">
+  <DashboardLeafPanel :id="`booking-${concern}`" :title="setting.title" :lead="setting.lead" :saving="p.saving.value" :disabled="!p.product.value || !valid || (!form?.dirty && !p.saveError.value)" :error="p.loadError.value ?? p.saveError.value ?? ''" @cancel="reset" @save="form?.submit()">
     <!-- Nuxt UI's form state says whether the owner changed anything; Save waits for it. -->
     <UForm v-if="p.product.value" :key="formKey" ref="form" :state="p.form" @submit="save">
-      <SettingRow v-if="concern === 'enabled'" v-model="p.form.bookable" label="Use a booking calendar" />
-      <UFormField v-else-if="concern === 'duration'" label="Duration in minutes" required>
+      <UFormField v-if="concern === 'enabled'" name="bookable">
+        <SettingRow v-model="p.form.bookable" label="Use a booking calendar" />
+      </UFormField>
+      <UFormField v-else-if="concern === 'duration'" name="booking_duration" label="Duration in minutes" required>
         <UInput v-model="p.form.booking_duration" inputmode="numeric" pattern="[0-9]*" class="w-full" />
       </UFormField>
       <div v-else-if="concern === 'capacity'" class="space-y-6">
-        <URadioGroup v-model="capacityChoice" :items="capacityOptions" variant="card" />
-        <UFormField v-if="capacityChoice === 'group'" label="Maximum guests per session" required>
+        <UFormField name="booking_capacity">
+          <URadioGroup v-model="capacityChoice" :items="capacityOptions" variant="card" />
+        </UFormField>
+        <UFormField v-if="capacityChoice === 'group'" name="booking_capacity" label="Maximum guests per session" required>
           <UInput v-model="p.form.booking_capacity" inputmode="numeric" pattern="[0-9]*" class="w-full" />
         </UFormField>
       </div>
-      <URadioGroup v-else-if="concern === 'confirmation'" v-model="p.form.confirmation_mode" :items="[{ value: 'instant', label: 'Confirm automatically' }, { value: 'review', label: 'Review each request' }]" variant="card" />
-      <UFormField v-else-if="concern === 'assignment'" label="Who guests meet">
+      <UFormField v-else-if="concern === 'confirmation'" name="confirmation_mode">
+        <URadioGroup v-model="p.form.confirmation_mode" :items="[{ value: 'instant', label: 'Confirm automatically' }, { value: 'review', label: 'Review each request' }]" variant="card" />
+      </UFormField>
+      <UFormField v-else-if="concern === 'assignment'" name="scheduling_mode" label="Who guests meet">
         <p v-if="membersError" role="alert" class="mb-3 text-error">Team members could not be loaded.</p>
         <URadioGroup v-else v-model="assignedMember" :items="memberOptions" variant="card" class="w-full" />
       </UFormField>
-      <div v-else-if="concern === 'payment'">
+      <UFormField v-else-if="concern === 'payment'" name="online_payment_required">
         <SettingRow v-model="p.form.online_payment_required" :disabled="!paymentEntitled && !p.form.online_payment_required" label="Require online payment for paid sessions" />
         <template v-if="!paymentEntitled">
           <p class="mt-4 text-sm text-muted">Online payments require Commerce. Paid sessions can be booked without online payment when this setting is off.</p>
           <UButton class="mt-3" :to="`/dashboard/${route.params.orgSlug}/payments?tab=plan`" variant="outline">View plans</UButton>
         </template>
-      </div>
-      <div v-else-if="concern === 'location'">
+      </UFormField>
+      <UFormField v-else-if="concern === 'location'" name="held_online">
         <SettingRow v-model="p.form.held_online" :disabled="p.form.scheduling_mode !== 'provider' && !p.form.held_online" label="Held online" />
         <UButton v-if="p.form.scheduling_mode !== 'provider'" class="mt-4" variant="outline" :to="`${level.to.value}/assignment`">Choose who guests meet</UButton>
-      </div>
+      </UFormField>
     </UForm>
   </DashboardLeafPanel>
 </template>

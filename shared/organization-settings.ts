@@ -75,13 +75,13 @@ export interface OrganizationSettings {
     careers_email?: string
     whatsapp_phone?: string
   }
-  consultation?: Omit<import('../types/blawby').PublicConsultationSettings, 'contact_form_enabled' | 'metadata'> & {
+  consultation?: import('../types/blawby').PublicConsultationSettings & {
     metadata_json: Record<string, unknown> | null
     created_at: string
     updated_at: string
     updated_by: string | null
   }
-  compliance?: Omit<import('../types/blawby').PublicCompliance, 'media' | 'metadata'> & {
+  compliance?: Omit<import('../types/blawby').PublicCompliance, 'media'> & {
     metadata_json: Record<string, unknown> | null
     created_at: string
     updated_at: string

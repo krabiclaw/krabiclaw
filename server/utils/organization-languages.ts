@@ -6,6 +6,8 @@ import { getOrganizationBillingStatus } from '~/server/utils/billing'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { assertOrganizationLanguageEntitlement, canonicalizeLocale, getPersistedSourceLocale } from '~/server/utils/localization'
 import { localizationError } from '~/server/utils/localization-errors'
+import { validateLocalizedValues } from '~/server/utils/localization-registry'
+import { organizationSupportsBlawbyTemplate } from '~/utils/template-registry'
 
 interface OrganizationLanguageRow {
   id: string
@@ -52,6 +54,18 @@ export async function publishOrganizationLanguage(
 
   if (!await getPublishedTenantPage(db, input.organizationId, '/', locale)) {
     localizationError(409, 'LOCALIZATION_VALIDATION_FAILED', 'Translate the homepage before publishing this language', { missing: ['homepage'] })
+  }
+
+  const organization = await queryFirst<{ vertical: string; theme_id: string; values_json: string | null }>(db, `
+    SELECT o.vertical, o.theme_id, rl.values_json
+      FROM organization o
+      LEFT JOIN resource_localizations rl ON rl.organization_id = o.id AND rl.resource_type = 'organization'
+        AND rl.resource_id = o.id AND rl.locale = ?
+     WHERE o.id = ?
+  `, [locale, input.organizationId])
+  if (!organization) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Organization was not found', { organization_id: input.organizationId })
+  if (organizationSupportsBlawbyTemplate({ vertical: organization.vertical, themeId: organization.theme_id })) {
+    validateLocalizedValues('organization', organization.values_json === null ? null : JSON.parse(organization.values_json), undefined, { publishedTemplate: 'blawby' })
   }
 
   const now = new Date().toISOString()

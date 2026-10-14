@@ -36,7 +36,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
   const changed=await writeMemberScheduling(own,'member-one',{...hours,expected_updated_at:approved!.updated_at,public_name:'Changed public name'})
   assert.equal(changed?.public_approved,0,'self-edited content loses prior approval')
   await writeMemberScheduling({...own,userId:'two'},'member-two',{...hours,timezone:'UTC'})
-  await db.prepare("INSERT INTO account(id,accountId,providerId,userId,scope)VALUES('busy-linked','google-subject','google','one',?)").bind(MEMBER_BUSY_SCOPES.join(' ')).run()
+  await db.prepare("INSERT INTO account(id,accountId,providerId,userId,scope)VALUES('busy-linked','google-subject','google','one',?)").bind(MEMBER_BUSY_SCOPES.join(',')).run()
   const raced = await Promise.allSettled([
    selectBusyCalendars(own,'member-one',{account_id:'busy-linked',calendar_ids:['same-calendar']}),
    storeCalendarSelection(db,'org',{account_id:'busy-linked',calendar_id:'same-calendar',calendar_name:'Synthetic calendar'}),

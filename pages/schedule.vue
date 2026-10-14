@@ -1,6 +1,6 @@
 <template>
   <NuxtLayout name="blawby">
-    <BlawbySchedule />
+    <TenantPublicPage path="/schedule" />
   </NuxtLayout>
 </template>
 

@@ -16,11 +16,19 @@
       </template>
     </ProductDetailPage>
     <TenantPageRenderer v-else :page="page" />
+    <template v-if="page.recipe === 'schedule' && blawbyDocument">
+      <OnlineConsultationBooking v-if="blawbyDocument.shell.canSchedule && blawbyDocument.shell.consultation.mode === 'native'" />
+      <div v-else class="blawby-container py-12 text-center">
+        <BlawbyButton v-if="blawbyDocument.shell.canSchedule" :to="blawbyDocument.shell.consultation.external_url!" @click="trackConsultationClick('schedule', page.path, blawbyDocument.shell.consultation.external_url, page.page_id)">{{ blawbyDocument.shell.consultation.cta_label }}</BlawbyButton>
+        <BlawbyButton v-else :to="localePath('/contact')" @click="trackConsultationClick('schedule', page.path, localePath('/contact'), page.page_id)">{{ t('site_pages.contact') }}</BlawbyButton>
+      </div>
+    </template>
   </template>
 </template>
 
 <script setup lang="ts">
 import ProductDetailPage from '~/components/products/ProductDetailPage.vue'
+import OnlineConsultationBooking from '~/components/booking/OnlineConsultationBooking.vue'
 import { presentationForProduct } from '~/utils/product-presentation'
 import { blockTextOrNull, isInternalRoute } from '~/utils/tenant-page-block-data'
 import { publicApiRequest, isRecord } from '~/utils/api-clients'
@@ -33,7 +41,7 @@ const props = defineProps<{ path: string; locale?: string | null }>()
 const { previewAuthorized, organization } = useTenantOrganization()
 const { id: organizationId, template } = organization
 const isPlatform = template.slug === 'platform'
-const { locale: i18nLocale, localePath } = useI18n()
+const { locale: i18nLocale, localePath, t } = useI18n()
 // Page ownership is a resolved site, not a tenant type. Krabiclaw's own site is
 // a site row with page documents like any other, and requiring `isTenant` here
 // is what forced its marketing pages to be hardcoded components (#903).
@@ -62,6 +70,7 @@ const isPageResponse = (value: unknown): value is { success: true; page: PublicT
 
 const requestEvent = useRequestEvent()
 const blawbyDocument = inject<Ref<BlawbyDocumentPayload> | null>('blawby-document', null)
+const { trackConsultationClick } = useOrganizationConversionTracking(blawbyDocument ? () => blawbyDocument.value.shell.consultation : undefined)
 const { data, error, status, execute } = await useAsyncData(key, async () => {
   if (template.slug === 'blawby') {
     const page = blawbyDocument?.value.route.page
@@ -192,7 +201,6 @@ useSocialMetadata(() => page.value && ({
     offering: linkedOffer.value?.product.kind === 'service' ? {
       name: linkedOffer.value.product.name,
       description: linkedOffer.value.product.description,
-      schemaType: presentationForProduct(linkedOffer.value.vertical, linkedOffer.value.product, organization.theme_id).structuredDataType,
     } : undefined,
   } : undefined,
 }))

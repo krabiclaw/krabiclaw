@@ -8,6 +8,27 @@
       "when": 1791865105773,
       "tag": "0000_baseline",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791889229474,
+      "tag": "0001_authored_contact_sections",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791890267344,
+      "tag": "0002_retire_oauth_client_public",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791891258972,
+      "tag": "0003_require_team_member_created_at",
+      "breakpoints": true
     }
   ]
 }

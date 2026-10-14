@@ -74,6 +74,12 @@ export const E2E_AUTH_FIXTURES: readonly E2eAuthFixture[] = [
     email: 'ncls-owner@playwright.example',
     memberships: [{ organizationId: 'org-ncls-blawby', role: 'owner' }],
   },
+  {
+    id: 'user-e2e-ncls-consultation-owner',
+    name: 'E2E NCLS Consultation Owner',
+    email: 'ncls-consultation-owner@playwright.example',
+    memberships: [{ organizationId: 'org-ncls-blawby', role: 'owner' }],
+  },
   ...[
     'oauth-cimd',
     'oauth-private-cimd',

@@ -1,7 +1,6 @@
 import type Stripe from 'stripe'
 import { HTTPError } from 'nitro';
 import type { DbClient } from '~/server/db'
-import { betterAuthTimestampToIso } from '~/server/utils/better-auth-timestamps'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { hasPermission } from 'better-auth/plugins'
 import { organizationAdapter } from '~/server/utils/member-access'
@@ -77,8 +76,8 @@ export async function getOrganizationBillingStatus(
     stripeCustomerId: customerId,
     stripeSubscriptionId: subscription?.stripeSubscriptionId ?? undefined,
     subscriptionStatus: subscription?.status ?? undefined,
-    currentPeriodEnd: subscription?.periodEnd ? betterAuthTimestampToIso(subscription.periodEnd, 'subscription.periodEnd') : undefined,
-    cancelAtPeriodEnd: subscription ? Boolean(subscription.cancelAtPeriodEnd) : undefined,
+    currentPeriodEnd: subscription?.periodEnd?.toISOString(),
+    cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd,
     stripeScheduleId: subscription?.stripeScheduleId ?? undefined,
     entitlements: getPlanEntitlements(plan),
   }

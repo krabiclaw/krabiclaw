@@ -9,12 +9,6 @@ export interface TenantContext {
   previewAuthorized: boolean
 }
 
-declare module '#app' {
-  interface NuxtPayload {
-    tenantContext?: TenantContext
-  }
-}
-
 export interface TenantOrganizationInfo {
   id: string
   name: string
@@ -35,20 +29,14 @@ export interface TenantOrganizationInfo {
 // with the Nuxt payload so hydration reads the same public identity as SSR.
 export const useTenantOrganization = (): TenantContext => {
   const event = useRequestEvent()
-  const nuxtApp = useNuxtApp()
   const tenantContext = useState<TenantContext>('tenant-context', () => {
-    const context = import.meta.server
-      ? event?.context.organization
-        ? {
-            organization: event.context.organization as TenantOrganizationInfo,
-            previewAuthorized: event.context.previewAuthorized === true,
-          }
-        : undefined
-      : nuxtApp.payload.tenantContext
-    if (!context) {
+    if (!event?.context.organization) {
       throw createError({ statusCode: 500, statusMessage: 'Tenant context unavailable', fatal: true })
     }
-    return context
+    return {
+      organization: event.context.organization as TenantOrganizationInfo,
+      previewAuthorized: event.context.previewAuthorized === true,
+    }
   })
   if (!tenantContext.value) {
     throw createError({ statusCode: 500, statusMessage: 'Tenant context unavailable', fatal: true })

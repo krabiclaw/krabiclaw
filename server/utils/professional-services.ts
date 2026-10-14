@@ -5,6 +5,7 @@ import { listOrganizationProducts } from '~/server/utils/product-management'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { HTTPError } from 'nitro';
+import { z } from 'zod'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import {
   loadExactPublicLocalizations,
@@ -15,11 +16,7 @@ import { listPublicLocaleRepresentations } from '~/server/utils/public-locale-re
 import { publicTemplateRegistry, organizationSupportsBlawbyTemplate } from '~/utils/template-registry'
 
 const BLAWBY_TEMPLATE = publicTemplateRegistry.blawby
-import {
-  getPublicTenantPageForPath,
-  listCanonicalTenantPages,
-  type PublicTenantPageHydrationResources,
-} from '~/server/utils/public-tenant-pages'
+import { getPublicTenantPageForPath } from '~/server/utils/public-tenant-pages'
 import { listPublishedTenantPagePaths } from '~/server/utils/content/pages'
 import { isBlawbyShellOnlyRouteRecipe } from '~/types/blawby'
 import { publicTenantVisibilitySql } from '~/server/utils/public-base'
@@ -30,12 +27,24 @@ import type {
   PublicCompliance,
   PublicComplianceContactPoint,
   PublicConsultationSettings,
-  PublicTenantPage,
 } from '~/types/blawby'
 
-function asBoolean(value: unknown) {
-  return value === true || value === 1 || value === '1'
-}
+const consultationSettingsSchema = z.object({
+  mode: z.enum(['native', 'external_url', 'native_disabled']),
+  cta_label: z.string().trim().min(1),
+  external_url: z.url({ protocol: /^https?$/, normalize: true, abort: true }).refine(value => {
+    const destination = new URL(value)
+    return !destination.username && !destination.password
+  }, 'external_url must be an absolute HTTP or HTTPS URL without credentials').nullable(),
+  schedule_path: z.string().trim().startsWith('/'),
+  confirmation_path: z.string().trim().startsWith('/'),
+  tracking_enabled: z.boolean(),
+  metadata_json: z.looseObject({}).nullable().optional(),
+}).superRefine((settings, context) => {
+  if (settings.mode === 'external_url' && settings.external_url === null) {
+    context.addIssue({ code: 'custom', path: ['external_url'], message: 'An external scheduler URL is required' })
+  }
+})
 
 function requiredText(value: unknown, field: string): string {
   if (typeof value === 'string' && value.trim()) return value.trim()
@@ -69,91 +78,48 @@ export async function getActiveBlawbyOrganization(
     : null
 }
 
-export async function listPublicTenantPages(env: CloudflareEnv, db: DbClient, organizationId: string): Promise<PublicTenantPage[]> {
-  const pages = await listCanonicalTenantPages(env, db, organizationId)
-  return pages.map(page => ({
-    id: page.id,
-    page_id: page.page_id,
-    path: page.path,
-    title: page.title,
-    page_type: page.page_type,
-    recipe: page.recipe,
-    sort_order: page.sort_order,
-    locale: page.locale,
-    summary: page.summary,
-    blocks: page.blocks,
-    media: page.media,
-    social_image: page.social_image,
-    updated_at: page.updated_at,
-  }))
-}
-
 /** Initialize the canonical consultation settings through the shared adapter. */
 export async function initializePublicConsultationSettings(db: DbClient, organizationId: string, settings: Omit<NonNullable<import('~/shared/organization-settings').OrganizationSettings['consultation']>, 'created_at' | 'updated_at' | 'updated_by'>, writeGuard?: BatchQuery) {
+  const validated = consultationSettingsSchema.parse(settings)
   await executeBatch(db, [...(writeGuard ? [writeGuard] : []), {
     query: `UPDATE organization SET consultation_settings_json = json(?), updated_at = ? WHERE id = ? AND consultation_settings_json IS NULL`,
-    params: [JSON.stringify({ ...settings, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), updated_by: null }), new Date().toISOString(), organizationId],
+    params: [JSON.stringify({ ...validated, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), updated_by: null }), new Date().toISOString(), organizationId],
   }, publicResourceCacheInvalidationQuery(organizationId, 'consultation_settings_initialized')], { operation: 'Initialize consultation settings' })
 }
 
 /** Only this adapter writes consultation settings. */
 export async function setPublicConsultationMode(db: DbClient, organizationId: string, mode: PublicConsultationSettings['mode'], externalUrl?: unknown): Promise<PublicConsultationSettings> {
-  if (mode !== 'native' && mode !== 'external_url' && mode !== 'native_disabled') throw new HTTPError({ statusCode: 400, statusMessage: 'Invalid consultation mode' })
   const settings = await getPublicConsultationSettings(db, organizationId)
-  let external = externalUrl === undefined ? settings.external_url : externalUrl
-  if (external !== null) {
-    let destination: URL
-    try {
-      if (typeof external !== 'string' || !/^https?:\/\//i.test(external.trim())) throw new Error('Invalid URL')
-      destination = new URL(external.trim())
-      if (!destination.hostname || destination.username || destination.password) throw new Error('Invalid URL')
-    } catch {
-      throw new HTTPError({ statusCode: 400, statusMessage: 'external_url must be an absolute HTTP or HTTPS URL without credentials', data: { code: 'INVALID_CONSULTATION_EXTERNAL_URL' } })
-    }
-    external = destination.toString()
+  const validated = consultationSettingsSchema.safeParse({ ...settings, mode, external_url: externalUrl === undefined ? settings.external_url : externalUrl })
+  if (!validated.success) {
+    throw new HTTPError({ statusCode: 400, statusMessage: validated.error.issues[0]!.message, data: { code: 'INVALID_CONSULTATION_SETTINGS', issues: validated.error.issues }, cause: validated.error })
   }
-  if (mode === 'external_url' && !external) throw new HTTPError({ statusCode: 400, statusMessage: 'An external scheduler URL is required', data: { code: 'CONSULTATION_EXTERNAL_URL_REQUIRED', missing: ['external_url'] } })
+  const external = validated.data.external_url
   const now = new Date().toISOString()
   await executeBatch(db, [{
     query: `UPDATE organization SET consultation_settings_json = json_set(consultation_settings_json, '$.mode', ?, '$.external_url', ?, '$.updated_at', ?), updated_at = ? WHERE id = ?`,
     params: [mode, external, now, now, organizationId],
   }, publicResourceCacheInvalidationQuery(organizationId, 'consultation_mode_changed')], { operation: 'Set consultation mode' })
-  return { ...settings, mode, external_url: external as string | null }
+  return { ...settings, mode, external_url: external }
 }
 
 export async function getPublicConsultationSettings(db: DbClient, organizationId: string): Promise<PublicConsultationSettings> {
-  const row = await queryFirst<ApiRecord>(db, `
-    SELECT json_extract(consultation_settings_json, '$.mode') AS mode,
-           json_extract(consultation_settings_json, '$.cta_label') AS cta_label,
-           json_extract(consultation_settings_json, '$.external_url') AS external_url,
-           json_extract(consultation_settings_json, '$.schedule_path') AS schedule_path,
-           json_extract(consultation_settings_json, '$.confirmation_path') AS confirmation_path,
-           json_extract(consultation_settings_json, '$.tracking_enabled') AS tracking_enabled,
-           json_extract(consultation_settings_json, '$.metadata_json') AS metadata_json
+  const row = await queryFirst<{ consultation_settings_json: string }>(db, `
+    SELECT consultation_settings_json
       FROM organization
      WHERE id = ? AND json_type(consultation_settings_json) = 'object'
      LIMIT 1
   `, [organizationId])
 
   if (!row) throw new HTTPError({ statusCode: 500, statusMessage: 'Professional-service consultation settings are missing', data: { code: 'CONSULTATION_SETTINGS_MISSING' } })
-  const metadata = row.metadata_json ? JSON.parse(row.metadata_json) as ApiRecord : {}
-  const ctaLabel = requiredText(row.cta_label, 'consultation.cta_label')
-  const schedulePath = requiredText(row.schedule_path, 'consultation.schedule_path')
-  const confirmationPath = requiredText(row.confirmation_path, 'consultation.confirmation_path')
-  if (row.mode !== 'native_disabled' && row.mode !== 'external_url' && row.mode !== 'native') {
-    throw new HTTPError({ statusCode: 500, statusMessage: 'Professional-service consultation mode is invalid', data: { code: 'INVALID_STORED_CONTENT' } })
+  let settings: z.output<typeof consultationSettingsSchema>
+  try {
+    settings = consultationSettingsSchema.parse(JSON.parse(row.consultation_settings_json) as unknown)
+  } catch (error) {
+    throw new HTTPError({ statusCode: 500, statusMessage: 'Stored professional-service consultation settings are invalid', data: { code: 'INVALID_STORED_CONTENT' }, cause: error })
   }
-
-  return {
-    mode: row.mode,
-    cta_label: ctaLabel,
-    external_url: typeof row.external_url === 'string' ? row.external_url : null,
-    schedule_path: schedulePath,
-    confirmation_path: confirmationPath,
-    tracking_enabled: row.tracking_enabled == null ? true : asBoolean(row.tracking_enabled),
-    contact_form_enabled: metadata.contact_form_enabled == null ? true : asBoolean(metadata.contact_form_enabled),
-    metadata,
-  }
+  const { metadata_json: _metadata, ...consultation } = settings
+  return consultation
 }
 
 export async function getPublicCompliance(db: DbClient, organizationId: string): Promise<PublicCompliance | null> {
@@ -171,8 +137,7 @@ export async function getPublicCompliance(db: DbClient, organizationId: string):
            json_extract(settings_json, '$.compliance.founding_date') AS founding_date,
            json_extract(settings_json, '$.compliance.same_as') AS same_as,
            json_extract(settings_json, '$.compliance.contact_points') AS contact_points,
-           json_extract(settings_json, '$.compliance.address_visibility') AS address_visibility,
-           json_extract(settings_json, '$.compliance.metadata_json') AS metadata_json
+           json_extract(settings_json, '$.compliance.address_visibility') AS address_visibility
       FROM organization
      WHERE id = ? AND json_type(settings_json, '$.compliance') = 'object'
      LIMIT 1
@@ -210,7 +175,6 @@ export async function getPublicCompliance(db: DbClient, organizationId: string):
     same_as: row.same_as ? JSON.parse(row.same_as) as string[] : [],
     contact_points: row.contact_points ? JSON.parse(row.contact_points) as PublicComplianceContactPoint[] : [],
     address_visibility: row.address_visibility === 'visible' ? 'visible' : 'hidden',
-    metadata: row.metadata_json ? JSON.parse(row.metadata_json) as ApiRecord : {},
   }
 }
 
@@ -274,7 +238,7 @@ export async function getPublicBlawbyShellData(
   const identity = localizedRepresentation
     ? {
         ...sourceIdentity,
-        name: typeof organizationLocalization?.values.name === 'string' ? organizationLocalization.values.name : '',
+        name: requiredText(organizationLocalization?.values.name, `organization ${organizationId}.${locale}.name`),
         brand_description: typeof organizationLocalization?.values.brand_description === 'string' ? organizationLocalization.values.brand_description : null,
       }
     : sourceIdentity
@@ -284,8 +248,7 @@ export async function getPublicBlawbyShellData(
     const consultationValues = organizationLocalization?.values.consultation as { cta_label?: unknown } | undefined
     consultation = {
       ...sourceConsultation,
-      cta_label: typeof consultationValues?.cta_label === 'string' ? consultationValues.cta_label : '',
-      metadata: { ...sourceConsultation.metadata, header_cta_label: null },
+      cta_label: requiredText(consultationValues?.cta_label, `organization ${organizationId}.${locale}.consultation.cta_label`),
     }
     const complianceValues = organizationLocalization?.values.compliance as { service_area?: unknown; disclaimer?: unknown; footer_disclaimer?: unknown } | undefined
     compliance = sourceCompliance
@@ -294,7 +257,6 @@ export async function getPublicBlawbyShellData(
           service_area: typeof complianceValues?.service_area === 'string' ? complianceValues.service_area : null,
           disclaimer: typeof complianceValues?.disclaimer === 'string' ? complianceValues.disclaimer : null,
           footer_disclaimer: typeof complianceValues?.footer_disclaimer === 'string' ? complianceValues.footer_disclaimer : null,
-          metadata: { ...sourceCompliance.metadata, header: null },
           media: sourceCompliance.media.map(item => ({ ...item, alt_text: null, file_name: null })),
         }
       : null
@@ -324,10 +286,9 @@ export async function getPublicBlawbyDocumentData(
     ? []
     : await loadExactPublicLocalizations(env, db, organizationId, locale)
 
-  const shellData = getPublicBlawbyShellData(db, organizationId, sourceLocale, { previewAuthorized: options.previewAuthorized, locale, localizations, env })
   const [shell, route] = await Promise.all([
-    shellData,
-    getPublicBlawbyRouteData(db, organizationId, recipe, sourceLocale, { ...options, locale, localizations, hydrationResources: { blawbyShell: shellData } }, env),
+    getPublicBlawbyShellData(db, organizationId, sourceLocale, { previewAuthorized: options.previewAuthorized, locale, localizations, env }),
+    getPublicBlawbyRouteData(db, organizationId, recipe, sourceLocale, { ...options, locale, localizations }, env),
   ])
   // Which path each recipe's document lives at is declared once, per template,
   // in utils/template-registry.ts; 'page' names its own path.
@@ -378,7 +339,7 @@ export async function getPublicBlawbyRouteData(
   organizationId: string,
   recipe: PublicBlawbyRouteData['recipe'],
   sourceLocale: string,
-  options: { previewAuthorized?: boolean; slug?: string | null; locale?: string | null; localizations?: readonly ExactPublicLocalization[]; hydrationResources?: PublicTenantPageHydrationResources } = {},
+  options: { previewAuthorized?: boolean; slug?: string | null; locale?: string | null; localizations?: readonly ExactPublicLocalization[] } = {},
   env: CloudflareEnv,
 ): Promise<PublicBlawbyRouteData> {
   // Declared once, per template, in utils/template-registry.ts.
@@ -389,7 +350,6 @@ export async function getPublicBlawbyRouteData(
     ? await getPublicTenantPageForPath(env, db, organizationId, pagePath, {
         locale: options.locale,
         localizations: localized ? options.localizations ?? [] : null,
-        hydrationResources: options.hydrationResources,
       })
     : null
   return {

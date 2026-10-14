@@ -36,8 +36,6 @@ function hasValidConsultation(value: unknown) {
     && typeof value.schedule_path === 'string'
     && typeof value.confirmation_path === 'string'
     && typeof value.tracking_enabled === 'boolean'
-    && typeof value.contact_form_enabled === 'boolean'
-    && isRecord(value.metadata)
 }
 
 function hasRequiredRouteContent(route: Record<string, unknown>) {

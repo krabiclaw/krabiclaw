@@ -421,14 +421,9 @@ export default defineNuxtConfig({
 
     // Auth/API/dashboard — never cache
     '/api/**':       { headers: { 'cache-control': 'no-store' } },
-    // The CMS is client rendered. It sits behind authentication, so there is no
-    // SEO to serve; its data is all organization-scoped and cannot be cached;
-    // and every navigation after the first is client side anyway. Rendering it
-    // on the server bought none of that and cost a second runtime for session
-    // and auth state to work in -- which on Cloudflare meant a nested Worker
-    // self-fetch with no bindings and a bespoke session provider to work around
-    // it. Nitro still serves `/server/api/**`; only the Vue pages move.
-    '/dashboard/**': { ssr: false, headers: { 'cache-control': 'no-store' } },
+    // Native client-only components own the CMS rendering boundary; Nuxt still
+    // renders the app shell and transports the host's public identity normally.
+    '/dashboard/**': { headers: { 'cache-control': 'no-store' } },
     '/auth/**':      { headers: { 'cache-control': 'no-store' } },
     '/signup':       { headers: { 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'" } },
     '/login':        { headers: { 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'" } },

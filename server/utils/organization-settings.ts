@@ -185,7 +185,7 @@ export async function loadSettingsPayload(
     canonical_url: updatedOrganization.canonical_url,
     // The website's booking switch exists only where consultation settings do.
     consultation_mode: consultation?.mode ?? updatedOrganization.consultation_mode,
-    ...(consultation ? { address_visibility: compliance?.address_visibility ?? 'hidden', contact_form_enabled: consultation.contact_form_enabled } : {}),
+    ...(consultation ? { address_visibility: compliance?.address_visibility ?? 'hidden' } : {}),
     palette: isPaletteTemplate(template) ? resolveSitePalette(template, siteConfig.palette) : null,
     palette_source: isPaletteTemplate(template) ? (siteConfig.palette ? 'custom' : 'template') : null,
     font_preset: resolveOrganizationFontPreset(siteConfig.font_preset),

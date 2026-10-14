@@ -21,7 +21,7 @@ const { data, error } = await useAsyncData(
   () => dashboardApi('/api/dashboard/members', { validate: isOrganizationMembersData }),
 )
 const groups = computed(() => [{ id: 'teams', items: (data.value?.teams ?? []).map(team => ({
-  id: team.id, label: team.name, summary: `${team.member_user_ids.length} members`,
+  id: team.id, label: team.name, summary: `${team.members.length} members`,
   to: `${level.path.value}/${encodeURIComponent(team.id)}`, lead: { icon: 'i-lucide-users' },
 })) }])
 </script>
