@@ -1054,8 +1054,7 @@ registry.en.lodging = {
   aboutImageAlt: "About our place",
   ctaTitle: "Stay with us.",
   ctaRoute: "",
-  contactSubtitle:
-    "For availability or a booking, head to your property's page, for long stays, groups, partnerships or anything else, use the form below.",
+  contactSubtitle: "For availability, bookings, long stays, groups, partnerships or anything else, use the form below.",
   contactSubjectCatering: "Long stays & groups",
   reserveCta: "Check availability",
   reservationPageKicker: "Stays",
@@ -1092,8 +1091,7 @@ registry.th.lodging = {
   aboutImageAlt: "เกี่ยวกับที่พักของเรา",
   ctaTitle: "มาพักกับเรา",
   ctaRoute: "",
-  contactSubtitle:
-    "หากต้องการตรวจสอบห้องว่างหรือจองที่พัก ให้ไปที่หน้าของที่พักนั้น หากเป็นการเข้าพักระยะยาว กลุ่ม พาร์ตเนอร์ หรือเรื่องอื่น ๆ ใช้แบบฟอร์มด้านล่างได้เลย",
+  contactSubtitle: "หากต้องการสอบถามห้องว่าง การจอง การเข้าพักระยะยาว กลุ่ม พาร์ตเนอร์ หรือเรื่องอื่น ๆ ใช้แบบฟอร์มด้านล่างได้เลย",
   contactSubjectCatering: "เข้าพักระยะยาวและกลุ่ม",
   reserveCta: "ตรวจสอบห้องว่าง",
   reservationPageKicker: "การเข้าพัก",
@@ -1130,7 +1128,7 @@ registry.ja.lodging = {
   aboutImageAlt: "私たちの宿について",
   ctaTitle: "私たちの宿に泊まる。",
   ctaRoute: "",
-  contactSubtitle: "空室状況やご予約は各施設のページをご確認ください。長期滞在、団体、提携、その他のお問い合わせは下記フォームをご利用ください。",
+  contactSubtitle: "空室状況、ご予約、長期滞在、団体、提携、その他のお問い合わせは下記フォームをご利用ください。",
   contactSubjectCatering: "長期滞在・団体",
   reserveCta: "空室を確認する",
   reservationPageKicker: "ご宿泊",
@@ -1167,8 +1165,7 @@ registry.vi.lodging = {
   aboutImageAlt: "Về chỗ nghỉ của chúng tôi",
   ctaTitle: "Hãy đến nghỉ cùng chúng tôi.",
   ctaRoute: "",
-  contactSubtitle:
-    "Để xem phòng trống hoặc đặt chỗ, hãy vào trang của chỗ nghỉ; với lưu trú dài ngày, đoàn khách, hợp tác hoặc việc khác, hãy dùng biểu mẫu bên dưới.",
+  contactSubtitle: "Để hỏi về phòng trống, đặt chỗ, lưu trú dài ngày, đoàn khách, hợp tác hoặc việc khác, hãy dùng biểu mẫu bên dưới.",
   contactSubjectCatering: "Lưu trú dài ngày & đoàn khách",
   reserveCta: "Xem phòng trống",
   reservationPageKicker: "Lưu trú",
