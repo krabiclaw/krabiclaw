@@ -101390,12 +101390,13 @@
     },
     {
       "slug": "manage-your-bookings",
-      "contentHash": "sha256:6abd60a05d677de1e77e31ae7ec0cb8bcf186aa95f5bef14b0fc04f1dd8e4202",
+      "contentHash": "sha256:f8e3dd308acf1f5f0158dc0f19feeb628231a0ce4ef982afe5dd2da97d58992d",
       "toolContracts": {
         "cancel_product_booking": "sha256:09fbbd2f3d89627aa78eb5b60d27b5e949edc7b8304b610422045cf5a89671a1",
         "confirm_product_booking": "sha256:30124315590810ca4e7e259836063d2878e2b2503acc6045b0525ca4daff8c33",
         "create_product_booking": "sha256:8aa4d7188344f54de6be6fa3574f5d3736a8d9dc6f9736c9831d927aec10e36d",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
+        "get_member_scheduling": "sha256:fe4a81a1b928b2e8ea93577b47cbbdb67be60a83586b5d57dec9524322bbd6fd",
         "get_product_booking": "sha256:1b6cb2d27c6bd3a8d7da1e8005e855af9c053bd84303d29df9a8705c56e61611",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_product_bookings": "sha256:ea80e0cc56ffb5b12058725b9644f50e50af6191c4a44493fb0be538224d7373",
@@ -101404,12 +101405,13 @@
         "reject_product_booking": "sha256:557fcf98b488029ac8081da295552e9ee2569dfc54a0ba561418a5ca7b8492d4",
         "replace_product_weekly_schedule": "sha256:d4f5ba8f99874961aa0d9cb91f22c8ef2b640aeeeff6a52fc8e7ed758fbf4ae2",
         "request_product_booking_change": "sha256:da50fa96ac71952ddaa8d3097a319ae2965b6e0ec0a3b52208b22cc5f6d95025",
+        "set_member_scheduling": "sha256:4917424bba3a8e887e87f7af783ae042161e738962e5e4b02c9d21b1ae946134",
         "update_product_session": "sha256:719c480fb7c4436732bfe437c820b50e4f7b37a2b23f6aa7e0634bbaf62ea776"
       }
     },
     {
       "slug": "add-photos-and-video",
-      "contentHash": "sha256:9d16ddc56925b1d58a072e2a1ae039700215487605c387937a1e63bb7775ceba",
+      "contentHash": "sha256:12d4c163d18a26ef149addaaf3ee345df1a5db52168d3c611513a27dfcbded2c",
       "toolContracts": {
         "attach_media": "sha256:010b4cb1cd55f355ae72e255d70c3f17cecb18a68daf4345dee1774638635a7b",
         "delete_media_asset": "sha256:7cd7618939616504dc9e0ec08771cc009b09671c40b69c23485dfb172b18ec2e",
@@ -101423,7 +101425,7 @@
     },
     {
       "slug": "publish-a-post",
-      "contentHash": "sha256:c8b250c2642317093c97983a0505762b5ba4d37bf5f395ef67bb2d83baeddad2",
+      "contentHash": "sha256:20b71a412abc2f5b707463326e643c5f540dba815c168559b15c3aa3274e44f2",
       "toolContracts": {
         "create_blog_post": "sha256:cf92662971e7d7f4055421b6f4df9f525e1ec18cd033d9ce88593d512e9d8f10",
         "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
@@ -101438,7 +101440,7 @@
     },
     {
       "slug": "handle-inquiries-and-reservation-requests",
-      "contentHash": "sha256:4730a49a52762902a23f8ca467acb86950ede621c3361b128e9e6027d8d4f5c1",
+      "contentHash": "sha256:27751690ab146ffab5ac13e86599c4174da482da631772f3935269e00273de77",
       "toolContracts": {
         "cancel_table_reservation": "sha256:671384fbe0abd846ad44296506d6acbb68fab9adeaecd53802aa98d9619a74c3",
         "create_table_reservation": "sha256:412c62d5987f89d7d7c7bf57ac2038c65f4101181bb4762341e0a937766c948b",
