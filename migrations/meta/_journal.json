@@ -5,43 +5,8 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1791865105773,
+      "when": 1791974143539,
       "tag": "0000_baseline",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1791889229474,
-      "tag": "0001_authored_contact_sections",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1791890267344,
-      "tag": "0002_retire_oauth_client_public",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1791891258972,
-      "tag": "0003_require_team_member_created_at",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1791961135919,
-      "tag": "0004_google_ads_integration_provider",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1791962476390,
-      "tag": "0005_organization_invite_links",
       "breakpoints": true
     }
   ]

@@ -209,6 +209,8 @@ export const TARGET_INVARIANT_QUERIES = {
   // Every Product is buyable: at least one variant. SQL cannot express this as
   // a constraint without making inserts circular, so it is audited here.
   every_product_has_a_variant: 'SELECT p.id FROM products p WHERE NOT EXISTS (SELECT 1 FROM product_variants v WHERE v.product_id = p.id)',
+  // A place to stay is at one location with house rules; the kind alone is not a home.
+  every_home_has_house_rules: "SELECT p.id FROM products p WHERE p.kind = 'stay' AND NOT EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = p.organization_id AND c.product_id = p.id)",
   // A location-scoped price belongs to a product that location actually offers.
   price_location_scope: `SELECT p.id FROM prices p WHERE p.location_id IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM product_variants v JOIN product_locations pl ON pl.product_id = v.product_id AND pl.location_id = p.location_id
@@ -459,7 +461,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     let sourceFiles = files
     assert(ledger.length > 0, 'Source migration ledger is missing')
     let recognized = false
-    for (const directory of [MIGRATIONS_DIRECTORY, 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11', 'migrations-history/v10', 'migrations-history/v9', 'migrations-history/v8', 'migrations-history/v7']) {
+    for (const directory of [MIGRATIONS_DIRECTORY, 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11', 'migrations-history/v10', 'migrations-history/v9', 'migrations-history/v8', 'migrations-history/v7']) {
       const candidates = readdirSync(resolve(directory)).filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort()
       if (ledger.length > candidates.length || !ledger.every((name, index) => name === candidates[index])) continue
       const expected = new Database(':memory:')
@@ -562,13 +564,13 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       stage.exec(normalizedTable)
     }
     // An older archived chain reaches v11 through v11's forward migrations, which the v12 baseline absorbed.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v11').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v11', name), 'utf8'))
       }
     }
     // An older archived chain reaches v12 through v12's forward migrations, which the v13 baseline absorbed.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v12').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v12', name), 'utf8'))
       }
@@ -587,7 +589,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // start empty; existing booking commitments and source languages keep every
     // recorded fact. The new nullable fields stay unknown until an owner sets
     // them or a native financial event supplies its actual billing basis.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v13').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v13', name), 'utf8'))
       }
@@ -616,7 +618,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     }
     // v15 relaxes the calendar group CHECK only. Older chains still pass
     // through v14's canonical content data migration before the exact copy.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v15', 'migrations-history/v14'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v14').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v14', name), 'utf8'))
       }
@@ -655,6 +657,15 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
         WHERE location_id IS NULL`).run().changes
       const rules = stage.prepare('DELETE FROM product_availability_rules WHERE location_id IS NULL').run().changes
       manifest.transforms.push({ name: 'online_offerings_held_by_providers', changes: held + assigned + detached + rules })
+    }
+    // v17 absorbs v16's deployed forward chain (authored contact sections, the
+    // retired public OAuth flag, team member times, the Google Ads provider and
+    // invite links). Older chains pass through it before the exact copy; a v16
+    // source already ran its pending ones above.
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v16'].includes(sourceDirectory)) {
+      for (const name of readdirSync('migrations-history/v16').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
+        stage.exec(readFileSync(resolve('migrations-history/v16', name), 'utf8'))
+      }
     }
     if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
       for (const name of files.slice(1)) stage.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8'))

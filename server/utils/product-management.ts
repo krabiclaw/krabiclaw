@@ -33,6 +33,7 @@ import type {
   Product,
   ProductOption,
   ProductSource,
+  ProductStayConfig,
   ProductVariant,
   ProductVariantInput,
   ProductVariantPatchInput,
@@ -67,7 +68,13 @@ const MAX_SLUG_SUFFIX_ATTEMPTS = 100
 
 /** Coarse publication gate; public catalogue readers also require booking readiness. */
 export const PUBLIC_PRODUCT_SQL = `pub.published = 1 AND (p.kind <> 'experience' OR NULLIF(trim(p.order_url), '') IS NOT NULL
-  OR EXISTS (SELECT 1 FROM product_booking_configs cfg WHERE cfg.product_id = p.id AND cfg.organization_id = p.organization_id AND cfg.duration_minutes > 0))`
+  OR EXISTS (SELECT 1 FROM product_booking_configs cfg WHERE cfg.product_id = p.id AND cfg.organization_id = p.organization_id AND cfg.duration_minutes > 0))
+  AND (p.kind <> 'stay' OR NULLIF(trim(p.order_url), '') IS NOT NULL)`
+
+/** Guests book a place to stay through its external booking link until Krabiclaw takes direct stays. */
+function assertStayPublishable(product: { kind: ProductKind; order_url: string | null }): void {
+  if (product.kind === 'stay' && !product.order_url?.trim()) conflict('Add the link where guests book this place to stay before publishing it')
+}
 
 type Row = Record<string, unknown>
 
@@ -124,6 +131,7 @@ function mapProductRow(row: Row): Product {
     locations: [],
     collections: [],
     booking: null,
+    stay: null,
     page: null,
     image: null,
     gallery: [],
@@ -200,6 +208,8 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
       WHERE organization_id = ? AND row_role = 'root' AND kind = 'page' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
+    { query: `SELECT product_id, location_id, check_in_time, check_out_time, max_guests, min_nights, assigned_member_id, assigned_team_id FROM product_stay_configs
+      WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
   ], { operation: 'Hydrate products' })
   const rowsAt = (index: number): Row[] => (batched[index] as { results?: Row[] })?.results ?? []
   const optionRows = rowsAt(0)
@@ -212,6 +222,15 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
   const collectionRows = rowsAt(7)
   const bookingRows = rowsAt(8)
   const pageRows = rowsAt(9)
+  for (const row of rowsAt(10)) {
+    const product = byId.get(String(row.product_id))
+    if (product) product.stay = {
+      location_id: String(row.location_id), check_in_time: String(row.check_in_time), check_out_time: String(row.check_out_time),
+      max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
+      assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
+      assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
+    }
+  }
   for (const row of pageRows) {
     const product = byId.get(String(row.product_id))
     if (product) product.page = { id: String(row.id), path: String(row.path), title: String(row.title) }
@@ -632,6 +651,42 @@ interface PlannedProduct {
   variants: PlannedVariant[]
   details: Record<string, ProductDetailValue>
   source: ProductSource
+  stay: ProductStayConfig | null
+}
+
+const STAY_TIME = /^([01]\d|2[0-3]):[0-5]\d$/
+
+/** A place to stay is priced per night; no other unit describes its base rate. */
+function stayUnitLabel(kind: ProductKind, unitLabel: string | null): string | null {
+  if (kind !== 'stay') return unitLabel
+  if (unitLabel !== null && unitLabel !== 'night') invalid('A place to stay is priced per night')
+  return 'night'
+}
+
+/** A place to stay is at one location of this organization, with house rules the calendar and channels enforce. */
+async function planStayConfig(db: DbClient, organizationId: string, kind: ProductKind, value: unknown): Promise<ProductStayConfig | null> {
+  if (kind !== 'stay') {
+    if (value !== undefined && value !== null) invalid('Only a place to stay takes stay settings')
+    return null
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) invalid('A place to stay needs its location, check-in and check-out times and maximum guests')
+  const stay = value as Record<string, unknown>
+  const locationId = typeof stay.location_id === 'string' ? stay.location_id.trim() : ''
+  if (!locationId) invalid('stay.location_id is required')
+  for (const field of ['check_in_time', 'check_out_time'] as const) {
+    if (typeof stay[field] !== 'string' || !STAY_TIME.test(stay[field] as string)) invalid(`stay.${field} must be a 24-hour HH:MM time`)
+  }
+  const maxGuests = stay.max_guests
+  if (typeof maxGuests !== 'number' || !Number.isInteger(maxGuests) || maxGuests < 1 || maxGuests > 99) invalid('stay.max_guests must be a whole number from 1 to 99')
+  const minNights = stay.min_nights ?? 1
+  if (typeof minNights !== 'number' || !Number.isInteger(minNights) || minNights < 1 || minNights > 365) invalid('stay.min_nights must be a whole number from 1 to 365')
+  const location = await queryFirst<{ id: string }>(db, 'SELECT id FROM business_locations WHERE organization_id = ? AND id = ?', [organizationId, locationId])
+  if (!location) notFound('That location is not in this organization')
+  const assignedMemberId = stay.assigned_member_id ?? null
+  const assignedTeamId = stay.assigned_team_id ?? null
+  if (assignedMemberId !== null && (typeof assignedMemberId !== 'string' || !await queryFirst(db, 'SELECT 1 FROM member WHERE organizationId = ? AND id = ?', [organizationId, assignedMemberId]))) notFound('stay.assigned_member_id is not a member of this organization')
+  if (assignedTeamId !== null && (typeof assignedTeamId !== 'string' || !await queryFirst(db, 'SELECT 1 FROM team WHERE organizationId = ? AND id = ?', [organizationId, assignedTeamId]))) notFound('stay.assigned_team_id is not a team of this organization')
+  return { location_id: locationId, check_in_time: stay.check_in_time as string, check_out_time: stay.check_out_time as string, max_guests: maxGuests, min_nights: minNights, assigned_member_id: assignedMemberId as string | null, assigned_team_id: assignedTeamId as string | null }
 }
 
 async function assertBookableOffering(db: DbClient, organizationId: string, product: PlannedProduct, locationId: string | null): Promise<void> {
@@ -826,7 +881,7 @@ async function planProduct(
     description: normalizeOptionalProductString(input.description, 'description', PRODUCT_LIMITS.description) ?? '',
     active: input.active ?? true,
     order_url: validateProductOrderUrl(input.order_url),
-    unit_label: validateProductUnitLabel(input.unit_label),
+    unit_label: stayUnitLabel(kind, validateProductUnitLabel(input.unit_label)),
     marketing_features: validateProductMarketingFeatures(input.marketing_features),
     metadata: validateProductMetadata(input.metadata),
     tax_code: normalizeOptionalProductString(input.tax_code, 'tax_code', PRODUCT_LIMITS.taxCode),
@@ -835,6 +890,7 @@ async function planProduct(
     kind,
     details: validateProductDetails(kind, input.details ?? {}),
     source: input.source ?? 'manual',
+    stay: await planStayConfig(db, organizationId, kind, input.stay),
   }
 }
 
@@ -875,6 +931,25 @@ function productWrites(
       JSON.stringify(planned.metadata), planned.tax_code, planned.source, planned.kind, JSON.stringify(planned.details), now,
       ...(options.expectedUpdatedAt === undefined ? [] : [organizationId, planned.id, options.expectedUpdatedAt]), now, actor.actorId, actor.actorId],
   }]
+
+  if (planned.stay) {
+    // The location relationship first: the house rules name it, so a home's one
+    // location is the relationship its config holds.
+    writes.push({
+      query: `INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_at, updated_at, created_by, updated_by)
+               VALUES (?, ?, ?, 1, 0, ?, ?, ?, ?) ON CONFLICT (product_id, location_id) DO NOTHING`,
+      params: [organizationId, planned.id, planned.stay.location_id, now, now, actor.actorId, actor.actorId],
+    }, {
+      query: `INSERT INTO product_stay_configs (product_id, organization_id, location_id, check_in_time, check_out_time, max_guests, min_nights, assigned_member_id, assigned_team_id, created_at, updated_at, created_by, updated_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT (product_id) DO UPDATE SET check_in_time = excluded.check_in_time, check_out_time = excluded.check_out_time,
+                 max_guests = excluded.max_guests, min_nights = excluded.min_nights, assigned_member_id = excluded.assigned_member_id,
+                 assigned_team_id = excluded.assigned_team_id, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+               WHERE product_stay_configs.organization_id = excluded.organization_id AND product_stay_configs.location_id = excluded.location_id`,
+      params: [planned.id, organizationId, planned.stay.location_id, planned.stay.check_in_time, planned.stay.check_out_time,
+        planned.stay.max_guests, planned.stay.min_nights, planned.stay.assigned_member_id, planned.stay.assigned_team_id, now, now, actor.actorId, actor.actorId],
+    })
+  }
 
   for (const option of options.writeOptions === false ? [] : planned.options) {
     writes.push({
@@ -1036,6 +1111,7 @@ export async function createProduct(db: DbClient, input: {
     writes.push(...await prepareProductBookingSetup(db, { organizationId: input.organizationId, productId: planned.id, actorId: input.actor.actorId, env: input.booking.env, now, booking: input.booking.data, productInSameBatch: true }))
   }
   if (input.publication?.published && planned.kind === 'experience' && !input.booking && !planned.order_url) invalid('Provide booking details or an external booking destination before publishing an experience')
+  if (input.publication?.published) assertStayPublishable(planned)
   const page = await prepareProductPageCreate(db, { organizationId: input.organizationId, product: planned, actor: input.actor, page: pageInput, env })
   if (page) writes.push(...page.queries)
   if (input.publication && input.organizationId) {
@@ -1289,7 +1365,9 @@ async function planProductUpdate(db: DbClient, input: {
     })),
     variants,
     details: { featured: current.details.featured ?? false, ...(patch.details ?? current.details) },
+    stay: current.stay ? { ...current.stay, ...patch.stay } : patch.stay as CreateProductInput['stay'],
   }
+  if ((current.kind === 'stay') !== (merged.kind === 'stay')) invalid('A place to stay keeps its kind, and another kind cannot become one; create a new place to stay instead')
   const planned = await planProduct(db, organizationId, merged, {
     organizationId: input.organizationId, existingId: productId, defaultCurrency: input.defaultCurrency,
     takenSlugs: input.takenSlugs, idOwners: input.idOwners, knownSlugs: input.knownSlugs,
@@ -1300,6 +1378,7 @@ async function planProductUpdate(db: DbClient, input: {
   planned.source = current.source
   assertVariantPricesConsistent(planned)
 
+  if (current.publications.some(publication => publication.organization_id === organizationId && publication.published)) assertStayPublishable(planned)
   const guardPublication = !input.booking && planned.kind === 'experience' && !planned.order_url
   let readiness: Awaited<ReturnType<typeof productBookingReadiness>> | undefined
   if (guardPublication && current.publications.some(publication => publication.organization_id === organizationId && publication.published)) {
@@ -1516,10 +1595,10 @@ export async function deleteProduct(db: DbClient, input: {
   // off both would go with them — silently for a booking with no thread, and
   // as a raw foreign-key error for one that has a thread holding it.
   const booked = await queryFirst<{ n: number }>(db, `
-    SELECT count(*) AS n FROM bookings WHERE organization_id = ? AND product_id = ?
-  `, [input.organizationId, input.productId])
+    SELECT (SELECT count(*) FROM bookings WHERE organization_id = ? AND product_id = ?) + (SELECT count(*) FROM stays WHERE organization_id = ? AND product_id = ?) AS n
+  `, [input.organizationId, input.productId, input.organizationId, input.productId])
   if ((booked?.n ?? 0) > 0) {
-    conflict('This product has bookings. Cancel them, or turn the product off instead of deleting it.')
+    conflict('This product has bookings or stays. Cancel them, or turn the product off instead of deleting it.')
   }
   if (await queryFirst(db, "SELECT 1 FROM payment_checkout_holds WHERE organization_id=? AND product_id=? AND status='active' AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') LIMIT 1", [input.organizationId, input.productId])) {
     conflict('This product has an active checkout. Turn it off instead of deleting it.')
@@ -1528,13 +1607,14 @@ export async function deleteProduct(db: DbClient, input: {
   const invalidations = await productCacheInvalidations(db, input.organizationId, input.productId, 'product_deleted')
   await executeBatch(db, [
     { query: `UPDATE products SET updated_at=NULL WHERE organization_id=? AND id=? AND (EXISTS(SELECT 1 FROM bookings WHERE organization_id=? AND product_id=?)
-      OR EXISTS(SELECT 1 FROM payment_checkout_holds WHERE organization_id=? AND product_id=? AND status='active' AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')))`, params: [input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId] },
+      OR EXISTS(SELECT 1 FROM stays WHERE organization_id=? AND product_id=?)
+      OR EXISTS(SELECT 1 FROM payment_checkout_holds WHERE organization_id=? AND product_id=? AND status='active' AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')))`, params: [input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId] },
     ...pages.flatMap(page => page.queries),
     ...resourceLocalizationDeletionQueries('product', { query: 'SELECT ?', params: [input.productId] }),
     ...invalidations,
     { query: 'DELETE FROM products WHERE organization_id = ? AND id = ?', params: [input.organizationId, input.productId] },
   ], { operation: 'Delete product' }).catch(error => {
-    if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) conflict('This product received a booking or checkout while you were deleting it. Turn it off instead of deleting it.')
+    if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) conflict('This product received a booking, stay or checkout while you were deleting it. Turn it off instead of deleting it.')
     throw error
   })
 }
@@ -1625,6 +1705,7 @@ export async function setProductPublication(db: DbClient, input: {
   organizationId: string; productId: string; published: boolean; actor: Actor; env?: CloudflareEnv
 }): Promise<void> {
   const product = await requireOrganizationProduct(db, input)
+  if (input.published) assertStayPublishable(product)
   let readiness: Awaited<ReturnType<typeof productBookingReadiness>> | undefined
   let alreadyPublished = false
   if (input.published && (product.kind === 'experience' || product.booking)) {
@@ -1659,6 +1740,7 @@ export async function setProductLocation(db: DbClient, input: {
   const organization = await queryFirst<{ organization_id: string }>(db, 'SELECT organization_id FROM business_locations WHERE organization_id = ? AND id = ?', [input.organizationId, input.locationId])
   if (!organization) notFound('Location not found')
   const product = await requireOrganizationProduct(db, input)
+  if (product.stay && product.stay.location_id !== input.locationId) conflict('A place to stay is at exactly one location')
   const currentLocation = product.locations.find(location => location.location_id === input.locationId)
   const expectedProductUpdatedAt = product.updated_at
   const location = { location_id: input.locationId, active: input.active ?? currentLocation?.active ?? true, published: input.published ?? currentLocation?.published ?? true }
@@ -1692,6 +1774,8 @@ export async function removeProductLocation(db: DbClient, input: {
 }): Promise<void> {
   const organization = await queryFirst<{ organization_id: string }>(db, 'SELECT organization_id FROM business_locations WHERE organization_id = ? AND id = ?', [input.organizationId, input.locationId])
   if (!organization) notFound('Location not found')
+  const home = await queryFirst<{ product_id: string }>(db, 'SELECT product_id FROM product_stay_configs WHERE organization_id = ? AND product_id = ? AND location_id = ?', [input.organizationId, input.productId, input.locationId])
+  if (home) conflict('A place to stay cannot leave the location it is at; delete the place to stay instead')
   await executeBatch(db, [
     { query: 'DELETE FROM product_locations WHERE organization_id = ? AND product_id = ? AND location_id = ?', params: [input.organizationId, input.productId, input.locationId] },
     publicResourceCacheInvalidationQuery(input.organizationId, 'product_location_changed'),

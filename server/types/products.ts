@@ -61,6 +61,21 @@ export interface Collection {
 /** What generating this product's occurrences starts from. Sessions keep their own. */
 export type ProductBookingConfig = Pick<import('~/server/utils/availability').ProductBookingConfigRecord, 'duration_minutes' | 'default_capacity' | 'confirmation_mode' | 'online_payment_required' | 'held_online' | 'scheduling_mode' | 'assigned_member_id' | 'assigned_team_id'>
 
+/**
+ * A place to stay: the one location it is at and its house rules. Times are
+ * local HH:MM in that location's timezone.
+ */
+export interface ProductStayConfig {
+  location_id: string
+  check_in_time: string
+  check_out_time: string
+  max_guests: number
+  min_nights: number
+  /** Who looks after the home: their stays are what an assigned member sees. */
+  assigned_member_id: string | null
+  assigned_team_id: string | null
+}
+
 /** Membership of one product in one collection, carrying its position there. */
 export interface CollectionMembership {
   collection_id: string
@@ -104,6 +119,8 @@ export interface Product {
    * bookable or about the defaults its sessions are generated from.
    */
   booking: ProductBookingConfig | null
+  /** Non-null exactly when this product is a place to stay (kind `stay`). */
+  stay: ProductStayConfig | null
   /**
    * The source page this product owns, or null when it has none. The binding
    * is the page's root `product_id`; translations inherit it. A product's
@@ -161,6 +178,8 @@ export interface CreateProductInput {
   variants?: ProductVariantInput[]
   details?: ProductDetails
   source?: ProductSource
+  /** Required for kind `stay` and refused for every other kind. */
+  stay?: ProductStayConfig
 }
 
 /** Existing identities accept partial fields; a new entry must supply its required fields. */
@@ -170,7 +189,9 @@ export type ProductVariantPatchInput = Omit<Partial<ProductVariantInput>, 'price
   prices_mode?: 'merge' | 'replace'
 }
 
-export type UpdateProductInput = Partial<Omit<CreateProductInput, 'source' | 'variants'>> & {
+export type UpdateProductInput = Partial<Omit<CreateProductInput, 'source' | 'variants' | 'stay'>> & {
+  /** House rules to change. The location a home is at is fixed when it is created. */
+  stay?: Partial<Omit<ProductStayConfig, 'location_id'>>
   variants?: ProductVariantPatchInput[]
   /** Merge preserves unmentioned variants. Replace removes variants omitted from the supplied list. */
   variants_mode?: 'merge' | 'replace'

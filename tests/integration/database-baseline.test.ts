@@ -422,3 +422,37 @@ test('snapshot payload preserves destination signing keys for refreshes and carr
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('a v16 export transfers into the v17 baseline unchanged, which admits places to stay', async () => {
+  const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
+  const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-v16-transfer-'))
+  const v16 = JSON.parse(readFileSync('migrations-history/v16/meta/_journal.json', 'utf8')).entries.map((entry: { tag: string }) => `${entry.tag}.sql`) as string[]
+  try {
+    const sourcePath = join(directory, 'v16.sqlite')
+    const source = new Database(sourcePath)
+    for (const file of v16) source.exec(readFileSync(`migrations-history/v16/${file}`, 'utf8'))
+    source.exec(`CREATE TABLE "d1_migrations"(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);
+      ${v16.map(file => `INSERT INTO d1_migrations (name) VALUES ('${file}');`).join('\n')}`)
+    source.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES ('org', 'Org', 'org', 'org', 'USD', 'America/Denver')").run()
+    source.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', 'org', 'en', 1, 'published')").run()
+    source.prepare("INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES ('dish', 'org', 'dish', 'Noodles', 'noodles', 'user-1', 'user-1')").run()
+    source.prepare("INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES ('dish-default', 'org', 'dish', 'Noodles', 'user-1', 'user-1')").run()
+    source.close()
+    const targetPath = join(directory, 'v17.sqlite')
+    await transferDatabaseExport(sourcePath, targetPath, { payloadPath: join(directory, 'payload.sql') })
+    const target = new Database(targetPath)
+    try {
+      assert.deepEqual(target.pragma('foreign_key_check'), [])
+      assert.deepEqual(target.prepare("SELECT id, kind, name FROM products WHERE organization_id = 'org'").all(), [{ id: 'dish', kind: 'dish', name: 'Noodles' }])
+      for (const table of ['product_stay_configs', 'product_nights', 'stays', 'stay_nights', 'stay_payments']) {
+        assert.equal((target.prepare(`SELECT count(*) AS n FROM ${table}`).get() as { n: number }).n, 0, `${table} starts empty`)
+      }
+      target.prepare("INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES ('home', 'org', 'stay', 'Cabin', 'cabin', 'user-1', 'user-1')").run()
+      assert.throws(() => target.prepare("INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES ('boat', 'org', 'boat', 'Boat', 'boat', 'user-1', 'user-1')").run(), /products_kind_check/)
+    } finally {
+      target.close()
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

@@ -15,6 +15,7 @@ import { QA_TOOLS, handleQaTools } from './qa'
 import { REVIEWS_TOOLS, handleReviewsTools } from './reviews'
 import { ORGANIZATIONS_TOOLS, handleOrganizationsTools } from './organizations'
 import { BOOKINGS_TOOLS, handleBookingsTools } from './bookings'
+import { STAYS_TOOLS, handleStaysTools } from './stays'
 import { SUBMISSIONS_TOOLS, handleSubmissionsTools } from './submissions'
 import { HTTPError } from 'nitro';
 import type { H3Event } from 'nitro'
@@ -56,6 +57,7 @@ export const MCP_PUBLIC_TOOLS: McpToolDefinition[] = [
   ...ORGANIZATIONS_TOOLS,
   ...SUBMISSIONS_TOOLS,
   ...BOOKINGS_TOOLS,
+  ...STAYS_TOOLS,
 ].sort((a, b) => a.name.localeCompare(b.name))
 
 export const MCP_INTERNAL_TOOLS: McpToolDefinition[] = []
@@ -122,6 +124,7 @@ export const DOMAIN_HANDLERS: Record<string, (_ctx: McpExecutorContext) => Promi
   organizations: handleOrganizationsTools,
   submissions: handleSubmissionsTools,
   bookings: handleBookingsTools,
+  stays: handleStaysTools,
 }
 
 export async function executeMcpToolCall(

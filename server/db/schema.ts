@@ -393,7 +393,7 @@ export const products = sqliteTable("products", {
 	unique("products_org_slug_unique").on(table.organization_id, table.slug),
 	check("products_name_not_blank_check", sql`trim(name) <> ''`),
 	check("products_slug_check", sql`slug <> '' AND slug = lower(slug) AND slug NOT GLOB '*[^a-z0-9-]*' AND slug NOT LIKE '-%' AND slug NOT LIKE '%-' AND slug NOT LIKE '%--%'`),
-	check("products_kind_check", sql`kind IN ('dish', 'experience', 'service', 'item')`),
+	check("products_kind_check", sql`kind IN ('dish', 'experience', 'service', 'item', 'stay')`),
 	check("products_active_check", sql`active IN (0, 1)`),
 	check("products_marketing_features_check", sql`json_valid(marketing_features) AND json_type(marketing_features) = 'array'`),
 	check("products_details_json_check", sql`json_valid(details_json) AND json_type(details_json) = 'object'`),
@@ -633,6 +633,8 @@ export const product_locations = sqliteTable("product_locations", {
 	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [products.organization_id, products.id], name: "product_locations_product_scope_fk" }).onDelete("cascade"),
 	foreignKey({ columns: [table.organization_id, table.location_id], foreignColumns: [business_locations.organization_id, business_locations.id], name: "product_locations_location_scope_fk" }).onDelete("cascade"),
 	index("product_locations_location_idx").on(table.location_id, table.published, table.active),
+	// Parent key for product_stay_configs: a home names its one location relationship.
+	uniqueIndex("product_locations_org_product_location_unique").on(table.organization_id, table.product_id, table.location_id),
 	check("product_locations_active_check", sql`active IN (0, 1) AND published IN (0, 1)`),
 ]);
 
@@ -1045,6 +1047,203 @@ export const reservations = sqliteTable("reservations", {
 	check("reservations_interval_check", sql`ends_at > starts_at`),
 	check("reservations_party_size_check", sql`party_size > 0`),
 	check("reservations_timezone_check", sql`timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'`),
+]);
+
+// ---------------------------------------------------------------------------
+// Places to stay.
+//
+// A home is a Product of kind `stay` at exactly one location: the location is
+// the place (address, timezone, team), the Product is what a guest books, and
+// its default variant's price is the base nightly rate. Nights are calendar
+// dates in the location's timezone; a stay holds the half-open range
+// [check_in_date, check_out_date). Overnight stays are not product_sessions:
+// a session is one instant range with seats, a stay is a run of whole nights.
+// Read/write: server/domain/stays.ts, and nothing else.
+// ---------------------------------------------------------------------------
+
+// Row meaning: this Product is a home at this location, with these house rules.
+// The composite key to product_locations is what makes "exactly one location"
+//   true in SQL: the config names the one relationship, and the relationship
+//   cannot be removed while the config names it.
+// Times are local wall-clock HH:MM in the location's timezone.
+// Assignment: the member or team who look after the home (cleaning,
+//   turnovers). Members with assigned-operations access read this home's stays
+//   and nothing else; NULL means only organization-wide roles do.
+// Deletion: cascades from Product; refused while stays exist (see stays).
+export const product_stay_configs = sqliteTable("product_stay_configs", {
+	product_id: text().primaryKey(),
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	location_id: text().notNull(),
+	check_in_time: text().notNull(),
+	check_out_time: text().notNull(),
+	max_guests: integer().notNull(),
+	min_nights: integer().default(1).notNull(),
+	assigned_member_id: text(),
+	assigned_team_id: text().references(() => team.id, { onDelete: "set null" }),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+	created_by: text().notNull(),
+	updated_by: text().notNull(),
+}, (table) => [
+	check("product_stay_configs_instants_check", sql`(created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
+	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [products.organization_id, products.id], name: "product_stay_configs_product_scope_fk" }).onDelete("cascade"),
+	foreignKey({ columns: [table.organization_id, table.product_id, table.location_id], foreignColumns: [product_locations.organization_id, product_locations.product_id, product_locations.location_id], name: "product_stay_configs_location_scope_fk" }).onDelete("no action"),
+	foreignKey({ columns: [table.organization_id, table.assigned_team_id], foreignColumns: [team.organizationId, team.id], name: "product_stay_configs_team_scope_fk" }).onDelete("no action"),
+	unique("product_stay_configs_org_product_unique").on(table.organization_id, table.product_id),
+	check("product_stay_configs_times_check", sql`check_in_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_time < '24:00' AND check_out_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_out_time < '24:00'`),
+	check("product_stay_configs_guests_check", sql`max_guests >= 1`),
+	check("product_stay_configs_min_nights_check", sql`min_nights >= 1`),
+]);
+
+// Row meaning: the host (or an imported channel calendar) set this night apart
+//   from the home's defaults. Absence of a row is the default: open, at the
+//   base nightly price, with the home's minimum stay.
+// A night is bookable when it is not closed and no stay_nights row claims it;
+//   occupancy is never stored here.
+// price_minor NULL means the base nightly price applies.
+// `source`: 'host' (edited in Krabiclaw) or 'import' (read from a channel when
+//   the home was connected).
+// Deletion: cascades from the home.
+export const product_nights = sqliteTable("product_nights", {
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	product_id: text().notNull(),
+	date: text().notNull(),
+	closed: integer({ mode: "boolean" }).default(false).notNull(),
+	price_minor: integer(),
+	min_stay_arrival: integer(),
+	min_stay_through: integer(),
+	max_stay: integer(),
+	closed_to_arrival: integer({ mode: "boolean" }).default(false).notNull(),
+	closed_to_departure: integer({ mode: "boolean" }).default(false).notNull(),
+	source: text().$type<'host' | 'import'>().notNull(),
+	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+	updated_by: text().notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.product_id, table.date], name: "product_nights_pk" }),
+	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "product_nights_home_scope_fk" }).onDelete("cascade"),
+	check("product_nights_date_check", sql`date(date, '+0 days') IS date`),
+	check("product_nights_flags_check", sql`closed IN (0, 1) AND closed_to_arrival IN (0, 1) AND closed_to_departure IN (0, 1)`),
+	check("product_nights_price_check", sql`price_minor IS NULL OR price_minor >= 0`),
+	check("product_nights_stay_rules_check", sql`(min_stay_arrival IS NULL OR min_stay_arrival >= 1) AND (min_stay_through IS NULL OR min_stay_through >= 1) AND (max_stay IS NULL OR max_stay >= 1)`),
+	check("product_nights_source_check", sql`source IN ('host', 'import')`),
+	check("product_nights_updated_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
+]);
+
+// Row meaning: a guest stays at this home for the nights
+//   [check_in_date, check_out_date).
+// `owner`: 'app' stays are created and edited in Krabiclaw; 'channel' stays
+//   arrive from a connected channel and are read-only here — they change only
+//   through that channel's revision feed.
+// `overbooked`: a channel stay the channel had already confirmed when it
+//   arrived, overlapping nights another stay holds. It is stored, holds no
+//   night claims, and stays flagged until a person cancels one of the stays.
+//   Only a channel stay can be overbooked; an app stay is refused instead.
+// Money: total_minor is what the stay costs in `currency`. It is not a payment;
+//   offline receipts are stay_payments, and channel-collected money is the
+//   channel's.
+// Null semantics: guest contact fields are NULL when the channel withholds
+//   them. user_id is the guest's Krabiclaw account when known. provider and
+//   its references are NULL for app stays.
+// Deletion: a stay is cancelled, not deleted. Deleting the home is refused
+//   while it has stays (NO ACTION); the organization's cascade removes both in
+//   one statement.
+export const stays = sqliteTable("stays", {
+	id: text().primaryKey(),
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	product_id: text().notNull(),
+	channel: text().$type<'airbnb' | 'vrbo' | 'direct'>().notNull(),
+	owner: text().$type<'app' | 'channel'>().notNull(),
+	status: text().$type<'pending' | 'confirmed' | 'cancelled'>().notNull(),
+	overbooked: integer({ mode: "boolean" }).default(false).notNull(),
+	check_in_date: text().notNull(),
+	check_out_date: text().notNull(),
+	arrival_time: text(),
+	adults: integer().notNull(),
+	children: integer().default(0).notNull(),
+	infants: integer().default(0).notNull(),
+	guest_name: text(),
+	guest_surname: text(),
+	guest_email: text(),
+	guest_phone: text(),
+	user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
+	total_minor: integer().notNull(),
+	currency: text().notNull(),
+	notes: text(),
+	provider: text().$type<'channex'>(),
+	external_booking_id: text(),
+	channel_booking_id: text(),
+	revision_id: text(),
+	provider_updated_at: text(),
+	idempotency_key: text(),
+	cancelled_at: text(),
+	cancellation_reason: text(),
+	version: integer().default(1).notNull(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+	created_by: text(),
+	updated_by: text(),
+}, (table) => [
+	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "stays_home_scope_fk" }).onDelete("no action"),
+	unique("stays_org_product_id_unique").on(table.organization_id, table.product_id, table.id),
+	unique("stays_org_id_unique").on(table.organization_id, table.id),
+	uniqueIndex("stays_idempotency_unique").on(table.organization_id, table.idempotency_key).where(sql`idempotency_key IS NOT NULL`),
+	uniqueIndex("stays_provider_booking_unique").on(table.provider, table.external_booking_id).where(sql`external_booking_id IS NOT NULL`),
+	index("stays_product_dates_idx").on(table.product_id, table.check_in_date, table.check_out_date),
+	index("stays_org_dates_idx").on(table.organization_id, table.check_in_date, table.status),
+	check("stays_dates_check", sql`date(check_in_date, '+0 days') IS check_in_date AND date(check_out_date, '+0 days') IS check_out_date AND check_out_date > check_in_date`),
+	check("stays_arrival_time_check", sql`arrival_time IS NULL OR (arrival_time GLOB '[0-2][0-9]:[0-5][0-9]' AND arrival_time < '24:00')`),
+	check("stays_party_check", sql`adults >= 1 AND children >= 0 AND infants >= 0`),
+	check("stays_channel_check", sql`channel IN ('airbnb', 'vrbo', 'direct')`),
+	check("stays_owner_check", sql`owner IN ('app', 'channel') AND (owner = 'channel') = (provider IS NOT NULL AND external_booking_id IS NOT NULL)`),
+	check("stays_status_check", sql`status IN ('pending', 'confirmed', 'cancelled') AND (status = 'cancelled') = (cancelled_at IS NOT NULL)`),
+	check("stays_overbooked_check", sql`overbooked IN (0, 1) AND (overbooked = 0 OR owner = 'channel')`),
+	check("stays_app_guest_check", sql`owner = 'channel' OR (guest_name IS NOT NULL AND trim(guest_name) <> '')`),
+	check("stays_money_check", sql`total_minor >= 0 AND length(currency) = 3 AND currency = upper(currency)`),
+	check("stays_provider_check", sql`provider IS NULL OR provider = 'channex'`),
+	check("stays_version_check", sql`version >= 1`),
+	check("stays_instants_check", sql`(cancelled_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', cancelled_at, '+0 days') IS cancelled_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
+]);
+
+// Row meaning: this stay holds this night at this home.
+// The primary key is the overlap guard: a night is held by at most one stay,
+//   so two concurrent writes for the same night cannot both commit. Claims are
+//   written in the same batch as the stay and deleted when it is cancelled.
+//   An overbooked or cancelled stay holds none.
+// Deletion: cascades from the stay.
+export const stay_nights = sqliteTable("stay_nights", {
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	product_id: text().notNull(),
+	date: text().notNull(),
+	stay_id: text().notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.product_id, table.date], name: "stay_nights_pk" }),
+	foreignKey({ columns: [table.organization_id, table.product_id, table.stay_id], foreignColumns: [stays.organization_id, stays.product_id, stays.id], name: "stay_nights_stay_scope_fk" }).onDelete("cascade"),
+	index("stay_nights_stay_idx").on(table.stay_id),
+	check("stay_nights_date_check", sql`date(date, '+0 days') IS date`),
+]);
+
+// Row meaning: the host recorded receiving (or, negative, refunding) this
+//   amount for an app stay outside Stripe. Not Krabiclaw-processed volume.
+// Deletion: cascades from the stay. A mistaken entry is deleted by the host.
+export const stay_payments = sqliteTable("stay_payments", {
+	id: text().primaryKey(),
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	stay_id: text().notNull(),
+	amount_minor: integer().notNull(),
+	currency: text().notNull(),
+	method: text().$type<'cash' | 'bank_transfer' | 'card_external' | 'other'>().notNull(),
+	paid_on: text().notNull(),
+	reference: text(),
+	note: text(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+	created_by: text().notNull(),
+}, (table) => [
+	foreignKey({ columns: [table.organization_id, table.stay_id], foreignColumns: [stays.organization_id, stays.id], name: "stay_payments_stay_scope_fk" }).onDelete("cascade"),
+	index("stay_payments_stay_idx").on(table.stay_id, table.paid_on),
+	check("stay_payments_amount_check", sql`amount_minor <> 0 AND length(currency) = 3 AND currency = upper(currency)`),
+	check("stay_payments_method_check", sql`method IN ('cash', 'bank_transfer', 'card_external', 'other')`),
+	check("stay_payments_paid_on_check", sql`date(paid_on, '+0 days') IS paid_on`),
+	check("stay_payments_created_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
 ]);
 
 // ---------------------------------------------------------------------------

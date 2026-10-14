@@ -50,7 +50,7 @@ const catalogPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/p
 
 // Kind is the product's own, so the filters are kinds, named the same on every
 // template. `item` is the generic kind and reads as Products.
-const KIND_FILTER_LABELS: Record<ProductKind, string> = { dish: 'Menu items', experience: 'Experiences', service: 'Services', item: 'Products' }
+const KIND_FILTER_LABELS: Record<ProductKind, string> = { dish: 'Menu items', experience: 'Experiences', service: 'Services', item: 'Products', stay: 'Places to stay' }
 const kind = computed<ProductKind | 'all'>(() => props.fixedKind ?? (PRODUCT_KINDS.includes(route.query.kind as ProductKind) ? route.query.kind as ProductKind : 'all'))
 // A filter for every kind this catalog holds; a kind nobody sells is not a choice.
 const kindFilters = computed(() => [

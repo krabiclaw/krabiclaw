@@ -203,6 +203,21 @@ const bookingSetup = {
 
 const detailObject = productDetailsSchema()
 
+const stayTime = { type: 'string', pattern: '^([01]\\d|2[0-3]):[0-5]\\d$' }
+const stayRules = {
+  check_in_time: { ...stayTime, description: 'Local 24-hour time guests may arrive from, in the location’s timezone.' },
+  check_out_time: { ...stayTime, description: 'Local 24-hour time guests leave by.' },
+  max_guests: { type: 'integer', minimum: 1, maximum: 99 },
+  min_nights: { type: 'integer', minimum: 1, maximum: 365, description: 'Default minimum nights; individual nights may set their own.' },
+  assigned_member_id: { type: ['string', 'null'], description: 'Member who looks after the home; their assigned access shows its stays.' },
+  assigned_team_id: { type: ['string', 'null'], description: 'Team who look after the home, such as cleaners.' },
+}
+const stayObject = { type: ['object', 'null'], description: 'Non-null exactly for a place to stay: its one location and house rules.', properties: { location_id: { type: 'string' }, ...stayRules },
+  required: ['location_id', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'assigned_member_id', 'assigned_team_id'] }
+const staySetup = { type: 'object', description: 'Required for kind stay and refused for every other kind: the location the home is at (fixed once created) and its house rules. Base nightly rate is the variant price.',
+  properties: { location_id: { type: 'string' }, ...stayRules }, required: ['location_id', 'check_in_time', 'check_out_time', 'max_guests'], additionalProperties: false }
+const stayPatch = { type: 'object', description: 'House rules to change on a place to stay. Its location is fixed.', properties: stayRules, additionalProperties: false }
+
 const productObject = {
   type: 'object',
   properties: {
@@ -212,6 +227,7 @@ const productObject = {
     marketing_features: { type: 'array', items: { type: 'string' } },
     metadata: { type: 'object', additionalProperties: { type: 'string' } },
     booking: bookingConfigObject,
+    stay: stayObject,
     booking_readiness: { type: ['object', 'null'], properties: { ready: { type: 'boolean' }, missing: { type: 'array', items: { type: 'string' } } }, required: ['ready', 'missing'] },
     public_url: { type: ['string', 'null'] },
     page: { type: ['object', 'null'], description: "The source page this product owns, or null. Edit its content with the site-page tools; its binding is the page's product_id.", properties: { id: { type: 'string' }, path: { type: 'string' }, title: { type: 'string' } }, required: ['id', 'path', 'title'] },
@@ -271,7 +287,7 @@ const productListResultObject = {
 
 
 const productWrite = {
-  kind: { type: 'string', enum: [...PRODUCT_KINDS], description: 'The customer-facing kind: dish, experience, service or item. Determines the allowed descriptive fields; booking and stock remain separate capabilities.' },
+  kind: { type: 'string', enum: [...PRODUCT_KINDS], description: 'The customer-facing kind: dish, experience, service, item or stay (a place to stay). Determines the allowed descriptive fields; booking and stock remain separate capabilities.' },
   name: { type: 'string' },
   description: { type: 'string' },
   active: { type: 'boolean', description: 'Enable or disable sale of this product. Independent of site and location publication.' },
@@ -318,8 +334,8 @@ export const PRODUCTS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'list_products', description: "List products carried by the selected site, published or withheld. Results include products across the site; list_location_products narrows to one location.", domain: 'products', minimumRole: 'member', inputSchema: { kind: { type: 'string', enum: [...PRODUCT_KINDS] }, featured: { type: 'boolean' }, published_only: { type: 'boolean' }, ...paginationInputSchema }, required: [], outputSchema: productListResultObject }),
   organizationTool({ name: 'list_location_products', description: 'List product identities offered at one selected location. Results are paginated; published_only narrows to published offerings. Use list_products for the whole site.', domain: 'products', minimumRole: 'admin', inputSchema: { location_id: { type: 'string' }, kind: { type: 'string', enum: [...PRODUCT_KINDS] }, featured: { type: 'boolean' }, published_only: { type: 'boolean' }, ...paginationInputSchema }, required: ['location_id'], outputSchema: productListResultObject }),
   organizationTool({ name: 'get_product', description: "Read one site product before reviewing or editing its options, variants, prices, media, publication, locations, collections, named product facts or booking defaults. Prices belong to variants; booking defaults apply to new sessions.", domain: 'products', minimumRole: 'member', inputSchema: { product_id: { type: 'string' } }, required: ['product_id'], outputSchema: productResult }),
-  organizationTool({ name: 'create_product', description: 'Add a catalog item, experience or service. Experiences need booking duration, capacity, location and actual times, or an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. Repeat the same idempotency key on retry.' , domain: 'products', minimumRole: 'admin', inputSchema: { ...productWrite, booking: bookingSetup, page: { type: 'object', description: 'A source page created with this product and bound to it, in the same write. Omit for a product without a page of its own.', properties: { ...TENANT_PAGE_METADATA_SCHEMA, path: { type: 'string', description: "The page's public path. A service may omit it to get the first free /services/<slug>." }, blocks: TENANT_PAGE_BLOCKS_SCHEMA }, required: ['title', 'blocks'], additionalProperties: false }, idempotency_key: { type: 'string', minLength: 1, maxLength: 200, description: 'Repeat the same key with the same request to get the product it created instead of a second one.' } }, required: ['name', 'kind', 'idempotency_key'], outputSchema: productResult }),
-  organizationTool({ name: 'update_product', description: 'Edit a product and return its updated record. For a price change, supply the variant ID, price ID and unit_amount. Variants and prices merge by ID; omitted entries stay. Supplied options and text details replace their current values. Booking setup also creates sessions and publishes the offering.', domain: 'products', minimumRole: 'member', inputSchema: { product_id: { type: 'string' }, ...productPatch, booking: bookingSetup, idempotency_key: { type: 'string', minLength: 1, maxLength: 200, description: 'Required with booking setup. Repeat the same key with the same request for an identical retry.' } }, required: ['product_id'], outputSchema: productResult }),
+  organizationTool({ name: 'create_product', description: 'Add a catalog item, experience, service or place to stay. Experiences need booking duration, capacity, location and actual times, or an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and house rules) and is priced per night by its variant price. Repeat the same idempotency key on retry.' , domain: 'products', minimumRole: 'admin', inputSchema: { ...productWrite, booking: bookingSetup, stay: staySetup, page: { type: 'object', description: 'A source page created with this product and bound to it, in the same write. Omit for a product without a page of its own.', properties: { ...TENANT_PAGE_METADATA_SCHEMA, path: { type: 'string', description: "The page's public path. A service may omit it to get the first free /services/<slug>." }, blocks: TENANT_PAGE_BLOCKS_SCHEMA }, required: ['title', 'blocks'], additionalProperties: false }, idempotency_key: { type: 'string', minLength: 1, maxLength: 200, description: 'Repeat the same key with the same request to get the product it created instead of a second one.' } }, required: ['name', 'kind', 'idempotency_key'], outputSchema: productResult }),
+  organizationTool({ name: 'update_product', description: 'Edit a product and return its updated record. For a price change, supply the variant ID, price ID and unit_amount. Variants and prices merge by ID; omitted entries stay. Supplied options and text details replace their current values. Booking setup also creates sessions and publishes the offering.', domain: 'products', minimumRole: 'member', inputSchema: { product_id: { type: 'string' }, ...productPatch, booking: bookingSetup, stay: stayPatch, idempotency_key: { type: 'string', minLength: 1, maxLength: 200, description: 'Required with booking setup. Repeat the same key with the same request for an identical retry.' } }, required: ['product_id'], outputSchema: productResult }),
   organizationTool({ name: 'delete_product', description: 'Delete a product and its public page. Booking history prevents deletion; pause bookings or withhold publication to retain it.', domain: 'products', minimumRole: 'admin', inputSchema: { product_id: { type: 'string' } }, required: ['product_id'], outputSchema: { type: 'object', properties: { deleted: { type: 'boolean' } }, required: ['deleted'] } }),
   organizationTool({ name: 'set_product_publication', description: "Publish or withhold a product when the user wants to change its visibility on the selected site. This setting is independent of whether the product is available for sale and of visibility at individual locations.", domain: 'products', minimumRole: 'admin', inputSchema: { product_id: { type: 'string' }, published: { type: 'boolean' } }, required: ['product_id', 'published'], outputSchema: productResult }),
   organizationTool({ name: 'set_product_location', description: "Set whether the selected location offers a product and whether it appears on that location’s website surfaces. Existing product prices do not establish a location offering.", domain: 'products', minimumRole: 'admin', inputSchema: { product_id: { type: 'string' }, location_id: { type: 'string' }, active: { type: 'boolean' }, published: { type: 'boolean' } }, required: ['product_id', 'location_id'], outputSchema: productResult }),
@@ -497,6 +513,8 @@ export async function handleProductsTools(ctx: McpExecutorContext) {
       const idempotencyKey = requiredString(args, 'idempotency_key')
       const booking = args.booking as ProductBookingSetupInput | undefined
       if (booking?.location_id) await authorizeLocation(ctx, booking.location_id)
+      const stayLocation = (args.stay as { location_id?: unknown } | undefined)?.location_id
+      if (typeof stayLocation === 'string') await authorizeLocation(ctx, stayLocation)
       const product = await createProduct(organization.db, {
         organizationId: organization.organizationId,
         env: organization.env,
