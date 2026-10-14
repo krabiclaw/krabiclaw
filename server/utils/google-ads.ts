@@ -36,7 +36,7 @@ export async function listGoogleAdsAccounts(accessToken: string, developerToken?
   }
 
   // 1. List accessible customers
-  const listResponse = await fetch('https://googleads.googleapis.com/v19/customers:listAccessibleCustomers', {
+  const listResponse = await fetch('https://googleads.googleapis.com/v25/customers:listAccessibleCustomers', {
     headers,
   })
 
@@ -57,7 +57,7 @@ export async function listGoogleAdsAccounts(accessToken: string, developerToken?
     const formattedCustomerId = formatGoogleAdsCustomerId(customerId)
 
     try {
-      const searchResponse = await fetch(`https://googleads.googleapis.com/v19/customers/${customerId}/googleAds:search`, {
+      const searchResponse = await fetch(`https://googleads.googleapis.com/v25/customers/${customerId}/googleAds:search`, {
         method: 'POST',
         headers: {
           ...headers,
