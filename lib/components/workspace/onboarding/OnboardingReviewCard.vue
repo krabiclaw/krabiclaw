@@ -70,7 +70,6 @@ const ledger = computed(() => {
       done: hasHours,
     },
   ]
-  if (state.value.flow === 'add-location') return place
   return [
     ...place,
     ...(asksForProducts.value

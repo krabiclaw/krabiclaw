@@ -5,6 +5,7 @@
     :title="day ? day.label : 'Timezone'"
     :saving="editor.saving.value"
     :disabled="editor.saveDisabled.value"
+    :save-label="editor.saveLabel.value"
     :error="editor.editorError.value ?? editor.validationMessage.value ?? ''"
     @cancel="editor.revert"
     @save="editor.save"

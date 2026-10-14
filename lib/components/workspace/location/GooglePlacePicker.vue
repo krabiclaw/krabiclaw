@@ -40,7 +40,7 @@ import { getErrorMessage } from '~/utils/errors'
 
 /**
  * The one business search for every surface that connects a location to a
- * Google place: new-site onboarding, add-location and Settings → Google Maps.
+ * Google place: new-site onboarding and Settings → Google Maps.
  *
  * It owns Google's Autocomplete (New) session. A token is minted when a search
  * starts, reused for every prediction request in it, and sent once more with

@@ -82,11 +82,15 @@ export interface LocationRecord {
   updated_at?: string;
 }
 
+/** `/locations/new` is the create level, so no location's address may be it. */
+const RESERVED_LOCATION_SLUG = "new";
+
 function toSlug(value: string) {
   const normalized = value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
+  if (normalized === RESERVED_LOCATION_SLUG) return `${normalized}-location`;
   if (normalized) return normalized;
 
   let hash = 0;

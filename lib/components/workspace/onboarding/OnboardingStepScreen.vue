@@ -84,9 +84,7 @@ import { singleTimezoneForCountry } from '~/utils/timezone'
 import type { OrganizationVertical } from '~/utils/vertical-copy'
 
 /**
- * One step of the flow, rendered. Both shells — the routed new-site flow and
- * the add-location column inside an existing site — draw their current step
- * with this, so a step looks and behaves the same in either.
+ * One step of the new-site flow, rendered.
  *
  * The screen owns the controls and nothing else: the shell owns the footer,
  * the server calls and where "next" goes.
