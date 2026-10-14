@@ -42,7 +42,8 @@ export default defineAppConfig({
     // (docs/design/airbnb-parity-audit.md). A page passes
     // `size` only where a control genuinely differs; the commit bar's Save is
     // the one `xl`. Focus is a 2px ring in the text colour, as Airbnb's is
-    // black: coral is reserved for Save and the lit tab.
+    // black. Buttons are neutral — navy in light, white in dark — and coral
+    // is left for status and selection marks.
     checkbox: { defaultVariants: { size: 'lg' } },
     inputMenu: field,
     inputNumber: field,
@@ -59,14 +60,7 @@ export default defineAppConfig({
           xl: { base: 'h-12 px-6 text-base' }
         }
       },
-      defaultVariants: { size: 'lg' },
-      compoundVariants: [
-        {
-          color: 'primary',
-          variant: 'solid',
-          class: 'text-on-primary'
-        }
-      ]
+      defaultVariants: { size: 'lg', color: 'neutral' }
     },
     // A yes/no setting. Black when on, as Airbnb's toggle is; off is the 3:1
     // field edge, because Nuxt UI's off track vanishes on the cream page.

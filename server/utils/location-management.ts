@@ -9,6 +9,8 @@ import { refreshSocialCard } from '~/server/utils/social-card'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { prepareContentDocumentDeletion } from '~/server/utils/content/documents'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
+import { organizationLocations } from '~/server/utils/billing'
+import { additionalLocationPrice, INCLUDED_LOCATIONS, isKnownRecurringPlan } from '~/shared/billing-model'
 
 type SetupEnv = CloudflareEnv;
 
@@ -217,6 +219,19 @@ export async function createLocation(
   if (!organization) return { status: 404, data: { error: 'Organization not found.' } };
   if (organization.onboarding_status !== 'active') {
     return { status: 409, data: { error: 'Finish website setup before adding another location.', code: 'ONBOARDING_INCOMPLETE' } };
+  }
+  const locations = await organizationLocations(env, db, organizationId);
+  if (locations.used >= locations.covered) {
+    return {
+      status: 402,
+      data: {
+        error: isKnownRecurringPlan(locations.plan)
+          ? `Your plan covers ${locations.covered} locations. Add a location to your plan in Billing (${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}), then create it.`
+          : `Basic includes ${INCLUDED_LOCATIONS} locations. Choose Growth or Commerce in Billing to add more.`,
+        code: 'LOCATION_LIMIT',
+        locations: { used: locations.used, covered: locations.covered },
+      },
+    };
   }
 
   const title = input.title.trim();

@@ -89,7 +89,7 @@ export interface OrganizationSettingsEditor {
   organizationId: string
   saving: Ref<boolean>
   saveDisabled: ComputedRef<boolean>
-  editorError: Ref<string | null>
+  editorError: ComputedRef<string | null>
   validationMessage: ComputedRef<string | null>
   nameCharactersRemaining: ComputedRef<number>
   descriptionCharactersRemaining: ComputedRef<number>
@@ -115,6 +115,7 @@ import EditorNavigationList, { type EditorNavigationItem } from '~/components/da
 import { isCurrencyCode } from '~/shared/currencies'
 import { ORGANIZATION_FONT_OPTIONS, isOrganizationFontPreset, resolveOrganizationFontPreset } from '~/shared/organization-fonts'
 import { parseSitePalette } from '~/shared/site-palette'
+import { getErrorMessage } from '~/utils/errors'
 import { ORIGINAL_LOGO_PRESENTATION } from '~/shared/media-placement-contract'
 
 const props = withDefaults(defineProps<{ surface?: 'brand' | 'settings' }>(), { surface: 'settings' })
@@ -243,7 +244,8 @@ function isValidUrl(value: string) {
   if (!value.trim()) return true
   try { const url = new URL(value); return url.protocol === 'http:' || url.protocol === 'https:' } catch { return false }
 }
-const dirty = computed(() => editorSignature(detailKey.value) !== originalSignature.value)
+// Nothing is a draft until settings have loaded: an unfilled form is not an edit.
+const dirty = computed(() => loadedSettings.value !== null && editorSignature(detailKey.value) !== originalSignature.value)
 const validationMessage = computed(() => {
   if (!dirty.value) return null
   switch (detailKey.value) {
@@ -310,10 +312,6 @@ function resetDraft() {
   if (loadedSettings.value) fillForm(loadedSettings.value)
   originalSignature.value = editorSignature(detailKey.value)
 }
-function errorMessage(error: unknown, fallback: string) {
-  if (error && typeof error === 'object' && 'data' in error) { const data = (error as { data?: { error?: string } }).data; if (data?.error) return data.error }
-  return error instanceof Error ? error.message : fallback
-}
 
 const settingsResourceKey = computed(() => `dashboard-organization-settings:${String(route.params.orgSlug)}`)
 const { data: settingsResource, error: settingsResourceError, refresh: refreshSettingsResource } = await useAsyncData<SettingsPageResource>(settingsResourceKey, async () => {
@@ -324,7 +322,7 @@ const { data: settingsResource, error: settingsResourceError, refresh: refreshSe
 })
 // The saved settings are what the request answered; the form is the draft seeded from each answer.
 const loadedSettings = computed(() => settingsResource.value?.settings.settings ?? null)
-const loadError = computed(() => settingsResourceError.value ? errorMessage(settingsResourceError.value, 'Failed to load organization settings') : null)
+const loadError = computed(() => settingsResourceError.value ? getErrorMessage(settingsResourceError.value, 'Failed to load organization settings') : null)
 watch(settingsResource, (resource) => {
   if (!resource) return
   fillForm(resource.settings.settings)
@@ -346,7 +344,7 @@ async function refreshSettings() {
 async function resetPalette() {
   saving.value = true
   editorError.value = null
-  try { await patchSettings({ palette: null }) } catch (error) { editorError.value = errorMessage(error, 'Failed to reset the colors') } finally { saving.value = false }
+  try { await patchSettings({ palette: null }) } catch (error) { editorError.value = getErrorMessage(error, 'Failed to reset the colors') } finally { saving.value = false }
 }
 function logoUrl(assetId: string | null) {
   return assetId ? loadedSettings.value?.media?.find(item => item.asset_id === assetId)?.public_url ?? null : null
@@ -400,14 +398,15 @@ async function saveCurrentEditor() {
         break
       }
     }
-  } catch (error) { editorError.value = errorMessage(error, 'Failed to save this setting') } finally { saving.value = false }
+  } catch (error) { editorError.value = getErrorMessage(error, 'Failed to save this setting') } finally { saving.value = false }
 }
 provide(organizationSettingsEditorKey, {
   form,
   organizationId,
   saving,
   saveDisabled,
-  editorError,
+  // A leaf opened on settings that failed to load shows why.
+  editorError: computed(() => loadError.value ?? editorError.value),
   validationMessage,
   nameCharactersRemaining,
   descriptionCharactersRemaining,

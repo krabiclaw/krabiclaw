@@ -1,6 +1,6 @@
 import { defineComponent, h, type PropType } from 'vue'
 import { ESection, EButton } from '../vue-email'
-import { light, brand, layout, font } from '../tokens'
+import { light, layout, font } from '../tokens'
 import type { NotificationAction } from '~/server/notifications/messages'
 
 const BASE = `display:block;width:100%;box-sizing:border-box;font-family:${font.body};font-size:16px;font-weight:700;line-height:1;text-decoration:none;text-align:center;padding:16px 24px;border-radius:10px`
@@ -26,7 +26,7 @@ export default defineComponent({
           ? h(EButton, {
               class: 'email-cta-primary',
               href: primary.url,
-              style: `${BASE};background:${brand.primary};color:${brand.onPrimary};border:none`,
+              style: `${BASE};background:${light.text};color:${light.surface};border:none`,
             }, () => primary.label)
           : null,
         secondary

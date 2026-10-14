@@ -297,11 +297,15 @@ async function loadPublicPageSource(
     if (mutateResponseHeaders) setHeader(event, "x-bootstrap-cache", "SKIP");
   }
 
-  const { organization } = await loadPublicBase(event, organizationId, { previewAuthorized: isPreviewAuthorized });
+  // The site row and its source locale depend only on the organization id,
+  // so they are read in one round trip rather than one after the other.
+  const [{ organization }, sourceLocale] = await Promise.all([
+    loadPublicBase(event, organizationId, { previewAuthorized: isPreviewAuthorized }),
+    getSourceLocale(db, organizationId),
+  ])
   options.signal?.throwIfAborted();
 
   const orgId = organization.id;
-  const sourceLocale = await getSourceLocale(db, orgId)
   const language = await assertPublicOrganizationLanguageEntitlement(env, db, orgId, locale ?? sourceLocale)
   const localizedLocale = language.source ? null : language.locale
   let publicLocalizations: ExactPublicLocalization[] = []

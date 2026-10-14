@@ -38,20 +38,13 @@ export const dark = {
   border: '#2C3360',
 } as const
 
-/** Brand marks keep their value in both schemes. */
+/**
+ * Coral marks, never a button: actions are monochrome like the product's,
+ * navy on light and white on dark (the light and dark text tokens above).
+ */
 export const brand = {
   /** --kc-coral */
-  primary: '#FB7461',
-  /**
-   * White, in both schemes, because that is what the product's own primary
-   * button renders — measured at rgb(245,244,251) on rgb(251,116,97). The
-   * emails had navy here, which made them the only surface that disagreed.
-   *
-   * It is a brand decision rather than a contrast-led one: white on this coral
-   * measures 2.70:1, under the 4.5:1 AA floor. The platform already ships that,
-   * so matching it keeps one answer rather than two.
-   */
-  onPrimary: '#FFFFFF',
+  primary: '#EE4237',
 } as const
 
 /**

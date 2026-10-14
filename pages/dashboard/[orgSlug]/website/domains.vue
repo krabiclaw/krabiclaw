@@ -379,7 +379,7 @@ function statusColor(status: DomainStatus) {
 
 function primaryAction(group: DomainGroup) {
   if (group.status === 'active' && group.role === 'canonical') return null
-  if (group.status === 'active') return { label: 'Make primary', icon: 'i-lucide-star', color: 'primary' as const, variant: 'soft' as const }
+  if (group.status === 'active') return { label: 'Make primary', icon: 'i-lucide-star', color: 'neutral' as const, variant: 'soft' as const }
   if (group.status === 'pending') return { label: 'Configure', icon: 'i-lucide-list-checks', color: 'neutral' as const, variant: 'soft' as const }
   if (group.status === 'verifying') return { label: 'Check now', icon: 'i-lucide-refresh-cw', color: 'neutral' as const, variant: 'soft' as const }
   if (group.status === 'failed') return { label: 'Retry', icon: 'i-lucide-rotate-cw', color: 'error' as const, variant: 'soft' as const }

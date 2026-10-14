@@ -20,7 +20,6 @@
             </div>
             <UButton
               size="sm"
-              color="primary"
               class="rounded-full"
               :disabled="targetUser.id === currentUserId"
               :loading="impersonatingUserId === targetUser.id"

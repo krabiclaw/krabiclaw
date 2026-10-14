@@ -15,7 +15,7 @@ function checkoutReturnUrls(): { successUrl: string; cancelUrl: string; returnUr
 async function organizationSubscriptionId(
   dashboardApi: ReturnType<typeof useDashboardApi>,
   organizationId: string,
-): Promise<{ id?: string; status?: string; plan: string }> {
+): Promise<{ id?: string; status?: string; plan: string; annual: boolean; locations: { used: number; covered: number } }> {
   // A business on Starter has no subscription row, so the id and status are
   // absent from the response rather than present and empty.
   type BillingStatusResponse = {
@@ -23,7 +23,9 @@ async function organizationSubscriptionId(
     billing: {
       stripeSubscriptionId?: string
       subscriptionStatus?: string
+      billingInterval?: 'month' | 'year'
       plan: string
+      locations: { used: number; covered: number }
     }
   }
   const response = await dashboardApi<BillingStatusResponse>('/api/billing/status', {
@@ -35,15 +37,26 @@ async function organizationSubscriptionId(
         && billing !== null
         && (!('stripeSubscriptionId' in billing) || billing.stripeSubscriptionId === undefined || typeof billing.stripeSubscriptionId === 'string')
         && (!('subscriptionStatus' in billing) || billing.subscriptionStatus === undefined || typeof billing.subscriptionStatus === 'string')
+        && (!('billingInterval' in billing) || billing.billingInterval === undefined || billing.billingInterval === 'month' || billing.billingInterval === 'year')
         && 'plan' in billing
         && isKnownBillingPlan(billing.plan)
+        && 'locations' in billing
+        && isLocationCount(billing.locations)
     },
   })
   return {
     id: response.billing.stripeSubscriptionId,
     status: response.billing.subscriptionStatus,
     plan: response.billing.plan,
+    annual: response.billing.billingInterval === 'year',
+    locations: response.billing.locations,
   }
+}
+
+export function isLocationCount(value: unknown): value is { used: number; covered: number } {
+  return typeof value === 'object' && value !== null
+    && 'used' in value && Number.isSafeInteger(value.used)
+    && 'covered' in value && Number.isSafeInteger(value.covered)
 }
 
 export const useOrganizationSubscription = () => {
@@ -84,6 +97,7 @@ export const useOrganizationSubscription = () => {
       plan,
       currentPlan,
       subscriptionId: subscription.id,
+      locations: Math.max(subscription.locations.used, subscription.locations.covered),
       onAction: action => {
         if (action === 'upgrade') trackSubscriptionUpgrade(plan, organizationId)
         if (action === 'downgrade' && plan !== 'free') trackSubscriptionDowngrade(plan, organizationId)
@@ -91,8 +105,37 @@ export const useOrganizationSubscription = () => {
     })
   }
 
+  // The subscription's quantity is the locations it covers. Better Auth's
+  // upgrade on the same plan sends it to Stripe's confirmation page, which shows
+  // what changes on the bill before anything does.
+  async function setPlanLocations(organizationId: string, locations: number) {
+    const subscription = await organizationSubscriptionId(dashboardApi, organizationId)
+    if (!subscription.id) throw new Error('Choose a plan before adding locations to it')
+    if (subscription.status === 'past_due') {
+      await openBillingPortal()
+      return
+    }
+    const { returnUrl } = checkoutReturnUrls()
+    const response = await authClient.subscription.upgrade({
+      plan: subscription.plan,
+      annual: subscription.annual,
+      seats: locations,
+      referenceId: organizationId,
+      subscriptionId: subscription.id,
+      customerType: 'organization',
+      returnUrl,
+      successUrl: returnUrl,
+      cancelUrl: returnUrl,
+      disableRedirect: true,
+    })
+    if (response.error) throw new Error(response.error.message ?? 'Your plan’s locations could not be changed')
+    const confirmUrl = response.data && 'url' in response.data ? response.data.url : null
+    if (!confirmUrl) throw new Error('Missing Stripe confirmation URL')
+    await navigateTo(confirmUrl, { external: true })
+  }
+
   // Forwarded so a checkout that went through with its billing analytics intent
   // unrecorded is visible to whatever renders this, rather than ending in a ref
   // nobody reads — which is the same silence in a newer place.
-  return { startOrganizationCheckout, openBillingPortal, analyticsIntentError }
+  return { startOrganizationCheckout, setPlanLocations, openBillingPortal, analyticsIntentError }
 }

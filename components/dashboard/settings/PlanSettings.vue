@@ -23,6 +23,11 @@
         </BillingPlanCard>
       </div>
     </DashboardListItemDialog>
+    <DashboardListItemDialog v-model:open="locationsOpen" title="Locations on your plan" :saving="busy" :save-disabled="!locationsChanged" :error="sheetError" save-label="Continue to Stripe" @save="saveLocations">
+      <UFormField label="Locations" :description="locationsDialogNote">
+        <UInputNumber v-model="locationsQuantity" :min="locationsMinimum" :disabled="busy" class="w-full" />
+      </UFormField>
+    </DashboardListItemDialog>
     <DashboardListItemDialog v-model:open="creditOpen" title="Verify credit note" :saving="busy" :save-disabled="!creditNote.trim()" :error="sheetError" save-label="Verify credit" @save="settleCredit">
       <UFormField label="Issued Stripe credit note ID"><UInput v-model="creditNote" placeholder="cn_…" :disabled="busy" class="w-full" /></UFormField>
     </DashboardListItemDialog>
@@ -34,7 +39,8 @@ import EditorNavigationList from '~/components/dashboard/EditorNavigationList.vu
 import type { EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import { authClient } from '~/lib/auth-client'
-import { STARTER_PLAN_ID, isKnownBillingPlan, isNewSalePlan } from '~/shared/billing-model'
+import { additionalLocationPrice, INCLUDED_LOCATIONS, STARTER_PLAN_ID, isKnownBillingPlan, isNewSalePlan } from '~/shared/billing-model'
+import { isLocationCount } from '~/composables/useOrganizationSubscription'
 import { paymentMoney } from '~/shared/payment-display'
 import { isCurrencyCode } from '~/shared/currencies'
 
@@ -43,7 +49,7 @@ const router = useRouter()
 const dashboardApi = useDashboardApi()
 const dashboard = useDashboardOrganization()
 const { trackSubscriptionCheckoutSuccess } = useAnalytics()
-const { startOrganizationCheckout } = useOrganizationSubscription()
+const { startOrganizationCheckout, setPlanLocations } = useOrganizationSubscription()
 const { plans, displayPrice } = await usePlans()
 const { formatExactDateTime } = useHumanTime()
 
@@ -53,9 +59,10 @@ const sheetError = ref('')
 const busy = ref(false)
 const choosing = ref(false)
 
-interface BillingStatus { organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; subscriptionStatus?: string; currentPeriodEnd?: string; cancelAtPeriodEnd?: boolean; scheduledPlan?: { plan: string; at: string } | null }
+interface BillingStatus { organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; subscriptionStatus?: string; currentPeriodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month' | 'year'; locations: { used: number; covered: number }; scheduledPlan?: { plan: string; at: string } | null }
 const isBillingResponse = (value: unknown): value is { success: true; billing: BillingStatus } =>
   isRecord(value) && value.success === true && isRecord(value.billing) && typeof value.billing.organizationId === 'string' && isKnownBillingPlan(value.billing.plan)
+  && isLocationCount(value.billing.locations)
   && (value.billing.scheduledPlan === undefined || value.billing.scheduledPlan === null || (isRecord(value.billing.scheduledPlan) && isKnownBillingPlan(value.billing.scheduledPlan.plan) && typeof value.billing.scheduledPlan.at === 'string'))
 const { data: billingResponse, error: billingError, refresh: refreshBilling } = await useAsyncData(
   computed(() => `dashboard-billing:${String(route.params.orgSlug || '')}`),
@@ -94,10 +101,26 @@ const planSummary = computed(() => {
   return parts.join(' · ')
 })
 
+// Stripe's phrasing: the included allowance, then the charge per additional unit.
+const locationPrice = computed(() => additionalLocationPrice(billing.value?.billingInterval))
+const locationsSummary = computed(() => {
+  const locations = billing.value?.locations
+  if (!locations) return ''
+  if (onStarter.value) return `${locations.used} of ${INCLUDED_LOCATIONS} included. Growth and Commerce add more locations.`
+  return `${locations.used} in use, ${locations.covered} on your plan · ${INCLUDED_LOCATIONS} included, then ${locationPrice.value}`
+})
+// Lowering below the locations in use would bill for fewer than the site has.
+const locationsMinimum = computed(() => Math.max(INCLUDED_LOCATIONS, billing.value?.locations.used ?? INCLUDED_LOCATIONS))
+const locationsQuantity = ref(INCLUDED_LOCATIONS)
+const locationsOpen = ref(false)
+const locationsChanged = computed(() => locationsQuantity.value !== billing.value?.locations.covered)
+const locationsDialogNote = computed(() => `${INCLUDED_LOCATIONS} included, then ${locationPrice.value}. Stripe shows what changes on your bill before you confirm.`)
+
 const groups = computed<EditorNavigationGroup[]>(() => [{
   id: 'billing',
   items: [
     { id: 'plan', label: currentPlan.value?.name ?? 'Plan', summary: planSummary.value, action: { label: onStarter.value ? 'Choose a plan' : 'Manage' } },
+    ...(billing.value ? [{ id: 'locations', label: 'Locations', summary: locationsSummary.value, ...(onStarter.value || billing.value.subscriptionStatus !== 'active' || scheduledPlan.value || billing.value.cancelAtPeriodEnd ? {} : { action: { label: 'Change' } }) }] : []),
     ...(usage.value?.pricing ? [{ id: 'fees', label: 'Payments fees', summary: `${usage.value.pricing.captured_volume_rate_percent}% of each payment, plus Stripe’s fees. Fees aren’t returned after a refund or dispute.` }] : []),
     ...(usage.value && usage.value.configured === false && billing.value?.plan === 'commerce' ? [{ id: 'usage:pending', label: 'Payments fees', summary: 'Getting ready. Fees for payments you take before then are billed once it’s done.' }] : []),
     ...(usage.value?.account && ['servicing', 'closing'].includes(usage.value.account.status) ? [{ id: 'usage:finalize', label: 'Previous Payments billing', summary: 'Charges from earlier payments still apply; end it once they are settled.', action: { label: 'End' } }] : []),
@@ -119,6 +142,13 @@ async function onRowAction(id: string) {
   if (busy.value) return
   errorMessage.value = ''
   if (id === 'plan') { sheetError.value = ''; choosing.value = true; return }
+  if (id === 'locations') {
+    if (onStarter.value) return
+    sheetError.value = ''
+    locationsQuantity.value = Math.max(locationsMinimum.value, billing.value?.locations.covered ?? INCLUDED_LOCATIONS)
+    locationsOpen.value = true
+    return
+  }
   if (id.startsWith('credit:')) { creditId.value = id.slice('credit:'.length); creditNote.value = ''; sheetError.value = ''; return }
   busy.value = true
   try {
@@ -148,6 +178,19 @@ async function choosePlan(id: string) {
     await startOrganizationCheckout(organizationId(), plan)
   } catch (error) {
     sheetError.value = getErrorMessage(error, 'The plan could not be changed')
+  } finally {
+    busy.value = false
+  }
+}
+
+async function saveLocations() {
+  if (busy.value || !locationsChanged.value) return
+  busy.value = true
+  sheetError.value = ''
+  try {
+    await setPlanLocations(organizationId(), locationsQuantity.value)
+  } catch (error) {
+    sheetError.value = getErrorMessage(error, 'Your plan’s locations could not be changed')
   } finally {
     busy.value = false
   }

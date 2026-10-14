@@ -1,7 +1,6 @@
 import { assertCalendarDate, isValidTimezone, instantDate, localDateAt, addLocalDays } from '~/utils/timezone'
 import { HTTPError } from 'nitro'
-import { queryAll, queryFirst, type DbClient } from '~/server/db'
-import { d1JsonStringSet } from '~/server/db/d1-limits'
+import { executeBatch, queryAll, type DbClient } from '~/server/db'
 import { resolveOrganizationCmsCapabilities } from '~/server/utils/cms-capabilities'
 import { assignedBookingSql, roleAllows, assertRoleAllows, type ResolvedMembership } from '~/server/utils/member-access'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -170,12 +169,22 @@ export async function listAgenda(
     ? query.principal.membership : null
   if (staff) await assertRoleAllows({ ...staff, permissions: { operations: ['assigned'] } })
 
-  const capabilityOrganizations = await queryAll<CapabilityOrganizationRow>(db, `
-    SELECT s.id, s.name, s.subdomain, s.vertical, s.theme_id
-    FROM organization s
-    WHERE ${scope.buyerUserId ? `s.id IN (SELECT r.organization_id FROM requests r WHERE r.user_id = ? AND ${REQUEST_CURRENT_BUYER_SQL})` : 's.id = ?'}
-    ORDER BY s.id
-  `, [scope.buyerUserId ?? scope.organizationId])
+  // One round trip reads everything the scope alone decides: the businesses in
+  // scope, whether any has ever taken a booking or a reservation, and the
+  // business's branches. Each statement used to wait for the one before it.
+  const scopeSql = scope.buyerUserId
+    ? `IN (SELECT r.organization_id FROM requests r WHERE r.user_id = ? AND ${REQUEST_CURRENT_BUYER_SQL})`
+    : '= ?'
+  const scopeParam = scope.buyerUserId ?? scope.organizationId
+  const [capabilityResult, bookableResult, reservingResult, locationResult] = await executeBatch(db, [
+    { query: `SELECT s.id, s.name, s.subdomain, s.vertical, s.theme_id FROM organization s WHERE s.id ${scopeSql} ORDER BY s.id`, params: [scopeParam] },
+    { query: `SELECT 1 AS present FROM product_booking_configs WHERE organization_id ${scopeSql} LIMIT 1`, params: [scopeParam] },
+    { query: `SELECT 1 AS present FROM reservations WHERE organization_id ${scopeSql} LIMIT 1`, params: [scopeParam] },
+    // A buyer's calendar is not filtered by branch; the business's is.
+    { query: `SELECT l.id, l.organization_id, l.title FROM business_locations l WHERE l.organization_id = ? AND l.organization_id ${scopeSql} ORDER BY l.title, l.id`, params: [scope.organizationId ?? '', scopeParam] },
+  ], { operation: 'Read the agenda scope' })
+  const capabilityOrganizations = (capabilityResult?.results ?? []) as CapabilityOrganizationRow[]
+  const locations = scope.organizationId ? (locationResult?.results ?? []) as LocationRow[] : []
   // A buyer has visits, not a publishing calendar.
   const available = new Set<AgendaKind>(scope.buyerUserId || staff ? [] : ['post'])
   for (const organization of capabilityOrganizations) {
@@ -189,13 +198,8 @@ export async function listAgenda(
   // A business that has taken bookings or reservations sees them whatever its
   // site template says: the record exists, so the calendar shows it.
   if (capabilityOrganizations.length) {
-    const ids = JSON.stringify(capabilityOrganizations.map(organization => organization.id))
-    const [bookable, reserving] = await Promise.all([
-      queryFirst(db, `SELECT 1 FROM product_booking_configs WHERE organization_id IN (SELECT value FROM json_each(?)) LIMIT 1`, [ids]),
-      queryFirst(db, `SELECT 1 FROM reservations WHERE organization_id IN (SELECT value FROM json_each(?)) LIMIT 1`, [ids]),
-    ])
-    if (bookable) available.add('booking')
-    if (!staff && reserving) available.add('reservation')
+    if (bookableResult?.results?.length) available.add('booking')
+    if (!staff && reservingResult?.results?.length) available.add('reservation')
   }
   const availableKinds = AGENDA_KINDS.filter(kind => available.has(kind))
   const requestedKinds = new Set((query.kinds?.length ? query.kinds : availableKinds).filter(kind => available.has(kind)))
@@ -260,7 +264,13 @@ export async function listAgenda(
   })}
     AND p.status = 'published' AND p.published_at BETWEEN ? AND ?`, [...params(), broadFrom, broadTo]))
 
-  const rows = (await Promise.all(sourceQueries)).flat()
+  // The branch pictures depend on nothing the source rows carry, so they are
+  // read in the same round trip as the rows.
+  const [sourceRows, locationPictures] = await Promise.all([
+    Promise.all(sourceQueries),
+    scope.organizationId ? loadOwnerPictures(db, scope.organizationId, 'business_location', locations.map(location => location.id)) : Promise.resolve(new Map<string, { imageUrl: string } | null>()),
+  ])
+  const rows = sourceRows.flat()
   // Pictures are read per owning business; a buyer's rows span several.
   const pictures = new Map<string, string | null>()
   await Promise.all([...new Set(rows.map(row => `${row.organization_id}\n${row.picture_owner_type}`))].map(async (group) => {
@@ -297,14 +307,6 @@ export async function listAgenda(
     }]
   }).sort((left, right) => left.startsAt.localeCompare(right.startsAt) || left.id.localeCompare(right.id))
 
-  // A buyer's calendar is not filtered by branch; the business's is.
-  const locationParams: unknown[] = [scope.organizationId, d1JsonStringSet(capabilityOrganizations.map(organization => organization.id))]
-  const locations = capabilityOrganizations.length === 0 || !scope.organizationId ? [] : await queryAll<LocationRow>(db, `
-    SELECT l.id, l.organization_id, l.title FROM business_locations l
-    WHERE l.organization_id = ? AND l.organization_id IN (SELECT value FROM json_each(?))
-    ORDER BY l.title, l.id
-  `, locationParams)
-  const locationPictures = scope.organizationId ? await loadOwnerPictures(db, scope.organizationId, 'business_location', locations.map(location => location.id)) : new Map()
   return {
     items, availableKinds,
     locations: locations.map(location => ({ id: location.id, organizationId: location.organization_id, title: location.title, imageUrl: locationPictures.get(location.id)?.imageUrl ?? null })),

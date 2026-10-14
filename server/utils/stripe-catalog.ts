@@ -1,9 +1,11 @@
 import type Stripe from 'stripe'
-import { assertNewSalePlan, PAID_PLAN_PRICES } from '~/shared/billing-model'
+import { assertNewSalePlan, PAID_PLAN_PRICES, planPriceTiers } from '~/shared/billing-model'
 
 /**
  * Each new-sale plan is one fixed application offer. Stripe catalog metadata may
- * identify the product, but it cannot change this price contract.
+ * identify the product, but it cannot change this price contract: a graduated
+ * USD price whose first tier is the plan amount for the included locations and
+ * whose second is each additional location (`planPriceTiers`).
  */
 export function assertStripeCatalogPrices(
   planId: string,
@@ -12,30 +14,40 @@ export function assertStripeCatalogPrices(
 ): asserts monthly is Stripe.Price {
   const plan = assertNewSalePlan(planId)
   const amounts = PAID_PLAN_PRICES[plan]
-  if (
-    !monthly
-    || typeof monthly.unit_amount !== 'number'
-    || monthly.unit_amount !== amounts.monthly
-    || typeof monthly.currency !== 'string'
-    || monthly.currency.trim().toLowerCase() !== 'usd'
-  ) {
-    throw new Error(`${plan} monthly price must be exactly USD ${amounts.monthly} cents`)
+  if (!monthly || !hasPlanTiers(monthly, amounts.monthly, 'month')) {
+    throw new Error(`${plan} monthly price must be the graduated USD ${amounts.monthly} cent plan price`)
   }
-  if (
-    annual
-    && (
-      amounts.annual === undefined
-      || typeof annual.unit_amount !== 'number'
-      || annual.unit_amount !== amounts.annual
-      || typeof annual.currency !== 'string'
-      || annual.currency.trim().toLowerCase() !== 'usd'
-    )
-  ) {
+  if (annual && (amounts.annual === undefined || !hasPlanTiers(annual, amounts.annual, 'year'))) {
     throw new Error(amounts.annual === undefined
       ? `${plan} has no authorized annual price`
-      : `${plan} annual price must be exactly USD ${amounts.annual} cents`)
+      : `${plan} annual price must be the graduated USD ${amounts.annual} cent plan price`)
   }
 }
+
+function hasPlanTiers(price: Stripe.Price, amount: number, interval: 'month' | 'year'): boolean {
+  const expected = planPriceTiers(amount, interval)
+  return price.currency?.trim().toLowerCase() === 'usd'
+    && price.billing_scheme === 'tiered'
+    && price.tiers_mode === 'graduated'
+    && Array.isArray(price.tiers)
+    && price.tiers.length === expected.length
+    && price.tiers.every((tier, index) => {
+      const want = expected[index]!
+      return (tier.up_to ?? 'inf') === want.up_to
+        && tier.flat_amount === (want.flat_amount ?? null)
+        && tier.unit_amount === (want.unit_amount ?? null)
+    })
+}
+
+/** The plan amount a canonical price charges for its included locations. */
+export function planPriceAmount(price: Stripe.Price): number {
+  const amount = price.tiers?.[0]?.flat_amount
+  if (typeof amount !== 'number' || amount <= 0) throw new Error(`Stripe price ${price.id} has no plan amount`)
+  return amount
+}
+
+/** Plan prices are read with their tiers, which Stripe lists only when expanded. */
+export const PLAN_PRICE_LIST_EXPAND = ['data.tiers']
 
 export function selectStripeCatalogPrice(
   product: Stripe.Product,
@@ -50,8 +62,7 @@ export function selectStripeCatalogPrice(
     price.active !== false
     && price.recurring?.interval === interval
     && price.recurring.interval_count === 1
-    && typeof price.unit_amount === 'number'
-    && price.unit_amount > 0
+    && price.billing_scheme === 'tiered'
     && typeof price.currency === 'string'
     && price.currency.length > 0,
   )
@@ -83,48 +94,4 @@ export function selectStripeCatalogPrice(
     throw new Error(`Stripe product ${product.id} must have exactly one canonical ${interval} price`)
   }
   return candidates[0] ?? null
-}
-
-export interface StripeCatalogPriceResolution {
-  product: Stripe.Product
-  price: Stripe.Price
-}
-
-/**
- * Resolve the one active product and canonical recurring price for a plan.
- *
- * Product and price lists are deliberately passed in by the caller so the
- * same provider snapshot can be used by checkout, transfer previews, and the
- * Better Auth plan loader. Never choose the first matching product or price:
- * duplicate products and ambiguous prices are catalog corruption and must
- * fail closed until an operator repairs the catalog.
- */
-export function resolveStripeCatalogPrice(
-  products: Stripe.Product[],
-  prices: Stripe.Price[],
-  planId: string,
-  interval: 'month' | 'year',
-): StripeCatalogPriceResolution {
-  const normalizedPlanId = planId.trim().toLowerCase()
-  const matches = products.filter(product =>
-    product.active !== false
-    && product.metadata?.plan_id?.trim().toLowerCase() === normalizedPlanId,
-  )
-  if (matches.length === 0) {
-    throw new Error(`No active Stripe product found for plan ${normalizedPlanId}`)
-  }
-  if (matches.length > 1) {
-    const ids = matches.map(product => product.id).sort().join(', ')
-    throw new Error(`Stripe has multiple active products for plan ${normalizedPlanId}: ${ids}`)
-  }
-  const product = matches[0]!
-  const productPrices = prices.filter(price => {
-    const productId = typeof price.product === 'string' ? price.product : price.product?.id
-    return productId === product.id
-  })
-  const price = selectStripeCatalogPrice(product, productPrices, interval)
-  if (!price) {
-    throw new Error(`No active Stripe ${interval} price found for plan ${normalizedPlanId}`)
-  }
-  return { product, price }
 }

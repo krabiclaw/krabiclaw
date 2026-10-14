@@ -4,6 +4,8 @@ import { createStripeClient } from '~/server/utils/stripe-client'
 import { getPlanEntitlements } from './billing-entitlements'
 import {
   assertStripeCatalogPrices,
+  PLAN_PRICE_LIST_EXPAND,
+  planPriceAmount,
   selectStripeCatalogPrice,
 } from './stripe-catalog'
 import {
@@ -20,7 +22,7 @@ import {
 
 export interface PlanPrice {
   id: string
-  amount: number // cents
+  amount: number // cents, for the included locations
   currency: string
   interval: 'month' | 'year'
 }
@@ -251,11 +253,12 @@ export async function fetchStripeProducts(
   while (true) {
     const prices = await stripe.prices.list({
       active: true,
+      type: 'recurring',
       limit: 100,
+      expand: PLAN_PRICE_LIST_EXPAND,
       ...(startingAfter ? { starting_after: startingAfter } : {}),
     })
     for (const price of prices.data) {
-      if (!price.unit_amount || price.type !== 'recurring') continue
       const interval = price.recurring?.interval
       if (interval !== 'month' && interval !== 'year') continue
       const pid =
@@ -322,7 +325,7 @@ export async function fetchStripeProducts(
       .filter((price): price is Stripe.Price => Boolean(price))
       .map((price) => ({
         id: price.id,
-        amount: price.unit_amount ?? 0,
+        amount: planPriceAmount(price),
         currency: price.currency,
         interval: price.recurring?.interval === 'year' ? 'year' : 'month',
       }))
@@ -374,7 +377,7 @@ const PLANS_CACHE_TTL_SECONDS = 3600
 // stub under `nuxt dev`, and Nuxt's useRuntimeConfig() is the real one.
 function plansCacheKey(buildId: string | undefined): string {
   if (!buildId) throw new BillingPlansError('BILLING_PLANS_UNAVAILABLE', 'Billing plans cache has no build id to key on')
-  return `stripe-plans:v5:${buildId}`
+  return `stripe-plans:v6:${buildId}`
 }
 
 // Single-instance in-flight guard — prevents a cache stampede where multiple

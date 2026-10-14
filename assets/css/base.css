@@ -86,6 +86,10 @@
 
 @theme inline {
   --color-on-primary: var(--primary-foreground);
+  /* The fill a shared component's call to action wears: the owner's action
+     colour on a site, monochrome on Krabiclaw's own pages. */
+  --color-action: var(--action);
+  --color-on-action: var(--action-foreground);
   --color-primary: var(--ui-primary);
   --color-secondary: var(--ui-secondary);
   --color-success: var(--ui-success);
@@ -142,15 +146,14 @@
   --kc-navy-700:    #2C3360;
   --kc-navy-500:    #4A5380;
   --kc-navy-300:    #8C92B0;
-  --kc-coral:       var(--color-coral-500);
+  /* The coral sampled from the logo body, light and dark. Coral marks status
+     and selection; actions are monochrome (navy in light, white in dark). */
+  --kc-coral:       #EE4237;
+  --kc-coral-dark:  #FF614F;
   --kc-coral-600:   var(--color-coral-600);
   --kc-coral-400:   var(--color-coral-400);
   --kc-coral-200:   var(--color-coral-200);
   --kc-coral-50:    var(--color-coral-50);
-  /* The one platform CTA gradient. Five call sites hand-rolled this inline,
-     with three different shadow values, before it had a name. */
-  --kc-cta-gradient: linear-gradient(135deg, var(--kc-coral) 0%, #E0524C 100%);
-  --kc-cta-shadow:   0 4px 20px color-mix(in srgb, var(--kc-coral) 35%, transparent);
 
   --kc-teal:        var(--color-teal-500);
   --kc-teal-600:    var(--color-teal-600);
@@ -199,6 +202,8 @@
   --ui-primary:          var(--site-action);
   --color-primary:       var(--site-action);
   --primary-foreground:  var(--site-on-action);
+  --action:              var(--site-action);
+  --action-foreground:   var(--site-on-action);
   --ui-secondary:        var(--site-accent);
   --ui-bg:               var(--site-ground);
   --ui-bg-elevated:      var(--site-surface);
@@ -251,6 +256,10 @@
   --ui-primary:           var(--kc-coral);
 
   --primary-foreground:   #FFF;
+  /* Coral is a mark here, never a button: actions are navy on light and
+     white on dark, the inverted surface. */
+  --action:               var(--ui-bg-inverted);
+  --action-foreground:    var(--ui-text-inverted);
 
   --ui-secondary:         var(--kc-teal-600);
   --ui-success:           var(--kc-success);
@@ -285,7 +294,7 @@
 /* ── Platform theme dark mode ─────────────────────────────── */
 /*
    Rule: --kc-* brand palette variables are NEVER overridden for dark mode.
-   They represent absolute brand colours (navy = #1F2547, coral = #FB7461 …)
+   They represent absolute brand colours (navy = #1F2547, coral = #EE4237 …)
    used as backgrounds, borders AND text — overriding them cascades
    incorrectly into backgrounds. Only --ui-* semantic tokens are redefined.
 
@@ -297,13 +306,13 @@
    - text:        #EEF0F8  (warm cream-white, 16:1 on bg)
    - text-muted:  #9CA4C6  (blue-grey, 7:1 on bg)
    - text-dimmed: #6B7198  (muted, 4.8:1 on bg — eyebrows / captions)
-   - Coral, teal, yellow are unchanged — vibrant accents work on dark surfaces.
+   - primary:     --kc-coral-dark, the logo coral lifted for a dark ground.
 
    Hardcoded text-(--kc-navy) in templates must be changed to text-default
    individually — see index.vue. Do NOT override --kc-navy here.
 */
 .dark .platform-theme {
-  --ui-primary:           #FB7461;
+  --ui-primary:           var(--kc-coral-dark);
 
   --primary-foreground:   #F5F4FB;
 
@@ -365,7 +374,7 @@
   letter-spacing: -0.01em;
 }
 .kc-wordmark__krabi { color: var(--kc-navy); }
-.kc-wordmark__claw  { color: var(--kc-coral); }
+.kc-wordmark__claw  { color: var(--ui-primary); }
 .kc-wordmark__tld   { color: var(--kc-navy); font-size: 0.55em; vertical-align: top; margin-left: 1px; }
 /* Docs and blog carry a contextual word instead of the .com lock-up. */
 .kc-wordmark__suffix { color: var(--ui-text-muted); font-weight: 500; margin-left: 7px; }

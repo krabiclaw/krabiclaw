@@ -1,6 +1,6 @@
 import { defineComponent, h, type PropType } from 'vue'
 import { EHtml, EHead, EBody, EPreview, EContainer, ESection, EText, ELink, EImg, EStyle } from '../vue-email'
-import { light, dark, brand, font, layout, type } from '../tokens'
+import { light, dark, font, layout, type } from '../tokens'
 import { platformLocale } from '~/shared/platform-locales'
 
 /**
@@ -64,14 +64,15 @@ export default defineComponent({
               /* The hero's letterbox is the page behind the picture, so it
                  follows the scheme rather than staying a light band. */
               .email-hero-img { background-color: ${dark.bg} !important; }
-              /* The coral button keeps its white label in both schemes, like
-                 the product's own. The label lives in a span inside the anchor
-                 and the generic span rule above sets that span's colour
-                 directly, so the button has to out-specify it: a class plus
-                 universal selector loses to a class plus element, which left
-                 the label muted grey on coral at 1.61:1. */
+              /* The primary button inverts with the scheme, like the
+                 product's: navy on light, white on dark. The label lives in a
+                 span inside the anchor and the generic span rule above sets
+                 that span's colour directly, so the button has to out-specify
+                 it: a class plus universal selector loses to a class plus
+                 element. */
               .email-body .email-cta-secondary, .email-body .email-cta-secondary span { border-color: ${dark.border} !important; color: ${dark.text} !important; }
-              .email-body .email-cta-primary, .email-body .email-cta-primary span { color: ${brand.onPrimary} !important; }
+              .email-body .email-cta-primary { background-color: ${light.surface} !important; }
+              .email-body .email-cta-primary, .email-body .email-cta-primary span { color: ${light.text} !important; }
             }
             @media only screen and (max-width: 600px) {
               .email-gutter { padding-left: 20px !important; padding-right: 20px !important; }

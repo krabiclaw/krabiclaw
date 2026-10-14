@@ -33,6 +33,8 @@ test('public auth CTAs reflect the SSR session', async ({ page, baseURL }) => {
   // it instead.
   await page.setViewportSize({ width: 390, height: 900 })
   await page.goto('/')
+  // The menu button is server-rendered; it opens the menu once Vue owns it.
+  await waitForNuxtHydration(page)
   const narrowHeader = page.locator('header').first()
   await expect(narrowHeader.getByRole('link', { name: 'Start free', exact: true }).first()).toBeVisible()
   await expect(narrowHeader.getByRole('link', { name: 'Sign in', exact: true }).first()).toBeHidden()

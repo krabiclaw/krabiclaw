@@ -63,6 +63,9 @@
             {{ billingPeriodLabel }}
           </span>
         </div>
+        <p data-plan-locations class="text-xs font-semibold mt-2" :class="isHighlighted ? 'text-white/70' : 'text-muted'">
+          {{ locationsNote }}
+        </p>
         <p v-if="annual && savingsNote" class="text-xs font-semibold mt-2.5 flex items-center gap-1.5" :class="isHighlighted ? 'text-emerald-400' : 'text-emerald-600'">
           <PlatformIcon name="sparkles" class="size-3.5 shrink-0" />
           {{ savingsNote }}
@@ -115,6 +118,7 @@
 <script setup lang="ts">
 import { useEventListener } from '@vueuse/core'
 import type { Plan } from '~/composables/usePlans'
+import { additionalLocationPrice, INCLUDED_LOCATIONS } from '~/shared/billing-model'
 
 const props = defineProps<{
   plan: Plan
@@ -155,6 +159,13 @@ const isHighlighted = computed(() => props.highlighted ?? props.plan.highlighted
 const currentPrice = computed(() => displayPrice(props.plan, props.annual ?? false))
 
 const billingPeriodLabel = computed(() => props.photo && props.plan.id === 'free' ? 'No subscription' : (props.annual ?? false) ? '/year' : '/mo')
+
+// Stripe's own phrasing: the included allowance, then the charge per additional unit.
+const locationsNote = computed(() => {
+  const price = props.plan.prices.find(p => p.interval === ((props.annual ?? false) ? 'year' : 'month'))
+  if (!price) return `${INCLUDED_LOCATIONS} locations included`
+  return `${INCLUDED_LOCATIONS} locations included, then ${additionalLocationPrice(price.interval)}`
+})
 
 const savingsNote = computed(() => {
   if (!props.annual) return null
