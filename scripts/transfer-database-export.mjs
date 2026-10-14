@@ -659,8 +659,8 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       manifest.transforms.push({ name: 'online_offerings_held_by_providers', changes: held + assigned + detached + rules })
     }
     // v17 absorbs v16's deployed forward chain (authored contact sections, the
-    // retired public OAuth flag, team member times, the Google Ads provider and
-    // invite links). Older chains pass through it before the exact copy; a v16
+    // retired public OAuth flag, team member times, the Google Ads provider,
+    // invite links and full-remaining refunds). Older chains pass through it before the exact copy; a v16
     // source already ran its pending ones above.
     if (![MIGRATIONS_DIRECTORY, 'migrations-history/v16'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v16').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {

@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "f6454711-e4d4-4da7-9d34-4022df7873cc",
+  "id": "1946ba8f-9fc9-4533-a301-9e6eba4003a3",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -7231,7 +7231,7 @@
           "name": "amount",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "note": {
@@ -8155,7 +8155,7 @@
           "name": "amount",
           "type": "integer",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
           "autoincrement": false
         },
         "reason": {
@@ -8265,7 +8265,7 @@
       "checkConstraints": {
         "payment_refunds_amount_check": {
           "name": "payment_refunds_amount_check",
-          "value": "amount > 0"
+          "value": "amount IS NULL OR amount > 0"
         }
       }
     },

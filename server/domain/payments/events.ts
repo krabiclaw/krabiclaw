@@ -35,12 +35,13 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,int
   // through its durable refund intent after an interrupted native response.
   const attempt=await queryFirst<{stripe_checkout_id:string}>(db,'SELECT stripe_checkout_id FROM payment_attempts WHERE payment_id=? AND stripe_checkout_id IS NOT NULL ORDER BY created_at DESC LIMIT 1',[payment.id])
   if(!attempt) throw new Error('PaymentIntent has no authorized checkout attempt')
-  const checkout=await stripe.checkout.sessions.retrieve(attempt.stripe_checkout_id,{expand:['line_items.data.price']},{stripeAccount:payment.stripe_account_id})
-  const snapshot=JSON.parse(payment.price_snapshot_json) as {price:{unit_amount:number;currency:string};quantity:number;billing_fx?:unknown}
-  const line=checkout.line_items?.data[0]
+  const checkout=await stripe.checkout.sessions.retrieve(attempt.stripe_checkout_id,{},{stripeAccount:payment.stripe_account_id})
+  const snapshot=JSON.parse(payment.price_snapshot_json) as {billing_fx?:unknown}
   const checkoutIntentId=typeof checkout.payment_intent==='string'?checkout.payment_intent:checkout.payment_intent?.id
+  // Identity only: this Checkout is the authorized purchase, on this account and mode, and it is the one the intent paid.
+  // What it charged is Stripe's: tax and any surcharge make the total legitimately differ from the catalog price.
   if(checkoutIntentId!==intent.id)throw new Error('Captured intent is not the authorized Checkout payment')
-  if(checkout.line_items?.data.length!==1 || line?.price?.unit_amount!==snapshot.price.unit_amount || line.quantity!==snapshot.quantity || line.price.currency.toUpperCase()!==payment.currency || checkout.client_reference_id!==payment.id || checkout.livemode!==Boolean(payment.livemode) || checkout.amount_total!==intent.amount || checkout.currency?.toUpperCase()!==payment.currency) throw new Error('Checkout frozen price or native tax total mismatch')
+  if(checkout.client_reference_id!==payment.id || checkout.livemode!==Boolean(payment.livemode) || checkout.currency?.toUpperCase()!==payment.currency) throw new Error('Checkout does not belong to this payment')
   const now = new Date().toISOString()
   if (intent.status !== 'succeeded') {
     if (intent.status === 'canceled') await executeBatch(db,[{query:"UPDATE payments SET state='failed',updated_at=? WHERE id=? AND captured_amount=0",params:[now,payment.id]},{query:"UPDATE payment_checkout_holds SET status='released' WHERE payment_id=? AND status='active'",params:[payment.id]}])
@@ -48,7 +49,7 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,int
     return
   }
   if (checkout.payment_status !== 'paid') throw new Error('Stripe Checkout has not confirmed paid fulfillment')
-  if (intent.amount_received !== checkout.amount_total || intent.application_fee_amount) throw new Error('Captured principal or application fee violates financial contract')
+  if (intent.application_fee_amount) throw new Error('Direct charges carry no application fee')
   const chargeId=typeof intent.latest_charge==='string'?intent.latest_charge:intent.latest_charge?.id
   const charge=chargeId?await stripe.charges.retrieve(chargeId,{}, {stripeAccount:payment.stripe_account_id}):null
   if(!charge || charge.livemode!==Boolean(payment.livemode) || charge.payment_intent!==intent.id || charge.amount!==intent.amount_received) throw new Error('Captured charge financial scope mismatch')
@@ -65,7 +66,7 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,int
   captured.savedCard=Boolean(method&&method.created<checkout.created)
   const capture={kind:'payment_captured' as const,nativeId:intent.id,status:intent.status,amount:intent.amount_received,checkout}
   if(recorded.state==='recovery'){
-    const outcomes=await Promise.allSettled([executeRefund(db,stripe,recorded,recorded.captured_amount,`unfulfillable:${intent.id}`,'requested_by_customer',null,env),notifyPaymentFinancialEvent(db,stripe,env,recorded,capture)])
+    const outcomes=await Promise.allSettled([executeRefund(db,stripe,recorded,null,`unfulfillable:${intent.id}`,'requested_by_customer',null,env),notifyPaymentFinancialEvent(db,stripe,env,recorded,capture)])
     raiseSettledFailures('Unfulfillable payment recovery',payment.id,outcomes,['refund','capture notification'])
     return
   }
@@ -107,7 +108,7 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,int
       const converted = await queryFirst<{status:string}>(db,'SELECT status FROM payment_checkout_holds WHERE id=?',[hold.id])
       if (converted?.status !== 'converted') {
         await executeBatch(db,[{query:"UPDATE payment_checkout_holds SET status='released' WHERE id=? AND status='active'",params:[hold.id]},{query:"UPDATE payments SET state='recovery',updated_at=? WHERE id=?",params:[now,payment.id]}])
-        const outcomes=await Promise.allSettled([executeRefund(db,stripe,await requirePayment(db,payment.organization_id,payment.id),intent.amount_received,`unfulfillable:${intent.id}`,'requested_by_customer',null,env),notifyPaymentFinancialEvent(db,stripe,env,recorded,capture)])
+        const outcomes=await Promise.allSettled([executeRefund(db,stripe,await requirePayment(db,payment.organization_id,payment.id),null,`unfulfillable:${intent.id}`,'requested_by_customer',null,env),notifyPaymentFinancialEvent(db,stripe,env,recorded,capture)])
         raiseSettledFailures('Unfulfillable payment recovery',payment.id,outcomes,['refund','capture notification'])
         return
       }

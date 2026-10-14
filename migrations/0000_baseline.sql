@@ -1049,7 +1049,7 @@ CREATE TABLE `payment_authorizations` (
 	`user_id` text,
 	`payment_id` text NOT NULL,
 	`action` text NOT NULL,
-	`amount` integer NOT NULL,
+	`amount` integer,
 	`note` text,
 	`expires_at` text NOT NULL,
 	`approved_at` text,
@@ -1184,7 +1184,7 @@ CREATE TABLE `payment_refunds` (
 	`payment_id` text NOT NULL,
 	`idempotency_key` text NOT NULL,
 	`stripe_refund_id` text,
-	`amount` integer NOT NULL,
+	`amount` integer,
 	`reason` text NOT NULL,
 	`note` text,
 	`status` text NOT NULL,
@@ -1195,7 +1195,7 @@ CREATE TABLE `payment_refunds` (
 	`updated_at` text NOT NULL,
 	FOREIGN KEY (`payment_id`) REFERENCES `payments`(`id`) ON UPDATE no action ON DELETE restrict,
 	FOREIGN KEY (`created_by`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
-	CONSTRAINT "payment_refunds_amount_check" CHECK(amount > 0)
+	CONSTRAINT "payment_refunds_amount_check" CHECK(amount IS NULL OR amount > 0)
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `payment_refunds_idempotency_key_unique` ON `payment_refunds` (`idempotency_key`);--> statement-breakpoint
