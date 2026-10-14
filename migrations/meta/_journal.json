@@ -36,6 +36,13 @@
       "when": 1791961135919,
       "tag": "0004_google_ads_integration_provider",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1791962476390,
+      "tag": "0005_organization_invite_links",
+      "breakpoints": true
     }
   ]
 }

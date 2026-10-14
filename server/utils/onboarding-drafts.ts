@@ -182,7 +182,7 @@ export interface OnboardingDraftPayload {
 }
 
 function defaultProductCategory(vertical: OrganizationVertical): string {
-  if (vertical === 'experience') return 'Experiences'
+  if (vertical === 'experience' || vertical === 'lodging') return 'Experiences'
   if (vertical === 'service') return 'Services'
   return 'Menu'
 }

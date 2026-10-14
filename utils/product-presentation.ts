@@ -62,7 +62,7 @@ export function resolveProductPresentation(vertical: string | null | undefined, 
       structuredDataType: 'MenuItem',
     }
   }
-  if (normalized === 'experience' || normalized === 'service') {
+  if (normalized === 'experience' || normalized === 'service' || normalized === 'lodging') {
     return {
       feature: 'products',
       collectionPath: '/products',
@@ -129,6 +129,7 @@ const PHOTO_CATEGORIES_BY_VERTICAL: Record<string, readonly MediaCategory[]> = {
   restaurant: ['exterior', 'interior', 'food', 'menu', 'team', 'other'],
   experience: ['exterior', 'interior', 'team', 'other'],
   service: ['exterior', 'interior', 'team', 'other'],
+  lodging: ['exterior', 'interior', 'team', 'other'],
 }
 
 export function photoCategories(

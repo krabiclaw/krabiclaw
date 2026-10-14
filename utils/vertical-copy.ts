@@ -1,7 +1,8 @@
 export type OrganizationVertical =
   | "restaurant"
   | "experience"
-  | "service";
+  | "service"
+  | "lodging";
 
 // The single canonical list of app-level verticals a tenant can be created
 // or migrated with. This is the one place that enumerates every supported
@@ -9,7 +10,7 @@ export type OrganizationVertical =
 // rather than redeclaring its own array, and any UI vertical picker should
 // import this (or ALL_VERTICALS) instead of hand-writing a local
 // 'restaurant' | 'experience' union that silently omits new verticals.
-export const ALL_VERTICALS: OrganizationVertical[] = ["restaurant", "experience", "service"];
+export const ALL_VERTICALS: OrganizationVertical[] = ["restaurant", "experience", "service", "lodging"];
 
 type LocaleCode = "en" | "th" | "ja" | "vi";
 
@@ -1038,6 +1039,157 @@ registry.vi.service = {
     `Chúng tôi đã nhận yêu cầu tư vấn cho ${_guests} ${_guestLabel} vào ${_date} lúc ${_time}.`,
 }
 
+// A vacation rental. Its homes, stays and nightly prices live in the lodging
+// service, not here, so its booking calls to action have nowhere to go yet and
+// stay hidden (empty routes); the locations below are the business's address.
+registry.en.lodging = {
+  ...registry.en.experience!,
+  poweredByTagline: "vacation rental sites that run themselves",
+  aboutImageAlt: "About our place",
+  ctaTitle: "Stay with us.",
+  ctaRoute: "",
+  contactSubtitle: "For availability, bookings, long stays, groups, partnerships or anything else, use the form below.",
+  contactSubjectCatering: "Long stays & groups",
+  reserveCta: "Check availability",
+  reservationPageKicker: "Stays",
+  reservationFormTitle: "Request a Stay",
+  reservationRequestButton: "Request Stay",
+  reservationWord: "stay",
+  reservationExploreLabel: "View Properties",
+  reservationExploreRoute: "",
+  locationGroupLine: (_count: number) => `${_count} location${_count === 1 ? "" : "s"}`,
+  bookingNotesPlaceholder: "Arrival time, number of guests, or anything we should prepare.",
+  contactLocationsByHeading: "Address, check-in details and contact, for each property.",
+  contactLocationsByNote: 'For parking, access and house rules, follow the "Plan a visit" link on each card.',
+  otherLocationsHeading: "Other properties",
+  seoReservationDescription: (_name: string) => `Request a stay at ${_name}.`,
+  viewMenuCta: "View Properties",
+  viewMenuRoute: "",
+  visitLocationCta: "View this property →",
+  mainLocationLabel: "Main property",
+  secondLocationLabel: "Second property",
+  addSecondLocationNote: "Add a second property once your first is connected.",
+  mainDiningRoomLabel: "Main property",
+  locationLabel: "Property",
+  selectLocationLabel: "Select a property",
+  chooseLocationLabel: "Please choose a property.",
+  specialRequestsPlaceholder: "Tell us anything that will help us prepare for your stay.",
+  cancelAnytimeLabel: "Need to change your plans? Contact us before arrival.",
+  confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
+    `We've received your stay request for ${_guests} ${_guestLabel} arriving ${_date}.`,
+}
+
+registry.th.lodging = {
+  ...registry.th.experience!,
+  poweredByTagline: "เว็บไซต์บ้านพักให้เช่าที่ดูแลตัวเองได้",
+  aboutImageAlt: "เกี่ยวกับที่พักของเรา",
+  ctaTitle: "มาพักกับเรา",
+  ctaRoute: "",
+  contactSubtitle: "หากต้องการสอบถามห้องว่าง การจอง การเข้าพักระยะยาว กลุ่ม พาร์ตเนอร์ หรือเรื่องอื่น ๆ ใช้แบบฟอร์มด้านล่างได้เลย",
+  contactSubjectCatering: "เข้าพักระยะยาวและกลุ่ม",
+  reserveCta: "ตรวจสอบห้องว่าง",
+  reservationPageKicker: "การเข้าพัก",
+  reservationFormTitle: "ขอจองที่พัก",
+  reservationRequestButton: "ส่งคำขอจองที่พัก",
+  reservationWord: "การเข้าพัก",
+  reservationExploreLabel: "ดูที่พัก",
+  reservationExploreRoute: "",
+  locationGroupLine: (_count: number) => `${_count} สถานที่`,
+  bookingNotesPlaceholder: "เวลาที่จะมาถึง จำนวนผู้เข้าพัก หรือสิ่งที่อยากให้เราเตรียมไว้",
+  contactLocationsByHeading: "ที่อยู่ รายละเอียดการเช็กอิน และช่องทางติดต่อของที่พักแต่ละแห่ง",
+  contactLocationsByNote: 'สำหรับรายละเอียดที่จอดรถ การเดินทาง และกฎของบ้าน ให้กดลิงก์ "วางแผนการมาเยือน" ในแต่ละการ์ด',
+  otherLocationsHeading: "ที่พักอื่น ๆ",
+  seoReservationDescription: (_name: string) => `ขอจองที่พักที่ ${_name}`,
+  viewMenuCta: "ดูที่พัก",
+  viewMenuRoute: "",
+  visitLocationCta: "ดูที่พักนี้ →",
+  mainLocationLabel: "ที่พักหลัก",
+  secondLocationLabel: "ที่พักแห่งที่สอง",
+  addSecondLocationNote: "เพิ่มที่พักแห่งที่สองได้หลังจากเชื่อมต่อแห่งแรกแล้ว",
+  mainDiningRoomLabel: "ที่พักหลัก",
+  locationLabel: "ที่พัก",
+  selectLocationLabel: "เลือกที่พัก",
+  chooseLocationLabel: "กรุณาเลือกที่พัก",
+  specialRequestsPlaceholder: "บอกเราได้ทุกอย่างที่ช่วยให้เราเตรียมพร้อมสำหรับการเข้าพักของคุณ",
+  cancelAnytimeLabel: "ต้องการเปลี่ยนแผน? ติดต่อเราก่อนวันเข้าพัก",
+  confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
+    `เราได้รับคำขอเข้าพักสำหรับ ${_guests} ${_guestLabel} เข้าพักวันที่ ${_date} แล้ว`,
+}
+
+registry.ja.lodging = {
+  ...registry.ja.experience!,
+  poweredByTagline: "自動で運営できる貸別荘のウェブサイト",
+  aboutImageAlt: "私たちの宿について",
+  ctaTitle: "私たちの宿に泊まる。",
+  ctaRoute: "",
+  contactSubtitle: "空室状況、ご予約、長期滞在、団体、提携、その他のお問い合わせは下記フォームをご利用ください。",
+  contactSubjectCatering: "長期滞在・団体",
+  reserveCta: "空室を確認する",
+  reservationPageKicker: "ご宿泊",
+  reservationFormTitle: "宿泊のリクエスト",
+  reservationRequestButton: "宿泊をリクエスト",
+  reservationWord: "宿泊",
+  reservationExploreLabel: "施設を見る",
+  reservationExploreRoute: "",
+  locationGroupLine: (_count: number) => `${_count}か所`,
+  bookingNotesPlaceholder: "到着時刻、人数、ご準備しておくことなどをお知らせください。",
+  contactLocationsByHeading: "各施設の住所・チェックイン情報・連絡先。",
+  contactLocationsByNote: "駐車場、アクセス、ハウスルールは、各施設の「来店情報」からご確認ください。",
+  otherLocationsHeading: "その他の施設",
+  seoReservationDescription: (_name: string) => `${_name}のご宿泊をリクエストいただけます。`,
+  viewMenuCta: "施設を見る",
+  viewMenuRoute: "",
+  visitLocationCta: "この施設を見る →",
+  mainLocationLabel: "メイン施設",
+  secondLocationLabel: "2つ目の施設",
+  addSecondLocationNote: "最初の施設を接続した後、2つ目を追加できます。",
+  mainDiningRoomLabel: "メイン施設",
+  locationLabel: "施設",
+  selectLocationLabel: "施設を選択",
+  chooseLocationLabel: "施設を選択してください。",
+  specialRequestsPlaceholder: "ご滞在の準備に役立つことがあれば何でもお知らせください。",
+  cancelAnytimeLabel: "ご予定が変わった場合は、到着前にご連絡ください。",
+  confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
+    `${_date}からのご宿泊、${_guests}${_guestLabel}様のリクエストを受け付けました。`,
+}
+
+registry.vi.lodging = {
+  ...registry.vi.experience!,
+  poweredByTagline: "Website cho thuê nhà nghỉ dưỡng tự vận hành",
+  aboutImageAlt: "Về chỗ nghỉ của chúng tôi",
+  ctaTitle: "Hãy đến nghỉ cùng chúng tôi.",
+  ctaRoute: "",
+  contactSubtitle: "Để hỏi về phòng trống, đặt chỗ, lưu trú dài ngày, đoàn khách, hợp tác hoặc việc khác, hãy dùng biểu mẫu bên dưới.",
+  contactSubjectCatering: "Lưu trú dài ngày & đoàn khách",
+  reserveCta: "Xem phòng trống",
+  reservationPageKicker: "Lưu trú",
+  reservationFormTitle: "Yêu cầu đặt chỗ",
+  reservationRequestButton: "Gửi yêu cầu đặt chỗ",
+  reservationWord: "kỳ lưu trú",
+  reservationExploreLabel: "Xem chỗ nghỉ",
+  reservationExploreRoute: "",
+  locationGroupLine: (_count: number) => `${_count} địa điểm`,
+  bookingNotesPlaceholder: "Giờ đến, số khách hoặc bất cứ điều gì chúng tôi nên chuẩn bị.",
+  contactLocationsByHeading: "Địa chỉ, thông tin nhận phòng và liên hệ của từng chỗ nghỉ.",
+  contactLocationsByNote: "Thông tin chỗ đỗ xe, đường đến và nội quy có trong mục Ghé thăm của từng chỗ nghỉ.",
+  otherLocationsHeading: "Chỗ nghỉ khác",
+  seoReservationDescription: (_name: string) => `Gửi yêu cầu lưu trú tại ${_name}.`,
+  viewMenuCta: "Xem chỗ nghỉ",
+  viewMenuRoute: "",
+  visitLocationCta: "Xem chỗ nghỉ này →",
+  mainLocationLabel: "Chỗ nghỉ chính",
+  secondLocationLabel: "Chỗ nghỉ thứ hai",
+  addSecondLocationNote: "Thêm chỗ nghỉ thứ hai sau khi đã kết nối chỗ nghỉ đầu tiên.",
+  mainDiningRoomLabel: "Chỗ nghỉ chính",
+  locationLabel: "Chỗ nghỉ",
+  selectLocationLabel: "Chọn chỗ nghỉ",
+  chooseLocationLabel: "Vui lòng chọn một chỗ nghỉ.",
+  specialRequestsPlaceholder: "Cho chúng tôi biết bất cứ điều gì giúp chúng tôi chuẩn bị cho kỳ lưu trú của bạn.",
+  cancelAnytimeLabel: "Cần thay đổi kế hoạch? Hãy liên hệ với chúng tôi trước khi đến.",
+  confirmationMessage: (_guests: number | string, _guestLabel: string, _date: string, _time: string) =>
+    `Chúng tôi đã nhận yêu cầu lưu trú cho ${_guests} ${_guestLabel}, nhận phòng ngày ${_date}.`,
+}
+
 export function normalizeVertical(vertical: string | null | undefined): string {
   // `organizations.vertical` is NOT NULL (organizations_vertical_check in server/db/schema.ts).
   // Every caller already gates on the site being loaded before calling this,
@@ -1055,6 +1207,7 @@ export function getVerticalLabel(vertical: string | null | undefined): string {
   if (v === "service") return "Professional services"
   if (v === "experience") return "Experience"
   if (v === "restaurant") return "Restaurant"
+  if (v === "lodging") return "Vacation rental"
   return "Business"
 }
 
@@ -1073,11 +1226,12 @@ export function getVerticalCopy(vertical: string | null | undefined, locale: str
   throw new Error(`getVerticalCopy() has no registry entry for vertical "${v}".`)
 }
 
-// Restaurants and professional services get their schema.org subtype plus
+// Restaurants, professional services and lodging get their schema.org subtype plus
 // LocalBusiness; other verticals fall back to the generic LocalBusiness type.
 export function getBusinessSchemaTypes(vertical: string | null | undefined): string[] {
   const v = normalizeVertical(vertical)
   if (v === "restaurant") return ["Restaurant", "LocalBusiness"]
   if (v === "service") return ["ProfessionalService", "LocalBusiness"]
+  if (v === "lodging") return ["LodgingBusiness", "LocalBusiness"]
   return ["LocalBusiness"]
 }

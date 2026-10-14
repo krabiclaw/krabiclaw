@@ -140,6 +140,7 @@ const supportedCombinations: Record<OrganizationVertical, readonly PublicTemplat
   restaurant: ['saya'],
   experience: ['saya'],
   service: ['blawby', 'platform'],
+  lodging: ['saya'],
 }
 
 // Always-on features: 'contact'/'locations'/'settings' are infra; 'blog'/'qa'/
@@ -162,6 +163,9 @@ const verticalDefaultFeatures: Record<OrganizationVertical, readonly ProductFeat
   restaurant: ['products', 'reservations'],
   experience: ['products', 'reservations'],
   service: ['services'],
+  // Stays are booked in the lodging service; what a rental sells here are
+  // its extras and experiences, so it has products and no table reservations.
+  lodging: ['products'],
 }
 
 // Vocabulary/label differences that are purely cosmetic (same underlying feature, different

@@ -1,6 +1,6 @@
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { rebuildPlatformKnowledgeIndex, syncOrganizationSearchIndex } from '~/server/utils/public-search'
-import { validateInternalRequest } from '~/server/utils/internal-secret'
+import { SEARCH_INTERNAL_CALLER, validateInternalRequest } from '~/server/utils/internal-secret'
 
 export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
@@ -8,7 +8,7 @@ export default defineHandler(async (event) => {
     return jsonResponse({ error: 'Database not available' }, { status: 500 })
   }
 
-  const validation = await validateInternalRequest(event, env)
+  const validation = await validateInternalRequest(event, env, SEARCH_INTERNAL_CALLER)
   if (!validation.ok) return jsonResponse({ error: validation.error }, { status: validation.status })
 
   // One request per pass keeps each under the Workers request ceiling: the

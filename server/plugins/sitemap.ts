@@ -237,10 +237,12 @@ export default definePlugin((nitroApp) => {
     const [locations, products, posts, tenantPages] = await Promise.all([
       queryAll<ApiRecord>(
         db,
-        `SELECT id, slug, updated_at
-         FROM business_locations
-         WHERE organization_id = ?
-           AND status = 'active'`,
+        `SELECT bl.id, bl.slug, bl.updated_at,
+                EXISTS (SELECT 1 FROM location_reservation_configs c
+                         WHERE c.organization_id = bl.organization_id AND c.location_id = bl.id) AS has_reservations
+         FROM business_locations bl
+         WHERE bl.organization_id = ?
+           AND bl.status = 'active'`,
         [organizationId],
       ),
       queryAll<ApiRecord>(
@@ -262,12 +264,12 @@ export default definePlugin((nitroApp) => {
       listPublishedTenantSitemapPages(db, organizationId),
     ])
 
-    entries.push(...template.sitemap.exactPaths.filter(loc => !['/menu', '/products', '/experiences'].includes(loc)).map(loc => ({ loc })))
+    entries.push(...template.sitemap.exactPaths.filter(loc => !['/menu', '/products', '/experiences', '/reservations'].includes(loc)).map(loc => ({ loc })))
 
-    if (locations.length > 0) {
-      entries.push({ loc: '/locations' })
-      if (organization.vertical !== 'experience') entries.push({ loc: '/reservations' })
-    }
+    if (locations.length > 0) entries.push({ loc: '/locations' })
+    // The reservations page exists for a site whose locations take them, the
+    // same fact the site header uses to offer it.
+    if (locations.some(location => Number(location.has_reservations) === 1)) entries.push({ loc: '/reservations' })
     const productSurfaces = new Set(products.map(product => productSurfaceOf(organization.vertical, { kind: product.kind as ProductKind })))
     for (const surface of productSurfaces) entries.push({ loc: presentationForSurface(organization.vertical, surface).collectionPath })
 

@@ -159,6 +159,31 @@ suite; after `local:setup`, create it for manual use with the Worker running:
 corepack yarn local:actors
 ```
 
+### Native app development accounts on staging
+
+Debug builds of the native app sign in to Krabiclaw **staging** with email and
+password (`docs/shared-auth-contract.md` D9). `local:actors` only reaches a
+local Worker, so a platform admin creates these accounts once on staging
+through Better Auth's admin API, verified so they can sign in immediately. Use
+addresses at an alias the operator owns, and a password kept with the team's
+credentials, never in the repository:
+
+```sh
+STAGING=https://staging.krabiclaw.com
+curl -sS -c /tmp/staging-admin.jar -H "origin: $STAGING" -H 'content-type: application/json' \
+  -d '{"email":"<platform admin email>","password":"<platform admin password>"}' \
+  "$STAGING/api/auth/sign-in/email"
+curl -sS -b /tmp/staging-admin.jar -H "origin: $STAGING" -H 'content-type: application/json' \
+  -d '{"email":"<native-owner alias>","name":"Native Owner","password":"<shared dev password>","role":"user","data":{"emailVerified":true}}' \
+  "$STAGING/api/auth/admin/create-user"
+rm /tmp/staging-admin.jar
+```
+
+Repeat the second call for each role the app needs to exercise (an owner who
+creates a lodging organization, and a co-host and cleaner who join it through an
+invite link). Each answers `{"user":{…}}`; then sign in once from the app to
+confirm.
+
 `schema:local` applies new forward migrations when the schema changes. A rare
 replacement baseline, such as the v6 WNAM cutover, starts a new migration
 history; a local D1 created under the prior baseline then fails the schema
