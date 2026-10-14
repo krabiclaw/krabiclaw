@@ -288,7 +288,7 @@ export async function refreshSocialCard(input: {
   // exists: one deleted out from under its row served 404 forever while every
   // reconcile reused it. The card is reused only while its image is served.
   const currentServed = current?.generation_key === generationKey && current.public_url
-    ? (await fetch(current.public_url, { method: 'HEAD', signal: AbortSignal.timeout(10_000) })).ok
+    ? (await fetch(current.public_url, { method: 'HEAD' })).ok
     : false
   if (currentServed && current?.public_url) {
     await executeBatch(db, [{ query: "UPDATE media_placements SET status = 'active' WHERE owner_type = ? AND owner_id = ? AND slot = 'social_card' AND asset_id = ?", params: [owner.owner_type, owner.owner_id, current.asset_id] }])

@@ -137,7 +137,7 @@ export async function refreshMemberBusy(db: DbClient, env: CloudflareEnv, member
   // Commit coverage only after every contiguous window succeeds.
   for(let from=Date.parse(now);from<Date.parse(until);from+=30*86400000) {
    const timeMax=new Date(Math.min(from+30*86400000,Date.parse(until))).toISOString()
-   const response=await fetch('https://www.googleapis.com/calendar/v3/freeBusy',{method:'POST',headers:{Authorization:`Bearer ${token.accessToken}`,'content-type':'application/json'},signal:AbortSignal.timeout(10000),body:JSON.stringify({timeMin:new Date(from).toISOString(),timeMax,items:ids.map(id=>({id}))})})
+   const response=await fetch('https://www.googleapis.com/calendar/v3/freeBusy',{method:'POST',headers:{Authorization:`Bearer ${token.accessToken}`,'content-type':'application/json'},body:JSON.stringify({timeMin:new Date(from).toISOString(),timeMax,items:ids.map(id=>({id}))})})
    if(!response.ok) {
     const failure=await response.json().catch((cause:unknown)=>{
      throw new Error(`Google busy-calendar check failed (${response.status}): Invalid error response${cause instanceof Error?` (${cause.message})`:''}`)
@@ -177,7 +177,7 @@ export async function connectPersonalCalendar(actor:SchedulingActor, memberId:st
  const token=await linkedAccountAccessToken(actor.env,accountId)
  let next:string|undefined
  for(let page=0;page<4;page++) {
-  const response=await fetch(`https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250&fields=items(id,primary),nextPageToken${next?`&pageToken=${encodeURIComponent(next)}`:''}`,{headers:{Authorization:`Bearer ${token.accessToken}`},signal:AbortSignal.timeout(10000)})
+  const response=await fetch(`https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250&fields=items(id,primary),nextPageToken${next?`&pageToken=${encodeURIComponent(next)}`:''}`,{headers:{Authorization:`Bearer ${token.accessToken}`}})
   if(!response.ok)throw new HTTPError({statusCode:502,message:'Your personal calendar could not be connected. Try again.'})
   const data=await response.json() as {items?:{id:string;primary?:boolean}[];nextPageToken?:string}
   const primary=data.items?.find(calendar=>calendar.primary)

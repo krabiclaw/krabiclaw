@@ -1,5 +1,4 @@
 const PUBLIC_HELP_MODEL = '@cf/meta/llama-3.1-8b-instruct-fast'
-const AI_TIMEOUT_MS = 30000
 
 interface WorkersAiMessage {
   role: 'system' | 'user' | 'assistant'
@@ -23,21 +22,10 @@ export async function runWorkersAiText(
     throw new Error('Workers AI binding is not available')
   }
 
-  let timeoutHandle: ReturnType<typeof setTimeout> | undefined
-  try {
-    const result = await Promise.race([
-      ai.run(PUBLIC_HELP_MODEL, {
-        messages,
-        max_tokens: options.maxTokens ?? 700,
-        temperature: options.temperature ?? 0.2,
-      }),
-      new Promise<never>((_, reject) => {
-        timeoutHandle = setTimeout(() => reject(new Error('Workers AI request timed out')), AI_TIMEOUT_MS)
-      }),
-    ])
-
-    return result.response?.trim() ?? ''
-  } finally {
-    clearTimeout(timeoutHandle)
-  }
+  const result = await ai.run(PUBLIC_HELP_MODEL, {
+    messages,
+    max_tokens: options.maxTokens ?? 700,
+    temperature: options.temperature ?? 0.2,
+  })
+  return result.response?.trim() ?? ''
 }

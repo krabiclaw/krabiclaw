@@ -17,7 +17,6 @@ async function recordBrowserError(report: BrowserErrorReport): Promise<void> {
       referrerPolicy: 'no-referrer',
       body: serializeBrowserErrorReport(report),
       keepalive: true,
-      signal: AbortSignal.timeout(10_000),
     })
     if (!response.ok) throw new Error(`Browser error collection was rejected (${response.status})`)
     const result: unknown = await response.json()

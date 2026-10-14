@@ -201,7 +201,7 @@ async function uploadImage(file: File) {
   if (!requestId) return
   const form = new FormData()
   form.append('image', file)
-  const uploaded = await postReviewMedia(requestId, form, 'image', mediaUploadSignal())
+  const uploaded = await postReviewMedia(requestId, form, 'image')
   media.value.push({ asset_id: uploaded.asset_id, kind: 'image', preview_url: URL.createObjectURL(file) })
 }
 
@@ -217,7 +217,7 @@ async function uploadVideo(file: File) {
     const form = new FormData()
     form.append('video', file)
     form.append('thumbnail', poster)
-    const uploaded = await postReviewMedia(requestId, form, 'video', mediaUploadSignal(controller.signal))
+    const uploaded = await postReviewMedia(requestId, form, 'video', controller.signal)
     media.value.push({ asset_id: uploaded.asset_id, kind: 'video', preview_url: uploaded.thumbnail_url })
   } finally {
     activeVideoUploads.delete(controller)
@@ -227,7 +227,7 @@ async function uploadVideo(file: File) {
 // Photos and videos share one upload route. The asset is active and placed on
 // the review request when this returns; a response that names an asset but
 // breaks the contract is discarded so nothing is left attached.
-async function postReviewMedia(requestId: string, form: FormData, kind: 'image' | 'video', signal: AbortSignal) {
+async function postReviewMedia(requestId: string, form: FormData, kind: 'image' | 'video', signal?: AbortSignal) {
   let assetId: string | null = null
   try {
     const response = await fetch(`/api/public/review-requests/${encodeURIComponent(requestId)}/media/upload`, {

@@ -69,24 +69,20 @@ function botToken(env: CloudflareEnv): string {
   return env.DISCORD_BOT_TOKEN
 }
 
-async function discordRequest<T>(path: string, init: { authorization: string; method?: string; body?: BodyInit; query?: Record<string, string>; deadline?: MetaDeadline; timeoutMs?: number }): Promise<T | null> {
+async function discordRequest<T>(path: string, init: { authorization: string; method?: string; body?: BodyInit; query?: Record<string, string>; deadline?: MetaDeadline }): Promise<T | null> {
   const url = new URL(`${DISCORD_API}${path}`)
   for (const [key, value] of Object.entries(init.query ?? {})) url.searchParams.set(key, value)
-  const perRequest = init.timeoutMs ?? 10_000
-  const remaining = init.deadline?.remaining() ?? perRequest
-  if (remaining <= 250) throw new DiscordError('transport', 'The operation ran out of time before the Discord request could be sent')
-  const timeout = Math.min(perRequest, remaining)
+  if (init.deadline && init.deadline.remaining() <= 250) throw new DiscordError('transport', 'The operation ran out of time before the Discord request could be sent')
   let response: Response
   try {
     response = await fetch(url, {
       method: init.method ?? 'GET', body: init.body,
       headers: { authorization: init.authorization, ...(typeof init.body === 'string' ? { 'content-type': 'application/json' } : {}) },
       // Workers support follow and manual; a redirect is refused below, never followed.
-      redirect: 'manual', signal: AbortSignal.timeout(timeout),
+      redirect: 'manual',
     })
   } catch (error) {
-    const name = error instanceof Error ? error.name : ''
-    throw new DiscordError('transport', name === 'TimeoutError' || name === 'AbortError' ? `Discord did not answer within ${timeout}ms` : 'Discord could not be reached', {}, { cause: error })
+    throw new DiscordError('transport', 'Discord could not be reached', {}, { cause: error })
   }
   if (response.status >= 300 && response.status < 400) throw new DiscordError('rejected', `Discord answered with a redirect (${response.status}), which is not followed`, { status: response.status })
   if (response.status === 204) return null
@@ -183,7 +179,7 @@ export async function createMessage(env: CloudflareEnv, channelId: string, input
       body = JSON.stringify(payload)
     }
     try {
-      return messageOf(await discordRequest<DiscordMessage>(`/channels/${channelId}/messages`, { authorization: asBot(env), method: 'POST', body, deadline, timeoutMs: 25_000 }))
+      return messageOf(await discordRequest<DiscordMessage>(`/channels/${channelId}/messages`, { authorization: asBot(env), method: 'POST', body, deadline }))
     } catch (error) {
       if (!(error instanceof DiscordError) || error.failure !== 'rate_limited' || error.retryAfterMs === null) throw error
       if (deadline.remaining() - error.retryAfterMs < 10_000) throw error

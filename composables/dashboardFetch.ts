@@ -43,7 +43,6 @@ async function executeApiFetch<T>(
         method,
         headers,
         retry: 0,
-        timeout: fetchOptions.timeout ?? (method === 'GET' ? DASHBOARD_READ_TIMEOUT_MS : MUTATION_TIMEOUT_MS),
       }
       const response = await $fetch.raw<unknown>(request, requestOptions)
       requestId = response.headers.get('x-request-id')
