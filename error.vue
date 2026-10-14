@@ -25,7 +25,7 @@
       <button
         v-if="organization"
         type="button"
-        class="inline-flex items-center justify-center rounded-full bg-primary px-5 py-3 text-sm font-semibold text-on-primary transition hover:opacity-90 cursor-pointer"
+        class="inline-flex items-center justify-center rounded-full bg-action px-5 py-3 text-sm font-semibold text-on-action transition hover:opacity-90 cursor-pointer"
         @click="clearError({ redirect: '/' })"
       >
         Go back home

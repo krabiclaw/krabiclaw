@@ -86,6 +86,10 @@
 
 @theme inline {
   --color-on-primary: var(--primary-foreground);
+  /* The fill a shared component's call to action wears: the owner's action
+     colour on a site, monochrome on Krabiclaw's own pages. */
+  --color-action: var(--action);
+  --color-on-action: var(--action-foreground);
   --color-primary: var(--ui-primary);
   --color-secondary: var(--ui-secondary);
   --color-success: var(--ui-success);
@@ -198,6 +202,8 @@
   --ui-primary:          var(--site-action);
   --color-primary:       var(--site-action);
   --primary-foreground:  var(--site-on-action);
+  --action:              var(--site-action);
+  --action-foreground:   var(--site-on-action);
   --ui-secondary:        var(--site-accent);
   --ui-bg:               var(--site-ground);
   --ui-bg-elevated:      var(--site-surface);
@@ -250,6 +256,10 @@
   --ui-primary:           var(--kc-coral);
 
   --primary-foreground:   #FFF;
+  /* Coral is a mark here, never a button: actions are navy on light and
+     white on dark, the inverted surface. */
+  --action:               var(--ui-bg-inverted);
+  --action-foreground:    var(--ui-text-inverted);
 
   --ui-secondary:         var(--kc-teal-600);
   --ui-success:           var(--kc-success);

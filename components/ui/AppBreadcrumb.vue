@@ -9,7 +9,7 @@
         >
           {{ crumb.label }}
         </NuxtLink>
-        <span v-else class="inline-flex items-center rounded-full bg-primary px-4 py-2 text-[10px] text-on-primary font-bold uppercase tracking-widest shadow-sm" aria-current="page">
+        <span v-else class="inline-flex items-center rounded-full bg-action px-4 py-2 text-[10px] text-on-action font-bold uppercase tracking-widest shadow-sm" aria-current="page">
           {{ crumb.label }}
         </span>
         <span v-if="i < crumbs.length - 1" class="text-muted/30" aria-hidden="true">

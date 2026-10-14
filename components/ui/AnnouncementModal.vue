@@ -53,7 +53,7 @@
                 :href="announcement.cta_url"
                 target="_blank"
                 rel="noopener noreferrer"
-                class="mt-2 inline-flex w-full items-center justify-center rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-on-primary no-underline hover:opacity-90"
+                class="mt-2 inline-flex w-full items-center justify-center rounded-lg bg-action px-4 py-2.5 text-sm font-semibold text-on-action no-underline hover:opacity-90"
                 @click="trackCtaClick"
               >
                 {{ announcement.cta_label }}
