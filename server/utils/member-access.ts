@@ -378,6 +378,18 @@ export async function assertProductAccess(db: DbClient, input: MemberAccessPrinc
   if (input.patch?.booking !== undefined) throw new HTTPError({ statusCode: 403, message: 'Offering creation requires admin access; edit saved booking settings and schedule separately' })
 }
 
+/**
+ * The home is looked after by the caller, directly or through their team.
+ * `alias` is a product_stay_configs row; the statement binds the caller's
+ * userId twice.
+ */
+export function assignedHomeSql(alias: string): string {
+  return `(EXISTS (SELECT 1 FROM member m WHERE m.id = ${alias}.assigned_member_id AND m.organizationId = ${alias}.organization_id AND m.userId = ?)
+    OR EXISTS (SELECT 1 FROM team t JOIN teamMember tm ON tm.teamId = t.id
+      JOIN member m ON m.userId = tm.userId AND m.organizationId = t.organizationId
+      WHERE t.id = ${alias}.assigned_team_id AND t.organizationId = ${alias}.organization_id AND m.userId = ?))`
+}
+
 export function assignedBookingSql(alias: string): string {
   return `EXISTS (SELECT 1 FROM member m JOIN products assigned_product ON assigned_product.organization_id = m.organizationId
     WHERE m.id = ${alias}.assigned_member_id AND m.organizationId = ${alias}.organization_id AND m.userId = ?

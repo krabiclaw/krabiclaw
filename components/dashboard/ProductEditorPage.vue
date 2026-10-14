@@ -36,7 +36,7 @@ import type { ComputedRef, InjectionKey, Ref } from 'vue'
 import type { Collection, Product } from '~/server/types/products'
 import type { DashboardLocation } from '~/composables/useDashboardOrganization'
 
-export const SECTION_KEYS = ['photo', 'kind', 'name', 'price', 'description', 'page', 'options', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections'] as const
+export const SECTION_KEYS = ['photo', 'kind', 'name', 'price', 'description', 'page', 'options', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections', 'stay'] as const
 export type SectionKey = typeof SECTION_KEYS[number]
 export type BookingConcern = 'enabled' | 'duration' | 'capacity' | 'confirmation' | 'payment' | 'location' | 'assignment' | number
 
@@ -94,6 +94,15 @@ export interface ProductForm {
   /** Held online: booked in the provider's working hours rather than weekly times at a location. */
   held_online: boolean
   image_asset_id: string | null
+  /** A place to stay's one location, fixed once it is created, and its stay settings. */
+  stay_location_id: string
+  check_in_time: string
+  check_out_time: string
+  max_guests: string
+  min_nights: string
+  stay_team_id: string
+  /** Kept as loaded: this editor assigns a team, and saving never clears a member set elsewhere. */
+  stay_member_id: string
 }
 
 /** The product's draft and what its leaves show or do beside their one field. */
@@ -216,6 +225,7 @@ const sectionLabels: Record<SectionKey, string> = {
   'publication': 'Website',
   'booking': 'Scheduling',
   'locations': 'Locations',
+  'stay': 'Stay settings',
   get collections() { return product.value?.kind === 'dish' ? 'Menu sections' : presentation.value.collectionGroupLabelPlural },
 }
 
@@ -331,6 +341,7 @@ const draft = useState<ProductForm>(draftKey, () => ({
   booking_duration: '',
   booking_capacity: '', scheduling_mode: 'legacy', assigned_member_id: '', assigned_team_id: '', confirmation_mode: 'instant', online_payment_required: false, held_online: false,
   image_asset_id: null as string | null,
+  stay_location_id: '', check_in_time: '15:00', check_out_time: '11:00', max_guests: '', min_nights: '1', stay_team_id: '', stay_member_id: '',
 }))
 const form = reactive(draft.value)
 // One key per product being created, kept across the walk's leaves and retries.
@@ -339,9 +350,17 @@ const createKey = useState(createKeyName, () => crypto.randomUUID())
 // A walk opened from a filtered Catalog already knows the kind it is creating.
 if (isNew.value && !form.kind && PRODUCT_KINDS.includes(route.query.kind as ProductKind)) form.kind = route.query.kind as ProductKind
 
+/**
+ * The location a price is read and written for: a place to stay is priced at
+ * its own location; anything else at the catalog's scope.
+ */
+function priceLocationId(): string | null {
+  return form.kind === 'stay' ? form.stay_location_id || null : locationId.value
+}
+
 /** What this location and currency pays for one variant, as a major-unit string. */
 function variantPriceMajor(variant: Product['variants'][number]): string {
-  const price = selectPrice(variant.prices, { currency, location_id: locationId.value, at: new Date().toISOString() })
+  const price = selectPrice(variant.prices, { currency, location_id: priceLocationId(), at: new Date().toISOString() })
   return price ? minorAmountToMajor(price.unit_amount, price.currency) : ''
 }
 
@@ -352,6 +371,7 @@ watch(product, (row) => { if (row) loadForm(row) }, { immediate: true })
 
 function loadForm(row: Product) {
   form.kind = row.kind
+  form.stay_location_id = row.stay?.location_id ?? ''
   form.name = row.name
   form.description = row.description
   form.order_url = row.order_url ?? ''
@@ -389,6 +409,12 @@ function loadForm(row: Product) {
   form.online_payment_required = row.booking?.online_payment_required ?? false
   form.held_online = row.booking?.held_online ?? false
   form.booking_capacity = row.booking?.default_capacity === null || row.booking === null ? '' : String(row.booking.default_capacity)
+  form.check_in_time = row.stay?.check_in_time ?? '15:00'
+  form.check_out_time = row.stay?.check_out_time ?? '11:00'
+  form.max_guests = row.stay ? String(row.stay.max_guests) : ''
+  form.min_nights = row.stay ? String(row.stay.min_nights) : '1'
+  form.stay_team_id = row.stay?.assigned_team_id ?? ''
+  form.stay_member_id = row.stay?.assigned_member_id ?? ''
   loadedCatalogShape.value = catalogShapeOf()
 }
 
@@ -482,11 +508,27 @@ function rebuildVariants() {
 const sectionValid = computed(() => {
   if (editorKey.value === 'kind') return PRODUCT_KINDS.includes(form.kind as ProductKind)
   if (editorKey.value === 'name') return Boolean(form.name.trim())
+  if (editorKey.value === 'stay') return !stayIncomplete()
   if (editorKey.value === 'options') {
     return form.options.every(option => option.name.trim() && option.values.length > 0)
   }
   return true
 })
+
+/** A place to stay is created at a location, with arrival and departure times and how many it sleeps. */
+function stayIncomplete(): boolean {
+  const guests = Number(form.max_guests)
+  const nights = Number(form.min_nights)
+  return !form.stay_location_id || !MINUTE_TIME_PATTERN.test(form.check_in_time) || !MINUTE_TIME_PATTERN.test(form.check_out_time)
+    || !Number.isInteger(guests) || guests < 1 || guests > 99 || !Number.isInteger(nights) || nights < 1 || nights > 365
+}
+function staySummary(): string {
+  const place = organizationLocations.value.find(entry => entry.id === form.stay_location_id)?.title
+  if (!place) return 'Choose where it is'
+  return `${place} · Check-in ${form.check_in_time}, checkout ${form.check_out_time} · Sleeps ${form.max_guests}`
+}
+// A walk opened from a location's catalog creates the place to stay there.
+if (isNew.value && !form.stay_location_id && locationId.value) form.stay_location_id = locationId.value
 
 // ── The index ─────────────────────────────────────────────
 function listSummary(values: readonly string[], empty: string) {
@@ -516,7 +558,7 @@ function priceSummary(): string {
   if (row.variants.length > 1) return `${row.variants.length} variants`
   const variant = row.variants[0]
   if (!variant) return 'No price set'
-  const price = selectPrice(variant.prices, { currency, location_id: locationId.value, at: new Date().toISOString() })
+  const price = selectPrice(variant.prices, { currency, location_id: priceLocationId(), at: new Date().toISOString() })
   const amount = formatProductMoney(price)
   if (amount) return amount
   // Priced in words — "Contact us for group pricing" — is a price the merchant
@@ -556,6 +598,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
     items: [
       { id: 'kind', label: 'Type', summary: form.kind ? PRODUCT_KIND_LABELS[form.kind] : 'Choose a type', to: sectionPath('kind') },
       { id: 'name', label: 'Name', summary: form.name || 'Not named yet', placeholder: !form.name, to: sectionPath('name') },
+      ...(form.kind === 'stay' ? [{ id: 'stay', label: 'Stay settings', summary: staySummary(), placeholder: stayIncomplete(), to: sectionPath('stay') }] : []),
     ],
   }]
   // A product that failed to load has nothing to summarize; the level shows the failure.
@@ -573,7 +616,10 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       ...(product.value.page || form.kind === 'service'
         ? [{ id: 'page', label: 'Page content', summary: product.value.page ? product.value.page.path : 'No page', placeholder: !product.value.page, to: product.value.page ? `/dashboard/${String(route.params.orgSlug)}/website/pages/${encodeURIComponent(product.value.page.id)}` : sectionPath('page') }]
         : []),
-      { id: 'price', label: form.kind === 'service' ? 'Consultation pricing' : 'Price', summary: priceSummary(), placeholder: priceSummary() === 'No price set', to: pricePath.value },
+      { id: 'price', label: form.kind === 'service' ? 'Consultation pricing' : form.kind === 'stay' ? 'Nightly price' : 'Price', summary: priceSummary(), placeholder: priceSummary() === 'No price set', to: pricePath.value },
+      // A place to stay is at its one location under its stay settings; nights and
+      // stays are on the Calendar, not scheduled sessions.
+      ...(form.kind === 'stay' ? [{ id: 'stay', label: 'Stay settings', summary: staySummary(), to: sectionPath('stay') }] : []),
       // The person a service's consultations are booked with: the existing
       // assignment concern, reached from the overview. It belongs to bookings,
       // so until the service takes bookings the row leads there first.
@@ -591,9 +637,9 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
         to: sectionPath('attributes'),
       },
       { id: 'kind', label: 'Type', summary: form.kind ? PRODUCT_KIND_LABELS[form.kind] : 'Choose a type', to: sectionPath('kind') },
-      { id: 'booking', label: form.kind === 'service' ? 'Bookings' : 'Scheduling', summary: form.bookable ? bookingSummary() : 'Not bookable', placeholder: !form.bookable, to: sectionPath('booking') },
-      { id: 'order-url', label: 'External link', summary: form.order_url || 'No external link', placeholder: !form.order_url, to: sectionPath('order-url') },
-      { id: 'locations', label: 'Locations', summary: locationsSummary(), placeholder: !Object.keys(form.locations).length, to: sectionPath('locations') },
+      ...(form.kind === 'stay' ? [] : [{ id: 'booking', label: form.kind === 'service' ? 'Bookings' : 'Scheduling', summary: form.bookable ? bookingSummary() : 'Not bookable', placeholder: !form.bookable, to: sectionPath('booking') }]),
+      { id: 'order-url', label: form.kind === 'stay' ? 'Booking link' : 'External link', summary: form.order_url || 'No external link', placeholder: !form.order_url, to: sectionPath('order-url') },
+      ...(form.kind === 'stay' ? [] : [{ id: 'locations', label: 'Locations', summary: locationsSummary(), placeholder: !Object.keys(form.locations).length, to: sectionPath('locations') }]),
       { id: 'collections', label: sectionLabels.collections, summary: collectionsSummary(), placeholder: !form.collection_ids.length, to: sectionPath('collections') },
       { id: 'publication', label: 'Website visibility', summary: publicationSummary(), to: sectionPath('publication') },
     ].sort((left, right) => rowRank(left.id) - rowRank(right.id)),
@@ -648,7 +694,7 @@ function buildCatalog() {
   // price, another currency, a recurring term — is restated untouched, with
   // its own id, so editing the one amount on screen cannot silently retire the
   // ones that are not.
-  const selection = { currency, location_id: locationId.value, at: new Date().toISOString() }
+  const selection = { currency, location_id: priceLocationId(), at: new Date().toISOString() }
   const carry = (price: Price) => ({
     id: price.id, unit_amount: price.unit_amount, currency: price.currency, location_id: price.location_id,
     active: price.active, type: price.type, recurring_interval: price.recurring_interval,
@@ -663,7 +709,7 @@ function buildCatalog() {
     // An empty box is not a price of zero. Zero is typed, and means free.
     if (!typed) return variant.prices.filter(price => price.id !== governing?.id).map(carry)
     if (!governing) {
-      return [...variant.prices.map(carry), { unit_amount: majorAmountToMinor(typed, currency), currency, location_id: locationId.value }]
+      return [...variant.prices.map(carry), { unit_amount: majorAmountToMinor(typed, currency), currency, location_id: priceLocationId() }]
     }
     return variant.prices.map(price => (price.id === governing.id
       ? { ...carry(price), unit_amount: majorAmountToMinor(typed, price.currency) }
@@ -720,6 +766,14 @@ function payload() {
     } : {}),
     details: form.details,
     active: form.active,
+    // Stay settings are restated only when they are what is being saved, so a
+    // description save never writes back settings someone else changed.
+    ...(form.kind === 'stay' && (isNew.value || editorKey.value === 'stay') ? { stay: {
+      ...(isNew.value ? { location_id: form.stay_location_id } : {}),
+      check_in_time: form.check_in_time, check_out_time: form.check_out_time,
+      max_guests: Number(form.max_guests), min_nights: Number(form.min_nights),
+      assigned_member_id: form.stay_member_id || null, assigned_team_id: form.stay_team_id || null,
+    } } : {}),
   }
 }
 
@@ -728,8 +782,8 @@ const { createActionLabel, saveLabel: createSaveLabel, saveDisabled, save: saveC
   isNew,
   openKey: editorKey,
   labels: sectionLabels,
-  order: ['kind', 'name'],
-  missing: key => key === 'name' ? !form.name.trim() : !form.kind,
+  order: () => form.kind === 'stay' ? ['kind', 'name', 'stay'] : ['kind', 'name'],
+  missing: key => key === 'name' ? !form.name.trim() : key === 'stay' ? stayIncomplete() : !form.kind,
   noun: () => form.kind ? presentationForProduct(vertical, { kind: assertProductKind(form.kind) }, dashboard.organization.value?.theme_id).itemLabel.toLowerCase() : 'product',
   saving,
   // A product that could not be read has no draft worth writing over it.
@@ -771,7 +825,7 @@ async function commit(bookingConcern?: BookingConcern) {
       // created from a collection joins it — explicit writes, each named by the
       // URL that opened the walk, neither implied. The location relationship is
       // not collection membership.
-      if (id) await dashboardApi(`/api/editor/organizations/${organizationId}/products/${created.product.id}/locations/${id}`, {
+      if (id && form.kind !== 'stay') await dashboardApi(`/api/editor/organizations/${organizationId}/products/${created.product.id}/locations/${id}`, {
         method: 'PUT', body: { active: true, published: false }, validate: isRecord,
       })
       if (createCollectionId.value) await setCollectionMembership(created.product.id, createCollectionId.value, true)

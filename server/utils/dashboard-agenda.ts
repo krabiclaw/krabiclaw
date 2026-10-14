@@ -1,14 +1,14 @@
-import { assertCalendarDate, isValidTimezone, instantDate, localDateAt, addLocalDays } from '~/utils/timezone'
+import { assertCalendarDate, isValidTimezone, instantDate, localDateAt, addLocalDays, localDateTimeToInstant } from '~/utils/timezone'
 import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, type DbClient } from '~/server/db'
 import { resolveOrganizationCmsCapabilities } from '~/server/utils/cms-capabilities'
-import { assignedBookingSql, roleAllows, assertRoleAllows, type ResolvedMembership } from '~/server/utils/member-access'
+import { assignedBookingSql, assignedHomeSql, roleAllows, assertRoleAllows, type ResolvedMembership } from '~/server/utils/member-access'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
 import { postEditorPath } from '~/server/utils/dashboard-links'
 
-export const AGENDA_KINDS = ['reservation', 'booking', 'post'] as const
+export const AGENDA_KINDS = ['reservation', 'booking', 'post', 'stay'] as const
 export type AgendaKind = typeof AGENDA_KINDS[number]
 
 export interface AgendaItem {
@@ -18,6 +18,10 @@ export interface AgendaItem {
   requestId: string | null
   operationalBookingId: string | null
   operationalReservationId: string | null
+  /** The stay a `stay` row is an arrival or departure of; one stay is two rows. */
+  stayId: string | null
+  /** Whether a `stay` row is guests arriving or leaving; null for every other kind. */
+  stayMoment: 'arrival' | 'departure' | null
   kind: AgendaKind
   startsAt: string
   endsAt: string | null
@@ -176,12 +180,14 @@ export async function listAgenda(
     ? `IN (SELECT r.organization_id FROM requests r WHERE r.user_id = ? AND ${REQUEST_CURRENT_BUYER_SQL})`
     : '= ?'
   const scopeParam = scope.buyerUserId ?? scope.organizationId
-  const [capabilityResult, bookableResult, reservingResult, locationResult] = await executeBatch(db, [
+  const [capabilityResult, bookableResult, reservingResult, locationResult, hostingResult] = await executeBatch(db, [
     { query: `SELECT s.id, s.name, s.subdomain, s.vertical, s.theme_id FROM organization s WHERE s.id ${scopeSql} ORDER BY s.id`, params: [scopeParam] },
     { query: `SELECT 1 AS present FROM product_booking_configs WHERE organization_id ${scopeSql} LIMIT 1`, params: [scopeParam] },
     { query: `SELECT 1 AS present FROM reservations WHERE organization_id ${scopeSql} LIMIT 1`, params: [scopeParam] },
     // A buyer's calendar is not filtered by branch; the business's is.
     { query: `SELECT l.id, l.organization_id, l.title FROM business_locations l WHERE l.organization_id = ? AND l.organization_id ${scopeSql} ORDER BY l.title, l.id`, params: [scope.organizationId ?? '', scopeParam] },
+    // A business with a place to stay has arrivals and departures; a buyer's agenda has none.
+    { query: 'SELECT 1 AS present FROM product_stay_configs WHERE organization_id = ? LIMIT 1', params: [scope.organizationId ?? ''] },
   ], { operation: 'Read the agenda scope' })
   const capabilityOrganizations = (capabilityResult?.results ?? []) as CapabilityOrganizationRow[]
   const locations = scope.organizationId ? (locationResult?.results ?? []) as LocationRow[] : []
@@ -201,6 +207,7 @@ export async function listAgenda(
     if (bookableResult?.results?.length) available.add('booking')
     if (!staff && reservingResult?.results?.length) available.add('reservation')
   }
+  if (scope.organizationId && hostingResult?.results?.length) available.add('stay')
   const availableKinds = AGENDA_KINDS.filter(kind => available.has(kind))
   const requestedKinds = new Set((query.kinds?.length ? query.kinds : availableKinds).filter(kind => available.has(kind)))
   if (requestedKinds.size === 0) {
@@ -264,10 +271,28 @@ export async function listAgenda(
   })}
     AND p.status = 'published' AND p.published_at BETWEEN ? AND ?`, [...params(), broadFrom, broadTo]))
 
+  // A stay is two moments at its home: guests arrive on the check-in date at the
+  // home's check-in time and leave on the checkout date at its checkout time,
+  // both in the location's zone. Members see the homes they look after.
+  const stayRows = requestedKinds.has('stay') && scope.organizationId ? queryAll<{
+    id: string; organization_id: string; product_id: string; product_name: string; status: string; check_in_date: string; check_out_date: string
+    guest_name: string | null; guest_surname: string | null; party_size: number; location_id: string; location_title: string; timezone: string; check_in_time: string; check_out_time: string
+  }>(db, `SELECT st.id, st.organization_id, st.product_id, p.name AS product_name, st.status, st.check_in_date, st.check_out_date, st.guest_name, st.guest_surname,
+        st.adults + st.children AS party_size, c.location_id, l.title AS location_title, l.timezone, c.check_in_time, c.check_out_time
+      FROM stays st
+      JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
+      JOIN products p ON p.organization_id = st.organization_id AND p.id = st.product_id
+      JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
+     WHERE st.organization_id = ? AND st.status <> 'cancelled' AND (st.check_in_date BETWEEN ? AND ? OR st.check_out_date BETWEEN ? AND ?)
+       ${query.locationId ? 'AND c.location_id = ?' : ''} ${staff ? `AND ${assignedHomeSql('c')}` : ''}`,
+    [scope.organizationId, query.from, query.to, query.from, query.to, ...(query.locationId ? [query.locationId] : []), ...(staff ? [staff.userId, staff.userId] : [])])
+    : Promise.resolve([])
+
   // The branch pictures depend on nothing the source rows carry, so they are
   // read in the same round trip as the rows.
-  const [sourceRows, locationPictures] = await Promise.all([
+  const [sourceRows, stays, locationPictures] = await Promise.all([
     Promise.all(sourceQueries),
+    stayRows,
     scope.organizationId ? loadOwnerPictures(db, scope.organizationId, 'business_location', locations.map(location => location.id)) : Promise.resolve(new Map<string, { imageUrl: string } | null>()),
   ])
   const rows = sourceRows.flat()
@@ -294,7 +319,7 @@ export async function listAgenda(
         : `/dashboard/${query.organizationSlug ?? scope.organizationId}/bookings/${row.kind}/${encodeURIComponent(row.id)}`
     return [{
       assignedMemberId:row.assigned_member_id,assignedMemberName:row.assigned_member_name,
-      id: `${row.kind}:${row.id}`, requestId: row.kind === 'post' ? null : row.id, operationalBookingId: row.kind === 'booking' ? row.operational_id : null, operationalReservationId: row.kind === 'reservation' ? row.operational_id : null, kind: row.kind, startsAt,
+      id: `${row.kind}:${row.id}`, requestId: row.kind === 'post' ? null : row.id, operationalBookingId: row.kind === 'booking' ? row.operational_id : null, operationalReservationId: row.kind === 'reservation' ? row.operational_id : null, stayId: null, stayMoment: null, kind: row.kind, startsAt,
       endsAt: row.ends_at === null ? null : instantDate(row.ends_at).toISOString(),
       dayKey, timeZone, showTimeZone: false,
       title: scope.buyerUserId ? row.resource_title ?? row.title : row.title,
@@ -305,7 +330,25 @@ export async function listAgenda(
       resourceImageUrl: pictures.get(`${row.organization_id}\n${row.picture_owner_type}\n${row.picture_owner_id}`) ?? null,
       resourceTitle: row.resource_title, partySize: row.party_size, to,
     }]
-  }).sort((left, right) => left.startsAt.localeCompare(right.startsAt) || left.id.localeCompare(right.id))
+  })
+  const organizationPath = query.organizationSlug ?? scope.organizationId
+  for (const stay of query.assignedMemberId ? [] : stays) {
+    if (!isValidTimezone(stay.timezone)) throw new Error(`Timezone is not configured for stay ${stay.id}`)
+    const guest = [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ') || 'Guest'
+    for (const [moment, day, time] of [['arrival', stay.check_in_date, stay.check_in_time], ['departure', stay.check_out_date, stay.check_out_time]] as const) {
+      if (day < query.from || day > query.to) continue
+      const instant = localDateTimeToInstant(day, time, stay.timezone, 'compatible').toISOString()
+      items.push({
+        assignedMemberId: null, assignedMemberName: null, id: `stay:${stay.id}:${moment}`, requestId: null, operationalBookingId: null, operationalReservationId: null,
+        stayId: stay.id, stayMoment: moment, kind: 'stay', startsAt: instant, endsAt: null, dayKey: day, timeZone: stay.timezone, showTimeZone: false,
+        title: guest, subtitle: `${moment === 'arrival' ? 'Checking in' : 'Checking out'} · ${stay.party_size === 1 ? '1 guest' : `${stay.party_size} guests`}`,
+        status: stay.status, organizationId: stay.organization_id, locationId: stay.location_id, locationTitle: stay.location_title,
+        guestImageUrl: null, resourceImageUrl: null, resourceTitle: stay.product_name, partySize: stay.party_size,
+        to: `/dashboard/${organizationPath}/bookings/stay/${encodeURIComponent(stay.id)}`,
+      })
+    }
+  }
+  items.sort((left, right) => left.startsAt.localeCompare(right.startsAt) || left.id.localeCompare(right.id))
 
   return {
     items, availableKinds,
@@ -323,13 +366,13 @@ export async function listTodayAgenda(
   const nearby = await listAgenda(db, scope, {
     from: addLocalDays(utcKey, -1),
     to: addLocalDays(utcKey, 1),
-    kinds: ['reservation', 'booking'],
+    kinds: ['reservation', 'booking', 'stay'],
     organizationSlug: input.organizationSlug,
     principal: input.principal,
   })
   return {
     ...nearby,
-    availableKinds: nearby.availableKinds.filter(kind => kind === 'reservation' || kind === 'booking'),
+    availableKinds: nearby.availableKinds.filter(kind => kind === 'reservation' || kind === 'booking' || kind === 'stay'),
     items: nearby.items.filter(item => item.dayKey === todayKeyForTimeZone(now, item.timeZone)),
     resolvedAt: now.toISOString(),
   }

@@ -227,8 +227,8 @@ E2E_ALLOW_DEV_ROUTES = "true"
 
 [[env.staging.d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-staging-v16"
-database_id = "76622a9c-bb92-4c1d-ab2c-206ff2594600"
+database_name = "krabiclaw-staging-v17"
+database_id = "a9c8e8f0-eb44-4058-b251-f629276de5b5"
 migrations_dir = "migrations"
 remote = false
 

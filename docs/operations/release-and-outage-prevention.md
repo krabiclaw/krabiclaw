@@ -348,6 +348,32 @@ Prepared in WNAM on 2026-10-13: production v16
 `754caf79-1e59-4e5e-93d7-18449df90e3b` and staging v16
 `76622a9c-bb92-4c1d-ab2c-206ff2594600`.
 
+The v16-to-v17 epoch makes a place to stay a Product (#1381). It is additive
+except for one constraint, which is why it needs a replacement database:
+
+- `products_kind_check` admits `stay`. The constraint is on `products`, which
+  `product_variants`, `product_options`, `product_locations`,
+  `product_booking_configs`, `product_sessions`, `bookings`,
+  `collection_products`, `product_publications`, `content_documents` and
+  `reviews` reference (and now `product_stay_configs`), so the change is a
+  table rebuild.
+- `product_locations` gains the unique `(organization_id, product_id,
+  location_id)` index that `product_stay_configs` references.
+- New tables: `product_stay_configs`, `product_nights`, `stays`, `stay_nights`
+  and `stay_payments`. They start empty.
+- Existing rows transfer unchanged; no product changes kind. The transfer audits
+  `every_home_has_stay_settings`.
+
+The complete applied v16 chain (`0000_baseline` through
+`0007_payment_intents`) and its Drizzle metadata remain unchanged in
+`migrations-history/v16/`; an older export passes through its forward
+migrations before the copy.
+
+Prepared in WNAM on 2026-10-14: staging v17
+`a9c8e8f0-eb44-4058-b251-f629276de5b5`, built with `wrangler d1 migrations
+apply` and loaded from `krabiclaw-staging-v16` (87 tables, 78,725 rows;
+`foreign_key_check` empty). Production v17 is created at its own cutover.
+
 ```sh
 node --experimental-strip-types scripts/pull-production-snapshot.ts --staging --source krabiclaw-staging-v15 --out staging-v16-initial.sqlite
 node --experimental-strip-types scripts/pull-production-snapshot.ts --production --source krabiclaw-production-v15 --out production-v16-initial.sqlite

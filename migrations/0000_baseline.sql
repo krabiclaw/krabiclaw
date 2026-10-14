@@ -707,7 +707,6 @@ CREATE TABLE `oauthClient` (
 	`clientCredentialsScopes` text DEFAULT '[]' NOT NULL,
 	`clientDiscoveryId` text,
 	`applicationType` text,
-	`public` integer DEFAULT 0 NOT NULL,
 	`requirePKCE` integer DEFAULT 1 NOT NULL,
 	`skipConsent` integer DEFAULT 0 NOT NULL,
 	`userId` text,
@@ -954,7 +953,7 @@ CREATE TABLE `organization_integrations` (
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
-	CONSTRAINT "organization_integrations_provider_check" CHECK(provider IN ('facebook', 'instagram', 'discord', 'google_analytics', 'google_search_console', 'google_calendar')),
+	CONSTRAINT "organization_integrations_provider_check" CHECK(provider IN ('facebook', 'instagram', 'discord', 'google_analytics', 'google_ads', 'google_search_console', 'google_calendar')),
 	CONSTRAINT "organization_integrations_values_check" CHECK(trim(account_id) <> '' AND trim(target_id) <> '' AND trim(target_name) <> '' AND trim(revision) <> ''),
 	CONSTRAINT "organization_integrations_measurement_check" CHECK((provider = 'google_analytics') = (measurement_id IS NOT NULL)),
 	CONSTRAINT "organization_integrations_verification_check" CHECK((provider = 'google_search_console') = (verified IS NOT NULL) AND (verification_token IS NULL OR provider = 'google_search_console') AND (verified IS NULL OR verified IN (0, 1))),
@@ -965,6 +964,25 @@ CREATE TABLE `organization_integrations` (
 CREATE INDEX `organization_integrations_account_idx` ON `organization_integrations` (`provider`,`account_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `organization_integrations_provider_unique` ON `organization_integrations` (`organization_id`,`provider`);--> statement-breakpoint
 CREATE UNIQUE INDEX `organization_integrations_target_unique` ON `organization_integrations` (`provider`,`target_id`);--> statement-breakpoint
+CREATE TABLE `organization_invite_links` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`role` text NOT NULL,
+	`token_hash` text NOT NULL,
+	`inviter_id` text NOT NULL,
+	`expires_at` text NOT NULL,
+	`used_at` text,
+	`used_by_user_id` text,
+	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`inviter_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`used_by_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
+	CONSTRAINT "organization_invite_links_instants_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', expires_at, '+0 days') IS expires_at AND (used_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', used_at, '+0 days') IS used_at) AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at),
+	CONSTRAINT "organization_invite_links_role_check" CHECK(role IN ('admin', 'member'))
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `organization_invite_links_token_hash_unique` ON `organization_invite_links` (`token_hash`);--> statement-breakpoint
+CREATE INDEX `organization_invite_links_organization_id_idx` ON `organization_invite_links` (`organization_id`);--> statement-breakpoint
 CREATE TABLE `organization_locales` (
 	`id` text PRIMARY KEY NOT NULL,
 	`organization_id` text NOT NULL,
@@ -1015,6 +1033,8 @@ CREATE TABLE `payment_attempts` (
 	`idempotency_key` text NOT NULL,
 	`stripe_checkout_id` text,
 	`checkout_url` text,
+	`stripe_payment_intent_id` text,
+	`review_json` text,
 	`return_token` text NOT NULL,
 	`status` text DEFAULT 'creating' NOT NULL,
 	`expires_at` text NOT NULL,
@@ -1031,7 +1051,7 @@ CREATE TABLE `payment_authorizations` (
 	`user_id` text,
 	`payment_id` text NOT NULL,
 	`action` text NOT NULL,
-	`amount` integer NOT NULL,
+	`amount` integer,
 	`note` text,
 	`expires_at` text NOT NULL,
 	`approved_at` text,
@@ -1166,7 +1186,7 @@ CREATE TABLE `payment_refunds` (
 	`payment_id` text NOT NULL,
 	`idempotency_key` text NOT NULL,
 	`stripe_refund_id` text,
-	`amount` integer NOT NULL,
+	`amount` integer,
 	`reason` text NOT NULL,
 	`note` text,
 	`status` text NOT NULL,
@@ -1177,7 +1197,7 @@ CREATE TABLE `payment_refunds` (
 	`updated_at` text NOT NULL,
 	FOREIGN KEY (`payment_id`) REFERENCES `payments`(`id`) ON UPDATE no action ON DELETE restrict,
 	FOREIGN KEY (`created_by`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
-	CONSTRAINT "payment_refunds_amount_check" CHECK(amount > 0)
+	CONSTRAINT "payment_refunds_amount_check" CHECK(amount IS NULL OR amount > 0)
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `payment_refunds_idempotency_key_unique` ON `payment_refunds` (`idempotency_key`);--> statement-breakpoint
@@ -1224,6 +1244,7 @@ CREATE TABLE `payments` (
 	`amount` integer NOT NULL,
 	`price_snapshot_json` text NOT NULL,
 	`tax_amount` integer DEFAULT 0 NOT NULL,
+	`surcharge_amount` integer DEFAULT 0 NOT NULL,
 	`captured_amount` integer DEFAULT 0 NOT NULL,
 	`refunded_amount` integer DEFAULT 0 NOT NULL,
 	`state` text DEFAULT 'pending' NOT NULL,
@@ -1398,6 +1419,32 @@ CREATE TABLE `product_locations` (
 );
 --> statement-breakpoint
 CREATE INDEX `product_locations_location_idx` ON `product_locations` (`location_id`,`published`,`active`);--> statement-breakpoint
+CREATE UNIQUE INDEX `product_locations_org_product_location_unique` ON `product_locations` (`organization_id`,`product_id`,`location_id`);--> statement-breakpoint
+CREATE TABLE `product_nights` (
+	`organization_id` text NOT NULL,
+	`product_id` text NOT NULL,
+	`date` text NOT NULL,
+	`closed` integer DEFAULT 0 NOT NULL,
+	`price_minor` integer,
+	`min_stay_arrival` integer,
+	`min_stay_through` integer,
+	`max_stay` integer,
+	`closed_to_arrival` integer DEFAULT 0 NOT NULL,
+	`closed_to_departure` integer DEFAULT 0 NOT NULL,
+	`source` text NOT NULL,
+	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	`updated_by` text NOT NULL,
+	PRIMARY KEY(`product_id`, `date`),
+	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`organization_id`,`product_id`) REFERENCES `product_stay_configs`(`organization_id`,`product_id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "product_nights_date_check" CHECK(date(date, '+0 days') IS date),
+	CONSTRAINT "product_nights_flags_check" CHECK(closed IN (0, 1) AND closed_to_arrival IN (0, 1) AND closed_to_departure IN (0, 1)),
+	CONSTRAINT "product_nights_price_check" CHECK(price_minor IS NULL OR price_minor >= 0),
+	CONSTRAINT "product_nights_stay_rules_check" CHECK((min_stay_arrival IS NULL OR min_stay_arrival >= 1) AND (min_stay_through IS NULL OR min_stay_through >= 1) AND (max_stay IS NULL OR max_stay >= 1)),
+	CONSTRAINT "product_nights_source_check" CHECK(source IN ('host', 'import')),
+	CONSTRAINT "product_nights_updated_at_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)
+);
+--> statement-breakpoint
 CREATE TABLE `product_option_values` (
 	`id` text PRIMARY KEY NOT NULL,
 	`organization_id` text NOT NULL,
@@ -1488,6 +1535,32 @@ CREATE INDEX `product_sessions_product_start_idx` ON `product_sessions` (`produc
 CREATE INDEX `product_sessions_location_start_idx` ON `product_sessions` (`location_id`,`starts_at`,`status`);--> statement-breakpoint
 CREATE UNIQUE INDEX `product_sessions_org_id_unique` ON `product_sessions` (`organization_id`,`id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `product_sessions_org_product_id_unique` ON `product_sessions` (`organization_id`,`product_id`,`id`);--> statement-breakpoint
+CREATE TABLE `product_stay_configs` (
+	`product_id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`location_id` text NOT NULL,
+	`check_in_time` text NOT NULL,
+	`check_out_time` text NOT NULL,
+	`max_guests` integer NOT NULL,
+	`min_nights` integer DEFAULT 1 NOT NULL,
+	`assigned_member_id` text,
+	`assigned_team_id` text,
+	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	`created_by` text NOT NULL,
+	`updated_by` text NOT NULL,
+	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`assigned_team_id`) REFERENCES `team`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`organization_id`,`product_id`) REFERENCES `products`(`organization_id`,`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`organization_id`,`product_id`,`location_id`) REFERENCES `product_locations`(`organization_id`,`product_id`,`location_id`) ON UPDATE no action ON DELETE no action,
+	FOREIGN KEY (`organization_id`,`assigned_team_id`) REFERENCES `team`(`organizationId`,`id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "product_stay_configs_instants_check" CHECK((created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)),
+	CONSTRAINT "product_stay_configs_times_check" CHECK(check_in_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_time < '24:00' AND check_out_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_out_time < '24:00'),
+	CONSTRAINT "product_stay_configs_guests_check" CHECK(max_guests >= 1),
+	CONSTRAINT "product_stay_configs_min_nights_check" CHECK(min_nights >= 1)
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `product_stay_configs_org_product_unique` ON `product_stay_configs` (`organization_id`,`product_id`);--> statement-breakpoint
 CREATE TABLE `product_variant_option_values` (
 	`organization_id` text NOT NULL,
 	`product_id` text NOT NULL,
@@ -1549,7 +1622,7 @@ CREATE TABLE `products` (
 	CONSTRAINT "products_instants_check" CHECK((created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)),
 	CONSTRAINT "products_name_not_blank_check" CHECK(trim(name) <> ''),
 	CONSTRAINT "products_slug_check" CHECK(slug <> '' AND slug = lower(slug) AND slug NOT GLOB '*[^a-z0-9-]*' AND slug NOT LIKE '-%' AND slug NOT LIKE '%-' AND slug NOT LIKE '%--%'),
-	CONSTRAINT "products_kind_check" CHECK(kind IN ('dish', 'experience', 'service', 'item')),
+	CONSTRAINT "products_kind_check" CHECK(kind IN ('dish', 'experience', 'service', 'item', 'stay')),
 	CONSTRAINT "products_active_check" CHECK(active IN (0, 1)),
 	CONSTRAINT "products_marketing_features_check" CHECK(json_valid(marketing_features) AND json_type(marketing_features) = 'array'),
 	CONSTRAINT "products_details_json_check" CHECK(json_valid(details_json) AND json_type(details_json) = 'object'),
@@ -1771,6 +1844,99 @@ CREATE TABLE `session` (
 --> statement-breakpoint
 CREATE UNIQUE INDEX `session_token_unique` ON `session` (`token`);--> statement-breakpoint
 CREATE INDEX `session_userId_idx` ON `session` (`userId`);--> statement-breakpoint
+CREATE TABLE `stay_nights` (
+	`organization_id` text NOT NULL,
+	`product_id` text NOT NULL,
+	`date` text NOT NULL,
+	`stay_id` text NOT NULL,
+	PRIMARY KEY(`product_id`, `date`),
+	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`organization_id`,`product_id`,`stay_id`) REFERENCES `stays`(`organization_id`,`product_id`,`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "stay_nights_date_check" CHECK(date(date, '+0 days') IS date)
+);
+--> statement-breakpoint
+CREATE INDEX `stay_nights_stay_idx` ON `stay_nights` (`stay_id`);--> statement-breakpoint
+CREATE TABLE `stay_payments` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`stay_id` text NOT NULL,
+	`amount_minor` integer NOT NULL,
+	`currency` text NOT NULL,
+	`method` text NOT NULL,
+	`paid_on` text NOT NULL,
+	`reference` text,
+	`note` text,
+	`idempotency_key` text NOT NULL,
+	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	`created_by` text NOT NULL,
+	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`organization_id`,`stay_id`) REFERENCES `stays`(`organization_id`,`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "stay_payments_amount_check" CHECK(amount_minor <> 0 AND length(currency) = 3 AND currency = upper(currency)),
+	CONSTRAINT "stay_payments_method_check" CHECK(method IN ('cash', 'bank_transfer', 'card_external', 'other')),
+	CONSTRAINT "stay_payments_paid_on_check" CHECK(date(paid_on, '+0 days') IS paid_on),
+	CONSTRAINT "stay_payments_created_at_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at)
+);
+--> statement-breakpoint
+CREATE INDEX `stay_payments_stay_idx` ON `stay_payments` (`stay_id`,`paid_on`);--> statement-breakpoint
+CREATE UNIQUE INDEX `stay_payments_idempotency_unique` ON `stay_payments` (`organization_id`,`idempotency_key`);--> statement-breakpoint
+CREATE TABLE `stays` (
+	`id` text PRIMARY KEY NOT NULL,
+	`organization_id` text NOT NULL,
+	`product_id` text NOT NULL,
+	`channel` text NOT NULL,
+	`owner` text NOT NULL,
+	`status` text NOT NULL,
+	`overbooked` integer DEFAULT 0 NOT NULL,
+	`check_in_date` text NOT NULL,
+	`check_out_date` text NOT NULL,
+	`arrival_time` text,
+	`adults` integer NOT NULL,
+	`children` integer DEFAULT 0 NOT NULL,
+	`infants` integer DEFAULT 0 NOT NULL,
+	`guest_name` text,
+	`guest_surname` text,
+	`guest_email` text,
+	`guest_phone` text,
+	`user_id` text,
+	`total_minor` integer NOT NULL,
+	`currency` text NOT NULL,
+	`notes` text,
+	`provider` text,
+	`external_booking_id` text,
+	`channel_booking_id` text,
+	`revision_id` text,
+	`provider_updated_at` text,
+	`idempotency_key` text,
+	`cancelled_at` text,
+	`cancellation_reason` text,
+	`version` integer DEFAULT 1 NOT NULL,
+	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	`updated_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
+	`created_by` text,
+	`updated_by` text,
+	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
+	FOREIGN KEY (`user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null,
+	FOREIGN KEY (`organization_id`,`product_id`) REFERENCES `product_stay_configs`(`organization_id`,`product_id`) ON UPDATE no action ON DELETE no action,
+	CONSTRAINT "stays_dates_check" CHECK(date(check_in_date, '+0 days') IS check_in_date AND date(check_out_date, '+0 days') IS check_out_date AND check_out_date > check_in_date),
+	CONSTRAINT "stays_arrival_time_check" CHECK(arrival_time IS NULL OR (arrival_time GLOB '[0-2][0-9]:[0-5][0-9]' AND arrival_time < '24:00')),
+	CONSTRAINT "stays_party_check" CHECK(adults >= 1 AND children >= 0 AND infants >= 0),
+	CONSTRAINT "stays_channel_check" CHECK(channel IN ('airbnb', 'vrbo', 'direct')),
+	CONSTRAINT "stays_owner_check" CHECK(owner IN ('app', 'channel') AND (owner = 'channel') = (provider IS NOT NULL AND external_booking_id IS NOT NULL)),
+	CONSTRAINT "stays_status_check" CHECK(status IN ('pending', 'confirmed', 'cancelled') AND (status = 'cancelled') = (cancelled_at IS NOT NULL)),
+	CONSTRAINT "stays_overbooked_check" CHECK(overbooked IN (0, 1) AND (overbooked = 0 OR owner = 'channel')),
+	CONSTRAINT "stays_app_guest_check" CHECK(owner = 'channel' OR (guest_name IS NOT NULL AND trim(guest_name) <> '')),
+	CONSTRAINT "stays_money_check" CHECK(total_minor >= 0 AND length(currency) = 3 AND currency = upper(currency)),
+	CONSTRAINT "stays_provider_check" CHECK(provider IS NULL OR provider = 'channex'),
+	CONSTRAINT "stays_version_check" CHECK(version >= 1),
+	CONSTRAINT "stays_instants_check" CHECK((cancelled_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', cancelled_at, '+0 days') IS cancelled_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at))
+);
+--> statement-breakpoint
+CREATE UNIQUE INDEX `stays_idempotency_unique` ON `stays` (`organization_id`,`idempotency_key`) WHERE idempotency_key IS NOT NULL;--> statement-breakpoint
+CREATE UNIQUE INDEX `stays_provider_booking_unique` ON `stays` (`provider`,`external_booking_id`) WHERE external_booking_id IS NOT NULL;--> statement-breakpoint
+CREATE INDEX `stays_product_dates_idx` ON `stays` (`product_id`,`check_in_date`,`check_out_date`);--> statement-breakpoint
+CREATE INDEX `stays_org_dates_idx` ON `stays` (`organization_id`,`check_in_date`,`status`);--> statement-breakpoint
+CREATE UNIQUE INDEX `stays_org_product_id_unique` ON `stays` (`organization_id`,`product_id`,`id`);--> statement-breakpoint
+CREATE UNIQUE INDEX `stays_org_id_unique` ON `stays` (`organization_id`,`id`);--> statement-breakpoint
 CREATE TABLE `stripe_connected_accounts` (
 	`id` text PRIMARY KEY NOT NULL,
 	`organization_id` text NOT NULL,
@@ -1779,6 +1945,7 @@ CREATE TABLE `stripe_connected_accounts` (
 	`livemode` integer NOT NULL,
 	`status` text DEFAULT 'creating' NOT NULL,
 	`card_payments_status` text,
+	`surcharge_basis_points` integer,
 	`requirements_json` text DEFAULT '[]' NOT NULL,
 	`stripe_refreshed_at` text,
 	`last_error` text,
@@ -1895,7 +2062,7 @@ CREATE TABLE `teamMember` (
 	`teamId` text NOT NULL,
 	`userId` text NOT NULL,
 	`membershipKey` text,
-	`createdAt` integer,
+	`createdAt` integer NOT NULL,
 	FOREIGN KEY (`teamId`) REFERENCES `team`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`userId`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE cascade
 );

@@ -49,7 +49,7 @@ const items = computed(() => {
   if (here.some(product => product.kind === 'dish')) {
     list.push({ key: 'menu', label: t('saya.subnav.menu'), href: `/locations/${props.locationSlug}/menu` })
   }
-  if (here.some(product => product.kind === 'item' || product.kind === 'service')) {
+  if (here.some(product => product.kind === 'item' || product.kind === 'service' || product.kind === 'stay')) {
     list.push({ key: 'products', label: t('saya.footer.products'), href: `/locations/${props.locationSlug}/products` })
   }
   if (here.some(isExperience)) {

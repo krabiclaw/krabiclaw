@@ -80,6 +80,18 @@
         "destructive_justification": "Cancels an existing product booking, releasing capacity once and emailing the guest. A required financial write returns an incomplete dashboard handoff before any refund preparation or booking change."
       }
     },
+    "cancel_stay": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Cancels a host-entered stay under its version and frees its nights; sends no email and moves no money.",
+        "open_world_justification": "Cancels a host-entered stay under its version and frees its nights; sends no email and moves no money. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Cancels a host-entered stay under its version and frees its nights; sends no email and moves no money."
+      }
+    },
     "cancel_table_reservation": {
       "annotations": {
         "readOnlyHint": false,
@@ -246,6 +258,18 @@
         "read_only_justification": "Creates a tenant page and its structured content document.",
         "open_world_justification": "Creates an authored page that can become publicly accessible on a live site.",
         "destructive_justification": "Creates a tenant page and its structured content document."
+      }
+    },
+    "create_stay": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates a host-entered stay with caller idempotency, holding its nights atomically; a night another stay holds refuses it. Sends no email and takes no payment.",
+        "open_world_justification": "Creates a host-entered stay with caller idempotency, holding its nights atomically; a night another stay holds refuses it. Sends no email and takes no payment. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Creates a host-entered stay with caller idempotency, holding its nights atomically; a night another stay holds refuses it. Sends no email and takes no payment."
       }
     },
     "create_table_reservation": {
@@ -426,6 +450,18 @@
         "read_only_justification": "Deletes a tenant page; deleting its source locale removes every translation with it.",
         "open_world_justification": "Removes the selected page or translation from the public website; source deletion also removes its translations.",
         "destructive_justification": "Deletes a tenant page; deleting its source locale removes every translation with it."
+      }
+    },
+    "delete_stay_payment": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Deletes one offline payment record from a host-entered stay.",
+        "open_world_justification": "Deletes one offline payment record from a host-entered stay. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Deletes one offline payment record from a host-entered stay."
       }
     },
     "delete_team": {
@@ -726,6 +762,30 @@
         "read_only_justification": "Reads which website, Facebook Page and Instagram account the organization can publish to, and whether Meta currently accepts each connection, without returning any token.",
         "open_world_justification": "Reads which website, Facebook Page and Instagram account the organization can publish to, and whether Meta currently accepts each connection, without returning any token. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
         "destructive_justification": "Reads which website, Facebook Page and Instagram account the organization can publish to, and whether Meta currently accepts each connection, without returning any token."
+      }
+    },
+    "get_stay": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads one stay with its guest details and the offline payments recorded against it.",
+        "open_world_justification": "Reads one stay with its guest details and the offline payments recorded against it. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads one stay with its guest details and the offline payments recorded against it."
+      }
+    },
+    "get_stay_calendar": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads each night of a date range at one place to stay: whether it is free, its price and rules, and the stay holding it.",
+        "open_world_justification": "Reads each night of a date range at one place to stay: whether it is free, its price and rules, and the stay holding it. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads each night of a date range at one place to stay: whether it is free, its price and rules, and the stay holding it."
       }
     },
     "get_website_draft": {
@@ -1040,6 +1100,18 @@
         "destructive_justification": "Lists tenant pages for the selected organization."
       }
     },
+    "list_stays": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads stays at the selected business’s places to stay overlapping a date range; members see only the homes their team looks after.",
+        "open_world_justification": "Reads stays at the selected business’s places to stay overlapping a date range; members see only the homes their team looks after. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads stays at the selected business’s places to stay overlapping a date range; members see only the homes their team looks after."
+      }
+    },
     "list_teams": {
       "annotations": {
         "readOnlyHint": true,
@@ -1158,6 +1230,18 @@
         "read_only_justification": "Atomically creates or updates catalog products using supplied IDs and a durable retry key. Disables omitted products only when deactivate_missing is requested.",
         "open_world_justification": "Changes catalog content or availability shown for published products on the public website.",
         "destructive_justification": "Atomically creates or updates catalog products using supplied IDs and a durable retry key. Disables omitted products only when deactivate_missing is requested."
+      }
+    },
+    "record_stay_payment": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Records money the host received outside KrabiClaw against a host-entered stay, idempotently per key; moves no money.",
+        "open_world_justification": "Records money the host received outside KrabiClaw against a host-entered stay, idempotently per key; moves no money. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Records money the host received outside KrabiClaw against a host-entered stay, idempotently per key; moves no money."
       }
     },
     "reject_product_booking": {
@@ -1484,6 +1568,18 @@
         "destructive_justification": "Creates or overwrites the selected product’s publication setting, including removing it from public display."
       }
     },
+    "set_stay_nights": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Closes or opens nights, sets nightly prices or stay rules, or resets them, for a date range at one place to stay.",
+        "open_world_justification": "Closes or opens nights, sets nightly prices or stay rules, or resets them, for a date range at one place to stay. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Closes or opens nights, sets nightly prices or stay rules, or resets them, for a date range at one place to stay."
+      }
+    },
     "set_team_member": {
       "annotations": {
         "readOnlyHint": false,
@@ -1686,6 +1782,18 @@
         "read_only_justification": "Overwrites tenant page metadata or supplied structured content, subject to version and removal checks.",
         "open_world_justification": "Changes a published page’s content, metadata, address or product binding seen by public website visitors.",
         "destructive_justification": "Overwrites tenant page metadata or supplied structured content, subject to version and removal checks."
+      }
+    },
+    "update_stay": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Changes a host-entered stay’s dates, party, guest details, total or notes under its version, moving its night claims; channel stays are refused.",
+        "open_world_justification": "Changes a host-entered stay’s dates, party, guest details, total or notes under its version, moving its night claims; channel stays are refused. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Changes a host-entered stay’s dates, party, guest details, total or notes under its version, moving its night claims; channel stays are refused."
       }
     },
     "update_team": {
