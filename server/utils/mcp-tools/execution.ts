@@ -152,12 +152,11 @@ export function toolFileReference(value: unknown, key: string): ToolFileReferenc
   };
 }
 
-async function fetchToolFile(file: ToolFileReference, timeoutMs: number): Promise<Response> {
+async function fetchToolFile(file: ToolFileReference): Promise<Response> {
   const safeDownloadUrl = assertSafeDownloadUrl(file.download_url, `Attachment ${file.file_id}`);
   try {
     return await fetch(safeDownloadUrl, {
       redirect: "manual",
-      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown network error";
@@ -251,7 +250,7 @@ export async function resolveUserUploadedMediaFile(
   let byteLength: number | undefined;
   let status = 'success';
   try {
-    const response = await fetchToolFile(file, 30_000);
+    const response = await fetchToolFile(file);
     if (!response.ok) {
       throw new HTTPError({
         statusCode: 400,

@@ -579,7 +579,7 @@ async function discordFiles(post: Post, deadline: MetaDeadline): Promise<Discord
   for (const [index, item] of post.media.entries()) {
     const remaining = deadline.remaining()
     if (remaining <= 250) throw new DiscordError('transport', 'The operation ran out of time while reading the post media')
-    const response = await fetch(item.public_url, { redirect: 'follow', signal: AbortSignal.timeout(Math.min(20_000, remaining)) })
+    const response = await fetch(item.public_url, { redirect: 'follow' })
     if (!response.ok) throw new Error(`Asset ${item.asset_id} could not be read from ${item.public_url}: HTTP ${response.status}`)
     const type = (response.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase()
     if (DISCORD_MEDIA_TYPES[type] !== item.kind) return { code: 'unsupported_media_type', message: `Asset ${item.asset_id} is served as ${type || 'an unknown type'}, which is not a Discord ${item.kind} format here` }

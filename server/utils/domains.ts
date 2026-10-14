@@ -104,7 +104,6 @@ interface CloudflareCustomHostname {
 const CF_API_BASE = 'https://api.cloudflare.com/client/v4'
 const MAX_RETRY_COUNT = 12
 const STUCK_AFTER_MS = 48 * 60 * 60 * 1000
-const DNS_QUERY_TIMEOUT_MS = 5_000
 
 const reservedDomains = [
   'app', 'api', 'admin', 'dashboard', 'login', 'signup',
@@ -279,7 +278,7 @@ async function cloudflareRequest<T>(
 
   const response = await fetch(`${CF_API_BASE}${path}`, {
     ...init,
-    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
+    signal,
     headers: {
       Authorization: `Bearer ${env.CF_CUSTOM_HOSTNAMES_API_TOKEN}`,
       'Content-Type': 'application/json',
@@ -387,28 +386,17 @@ async function queryDnsJson(hostname: string, type: 'CNAME' | 'A' | 'AAAA', sign
   url.searchParams.set('name', hostname)
   url.searchParams.set('type', type)
 
-  const timeoutController = new AbortController()
-  const timeout = setTimeout(() => timeoutController.abort(), DNS_QUERY_TIMEOUT_MS)
-  const abort = () => timeoutController.abort()
-  if (signal?.aborted) abort()
-  signal?.addEventListener('abort', abort, { once: true })
-
-  try {
-    const response = await fetch(url, {
-      headers: { accept: 'application/dns-json' },
-      signal: timeoutController.signal,
-    })
-    if (!response.ok) throw new Error(`DNS ${type} lookup for ${hostname} failed (HTTP ${response.status})`)
-    const body = await response.json() as { Status?: number; Answer?: Array<{ type?: number; data?: string }> }
-    if (body.Status !== 0 && body.Status !== 3) throw new Error(`DNS ${type} lookup for ${hostname} failed (status ${body.Status})`)
-    return (body.Answer ?? [])
-      .filter(answer => answer.type === DNS_RECORD_TYPES[type])
-      .map((answer) => normalizeDnsValue(answer.data))
-      .filter(Boolean)
-  } finally {
-    clearTimeout(timeout)
-    signal?.removeEventListener('abort', abort)
-  }
+  const response = await fetch(url, {
+    headers: { accept: 'application/dns-json' },
+    signal,
+  })
+  if (!response.ok) throw new Error(`DNS ${type} lookup for ${hostname} failed (HTTP ${response.status})`)
+  const body = await response.json() as { Status?: number; Answer?: Array<{ type?: number; data?: string }> }
+  if (body.Status !== 0 && body.Status !== 3) throw new Error(`DNS ${type} lookup for ${hostname} failed (status ${body.Status})`)
+  return (body.Answer ?? [])
+    .filter(answer => answer.type === DNS_RECORD_TYPES[type])
+    .map((answer) => normalizeDnsValue(answer.data))
+    .filter(Boolean)
 }
 
 export interface DomainResolutionInspection {

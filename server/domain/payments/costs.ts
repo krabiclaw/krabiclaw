@@ -118,7 +118,7 @@ export async function ingestStripeFeeReportEvent(db:DbClient,stripe:Stripe,env:C
  if(run.status!=='succeeded'||!run.result?.url)throw new Error(`Stripe fee report ${run.id} event carries no result`)
  const url=new URL(run.result.url)
  if(url.protocol!=='https:' || (url.hostname!=='files.stripe.com' && url.hostname!=='api.stripe.com')) throw new Error('Unexpected native Stripe report file origin')
- const response=await fetch(url,{headers:{Authorization:`Bearer ${env.STRIPE_SECRET_KEY}`},redirect:'error',signal:AbortSignal.timeout(10000)})
+ const response=await fetch(url,{headers:{Authorization:`Bearer ${env.STRIPE_SECRET_KEY}`},redirect:'error'})
  if(!response.ok) throw new Error(`Stripe fee report download failed (${response.status})`)
  const {organizations}=await ingestStripeFeeReport(db,livemode,await response.text(),stripe)
  for(const organizationId of organizations)await deliverPaymentsUsage(db,env,organizationId)

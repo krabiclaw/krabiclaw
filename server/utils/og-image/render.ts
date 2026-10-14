@@ -8,7 +8,7 @@ import { ensureResvgInitialized, loadLocalWasmModule } from '~/server/utils/resv
 // The brand mark comes from the site's own logo placement (a media asset URL),
 // Krabiclaw's site included.
 function resolveLogoDataUri(images: ImagesBinding, logoUrl: string | null | undefined): Promise<string | null> {
-  return fetchTransformedImageAsDataUri(images, logoUrl, { width: 160, height: 160, fit: 'contain' }, { format: 'image/png' }, { timeoutMs: 4000 })
+  return fetchTransformedImageAsDataUri(images, logoUrl, { width: 160, height: 160, fit: 'contain' }, { format: 'image/png' })
 }
 
 // initWasm() may only run once per isolate. Cached at module scope so repeated renders in
@@ -62,7 +62,6 @@ export async function renderOgImagePng(
       format: 'image/jpeg',
       quality: 85,
     }, {
-      timeoutMs: 4000,
       acceptedContentTypes: ['image/png', 'image/jpeg', 'image/webp'],
     }),
     resolveLogoDataUri(deps.images, payload.logoUrl),

@@ -104,7 +104,6 @@ async function zarazRequest<T>(env: ZarazEnv, init: RequestInit = {}): Promise<T
   if (requireZarazEnv(env) === 'absent') throw new Error('Zaraz is declared absent in this environment')
   const response = await fetch(`${CF_API_BASE}/zones/${env.CF_ZONE_ID}/settings/zaraz/config`, {
     ...init,
-    signal: AbortSignal.timeout(15_000),
     headers: {
       Authorization: `Bearer ${env.CLOUDFLARE_API_TOKEN}`,
       'Content-Type': 'application/json',
