@@ -1,5 +1,21 @@
 export default {
   "reservations": { "deposit_label": "Reservation deposit", "confirmed": "Reservation confirmed" },
+  "payment": {
+    "title": "Pay for your booking",
+    "unavailable": "This payment is not available.",
+    "already_paid": "This booking is already paid.",
+    "expired": "This payment has expired.",
+    "expired_help": "Start the booking again to pay for it.",
+    "surcharge": "Card surcharge",
+    "total": "Total",
+    "review": "Review payment",
+    "change_method": "Change",
+    "surcharge_applies": "A surcharge applies to this card. It is shown above and included in the total.",
+    "no_surcharge": "No surcharge applies to this payment method.",
+    "pay": "Pay {amount}",
+    "cancel": "Cancel",
+    "declined": "The payment was not completed."
+  },
   "site_pages": {
       "home": "Home",
       "about": "About",

@@ -316,7 +316,40 @@ outbox identity is namespaced by account/mode/event. Only minimal object identit
 is retained. Stripe remains record authority; a webhook handler that fails
 returns non-2xx and Stripe redelivers the event until the write lands.
 
-Checkout is created only for a booked session through `createProductBooking`;
+### Paying on the site
+
+The buyer pays on the business's own site at `/pay/<payment id>`, not on a hosted
+Checkout. `createPaymentCheckout` opens a Stripe PaymentIntent on the connected
+account (`payment_attempts.stripe_payment_intent_id`) and hands the browser the
+page path and a purchase claim, carried in the URL fragment so no server, log or
+referrer sees it. Stripe's Payment Element, mounted on the connected account in
+deferred mode with the business's payment method configuration, collects the
+method; `POST /api/public/payments/<id>/review` attaches it to the intent and
+returns what the card will cost; `POST .../confirm` confirms exactly the reviewed
+method and total, and the browser completes any 3DS with `handleNextAction` before
+returning to `/account` with the claim. A succeeded confirmation settles at once
+through `reconcilePaymentIntent`, and again, idempotently, from the webhook.
+
+**Surcharge.** A business that opts in sets `surcharge_basis_points` on its
+connected account. Stripe's native surcharge preview (`amount_details.surcharge`,
+pinned by `STRIPE_PAYMENTS_API_VERSION`) says, per attached card, whether a
+surcharge is `available` and its `maximum_amount`; the business's rate is applied
+inside that bound and an ineligible card carries none. Stripe not answering is an
+error, never a free payment. The surcharged total is confirmed with
+`amount_to_confirm` and the named surcharge, so Stripe's receipts and refunds carry
+it; `payments.surcharge_amount` records what Stripe charged.
+
+**Expiry.** A hosted Checkout expired itself; a PaymentIntent waits. The hourly
+`payments:expire-attempts` task abandons intents whose attempt `expires_at` has
+passed, and Stripe's `canceled` answer is settled through the same path as the
+webhook: the payment fails, the hold is released, the attempt is `expired` and
+`payment_checkout_expired` is recorded. Capacity itself is time-bound in every
+availability query, so a hold never blocks past its `expires_at` either way.
+
+A business with Stripe Tax configured is refused (409 `stripe_tax_unsupported`)
+rather than charged without the tax Checkout used to calculate.
+
+The PaymentIntent is created only for a booked session through `createProductBooking`;
 there is no merchant payment link or MCP order checkout. Existing one-time order
 payments keep their immutable lines and Price snapshots and remain serviceable.
 Native automatic tax is enabled only for a merchant with active configured Stripe
@@ -344,18 +377,18 @@ anonymous identities whose requests were all made with that email join it
 received every confirmation and manage link sent to it. An email typed into a form
 is never proof by itself, and no tenant membership is granted. There is no manual
 transfer-code flow. Thank-you pages and guest confirmation emails invite the guest to
-create the account at krabiclaw.com with the email they used. Hidden hosted return tokens are one-time possession
-proofs; the server retrieves native Checkout and PaymentIntent before conversion.
+create the account at krabiclaw.com with the email they used. Hidden return tokens are one-time possession
+proofs; the server retrieves the native PaymentIntent before conversion.
 Financial parent FKs retain evidence; tenant deletion stores minimal servicing
 relationships without retaining merchant credentials or recreating the tenant.
 
 ### Saved cards
 
-A buyer's cards are saved with each business, never on KrabiClaw. At a business's
-Checkout a signed-in buyer pays as their Customer on that business's connected
-account (`stripe_connected_customers`); Stripe's own checkbox saves a new card
-there, Checkout offers those saved cards again at that business only, and lets the
-buyer remove them. A Customer on the connected account is also what lets that
+A buyer's cards are saved with each business, never on KrabiClaw. On a business's
+pay page a signed-in buyer pays as their Customer on that business's connected
+account (`stripe_connected_customers`) through a Stripe customer session; the
+Payment Element's own checkbox saves a new card there, offers those saved cards
+again at that business only, and lets the buyer remove them. A Customer on the connected account is also what lets that
 business charge a saved card later, as Stripe's recurring-payment guidance
 requires. A guest pays without a Customer; Link remains Stripe's way to reuse cards
 across businesses. KrabiClaw creates no platform Customer for buyers: the Better

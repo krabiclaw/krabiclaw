@@ -15,7 +15,8 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   nativeId: string
   status: string
   amount: number
-  checkout?: Stripe.Checkout.Session
+  /** The buyer's email as Stripe has it; read from the charge when the caller has not. */
+  email?: string | null
   responseDueBy?: string | null
 }) {
   const organization = await queryFirst<{ name: string; slug: string }>(db, 'SELECT name,slug FROM organization WHERE id=?', [payment.organization_id])
@@ -28,12 +29,13 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   if (typeof snapshot.title !== 'string' || !snapshot.title.trim() || !isCurrencyCode(payment.currency)) throw new Error('Payments notification requires its immutable item and currency')
   let email: string | null = null
   if (guestKind) {
-    const attempt = await queryFirst<{ stripe_checkout_id: string }>(db, 'SELECT stripe_checkout_id FROM payment_attempts WHERE payment_id=? AND stripe_checkout_id IS NOT NULL ORDER BY created_at DESC LIMIT 1', [payment.id])
-    if (!attempt) throw new Error('Payments notification has no native Checkout identity')
-    const checkout = input.checkout ?? await stripe.checkout.sessions.retrieve(attempt.stripe_checkout_id, {}, { stripeAccount: payment.stripe_account_id })
-    const intentId = typeof checkout.payment_intent === 'string' ? checkout.payment_intent : checkout.payment_intent?.id
-    if (checkout.id !== attempt.stripe_checkout_id || checkout.client_reference_id !== payment.id || checkout.livemode !== Boolean(payment.livemode) || checkout.currency?.toUpperCase() !== payment.currency || (payment.stripe_payment_intent_id && intentId !== payment.stripe_payment_intent_id)) throw new Error('Payments notification Checkout identity mismatch')
-    email = checkout.customer_details?.email ?? null
+    // The address the buyer gave Stripe with the card, from the charge the intent made.
+    if (input.email !== undefined) email = input.email
+    else if (payment.stripe_charge_id) {
+      const charge = await stripe.charges.retrieve(payment.stripe_charge_id, {}, { stripeAccount: payment.stripe_account_id })
+      if (charge.livemode !== Boolean(payment.livemode) || charge.currency.toUpperCase() !== payment.currency || (payment.stripe_payment_intent_id && charge.payment_intent !== payment.stripe_payment_intent_id)) throw new Error('Stripe charge does not match the payment')
+      email = charge.billing_details.email ?? null
+    }
   }
   const eventKey = `payments:${payment.stripe_account_id}:${payment.livemode}:${input.nativeId}:${input.status}:${input.kind}`
   const visitKind = payment.subject_type === 'booking' || payment.subject_type === 'reservation' ? payment.subject_type : null
