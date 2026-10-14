@@ -97,7 +97,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'get_calendar',
-      description: "Read the business’s reservations, bookings, consultations, published posts and unavailable dates when the user wants to review its calendar. Dates are inclusive local calendar days, with at most 62 days per call. Use kinds to filter the agenda.",
+      description: "Read the business’s reservations, bookings, consultations, guest arrivals and departures, published posts and unavailable dates when the user wants to review its calendar. Dates are inclusive local calendar days, with at most 62 days per call. Use kinds to filter the agenda.",
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {
@@ -105,7 +105,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
         assigned_member_id: { type: 'string' },
         from: { ...calendarDateSchema, description: 'First day, YYYY-MM-DD.' },
         to: { ...calendarDateSchema, description: 'Last day, YYYY-MM-DD, inclusive.' },
-        kinds: { type: 'array', items: { type: 'string', enum: ['reservation', 'booking', 'post'] }, description: 'Limit to these kinds. Defaults to every kind the location offers.' },
+        kinds: { type: 'array', items: { type: 'string', enum: ['reservation', 'booking', 'post', 'stay'] }, description: 'Limit to these kinds. Defaults to every kind the location offers. A stay appears on its arrival and its departure day.' },
       },
       required: ['from', 'to'],
       outputSchema: {

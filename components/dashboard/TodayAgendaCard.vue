@@ -64,7 +64,7 @@ const where = computed(() => props.personal
 
 const resourceIcon = computed(() => props.item.kind === 'booking'
   ? 'i-lucide-ticket'
-  : 'i-lucide-map-pin')
+  : props.item.kind === 'stay' ? 'i-lucide-house' : 'i-lucide-map-pin')
 
 function firstName(name: string): string {
   return name.trim().split(/\s+/)[0] || name

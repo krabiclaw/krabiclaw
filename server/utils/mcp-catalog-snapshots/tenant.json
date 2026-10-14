@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:3909bc2d8c5c930c51a497ba65f42f36e132c48f636e27abc9515bc0409adb8a",
-  "documentationFingerprint": "sha256:e2ed09bfac34733af51bfd90fab6fb2208df3da3c8e363f7232264d6479e1dfb",
+  "fingerprint": "sha256:db67b7fddaf422aeeea1b9073c81139ed8059b042ec3307d6493efb3bf0d1ded",
+  "documentationFingerprint": "sha256:e3c98e6e34ca3764a8735a1f3a178c636ef303bf236f557944995b7f1891dc5b",
   "tools": [
     {
       "name": "append_content_block",
@@ -7493,7 +7493,8 @@
                   "enum": [
                     "reservation",
                     "booking",
-                    "post"
+                    "post",
+                    "stay"
                   ],
                   "type": "string"
                 },
@@ -37454,7 +37455,7 @@
     {
       "name": "get_calendar",
       "title": "Get calendar",
-      "description": "Read the business’s reservations, bookings, consultations, published posts and unavailable dates when the user wants to review its calendar. Dates are inclusive local calendar days, with at most 62 days per call. Use kinds to filter the agenda.",
+      "description": "Read the business’s reservations, bookings, consultations, guest arrivals and departures, published posts and unavailable dates when the user wants to review its calendar. Dates are inclusive local calendar days, with at most 62 days per call. Use kinds to filter the agenda.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -37468,12 +37469,13 @@
             "type": "string"
           },
           "kinds": {
-            "description": "Limit to these kinds. Defaults to every kind the location offers.",
+            "description": "Limit to these kinds. Defaults to every kind the location offers. A stay appears on its arrival and its departure day.",
             "items": {
               "enum": [
                 "reservation",
                 "booking",
-                "post"
+                "post",
+                "stay"
               ],
               "type": "string"
             },
@@ -37552,7 +37554,8 @@
                   "enum": [
                     "reservation",
                     "booking",
-                    "post"
+                    "post",
+                    "stay"
                   ],
                   "type": "string"
                 },
@@ -57529,7 +57532,8 @@
                   "enum": [
                     "reservation",
                     "booking",
-                    "post"
+                    "post",
+                    "stay"
                   ],
                   "type": "string"
                 },

@@ -235,6 +235,19 @@ retry returns the same pair. It starts sale-inactive and unpublished, with no
 price and no booking. A bound page is public exactly while its Product is
 published on the site; there is no second publish flag for it.
 
+### Places to stay
+
+A place to stay is a Product of kind `stay`, edited in the one Product editor.
+Its House rules row owns its one location (chosen once, when it is created),
+check-in and checkout times, how many it sleeps, the minimum nights and the
+team who look after it; it has no Scheduling or Locations rows. Its price row
+is the base nightly price. Its stays are on Today and the Calendar, on the day
+guests arrive and the day they leave, and open at the booking route as
+`bookings/stay/:stayId`. A stay taken by the host records offline payments and
+is cancelled there; a stay from Airbnb or another channel is read-only and
+changes on that channel. A place to stay is shown on the website only with its
+booking link until direct stays exist.
+
 ### Organizations
 
 The tenant is Better Auth's organization, and the dashboard calls it that:

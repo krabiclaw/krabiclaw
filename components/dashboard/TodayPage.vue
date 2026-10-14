@@ -117,6 +117,8 @@ const PAGE_SIZE = 12
 const UPCOMING_WINDOW_DAYS = 30
 const UPCOMING_HORIZON_DAYS = 365
 const BOOKING_KINDS: AgendaKind[] = ['reservation', 'booking']
+// Today lists who is coming: bookings and reservations, and guests arriving at or leaving a place to stay.
+const TODAY_KINDS: AgendaKind[] = [...BOOKING_KINDS, 'stay']
 
 const ranges: Array<{ label: string; value: TodayRange }> = [
   { label: 'Today', value: 'today' },
@@ -137,7 +139,7 @@ const isNullableString = (value: unknown): value is string | null => value === n
 const isAgendaItem = (value: unknown): value is AgendaItem =>
   isRecord(value)
   && typeof value.id === 'string'
-  && BOOKING_KINDS.includes(value.kind as AgendaKind)
+  && TODAY_KINDS.includes(value.kind as AgendaKind)
   && typeof value.startsAt === 'string'
   && typeof value.dayKey === 'string'
   && typeof value.timeZone === 'string'
@@ -269,7 +271,7 @@ async function loadUpcoming() {
           to,
           locationId: filters.locationId !== AGENDA_FILTER_ALL ? filters.locationId : undefined,
           assigned_member_id: filters.assignedMemberId !== AGENDA_FILTER_ALL ? filters.assignedMemberId : undefined,
-          kinds: filters.kind !== AGENDA_FILTER_ALL ? filters.kind : 'reservation, booking',
+          kinds: filters.kind !== AGENDA_FILTER_ALL ? filters.kind : TODAY_KINDS.join(','),
         },
         validate: isAgendaPayload,
       })
@@ -301,7 +303,7 @@ function retryRealtime() {
   void refreshAgenda()
 }
 
-// `AgendaKind` still admits 'post'; Today only ever lists the two booking kinds
+// `AgendaKind` still admits 'post' and 'stay'; Today's heading counts the two booking kinds
 // (`isAgendaItem` rejects the rest), so this narrows the type rather than
 // standing in for missing data.
 function isBookingKind(kind: AgendaKind): kind is BookingKind {

@@ -250,16 +250,17 @@ export interface ProductPresentation {
   collectionPath: '/menu' | '/products' | '/experiences' | '/schedule'
   locationCollectionSegment: ProductSurface
   productPath: (_locationSlug: string, _productSlug: string) => string
-  collectionLabel: 'Menu' | 'Products' | 'Experiences' | 'Consultations' | 'Services'
-  itemLabel: 'Dish' | 'Product' | 'Experience' | 'Service'
+  collectionLabel: 'Menu' | 'Products' | 'Experiences' | 'Consultations' | 'Services' | 'Places to stay'
+  itemLabel: 'Dish' | 'Product' | 'Experience' | 'Service' | 'Place to stay'
   // English plurals are irregular enough here ("Dish" -> "Dishes",
   // "Collection" -> "Collections") that appending an "s" produces visible typos.
-  itemLabelPlural: 'Dishes' | 'Products' | 'Experiences' | 'Services'
+  itemLabelPlural: 'Dishes' | 'Products' | 'Experiences' | 'Services' | 'Places to stay'
   collectionGroupLabel: 'Section' | 'Collection'
   collectionGroupLabelPlural: 'Sections' | 'Collections'
   /**
    * What this surface's items are, in schema.org's vocabulary: dishes are
-   * MenuItems, goods are Products, and a bookable experience is an Event.
+   * MenuItems, goods are Products, a bookable experience is an Event and a
+   * place to stay is an Accommodation.
    */
-  structuredDataType: 'MenuItem' | 'Product' | 'Event'
+  structuredDataType: 'MenuItem' | 'Product' | 'Event' | 'Accommodation'
 }

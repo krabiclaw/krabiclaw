@@ -102,10 +102,10 @@ const { data, error, status } = await useAsyncData(
 )
 
 // A booking opens as a leaf of this day; a post keeps its own screen. The
-// item id is `kind:record`, which is how the agenda names a row.
+// item id is `kind:record`, which is how the agenda names a row; a stay's two rows name their stay.
 function openHere(item: AgendaItem): string | undefined {
   if (item.kind === 'post' || props.personalScope) return undefined
-  return `${level.path.value}/${item.kind}/${encodeURIComponent(item.id.slice(item.kind.length + 1))}`
+  return `${level.path.value}/${item.kind}/${encodeURIComponent(item.stayId ?? item.id.slice(item.kind.length + 1))}`
 }
 const items = computed(() => data.value?.items ?? [])
 const saveError = ref<unknown>(null)
