@@ -24,6 +24,7 @@ export interface Payment {
   tax_amount: number
   captured_amount: number
   refunded_amount: number
+  surcharge_amount: number
   state: string
   stripe_payment_intent_id: string | null
   stripe_charge_id: string | null

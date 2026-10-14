@@ -12,6 +12,7 @@
     <div class="mt-4">
       <p class="text-base font-medium text-highlighted">{{ amountLabel }}</p>
       <p class="mt-1 text-base text-muted">{{ paymentMoney(payment.captured_amount, payment.currency) }}</p>
+      <p v-if="payment.surcharge_amount" class="mt-1 text-base text-muted" data-payment-surcharge>Includes a {{ paymentMoney(payment.surcharge_amount, payment.currency) }} card surcharge</p>
     </div>
     <div v-if="payment.refunded_amount" class="mt-4">
       <p class="text-base font-medium text-highlighted">Refunded</p>

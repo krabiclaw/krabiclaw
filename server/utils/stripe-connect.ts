@@ -31,6 +31,8 @@ export interface StripeConnectedAccount {
   livemode: boolean
   status: StripeConnectStatus
   cardPaymentsStatus: StripeCapabilityStatus | null
+  /** Pass on credit card fees: the surcharge rate in basis points, bounded by Stripe's maximum per card; null is off. */
+  surchargeBasisPoints: number | null
   requirements: StripeConnectRequirement[]
   stripeRefreshedAt: string | null
   lastError: string | null
@@ -46,6 +48,7 @@ interface StripeConnectedAccountRow {
   livemode: number
   status: StripeConnectStatus
   card_payments_status: StripeCapabilityStatus | null
+  surcharge_basis_points: number | null
   requirements_json: string
   stripe_refreshed_at: string | null
   last_error: string | null
@@ -91,6 +94,7 @@ function mapConnectedAccount(row: StripeConnectedAccountRow): StripeConnectedAcc
     livemode: Boolean(row.livemode),
     status: row.status,
     cardPaymentsStatus: row.card_payments_status,
+    surchargeBasisPoints: row.surcharge_basis_points,
     requirements: parseRequirements(row.requirements_json),
     stripeRefreshedAt: row.stripe_refreshed_at,
     lastError: row.last_error,
@@ -149,7 +153,7 @@ export async function getStripeConnectedAccount(
 ): Promise<StripeConnectedAccount | null> {
   const row = await queryFirst<StripeConnectedAccountRow>(db, `
     SELECT id, organization_id, stripe_account_id, country, livemode, status,
-           card_payments_status, requirements_json, stripe_refreshed_at,
+           card_payments_status, surcharge_basis_points, requirements_json, stripe_refreshed_at,
            last_error, created_at, updated_at
     FROM stripe_connected_accounts
     WHERE organization_id = ?
@@ -188,7 +192,7 @@ export async function getStripeConnectedAccountByStripeId(
 ): Promise<StripeConnectedAccount | null> {
   const row = await queryFirst<StripeConnectedAccountRow>(db, `
     SELECT id, organization_id, stripe_account_id, country, livemode, status,
-           card_payments_status, requirements_json, stripe_refreshed_at,
+           card_payments_status, surcharge_basis_points, requirements_json, stripe_refreshed_at,
            last_error, created_at, updated_at
     FROM stripe_connected_accounts
     WHERE stripe_account_id = ?

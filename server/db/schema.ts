@@ -2417,8 +2417,6 @@ export const payment_refunds = sqliteTable("payment_refunds", {
  stripe_refund_id: text(),
  /** Stripe's refunded amount once it answers; NULL while a full-remaining refund is still with Stripe. */
  amount: integer(),
- /** The surcharge portion inside `amount` on a partial refund, allocated in proportion to the principal returned. */
- surcharge_amount: integer().default(0).notNull(),
  reason: text().notNull(),
  /** What the business told the buyer when it sent the money, as Airbnb's refund carries a message. */
  note: text(),

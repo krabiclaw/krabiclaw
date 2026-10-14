@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "e3fb0869-55cd-4c3f-a00e-cea6ba7da9bb",
+  "id": "64e36c1b-76d3-4a02-84bc-46f0cfb6e486",
   "prevId": "7fde9a34-e1ff-4d62-ad82-5a72667a7f7d",
   "tables": {
     "account": {
@@ -8171,14 +8171,6 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
-        },
-        "surcharge_amount": {
-          "name": "surcharge_amount",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": 0
         },
         "reason": {
           "name": "reason",
