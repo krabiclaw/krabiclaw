@@ -67,8 +67,9 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
 
   // Today lists the arrival and opens the stay.
   await page.goto(`/dashboard/${slug}`)
-  const arrival = page.getByRole('link').filter({ hasText: 'Ana Silva' }).filter({ hasText: 'Checking in' })
-  await expect(arrival).toBeVisible()
+  // Today's card names the guest by first name and the moment: arriving, at the home's check-in time.
+  const arrival = page.getByRole('link', { name: /3:00\sPM Ana arrives today with 2 guests/ })
+  await expect(arrival).toHaveAttribute('href', `/dashboard/${slug}/bookings/stay/${stay.data!.stay.id}`)
   await arrival.click()
   await expect(page.getByRole('heading', { name: 'Ana Silva', level: 1 })).toBeVisible()
 
