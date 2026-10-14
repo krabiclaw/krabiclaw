@@ -98,7 +98,7 @@ test.describe('lodging identity boundary', () => {
       expect((await pending.json() as { inviteLinks: Array<{ id: string; role: string }> }).inviteLinks).toEqual([expect.objectContaining({ id: inviteLinkId, role: 'admin' })])
       const offered = await api.get(`/api/internal/lodging/invite-links/${encodeURIComponent(inviteToken)}`, { headers: service })
       expect(offered.status, await offered.text()).toBe(200)
-      expect(await offered.json()).toEqual({ organization: { id: organization.id, name: organization.name }, role: 'admin', expiresAt, status: 'pending' })
+      expect(await offered.json()).toEqual({ organizationName: organization.name, role: 'admin', status: 'pending', expiresAt })
       expect((await api.get(`/api/internal/lodging/invite-links/${encodeURIComponent(inviteToken)}`, { headers: bearer })).status).toBe(401)
       const inviteeBearer = await signInBearer(invitee.email)
       const accepted = await api.post(`/api/invite-links/${encodeURIComponent(inviteToken)}/accept`, { headers: inviteeBearer })
