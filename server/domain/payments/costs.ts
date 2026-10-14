@@ -60,6 +60,8 @@ export async function ingestStripeFeeReport(db:DbClient,livemode:boolean,csv:str
   if(old && old.currency!==row.currency) throw new Error('Stripe fee currency changed for native identity')
   if(old?.organization_id&&old.organization_id!==tenant)throw new Error('Stripe fee attribution changed for an already billed native identity')
   const now=new Date().toISOString(),revision=(old?.revision??0)+1
+  // A replayed report still bills whatever this tenant has accrued but not delivered.
+  if(tenant)organizations.add(tenant)
   if(old?.amount===row.amount && (old.organization_id || !tenant)) continue
   // A previously unresolved snapshot has never produced usage.
   const delta=row.amount-(old?.organization_id?old.amount:0)
@@ -77,7 +79,7 @@ export async function ingestStripeFeeReport(db:DbClient,livemode:boolean,csv:str
    ...(tenant&&delta!==0?[{query:`INSERT INTO payment_usage_events(id,organization_id,payment_id,kind,currency,amount,billing_basis_json,source_id,provider_occurred_at,created_at) SELECT ?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM payment_cost_snapshots WHERE source_id=? AND revision=? AND amount=?) ON CONFLICT(source_id) DO NOTHING`,params:[crypto.randomUUID(),tenant,payment?.id??null,old?.organization_id?'stripe_cost_adjustment':'stripe_cost',row.currency,delta,JSON.stringify(usageBasis),`${source}:revision:${revision}`,row.incurred_at,now,source,revision,row.amount]}]:[]),
   ],{operation:'Reconcile native attributable Stripe costs'})
   if (results[0]?.meta.changes !== 1) throw new Error('Stripe cost was revised concurrently; reconcile the current native receipt before processing this report')
-  if(tenant){attributed++;organizations.add(tenant)}else unattributed++
+  if(tenant)attributed++;else unattributed++
  }
  return {attributed,unattributed,organizations}
 }
