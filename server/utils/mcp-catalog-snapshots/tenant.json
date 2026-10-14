@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:db67b7fddaf422aeeea1b9073c81139ed8059b042ec3307d6493efb3bf0d1ded",
-  "documentationFingerprint": "sha256:e3c98e6e34ca3764a8735a1f3a178c636ef303bf236f557944995b7f1891dc5b",
+  "fingerprint": "sha256:b6b8ed6aaf417b7aadd4cbc74432f25ebc11b19c9b9f7f25d184c96b7a14e30c",
+  "documentationFingerprint": "sha256:a8c11e3c8c659b1fa0451924ab121feab4162a9e365032e2667a81c8cf85952f",
   "tools": [
     {
       "name": "append_content_block",
@@ -7558,6 +7558,13 @@
                 "status": {
                   "type": "string"
                 },
+                "stayId": {
+                  "description": "For a stay row, the stay to read with get_stay; one stay is its arrival and its departure.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "subtitle": {
                   "type": [
                     "string",
@@ -7580,6 +7587,7 @@
                 "requestId",
                 "operationalBookingId",
                 "operationalReservationId",
+                "stayId",
                 "startsAt",
                 "endsAt",
                 "dayKey",
@@ -37619,6 +37627,13 @@
                 "status": {
                   "type": "string"
                 },
+                "stayId": {
+                  "description": "For a stay row, the stay to read with get_stay; one stay is its arrival and its departure.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "subtitle": {
                   "type": [
                     "string",
@@ -37641,6 +37656,7 @@
                 "requestId",
                 "operationalBookingId",
                 "operationalReservationId",
+                "stayId",
                 "startsAt",
                 "endsAt",
                 "dayKey",
@@ -57597,6 +57613,13 @@
                 "status": {
                   "type": "string"
                 },
+                "stayId": {
+                  "description": "For a stay row, the stay to read with get_stay; one stay is its arrival and its departure.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "subtitle": {
                   "type": [
                     "string",
@@ -57619,6 +57642,7 @@
                 "requestId",
                 "operationalBookingId",
                 "operationalReservationId",
+                "stayId",
                 "startsAt",
                 "endsAt",
                 "dayKey",
