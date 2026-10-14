@@ -1,10 +1,15 @@
+import { request as httpRequest } from 'node:http'
+import { request as httpsRequest } from 'node:https'
 import { expect, test } from '@playwright/test'
 import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
 import { devLoginHeaders } from './test-env'
 
 // The native app and the lodging Worker authenticate with a Better Auth bearer
-// session and nothing else: no cookies, no Origin. These use fetch, which has
-// no cookie jar, so a cookie can never stand in for the bearer.
+// session and nothing else: no cookies, no Origin, no fetch-metadata headers.
+// These use node:http, which sends only the headers given — fetch adds
+// Sec-Fetch-Mode, which a native URLSession never sends and which makes Better
+// Auth demand an Origin — and keeps no cookie jar, so a cookie can never stand
+// in for the bearer.
 // docs/shared-auth-contract.md §3–§4.
 
 const fixture = findE2eAuthFixture('user-e2e-lodging-native')
@@ -15,16 +20,35 @@ test.describe('lodging identity boundary', () => {
   const session = (baseURL: string | undefined) => {
     const password = process.env.CANARY_LOGIN_PASSWORD
     if (!password) throw new Error('CANARY_LOGIN_PASSWORD is not configured.')
-    const call = async (method: 'GET' | 'POST' | 'DELETE', path: string, init: { headers?: Record<string, string>; data?: unknown } = {}) => {
-      const response = await fetch(new URL(path, baseURL), {
+    const call = (method: 'GET' | 'POST' | 'DELETE', path: string, init: { headers?: Record<string, string>; data?: unknown } = {}) => new Promise<{
+      status: number
+      headers: { get: (name: string) => string | null }
+      text: () => Promise<string>
+      json: () => Promise<unknown>
+    }>((resolve, reject) => {
+      const url = new URL(path, baseURL)
+      const body = init.data === undefined ? undefined : JSON.stringify(init.data)
+      const send = url.protocol === 'https:' ? httpsRequest : httpRequest
+      const outgoing = send(url, {
         method,
-        redirect: 'manual',
-        headers: { ...init.headers, ...(init.data === undefined ? {} : { 'content-type': 'application/json' }) },
-        body: init.data === undefined ? undefined : JSON.stringify(init.data),
+        headers: { ...init.headers, ...(body === undefined ? {} : { 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(body)) }) },
+      }, (incoming) => {
+        const chunks: Buffer[] = []
+        incoming.on('data', (chunk: Buffer) => chunks.push(chunk))
+        incoming.on('end', () => {
+          const text = Buffer.concat(chunks).toString('utf8')
+          resolve({
+            status: incoming.statusCode ?? 0,
+            headers: { get: (name: string) => { const value = incoming.headers[name.toLowerCase()]; return Array.isArray(value) ? value.join(', ') : value ?? null } },
+            text: async () => text,
+            json: async () => JSON.parse(text) as unknown,
+          })
+        })
+        incoming.on('error', reject)
       })
-      const text = await response.text()
-      return { status: response.status, headers: response.headers, text: async () => text, json: async () => JSON.parse(text) as unknown }
-    }
+      outgoing.on('error', reject)
+      outgoing.end(body)
+    })
     const api = {
       get: (path: string, init?: { headers?: Record<string, string> }) => call('GET', path, init),
       post: (path: string, init?: { headers?: Record<string, string>; data?: unknown }) => call('POST', path, init),
