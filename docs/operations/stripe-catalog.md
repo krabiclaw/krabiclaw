@@ -176,6 +176,16 @@ apply it to an account together with the application release that reads that
 shape: the previous build rejects the new prices and the new build rejects the
 old ones.
 
+Subscription webhooks sent while the catalog is half replaced, or before the
+release that reads it, reach a plan loader that rejects the catalog. Better Auth
+Stripe's `customer.subscription.updated` handler logs that error and still
+answers 200, so Stripe does not retry and the Better Auth row keeps its old
+`seats`. After the apply completes, read each migrated subscription's `seats`
+back from the `subscription` table and resend any event that did not land
+(`stripe events resend <evt> --webhook-endpoint <we_…>`, the
+`/api/auth/stripe/webhook` endpoint). The 2026-10-14 rollout resent four live
+and three test events this way.
+
 Apply defaults to test mode (`sk_test_` or `rk_test_`). Live apply requires
 `--require-live-mode` on the reviewed plan and apply commands. Apply is refused
 unless the key and plan have the selected mode, the
