@@ -122,7 +122,7 @@ test('invitation account switching updates the reactive session without reloadin
 test('signed-in paid CTAs retain their selected plan through the canonical billing redirect', async ({ page, baseURL }) => {
   await loginAs(page.request, baseURL!, 'user-e2e-demo-owner')
   await page.goto('/pricing')
-  for (const [plan, label] of [['growth', 'Get Growth'], ['commerce', 'Get Commerce']] as const) {
+  for (const [plan, label] of [['growth', 'Get Growth'], ['commerce', 'Get Commerce'], ['marketing', 'Get Marketing']] as const) {
     await expect(page.getByRole('link', { name: label, exact: true })).toHaveAttribute('href', `/api/post-login?plan=${plan}`)
     const destination = await page.request.get(`/api/post-login?plan=${plan}`, { maxRedirects: 0 })
     expect(destination.status()).toBe(302)

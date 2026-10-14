@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
   "fingerprint": "sha256:e19d2fa090d37cb9c36701abc34bfc4d35612a377c2457656f2e47a99d8f77be",
-  "documentationFingerprint": "sha256:a28a36c985be443ae23eb1cb1799f023a69a829e177be64d8654da448702d958",
+  "documentationFingerprint": "sha256:ff3a31e4025629c930f9c0ef8675d2ed0ca46aa45790fe2abb8adfd38308f3bc",
   "tools": [
     {
       "name": "append_content_block",
@@ -8204,7 +8204,7 @@
       ],
       "domain": "google_ads",
       "minimumRole": "admin",
-      "requiredEntitlement": null,
+      "requiredEntitlement": "marketing",
       "fileParams": [],
       "uiResourceUri": null
     },
@@ -13873,7 +13873,7 @@
       ],
       "domain": "google_ads",
       "minimumRole": "admin",
-      "requiredEntitlement": null,
+      "requiredEntitlement": "marketing",
       "fileParams": [],
       "uiResourceUri": null
     },
@@ -36973,7 +36973,7 @@
       ],
       "domain": "google_ads",
       "minimumRole": "admin",
-      "requiredEntitlement": null,
+      "requiredEntitlement": "marketing",
       "fileParams": [],
       "uiResourceUri": null
     },
@@ -51678,7 +51678,7 @@
       ],
       "domain": "marketing",
       "minimumRole": "admin",
-      "requiredEntitlement": null,
+      "requiredEntitlement": "marketing",
       "fileParams": [],
       "uiResourceUri": null
     },
@@ -52462,7 +52462,7 @@
       ],
       "domain": "google_ads",
       "minimumRole": "admin",
-      "requiredEntitlement": null,
+      "requiredEntitlement": "marketing",
       "fileParams": [],
       "uiResourceUri": null
     },
@@ -90145,7 +90145,7 @@
       ],
       "domain": "google_ads",
       "minimumRole": "admin",
-      "requiredEntitlement": null,
+      "requiredEntitlement": "marketing",
       "fileParams": [],
       "uiResourceUri": null
     },

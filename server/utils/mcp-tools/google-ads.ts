@@ -36,6 +36,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
     description: 'List Google Ads campaigns for the connected Google Ads account, including status, daily budget, spend, impressions, clicks, and conversions.',
     domain: 'google_ads',
     minimumRole: 'admin',
+    requiredEntitlement: 'marketing',
     inputSchema: {
       status: {
         type: 'string',
@@ -75,6 +76,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
     description: 'Read full details of a Google Ads campaign, including its budget, ad groups, criteria/keywords, and responsive search ad headlines, descriptions, and final URLs.',
     domain: 'google_ads',
     minimumRole: 'admin',
+    requiredEntitlement: 'marketing',
     required: ['campaign_id'],
     inputSchema: {
       campaign_id: {
@@ -131,6 +133,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
     description: 'Create and launch a new Google Ads Search campaign with an atomic mutate batch including daily budget, campaign, ad group, keywords, and responsive search ad.',
     domain: 'google_ads',
     minimumRole: 'admin',
+    requiredEntitlement: 'marketing',
     required: ['name', 'daily_budget_micros', 'target_url', 'keywords', 'headlines', 'descriptions'],
     inputSchema: {
       name: {
@@ -196,6 +199,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
     description: 'Clone an existing Google Ads campaign structure for a new landing page or blog post, copying keywords, updating destination URL, and adapting ad headlines and daily budget.',
     domain: 'google_ads',
     minimumRole: 'admin',
+    requiredEntitlement: 'marketing',
     required: ['source_campaign_id', 'new_campaign_name', 'target_url'],
     inputSchema: {
       source_campaign_id: {
@@ -248,6 +252,7 @@ export const GOOGLE_ADS_TOOLS: McpToolDefinition[] = [
     description: 'Update the status (ENABLED/PAUSED) or daily budget of an existing Google Ads campaign.',
     domain: 'google_ads',
     minimumRole: 'admin',
+    requiredEntitlement: 'marketing',
     required: ['campaign_id'],
     inputSchema: {
       campaign_id: {

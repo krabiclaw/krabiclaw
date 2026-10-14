@@ -40,6 +40,8 @@ export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly P
     { id: 'locations.management', label: 'Locations and calendar', detail: 'Manage location details and available dates.', included: 'Included' },
     { id: 'posts.website', label: 'Website posts', detail: 'Create and publish posts on your website.', included: 'Included' },
     { id: 'social.external-channels', label: 'Facebook, Instagram and Discord publishing', detail: 'Explicit publishing to connected channels requires provider permissions and valid media.', entitlement: 'managed_service' },
+    { id: 'ads.google', label: 'Google Ads campaign management', detail: 'Create, clone, pause and budget search campaigns in a connected Google Ads account. Ad spend is billed by Google; campaigns we manage are 10% of monthly ad spend.', entitlement: 'marketing' },
+    { id: 'ads.omnichannel', label: 'Omnichannel campaign launches', detail: 'One launch across Google Ads, Instagram, Facebook, Discord and an on-site announcement.', entitlement: 'marketing' },
   ] },
   { title: 'Guests and bookings', rows: [
     { id: 'bookings.requests', label: 'Bookings and consultation requests', detail: 'Availability depends on your business type and configured offerings.', included: 'Included' },

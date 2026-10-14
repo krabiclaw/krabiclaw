@@ -4,7 +4,6 @@ import {
   formatGoogleAdsCustomerId,
   listGoogleAdsAccounts,
   listGoogleAdsCampaigns,
-  getGoogleAdsCampaignDetail,
   createGoogleAdsSearchCampaign,
   cloneGoogleAdsCampaign,
   updateGoogleAdsCampaignStatus,
@@ -124,7 +123,14 @@ test('listGoogleAdsCampaigns queries campaigns and formats performance metrics',
 })
 
 test('createGoogleAdsSearchCampaign builds atomic mutate batch with temp IDs and returns campaign receipt', async (t) => {
-  let mutateBody: any = null
+  type MutateOperation = {
+    campaignBudgetOperation?: { create: { amountMicros: string } }
+    campaignOperation?: { create: { name: string } }
+    adGroupOperation?: unknown
+    adGroupCriterionOperation?: { create: { keyword: { text: string } } }
+    adGroupAdOperation?: { create: { ad: { finalUrls: string[] } } }
+  }
+  let mutateBody: { mutateOperations: MutateOperation[] } | null = null
   t.mock.method(globalThis, 'fetch', async (input, init) => {
     const url = String(input)
     assert.ok(url.includes('/customers/3317427925/googleAds:mutate'))
@@ -158,15 +164,11 @@ test('createGoogleAdsSearchCampaign builds atomic mutate batch with temp IDs and
   assert.ok(mutateBody)
   const ops = mutateBody.mutateOperations
   assert.equal(ops.length, 5) // budget, campaign, adGroup, keyword, rsa
-  assert.ok(ops[0].campaignBudgetOperation)
-  assert.equal(ops[0].campaignBudgetOperation.create.amountMicros, '15000000')
-  assert.ok(ops[1].campaignOperation)
-  assert.equal(ops[1].campaignOperation.create.name, 'New Blog Post Campaign')
-  assert.ok(ops[2].adGroupOperation)
-  assert.ok(ops[3].adGroupCriterionOperation)
-  assert.equal(ops[3].adGroupCriterionOperation.create.keyword.text, 'krabi tours')
-  assert.ok(ops[4].adGroupAdOperation)
-  assert.deepEqual(ops[4].adGroupAdOperation.create.ad.finalUrls, ['https://krabiclaw.com/blog/operations/preview'])
+  assert.equal(ops[0]!.campaignBudgetOperation?.create.amountMicros, '15000000')
+  assert.equal(ops[1]!.campaignOperation?.create.name, 'New Blog Post Campaign')
+  assert.ok(ops[2]!.adGroupOperation)
+  assert.equal(ops[3]!.adGroupCriterionOperation?.create.keyword.text, 'krabi tours')
+  assert.deepEqual(ops[4]!.adGroupAdOperation?.create.ad.finalUrls, ['https://krabiclaw.com/blog/operations/preview'])
 })
 
 test('cloneGoogleAdsCampaign reads source campaign, applies replacements, and creates new campaign', async (t) => {
@@ -239,7 +241,7 @@ test('cloneGoogleAdsCampaign reads source campaign, applies replacements, and cr
 
 test('updateGoogleAdsCampaignStatus and updateGoogleAdsCampaignBudget mutate campaign and budget', async (t) => {
   const mutated: string[] = []
-  t.mock.method(globalThis, 'fetch', async (input, init) => {
+  t.mock.method(globalThis, 'fetch', async (input) => {
     const url = String(input)
     mutated.push(url)
     return Response.json({ results: [] })
@@ -257,7 +259,7 @@ test('updateGoogleAdsCampaignStatus and updateGoogleAdsCampaignBudget mutate cam
 })
 
 test('getGoogleAdsPerformanceSummary queries customer aggregates and calculates blended CPC', async (t) => {
-  t.mock.method(globalThis, 'fetch', async (input, init) => {
+  t.mock.method(globalThis, 'fetch', async () => {
     return Response.json({
       results: [
         {
