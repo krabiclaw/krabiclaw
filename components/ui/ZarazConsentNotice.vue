@@ -61,7 +61,7 @@ onBeforeUnmount(() => document.removeEventListener('zarazConsentAPIReady', showN
 .consent-copy a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 .consent-actions { display: flex; flex-shrink: 0; gap: 8px; }
 .consent-choice { padding: 8px 16px; border: 0; border-radius: 8px; font: inherit; font-weight: 600; line-height: 1.5; cursor: pointer; }
-.consent-accept { background: var(--ui-primary); color: var(--primary-foreground, var(--ui-bg)); }
+.consent-accept { background: var(--action); color: var(--action-foreground); }
 .consent-reject { background: var(--ui-error); color: #fff; }
 .consent-close { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: inherit; cursor: pointer; }
 .consent-choice:hover, .consent-close:hover { filter: brightness(.9); }

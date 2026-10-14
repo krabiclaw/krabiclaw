@@ -54,11 +54,11 @@ from `size: 'xl'` defaults on every control plus a 1.06rem base; Airbnb runs
 - `input`/`textarea`: `rounded-lg` (8px), ring `--kc-field-border` (the 3:1
   token already in `base.css`, currently unused), `bg-default` not elevated.
   Focus ring 2px `#222`/`text-highlighted`, not primary coral — Airbnb's focus
-  is black; coral stays for Save and the lit tab.
+  is black; coral stays for status and selection marks.
 - `formField`: label `text-base font-medium text-highlighted`; `description`
   and `help` slots styled `text-sm text-muted` and **used by one rule** (see
   §5). `hint` only for `Optional`.
-- `button`: `rounded-lg`; solid primary `h-12 px-6` for the commit bar; `ghost`
+- `button`: `rounded-lg`; solid neutral `h-12 px-6` for the commit bar; `ghost`
   Cancel loses its padding so it reads as text. Add a `pill` variant
   (rounded-full, `bg-elevated`) — Airbnb's Edit/+/filter chips.
 - `switch`: `size: 'lg'`, checked colour `text-highlighted` (black/white), not

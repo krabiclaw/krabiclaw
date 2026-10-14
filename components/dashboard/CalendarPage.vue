@@ -110,7 +110,7 @@
                   :type="selecting ? 'button' : undefined"
                   :to="selecting ? undefined : dayTo(day.key)"
                   class="flex size-7 items-center justify-center rounded-full text-sm font-medium hover:bg-elevated"
-                  :class="[day.key === todayKey ? 'bg-primary text-inverted hover:bg-primary' : '', isUnavailableKey(day.key) ? 'text-muted line-through' : '']"
+                  :class="[day.key === todayKey ? 'bg-primary font-semibold text-inverted hover:bg-primary' : '', isUnavailableKey(day.key) ? 'text-muted line-through' : '']"
                   :aria-label="formatCalendarDate(day.key, 'en', { weekday: 'long', month: 'long', day: 'numeric' })"
                   @click="selecting ? extendSelection(day.key) : undefined"
                 >{{ day.number }}</component>
@@ -159,7 +159,7 @@
             <NuxtLink :to="dayTo(dayKey)" class="pt-1 text-center">
               <span
                 class="mx-auto flex size-7 items-center justify-center rounded-full text-sm font-medium"
-                :class="dayKey === todayKey ? 'bg-primary text-inverted' : isUnavailableKey(dayKey) ? 'text-muted line-through' : 'text-highlighted'"
+                :class="dayKey === todayKey ? 'bg-primary font-semibold text-inverted' : isUnavailableKey(dayKey) ? 'text-muted line-through' : 'text-highlighted'"
               >{{ Number(dayKey.slice(-2)) }}</span>
               <span class="block text-[11px] text-muted">{{ formatCalendarDate(dayKey, 'en', { weekday: 'short' }) }}</span>
             </NuxtLink>

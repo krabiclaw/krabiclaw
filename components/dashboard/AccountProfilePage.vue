@@ -32,7 +32,6 @@
             Cancel
           </UButton>
           <UButton
-            color="primary"
             :loading="otpVerifying"
             :disabled="otpCode.length !== 6"
             @click="verifyPhone"

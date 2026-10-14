@@ -196,14 +196,14 @@ carries one tenant segment, the organization's slug.
 | Tenant | Organization segment (`orgSlug`) |
 | --- | --- |
 | Ember & Slice | `ember-slice-demo` |
-| Pottery House | `pottery-house-krabi` |
-| Kikuzuki | `kikuzuki-krabi-thailand` |
+| Pottery House | `org-user-pottery-house` |
+| Kikuzuki | `org-bVY8SxxUuG6Ctk2CQnfCk8T2cPsj4jJX` |
 | NCLS | `north-carolina-legal-services` |
 
 For example, Kikuzuki starts at:
 
 ```text
-http://localhost:3000/dashboard/kikuzuki-krabi-thailand
+http://localhost:3000/dashboard/org-bVY8SxxUuG6Ctk2CQnfCk8T2cPsj4jJX
 ```
 
 The subdomain is the tenant's public address, not a dashboard segment: Kikuzuki
