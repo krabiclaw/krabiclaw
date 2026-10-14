@@ -372,7 +372,12 @@ migrations before the copy.
 Prepared in WNAM on 2026-10-14: staging v17
 `a9c8e8f0-eb44-4058-b251-f629276de5b5`, built with `wrangler d1 migrations
 apply` and loaded from `krabiclaw-staging-v16` (87 tables, 78,725 rows;
-`foreign_key_check` empty). Production v17 is created at its own cutover.
+`foreign_key_check` empty); its final delta after the staging binding moved
+reported no new rows and nothing changed or deleted. Production v17
+`e81e48eb-8ac6-4c9e-af31-5cef2946c52d` was created in WNAM on 2026-10-15,
+built with the same baseline and loaded from `krabiclaw-production-v16`
+immediately before the staging-to-main promotion; the v16 databases stay
+untouched.
 
 ```sh
 node --experimental-strip-types scripts/pull-production-snapshot.ts --staging --source krabiclaw-staging-v15 --out staging-v16-initial.sqlite
