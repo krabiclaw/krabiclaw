@@ -39,13 +39,14 @@ export type DashboardOrganizationRow = ResolvedMembership & {
   slug: string
 } & DashboardOrganizationConfig
 
-const ORGANIZATION_CONFIG_SQL = `
-  SELECT theme_id, vertical, subdomain,
+const ORGANIZATION_CONFIG_SELECT = `
+  SELECT id, theme_id, vertical, subdomain,
          (SELECT domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active' AND type = 'custom') AS custom_domain,
          (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url,
          status, onboarding_status, default_currency
-  FROM organization WHERE id = ? LIMIT 1
-`
+  FROM organization`
+const ORGANIZATION_CONFIG_BY_ID_SQL = `${ORGANIZATION_CONFIG_SELECT} WHERE id = ? LIMIT 1`
+const ORGANIZATION_CONFIG_BY_SLUG_SQL = `${ORGANIZATION_CONFIG_SELECT} WHERE slug = ? LIMIT 1`
 
 // The dashboard shows the business's mark and nothing else of its media: the
 // sidebar avatar is its `logo`, or no avatar at all.
@@ -224,10 +225,18 @@ export async function getDashboardMemberContext(event: H3Event, options: Dashboa
     ? sessionRecord.activeOrganizationId
     : null
 
-  const membership = await resolveRequestedOrganization(event, db, session.user.id, {
-    activeOrganizationId,
-    organizationSlug: options.organizationSlug,
-  })
+  // The route names the organization by slug, so its configuration row is read
+  // beside the membership resolution instead of after it: one round trip fewer
+  // on every dashboard call. The row only counts once the membership confirms
+  // it is the same organization.
+  const requestedSlug = options.organizationSlug ?? dashboardOrgQueryParam(event)
+  const [membership, configBySlug] = await Promise.all([
+    resolveRequestedOrganization(event, db, session.user.id, {
+      activeOrganizationId,
+      organizationSlug: options.organizationSlug,
+    }),
+    requestedSlug ? queryFirst<DashboardOrganizationConfig & { id: string }>(db, ORGANIZATION_CONFIG_BY_SLUG_SQL, [requestedSlug]) : null,
+  ])
 
   if (!membership) {
     if (options.requireOrganization === false) {
@@ -245,10 +254,13 @@ export async function getDashboardMemberContext(event: H3Event, options: Dashboa
   // Better Auth owns the membership and the organization's identity; its own
   // adapter does not return the tenant configuration columns beside them, so
   // they are read here from the same row and carried on one object.
-  const config = await queryFirst<DashboardOrganizationConfig>(db, ORGANIZATION_CONFIG_SQL, [membership.id])
-  if (!config) {
+  const configRow = configBySlug?.id === membership.id
+    ? configBySlug
+    : await queryFirst<DashboardOrganizationConfig & { id: string }>(db, ORGANIZATION_CONFIG_BY_ID_SQL, [membership.id])
+  if (!configRow) {
     throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
   }
+  const { id: _configId, ...config } = configRow
   const organization: DashboardOrganizationRow = Object.assign(membership, config)
 
   return { env, db, session, userId: session.user.id, organization }
@@ -315,14 +327,15 @@ export async function getDashboardLocationContext(event: H3Event, locationId: st
     throw new HTTPError({ statusCode: 404, message: 'Location not found' })
   }
 
-  const membership = await resolveUserOrganization(env, {
-    userId: session.user.id,
-    organizationId: row.organization_id,
-  }, event)
+  // The location row already names its organization, so the membership and the
+  // configuration row are read in the same round trip.
+  const [membership, configRow] = await Promise.all([
+    resolveUserOrganization(env, { userId: session.user.id, organizationId: row.organization_id }, event),
+    queryFirst<DashboardOrganizationConfig & { id: string }>(db, ORGANIZATION_CONFIG_BY_ID_SQL, [row.organization_id]),
+  ])
   if (!membership) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
-
-  const config = await queryFirst<DashboardOrganizationConfig>(db, ORGANIZATION_CONFIG_SQL, [membership.id])
-  if (!config) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
+  if (!configRow) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
+  const { id: _configId, ...config } = configRow
 
   return {
     env,
