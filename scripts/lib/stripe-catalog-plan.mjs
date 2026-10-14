@@ -88,9 +88,9 @@ export const PLAN_DEFINITIONS = Object.freeze([
     features: [
       'Everything in Commerce',
       'Create, clone, pause and budget Google Ads search campaigns',
-      'Launch one campaign across Google Ads, Instagram, Facebook, Discord and your site',
+      'One launch across Google Ads, Instagram, Facebook, Discord and your site',
       'Ad spend, clicks, impressions and conversions in your analytics',
-      '10% of monthly ad spend for campaigns we manage, billed with your Payments fees.',
+      '10% of monthly ad spend for campaigns we manage.',
     ],
   },
   {
