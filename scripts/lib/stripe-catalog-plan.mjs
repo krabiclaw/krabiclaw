@@ -72,7 +72,7 @@ export const PLAN_DEFINITIONS = Object.freeze([
     highlighted: false,
     features: [
       'Everything in Growth',
-      'Stripe Checkout for paid bookings and one-time orders',
+      'Online payments for paid bookings and one-time orders',
       'Buyer receipts and purchase history',
       'Refund, dispute and payout management',
       '1.4% of payment volume, plus Stripe fees.',
