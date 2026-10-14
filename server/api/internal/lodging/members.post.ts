@@ -7,6 +7,9 @@ import { LODGING_INTERNAL_CALLER, validateInternalRequest } from '~/server/utils
 import { organizationAdapter } from '~/server/utils/member-access'
 
 const PAGE = 100
+// D1 binds at most 100 parameters per statement; each list below shares its
+// statement with one or two other parameters.
+const MAX_IDS = 90
 
 // Current members of one organization, who each one is, and their live session ids, for the
 // lodging service's background work (push recipients, scheduled sends, socket
@@ -23,6 +26,9 @@ export default defineHandler(async (event) => {
   if (userIds !== undefined && !(Array.isArray(userIds) && userIds.every(id => typeof id === 'string' && id))) {
     return jsonResponse({ error: 'userIds must be a list of user ids' }, { status: 400 })
   }
+  if (Array.isArray(userIds) && userIds.length > MAX_IDS) {
+    return jsonResponse({ error: `userIds may name at most ${MAX_IDS} users per request` }, { status: 400 })
+  }
 
   const adapter = await organizationAdapter(env)
   if (!await adapter.findOrganizationById(organizationId)) return jsonResponse({ error: 'Organization not found' }, { status: 404 })
@@ -36,16 +42,18 @@ export default defineHandler(async (event) => {
   }
 
   const context = await createAuth(env).$context
-  const sessions = members.length
-    ? await context.adapter.findMany<{ id: string; userId: string }>({
-        model: 'session',
-        where: [
-          { field: 'userId', operator: 'in', value: members.map(member => member.userId) },
-          { field: 'expiresAt', operator: 'gt', value: new Date() },
-        ],
-        select: ['id', 'userId'],
-      })
-    : []
+  const memberUserIds = [...new Set(members.map(member => member.userId))]
+  const sessions: { id: string; userId: string }[] = []
+  for (let start = 0; start < memberUserIds.length; start += MAX_IDS) {
+    sessions.push(...await context.adapter.findMany<{ id: string; userId: string }>({
+      model: 'session',
+      where: [
+        { field: 'userId', operator: 'in', value: memberUserIds.slice(start, start + MAX_IDS) },
+        { field: 'expiresAt', operator: 'gt', value: new Date() },
+      ],
+      select: ['id', 'userId'],
+    }))
+  }
 
   return jsonResponse(members.map(member => ({
     userId: member.userId,

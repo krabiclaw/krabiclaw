@@ -293,10 +293,12 @@ async function prepareAccountDeletion(env: CloudflareEnv, db: ReturnType<typeof 
   if (!appleAccount && appleCode) {
     throw new APIError('BAD_REQUEST', { code: 'APPLE_ACCOUNT_MISMATCH', message: 'This account has no Apple ID linked.' })
   }
-  const appleGrant = appleAccount && appleCode ? await exchangeAppleAuthorizationCode(env, appleCode, appleAccount.accountId) : null
+  // The code is single use, so the grant it yields is revoked at once: a later
+  // failure then leaves no unrevoked grant behind, and the retry brings a new
+  // code. Lodging cleanup is idempotent, so it is safe to repeat.
+  if (appleAccount && appleCode) await revokeAppleGrant(env, await exchangeAppleAuthorizationCode(env, appleCode, appleAccount.accountId))
 
   if (await hasLodgingMembership(db, userId)) await deleteLodgingUser(env, userId)
-  if (appleGrant) await revokeAppleGrant(env, appleGrant)
 }
 
 export function createAuth(env: CloudflareEnv) {

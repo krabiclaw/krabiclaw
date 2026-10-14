@@ -135,8 +135,10 @@ test.describe('lodging identity boundary', () => {
       // Used links are no longer pending, and a withdrawn link cannot be accepted.
       expect((await (await api.get(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer })).json() as { inviteLinks: unknown[] }).inviteLinks).toEqual([])
       const withdrawn = await api.post(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer, data: { role: 'member' } })
+      expect(withdrawn.status, await withdrawn.text()).toBe(201)
       const withdrawnLink = await withdrawn.json() as { id: string; token: string }
       expect((await api.delete(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links/${withdrawnLink.id}`, { headers: bearer })).status).toBe(204)
+      expect((await api.get(`/api/internal/lodging/invite-links/${encodeURIComponent(withdrawnLink.token)}`, { headers: service })).status).toBe(404)
       expect((await api.post(`/api/invite-links/${encodeURIComponent(withdrawnLink.token)}/accept`, { headers: inviteeBearer })).status).toBe(404)
       expect((await api.post(`/api/organizations/org-demo/invite-links`, { headers: inviteeBearer, data: { role: 'member' } })).status).toBe(404)
       const inviteeLeft = await api.post('/api/auth/organization/leave', { headers: inviteeBearer, data: { organizationId: organization.id } })
@@ -192,6 +194,8 @@ test.describe('lodging identity boundary', () => {
     const locationHtml = await location.text()
     expect(locationHtml).toContain('"LodgingBusiness"')
     expect(locationHtml).not.toContain('Check availability')
+    // Its location takes no table reservations, so the site has no reservations page.
+    expect((await api.get('/reservations', { headers: { 'x-preview-tenant': slug } })).status).toBe(404)
 
     // Its homes live in the lodging service, so deleting it must reach that
     // service first. With none configured here the deletion fails and the
