@@ -195,6 +195,16 @@ export async function listGoogleAdsCampaigns(
   }))
 }
 
+/** One row of a Google Ads `googleAds:search` response, as the fields the readers below use. */
+interface GoogleAdsSearchRow {
+  campaign?: { id?: string; name?: string; status?: string; advertisingChannelType?: string }
+  campaignBudget?: { id?: string; amountMicros?: string | number }
+  metrics?: { clicks?: string | number; impressions?: string | number; costMicros?: string | number; conversions?: string | number }
+  adGroup?: { id?: string; name?: string; status?: string }
+  adGroupCriterion?: { keyword?: { text?: string; matchType?: GoogleAdsKeyword['matchType'] }; status?: string }
+  adGroupAd?: { ad?: { responsiveSearchAd?: { headlines?: Array<{ text?: string }>; descriptions?: Array<{ text?: string }> }; finalUrls?: string[] } }
+}
+
 export interface GoogleAdsKeyword {
   text: string
   matchType: 'EXACT' | 'PHRASE' | 'BROAD'
@@ -232,7 +242,7 @@ export async function getGoogleAdsCampaignDetail(
     }),
   })
   if (!campResp.ok) throw new Error(`Google Ads query failed: ${(await campResp.text()).slice(0, 300)}`)
-  const campData = await campResp.json() as { results?: any[] }
+  const campData = await campResp.json() as { results?: GoogleAdsSearchRow[] }
   const cRow = campData.results?.[0]
   if (!cRow) throw new Error(`Campaign ${campaignId} not found`)
 
@@ -244,7 +254,7 @@ export async function getGoogleAdsCampaignDetail(
       query: `SELECT ad_group.id, ad_group.name, ad_group.status FROM ad_group WHERE ad_group.campaign = 'customers/${cid}/campaigns/${campaignId}' AND ad_group.status != 'REMOVED'`,
     }),
   })
-  const adGroupsData = adGroupResp.ok ? (await adGroupResp.json() as { results?: any[] }) : { results: [] }
+  const adGroupsData = adGroupResp.ok ? (await adGroupResp.json() as { results?: GoogleAdsSearchRow[] }) : { results: [] }
   const adGroups = (adGroupsData.results ?? []).map(r => ({
     id: r.adGroup?.id ?? '',
     name: r.adGroup?.name ?? '',
@@ -259,7 +269,7 @@ export async function getGoogleAdsCampaignDetail(
       query: `SELECT ad_group_criterion.keyword.text, ad_group_criterion.keyword.match_type, ad_group_criterion.status FROM ad_group_criterion WHERE ad_group.campaign = 'customers/${cid}/campaigns/${campaignId}' AND ad_group_criterion.type = 'KEYWORD' AND ad_group_criterion.status != 'REMOVED'`,
     }),
   })
-  const kwData = kwResp.ok ? (await kwResp.json() as { results?: any[] }) : { results: [] }
+  const kwData = kwResp.ok ? (await kwResp.json() as { results?: GoogleAdsSearchRow[] }) : { results: [] }
   const keywords: GoogleAdsKeyword[] = (kwData.results ?? []).map(r => ({
     text: r.adGroupCriterion?.keyword?.text ?? '',
     matchType: r.adGroupCriterion?.keyword?.matchType ?? 'PHRASE',
@@ -274,7 +284,7 @@ export async function getGoogleAdsCampaignDetail(
       query: `SELECT ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.ad.responsive_search_ad.descriptions, ad_group_ad.ad.final_urls FROM ad_group_ad WHERE ad_group.campaign = 'customers/${cid}/campaigns/${campaignId}' AND ad_group_ad.status != 'REMOVED' LIMIT 5`,
     }),
   })
-  const adData = adResp.ok ? (await adResp.json() as { results?: any[] }) : { results: [] }
+  const adData = adResp.ok ? (await adResp.json() as { results?: GoogleAdsSearchRow[] }) : { results: [] }
   const headlines: string[] = []
   const descriptions: string[] = []
   const finalUrls: string[] = []
@@ -358,7 +368,7 @@ export async function createGoogleAdsSearchCampaign(
     throw new Error('targetUrl must be a valid http or https URL')
   }
 
-  const mutateOperations: any[] = [
+  const mutateOperations: Array<Record<string, unknown>> = [
     // 1. Budget
     {
       campaignBudgetOperation: {

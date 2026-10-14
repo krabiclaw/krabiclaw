@@ -92,6 +92,18 @@
         "destructive_justification": "Cancels a real restaurant table Reservation through the canonical inbox operation, releasing capacity once and sending its guest status message."
       }
     },
+    "clone_google_ads_campaign": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Copies an existing campaign in the connected Google Ads account to a new destination URL using a durable retry key; it can start spending the account’s budget.",
+        "open_world_justification": "Writes to the Google Ads account the business explicitly connected; it spends that account’s own advertising budget on Google.",
+        "destructive_justification": "Copies an existing campaign in the connected Google Ads account to a new destination URL using a durable retry key; it can start spending the account’s budget."
+      }
+    },
     "confirm_product_booking": {
       "annotations": {
         "readOnlyHint": false,
@@ -138,6 +150,18 @@
         "read_only_justification": "Creates an empty collection for the selected organization; products are added to it separately.",
         "open_world_justification": "Creates a site or menu section used by the public product catalog.",
         "destructive_justification": "Creates an empty collection for the selected organization; products are added to it separately."
+      }
+    },
+    "create_google_ads_search_campaign": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates a Google Ads search campaign, ad group, keywords and ad in the connected account using a durable retry key; it can start spending the account’s budget.",
+        "open_world_justification": "Writes to the Google Ads account the business explicitly connected; it spends that account’s own advertising budget on Google.",
+        "destructive_justification": "Creates a Google Ads search campaign, ad group, keywords and ad in the connected account using a durable retry key; it can start spending the account’s budget."
       }
     },
     "create_location": {
@@ -452,6 +476,18 @@
         "destructive_justification": "Reads one live post belonging to the explicitly selected connected channel."
       }
     },
+    "get_google_ads_campaign": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads one campaign, its ad groups, keywords and responsive search ads from the connected Google Ads account.",
+        "open_world_justification": "Reads one campaign, its ad groups, keywords and responsive search ads from the connected Google Ads account. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads one campaign, its ad groups, keywords and responsive search ads from the connected Google Ads account."
+      }
+    },
     "get_guest_conversation": {
       "annotations": {
         "readOnlyHint": true,
@@ -728,6 +764,18 @@
         "destructive_justification": "Creates or explicitly resends a Better Auth invitation, emails its recipient and returns the saved invitation and delivery receipt."
       }
     },
+    "launch_omnichannel_campaign": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Creates or clones a Google Ads campaign and publishes the explicitly requested posts to the selected connected social channels and website using a durable retry key.",
+        "open_world_justification": "Writes to the connected Google Ads account and publishes only to the social channels and website destinations named in the request.",
+        "destructive_justification": "Creates or clones a Google Ads campaign and publishes the explicitly requested posts to the selected connected social channels and website using a durable retry key."
+      }
+    },
     "list_article_categories": {
       "annotations": {
         "readOnlyHint": true,
@@ -774,6 +822,18 @@
         "read_only_justification": "Lists the collections of the selected organization.",
         "open_world_justification": "Lists the collections of the selected organization. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
         "destructive_justification": "Lists the collections of the selected organization."
+      }
+    },
+    "list_google_ads_campaigns": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads campaigns, budgets and performance metrics from the Google Ads account the selected business connected.",
+        "open_world_justification": "Reads campaigns, budgets and performance metrics from the Google Ads account the selected business connected. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads campaigns, budgets and performance metrics from the Google Ads account the selected business connected."
       }
     },
     "list_guest_conversations": {
@@ -1482,6 +1542,18 @@
         "read_only_justification": "Overwrites the selected collection name, description or placement.",
         "open_world_justification": "Changes collection text or position shown in the public product catalog.",
         "destructive_justification": "Overwrites the selected collection name, description or placement."
+      }
+    },
+    "update_google_ads_campaign": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Pauses, enables or changes the daily budget of one campaign in the connected Google Ads account.",
+        "open_world_justification": "Changes status or budget only in the Google Ads account the business explicitly connected.",
+        "destructive_justification": "Pauses, enables or changes the daily budget of one campaign in the connected Google Ads account."
       }
     },
     "update_location": {

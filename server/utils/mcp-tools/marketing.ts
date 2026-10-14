@@ -1,4 +1,3 @@
-import { HTTPError } from 'nitro'
 import type { McpToolDefinition } from './shared'
 import { organizationTool } from './shared'
 import type { McpExecutorContext } from './execution'
@@ -21,6 +20,7 @@ export const MARKETING_TOOLS: McpToolDefinition[] = [
     description: 'Launch and coordinate an omnichannel marketing campaign across Google Ads (search campaign create or clone), social channels (Instagram, Facebook, Discord), and on-site visitor announcements.',
     domain: 'marketing',
     minimumRole: 'admin',
+    requiredEntitlement: 'marketing',
     required: ['campaign_title', 'target_url'],
     inputSchema: {
       campaign_title: {
