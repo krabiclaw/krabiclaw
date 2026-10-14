@@ -223,7 +223,7 @@ test('a v15 export transfers into the v16 baseline: required clocks and currenci
     if (secondProvider || team) source.prepare("UPDATE product_sessions SET assigned_member_id='member-1'").run()
     if (team) {
       source.prepare("INSERT INTO team (id, name, organizationId, createdAt) VALUES ('providers', 'Providers', 'org', 1)").run()
-      source.prepare("INSERT INTO teamMember (id, teamId, userId) VALUES ('team-one', 'providers', 'user-1'), ('team-two', 'providers', 'user-2')").run()
+      source.prepare("INSERT INTO teamMember (id, teamId, userId, createdAt) VALUES ('team-one', 'providers', 'user-1', 1), ('team-two', 'providers', 'user-2', 1)").run()
       source.prepare("UPDATE product_booking_configs SET assigned_member_id=NULL, assigned_team_id='providers'").run()
     }
     source.close()
