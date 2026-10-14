@@ -352,15 +352,17 @@ The v16-to-v17 epoch makes a place to stay a Product (#1381). It is additive
 except for one constraint, which is why it needs a replacement database:
 
 - `products_kind_check` admits `stay`. The constraint is on `products`, which
-  `product_variants`, `product_locations`, `product_booking_configs`,
-  `product_sessions`, `bookings`, `collection_products` and
-  `product_publications` reference, so the change is a table rebuild.
+  `product_variants`, `product_options`, `product_locations`,
+  `product_booking_configs`, `product_sessions`, `bookings`,
+  `collection_products`, `product_publications`, `content_documents` and
+  `reviews` reference (and now `product_stay_configs`), so the change is a
+  table rebuild.
 - `product_locations` gains the unique `(organization_id, product_id,
   location_id)` index that `product_stay_configs` references.
 - New tables: `product_stay_configs`, `product_nights`, `stays`, `stay_nights`
   and `stay_payments`. They start empty.
 - Existing rows transfer unchanged; no product changes kind. The transfer audits
-  `every_home_has_house_rules`.
+  `every_home_has_stay_settings`.
 
 The complete applied v16 chain (`0000_baseline` through
 `0005_organization_invite_links`) and its Drizzle metadata remain unchanged in

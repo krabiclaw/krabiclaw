@@ -94,7 +94,7 @@ export interface ProductForm {
   /** Held online: booked in the provider's working hours rather than weekly times at a location. */
   held_online: boolean
   image_asset_id: string | null
-  /** A place to stay's one location, fixed once it is created, and its house rules. */
+  /** A place to stay's one location, fixed once it is created, and its stay settings. */
   stay_location_id: string
   check_in_time: string
   check_out_time: string
@@ -225,7 +225,7 @@ const sectionLabels: Record<SectionKey, string> = {
   'publication': 'Website',
   'booking': 'Scheduling',
   'locations': 'Locations',
-  'stay': 'House rules',
+  'stay': 'Stay settings',
   get collections() { return product.value?.kind === 'dish' ? 'Menu sections' : presentation.value.collectionGroupLabelPlural },
 }
 
@@ -590,7 +590,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
     items: [
       { id: 'kind', label: 'Type', summary: form.kind ? PRODUCT_KIND_LABELS[form.kind] : 'Choose a type', to: sectionPath('kind') },
       { id: 'name', label: 'Name', summary: form.name || 'Not named yet', placeholder: !form.name, to: sectionPath('name') },
-      ...(form.kind === 'stay' ? [{ id: 'stay', label: 'House rules', summary: staySummary(), placeholder: stayIncomplete(), to: sectionPath('stay') }] : []),
+      ...(form.kind === 'stay' ? [{ id: 'stay', label: 'Stay settings', summary: staySummary(), placeholder: stayIncomplete(), to: sectionPath('stay') }] : []),
     ],
   }]
   // A product that failed to load has nothing to summarize; the level shows the failure.
@@ -609,9 +609,9 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
         ? [{ id: 'page', label: 'Page content', summary: product.value.page ? product.value.page.path : 'No page', placeholder: !product.value.page, to: product.value.page ? `/dashboard/${String(route.params.orgSlug)}/website/pages/${encodeURIComponent(product.value.page.id)}` : sectionPath('page') }]
         : []),
       { id: 'price', label: form.kind === 'service' ? 'Consultation pricing' : form.kind === 'stay' ? 'Nightly price' : 'Price', summary: priceSummary(), placeholder: priceSummary() === 'No price set', to: pricePath.value },
-      // A place to stay is at its one location under its house rules; nights and
+      // A place to stay is at its one location under its stay settings; nights and
       // stays are on the Calendar, not scheduled sessions.
-      ...(form.kind === 'stay' ? [{ id: 'stay', label: 'House rules', summary: staySummary(), to: sectionPath('stay') }] : []),
+      ...(form.kind === 'stay' ? [{ id: 'stay', label: 'Stay settings', summary: staySummary(), to: sectionPath('stay') }] : []),
       // The person a service's consultations are booked with: the existing
       // assignment concern, reached from the overview. It belongs to bookings,
       // so until the service takes bookings the row leads there first.

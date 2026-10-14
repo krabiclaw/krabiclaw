@@ -11,7 +11,7 @@
         color="error"
         icon="i-lucide-triangle-alert"
         title="Overbooked"
-        :description="`${channelName} confirmed this stay on nights another stay holds. Cancel one of them on ${channelName} or here.`"
+        :description="`${channelName} confirmed this stay on nights another stay holds. Cancel this stay on ${channelName}, or cancel the other stay where it was booked.`"
       />
       <h1 class="text-[32px] font-semibold leading-tight text-highlighted">{{ guestName }}</h1>
       <p class="mt-1 text-base text-muted">{{ stayDates }} · {{ partyLabel }}</p>

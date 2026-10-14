@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:b6b8ed6aaf417b7aadd4cbc74432f25ebc11b19c9b9f7f25d184c96b7a14e30c",
-  "documentationFingerprint": "sha256:a8c11e3c8c659b1fa0451924ab121feab4162a9e365032e2667a81c8cf85952f",
+  "fingerprint": "sha256:f944f23c4034e2223f2f4ce94193b49d9be112de04569553a67708a69ca90b64",
+  "documentationFingerprint": "sha256:147e8603975134e5f6eabe577165058e0b26d47abe25a7dd406ad61cb8484363",
   "tools": [
     {
       "name": "append_content_block",
@@ -7159,7 +7159,7 @@
                   "type": "string"
                 },
                 "stay": {
-                  "description": "Non-null exactly for a place to stay: its one location and house rules.",
+                  "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it). Guest-facing house rules are the house_rules detail.",
                   "properties": {
                     "assigned_member_id": {
                       "description": "Member who looks after the home; their assigned access shows its stays.",
@@ -7565,6 +7565,17 @@
                     "null"
                   ]
                 },
+                "stayMoment": {
+                  "enum": [
+                    "arrival",
+                    "departure",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "subtitle": {
                   "type": [
                     "string",
@@ -7588,6 +7599,7 @@
                 "operationalBookingId",
                 "operationalReservationId",
                 "stayId",
+                "stayMoment",
                 "startsAt",
                 "endsAt",
                 "dayKey",
@@ -15312,7 +15324,7 @@
     {
       "name": "create_product",
       "title": "Create product",
-      "description": "Add a catalog item, experience, service or place to stay. Experiences need booking duration, capacity, location and actual times, or an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and house rules) and is priced per night by its variant price. Repeat the same idempotency key on retry.",
+      "description": "Add a catalog item, experience, service or place to stay. Experiences need booking duration, capacity, location and actual times, or an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and stay settings), takes its guest-facing rules in details.house_rules, and is priced per night by its variant price. Repeat the same idempotency key on retry.",
       "inputSchema": {
         "$defs": {
           "content_ai_assistance": {
@@ -19374,7 +19386,7 @@
           },
           "stay": {
             "additionalProperties": false,
-            "description": "Required for kind stay and refused for every other kind: the location the home is at (fixed once created) and its house rules. Base nightly rate is the variant price.",
+            "description": "Required for kind stay and refused for every other kind: the location the home is at (fixed once created) and its stay settings. Guest-facing house rules go in details.house_rules. Base nightly rate is the variant price.",
             "properties": {
               "assigned_member_id": {
                 "description": "Member who looks after the home; their assigned access shows its stays.",
@@ -20234,7 +20246,7 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and house rules.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it). Guest-facing house rules are the house_rules detail.",
                 "properties": {
                   "assigned_member_id": {
                     "description": "Member who looks after the home; their assigned access shows its stays.",
@@ -37634,6 +37646,17 @@
                     "null"
                   ]
                 },
+                "stayMoment": {
+                  "enum": [
+                    "arrival",
+                    "departure",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "subtitle": {
                   "type": [
                     "string",
@@ -37657,6 +37680,7 @@
                 "operationalBookingId",
                 "operationalReservationId",
                 "stayId",
+                "stayMoment",
                 "startsAt",
                 "endsAt",
                 "dayKey",
@@ -42578,7 +42602,7 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and house rules.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it). Guest-facing house rules are the house_rules detail.",
                 "properties": {
                   "assigned_member_id": {
                     "description": "Member who looks after the home; their assigned access shows its stays.",
@@ -57620,6 +57644,17 @@
                     "null"
                   ]
                 },
+                "stayMoment": {
+                  "enum": [
+                    "arrival",
+                    "departure",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "subtitle": {
                   "type": [
                     "string",
@@ -57643,6 +57678,7 @@
                 "operationalBookingId",
                 "operationalReservationId",
                 "stayId",
+                "stayMoment",
                 "startsAt",
                 "endsAt",
                 "dayKey",
@@ -71703,7 +71739,7 @@
                   "type": "string"
                 },
                 "stay": {
-                  "description": "Non-null exactly for a place to stay: its one location and house rules.",
+                  "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it). Guest-facing house rules are the house_rules detail.",
                   "properties": {
                     "assigned_member_id": {
                       "description": "Member who looks after the home; their assigned access shows its stays.",
@@ -73798,7 +73834,7 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and house rules.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it). Guest-facing house rules are the house_rules detail.",
                 "properties": {
                   "assigned_member_id": {
                     "description": "Member who looks after the home; their assigned access shows its stays.",
@@ -85557,7 +85593,7 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and house rules.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it). Guest-facing house rules are the house_rules detail.",
                 "properties": {
                   "assigned_member_id": {
                     "description": "Member who looks after the home; their assigned access shows its stays.",
@@ -86471,7 +86507,7 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and house rules.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it). Guest-facing house rules are the house_rules detail.",
                 "properties": {
                   "assigned_member_id": {
                     "description": "Member who looks after the home; their assigned access shows its stays.",
@@ -94522,7 +94558,7 @@
                         "type": "string"
                       },
                       "stay": {
-                        "description": "Non-null exactly for a place to stay: its one location and house rules.",
+                        "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it). Guest-facing house rules are the house_rules detail.",
                         "properties": {
                           "assigned_member_id": {
                             "description": "Member who looks after the home; their assigned access shows its stays.",
@@ -96068,7 +96104,7 @@
           },
           "stay": {
             "additionalProperties": false,
-            "description": "House rules to change on a place to stay. Its location is fixed.",
+            "description": "Stay settings to change on a place to stay. Its location is fixed.",
             "properties": {
               "assigned_member_id": {
                 "description": "Member who looks after the home; their assigned access shows its stays.",
@@ -96932,7 +96968,7 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and house rules.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it). Guest-facing house rules are the house_rules detail.",
                 "properties": {
                   "assigned_member_id": {
                     "description": "Member who looks after the home; their assigned access shows its stays.",
@@ -105562,18 +105598,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:df49ee1ff2e282ecdb97c1f4b9e3e4e41127fbffe555e6d1de334cbc589ea8ab",
-        "get_product": "sha256:a6573da6a4e9a4ede1a3357908cce62721ec34623e46630d07218cf201356543",
+        "create_product": "sha256:20770f4756d0705e57229d17eab08bed78fb7d924eddf2cb52b9ebe43ffdf975",
+        "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:ed2b8d9ead80fe1abb797f39ae69c813956fc9750e7a2636416e7abe6236801e",
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
-        "reconcile_products": "sha256:9c437e88f631f666b0a3e7dda2b2527ae9f5ec78d9eecc5b88a62abea367a4f5",
+        "reconcile_products": "sha256:0a37cdc72ef22320946c54eeb58f3fec590648e5f0a283849040fd4871171060",
         "reorder_collections": "sha256:7337b52f13f1caddb073c69300d67ecac75a9b62869dd7afc0a54d8b0741217f",
         "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
-        "update_menu": "sha256:6781e5360e55e261edbc481bcd72cc4d499ce6079a66f656cbce02e7d714fab9",
-        "update_product": "sha256:595c24df1e95f951ef4bc350f4191d46b92e3ffb47d53ced55c7f90c304e0b0d"
+        "update_menu": "sha256:63cbd21c021e0b61799765308bf3f7fba7caac5bc647ab6d9698b215038949d4",
+        "update_product": "sha256:72bbda52826f463b9ebebb2ed91e6ef12189ae4e1de2886b8f02e592d8a6b236"
       }
     },
     {
@@ -105618,8 +105654,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:010b4cb1cd55f355ae72e255d70c3f17cecb18a68daf4345dee1774638635a7b",
-        "create_product": "sha256:df49ee1ff2e282ecdb97c1f4b9e3e4e41127fbffe555e6d1de334cbc589ea8ab",
-        "get_product": "sha256:a6573da6a4e9a4ede1a3357908cce62721ec34623e46630d07218cf201356543",
+        "create_product": "sha256:20770f4756d0705e57229d17eab08bed78fb7d924eddf2cb52b9ebe43ffdf975",
+        "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
@@ -105683,7 +105719,7 @@
         "attach_media": "sha256:010b4cb1cd55f355ae72e255d70c3f17cecb18a68daf4345dee1774638635a7b",
         "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
-        "get_product": "sha256:a6573da6a4e9a4ede1a3357908cce62721ec34623e46630d07218cf201356543",
+        "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "save_media_attachment": "sha256:69bd4bf687fca2e9c3a05e5526c9b6e3a955245bdd06713e08942d433ad677dc",
@@ -105699,7 +105735,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:df49ee1ff2e282ecdb97c1f4b9e3e4e41127fbffe555e6d1de334cbc589ea8ab",
+        "create_product": "sha256:20770f4756d0705e57229d17eab08bed78fb7d924eddf2cb52b9ebe43ffdf975",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_website_draft": "sha256:fccf7d7281ba30d1e79163929e61abec1893c2e910460c4068364a65784a7bac",
@@ -105710,7 +105746,7 @@
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
-        "update_menu": "sha256:6781e5360e55e261edbc481bcd72cc4d499ce6079a66f656cbce02e7d714fab9",
+        "update_menu": "sha256:63cbd21c021e0b61799765308bf3f7fba7caac5bc647ab6d9698b215038949d4",
         "update_organization_settings": "sha256:e9db6807901edd4fa400c86f0c4f9b690927ff8bca927a7190ff8ab507a6d639",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
@@ -105725,7 +105761,7 @@
       },
       "toolContracts": {
         "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
-        "get_product": "sha256:a6573da6a4e9a4ede1a3357908cce62721ec34623e46630d07218cf201356543",
+        "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -105733,7 +105769,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "replace_product_weekly_schedule": "sha256:d4f5ba8f99874961aa0d9cb91f22c8ef2b640aeeeff6a52fc8e7ed758fbf4ae2",
         "set_product_booking_config": "sha256:727bf4fc651ced45ea84cc49b1c1e864366dbadac346e8dabdba56db426e1acc",
-        "update_product": "sha256:595c24df1e95f951ef4bc350f4191d46b92e3ffb47d53ced55c7f90c304e0b0d",
+        "update_product": "sha256:72bbda52826f463b9ebebb2ed91e6ef12189ae4e1de2886b8f02e592d8a6b236",
         "update_reservation_policy": "sha256:f1e5e7eda32993dc7be3ffc459ceb97517ed309bb144d2a5f29a0f0b082f784f"
       }
     },
@@ -105753,7 +105789,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "set_media": "sha256:4bf16ab96284e37a96cfd24355a24eff1426d3afcf1c45d0395365fe45a3e709",
-        "update_product": "sha256:595c24df1e95f951ef4bc350f4191d46b92e3ffb47d53ced55c7f90c304e0b0d",
+        "update_product": "sha256:72bbda52826f463b9ebebb2ed91e6ef12189ae4e1de2886b8f02e592d8a6b236",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
     },
@@ -105769,14 +105805,14 @@
         "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
         "get_guest_conversation": "sha256:4d6462fe91c70c95f5028b0593d026fa32ba54ef84d5be113995f58c56571adf",
         "get_organization_analytics": "sha256:9e4bc32d2c3991ca19b951c8541b6eb530df0f94426aadaee48bfd118d5a0fc3",
-        "get_product": "sha256:a6573da6a4e9a4ede1a3357908cce62721ec34623e46630d07218cf201356543",
+        "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_guest_conversations": "sha256:52234aefc87f59cc21dac690cca644fed2f78bd3461fe8a65a88953c5e278776",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reply_to_guest": "sha256:03666d869c938994de86f6e3380a5bb433d0dabba23e17570b63e79133800fef",
-        "update_product": "sha256:595c24df1e95f951ef4bc350f4191d46b92e3ffb47d53ced55c7f90c304e0b0d"
+        "update_product": "sha256:72bbda52826f463b9ebebb2ed91e6ef12189ae4e1de2886b8f02e592d8a6b236"
       }
     }
   ],
@@ -105802,7 +105838,7 @@
       "slug": "update-your-menu-with-an-ai-assistant",
       "contentHash": "sha256:aa8642030ebe66e3d27ab8abecff519d51ee2eaf11f7ee1e02875ee4e1ea987e",
       "toolContracts": {
-        "get_product": "sha256:a6573da6a4e9a4ede1a3357908cce62721ec34623e46630d07218cf201356543",
+        "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:ed2b8d9ead80fe1abb797f39ae69c813956fc9750e7a2636416e7abe6236801e",
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
@@ -105810,7 +105846,7 @@
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
         "reorder_collections": "sha256:7337b52f13f1caddb073c69300d67ecac75a9b62869dd7afc0a54d8b0741217f",
         "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
-        "update_menu": "sha256:6781e5360e55e261edbc481bcd72cc4d499ce6079a66f656cbce02e7d714fab9"
+        "update_menu": "sha256:63cbd21c021e0b61799765308bf3f7fba7caac5bc647ab6d9698b215038949d4"
       }
     },
     {

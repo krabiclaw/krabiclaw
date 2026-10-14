@@ -238,7 +238,7 @@ published on the site; there is no second publish flag for it.
 ### Places to stay
 
 A place to stay is a Product of kind `stay`, edited in the one Product editor.
-Its House rules row owns its one location (chosen once, when it is created),
+Its Stay settings row owns its one location (chosen once, when it is created),
 check-in and checkout times, how many it sleeps, the minimum nights and the
 team who look after it; it has no Scheduling or Locations rows. Its price row
 is the base nightly price. Its stays are on Today and the Calendar, on the day

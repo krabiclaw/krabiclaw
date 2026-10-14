@@ -39,11 +39,11 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   const location = locations.data!.locations[0]!
   expect(location).toBeTruthy()
 
-  // The one Product editor walks a place to stay through its house rules.
+  // The one Product editor walks a place to stay through its stay settings.
   await page.goto(`/dashboard/${slug}/products/new?kind=stay&location_id=${encodeURIComponent(location.id)}`)
   await page.getByRole('button', { name: 'Start with Name' }).click()
   await page.getByRole('textbox', { name: 'Name' }).fill('Cliff Cabin')
-  await page.getByRole('button', { name: 'Next: House rules', exact: true }).click()
+  await page.getByRole('button', { name: 'Next: Stay settings', exact: true }).click()
   await expect(page).toHaveURL(/\/products\/new\/stay/)
   await page.getByRole('textbox', { name: 'Sleeps' }).fill('4')
   await page.getByRole('textbox', { name: 'Minimum nights' }).fill('2')
@@ -73,7 +73,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
 
   await page.getByRole('textbox', { name: 'Amount (THB)' }).fill('100')
   await page.getByRole('button', { name: 'Record payment' }).click()
-  await expect(page.getByText('Bank transfer').or(page.getByText('Cash')).first()).toBeVisible()
+  await expect(page.getByText('Cash', { exact: true })).toBeVisible()
   const paid = await call<{ stay: { paid_minor: number; payment_status: string; payments: Array<{ method: string; amount_minor: number }> } }>('get_stay', { stay_id: stay.data!.stay.id })
   expect(paid.data!.stay).toMatchObject({ paid_minor: 100_00, payment_status: 'partial', payments: [{ method: 'cash', amount_minor: 100_00 }] })
 

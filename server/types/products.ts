@@ -62,7 +62,7 @@ export interface Collection {
 export type ProductBookingConfig = Pick<import('~/server/utils/availability').ProductBookingConfigRecord, 'duration_minutes' | 'default_capacity' | 'confirmation_mode' | 'online_payment_required' | 'held_online' | 'scheduling_mode' | 'assigned_member_id' | 'assigned_team_id'>
 
 /**
- * A place to stay: the one location it is at and its house rules. Times are
+ * A place to stay: the one location it is at and its stay settings. Times are
  * local HH:MM in that location's timezone.
  */
 export interface ProductStayConfig {
@@ -190,7 +190,7 @@ export type ProductVariantPatchInput = Omit<Partial<ProductVariantInput>, 'price
 }
 
 export type UpdateProductInput = Partial<Omit<CreateProductInput, 'source' | 'variants' | 'stay'>> & {
-  /** House rules to change. The location a home is at is fixed when it is created. */
+  /** Stay settings to change. The location a home is at is fixed when it is created. */
   stay?: Partial<Omit<ProductStayConfig, 'location_id'>>
   variants?: ProductVariantPatchInput[]
   /** Merge preserves unmentioned variants. Replace removes variants omitted from the supplied list. */

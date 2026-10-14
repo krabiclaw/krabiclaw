@@ -663,7 +663,7 @@ function stayUnitLabel(kind: ProductKind, unitLabel: string | null): string | nu
   return 'night'
 }
 
-/** A place to stay is at one location of this organization, with house rules the calendar and channels enforce. */
+/** A place to stay is at one location of this organization, with stay settings the calendar and channels enforce. */
 async function planStayConfig(db: DbClient, organizationId: string, kind: ProductKind, value: unknown): Promise<ProductStayConfig | null> {
   if (kind !== 'stay') {
     if (value !== undefined && value !== null) invalid('Only a place to stay takes stay settings')
@@ -933,11 +933,13 @@ function productWrites(
   }]
 
   if (planned.stay) {
-    // The location relationship first: the house rules name it, so a home's one
+    // The location relationship first: the stay settings name it, so a home's one
     // location is the relationship its config holds.
     writes.push({
+      // Its one location shows it: whether the public sees it is the product's
+      // publication, which a place to stay takes only with its booking link.
       query: `INSERT INTO product_locations (organization_id, product_id, location_id, active, published, created_at, updated_at, created_by, updated_by)
-               VALUES (?, ?, ?, 1, 0, ?, ?, ?, ?) ON CONFLICT (product_id, location_id) DO NOTHING`,
+               VALUES (?, ?, ?, 1, 1, ?, ?, ?, ?) ON CONFLICT (product_id, location_id) DO NOTHING`,
       params: [organizationId, planned.id, planned.stay.location_id, now, now, actor.actorId, actor.actorId],
     }, {
       query: `INSERT INTO product_stay_configs (product_id, organization_id, location_id, check_in_time, check_out_time, max_guests, min_nights, assigned_member_id, assigned_team_id, created_at, updated_at, created_by, updated_by)
@@ -1365,8 +1367,11 @@ async function planProductUpdate(db: DbClient, input: {
     })),
     variants,
     details: { featured: current.details.featured ?? false, ...(patch.details ?? current.details) },
-    stay: current.stay ? { ...current.stay, ...patch.stay } : patch.stay as CreateProductInput['stay'],
+    // The location a home is at is fixed: a patch naming another one is refused, never merged.
+    stay: current.stay ? { ...current.stay, ...patch.stay, location_id: current.stay.location_id } : patch.stay as CreateProductInput['stay'],
   }
+  const patchedLocation = (patch.stay as { location_id?: unknown } | undefined)?.location_id
+  if (current.stay && patchedLocation !== undefined && patchedLocation !== current.stay.location_id) conflict('A place to stay keeps its location; create a new place to stay instead')
   if ((current.kind === 'stay') !== (merged.kind === 'stay')) invalid('A place to stay keeps its kind, and another kind cannot become one; create a new place to stay instead')
   const planned = await planProduct(db, organizationId, merged, {
     organizationId: input.organizationId, existingId: productId, defaultCurrency: input.defaultCurrency,

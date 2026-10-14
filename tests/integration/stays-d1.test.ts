@@ -67,7 +67,10 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     assert.equal(cabin.kind, 'stay')
     assert.equal(cabin.unit_label, 'night')
     assert.deepEqual(cabin.stay, { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: 'cleaning' })
-    assert.deepEqual(cabin.locations.map(location => location.location_id), ['cabin-site'])
+    // Its one location shows it; the product's publication decides whether anyone does.
+    assert.deepEqual(cabin.locations, [{ location_id: 'cabin-site', active: true, published: true }])
+    await assert.rejects(updateProduct(db, { organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { location_id: 'lake-site', max_guests: 2 } as never } }), /keeps its location/)
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).locations.map(location => location.location_id), ['cabin-site'])
     await assert.rejects(setProductLocation(db, { organizationId: ORG, productId: cabin.id, locationId: 'lake-site', actor: { actorId: OWNER } }), /exactly one location/)
     await assert.rejects(removeProductLocation(db, { organizationId: ORG, productId: cabin.id, locationId: 'cabin-site' }), /cannot leave the location/)
     await assert.rejects(updateProduct(db, { organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { kind: 'experience' } }), /keeps its kind/)

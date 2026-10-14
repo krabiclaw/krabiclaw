@@ -1061,7 +1061,7 @@ export const reservations = sqliteTable("reservations", {
 // Read/write: server/domain/stays.ts, and nothing else.
 // ---------------------------------------------------------------------------
 
-// Row meaning: this Product is a home at this location, with these house rules.
+// Row meaning: this Product is a home at this location, with these stay settings.
 // The composite key to product_locations is what makes "exactly one location"
 //   true in SQL: the config names the one relationship, and the relationship
 //   cannot be removed while the config names it.

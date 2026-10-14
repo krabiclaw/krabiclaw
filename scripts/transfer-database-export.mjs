@@ -209,8 +209,8 @@ export const TARGET_INVARIANT_QUERIES = {
   // Every Product is buyable: at least one variant. SQL cannot express this as
   // a constraint without making inserts circular, so it is audited here.
   every_product_has_a_variant: 'SELECT p.id FROM products p WHERE NOT EXISTS (SELECT 1 FROM product_variants v WHERE v.product_id = p.id)',
-  // A place to stay is at one location with house rules; the kind alone is not a home.
-  every_home_has_house_rules: "SELECT p.id FROM products p WHERE p.kind = 'stay' AND NOT EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = p.organization_id AND c.product_id = p.id)",
+  // A place to stay is at one location with its stay settings; the kind alone is not a home.
+  every_home_has_stay_settings: "SELECT p.id FROM products p WHERE p.kind = 'stay' AND NOT EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = p.organization_id AND c.product_id = p.id)",
   // A location-scoped price belongs to a product that location actually offers.
   price_location_scope: `SELECT p.id FROM prices p WHERE p.location_id IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM product_variants v JOIN product_locations pl ON pl.product_id = v.product_id AND pl.location_id = p.location_id

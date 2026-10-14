@@ -54,7 +54,7 @@ const headline = computed(() => {
     ? `${props.item.partySize} ${props.item.partySize === 1 ? 'guest' : 'guests'}`
     : ''
   if (props.personal) return `${props.item.title} ${when}${guests ? ` for ${guests}` : ''}`
-  return `${firstName(props.item.title)} arrives ${when}${guests ? ` with ${guests}` : ''}`
+  return `${firstName(props.item.title)} ${props.item.stayMoment === 'departure' ? 'leaves' : 'arrives'} ${when}${guests ? ` with ${guests}` : ''}`
 })
 
 // Under personal scope the subtitle is the business; the business's own card names the branch.

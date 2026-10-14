@@ -20,6 +20,8 @@ export interface AgendaItem {
   operationalReservationId: string | null
   /** The stay a `stay` row is an arrival or departure of; one stay is two rows. */
   stayId: string | null
+  /** Whether a `stay` row is guests arriving or leaving; null for every other kind. */
+  stayMoment: 'arrival' | 'departure' | null
   kind: AgendaKind
   startsAt: string
   endsAt: string | null
@@ -317,7 +319,7 @@ export async function listAgenda(
         : `/dashboard/${query.organizationSlug ?? scope.organizationId}/bookings/${row.kind}/${encodeURIComponent(row.id)}`
     return [{
       assignedMemberId:row.assigned_member_id,assignedMemberName:row.assigned_member_name,
-      id: `${row.kind}:${row.id}`, requestId: row.kind === 'post' ? null : row.id, operationalBookingId: row.kind === 'booking' ? row.operational_id : null, operationalReservationId: row.kind === 'reservation' ? row.operational_id : null, stayId: null, kind: row.kind, startsAt,
+      id: `${row.kind}:${row.id}`, requestId: row.kind === 'post' ? null : row.id, operationalBookingId: row.kind === 'booking' ? row.operational_id : null, operationalReservationId: row.kind === 'reservation' ? row.operational_id : null, stayId: null, stayMoment: null, kind: row.kind, startsAt,
       endsAt: row.ends_at === null ? null : instantDate(row.ends_at).toISOString(),
       dayKey, timeZone, showTimeZone: false,
       title: scope.buyerUserId ? row.resource_title ?? row.title : row.title,
@@ -338,7 +340,7 @@ export async function listAgenda(
       const instant = localDateTimeToInstant(day, time, stay.timezone, 'compatible').toISOString()
       items.push({
         assignedMemberId: null, assignedMemberName: null, id: `stay:${stay.id}:${moment}`, requestId: null, operationalBookingId: null, operationalReservationId: null,
-        stayId: stay.id, kind: 'stay', startsAt: instant, endsAt: null, dayKey: day, timeZone: stay.timezone, showTimeZone: false,
+        stayId: stay.id, stayMoment: moment, kind: 'stay', startsAt: instant, endsAt: null, dayKey: day, timeZone: stay.timezone, showTimeZone: false,
         title: guest, subtitle: `${moment === 'arrival' ? 'Checking in' : 'Checking out'} · ${stay.party_size === 1 ? '1 guest' : `${stay.party_size} guests`}`,
         status: stay.status, organizationId: stay.organization_id, locationId: stay.location_id, locationTitle: stay.location_title,
         guestImageUrl: null, resourceImageUrl: null, resourceTitle: stay.product_name, partySize: stay.party_size,

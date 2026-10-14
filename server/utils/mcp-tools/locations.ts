@@ -16,12 +16,13 @@ const agendaItem = { type: 'object', properties: {
   id: text, kind: { type: 'string', enum: [...AGENDA_KINDS] }, requestId: nullableText,
   operationalBookingId: nullableText, operationalReservationId: nullableText,
   stayId: { ...nullableText, description: 'For a stay row, the stay to read with get_stay; one stay is its arrival and its departure.' },
+  stayMoment: { type: ['string', 'null'], enum: ['arrival', 'departure', null] },
   assignedMemberId: nullableText, assignedMemberName: nullableText,
   startsAt: text, endsAt: nullableText, dayKey: text, timeZone: text, showTimeZone: { type: 'boolean' },
   title: text, subtitle: nullableText, status: text, organizationId: text,
   locationId: nullableText, locationTitle: nullableText, guestImageUrl: nullableText,
   resourceImageUrl: nullableText, resourceTitle: nullableText, partySize: { type: ['integer', 'null'] }, to: text,
-}, required: ['id', 'kind', 'requestId', 'operationalBookingId', 'operationalReservationId', 'stayId', 'startsAt', 'endsAt', 'dayKey', 'timeZone', 'title', 'status', 'organizationId', 'locationId', 'partySize'] }
+}, required: ['id', 'kind', 'requestId', 'operationalBookingId', 'operationalReservationId', 'stayId', 'stayMoment', 'startsAt', 'endsAt', 'dayKey', 'timeZone', 'title', 'status', 'organizationId', 'locationId', 'partySize'] }
 const calendarMutation = { ...locationMutationSummaryObject, properties: { ...locationMutationSummaryObject.properties, affected_commitments: { type: 'array', items: agendaItem } }, required: [...locationMutationSummaryObject.required, 'affected_commitments'] }
 
 export const LOCATIONS_TOOLS: McpToolDefinition[] = [
