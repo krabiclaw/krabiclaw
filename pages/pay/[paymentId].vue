@@ -70,7 +70,7 @@ const claim = computed(() => route.hash.slice(1))
 type Handoff = Awaited<ReturnType<typeof paymentHandoff>>
 type Review = Awaited<ReturnType<typeof reviewPayment>>
 type Confirmation = Awaited<ReturnType<typeof confirmPayment>>
-const isHandoff = (value: unknown): value is Handoff => isRecord(value) && value.payment_id === paymentId && typeof value.title === 'string' && Number.isSafeInteger(value.subtotal) && typeof value.currency === 'string' && typeof value.stripe_account_id === 'string' && typeof value.publishable_key === 'string' && ['open', 'paid', 'failed', 'expired'].includes(String(value.state))
+const isHandoff = (value: unknown): value is Handoff => isRecord(value) && value.payment_id === paymentId && typeof value.title === 'string' && Number.isSafeInteger(value.subtotal) && typeof value.currency === 'string' && typeof value.stripe_account_id === 'string' && typeof value.publishable_key === 'string' && Array.isArray(value.payment_method_types) && value.payment_method_types.every(type => typeof type === 'string') && ['open', 'paid', 'failed', 'expired'].includes(String(value.state))
 const isReview = (value: unknown): value is Review => isRecord(value) && typeof value.payment_method_id === 'string' && Number.isSafeInteger(value.subtotal) && Number.isSafeInteger(value.surcharge) && value.total === (value.subtotal as number) + (value.surcharge as number) && isRecord(value.method)
 const isConfirmation = (value: unknown): value is Confirmation => isRecord(value) && typeof value.status === 'string' && typeof value.requires_action === 'boolean' && typeof value.return_url === 'string'
 
@@ -105,7 +105,9 @@ watch(handoff, async (value) => {
     if (!stripe || !mount.value) throw new Error('Stripe could not be loaded')
     elements = stripe.elements({
       mode: 'payment', amount: value.subtotal, currency: value.currency.toLowerCase(),
-      paymentMethodConfiguration: value.method_configuration_id,
+      paymentMethodTypes: value.payment_method_types,
+      // The method is created here and attached by the server, which prices it before anything is confirmed.
+      paymentMethodCreation: 'manual',
       ...(value.customer_session_client_secret ? { customerSessionClientSecret: value.customer_session_client_secret } : {}),
       appearance: { theme: document.documentElement.classList.contains('dark') ? 'night' : 'stripe' },
     })

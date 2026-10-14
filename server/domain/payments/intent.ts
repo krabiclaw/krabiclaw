@@ -39,7 +39,7 @@ function parseReview(value: string | null): PaymentReview | null {
 function snapshotOf(payment: Payment) {
   const snapshot = JSON.parse(payment.price_snapshot_json) as { title?: unknown; quantity?: unknown; method_configuration_id?: unknown }
   if (typeof snapshot.title !== 'string' || !Number.isSafeInteger(snapshot.quantity) || typeof snapshot.method_configuration_id !== 'string') throw new Error('Payment purchase snapshot is invalid')
-  return { title: snapshot.title, quantity: snapshot.quantity as number, methodConfigurationId: snapshot.method_configuration_id }
+  return { title: snapshot.title, quantity: snapshot.quantity as number }
 }
 
 /** What the pay page needs to mount Stripe's Payment Element on the connected account. */
@@ -47,6 +47,9 @@ export async function paymentHandoff(db: DbClient, stripe: Stripe, publishableKe
   const { payment, attempt, state } = await requireOpenAttempt(db, organizationId, paymentId, claim)
   const snapshot = snapshotOf(payment)
   if (!publishableKey) throw new HTTPError({ statusCode: 503, statusMessage: 'Stripe is not configured' })
+  // The methods Stripe resolved for this intent from the business's configuration, with nothing that redirects; the Element offers exactly these.
+  const intent = await stripe.paymentIntents.retrieve(attempt.stripe_payment_intent_id, {}, { stripeAccount: payment.stripe_account_id })
+  if (intent.metadata.krabiclaw_payment_id !== payment.id) throw new Error('Stripe PaymentIntent does not match the purchase')
   // Stripe's own saved-card features for a signed-in buyer, scoped to this business's customer.
   let customerSession: string | null = null
   if (state === 'open' && payment.buyer_user_id) {
@@ -58,7 +61,7 @@ export async function paymentHandoff(db: DbClient, stripe: Stripe, publishableKe
   }
   return {
     payment_id: payment.id, state, title: snapshot.title, quantity: snapshot.quantity, subtotal: payment.amount, currency: payment.currency, expires_at: attempt.expires_at,
-    stripe_account_id: payment.stripe_account_id, publishable_key: publishableKey, method_configuration_id: snapshot.methodConfigurationId,
+    stripe_account_id: payment.stripe_account_id, publishable_key: publishableKey, payment_method_types: intent.payment_method_types,
     customer_session_client_secret: customerSession,
     surcharge_basis_points: await surchargeBasisPoints(db, organizationId, payment.stripe_account_id),
     review: parseReview(attempt.review_json),
