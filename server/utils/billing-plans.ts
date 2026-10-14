@@ -13,6 +13,7 @@ import {
   isKnownRecurringPlan,
   GROWTH_PLAN_ID,
   COMMERCE_PLAN_ID,
+  MARKETING_PLAN_ID,
   NEW_SALE_PAID_PLAN_IDS,
   PAID_PLAN_PRICES,
   STARTER_PLAN_ID,
@@ -89,6 +90,7 @@ const STARTER_PLAN: Plan = {
 const PLAN_CTA: Record<string, { label: string; href: string }> = {
   [GROWTH_PLAN_ID]: { label: 'Get Growth', href: `/signup?plan=${GROWTH_PLAN_ID}&redirect=${encodeURIComponent(buildPostLoginUrl({ plan: GROWTH_PLAN_ID }))}` },
   [COMMERCE_PLAN_ID]: { label: 'Get Commerce', href: `/signup?plan=${COMMERCE_PLAN_ID}&redirect=${encodeURIComponent(buildPostLoginUrl({ plan: COMMERCE_PLAN_ID }))}` },
+  [MARKETING_PLAN_ID]: { label: 'Get Marketing', href: `/signup?plan=${MARKETING_PLAN_ID}&redirect=${encodeURIComponent(buildPostLoginUrl({ plan: MARKETING_PLAN_ID }))}` },
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -377,7 +379,7 @@ const PLANS_CACHE_TTL_SECONDS = 3600
 // stub under `nuxt dev`, and Nuxt's useRuntimeConfig() is the real one.
 function plansCacheKey(buildId: string | undefined): string {
   if (!buildId) throw new BillingPlansError('BILLING_PLANS_UNAVAILABLE', 'Billing plans cache has no build id to key on')
-  return `stripe-plans:v6:${buildId}`
+  return `stripe-plans:v7:${buildId}`
 }
 
 // Single-instance in-flight guard — prevents a cache stampede where multiple
