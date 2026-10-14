@@ -126,16 +126,20 @@ test('MCP paid booking cancellation and rejection hand off without preparing mon
    const nativeRefund = { id: 're_paid', object: 'refund', amount: 10000, currency: 'usd', status: 'succeeded', payment_intent: 'pi_paid', reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: refundRow.id } }
    const originalFetch = globalThis.fetch
    let creations = 0
+   const idempotencyKeys = new Set<string>()
    const fetchMock = t.mock.method(globalThis,'fetch',async (request, init) => {
     const url = new URL(request instanceof Request ? request.url : String(request))
     if(url.origin!=='https://api.stripe.com')return originalFetch(request,init)
     assert.equal(new Headers(init?.headers).get('stripe-account'),'acct_seller')
     if(url.pathname==='/v1/refunds' && init?.method==='POST') {
      creations++
-     return Response.json({error:{type:'api_error',message:'Native response interrupted'}},{status:503,headers:{'stripe-should-retry':'false'}})
+     // A full-remaining refund names no amount: Stripe decides what is left.
+     assert.doesNotMatch(String(init?.body),/(^|&)amount=/u)
+     idempotencyKeys.add(new Headers(init?.headers).get('idempotency-key')!)
+     if(creations===1)return Response.json({error:{type:'api_error',message:'Native response interrupted'}},{status:503,headers:{'stripe-should-retry':'false'}})
+     return Response.json(nativeRefund)
     }
     assert.equal(init?.method,'GET')
-    if(url.pathname==='/v1/refunds')return Response.json({object:'list',data:[nativeRefund],has_more:false})
     if(url.pathname==='/v1/refunds/re_paid')return Response.json(nativeRefund)
     assert.equal(decodeURIComponent(url.pathname),'/v1/checkout/sessions/cs:paid')
     return Response.json({id:'cs:paid',object:'checkout.session',client_reference_id:'paid',livemode:false,currency:'usd',payment_intent:'pi_paid',customer_details:{email:'guest@example.com'}})
@@ -144,14 +148,16 @@ test('MCP paid booking cancellation and rejection hand off without preparing mon
     const stripe = new Stripe(env.STRIPE_SECRET_KEY,{maxNetworkRetries:0,httpClient:Stripe.createFetchHttpClient()})
     const key = `${action==='reject'?'rejected':'cancelled'}:${booking.bookingId}`
     const payment = await requirePayment(db,ORG,'paid')
-    const refund = () => executeRefund(db,stripe,payment,10000,key,'requested_by_customer','verified',env)
+    const refund = () => executeRefund(db,stripe,payment,null,key,'requested_by_customer','verified',env)
     await assert.rejects(refund,/Native response interrupted/u)
     await db.prepare("UPDATE payment_authorizations SET expires_at='2000-01-01T00:00:00.000Z' WHERE id=?").bind(authorizationId).run()
     await approveRefundAuthorization(db,principal,authorizationId)
     assert.equal((await executeGuestThreadOperation(db,approvedInput)).ok,true)
+    // The retry re-sends the same native request under the same key; Stripe answers for the first attempt. Once recorded, no further request is made.
     assert.equal((await refund()).status,'succeeded')
     assert.equal((await refund()).status,'succeeded')
-    assert.equal(creations,1)
+    assert.equal(creations,2)
+    assert.equal(idempotencyKeys.size,1)
     assert.equal(await db.prepare("SELECT COUNT(*) n FROM payment_refunds WHERE payment_id='paid'").first('n'),1)
     assert.equal(await db.prepare("SELECT refunded_amount FROM payments WHERE id='paid'").first('refunded_amount'),10000)
    } finally { fetchMock.mock.restore() }

@@ -118,7 +118,18 @@ to the selected business.
 Stripe's settlement timing and payout schedule are separate. Krabiclaw does not
 apply Airbnb check-in payout-release rules. Bank changes use Stripe Express;
 sent payouts cannot be redirected. Merchant refunds require authenticated browser
-approval; paid business cancellation/rejection refunds the remaining principal.
+approval. A paid visit's rejection or cancellation, a guest's own cancellation of
+a deposit-paid reservation inside its terms, and the recovery of a capture
+nothing could be fulfilled for are each Stripe's full-remaining refund: the
+request names no amount, Stripe returns whatever it still holds for the
+payment, and the recorded amount is the one Stripe reports. The approval screen
+shows that remainder read from the charge. Each refund is one request under a
+stable idempotency key; a lost response is retried against Stripe's record of
+the first attempt, and an attempt older than Stripe's 24-hour key window is
+refused for a manual check rather than re-sent. Settlement verifies the
+Checkout is the authorized purchase on the right account and mode and that
+Stripe reports it paid; it does not recompute the total from the catalog
+price, so native tax or a surcharge is never a settlement failure.
 Dispute evidence is submitted in Stripe, and Managed Risk covers unrecoverable
 negative balances rather than guaranteeing that disputed funds are retained.
 The 1.4% captured-volume fee remains billable after refunds/disputes; actual Stripe

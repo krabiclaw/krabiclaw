@@ -1,6 +1,9 @@
 import { z } from 'zod'
 import { HTTPError } from 'nitro'
 import { guestReservationRefundQueries } from '~/server/domain/payments/visit-refund'
+import { executeRefund, requirePayment } from '~/server/domain/payments'
+import { createStripeClient } from '~/server/utils/stripe-client'
+import type { CloudflareEnv } from '~/server/utils/auth'
 import { recordBookingCancelled } from '~/server/domain/booking-analytics'
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
@@ -235,7 +238,7 @@ export async function requestSummary(db: DbClient, request: GuestRequest, knownR
  * record is what releases the seats — the thread holds none.
  */
 export async function cancelBookingRequest(db: DbClient, input: {
-  id: string; organizationId: string; kind: BookingRequest['kind']; now: string
+  id: string; organizationId: string; kind: BookingRequest['kind']; now: string; env: CloudflareEnv
 } & ({ tokenHash: string; buyerUserId?: never } | { buyerUserId: string; tokenHash?: never })): Promise<{ request: BookingRequest; record: ThreadOperationalRecord; wasConfirmed: boolean; changed: boolean } | null> {
   const current = await getGuestRequest(db, input.id, input.organizationId, input.kind)
   if (!current || current.kind === 'contact') return null
@@ -266,7 +269,7 @@ export async function cancelBookingRequest(db: DbClient, input: {
   const table = record.kind === 'booking' ? 'bookings' : 'reservations'
   const refund = record.kind === 'reservation' ? await guestReservationRefundQueries(db, {
     organizationId: input.organizationId, reservationId: record.id, requestId: input.id, startsAt: record.starts_at, now: input.now, buyerUserId: input.buyerUserId,
-  }) : { queries: [], guard: null }
+  }) : { queries: [], guard: null, refund: null }
   const [consumed, released] = await executeBatch(db, [
     {
       query: `UPDATE requests SET
@@ -301,5 +304,10 @@ export async function cancelBookingRequest(db: DbClient, input: {
   const request = parseGuestRequest(row)
   if (request.kind === 'contact') throw new Error('Cancellation returned a contact thread')
   if (record.kind === 'booking') await recordBookingCancelled(db, { organizationId: input.organizationId, bookingId: record.id, cancelledBy: 'guest', actorUserId: input.buyerUserId ?? null })
+  // The deposit goes back the moment the table is released: Stripe's full-remaining refund, under the cancellation's own key.
+  if (refund.refund) {
+    if (!input.env.STRIPE_SECRET_KEY) throw new Error('Stripe is not configured')
+    await executeRefund(db, createStripeClient(input.env.STRIPE_SECRET_KEY, 'payments'), await requirePayment(db, input.organizationId, refund.refund.paymentId), null, refund.refund.key, 'requested_by_customer', input.buyerUserId ?? null, input.env)
+  }
   return { request, record: { ...record, status: 'cancelled' }, wasConfirmed: record.status === 'confirmed', changed: true }
 }

@@ -20,50 +20,48 @@ export async function visitRefundQueries(db:DbClient,input:{action:VisitRefundAc
  if(!member)throw new HTTPError({statusCode:403,statusMessage:'Financial organization membership required'})
  const principal={organizationId:input.organizationId,userId:input.actorUserId,role:member.role}
  await authorizePayments(principal,'refund')
- const amount=payment.captured_amount-payment.refunded_amount
  const authorizationAction=input.subjectType==='reservation'?'cancel_reservation':input.action==='reject'?'reject_booking':'cancel_booking'
- const approval=input.authorizationId?await queryFirst(db,"SELECT id FROM payment_authorizations WHERE id=? AND organization_id=? AND user_id=? AND payment_id=? AND action=? AND amount=? AND approved_at IS NOT NULL AND consumed_at IS NULL AND expires_at>?",[input.authorizationId,input.organizationId,input.actorUserId,payment.id,authorizationAction,amount,input.now]):null
+ const approval=input.authorizationId?await queryFirst(db,"SELECT id FROM payment_authorizations WHERE id=? AND organization_id=? AND user_id=? AND payment_id=? AND action=? AND amount IS NULL AND approved_at IS NOT NULL AND consumed_at IS NULL AND expires_at>?",[input.authorizationId,input.organizationId,input.actorUserId,payment.id,authorizationAction,input.now]):null
  if(!approval){
   const org=await queryFirst<{slug:string}>(db,'SELECT slug FROM organization WHERE id=?',[input.organizationId])
   if(!org?.slug)throw new HTTPError({statusCode:409,statusMessage:'Refund approval dashboard destination is unavailable'})
-  const prepared=await requestRefundAuthorization(db,principal,payment.id,amount,authorizationAction,input.note)
+  const prepared=await requestRefundAuthorization(db,principal,payment.id,null,authorizationAction,input.note)
   throw new HTTPError({statusCode:409,statusMessage:`Paid ${input.action==='reject'?'rejection':'cancellation'} requires explicit approval of the full refund`,data:{financial_approval_url:`/dashboard/${encodeURIComponent(org.slug)}/earnings/refunds/approve?id=${prepared.authorization_id}`}})
  }
  const pending=await queryFirst(db,"SELECT id FROM payment_refunds WHERE payment_id=? AND status IN ('queued','creating','pending','requires_action')",[payment.id])
  if(pending)throw new HTTPError({statusCode:409,statusMessage:'A refund is already in progress; reconcile it before changing this booking'})
  const id=crypto.randomUUID(),key=visitRefundKey(input.action,input.subjectType,input.subjectId)
- const guard={query:`EXISTS(SELECT 1 FROM payments p JOIN payment_authorizations a ON a.payment_id=p.id WHERE p.id=? AND p.organization_id=? AND p.captured_amount-p.refunded_amount=? AND a.id=? AND a.user_id=? AND a.action=? AND a.approved_at IS NOT NULL AND a.consumed_at IS NULL AND a.expires_at>? AND NOT EXISTS(SELECT 1 FROM payment_refunds r WHERE r.payment_id=p.id AND r.status IN ('queued','creating','pending','requires_action')))`,params:[payment.id,input.organizationId,amount,input.authorizationId!,input.actorUserId,authorizationAction,input.now]}
+ // The approval and the booking write are one batch: the payment still holds money and the approval is the one given for it.
+ const guard={query:`EXISTS(SELECT 1 FROM payments p JOIN payment_authorizations a ON a.payment_id=p.id WHERE p.id=? AND p.organization_id=? AND p.captured_amount>p.refunded_amount AND a.id=? AND a.user_id=? AND a.action=? AND a.amount IS NULL AND a.approved_at IS NOT NULL AND a.consumed_at IS NULL AND a.expires_at>?)`,params:[payment.id,input.organizationId,input.authorizationId!,input.actorUserId,authorizationAction,input.now]}
  return {guard,queries:[
-  {query:`INSERT INTO payment_refunds(id,payment_id,idempotency_key,amount,reason,note,status,created_by,created_at,updated_at) SELECT ?,?,?,?,'requested_by_customer',(SELECT note FROM payment_authorizations WHERE id=?),'queued',?,?,? WHERE EXISTS(SELECT 1 FROM activity_entries WHERE id=? AND event_name=?) AND EXISTS(SELECT 1 FROM payments WHERE id=? AND captured_amount-refunded_amount=?) ON CONFLICT(idempotency_key) DO NOTHING`,params:[id,payment.id,key,amount,input.authorizationId!,input.actorUserId,input.now,input.now,input.entryId,`${input.subjectType}.${input.action}`,payment.id,amount]},
+  {query:`INSERT INTO payment_refunds(id,payment_id,idempotency_key,amount,reason,note,status,created_by,created_at,updated_at) SELECT ?,?,?,NULL,'requested_by_customer',(SELECT note FROM payment_authorizations WHERE id=?),'queued',?,?,? WHERE EXISTS(SELECT 1 FROM activity_entries WHERE id=?) ON CONFLICT(idempotency_key) DO NOTHING`,params:[id,payment.id,key,input.authorizationId!,input.actorUserId,input.now,input.now,input.entryId]},
   {query:'UPDATE payment_authorizations SET consumed_at=? WHERE id=? AND EXISTS(SELECT 1 FROM payment_refunds WHERE idempotency_key=?)',params:[input.now,input.authorizationId!,key]},
  ]}
 }
 
-/** The business's quoted deposit terms authorize this guest refund; cancellation always releases the table. */
+/** A guest's own cancellation inside the quoted deposit terms returns the deposit; cancellation always releases the table. */
 export async function guestReservationRefundQueries(db: DbClient, input: {
  organizationId: string; reservationId: string; requestId: string; startsAt: string; now: string; buyerUserId?: string
-}): Promise<{ queries: BatchQuery[]; guard: BatchQuery | null }> {
+}): Promise<{ queries: BatchQuery[]; guard: BatchQuery | null; refund: { paymentId: string; key: string } | null }> {
  const payment = await queryFirst<Payment>(db, "SELECT * FROM payments WHERE organization_id = ? AND subject_type = 'reservation' AND subject_id = ? AND captured_amount > refunded_amount", [input.organizationId, input.reservationId])
- if (!payment) return { queries: [], guard: null }
+ if (!payment) return { queries: [], guard: null, refund: null }
  const reservation = await queryFirst<{ policy_json: string | null }>(db, 'SELECT policy_json FROM reservations WHERE organization_id = ? AND id = ?', [input.organizationId, input.reservationId])
  const terms: unknown = reservation?.policy_json ? JSON.parse(reservation.policy_json) : null
  if (!isRecord(terms)) throw new Error('Paid reservation has no accepted cancellation terms')
  const cutoff = terms.free_cancellation_until_minutes
  if (cutoff !== null && (!Number.isSafeInteger(cutoff) || Number(cutoff) < 0)) throw new Error('Paid reservation cancellation cutoff is invalid')
- if (cutoff !== null && Date.parse(input.now) > Date.parse(input.startsAt) - Number(cutoff) * 60_000) return { queries: [], guard: null }
- const pending = await queryFirst<{ amount: number }>(db, "SELECT COALESCE(SUM(amount), 0) AS amount FROM payment_refunds WHERE payment_id = ? AND status IN ('queued','creating','pending','requires_action')", [payment.id])
- const amount = payment.captured_amount - payment.refunded_amount - Number(pending?.amount ?? 0)
- if (amount <= 0) return { queries: [], guard: null }
+ if (cutoff !== null && Date.parse(input.now) > Date.parse(input.startsAt) - Number(cutoff) * 60_000) return { queries: [], guard: null, refund: null }
  const key = `guest-cancelled-reservation:${input.reservationId}`
+ // One refund per cancellation: the batch refuses while an earlier one is still with Stripe.
  const guard: BatchQuery = {
-  query: `EXISTS (SELECT 1 FROM payments p WHERE p.id = ? AND p.organization_id = ? AND p.captured_amount - p.refunded_amount -
-    COALESCE((SELECT SUM(amount) FROM payment_refunds WHERE payment_id = p.id AND status IN ('queued','creating','pending','requires_action')), 0) = ?)`,
-  params: [payment.id, input.organizationId, amount],
+  query: `EXISTS (SELECT 1 FROM payments p WHERE p.id = ? AND p.organization_id = ? AND p.captured_amount > p.refunded_amount
+    AND NOT EXISTS (SELECT 1 FROM payment_refunds WHERE payment_id = p.id AND status IN ('queued','creating','pending','requires_action')))`,
+  params: [payment.id, input.organizationId],
  }
- return { guard, queries: [{
+ return { guard, refund: { paymentId: payment.id, key }, queries: [{
   query: `INSERT INTO payment_refunds(id,payment_id,idempotency_key,amount,reason,status,created_by,created_at,updated_at)
-    SELECT ?,?,?,?,'requested_by_customer','queued',?,?,? WHERE EXISTS (SELECT 1 FROM activity_entries WHERE request_id = ? AND dedupe_key = ?)
+    SELECT ?,?,?,NULL,'requested_by_customer','queued',?,?,? WHERE EXISTS (SELECT 1 FROM activity_entries WHERE request_id = ? AND dedupe_key = ?)
     ON CONFLICT(idempotency_key) DO NOTHING`,
-  params: [crypto.randomUUID(), payment.id, key, amount, input.buyerUserId ?? null, input.now, input.now, input.requestId, `reservation:${input.reservationId}:guest-cancel`],
+  params: [crypto.randomUUID(), payment.id, key, input.buyerUserId ?? null, input.now, input.now, input.requestId, `reservation:${input.reservationId}:guest-cancel`],
  }] }
 }
