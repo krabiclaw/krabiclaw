@@ -15,7 +15,7 @@ test.describe('lodging identity boundary', () => {
   test('a bearer session resolves its principal, keeps its only organization, and stops at sign-out', async ({ baseURL }) => {
     const password = process.env.CANARY_LOGIN_PASSWORD
     if (!password) throw new Error('CANARY_LOGIN_PASSWORD is not configured.')
-    const call = async (method: 'GET' | 'POST', path: string, init: { headers?: Record<string, string>; data?: unknown } = {}) => {
+    const call = async (method: 'GET' | 'POST' | 'DELETE', path: string, init: { headers?: Record<string, string>; data?: unknown } = {}) => {
       const response = await fetch(new URL(path, baseURL), {
         method,
         redirect: 'manual',
@@ -28,6 +28,7 @@ test.describe('lodging identity boundary', () => {
     const api = {
       get: (path: string, init?: { headers?: Record<string, string> }) => call('GET', path, init),
       post: (path: string, init?: { headers?: Record<string, string>; data?: unknown }) => call('POST', path, init),
+      delete: (path: string, init?: { headers?: Record<string, string> }) => call('DELETE', path, init),
     }
     const signInBearer = async (email: string) => {
       const signIn = await api.post('/api/auth/sign-in/email', {
@@ -85,15 +86,25 @@ test.describe('lodging identity boundary', () => {
       // A single-use link adds whoever accepts it, with the link's role.
       const link = await api.post(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer, data: { role: 'admin' } })
       expect(link.status, await link.text()).toBe(201)
-      const { token: inviteToken, expiresAt } = await link.json() as { token: string; expiresAt: string }
+      const { id: inviteLinkId, token: inviteToken, expiresAt } = await link.json() as { id: string; token: string; expiresAt: string }
       expect(Date.parse(expiresAt) - Date.now()).toBeGreaterThan(6.9 * 24 * 60 * 60 * 1000)
+      const pending = await api.get(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer })
+      expect(pending.status, await pending.text()).toBe(200)
+      expect((await pending.json() as { inviteLinks: Array<{ id: string; role: string }> }).inviteLinks).toEqual([expect.objectContaining({ id: inviteLinkId, role: 'admin' })])
       const inviteeBearer = await signInBearer(invitee.email)
       const accepted = await api.post(`/api/invite-links/${encodeURIComponent(inviteToken)}/accept`, { headers: inviteeBearer })
       expect(accepted.status, await accepted.text()).toBe(200)
+      expect(await accepted.json()).toMatchObject({ organization: { id: organization.id, name: organization.name }, role: 'admin' })
       const joined = await api.get(`/api/lodging/principal?organizationId=${encodeURIComponent(organization.id)}`, { headers: inviteeBearer })
       expect(joined.status, await joined.text()).toBe(200)
       expect((await joined.json() as { member: { role: string } }).member.role).toBe('admin')
       expect((await api.post(`/api/invite-links/${encodeURIComponent(inviteToken)}/accept`, { headers: inviteeBearer })).status).toBe(410)
+      // Used links are no longer pending, and a withdrawn link cannot be accepted.
+      expect((await (await api.get(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer })).json() as { inviteLinks: unknown[] }).inviteLinks).toEqual([])
+      const withdrawn = await api.post(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer, data: { role: 'member' } })
+      const withdrawnLink = await withdrawn.json() as { id: string; token: string }
+      expect((await api.delete(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links/${withdrawnLink.id}`, { headers: bearer })).status).toBe(204)
+      expect((await api.post(`/api/invite-links/${encodeURIComponent(withdrawnLink.token)}/accept`, { headers: inviteeBearer })).status).toBe(404)
       expect((await api.post(`/api/organizations/org-demo/invite-links`, { headers: inviteeBearer, data: { role: 'member' } })).status).toBe(404)
       const inviteeLeft = await api.post('/api/auth/organization/leave', { headers: inviteeBearer, data: { organizationId: organization.id } })
       expect(inviteeLeft.status, await inviteeLeft.text()).toBe(200)

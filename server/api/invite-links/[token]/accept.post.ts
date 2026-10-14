@@ -39,7 +39,8 @@ export default defineHandler(async (event) => {
     const member = await createAuth(env).api.addMember({
       body: { userId: session.user.id, organizationId: link.organization_id, role: link.role as 'admin' | 'member' },
     })
-    return jsonResponse({ organizationId: link.organization_id, member: { id: member?.id, role: member?.role } })
+    const organization = await queryFirst<{ id: string; name: string }>(env.DB, 'SELECT id, name FROM organization WHERE id = ?', [link.organization_id])
+    return jsonResponse({ organization, role: member?.role ?? link.role, memberId: member?.id })
   } catch (cause) {
     await execute(env.DB, 'UPDATE organization_invite_links SET used_at = NULL, used_by_user_id = NULL WHERE id = ? AND used_at = ?', [link.id, usedAt])
     throw cause
