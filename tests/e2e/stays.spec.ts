@@ -71,7 +71,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   const arrival = page.getByRole('link', { name: /3:00\sPM Ana arrives today with 2 guests/ })
   await expect(arrival).toHaveAttribute('href', `/dashboard/${slug}/bookings/stay/${stay.data!.stay.id}`)
   await arrival.click()
-  await expect(page.getByRole('heading', { name: 'Ana Silva', level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Ana Silva', level: 1, exact: true })).toBeVisible()
 
   await page.getByRole('textbox', { name: 'Amount (THB)' }).fill('100')
   await page.getByRole('button', { name: 'Record payment' }).click()
