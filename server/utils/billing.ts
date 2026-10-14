@@ -1,20 +1,15 @@
 import type Stripe from 'stripe'
 import { HTTPError } from 'nitro';
-import type { DbClient } from '~/server/db'
+import { queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { hasPermission } from 'better-auth/plugins'
 import { organizationAdapter } from '~/server/utils/member-access'
 import { getPlanEntitlements, type EntitlementsMap } from '~/server/utils/billing-entitlements'
-import { getOrganizationEntitlements, planFromSubscriptions, readOrganizationSubscriptions } from '~/server/utils/billing-access'
+import { entitlingSubscription, getOrganizationEntitlements, planFromSubscriptions, readOrganizationSubscriptions } from '~/server/utils/billing-access'
+import { coveredLocations } from '~/shared/billing-model'
 import { createStripeClient } from '~/server/utils/stripe-client'
 import { createStripePlanLoader } from '~/server/utils/better-auth-stripe'
 import { organizationAccessControl, organizationRoles } from '~/utils/organization-access'
-import { assertNewSalePlan } from '~/shared/billing-model'
-import {
-  assertStripeCatalogPrices,
-  resolveStripeCatalogPrice,
-  selectStripeCatalogPrice,
-} from '~/server/utils/stripe-catalog'
 
 export interface BillingEnv {
   STRIPE_SECRET_KEY?: string
@@ -30,7 +25,15 @@ export interface OrganizationBillingStatus {
   cancelAtPeriodEnd?: boolean
   /** Better Auth's subscription schedule for a plan change at the end of the period. */
   stripeScheduleId?: string
+  billingInterval?: 'month' | 'year'
+  locations: OrganizationLocations
   entitlements: EntitlementsMap
+}
+
+/** How many locations the organization has, and how many its plan pays for. */
+export interface OrganizationLocations {
+  used: number
+  covered: number
 }
 
 const billingAuthorizationOptions = {
@@ -55,15 +58,17 @@ export async function getOrganizationBillingStatus(
   // is entitled to. Those are different rules — a past_due row is the current
   // subscription but grants nothing — so both are applied to the same rows
   // rather than read twice.
-  const [organization, subscriptionsByOrganization] = await Promise.all([
+  const [organization, subscriptionsByOrganization, used] = await Promise.all([
     adapter.findOrganizationById(organizationId),
     readOrganizationSubscriptions(env, [organizationId]),
+    countOrganizationLocations(db, organizationId),
   ])
   if (!organization) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
   const subscriptions = subscriptionsByOrganization.get(organizationId) ?? []
   const current = subscriptions.filter(row => row.status !== 'canceled' && row.status !== 'incomplete_expired')
   if (current.length > 1) throw new Error('Organization has multiple current subscriptions')
   const subscription = current[0]
+  const entitling = entitlingSubscription(organizationId, subscriptions)
   const plan = planFromSubscriptions(organizationId, subscriptions)
   const customerId = 'stripeCustomerId' in organization && typeof organization.stripeCustomerId === 'string'
     ? organization.stripeCustomerId
@@ -79,8 +84,35 @@ export async function getOrganizationBillingStatus(
     currentPeriodEnd: subscription?.periodEnd?.toISOString(),
     cancelAtPeriodEnd: subscription?.cancelAtPeriodEnd,
     stripeScheduleId: subscription?.stripeScheduleId ?? undefined,
+    billingInterval: billingInterval(subscription?.billingInterval),
+    locations: { used, covered: coveredLocations(plan, entitling?.seats) },
     entitlements: getPlanEntitlements(plan),
   }
+}
+
+function billingInterval(value: string | undefined): 'month' | 'year' | undefined {
+  if (value === undefined || value === 'month' || value === 'year') return value
+  throw new Error(`Subscription billing interval ${value} is not a plan interval`)
+}
+
+async function countOrganizationLocations(db: DbClient, organizationId: string): Promise<number> {
+  const row = await queryFirst<{ count: number }>(db, 'SELECT COUNT(*) AS count FROM business_locations WHERE organization_id = ?', [organizationId])
+  if (!row) throw new Error('Location count could not be read')
+  return row.count
+}
+
+/**
+ * The locations this organization has against the ones its plan covers. Every
+ * surface that adds a location — dashboard and MCP — asks here first.
+ */
+export async function organizationLocations(env: CloudflareEnv, db: DbClient, organizationId: string): Promise<OrganizationLocations & { plan: string }> {
+  const [subscriptions, used] = await Promise.all([
+    readOrganizationSubscriptions(env, [organizationId]),
+    countOrganizationLocations(db, organizationId),
+  ])
+  const rows = subscriptions.get(organizationId) ?? []
+  const plan = planFromSubscriptions(organizationId, rows)
+  return { plan, used, covered: coveredLocations(plan, entitlingSubscription(organizationId, rows)?.seats) }
 }
 
 // ── Organization entitlements ─────────────────────────────────────────────────
@@ -107,44 +139,6 @@ export async function scheduledPlanChange(env: CloudflareEnv, scheduleId: string
   const plan = (await createStripePlanLoader(stripe, env)()).find(row => row.priceId === priceId || row.annualDiscountPriceId === priceId)
   if (!plan) throw new Error(`Subscription schedule ${scheduleId} moves to a price outside the plan catalog`)
   return { plan: plan.name.toLowerCase(), at: new Date(next.start_date * 1000).toISOString() }
-}
-
-export async function getPriceIdForPlan(env: BillingEnv, plan: string, interval: 'month' | 'year' = 'month'): Promise<string> {
-  const validatedPlan = assertNewSalePlan(plan)
-  const stripe = getStripe(env)
-  const products: Stripe.Product[] = []
-  let productsStartingAfter: string | undefined
-  do {
-    const page = await stripe.products.list({
-      active: true,
-      limit: 100,
-      ...(productsStartingAfter ? { starting_after: productsStartingAfter } : {}),
-    })
-    products.push(...page.data)
-    productsStartingAfter = page.has_more ? page.data.at(-1)?.id : undefined
-  } while (productsStartingAfter)
-
-  const prices: Stripe.Price[] = []
-  let pricesStartingAfter: string | undefined
-  do {
-    const page = await stripe.prices.list({
-      active: true,
-      type: 'recurring',
-      limit: 100,
-      ...(pricesStartingAfter ? { starting_after: pricesStartingAfter } : {}),
-    })
-    prices.push(...page.data)
-    pricesStartingAfter = page.has_more ? page.data.at(-1)?.id : undefined
-  } while (pricesStartingAfter)
-
-  const monthly = resolveStripeCatalogPrice(products, prices, validatedPlan, 'month')
-  const annual = selectStripeCatalogPrice(monthly.product, prices, 'year')
-  assertStripeCatalogPrices(validatedPlan, monthly.price, annual)
-  if (interval === 'year') {
-    if (!annual) throw new Error(`No active Stripe year price found for plan ${validatedPlan}`)
-    return annual.id
-  }
-  return monthly.price.id
 }
 
 export async function requireBillingAccess(

@@ -1,10 +1,19 @@
 # Stripe catalog operator plan
 
 `scripts/seed-stripe.mjs` reconciles the new-sale recurring catalog for Basic
-(free, with no Stripe product), Growth (`$49` per month, with an optional existing
-`$588` annual price), and Commerce (`$89` per month). Commerce includes Growth's
-features and Payments and has no annual price. `shared/billing-model.ts` owns the
-fixed USD subscription amounts. Managed (`$149`)
+(free, with no Stripe product), Growth (`$49` per month or `$588` per year), and
+Commerce (`$89` per month). Commerce includes Growth's features and Payments and
+has no annual price. Every plan includes 2 locations; Growth and Commerce charge
+`$49` per additional location per month (`$588` per year on annual Growth).
+
+Each paid plan price is one graduated Stripe price whose subscription quantity
+is the number of locations it covers: the first tier (up to 2) is a flat fee of
+the plan amount, the second is the per-location amount for every further unit.
+The product's `unit_label` is `location`. Keeping it one price on one
+subscription item is what lets Better Auth's plan changes and its location
+quantity changes (`seats`) use Stripe's portal confirmation, which refuses
+subscriptions with more than one item. `shared/billing-model.ts` owns the fixed
+USD amounts and the tiers (`planPriceTiers`). Managed (`$149`)
 and SEO Accelerator (`$349`) are retired from new offers. Every product and
 price, including already-archived products and inactive or one-time prices, is
 read into the reviewed snapshot. Only products whose metadata explicitly names
@@ -65,7 +74,7 @@ applied separately with the commands below. This prevents unrelated product
 metadata copy from blocking an application or incident release.
 
 Public plan reads share the canonical `ORGANIZATION_CACHE` catalog entry
-`stripe-plans:v5:<actual app.buildId>` for up to one hour. Tenant CMS content
+`stripe-plans:v6:<actual app.buildId>` for up to one hour. Tenant CMS content
 purges do not refresh this global entry. A genuine new application build selects
 a fresh entry; restarting the same built Worker retains its persistent cache.
 After catalog changes, verify the actual public plan and Markdown reads as well
@@ -73,9 +82,10 @@ as the native zero-operation read-back.
 
 Paid-plan changes also require the target account's native Stripe customer
 portal configuration. Better Auth Stripe uses `subscription_update_confirm` for
-its hosted confirmation. Enable subscription updates, allow price changes, and
-select only the canonical offered Product/Price IDs from that account's verified
-catalog. Read the saved products with
+its hosted confirmation. Enable subscription updates, allow price and quantity
+changes, and select only the canonical offered Product/Price IDs from that
+account's verified catalog; after a price replacement, select the new IDs.
+Quantity is how an owner adds or removes locations on their plan. Read the saved products with
 `expand=['features.subscription_update.products']`; the ordinary configuration
 response omits them. Preserve existing cancellation, payment-method, invoice,
 proration and timing settings unless the operator explicitly changes them.
@@ -139,16 +149,32 @@ reviewed provider snapshot. An active retired default price is cleared first;
 canonical offered products and inactive products are not cleared. There is no
 automatic first-product selection.
 
-For an existing canonical product, monthly and annual base prices are resolved
-with the same contract used by the Better Auth Stripe loader: explicit product
-metadata IDs first, then an unambiguous `lookup_key`, then a single remaining
-candidate. The configured `seat_price_id` is never selected or deactivated as a
-base price. The monthly base must already be the fixed USD amount for its plan;
-an amount mismatch fails closed. Annual pricing is optional: an absent annual
-price remains absent, while an ambiguous annual set fails closed. The plan
-snapshot includes each price's `lookup_key` and normalized metadata, so these
-selection inputs are covered by the review hash. On the selected product only
-non-canonical base-price candidates are deactivated.
+For an existing canonical product, the canonical monthly and annual prices are
+the active prices exactly matching the definition (`desiredPriceParams`):
+currency, interval, billing scheme and tiers or unit amount. Product metadata
+selects among identical candidates; more than one identical candidate without
+it fails closed. A price at any other amount or scheme is not canonical: the
+plan creates the matching price, points the product's metadata and default
+price at it, and deactivates the old one. The configured `seat_price_id` is
+never selected or deactivated. The plan snapshot includes each price's tiers,
+`lookup_key` and normalized metadata, so these inputs are covered by the review
+hash.
+
+The snapshot also records every open subscription billed on a paid plan product
+(its status, schedule, and items' price and quantity). A subscription on a
+non-canonical plan price gets a signed `migrate_subscription_price` operation
+before any price is deactivated: its one item moves to the canonical price for
+its interval at quantity `max(2, current quantity)`, with
+`proration_behavior: none`, which charges the same amount. A subscription with a
+schedule or more than one item fails planning closed. The subscription's
+reviewed state is its precondition, and an already-moved item is recognized on
+resume. Deactivating a price does not change a subscription on it; migration is
+what keeps Better Auth able to resolve every subscription's plan.
+
+A price replacement changes what the deployed Worker accepts as canonical, so
+apply it to an account together with the application release that reads that
+shape: the previous build rejects the new prices and the new build rejects the
+old ones.
 
 Apply defaults to test mode (`sk_test_` or `rk_test_`). Live apply requires
 `--require-live-mode` on the reviewed plan and apply commands. Apply is refused
@@ -161,7 +187,7 @@ target and canonical safety boundary against a fresh snapshot. A failed
 operation performs no mutation from that operation; earlier journaled
 operations remain applied and are reported as such. Use a restricted
 key for the selected mode with read-account plus the catalog/file permissions required for
-this task;
+this task, and subscription write when the plan migrates subscriptions;
 never place a key in a plan file or commit it.
 
 For an authorized production catalog change, use the configured live key in the

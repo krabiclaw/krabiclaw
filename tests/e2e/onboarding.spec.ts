@@ -371,14 +371,41 @@ test('the business search API refuses what the picker would never send', async (
   }
 })
 
+// Ember & Slice is on Commerce, billed for the 2 included locations, and has
+// both. A third is refused by the createLocation every surface shares, and the
+// add page offers to add a location to the plan instead of walking the steps.
+test('a location beyond the ones the plan pays for is refused until the plan covers it', async ({ page, baseURL }) => {
+  await loginAs(page.request, baseURL!, 'user-e2e-demo-owner')
+  const status = async () => {
+    const response = await page.request.get('/api/billing/status?organizationId=org-demo')
+    expect(response.status(), await response.text()).toBe(200)
+    return (await response.json() as { billing: { plan: string; locations: { used: number; covered: number } } }).billing
+  }
+  const before = await status()
+  expect(before.plan).toBe('commerce')
+  expect(before.locations).toEqual({ used: 2, covered: 2 })
+
+  const refused = await page.request.post('/api/dashboard/locations?org=ember-slice-demo', { data: { name: 'Third branch' } })
+  expect(refused.status(), await refused.text()).toBe(402)
+  expect(await refused.json()).toEqual({ error: 'Your plan covers 2 locations. Add a location to your plan in Billing (2 included, then $49 per additional location per month), then create it.' })
+  expect((await status()).locations).toEqual({ used: 2, covered: 2 })
+
+  await page.goto('/dashboard/ember-slice-demo/locations/new')
+  const limit = page.locator('[data-location-limit]')
+  await expect(limit).toContainText('Your plan covers 2 locations and your site has 2. 2 locations are included, then $49 per additional location per month.')
+  await expect(limit.getByRole('button', { name: 'Add a location to your plan', exact: true })).toBeVisible()
+  await expect(page.locator('[data-onboarding-step="business"]')).toHaveCount(0)
+})
+
 // Add-location walks the same business step with the same picker, and Settings
 // → Google Maps connects a location by the same selection. Both run against the
-// demo tenant's local copy; the location this adds is deactivated at the end.
+// NCLS tenant's local copy, which has one of its two included locations; the
+// location this adds is deactivated at the end.
 test('add-location and Settings connect a location through the same business picker', async ({ page, baseURL }) => {
   test.skip(process.env.E2E_GOOGLE_PLACES !== 'true', 'Live Google Places qualification requires E2E_GOOGLE_PLACES=true')
   await dismissPreviewToolbar(page)
-  await loginAs(page.request, baseURL!, 'user-e2e-demo-owner')
-  const org = 'ember-slice-demo'
+  await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
+  const org = 'north-carolina-legal-services'
   const step = (id: string) => page.locator(`[data-onboarding-step="${id}"]`)
   const next = (label = 'Next') => page.getByRole('button', { name: label, exact: true }).click()
   const connected = async () => {

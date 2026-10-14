@@ -26,7 +26,7 @@ const calendarMutation = { ...locationMutationSummaryObject, properties: { ...lo
 export const LOCATIONS_TOOLS: McpToolDefinition[] = [
   organizationTool({
       name: 'create_location',
-      description: 'Add a location to the selected business website. Repeat the same idempotency key with the same details on retry.',
+      description: 'Add a location to the selected business website. Every plan includes 2 locations; on Growth and Commerce each additional location is $49 per month, added to the plan by its owner in Billing first, and a location beyond those the plan covers is refused. Repeat the same idempotency key with the same details on retry.',
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {

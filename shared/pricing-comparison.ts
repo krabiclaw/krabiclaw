@@ -1,5 +1,6 @@
 import { getPlanEntitlements } from '../server/utils/billing-entitlements'
 import { PLATFORM_LOCALES } from './platform-locales'
+import { additionalLocationPrice, INCLUDED_LOCATIONS, isKnownRecurringPlan } from './billing-model'
 
 const ADDITIONAL_LANGUAGE_NAMES = new Intl.ListFormat('en', { type: 'conjunction' }).format(
   PLATFORM_LOCALES.filter(({ locale }) => locale !== 'en')
@@ -15,6 +16,8 @@ export interface PricingComparisonRow {
   detail: string
   included?: string
   entitlement?: string
+  /** A value that differs by plan and is not a yes/no capability. */
+  planValue?: (planId: string) => string
 }
 
 export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly PricingComparisonRow[] }> = [
@@ -31,6 +34,9 @@ export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly P
     { id: 'catalog.products', label: 'Menus, offerings and photos', detail: 'Manage products and media for your business type.', included: 'Included' },
     { id: 'media.management', label: 'Image and video library', detail: 'Upload and place supported media on your site; videos need a poster image.', included: 'Included' },
     { id: 'analytics.reports', label: 'Website analytics', detail: 'Read available organization-scoped reports. Connected Google reports require provider setup.', included: 'Included' },
+    { id: 'locations.included', label: 'Locations', detail: `${INCLUDED_LOCATIONS} locations included on every plan. Growth and Commerce add more at ${additionalLocationPrice()}.`, planValue: planId => isKnownRecurringPlan(planId)
+      ? `${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}`
+      : `${INCLUDED_LOCATIONS} included` },
     { id: 'locations.management', label: 'Locations and calendar', detail: 'Manage location details and available dates.', included: 'Included' },
     { id: 'posts.website', label: 'Website posts', detail: 'Create and publish posts on your website.', included: 'Included' },
     { id: 'social.external-channels', label: 'Facebook, Instagram and Discord publishing', detail: 'Explicit publishing to connected channels requires provider permissions and valid media.', entitlement: 'managed_service' },
@@ -58,7 +64,8 @@ export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly P
   ] },
 ]
 
-export function comparisonValue(row: Pick<PricingComparisonRow, 'included' | 'entitlement'>, planId: string): string {
+export function comparisonValue(row: Pick<PricingComparisonRow, 'included' | 'entitlement' | 'planValue'>, planId: string): string {
+  if (row.planValue) return row.planValue(planId)
   if (row.included) return row.included
   if (row.entitlement) {
     const value = getPlanEntitlements(planId)[row.entitlement]
