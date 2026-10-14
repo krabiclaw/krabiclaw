@@ -182,7 +182,7 @@ export interface OnboardingDraftPayload {
 }
 
 function defaultProductCategory(vertical: OrganizationVertical): string {
-  if (vertical === 'experience') return 'Experiences'
+  if (vertical === 'experience' || vertical === 'lodging') return 'Experiences'
   if (vertical === 'service') return 'Services'
   return 'Menu'
 }
@@ -353,7 +353,7 @@ export function buildOnboardingDraftPayload(input: {
   // under that slug and seeds its page at /locations/main. Deriving a slug from
   // the brand name here renamed the location out from under that page, leaving
   // every onboarded site serving 200 "Location Not Found" at /locations/main.
-  // Later locations get their own slugs through the add-location flow.
+  // Later locations get their own slugs when the location record is created.
   const locationSlug = 'main'
   const locationId = 'draft-location-main'
 

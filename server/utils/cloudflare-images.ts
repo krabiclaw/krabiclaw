@@ -55,7 +55,6 @@ export async function requestImageUpload(env: CloudflareImagesEnv): Promise<{ im
     method: 'POST',
     headers: authHeader(env),
     body: formData,
-    signal: AbortSignal.timeout(30_000),
   })
   if (!res.ok) throw new Error(`CF Images direct_upload error ${res.status}: ${await res.text()}`)
   const data = await res.json() as CloudflareImagesResponse
@@ -82,14 +81,11 @@ export async function uploadImageBuffer(
   const contentHash = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2,'0')).join('')
   form.append('id', imageId)
   form.append('metadata', JSON.stringify({content_sha256:contentHash}))
-  const signal = AbortSignal.timeout(30_000)
-
   try {
     const res = await fetch(`${apiBase(env)}/v1`, {
       method: 'POST',
       headers: authHeader(env),
       body: form,
-      signal,
     })
     if (!res.ok) throw new Error(`CF Images upload error ${res.status}: ${await res.text()}`)
     const data = await res.json() as CloudflareImagesResponse
@@ -118,8 +114,7 @@ export async function deleteImage(env: CloudflareImagesEnv, imageId: string): Pr
     res = await fetch(`${apiBase(env)}/v1/${imageId}`, {
       method: 'DELETE',
       headers: authHeader(env),
-      signal: AbortSignal.timeout(30_000),
-    })
+      })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
     throw new Error(`CF Images delete request failed for ${imageId}: ${message}`, { cause: error })
@@ -140,7 +135,6 @@ async function getUploadedImage(env: CloudflareImagesEnv, imageId: string) {
   assertCloudflareImagesConfigured(env)
   const res = await fetch(`${apiBase(env)}/v1/${imageId}`, {
     headers: authHeader(env),
-    signal: AbortSignal.timeout(30_000),
   })
   if (res.status === 404) return null
   if (!res.ok) throw new Error(`CF Images lookup error ${res.status}: ${await res.text()}`)

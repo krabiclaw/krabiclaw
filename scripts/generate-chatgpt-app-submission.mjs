@@ -12,6 +12,12 @@ const OUTPUT_PATH = 'chatgpt-app-submission.json'
 // Reviewed effects are authored here; annotation values still come from the registry.
 // A newly exposed tool must receive an explicit review before regeneration succeeds.
 const effects = {
+  list_google_ads_campaigns: 'Reads campaigns, budgets and performance metrics from the Google Ads account the selected business connected.',
+  get_google_ads_campaign: 'Reads one campaign, its ad groups, keywords and responsive search ads from the connected Google Ads account.',
+  create_google_ads_search_campaign: 'Creates a Google Ads search campaign, ad group, keywords and ad in the connected account using a durable retry key; it can start spending the account’s budget.',
+  clone_google_ads_campaign: 'Copies an existing campaign in the connected Google Ads account to a new destination URL using a durable retry key; it can start spending the account’s budget.',
+  update_google_ads_campaign: 'Pauses, enables or changes the daily budget of one campaign in the connected Google Ads account.',
+  launch_omnichannel_campaign: 'Creates or clones a Google Ads campaign and publishes the explicitly requested posts to the selected connected social channels and website using a durable retry key.',
   get_website_draft: 'Reads the authenticated user’s saved website draft, revision and missing publication fields.',
   save_website_draft: 'Creates or updates the authenticated user’s private website draft using a retry key and current revision; it does not publish.',
   publish_website: 'Activates a complete saved website draft, selects the new business as the user’s workspace and sends the native operator notification.',
@@ -152,6 +158,10 @@ const effects = {
 }
 
 const openWorldEffects = {
+  create_google_ads_search_campaign: 'Writes to the Google Ads account the business explicitly connected; it spends that account’s own advertising budget on Google.',
+  clone_google_ads_campaign: 'Writes to the Google Ads account the business explicitly connected; it spends that account’s own advertising budget on Google.',
+  update_google_ads_campaign: 'Changes status or budget only in the Google Ads account the business explicitly connected.',
+  launch_omnichannel_campaign: 'Writes to the connected Google Ads account and publishes only to the social channels and website destinations named in the request.',
   publish_website: 'Makes the saved website available to public visitors and sends the native onboarding notification to KrabiClaw operators.',
   create_location: 'Adds location details that can appear on the selected business’s public website.',
   append_content_block: 'Adds content visible to website visitors when the selected article or page is published.',

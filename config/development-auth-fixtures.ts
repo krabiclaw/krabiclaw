@@ -86,6 +86,11 @@ export const E2E_AUTH_FIXTURES: readonly E2eAuthFixture[] = [
     // Drives the new-site wizard end to end; every run leaves it owning one more
     // organization, which reset-e2e-artifacts sweeps as a non-fixture org.
     'onboarding-wizard',
+    // Signs in like the native app, with a bearer session and no cookies, and
+    // owns the organization it creates for the lodging-identity spec.
+    'lodging-native',
+    // Joins that organization through an invite link.
+    'lodging-invitee',
     ...[
       'inaccessible',
       'wrong-site',

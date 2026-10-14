@@ -1,4 +1,4 @@
-import { applicationFetch, dashboardFetch, useDashboardRouteScope } from '~/composables/dashboardFetch'
+import { applicationFetch } from '~/composables/dashboardFetch'
 import { isRecord } from '~/utils/api-clients'
 import { parseOpeningHours, parseSpecialHours, type OpeningHours } from '~/shared/reservation-hours'
 import { parsePhone } from '~/utils/phone'
@@ -6,6 +6,7 @@ import { useOnboardingState, type OnboardingPlacePreview } from '~/composables/u
 import { formatPostalAddress, postalAddressFromAnswers } from '~/utils/postal-address'
 import { isOrganizationFontPreset } from '~/shared/organization-fonts'
 import { LOGO_SHAPES, type LogoShape } from '~/shared/media-placement-contract'
+import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
 
 /**
  * Every server call the flow makes, and the shapes they answer with. The step
@@ -13,7 +14,6 @@ import { LOGO_SHAPES, type LogoShape } from '~/shared/media-placement-contract'
  */
 export function useOnboardingDraft() {
   const state = useOnboardingState()
-  const routeScope = useDashboardRouteScope()
   const busy = ref(false)
   const error = ref<string | null>(null)
   const { trackOrganizationCreated } = useAnalytics()
@@ -34,20 +34,6 @@ export function useOnboardingDraft() {
       postalCode: details.postalCode,
       country: details.country,
     }
-  }
-
-  /**
-   * POST /api/dashboard/locations is route-scoped: it resolves the site
-   * from the `org` and `site` query the dashboard transport sends, and refuses
-   * the request without them. The unscoped transport is for the new-site flow,
-   * which has no organization yet.
-   */
-  function locationsAddFetch<T>(options: Parameters<typeof dashboardFetch<T>>[2]) {
-    const scope = routeScope.value
-    if (!scope) {
-      throw new Error('Adding a location needs a /dashboard/{orgSlug} route.')
-    }
-    return dashboardFetch<T>('/api/dashboard/locations', scope, options)
   }
 
   function serializeDetails() {
@@ -195,40 +181,6 @@ export function useOnboardingDraft() {
   }
 
   /**
-   * Add the collected location to the site the dashboard route is already on.
-   * There is no draft in this flow: nothing is saved until this one call, which
-   * both creates the location and (on the Google path) imports its reviews.
-   */
-  async function addLocation(): Promise<boolean> {
-    busy.value = true
-    error.value = null
-    try {
-      const placeId = state.value.source === 'google_places' ? state.value.placeId : null
-      const res = await locationsAddFetch<Record<string, unknown>>({
-        method: 'POST',
-        body: placeId
-          ? { placeId, details: serializeDetails() }
-          : { name: state.value.details.name.trim(), details: serializeDetails() },
-        validate: (value): value is Record<string, unknown> => isRecord(value),
-      })
-      if (res.success !== true) {
-        throw new Error(typeof res.error === 'string' ? res.error : 'Could not add your location. Please try again.')
-      }
-      state.value.created = {
-        orgSlug: typeof res.orgSlug === 'string' ? res.orgSlug : null,
-        organizationSlug: typeof res.organizationSlug === 'string' ? res.organizationSlug : null,
-        locationSlug: typeof res.locationSlug === 'string' ? res.locationSlug : null,
-      }
-      return true
-    } catch (cause) {
-      error.value = cause instanceof Error ? cause.message : 'Something went wrong. Please try again.'
-      return false
-    } finally {
-      busy.value = false
-    }
-  }
-
-  /**
    * The pending site the caller's own active draft owns, or null when they have
    * no draft.
    *
@@ -316,7 +268,8 @@ export function useOnboardingDraft() {
 
     state.value.draftId = draft.draftId
     state.value.draftRevision = draft.updatedAt
-    state.value.vertical = draft.vertical === 'experience' || draft.vertical === 'service' ? draft.vertical : 'restaurant'
+    if (!ALL_VERTICALS.includes(draft.vertical as OrganizationVertical)) throw new Error(`Saved website draft has an unknown business type: ${String(draft.vertical)}`)
+    state.value.vertical = draft.vertical as OrganizationVertical
     state.value.source = draft.sourceType === 'google_places' ? 'google_places' : 'manual'
     state.value.placeId = typeof draft.placeId === 'string' && draft.placeId ? draft.placeId : null
     state.value.details.sourceLocale = typeof details.sourceLocale === 'string' ? details.sourceLocale : null
@@ -367,5 +320,5 @@ export function useOnboardingDraft() {
     return true
   }
 
-  return { busy, error, save, seedFromPlace, activate, addLocation, restore, activeDraftOrganizationId, discard, addressSummary }
+  return { busy, error, save, seedFromPlace, activate, restore, activeDraftOrganizationId, discard, addressSummary }
 }

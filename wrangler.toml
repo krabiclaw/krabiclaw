@@ -39,6 +39,8 @@ zone_name = "krabiclaw.com"
 
 
 [vars]
+# Sign in with Apple audience: the native app's bundle id.
+APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
 CF_SAAS_CNAME_TARGET = "customers.krabiclaw.com"
 BETTER_AUTH_URL = "https://krabiclaw.com"
 NUXT_PUBLIC_PLATFORM_DOMAIN = "https://krabiclaw.com"
@@ -144,6 +146,8 @@ enabled = true
 [env.dev]
 
 [env.dev.vars]
+# Sign in with Apple audience: the native app's bundle id.
+APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
 CF_SAAS_CNAME_TARGET = "customers.krabiclaw.com"
 BETTER_AUTH_URL = "https://krabiclaw.com"
 NUXT_PUBLIC_PLATFORM_DOMAIN = "https://krabiclaw.com"
@@ -199,6 +203,11 @@ routes = [
 crons = []
 
 [env.staging.vars]
+# The hosted lodging Worker that reads Krabiclaw staging (docs/shared-auth-contract.md).
+# Production has no lodging Worker yet, so it sets none and a lodging change there fails visibly.
+LODGING_API_URL = "https://bookyboo-api-development.paulchrisluke.workers.dev"
+# Sign in with Apple audience: the native app's bundle id.
+APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
 CF_SAAS_CNAME_TARGET = "customers.krabiclaw.com"
 BETTER_AUTH_URL = "https://staging.krabiclaw.com"
 NUXT_PUBLIC_PLATFORM_DOMAIN = "https://staging.krabiclaw.com"
@@ -267,6 +276,8 @@ enabled = true
 crons = []
 
 [env.e2e.vars]
+# Sign in with Apple audience: the native app's bundle id.
+APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
 CF_SAAS_CNAME_TARGET = "customers.krabiclaw.com"
 BETTER_AUTH_URL = "http://localhost:3000"
 NUXT_PUBLIC_PLATFORM_DOMAIN = "http://localhost:3000"

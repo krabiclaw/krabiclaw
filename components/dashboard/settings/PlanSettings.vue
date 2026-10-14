@@ -39,9 +39,10 @@ import EditorNavigationList from '~/components/dashboard/EditorNavigationList.vu
 import type { EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import { authClient } from '~/lib/auth-client'
-import { additionalLocationPrice, INCLUDED_LOCATIONS, STARTER_PLAN_ID, isKnownBillingPlan, isNewSalePlan } from '~/shared/billing-model'
+import { ADDITIONAL_LOCATION_PRICES, additionalLocationPrice, INCLUDED_LOCATIONS, STARTER_PLAN_ID, isKnownBillingPlan, isNewSalePlan } from '~/shared/billing-model'
 import { isLocationCount } from '~/composables/useOrganizationSubscription'
 import { paymentMoney } from '~/shared/payment-display'
+import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
 import { isCurrencyCode } from '~/shared/currencies'
 
 const route = useRoute()
@@ -50,7 +51,7 @@ const dashboardApi = useDashboardApi()
 const dashboard = useDashboardOrganization()
 const { trackSubscriptionCheckoutSuccess } = useAnalytics()
 const { startOrganizationCheckout, setPlanLocations } = useOrganizationSubscription()
-const { plans, displayPrice } = await usePlans()
+const { plans, formatPrice } = await usePlans()
 const { formatExactDateTime } = useHumanTime()
 
 const errorMessage = ref('')
@@ -88,13 +89,27 @@ const scheduledPlan = computed(() => {
   const scheduled = billing.value?.scheduledPlan
   return scheduled ? { name: plans.value.find(plan => plan.id === scheduled.plan)?.name ?? scheduled.plan, at: scheduled.at } : null
 })
+// What the subscription charges each interval: the plan's amount for the
+// included locations plus each additional one, the same tiers Stripe bills.
+const planCharge = computed(() => {
+  const status = billing.value
+  const plan = currentPlan.value
+  if (!status || !plan) return null
+  const interval = status.billingInterval ?? 'month'
+  const base = plan.prices.find(price => price.interval === interval)?.amount
+  if (base === undefined) return null
+  const additional = Math.max(0, status.locations.covered - INCLUDED_LOCATIONS)
+    * (interval === 'year' ? ADDITIONAL_LOCATION_PRICES.annual : ADDITIONAL_LOCATION_PRICES.monthly)
+  return `${formatPrice(base + additional)}/${interval === 'year' ? 'yr' : 'mo'}`
+})
+
 const planSummary = computed(() => {
   const status = billing.value
   if (!status) return ''
   if (onStarter.value) return 'Free'
   const parts: string[] = []
-  const price = currentPlan.value ? displayPrice(currentPlan.value, false) : null
-  if (price) parts.push(`${price}/mo`)
+  const charge = planCharge.value
+  if (charge) parts.push(charge)
   if (status.subscriptionStatus === 'past_due') parts.push('Payment past due')
   else if (scheduledPlan.value) parts.push(`Changes to ${scheduledPlan.value.name} on ${formatExactDateTime(scheduledPlan.value.at)}`)
   else if (status.currentPeriodEnd) parts.push(`${status.cancelAtPeriodEnd ? 'Ends' : 'Renews'} ${formatExactDateTime(status.currentPeriodEnd)}`)
@@ -122,7 +137,7 @@ const groups = computed<EditorNavigationGroup[]>(() => [{
     { id: 'plan', label: currentPlan.value?.name ?? 'Plan', summary: planSummary.value, action: { label: onStarter.value ? 'Choose a plan' : 'Manage' } },
     ...(billing.value ? [{ id: 'locations', label: 'Locations', summary: locationsSummary.value, ...(onStarter.value || billing.value.subscriptionStatus !== 'active' || scheduledPlan.value || billing.value.cancelAtPeriodEnd ? {} : { action: { label: 'Change' } }) }] : []),
     ...(usage.value?.pricing ? [{ id: 'fees', label: 'Payments fees', summary: `${usage.value.pricing.captured_volume_rate_percent}% of each payment, plus Stripe’s fees. Fees aren’t returned after a refund or dispute.` }] : []),
-    ...(usage.value && usage.value.configured === false && billing.value?.plan === 'commerce' ? [{ id: 'usage:pending', label: 'Payments fees', summary: 'Getting ready. Fees for payments you take before then are billed once it’s done.' }] : []),
+    ...(usage.value && usage.value.configured === false && billing.value && getPlanEntitlements(billing.value.plan).payments === true ? [{ id: 'usage:pending', label: 'Payments fees', summary: 'Getting ready. Fees for payments you take before then are billed once it’s done.' }] : []),
     ...(usage.value?.account && ['servicing', 'closing'].includes(usage.value.account.status) ? [{ id: 'usage:finalize', label: 'Previous Payments billing', summary: 'Charges from earlier payments still apply; end it once they are settled.', action: { label: 'End' } }] : []),
     ...(usage.value?.credits ?? []).map(credit => ({ id: `credit:${credit.id}`, label: `Pending credit ${paymentMoney(-credit.amount, credit.currency)}`, summary: 'Issue the credit in Stripe, then verify its credit note here.', action: { label: 'Verify' } })),
     ...(billing.value && (scheduledPlan.value || billing.value.cancelAtPeriodEnd) && currentPlan.value ? [{ id: 'restore', label: `Keep ${currentPlan.value.name}`, summary: scheduledPlan.value ? `Stay on ${currentPlan.value.name} instead of changing to ${scheduledPlan.value.name}.` : `Stay on ${currentPlan.value.name} after ${formatExactDateTime(billing.value.currentPeriodEnd!)}.`, action: { label: 'Keep plan' } }] : []),

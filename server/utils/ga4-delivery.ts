@@ -150,7 +150,6 @@ export async function sendMeasurementProtocol(env: MeasurementProtocolEnv, db: D
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(10_000),
         body: JSON.stringify({ client_id: input.clientId, ...(input.userId ? { user_id: input.userId } : {}), events: [{ name: input.event.name, params }] }),
       },
     )

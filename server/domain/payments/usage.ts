@@ -19,7 +19,7 @@ export function metronomeCurrencyAmount(minor:number,currency:CurrencyCode):stri
 }
 export async function metronomeRequest(env:CloudflareEnv,path:string,body?:unknown,key?:string):Promise<Record<string,unknown>> {
  if(!env.METRONOME_API_KEY) throw new HTTPError({statusCode:503,statusMessage:'Metronome is not configured'})
- const response=await fetch(`https://api.metronome.com${path}`,{method:body===undefined?'GET':'POST',headers:{Authorization:`Bearer ${env.METRONOME_API_KEY}`,'Content-Type':'application/json',...(key?{'Idempotency-Key':key}:{})},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(10000)})
+ const response=await fetch(`https://api.metronome.com${path}`,{method:body===undefined?'GET':'POST',headers:{Authorization:`Bearer ${env.METRONOME_API_KEY}`,'Content-Type':'application/json',...(key?{'Idempotency-Key':key}:{})},body:body===undefined?undefined:JSON.stringify(body)})
  const raw=await response.text()
  let result:unknown
  try {result=raw.trim()?JSON.parse(raw):null} catch {

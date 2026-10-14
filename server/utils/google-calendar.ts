@@ -34,7 +34,7 @@ class CalendarError extends Error {
 const BASE = 'https://www.googleapis.com/calendar/v3'
 async function google<T>(token: string, path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${BASE}${path}`, {
-    ...init, signal: AbortSignal.timeout(20_000),
+    ...init,
     headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/json', ...init?.headers },
   })
   if (!response.ok) throw new CalendarError(response.status)

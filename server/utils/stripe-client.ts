@@ -2,10 +2,9 @@ import Stripe from 'stripe'
 import {
   STRIPE_API_VERSION,
   STRIPE_PAYMENTS_API_VERSION,
-  STRIPE_REQUEST_TIMEOUT_MS,
 } from '~/shared/stripe-contract'
 
-export { STRIPE_API_VERSION, STRIPE_REQUEST_TIMEOUT_MS } from '~/shared/stripe-contract'
+export { STRIPE_API_VERSION } from '~/shared/stripe-contract'
 
 export function createStripeClient(secretKey: string, purpose: 'canonical' | 'payments' = 'canonical'): Stripe {
   return new Stripe(secretKey, {
@@ -13,6 +12,5 @@ export function createStripeClient(secretKey: string, purpose: 'canonical' | 'pa
     apiVersion: (purpose === 'payments' ? STRIPE_PAYMENTS_API_VERSION : STRIPE_API_VERSION) as Stripe.LatestApiVersion,
     // The Worker runtime uses the SDK fetch transport rather than Node sockets.
     httpClient: Stripe.createFetchHttpClient(),
-    timeout: STRIPE_REQUEST_TIMEOUT_MS,
   })
 }

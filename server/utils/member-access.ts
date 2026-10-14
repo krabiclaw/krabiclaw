@@ -158,7 +158,7 @@ export async function organizationAdapter(env: CloudflareEnv): Promise<Organizat
  * mid-request. Pass the event and the second resolution is free; without one
  * (scheduled jobs, tenant deletion) they read as before.
  */
-function organizationById(env: CloudflareEnv, id: string, event?: H3Event) {
+export function organizationById(env: CloudflareEnv, id: string, event?: H3Event) {
   const read = async () => (await organizationAdapter(env)).findOrganizationById(id)
   return event ? oncePerRequest(event, `organization:${id}`, read) : read()
 }

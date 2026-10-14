@@ -957,6 +957,12 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   replace_resource_localizations: { ...D, openWorldHint: true },
   get_reservation_policy: R,
   update_reservation_policy: { ...D, openWorldHint: true },
+  list_google_ads_campaigns: R,
+  get_google_ads_campaign: R,
+  create_google_ads_search_campaign: { ...W, openWorldHint: true, idempotentHint: true },
+  clone_google_ads_campaign: { ...W, openWorldHint: true, idempotentHint: true },
+  update_google_ads_campaign: { ...D, openWorldHint: true },
+  launch_omnichannel_campaign: { ...D, openWorldHint: true },
 } as const satisfies Record<string, McpToolAnnotations>
 
 export function buildToolAnnotationsByName() {

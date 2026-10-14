@@ -52,7 +52,7 @@ export const publicTemplateRegistry: Record<PublicTemplateSlug, PublicTemplateDe
     slug: 'saya',
     themeId: 'saya-theme-v1',
     layout: 'saya',
-    verticals: ['restaurant', 'experience'],
+    verticals: ['restaurant', 'experience', 'lodging'],
     serviceRoutes: {
       offeringsIndex: null,
       offeringDetailPrefix: null,

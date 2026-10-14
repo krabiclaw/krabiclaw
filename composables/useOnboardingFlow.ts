@@ -13,14 +13,6 @@ export type OnboardingStepId =
 
 export type OnboardingSectionId = 'business' | 'place' | 'offer' | 'review'
 
-/**
- * Which flow is being walked. Both read the same step table: add-location is a
- * strict subset of new-site — the same screens, minus the business type, the
- * brand and the activation, and committing to an existing site's locations
- * instead of creating one.
- */
-export type OnboardingFlowId = 'new-site' | 'add-location'
-
 export interface OnboardingProductDraft {
   name: string
   category: string
@@ -47,7 +39,6 @@ export interface OnboardingDraftPreview {
 }
 
 export interface OnboardingFlowState {
-  flow: OnboardingFlowId
   vertical: OrganizationVertical
   source: 'google_places' | 'manual' | null
   /** The Google place the owner picked; null on the manual path. */
@@ -83,8 +74,6 @@ export interface OnboardingFlowState {
 export interface OnboardingStep {
   id: OnboardingStepId
   section: OnboardingSectionId
-  /** The flows this step belongs to. A step outside the current flow does not exist. */
-  flows: OnboardingFlowId[]
   /** Intro screens carry no control and are always passable. */
   intro?: boolean
   title: (_state: OnboardingFlowState) => string
@@ -114,25 +103,25 @@ export const ONBOARDING_SECTIONS: Array<{ id: OnboardingSectionId; label: string
 
 export const ONBOARDING_STEPS: OnboardingStep[] = [
   {
-    id: 'type', section: 'business', flows: ['new-site'],
+    id: 'type', section: 'business',
     advanceOnChoice: true,
     title: () => 'What kind of business is this?',
     complete: state => Boolean(state.vertical),
   },
   {
-    id: 'language', section: 'business', flows: ['new-site'],
+    id: 'language', section: 'business',
     advanceOnChoice: true,
     title: () => 'What language is your website in?',
     complete: state => state.details.sourceLocale !== null,
   },
   {
-    id: 'business', section: 'business', flows: ['new-site', 'add-location'],
-    title: state => state.flow === 'add-location' ? 'What is this location called?' : 'What is your business called?',
+    id: 'business', section: 'business',
+    title: () => 'What is your business called?',
     complete: state => state.details.name.trim().length > 0 && (
       state.source === 'google_places' ? state.placeId !== null : state.source === 'manual'),
   },
   {
-    id: 'location', section: 'place', flows: ['new-site', 'add-location'],
+    id: 'location', section: 'place',
     title: () => 'Where should guests find you?',
     complete: state => Boolean(state.details.streetAddress.trim() || state.details.city.trim() || state.details.country.trim()),
     optional: true,
@@ -140,16 +129,15 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
   {
     // The location's clock, and the site's: required before the first save,
     // which creates the site. The hours themselves stay optional.
-    id: 'hours', section: 'place', flows: ['new-site', 'add-location'],
+    id: 'hours', section: 'place',
     title: () => 'When are you open?',
     complete: state => isValidTimezone(state.hours.timezone.trim()),
     nextLabel: () => 'Save hours',
   },
   {
     // Before the first save, because a site cannot exist without the currency
-    // it sells in. Only the new-site flow asks: a location added to an existing
-    // site prices in the currency that site already has.
-    id: 'currency', section: 'place', flows: ['new-site'],
+    // it sells in. A location added later prices in the currency its site has.
+    id: 'currency', section: 'place',
     advanceOnChoice: true,
     title: () => 'What currency do you price in?',
     lede: state => currencyForCountry(state.details.country)
@@ -158,13 +146,13 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     complete: state => state.details.currency !== null,
   },
   {
-    id: 'contact', section: 'place', flows: ['new-site', 'add-location'],
+    id: 'contact', section: 'place',
     title: () => 'What is your business contact number?',
     complete: state => state.details.phone.trim().length > 0,
     optional: true,
   },
   {
-    id: 'products', section: 'offer', flows: ['new-site'],
+    id: 'products', section: 'offer',
     applies: state => state.vertical !== 'service',
     title: state => state.vertical === 'restaurant'
       ? 'What is on the menu?'
@@ -173,29 +161,26 @@ export const ONBOARDING_STEPS: OnboardingStep[] = [
     optional: true,
   },
   {
-    id: 'look', section: 'offer', flows: ['new-site'],
+    id: 'look', section: 'offer',
     title: () => 'Last look at the front of house',
     complete: state => state.brand.heroHeadline.trim().length > 0,
     optional: true,
   },
   {
-    id: 'review', section: 'review', flows: ['new-site', 'add-location'],
-    title: state => state.flow === 'add-location'
-      ? 'Here is the location you are adding'
-      : 'Here is your site so far',
+    id: 'review', section: 'review',
+    title: () => 'Here is your site so far',
     complete: () => true,
     action: 'commit',
-    nextLabel: state => state.flow === 'add-location' ? 'Add location' : 'Create my site',
+    nextLabel: () => 'Create my site',
   },
 ]
 
-export function onboardingStep(id: string | undefined, flow: OnboardingFlowId): OnboardingStep | null {
-  return ONBOARDING_STEPS.find(step => step.id === id && step.flows.includes(flow)) ?? null
+export function onboardingStep(id: string | undefined): OnboardingStep | null {
+  return ONBOARDING_STEPS.find(step => step.id === id) ?? null
 }
 
-function emptyState(flow: OnboardingFlowId): OnboardingFlowState {
+function emptyState(): OnboardingFlowState {
   return {
-    flow,
     // 'restaurant' is the first choice on the type step, which the owner answers
     // before anything is saved. The country and the currency have no such
     // default: seeding them with the United States and USD is how a Krabi
@@ -221,30 +206,14 @@ function emptyState(flow: OnboardingFlowId): OnboardingFlowState {
   }
 }
 
-/**
- * The answers, shared by every step screen and by the shell around them. The
- * shell names its flow with startOnboardingFlow(); everything nested inside
- * reads the flow off the answers.
- */
+/** The answers, shared by every step screen and by the shell around them. */
 export function useOnboardingState() {
-  return useState<OnboardingFlowState>('onboarding-flow', () => emptyState('new-site'))
-}
-
-/**
- * Begin a flow, and hand back its answers. Answers never carry from one flow to
- * the other: walking in from a half-finished site of your own starts the
- * location you are adding empty.
- */
-export function startOnboardingFlow(flow: OnboardingFlowId) {
-  const state = useOnboardingState()
-  if (state.value.flow !== flow) state.value = emptyState(flow)
-  return state
+  return useState<OnboardingFlowState>('onboarding-flow', emptyState)
 }
 
 export function useOnboardingSteps() {
   const state = useOnboardingState()
-  const steps = computed(() => ONBOARDING_STEPS.filter(step =>
-    step.flows.includes(state.value.flow) && (step.applies?.(state.value) ?? true)))
+  const steps = computed(() => ONBOARDING_STEPS.filter(step => step.applies?.(state.value) ?? true))
 
   const indexOf = (id: OnboardingStepId) => steps.value.findIndex(step => step.id === id)
   const nextOf = (id: OnboardingStepId) => steps.value[indexOf(id) + 1] ?? null

@@ -1,17 +1,6 @@
 import type { FetchOptions } from 'ofetch'
 import { $fetch } from 'ofetch'
 
-export const PUBLIC_READ_TIMEOUT_MS = 6_000
-export const DASHBOARD_READ_TIMEOUT_MS = 8_000
-// Shared deadline for non-upload public and dashboard mutations.
-export const MUTATION_TIMEOUT_MS = 30_000
-export const MEDIA_UPLOAD_TIMEOUT_MS = 300_000
-
-export function mediaUploadSignal(callerSignal?: AbortSignal): AbortSignal {
-  const deadline = AbortSignal.timeout(MEDIA_UPLOAD_TIMEOUT_MS)
-  return callerSignal ? AbortSignal.any([callerSignal, deadline]) : deadline
-}
-
 export class ApiClientError extends Error {
   readonly statusCode: number
   readonly code: string
@@ -104,7 +93,6 @@ async function request<T>(
     body?: unknown
     query?: Record<string, unknown>
     signal?: AbortSignal
-    timeout: number
     validate: Validator<T>
     coalesceKey?: string
   },
@@ -112,15 +100,13 @@ async function request<T>(
   const method = options.method ?? 'GET'
   const run = async () => {
     try {
-      const deadline = AbortSignal.timeout(options.timeout)
       const requestOptions: ApiRequestOptions = {
         method,
         headers: options.headers,
         body: options.body as Record<string, unknown> | BodyInit | null | undefined,
         query: options.query,
-        signal: options.signal ? AbortSignal.any([options.signal, deadline]) : deadline,
+        signal: options.signal,
         retry: 0,
-        timeout: options.timeout,
       }
       const value = await $fetch<unknown>(url, requestOptions)
       if (!options.validate(value)) {
@@ -156,7 +142,7 @@ export function publicApiRequest<T>(
     query?: Record<string, unknown>
   },
 ) {
-  return request(url, { ...options, timeout: PUBLIC_READ_TIMEOUT_MS })
+  return request(url, options)
 }
 
 export function publicApiMutation<T>(
@@ -170,7 +156,7 @@ export function publicApiMutation<T>(
     validate: Validator<T>
   },
 ) {
-  return request(url, { ...options, timeout: MUTATION_TIMEOUT_MS })
+  return request(url, options)
 }
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>

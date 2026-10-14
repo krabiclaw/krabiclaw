@@ -179,6 +179,11 @@ const { id: organizationId } = organization
 const { locale, localePath, t } = useI18n()
 const resCopy = computed(() => getVerticalCopy((organization as ApiValue)?.vertical, locale.value))
 const { locations, config, getField, reservationPolicyByLocation } = await usePublicPageData()
+// A site whose locations take no reservations has no reservations page, the
+// same fact the header uses to offer one.
+if (!Object.values(reservationPolicyByLocation.value).some(policy => policy !== null)) {
+  throw createError({ statusCode: 404, statusMessage: 'This site does not take reservations' })
+}
 
 // The first location card's hero is this route's LCP element.
 useHeroLcpPreload(computed(() => {

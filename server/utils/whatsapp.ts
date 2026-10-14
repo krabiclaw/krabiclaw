@@ -15,7 +15,6 @@ function maskPhone(phone: string): string {
 
 const GRAPH_API_VERSION = 'v25.0'
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`
-const WHATSAPP_OTP_TIMEOUT_MS = 10_000
 
 interface WhatsAppEnv {
   WHATSAPP_PHONE_NUMBER_ID?: string
@@ -402,7 +401,6 @@ export async function sendWhatsAppOtp(
 
   const response = await fetch(`${GRAPH_BASE}/${phoneNumberId}/messages`, {
     method: 'POST',
-    signal: AbortSignal.timeout(WHATSAPP_OTP_TIMEOUT_MS),
     headers: {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',

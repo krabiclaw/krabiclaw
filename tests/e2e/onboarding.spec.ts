@@ -361,19 +361,11 @@ test('the business search API refuses what the picker would never send', async (
   expect(malformed.status(), await malformed.text()).toBe(400)
   const detailsMalformed = await request.post('/api/dashboard/google-places/details', { data: { placeId: KIKUZUKI.placeId, sessionToken: 'not-a-uuid' } })
   expect(detailsMalformed.status(), await detailsMalformed.text()).toBe(400)
-
-  // Add-location takes a picked placeId or a typed name, never a Maps link or
-  // a search to resolve.
-  for (const data of [{ mapsUrl: 'https://maps.app.goo.gl/abc' }, { query: 'Kikuzuki' }, { mapsUrl: 'https://maps.app.goo.gl/abc', previewOnly: true }]) {
-    const refused = await request.post('/api/dashboard/locations?org=ember-slice-demo', { data })
-    expect(refused.status(), await refused.text()).toBe(400)
-    expect(await refused.json()).toEqual({ error: 'Exactly one of placeId or name is required' })
-  }
 })
 
 // Ember & Slice is on Commerce, billed for the 2 included locations, and has
 // both. A third is refused by the createLocation every surface shares, and the
-// add page offers to add a location to the plan instead of walking the steps.
+// new location's own level offers to add a location to the plan instead of its sections.
 test('a location beyond the ones the plan pays for is refused until the plan covers it', async ({ page, baseURL }) => {
   await loginAs(page.request, baseURL!, 'user-e2e-demo-owner')
   const status = async () => {
@@ -385,62 +377,84 @@ test('a location beyond the ones the plan pays for is refused until the plan cov
   expect(before.plan).toBe('commerce')
   expect(before.locations).toEqual({ used: 2, covered: 2 })
 
-  const refused = await page.request.post('/api/dashboard/locations?org=ember-slice-demo', { data: { name: 'Third branch' } })
+  const refused = await page.request.post('/api/dashboard/locations?org=ember-slice-demo', { data: { title: 'Third branch', timezone: 'America/New_York' } })
   expect(refused.status(), await refused.text()).toBe(402)
-  expect(await refused.json()).toEqual({ error: 'Your plan covers 2 locations. Add a location to your plan in Billing (2 included, then $49 per additional location per month), then create it.' })
+  expect(await refused.json()).toEqual({
+    error: 'Your plan covers 2 locations. Add a location to your plan in Billing (2 included, then $49 per additional location per month), then create it.',
+    code: 'LOCATION_LIMIT',
+    locations: { used: 2, covered: 2 },
+  })
   expect((await status()).locations).toEqual({ used: 2, covered: 2 })
 
   await page.goto('/dashboard/ember-slice-demo/locations/new')
   const limit = page.locator('[data-location-limit]')
   await expect(limit).toContainText('Your site has 2 locations, and your plan covers 2. Plans include 2, then $49 per additional location per month.')
   await expect(limit.getByRole('button', { name: 'Add a location to your plan', exact: true })).toBeVisible()
-  await expect(page.locator('[data-onboarding-step="business"]')).toHaveCount(0)
+  // Nothing opens beside it: there is no section to walk until the plan covers one more.
+  await expect(page.getByRole('button', { name: 'Start with Name', exact: true })).toHaveCount(0)
+  await expect(page).toHaveURL(/\/dashboard\/ember-slice-demo\/locations\/new$/)
 })
 
-// Add-location walks the same business step with the same picker, and Settings
-// → Google Maps connects a location by the same selection. Both run against the
-// NCLS tenant's local copy, which has one of its two included locations; the
-// location this adds is deactivated at the end.
-test('add-location and Settings connect a location through the same business picker', async ({ page, baseURL }) => {
+// NCLS has one of the two locations its plan includes. Adding one walks the
+// location record's own create level: Name, then Hours, then Create location,
+// which opens the location it made.
+test('a location is created by walking its own record', async ({ page, baseURL }) => {
+  await dismissPreviewToolbar(page)
+  await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
+  const org = 'north-carolina-legal-services'
+  await page.goto(`/dashboard/${org}/locations/new`)
+  await expect(page).toHaveURL(new RegExp(`/dashboard/${org}/locations/new/name$`))
+  await expect(page.getByRole('heading', { name: 'New location' })).toBeVisible()
+  await page.getByRole('textbox', { name: 'Name' }).fill('Raleigh Annex')
+  await page.getByRole('button', { name: 'Next: Hours', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/dashboard/${org}/locations/new/hours/timezone$`))
+  await page.getByRole('button', { name: 'Time zone', exact: true }).click()
+  await page.getByPlaceholder('Search by city, e.g. Bangkok').fill('America/New_York')
+  await page.getByRole('option').first().click()
+  await page.getByRole('button', { name: 'Create location', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/dashboard/${org}/locations/raleigh-annex$`))
+
+  const created = await page.request.get(`/api/dashboard/locations?org=${org}`)
+  expect(created.status(), await created.text()).toBe(200)
+  const listed = ((await created.json()) as { locations: Array<{ id: string; slug: string }> }).locations
+    .find(candidate => candidate.slug === 'raleigh-annex')
+  expect(listed).toBeDefined()
+  const read = await page.request.get(`/api/dashboard/locations/${listed!.id}`)
+  expect(read.status(), await read.text()).toBe(200)
+  expect(((await read.json()) as { location: { title: string; timezone: string } }).location)
+    .toMatchObject({ title: 'Raleigh Annex', timezone: 'America/New_York' })
+  const deleted = await page.request.delete(`/api/organizations/org-ncls-blawby/locations/${listed!.id}`)
+  expect(deleted.status(), await deleted.text()).toBe(200)
+})
+
+// A location made by its own record has no place yet; Settings → Google Maps
+// connects it through the business picker, and connects another the same way.
+// Runs against the NCLS tenant's local copy; the location is deactivated at the end.
+test('Settings connects a new location to Google Maps through the business picker', async ({ page, baseURL }) => {
   test.skip(process.env.E2E_GOOGLE_PLACES !== 'true', 'Live Google Places qualification requires E2E_GOOGLE_PLACES=true')
   await dismissPreviewToolbar(page)
   await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
   const org = 'north-carolina-legal-services'
-  const step = (id: string) => page.locator(`[data-onboarding-step="${id}"]`)
-  const next = (label = 'Next') => page.getByRole('button', { name: label, exact: true }).click()
   const connected = async () => {
     const settings = await page.request.get(`/api/dashboard/settings?org=${org}`)
     expect(settings.status(), await settings.text()).toBe(200)
     return (await settings.json() as { settings: { integrations: { google_maps: Array<{ id: string; slug: string; google_place_id: string | null }> } } }).settings.integrations.google_maps
   }
 
-  await page.goto(`/dashboard/${org}/locations/new`)
-  await expect(step('business')).toBeVisible()
-  await page.getByRole('button', { name: 'Import from Google Maps', exact: true }).click()
-  await page.getByPlaceholder('Search for your business on Google Maps').pressSequentially("Joe's Pizza Carmine Street")
+  const made = await page.request.post(`/api/dashboard/locations?org=${org}`, { data: { title: "Joe's Pizza", timezone: 'America/New_York' } })
+  expect(made.status(), await made.text()).toBe(201)
+  const { location } = await made.json() as { location: { id: string; slug: string } }
+  await page.goto(`/dashboard/${org}/integrations/google-maps/${location.slug}`)
   const picked = page.waitForRequest(sent => sent.url().includes('/api/dashboard/google-places/details'))
+  await page.getByPlaceholder('Search for your business on Google Maps').pressSequentially(' Carmine Street')
   await page.getByRole('option', { name: /Carmine St/ }).first().click()
   const placeId = ((await picked).postDataJSON() as { placeId: string }).placeId
+  await expect(page.getByText('Connected to Google Maps')).toBeVisible()
 
-  await expect(step('location')).toBeVisible()
-  await expect(page.getByPlaceholder('123 Main Street')).toHaveValue('7 Carmine St')
-  await next()
-  await expect(step('hours')).toBeVisible()
-  await expect(step('hours')).toContainText('New York')
-  await next('Save hours')
-  await expect(step('contact')).toBeVisible()
-  await expect(page.getByPlaceholder('Phone number')).not.toHaveValue('')
-  await next()
-  await expect(step('review')).toBeVisible()
-  await next('Add location')
-  await expect(page.getByRole('heading', { name: 'Location added' })).toBeVisible()
-
-  const added = (await connected()).find(location => location.google_place_id === placeId)
+  const added = (await connected()).find(candidate => candidate.google_place_id === placeId)
   expect(added, `no location connected to ${placeId}`).toBeTruthy()
 
-  // Settings: choosing another prediction is the confirmation, and connects it.
-  await page.goto(`/dashboard/${org}/integrations/google-maps/${added!.slug}`)
-  await expect(page.getByText('Connected to Google Maps')).toBeVisible()
+  // Choosing another prediction is the confirmation, and connects it.
   await page.getByRole('button', { name: 'Connect a different place' }).click()
   const search = page.getByPlaceholder('Search for your business on Google Maps')
   await expect(search).toHaveValue("Joe's Pizza")

@@ -11,7 +11,7 @@ import { cimd } from '@better-auth/cimd'
 import { fetchCimdMetadataResource } from '~/server/utils/cimd-metadata-fetch'
 import type { GenericEndpointContext } from '@better-auth/core'
 import { HTTPError, type H3Event } from 'nitro';
-import { createDb, execute, executeBatch, queryAll, schema, type BatchQuery } from '~/server/db'
+import { createDb, execute, executeBatch, queryAll, queryFirst, schema, type BatchQuery } from '~/server/db'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { sendWhatsAppOtp } from '~/server/utils/whatsapp'
 import { parsePhoneOrThrow } from '~/utils/phone'
@@ -38,6 +38,8 @@ import { unwrapInstrumentedD1 } from '~/server/utils/request-metrics'
 import { timingSafeEqualText } from '~/server/utils/dev-route-auth'
 import { notifyOrganizationInvited } from '~/server/utils/notifications'
 import { cleanupOrganizationBeforeDelete } from '~/server/utils/tenant-deletion'
+import { APPLE_AUTHORIZATION_CODE_HEADER, exchangeAppleAuthorizationCode, revokeAppleGrant } from '~/server/utils/apple-revocation'
+import { deleteLodgingOrganization, deleteLodgingUser, hasLodgingMembership, isLodgingOrganization, notifyLodgingMembershipChanged } from '~/server/utils/lodging-service'
 import { reconcileZarazAnalytics } from '~/server/utils/zaraz-analytics'
 
 type MemberRow = InferSelectModel<typeof schema.member>
@@ -114,6 +116,10 @@ function organizationDeletionCleanupPlugin(env: CloudflareEnv): BetterAuthPlugin
         ...existingHooks,
         beforeDeleteOrganization: async (data, hookCtx) => {
           await beforeDeleteOrganization?.(data, hookCtx)
+          // The lodging Worker removes the organization's homes, Channex
+          // properties and team data first; a failure there keeps the
+          // organization, so nothing is left behind keyed to a deleted id.
+          if (await isLodgingOrganization(env.DB, data.organization.id)) await deleteLodgingOrganization(env, data.organization.id)
           await cleanupOrganizationBeforeDelete(env, data.organization.id)
         },
         afterDeleteOrganization: async (data, hookCtx) => {
@@ -136,6 +142,7 @@ export interface CloudflareEnv {
   BETTER_AUTH_URL?: string
   GOOGLE_CLIENT_ID: string
   GOOGLE_CLIENT_SECRET: string
+  APPLE_APP_BUNDLE_ID: string
   STRIPE_SECRET_KEY?: string
   STRIPE_WEBHOOK_SECRET?: string
   STRIPE_CONNECT_WEBHOOK_SECRET?: string
@@ -144,6 +151,11 @@ export interface CloudflareEnv {
   AI_SEARCH?: AiSearchNamespace
   AI_SEARCH_INSTANCE_ID?: string
   PLATFORM_SEARCH_REINDEX_SECRET?: string
+  APPLE_TEAM_ID?: string
+  APPLE_KEY_ID?: string
+  APPLE_PRIVATE_KEY?: string
+  LODGING_SERVICE_SECRET?: string
+  LODGING_API_URL?: string
   CF_ACCOUNT_ID?: string
   CLOUDFLARE_API_TOKEN?: string
   CLOUDFLARE_IMAGES_API_TOKEN?: string
@@ -246,6 +258,49 @@ function trustedOriginsForAuth(env: CloudflareEnv): string[] | ((_request?: Requ
   return [...origins]
 }
 
+/**
+ * What has to hold, and what has to be undone elsewhere, before an account is
+ * deleted (docs/shared-auth-contract.md D6). Each step fails the deletion: the
+ * account stays until all of them succeed.
+ */
+async function prepareAccountDeletion(env: CloudflareEnv, db: ReturnType<typeof createDb>, userId: string, request: Request | undefined) {
+  // An organization keeps an owner. Deleting its only owner would leave a
+  // business nobody can manage, so ownership is transferred or the
+  // organization deleted first.
+  const soleOwned = await queryAll<{ name: string }>(db, `
+    SELECT o.name FROM member m JOIN organization o ON o.id = m."organizationId"
+    WHERE m."userId" = ? AND (',' || m.role || ',') LIKE '%,owner,%'
+      AND NOT EXISTS (
+        SELECT 1 FROM member other
+        WHERE other."organizationId" = m."organizationId" AND other."userId" <> m."userId"
+          AND (',' || other.role || ',') LIKE '%,owner,%'
+      )
+    ORDER BY o.name
+  `, [userId])
+  if (soleOwned.length) {
+    throw new APIError('BAD_REQUEST', {
+      code: 'SOLE_ORGANIZATION_OWNER',
+      message: `Transfer ownership of, or delete, ${soleOwned.map(organization => organization.name).join(', ')} before deleting your account.`,
+    })
+  }
+
+  // An account signed in with Apple proves it again at deletion so its grant can be revoked.
+  const appleAccount = await queryFirst<{ accountId: string }>(db, `SELECT "accountId" FROM account WHERE "userId" = ? AND "providerId" = 'apple'`, [userId])
+  const appleCode = request?.headers.get(APPLE_AUTHORIZATION_CODE_HEADER)?.trim()
+  if (appleAccount && !appleCode) {
+    throw new APIError('BAD_REQUEST', { code: 'APPLE_REAUTHENTICATION_REQUIRED', message: 'Sign in with Apple again to delete this account.' })
+  }
+  if (!appleAccount && appleCode) {
+    throw new APIError('BAD_REQUEST', { code: 'APPLE_ACCOUNT_MISMATCH', message: 'This account has no Apple ID linked.' })
+  }
+  // The code is single use, so the grant it yields is revoked at once: a later
+  // failure then leaves no unrevoked grant behind, and the retry brings a new
+  // code. Lodging cleanup is idempotent, so it is safe to repeat.
+  if (appleAccount && appleCode) await revokeAppleGrant(env, await exchangeAppleAuthorizationCode(env, appleCode, appleAccount.accountId))
+
+  if (await hasLodgingMembership(db, userId)) await deleteLodgingUser(env, userId)
+}
+
 export function createAuth(env: CloudflareEnv) {
   if (!env?.DB) throw new HTTPError({ statusCode: 503, statusMessage: 'Database unavailable' })
   const d1 = unwrapInstrumentedD1(env.DB)
@@ -270,6 +325,18 @@ function buildAuth(env: CloudflareEnv) {
     organizationHooks: {
       beforeCreateOrganization: async ({ organization }: { organization: Record<string, unknown> }) => assertOrganizationFacts(organization),
       beforeUpdateOrganization: async ({ organization }: { organization: Record<string, unknown> }) => assertOrganizationFacts(organization),
+      // A removed member or changed role reads differently on every site, and
+      // a lodging organization's Worker closes that member's live sockets and
+      // drops their home assignments. Better Auth's /organization/leave runs
+      // no member hook, so the after-hook below covers it.
+      afterRemoveMember: async ({ member, organization }: { member: { userId: string }; organization: { id: string } }) => {
+        await recordMemberChange(organization.id)
+        if (await isLodgingOrganization(db, organization.id)) await notifyLodgingMembershipChanged(env, { organizationId: organization.id, userId: member.userId, change: 'removed' })
+      },
+      afterUpdateMemberRole: async ({ member, organization }: { member: { userId: string; role: string }; organization: { id: string } }) => {
+        await recordMemberChange(organization.id)
+        if (await isLodgingOrganization(db, organization.id)) await notifyLodgingMembershipChanged(env, { organizationId: organization.id, userId: member.userId, change: 'role_changed', role: member.role })
+      },
       afterAddTeamMember: async ({ team, user }: { team: { organizationId: string }; user: { id: string } }) => {
         const { materializeMemberSessions } = await import('~/server/utils/availability')
         await materializeMemberSessions(db, { organizationId: team.organizationId, userId: user.id, actorId: 'system' })
@@ -315,7 +382,11 @@ function buildAuth(env: CloudflareEnv) {
     // a way to sign in. The phone plugin's password sign-in and reset are off, and
     // its verify is accepted only as an update of the caller's own number: without
     // updatePhoneNumber it signs in whoever holds that number.
-    disabledPaths: ['/sign-in/phone-number', '/phone-number/request-password-reset', '/phone-number/reset-password'],
+    //
+    // An administrator does not delete accounts: /admin/remove-user would skip
+    // the ownership guard, Apple revocation and lodging cleanup that
+    // /delete-user runs in deleteUser.beforeDelete.
+    disabledPaths: ['/sign-in/phone-number', '/phone-number/request-password-reset', '/phone-number/reset-password', '/admin/remove-user'],
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         if (ctx.path === '/phone-number/verify' && ctx.body?.updatePhoneNumber !== true) {
@@ -323,6 +394,14 @@ function buildAuth(env: CloudflareEnv) {
         }
       }),
       after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path === '/organization/leave') {
+          const left = ctx.context.returned
+          if (left instanceof Error || !ctx.context.session) return
+          const organizationId = (ctx.body as { organizationId: string }).organizationId
+          await recordMemberChange(organizationId)
+          if (await isLodgingOrganization(db, organizationId)) await notifyLodgingMembershipChanged(env, { organizationId, userId: ctx.context.session.user.id, change: 'removed' })
+          return
+        }
         if (ctx.path !== '/callback/:id') return
         const state = await getOAuthState()
         const location = ctx.context.responseHeaders?.get('location')
@@ -361,8 +440,13 @@ function buildAuth(env: CloudflareEnv) {
       },
     },
     user: {
+      // POST /delete-user is the one way an account is deleted
+      // (/admin/remove-user is disabled), so everything that must hold or be
+      // undone before the account goes runs here, before Better Auth deletes
+      // its sessions, accounts and user row.
       deleteUser: {
         enabled: true,
+        beforeDelete: async (user, request) => prepareAccountDeletion(env, db, user.id, request),
       },
     },
     rateLimit: {
@@ -534,7 +618,7 @@ function buildAuth(env: CloudflareEnv) {
     },
     plugins: [
       bearer(),
-      lastLoginMethod({ customResolveMethod: ctx => loginMethodForPath(ctx.path) }),
+      lastLoginMethod({ customResolveMethod: ctx => loginMethodForPath(ctx.path, ctx.body) }),
       jwt({
         // The plugin's default after-hook mints a fresh JWT on every
         // /get-session — reading the jwks row, decrypting the private key and
@@ -640,7 +724,7 @@ function buildAuth(env: CloudflareEnv) {
         adminRoles: ['admin'],
         defaultRole: 'user',
         roles: platformAdminRoles,
-        impersonationSessionDuration: 60 * 60,
+        impersonationSessionDuration: 15 * 60,
       }),
       phoneNumber({
         sendOTP: async ({ phoneNumber: phone, code }) => {
@@ -737,6 +821,15 @@ function buildAuth(env: CloudflareEnv) {
       }),
     ],
     socialProviders: {
+      // The native app signs in with the identity token Sign in with Apple hands
+      // it. Better Auth verifies that token against Apple's keys with the app's
+      // bundle id as audience, so no client secret is involved and there is no
+      // web redirect flow. Apple is not a trusted linking provider: an existing
+      // account links it explicitly, and only with a verified email claim.
+      apple: {
+        clientId: env.APPLE_APP_BUNDLE_ID,
+        appBundleIdentifier: env.APPLE_APP_BUNDLE_ID,
+      },
       google: {
         clientId: env.GOOGLE_CLIENT_ID,
         clientSecret: env.GOOGLE_CLIENT_SECRET,

@@ -16,7 +16,7 @@ export default defineHandler(async event=>{
  if(body.action!=='approve' || !body.authorization_id) throw new HTTPError({statusCode:400,statusMessage:'Explicit refund approval required'})
  if(!env.STRIPE_SECRET_KEY) throw new HTTPError({statusCode:503,statusMessage:'Stripe is not configured'})
  await approveRefundAuthorization(db,principal,body.authorization_id)
- const authorization=await queryFirst<{action:string;payment_id:string;amount:number;note:string|null}>(db,'SELECT action,payment_id,amount,note FROM payment_authorizations WHERE id=? AND organization_id=? AND user_id=?',[body.authorization_id,organization.id,userId])
+ const authorization=await queryFirst<{action:string;payment_id:string;amount:number|null;note:string|null}>(db,'SELECT action,payment_id,amount,note FROM payment_authorizations WHERE id=? AND organization_id=? AND user_id=?',[body.authorization_id,organization.id,userId])
  if(authorization?.action==='reject_booking'||authorization?.action==='cancel_booking'||authorization?.action==='cancel_reservation'){
   const action:VisitRefundAction=authorization.action==='reject_booking'?'reject':'cancel'
   const payment=await requirePayment(db,organization.id,authorization.payment_id)
@@ -27,7 +27,7 @@ export default defineHandler(async event=>{
   const key=visitRefundKey(action,payment.subject_type,payment.subject_id)
   const refund=await queryFirst(db,'SELECT id FROM payment_refunds WHERE payment_id=? AND idempotency_key=?',[payment.id,key])
   if(!refund) throw new HTTPError({statusCode:409,statusMessage:outcome.ok?'Refund intent missing':`Booking ${action==='reject'?'rejection':'cancellation'} could not be committed`})
-  const submitted=await executeRefund(db,createStripeClient(env.STRIPE_SECRET_KEY, 'payments'),payment,authorization.amount,key,'requested_by_customer',userId,env,authorization.note)
+  const submitted=await executeRefund(db,createStripeClient(env.STRIPE_SECRET_KEY, 'payments'),payment,null,key,'requested_by_customer',userId,env,authorization.note)
   if(!outcome.ok)throw new HTTPError({statusCode:outcome.status,statusMessage:`Refund submitted, but the booking ${action==='reject'?'rejection':'cancellation'} notification did not complete. Retry this approval to finish it.`,data:{refund:submitted,operation:outcome}})
   return jsonResponse(submitted)
  }

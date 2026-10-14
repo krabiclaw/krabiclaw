@@ -1445,6 +1445,28 @@ export const onboarding_drafts = sqliteTable("onboarding_drafts", {
 	index("onboarding_drafts_user_id_idx").on(table.user_id),
 ]);
 
+// A single-use link that adds whoever opens it to an organization. Better Auth
+// invitations are bound to an email address, which an inviter cannot know for
+// a person who signs in with Apple's private relay; the link carries the role
+// instead, and accepting it adds the member through Better Auth's addMember.
+// Only the token's SHA-256 is stored.
+export const organization_invite_links = sqliteTable("organization_invite_links", {
+	id: text().primaryKey(),
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" } ),
+	role: text().notNull(),
+	token_hash: text().notNull(),
+	inviter_id: text().notNull().references(() => user.id, { onDelete: "cascade" } ),
+	expires_at: text().notNull(),
+	used_at: text(),
+	used_by_user_id: text().references(() => user.id, { onDelete: "set null" } ),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+}, (table) => [
+	check("organization_invite_links_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', expires_at, '+0 days') IS expires_at AND (used_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', used_at, '+0 days') IS used_at) AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
+	check("organization_invite_links_role_check", sql`role IN ('admin', 'member')`),
+	uniqueIndex("organization_invite_links_token_hash_unique").on(table.token_hash),
+	index("organization_invite_links_organization_id_idx").on(table.organization_id),
+]);
+
 export const rate_limits = sqliteTable("rate_limits", {
 	key: text().primaryKey(),
 	count: integer().default(0).notNull(),
@@ -2385,7 +2407,8 @@ export const payment_refunds = sqliteTable("payment_refunds", {
  payment_id: text().notNull().references(() => payments.id, { onDelete: "restrict" }),
  idempotency_key: text().notNull().unique(),
  stripe_refund_id: text(),
- amount: integer().notNull(),
+ /** Stripe's refunded amount once it answers; NULL while a full-remaining refund is still with Stripe. */
+ amount: integer(),
  reason: text().notNull(),
  /** What the business told the buyer when it sent the money, as Airbnb's refund carries a message. */
  note: text(),
@@ -2395,7 +2418,7 @@ export const payment_refunds = sqliteTable("payment_refunds", {
  created_by: text().references(() => user.id, { onDelete: "set null" }),
  created_at: text().notNull(),
  updated_at: text().notNull(),
-}, t => [unique("payment_refunds_provider_unique").on(t.payment_id,t.stripe_refund_id),check("payment_refunds_amount_check", sql`amount > 0`)]);
+}, t => [unique("payment_refunds_provider_unique").on(t.payment_id,t.stripe_refund_id),check("payment_refunds_amount_check", sql`amount IS NULL OR amount > 0`)]);
 export const payment_disputes = sqliteTable("payment_disputes", {
  id: text().primaryKey(),
  payment_id: text().notNull().references(() => payments.id, { onDelete: "restrict" }),
@@ -2443,7 +2466,8 @@ export const payment_authorizations = sqliteTable("payment_authorizations", {
  user_id: text().references(() => user.id, { onDelete: "set null" }),
  payment_id: text().notNull().references(() => payments.id, { onDelete: "restrict" }),
  action: text().notNull(),
- amount: integer().notNull(),
+ /** A partial refund's amount; NULL approves whatever Stripe still holds for the payment. */
+ amount: integer(),
  note: text(),
  expires_at: text().notNull(),
  approved_at: text(),

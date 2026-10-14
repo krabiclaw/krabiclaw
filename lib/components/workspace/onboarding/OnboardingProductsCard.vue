@@ -84,7 +84,8 @@ const COPY = {
   },
 } as const
 
-const copy = computed(() => COPY[state.value.vertical as keyof typeof COPY] ?? COPY.restaurant)
+// A restaurant lists dishes; every other vertical that sells here lists experiences.
+const copy = computed(() => state.value.vertical === 'restaurant' ? COPY.restaurant : COPY.experience)
 // Intl knows the symbol and the decimal places for the owner's currency, so
 // neither is a table we keep in step with it.
 const currencyFormat = computed(() => {

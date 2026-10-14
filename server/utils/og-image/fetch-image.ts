@@ -1,11 +1,9 @@
 /** Fetch and inline a bounded public HTTP(S) image for the OG renderer. */
 export interface FetchImageOptions {
-  timeoutMs?: number
   maxBytes?: number
   acceptedContentTypes?: readonly string[]
 }
 
-const DEFAULT_TIMEOUT_MS = 4000
 const DEFAULT_MAX_BYTES = 5_000_000
 const MAX_REDIRECTS = 5
 
@@ -80,49 +78,42 @@ export async function fetchTransformedImageAsDataUri(
   let currentUrl = publicImageUrl(url)
   if (!currentUrl) return null
 
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
-
-  try {
-    let response: Response | null = null
-    for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
-      response = await fetch(currentUrl, { signal: controller.signal, redirect: 'manual' })
-      if (response.status < 300 || response.status >= 400) break
-      const location = response.headers.get('location')
-      await cancelBody(response)
-      if (!location || redirectCount === MAX_REDIRECTS) return null
-      currentUrl = publicImageUrl(location, currentUrl)
-      if (!currentUrl) return null
-    }
-    if (!response?.ok) {
-      if (response) await cancelBody(response)
-      return null
-    }
-
-    const contentType = response.headers.get('content-type')?.split(';')[0]?.trim() || ''
-    if (!contentType.startsWith('image/')) {
-      await cancelBody(response)
-      return null
-    }
-    if (options.acceptedContentTypes && !options.acceptedContentTypes.includes(contentType)) {
-      await cancelBody(response)
-      return null
-    }
-
-    const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES
-    const contentLength = Number(response.headers.get('content-length'))
-    if (Number.isFinite(contentLength) && contentLength > maxBytes) {
-      await cancelBody(response)
-      return null
-    }
-    if (!response.body) return null
-
-    const transformed = await images.input(response.body).transform(transform).output(output)
-    const buffer = await readBoundedStream(transformed.image(), maxBytes)
-    return buffer ? `data:${transformed.contentType()};base64,${uint8ArrayToBase64(buffer)}` : null
-  } finally {
-    clearTimeout(timeout)
+  let response: Response | null = null
+  for (let redirectCount = 0; redirectCount <= MAX_REDIRECTS; redirectCount++) {
+    response = await fetch(currentUrl, { redirect: 'manual' })
+    if (response.status < 300 || response.status >= 400) break
+    const location = response.headers.get('location')
+    await cancelBody(response)
+    if (!location || redirectCount === MAX_REDIRECTS) return null
+    currentUrl = publicImageUrl(location, currentUrl)
+    if (!currentUrl) return null
   }
+  if (!response?.ok) {
+    if (response) await cancelBody(response)
+    return null
+  }
+
+  const contentType = response.headers.get('content-type')?.split(';')[0]?.trim() || ''
+  if (!contentType.startsWith('image/')) {
+    await cancelBody(response)
+    return null
+  }
+  if (options.acceptedContentTypes && !options.acceptedContentTypes.includes(contentType)) {
+    await cancelBody(response)
+    return null
+  }
+
+  const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES
+  const contentLength = Number(response.headers.get('content-length'))
+  if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    await cancelBody(response)
+    return null
+  }
+  if (!response.body) return null
+
+  const transformed = await images.input(response.body).transform(transform).output(output)
+  const buffer = await readBoundedStream(transformed.image(), maxBytes)
+  return buffer ? `data:${transformed.contentType()};base64,${uint8ArrayToBase64(buffer)}` : null
 }
 
 function uint8ArrayToBase64(bytes: Uint8Array): string {

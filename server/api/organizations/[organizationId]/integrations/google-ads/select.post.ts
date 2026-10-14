@@ -5,6 +5,7 @@ import { jsonResponse, rethrowHttpError } from '~/server/utils/api-response'
 import { requireIntegrationAccount } from '~/server/utils/auth'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { requireOrganizationAccess } from '~/server/utils/location-access'
+import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { selectGoogleAdsCustomer } from '~/server/utils/google-ads'
 
 /**
@@ -23,6 +24,9 @@ export default defineHandler(async (event) => {
   }
 
   const { env, session, organization } = await requireOrganizationAccess(event, organizationId)
+  if (!await hasOrganizationEntitlement(env, organization.id, 'marketing')) {
+    return jsonResponse({ error: 'Google Ads requires the Marketing plan.' }, { status: 403 })
+  }
   const current = await readIntegration(env.DB, organization.id, 'google_ads')
   if (current) return jsonResponse({ error: 'Disconnect Google Ads before connecting again.' }, { status: 409 })
   await requireIntegrationAccount(env, accountId, {

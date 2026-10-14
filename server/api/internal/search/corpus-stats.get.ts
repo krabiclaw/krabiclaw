@@ -5,7 +5,7 @@
 // (buildPlatformKnowledgeDocuments) on every request and shouldn't be a public,
 // unauthenticated way to do that.
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
-import { validateInternalRequest } from '~/server/utils/internal-secret'
+import { SEARCH_INTERNAL_CALLER, validateInternalRequest } from '~/server/utils/internal-secret'
 import { buildPlatformKnowledgeDocuments } from '~/server/utils/public-search'
 import {
   PLATFORM_KNOWLEDGE_FAQ_ENTRIES, PLATFORM_KNOWLEDGE_ROUTE_ENTRIES, PLATFORM_KNOWLEDGE_PAGE_ENTRIES, } from '~/config/platform-knowledge'
@@ -14,7 +14,7 @@ export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
   if (!env.db) return jsonResponse({ error: 'Database not available' }, { status: 500 })
 
-  const validation = await validateInternalRequest(event, env)
+  const validation = await validateInternalRequest(event, env, SEARCH_INTERNAL_CALLER)
   if (!validation.ok) return jsonResponse({ error: validation.error }, { status: validation.status })
 
   const staticCounts = {

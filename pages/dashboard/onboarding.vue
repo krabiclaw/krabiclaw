@@ -77,7 +77,7 @@ import { useDashboardTopNavAction } from '~/composables/useDashboardTopNavAction
 import {
   onboardingStep,
   onboardingStepPath,
-  startOnboardingFlow,
+  useOnboardingState,
   useOnboardingSteps,
 } from '~/composables/useOnboardingFlow'
 import { useOnboardingDraft } from '~/composables/useOnboardingDraft'
@@ -90,11 +90,11 @@ definePageMeta({ layout: 'dashboard', tabs: false })
 const route = useRoute()
 const router = useRouter()
 const config = useRuntimeConfig()
-const state = startOnboardingFlow('new-site')
+const state = useOnboardingState()
 const draft = useOnboardingDraft()
 const { indexOf, nextOf, previousOf, resumeStep } = useOnboardingSteps()
 
-const currentStep = computed(() => onboardingStep(String(route.params.step ?? ''), 'new-site'))
+const currentStep = computed(() => onboardingStep(String(route.params.step ?? '')))
 const previousStep = computed(() => currentStep.value ? previousOf(currentStep.value.id) : null)
 const nextStep = computed(() => currentStep.value ? nextOf(currentStep.value.id) : null)
 const nextLabel = computed(() => currentStep.value?.nextLabel?.(state.value)
