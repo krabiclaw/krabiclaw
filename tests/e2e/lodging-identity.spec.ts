@@ -12,7 +12,7 @@ const invitee = findE2eAuthFixture('user-e2e-lodging-invitee')
 const lodgingSecret = process.env.LODGING_SERVICE_SECRET ?? ''
 
 test.describe('lodging identity boundary', () => {
-  test('a bearer session resolves its principal, keeps its only organization, and stops at sign-out', async ({ baseURL }) => {
+  const session = (baseURL: string | undefined) => {
     const password = process.env.CANARY_LOGIN_PASSWORD
     if (!password) throw new Error('CANARY_LOGIN_PASSWORD is not configured.')
     const call = async (method: 'GET' | 'POST' | 'DELETE', path: string, init: { headers?: Record<string, string>; data?: unknown } = {}) => {
@@ -40,9 +40,14 @@ test.describe('lodging identity boundary', () => {
       expect(token, 'Better Auth issues the bearer in set-auth-token').toBeTruthy()
       return { authorization: `Bearer ${token}` }
     }
+    return { api, signInBearer }
+  }
+
+  test('a bearer session resolves its principal, keeps its only organization, and stops at sign-out', async ({ baseURL }) => {
+    const { api, signInBearer } = session(baseURL)
     const bearer = await signInBearer(fixture.email)
 
-    const slug = `lodging-native-${crypto.randomUUID().slice(0, 8)}`
+    const slug = `e2e-lodging-${crypto.randomUUID().slice(0, 8)}`
     const created = await api.post('/api/auth/organization/create', {
       headers: bearer,
       data: { name: `Lodging Native ${slug}`, slug, default_currency: 'THB', timezone: 'Asia/Bangkok' },
@@ -127,5 +132,41 @@ test.describe('lodging identity boundary', () => {
     const signOut = await api.post('/api/auth/sign-out', { headers: bearer, data: {} })
     expect(signOut.status, await signOut.text()).toBe(200)
     expect((await api.get(`/api/lodging/principal?organizationId=org-demo`, { headers: bearer })).status).toBe(401)
+  })
+
+  test('a lodging organization publishes a Saya site and cannot be deleted without the lodging service', async ({ baseURL }) => {
+    const { api, signInBearer } = session(baseURL)
+    const bearer = await signInBearer(fixture.email)
+    const slug = `e2e-lodging-${crypto.randomUUID().slice(0, 8)}`
+    const name = `Lodging Site ${slug}`
+    const created = await api.post('/api/auth/organization/create', {
+      headers: bearer,
+      data: { name, slug, default_currency: 'THB', timezone: 'Asia/Bangkok' },
+    })
+    expect(created.status, await created.text()).toBe(200)
+    const organization = await created.json() as { id: string }
+
+    const provisioned = await api.post('/api/organizations', {
+      headers: bearer,
+      data: { organizationId: organization.id, name, subdomain: slug, vertical: 'lodging', sourceLocale: 'en' },
+    })
+    expect(provisioned.status, await provisioned.text()).toBe(200)
+    expect(await provisioned.json()).toMatchObject({ organizationId: organization.id, subdomain: slug })
+
+    // The public site, read through the tenant host rather than the API that wrote it.
+    const home = await api.get('/', { headers: { 'x-preview-tenant': slug } })
+    expect(home.status).toBe(200)
+    const html = await home.text()
+    expect(html).toContain(name)
+    expect(html).toContain('vacation rental sites that run themselves')
+    expect(html).not.toContain('Check availability')
+
+    // Its homes live in the lodging service, so deleting it must reach that
+    // service first. With none configured here the deletion fails and the
+    // organization stays; the e2e sweep removes it.
+    const refused = await api.post('/api/auth/organization/delete', { headers: bearer, data: { organizationId: organization.id } })
+    expect(refused.status, await refused.text()).toBe(500)
+    expect(await refused.json()).toMatchObject({ code: 'LODGING_SERVICE_NOT_CONFIGURED' })
+    expect((await api.get(`/api/lodging/principal?organizationId=${encodeURIComponent(organization.id)}`, { headers: bearer })).status).toBe(200)
   })
 })

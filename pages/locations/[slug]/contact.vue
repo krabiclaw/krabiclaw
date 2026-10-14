@@ -148,7 +148,7 @@
       <section class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-8 px-4 py-24 sm:px-6 lg:px-8">
         <h3 class="saya-display-md saya-italic text-default">{{ t('saya.location.see_you_soon') }}</h3>
         <div class="flex flex-wrap gap-3">
-          <SayaButton :to="localePath(locationCopy.ctaRoute)" size="lg">{{ locationCopy.reserveCta }}</SayaButton>
+          <SayaButton v-if="locationCopy.ctaRoute" :to="localePath(locationCopy.ctaRoute)" size="lg">{{ locationCopy.reserveCta }}</SayaButton>
           <a
             v-if="location.phone"
             :href="`tel:${location.phone}`"

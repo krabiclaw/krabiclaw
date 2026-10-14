@@ -1,7 +1,7 @@
 import type { McpToolDefinition } from './shared'
 import { HTTPError } from 'nitro'
 import { SUPPORTED_CURRENCIES, currentUserObject, globalTool, pageInfoObject, paginationInputSchema, organizationSummaryItem, organizationTool, withToolAnnotations, workspaceContextObject } from './shared'
-import { ALL_VERTICALS } from '~/utils/vertical-copy'
+import { WEBSITE_DRAFT_VERTICALS } from '~/utils/vertical-copy'
 import { PLATFORM_LOCALES } from '~/shared/platform-locales'
 import { timezoneSchema } from '~/utils/timezone'
 import { setPublicConsultationMode } from '~/server/utils/professional-services'
@@ -82,7 +82,7 @@ const websiteDraftOutputSchema = {
   type: 'object', properties: {
     draft_id: { type: 'string' }, revision: { type: 'string', format: 'date-time' }, organization_id: { type: 'string' }, idempotency_key: { type: 'string' },
     status: { type: 'string', enum: ['active', 'committed'] }, subdomain: { type: 'string' },
-    name: { type: 'string' }, vertical: { type: 'string', enum: ALL_VERTICALS }, source_locale: { type: 'string' },
+    name: { type: 'string' }, vertical: { type: 'string', enum: WEBSITE_DRAFT_VERTICALS }, source_locale: { type: 'string' },
     currency: { type: 'string' }, timezone: { type: 'string' }, location: websiteDraftLocationSchema,
     hero_headline: { type: 'string' }, hero_subtitle: { type: 'string' }, products: { type: 'array', items: websiteDraftProductSchema },
     missing_fields: { type: 'array', items: { type: 'string', enum: ['source_locale', 'currency', 'timezone', 'subdomain'] } },
@@ -103,7 +103,7 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
       draft_id: { type: 'string', minLength: 1, description: 'Existing draft to edit; omit when creating.' }, revision: { type: 'string', format: 'date-time', description: 'Required when editing: the revision returned by get_website_draft.' },
       idempotency_key: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S' },
       name: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'Required when creating; omitted on an edit to retain it.' },
-      vertical: { type: 'string', enum: ALL_VERTICALS, description: 'Required when creating; omitted on an edit to retain it.' }, source_locale: { type: 'string', enum: PLATFORM_LOCALES.map(locale => locale.locale), description: 'Required when creating; a saved draft cannot be relabelled into another language.' },
+      vertical: { type: 'string', enum: WEBSITE_DRAFT_VERTICALS, description: 'Required when creating; omitted on an edit to retain it.' }, source_locale: { type: 'string', enum: PLATFORM_LOCALES.map(locale => locale.locale), description: 'Required when creating; a saved draft cannot be relabelled into another language.' },
       currency: { type: 'string', enum: SUPPORTED_CURRENCIES }, timezone: timezoneSchema,
       subdomain: { type: 'string', minLength: 1, maxLength: 63, pattern: '^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$' },
       location: websiteDraftLocationSchema,
