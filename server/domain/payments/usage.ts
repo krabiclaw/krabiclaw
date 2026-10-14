@@ -72,7 +72,7 @@ function providerId(result:Record<string,unknown>):string {
 /**
  * Payments fees are billed by a Metronome contract on the business's own Stripe
  * customer. A business gets it when its plan includes Payments: on the Stripe
- * subscription event that grants it, and the hourly reconciliation for any it missed.
+ * subscription event that grants it. Stripe redelivers that event until set-up succeeds.
  */
 export async function setUpPaymentsBilling(db:DbClient,stripe:Stripe,env:CloudflareEnv,organizationId:string) {
  const existing=await queryFirst<BillingAccount>(db,'SELECT * FROM payment_billing_accounts WHERE organization_id=?',[organizationId])
@@ -227,7 +227,7 @@ export async function paymentsUsageStatus(db:DbClient,env:CloudflareEnv,organiza
  return {configured:true,pending,pricing,account:{...account,status},invoices:collected,credits,source:'Metronome',refreshed_at:new Date().toISOString()}
 }
 export async function deliverPaymentsUsage(db:DbClient,env:CloudflareEnv,organizationId:string) {
- const events=await queryAll<{id:string;payment_id:string|null;kind:string;currency:CurrencyCode;amount:number;source_id:string;provider_occurred_at:string;created_at:string;billing_timestamp:string|null;billing_basis_json:string|null}>(db,`SELECT * FROM payment_usage_events WHERE organization_id=? AND delivery_at IS NULL AND dead_letter_at IS NULL ORDER BY created_at LIMIT 100`,[organizationId])
+ const events=await queryAll<{id:string;payment_id:string|null;kind:string;currency:CurrencyCode;amount:number;source_id:string;provider_occurred_at:string;created_at:string;billing_timestamp:string|null;billing_basis_json:string|null}>(db,`SELECT * FROM payment_usage_events WHERE organization_id=? AND delivery_at IS NULL AND dead_letter_at IS NULL ORDER BY created_at`,[organizationId])
  if(!events.length)return {delivered:0}
  const account=await queryFirst<BillingAccount>(db,'SELECT * FROM payment_billing_accounts WHERE organization_id=?',[organizationId])
  if(!account?.metronome_customer_id||!account.metronome_contract_id) throw new Error('Payments billing mapping missing; accrued usage remains undelivered')
