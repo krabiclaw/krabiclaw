@@ -21,30 +21,21 @@ if (routeData.value.recipe !== 'contact' || !page.value || page.value.locale !==
   || resolveTenantLocalePath(page.value.path, [activeLocale.value]).sourcePath !== '/contact') {
   throw createError({ statusCode: 500, statusMessage: 'Blawby layout did not provide the requested page' })
 }
-const identity = computed(() => document.value.shell.identity)
-const compliance = computed(() => document.value.shell.compliance)
-const org = useBlawbyOrgIdentity(identity, compliance)
 
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
-useSocialMetadata(() => ({
+const { name: organizationName, social_image: socialImage } = useTenantOrganization().organization
+useSocialMetadata(() => page.value && ({
   path: '/contact',
-  socialImage: organizationSocialImage,
-  title: `${page.value?.title || 'Contact'} | ${identity.value.name}`,
-  description: page.value?.summary || '',
-  brand: {
-    organizationName: identity.value.name,
-  },
+  socialImage,
+  title: `${page.value.title} | ${organizationName}`,
+  description: page.value.summary || '',
   breadcrumbs: [
     { name: 'Home', url: '/' },
-    { name: page.value?.title || 'Contact', url: '/contact' },
+    { name: page.value.title, url: '/contact' },
   ],
-  faqItems: routeData.value.qa
-    .map(item => ({ question: item.question.trim(), answer: item.answer?.trim() ?? '' }))
-    .filter(item => item.question && item.answer),
+  contentBlocks: page.value.blocks,
   professionalService: {
     recipe: 'contact',
-    org: org.value,
   },
 }))
 </script>

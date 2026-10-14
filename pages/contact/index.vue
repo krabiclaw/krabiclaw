@@ -1,6 +1,6 @@
 <template>
-  <NuxtLayout :name="isBlawby ? 'blawby' : 'saya'">
-    <BlawbyContact v-if="isBlawby" />
+  <NuxtLayout :name="template.layout">
+    <BlawbyContact v-if="template.slug === 'blawby'" />
 
     <!-- Brand contact page (tenant sites only — the platform marketing contact page was retired in favor of /help) -->
     <div v-else>
@@ -232,12 +232,13 @@ import type { SubmissionMeasurement } from '~/composables/useOrganizationConvers
 
 definePageMeta({ layout: false })
 
-const { isPlatform, organizationId, previewAuthorized, organization } = useTenantOrganization()
-const { isBlawby } = usePublicTemplate()
-if (isPlatform || !organizationId) throw createError({ statusCode: 404 })
+const { previewAuthorized, organization } = useTenantOrganization()
+const { template, id: organizationId } = organization
+const isPlatform = organization.template.slug === 'platform'
+if (isPlatform) throw createError({ statusCode: 404 })
 
 const { locale, localePath, t } = useI18n()
-const vertCopy = computed(() => getVerticalCopy(organization?.vertical, locale.value))
+const vertCopy = computed(() => getVerticalCopy(organization.vertical, locale.value))
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 // Plain-Tailwind form styling — replaces UInput/UTextarea's default look
@@ -246,7 +247,7 @@ import { FORM_INPUT_CLASS } from '~/utils/form-constants'
 import { addressPlaceName, formatPostalAddress, type PostalAddress } from '~/utils/postal-address'
 const inputClass = FORM_INPUT_CLASS
 
-const businessName = computed(() => organization?.name?.trim() ?? '')
+const businessName = organization.name
 // A preview is the real site, so the form is real too — but an owner looking
 // at an unlaunched site should not be able to file a guest thread against it.
 const isDraftPreview = computed(() => previewAuthorized)
@@ -364,16 +365,12 @@ const handleTenantContact = async () => {
 
 // ── SEO ──────────────────────────────────────────────────
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
 useSocialMetadata(() => ({
   path: '/contact',
-  socialImage: organizationSocialImage,
-  title: tenantPage.value?.title || businessName.value,
+  socialImage: organization.social_image,
+  title: tenantPage.value?.title || businessName,
   description: tenantPage.value?.summary || '',
   schemaPageType: 'ContactPage',
-  brand: {
-    organizationName: businessName.value,
-  },
   breadcrumbs: [
     { name: tenantPage.value?.title || 'Contact', url: '/contact' },
   ],

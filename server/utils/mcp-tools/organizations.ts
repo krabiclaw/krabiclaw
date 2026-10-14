@@ -17,7 +17,6 @@ import { requireMcpOrganizationApi } from '~/server/utils/mcp-auth'
 import { organizationRoles } from '~/utils/organization-access'
 import { getOrganizationTeamsData, getInvitationDeliveries } from '~/server/utils/dashboard-members'
 import { assertRoleAllows, organizationAdapter } from '~/server/utils/member-access'
-import { betterAuthTimestampToIso } from '~/server/utils/better-auth-timestamps'
 
 const PALETTE_COLORS_SCHEMA = {
   type: 'object',
@@ -56,14 +55,17 @@ const memberObject = { type: 'object', properties: {
   id: { type: 'string' }, organizationId: { type: 'string' }, userId: { type: 'string' }, role: { type: 'string' }, createdAt: { type: 'string', format: 'date-time' },
 }, required: ['id', 'organizationId', 'userId', 'role', 'createdAt'] } as const
 const invitationObject = { type: 'object', properties: {
-  id: { type: 'string' }, organizationId: { type: 'string' }, email: { type: 'string' }, role: { type: ['string', 'null'] }, status: { type: 'string' }, inviterId: { type: 'string' },
+  id: { type: 'string' }, organizationId: { type: 'string' }, email: { type: 'string' }, role: { type: 'string' }, status: { type: 'string' }, inviterId: { type: 'string' },
   createdAt: { type: 'string', format: 'date-time' }, expiresAt: { type: 'string', format: 'date-time' },
   delivery: { type: ['object','null'], properties: {status:{type:'string'},provider:{type:'string'},provider_message_id:{type:['string','null']},error:{type:['string','null']}}, required:['status','provider','provider_message_id','error'] },
 }, required: ['id', 'organizationId', 'email', 'role', 'status', 'inviterId', 'createdAt', 'expiresAt','delivery'] } as const
 const roleField = { type: 'string', enum: Object.keys(organizationRoles) }
 const teamObject = { type: 'object', properties: {
-  id: { type: 'string' }, name: { type: 'string' }, organization_id: { type: 'string' }, created_at: { type: 'string', format: 'date-time' }, updated_at: { type: ['string', 'null'], format: 'date-time' }, member_user_ids: { type: 'array', items: { type: 'string' }, uniqueItems: true },
-}, required: ['id', 'name', 'organization_id', 'created_at', 'updated_at', 'member_user_ids'] } as const
+  id: { type: 'string' }, name: { type: 'string' }, organizationId: { type: 'string' }, createdAt: { type: 'string', format: 'date-time' }, updatedAt: { type: 'string', format: 'date-time' },
+  members: { type: 'array', items: { type: 'object', properties: {
+    id: { type: 'string' }, teamId: { type: 'string' }, userId: { type: 'string' }, createdAt: { type: 'string', format: 'date-time' },
+  }, required: ['id', 'teamId', 'userId', 'createdAt'] } },
+}, required: ['id', 'name', 'organizationId', 'createdAt', 'members'] } as const
 const teamOutput = { type: 'object', properties: { team: teamObject }, required: ['team'] }
 
 const websiteDraftLocationSchema = {
@@ -142,7 +144,7 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
   organizationTool({
     name: 'list_organization_members', description: 'Read the business’s teammates and invitations. Member IDs identify organization memberships; user IDs identify people.',
     domain: 'organizations', minimumRole: 'admin', inputSchema: { limit: { type: 'integer', minimum: 1, maximum: 100 }, offset: { type: 'integer', minimum: 0 } },
-    outputSchema: { type: 'object', properties: { members: { type: 'array', items: { ...memberObject, properties: { ...memberObject.properties, user: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, email: { type: 'string' }, image: { type: ['string', 'null'] } }, required: ['id', 'name', 'email', 'image'] } }, required: [...memberObject.required, 'user'] } }, total: { type: 'integer', minimum: 0 }, invitations: { type: 'array', items: invitationObject } }, required: ['members', 'total', 'invitations'], additionalProperties: false },
+    outputSchema: { type: 'object', properties: { members: { type: 'array', items: { ...memberObject, properties: { ...memberObject.properties, user: { type: 'object', properties: { id: { type: 'string' }, name: { type: 'string' }, email: { type: 'string' }, image: { type: ['string', 'null'] } }, required: ['id', 'name', 'email'] } }, required: [...memberObject.required, 'user'] } }, total: { type: 'integer', minimum: 0 }, invitations: { type: 'array', items: invitationObject } }, required: ['members', 'total', 'invitations'], additionalProperties: false },
   }),
   organizationTool({
     name: 'invite_organization_member', description: 'Invite a teammate by email using Better Auth. The invitation remains pending until they accept. Set resend only when the user wants an existing invitation sent again.',
@@ -239,7 +241,6 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
               media: { type: 'array', items: ORGANIZATION_MEDIA_ITEM_SCHEMA },
               contact_email: { type: ['string', 'null'] },
               address_visibility: { type: 'string', enum: ['visible', 'hidden'] },
-              contact_form_enabled: { type: 'boolean' },
               default_currency: { type: 'string' },
               timezone: { type: 'string' },
               press_email: { type: ['string', 'null'] },
@@ -300,7 +301,6 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
           id: { type: 'string' },
           changed_fields: { type: 'array', items: { type: 'string' } },
           address_visibility: { type: 'string', enum: ['visible', 'hidden'] },
-          contact_form_enabled: { type: 'boolean' },
           contrast_warnings: { type: 'array', items: { type: 'object', properties: { mode: { type: 'string' }, pair: { type: 'string' }, ratio: { type: 'number' }, minimum: { type: 'number' } }, required: ['mode', 'pair', 'ratio', 'minimum'] } },
           updated_at: { type: 'string' },
           context: { type: 'object' },
@@ -364,27 +364,25 @@ export async function handleOrganizationsTools(ctx: McpExecutorContext): Promise
         adapter.listMembers({ organizationId: organization.organizationId, limit: args.limit as number | undefined, offset: args.offset as number | undefined }),
         adapter.listInvitations({ organizationId: organization.organizationId }),
       ])
-      const facts = invitations.map(invitation => ({ ...invitation, createdAt: betterAuthTimestampToIso(invitation.createdAt, 'invitation.createdAt'), expiresAt: betterAuthTimestampToIso(invitation.expiresAt, 'invitation.expiresAt') }))
-      const deliveries = await getInvitationDeliveries(organization.db, organization.organizationId, facts)
-      return { ...result, members: result.members.map(member => ({ ...member, createdAt: betterAuthTimestampToIso(member.createdAt, 'member.createdAt'), user: { ...member.user, image: member.user.image ?? null } })), invitations: facts.map(invitation => ({...invitation,delivery:deliveries.get(invitation.id) ?? null})) }
+      const deliveries = await getInvitationDeliveries(organization.db, organization.organizationId, invitations)
+      return { ...result, invitations: invitations.map(invitation => ({...invitation,delivery:deliveries.get(invitation.id) ?? null})) }
     }
     case 'invite_organization_member': {
       const { api, headers } = await requireMcpOrganizationApi(ctx.event, organization)
       const invitation = await api.createInvitation({ headers, body: { organizationId: organization.organizationId, email: requiredString(args, 'email'), role: requiredString(args, 'role') as keyof typeof organizationRoles, resend: args.resend === true } })
-      const fact = { ...invitation, createdAt: invitation.createdAt.toISOString(), expiresAt: invitation.expiresAt.toISOString() }
-      const delivery = (await getInvitationDeliveries(organization.db, organization.organizationId, [fact])).get(invitation.id) ?? null
+      const delivery = (await getInvitationDeliveries(organization.db, organization.organizationId, [invitation])).get(invitation.id) ?? null
       if (!delivery || ['failed','pending'].includes(delivery.status)) throw new HTTPError({statusCode:502,statusMessage:delivery?.error ?? 'Invitation was saved, but its email delivery is unconfirmed',data:{invitation_id: typeof invitation.id === 'string' && invitation.id.trim() ? invitation.id : undefined}})
-      return { invitation: {...fact,delivery} }
+      return { invitation: {...invitation,delivery} }
     }
     case 'update_organization_member_role': {
       const { api, headers } = await requireMcpOrganizationApi(ctx.event, organization)
       const member = await api.updateMemberRole({ headers, body: { organizationId: organization.organizationId, memberId: requiredString(args, 'member_id'), role: requiredString(args, 'role') } })
-      return { member: { ...member, createdAt: member.createdAt.toISOString() } }
+      return { member }
     }
     case 'remove_organization_member': {
       const { api, headers } = await requireMcpOrganizationApi(ctx.event, organization)
       const result = await api.removeMember({ headers, body: { organizationId: organization.organizationId, memberIdOrEmail: requiredString(args, 'member_id') } })
-      return { member: { ...result.member, createdAt: result.member.createdAt.toISOString() } }
+      return { member: result.member }
     }
     case 'cancel_organization_invitation': {
       const { api, headers } = await requireMcpOrganizationApi(ctx.event, organization)
@@ -393,8 +391,7 @@ export async function handleOrganizationsTools(ctx: McpExecutorContext): Promise
       if (!invitations.some(invitation => invitation.id === invitationId)) throw new HTTPError({ statusCode: 404, statusMessage: 'Invitation not found in this business' })
       const invitation = await api.cancelInvitation({ headers, body: { invitationId } })
       if (!invitation) throw new Error('Better Auth did not return the cancelled invitation')
-      const fact = { ...invitation, createdAt: invitation.createdAt.toISOString(), expiresAt: invitation.expiresAt.toISOString() }
-      return { invitation: {...fact,delivery:(await getInvitationDeliveries(organization.db, organization.organizationId, [fact])).get(invitation.id) ?? null} }
+      return { invitation: {...invitation,delivery:(await getInvitationDeliveries(organization.db, organization.organizationId, [invitation])).get(invitation.id) ?? null} }
     }
     case "get_organization":
       {
@@ -446,7 +443,7 @@ export async function handleOrganizationsTools(ctx: McpExecutorContext): Promise
           entity: "organization_settings",
           id: organization.organizationId,
           changed_fields: Object.keys(updates),
-          ...(settingsResult.address_visibility !== undefined ? { address_visibility: settingsResult.address_visibility, contact_form_enabled: settingsResult.contact_form_enabled } : {}),
+          ...(settingsResult.address_visibility !== undefined ? { address_visibility: settingsResult.address_visibility } : {}),
           contrast_warnings: settingsResult.palette ? paletteContrast(settingsResult.palette).filter(check => check.ratio < check.minimum) : [],
           updated_at: settingsResult.updated_at,
           context: updateSettingsContext,

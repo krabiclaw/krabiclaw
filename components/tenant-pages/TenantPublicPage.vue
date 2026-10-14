@@ -7,7 +7,7 @@
     loop they lost every section the marketing site had (#903).
   -->
   <template v-if="page">
-    <ProductDetailPage v-if="linkedOffer" :key="`${linkedOffer.product.id}:${linkedOffer.location?.id ?? 'online'}:${Boolean(linkedOffer.scopeRequired)}`" :organization-id="organizationId" :organization-name="linkedOffer.brandName" :vertical="linkedOffer.product.kind === 'service' ? 'service' : linkedOffer.vertical" :product="linkedOffer.product" :booking="linkedOffer.booking" :location="linkedOffer.location" :locations="linkedOffer.locations" :online-available="linkedOffer.onlineAvailable" :scope-required="linkedOffer.scopeRequired" :currency="linkedOffer.currency" :page-document="page" :collection-name="linkedOffer.collectionName" :presentation="servicePresentation" :reviews="linkedOffer.reviews" :sessions="linkedOffer.sessions" :collection-siblings="linkedOffer.collectionSiblings">
+    <ProductDetailPage v-if="linkedOffer" :key="`${linkedOffer.product.id}:${linkedOffer.location?.id ?? 'online'}:${Boolean(linkedOffer.scopeRequired)}`" :organization-id="organizationId" :organization-name="linkedOffer.brandName" :vertical="linkedOffer.product.kind === 'service' ? 'service' : linkedOffer.vertical" :product="linkedOffer.product" :booking="linkedOffer.booking" :location="linkedOffer.location" :locations="linkedOffer.locations" :online-available="linkedOffer.onlineAvailable" :scope-required="linkedOffer.scopeRequired" :currency="linkedOffer.currency" :page-document="page" :collection-name="linkedOffer.collectionName" :presentation="presentationForProduct(linkedOffer.vertical, linkedOffer.product, organization.theme_id)" :reviews="linkedOffer.reviews" :sessions="linkedOffer.sessions" :collection-siblings="linkedOffer.collectionSiblings">
       <template #actions>
         <BlawbyButton v-if="secondaryAction" class="mt-5" variant="outline" :to="secondaryAction.url">{{ secondaryAction.label }}</BlawbyButton>
       </template>
@@ -16,27 +16,32 @@
       </template>
     </ProductDetailPage>
     <TenantPageRenderer v-else :page="page" />
+    <template v-if="page.recipe === 'schedule' && blawbyDocument">
+      <OnlineConsultationBooking v-if="blawbyDocument.shell.canSchedule && blawbyDocument.shell.consultation.mode === 'native'" />
+      <div v-else class="blawby-container py-12 text-center">
+        <BlawbyButton v-if="blawbyDocument.shell.canSchedule" :to="blawbyDocument.shell.consultation.external_url!" @click="trackConsultationClick('schedule', page.path, blawbyDocument.shell.consultation.external_url, page.page_id)">{{ blawbyDocument.shell.consultation.cta_label }}</BlawbyButton>
+        <BlawbyButton v-else :to="localePath('/contact')" @click="trackConsultationClick('schedule', page.path, localePath('/contact'), page.page_id)">{{ t('site_pages.contact') }}</BlawbyButton>
+      </div>
+    </template>
   </template>
 </template>
 
 <script setup lang="ts">
 import ProductDetailPage from '~/components/products/ProductDetailPage.vue'
-import { presentationForProduct, requireProductPresentation } from '~/utils/product-presentation'
+import OnlineConsultationBooking from '~/components/booking/OnlineConsultationBooking.vue'
+import { presentationForProduct } from '~/utils/product-presentation'
 import { blockTextOrNull, isInternalRoute } from '~/utils/tenant-page-block-data'
 import { publicApiRequest, isRecord } from '~/utils/api-clients'
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
-import type { PublicBlawbyIdentity, PublicCompliance } from '~/types/blawby'
 import { normalizeTenantPagePath } from '~/utils/tenant-page-blocks'
 import type { BlawbyDocumentPayload } from '~/utils/blawby-document-contract'
-import type { ProfessionalServiceRecipe } from '~/utils/professional-service-schema'
 
 const props = defineProps<{ path: string; locale?: string | null }>()
-const config = useRuntimeConfig()
-const requestURL = useRequestURL()
-const { organizationId, isPlatform, previewAuthorized, organization } = useTenantOrganization()
-const { isBlawby } = usePublicTemplate()
-const { locale: i18nLocale, localePath } = useI18n()
+const { previewAuthorized, organization } = useTenantOrganization()
+const { id: organizationId, template } = organization
+const isPlatform = template.slug === 'platform'
+const { locale: i18nLocale, localePath, t } = useI18n()
 // Page ownership is a resolved site, not a tenant type. Krabiclaw's own site is
 // a site row with page documents like any other, and requiring `isTenant` here
 // is what forced its marketing pages to be hardcoded components (#903).
@@ -65,8 +70,9 @@ const isPageResponse = (value: unknown): value is { success: true; page: PublicT
 
 const requestEvent = useRequestEvent()
 const blawbyDocument = inject<Ref<BlawbyDocumentPayload> | null>('blawby-document', null)
+const { trackConsultationClick } = useOrganizationConversionTracking(blawbyDocument ? () => blawbyDocument.value.shell.consultation : undefined)
 const { data, error, status, execute } = await useAsyncData(key, async () => {
-  if (isBlawby.value) {
+  if (template.slug === 'blawby') {
     const page = blawbyDocument?.value.route.page
     if (!page || page.locale !== activeLocale.value
       || resolveTenantLocalePath(page.path, [activeLocale.value]).sourcePath !== pagePath.value) {
@@ -127,9 +133,6 @@ const page = computed(() => data.value?.page ?? null)
 // A service document owns content and SEO; its explicit root binding owns the
 // Product supplying Price, Session and Booking. Never derive it from a slug.
 const linkedOffer = await usePublicPageProduct(pagePath, activeLocale, computed(() => page.value?.product_id ?? null))
-const servicePresentation = computed(() => linkedOffer.value
-  ? presentationForProduct(linkedOffer.value.vertical, linkedOffer.value.product)
-  : requireProductPresentation('service'))
 const secondaryAction = computed(() => {
   const hero = page.value?.blocks.find(block => block.type === 'hero')
   const label = blockTextOrNull(hero?.data.secondary_label)
@@ -175,118 +178,30 @@ if (data.value?.page) {
   useState<PublicLocaleRepresentation[]>('public-locale-representations', () => []).value = data.value.page.localeRepresentations
 }
 
-const schemaContext = inject<{ identity: ComputedRef<PublicBlawbyIdentity>; compliance: ComputedRef<PublicCompliance | null> } | null>('blawby-schema-context', null)
-const schemaOrg = useBlawbyOrgIdentity(() => schemaContext?.identity.value, () => schemaContext?.compliance.value)
-const supportedSchemaRecipes = new Set<string>(['home', 'about', 'contact', 'pricing', 'donate', 'schedule', 'services-index', 'service-detail'])
-const schemaRecipe = computed<ProfessionalServiceRecipe>(() => {
-  if (!page.value) return 'tenant-page'
-  if (page.value.recipe && supportedSchemaRecipes.has(page.value.recipe)) return page.value.recipe as ProfessionalServiceRecipe
-  if (page.value.path === '/services') return 'services-index'
-  if (page.value.path.startsWith('/services/')) return 'service-detail'
-  const pathRecipes = new Map<string, ProfessionalServiceRecipe>([
-    ['/', 'home'],
-    ['/about', 'about'],
-    ['/contact', 'contact'],
-    ['/pricing', 'pricing'],
-    ['/donate', 'donate'],
-    ['/schedule', 'schedule'],
-  ])
-  return pathRecipes.get(page.value.path) || 'tenant-page'
-})
-
-const pageFaqBlock = computed(() => page.value?.blocks.find(block => block.type === 'faq'))
-const pageFaqItems = computed<Array<{ question: string; answer: string }>>(() => {
-  if (!pageFaqBlock.value || !Array.isArray(pageFaqBlock.value.data.items)) return []
-  return pageFaqBlock.value.data.items
-    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
-    .map(item => ({
-      question: typeof item.title === 'string' ? item.title.trim() : '',
-      answer: typeof item.description === 'string' ? item.description.trim() : '',
-    }))
-    .filter(item => item.question && item.answer)
-})
-
-const pageHowToBlock = computed(() => page.value?.blocks.find(block => block.type === 'how_to'))
-const pageHowToNode = computed<ApiRecord | null>(() => {
-  if (!pageHowToBlock.value || !Array.isArray(pageHowToBlock.value.data.steps) || !page.value) return null
-  const steps = pageHowToBlock.value.data.steps
-    .filter((step): step is Record<string, unknown> => Boolean(step && typeof step === 'object'))
-    .map(step => ({
-      name: typeof step.name === 'string' ? step.name.trim() : '',
-      text: typeof step.text === 'string' ? step.text.trim() : '',
-    }))
-    .filter(step => step.name || step.text)
-  if (!steps.length) return null
-  const origin = isPlatform ? config.public.siteUrl : requestURL.origin
-  const url = resolveSeoUrl(page.value.path, origin)
-  return {
-    '@type': 'HowTo',
-    '@id': `${url}#howto`,
-    name: blockTextOrNull(pageHowToBlock.value.data.title) || page.value?.title || '',
-    step: steps.map((step, index) => ({
-      '@type': 'HowToStep',
-      position: index + 1,
-      name: step.name || undefined,
-      text: step.text || undefined,
-    })),
-  }
-})
-
-const serviceItems = computed(() => {
-  if (!page.value) return []
-  // The services this page lists are pages, and the page renders them from its
-  // page_grid. Reading a product_grid here described a block these pages do not
-  // carry, so the schema listed no services at all.
-  const servicesBlock = page.value.blocks.find(block => block.type === 'page_grid')
-  return Array.isArray(servicesBlock?.data.items)
-    ? servicesBlock.data.items.filter(item => item && typeof item === 'object' && !Array.isArray(item)).map(item => {
-        const record = item as Record<string, unknown>
-        return {
-          name: typeof record.title === 'string' ? record.title : '',
-          url: typeof record.url === 'string' ? record.url : '',
-          description: typeof record.description === 'string' ? record.description : null,
-        }
-      }).filter(item => item.name && item.url)
-    : []
-})
-
-const donationUrl = computed(() => {
-  const donationBlock = page.value?.blocks.find(block => block.type === 'donation_choices')
-  return typeof donationBlock?.data.destination === 'string' ? donationBlock.data.destination : null
-})
-
-const { canonicalUrl } = useSocialMetadata(() => page.value && ({
+useSocialMetadata(() => page.value && ({
   path: page.value.path,
   // Krabiclaw's own brand name is the platform name: its layout's title
   // template and useSocialMetadata already state it once for every platform
   // surface, so the page names only itself. A tenant states its own name.
-  title: isPlatform ? page.value.title : `${page.value.title} | ${organization?.name || ''}`,
+  title: isPlatform ? page.value.title : `${page.value.title} | ${organization.name}`,
   description: page.value.summary || '',
-  ...(isPlatform ? {} : { brand: { organizationName: organization?.name || '' } }),
   socialImage: page.value.social_image,
-  faqItems: pageFaqItems.value.length ? pageFaqItems.value : undefined,
-  schemaNodes: pageHowToNode.value ? [pageHowToNode.value] : undefined,
+  contentBlocks: page.value.blocks,
   schemaPageType: isPlatform && page.value.path === '/' ? 'SoftwareApplication' : undefined,
   softwareApplication: isPlatform && page.value.path === '/' ? {
     applicationCategory: 'BusinessApplication',
     operatingSystem: 'All (Web / Cloud-based)',
   } : undefined,
   breadcrumbs: page.value.path === '/' ? undefined : [
-    { name: isPlatform ? 'Home' : (organization?.name || 'Home'), url: '/' },
+    { name: isPlatform ? 'Home' : organization.name, url: '/' },
     { name: page.value.title, url: page.value.path },
   ],
-  professionalService: (isBlawby.value && schemaContext && schemaOrg.value?.name) ? {
-    recipe: schemaRecipe.value,
-    org: schemaOrg.value,
-    items: serviceItems.value,
-    offering: schemaRecipe.value === 'service-detail' ? {
-      name: page.value.title,
-      description: page.value.summary || null,
-      schemaType: schemaOrg.value?.entityType || 'LegalService',
+  professionalService: template.slug === 'blawby' ? {
+    recipe: linkedOffer.value?.product.kind === 'service' ? 'service-detail' : page.value.recipe,
+    offering: linkedOffer.value?.product.kind === 'service' ? {
+      name: linkedOffer.value.product.name,
+      description: linkedOffer.value.product.description,
     } : undefined,
-    donationUrl: donationUrl.value,
   } : undefined,
 }))
-
-useVideoSchema(() => page.value?.blocks, canonicalUrl)
 </script>

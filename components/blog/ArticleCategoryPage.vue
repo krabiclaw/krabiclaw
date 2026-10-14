@@ -66,8 +66,9 @@ import { categorySubtree, categoryTrail } from '~/composables/usePublishedArticl
 const props = defineProps<{ collection: ArticleCollection }>()
 const route = useRoute()
 const { t, localePath } = useI18n()
-const { organization, isPlatform } = useTenantOrganization()
-const organizationName = computed(() => organization?.name?.trim() ?? '')
+const { organization } = useTenantOrganization()
+const isPlatform = organization.template.slug === 'platform'
+const organizationName = organization.name
 
 const { categories, localeRepresentations } = await usePublishedArticles(props.collection)
 // A category with no published article, or none by this name, is not a page.
@@ -119,10 +120,9 @@ const itemList = useArticleItemList(() => localePath(path.value), () => category
 
 useSocialMetadata(() => ({
   path: path.value,
-  socialImage: illustration.value ? { url: illustration.value.og, width: 1200, height: 630, type: 'image/png', alt: illustration.value.alt } : organization?.social_image ?? null,
-  title: isPlatform || !organizationName.value ? `${category.value.name} | ${indexLabel.value}` : `${category.value.name} | ${indexLabel.value} | ${organizationName.value}`,
-  description: category.value.description || t('saya.posts.category_meta_description', { category: category.value.name, collection: indexLabel.value, organization: organizationName.value }),
-  brand: { organizationName: organizationName.value },
+  socialImage: illustration.value ? { url: illustration.value.og, width: 1200, height: 630, type: 'image/png', alt: illustration.value.alt } : organization.social_image,
+  title: isPlatform ? `${category.value.name} | ${indexLabel.value}` : `${category.value.name} | ${indexLabel.value} | ${organizationName}`,
+  description: category.value.description || t('saya.posts.category_meta_description', { category: category.value.name, collection: indexLabel.value, organization: organizationName }),
   schemaPageType: 'CollectionPage',
   schemaNodes: [itemList.value],
   breadcrumbs: [

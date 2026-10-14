@@ -8,8 +8,8 @@ import { isCurrencyCode } from '~/shared/currencies'
 import { presentationForSurface } from '~/utils/product-presentation'
 
 definePageMeta({ layout: 'saya' })
-const { isBlawby } = usePublicTemplate()
-if (isBlawby.value) throw createError({ statusCode: 404 })
+const { template } = useTenantOrganization().organization
+if (template.slug === 'blawby') throw createError({ statusCode: 404 })
 const { products, collections, locations, location, config, organization, data: pagePayload } = await usePublicPageData({ lazy: false })
 // What the merchant sells over the counter. Anything a guest books a seat on
 // is an Experience and has its own surface, so it is not listed twice.
@@ -39,7 +39,6 @@ useSocialMetadata(() => ({
   title: `${locationTitle} Products`,
   description: `Products at ${locationTitle}.`,
   socialImage: location.value?.social_image ?? null,
-  brand: { organizationName: brandName },
   breadcrumbs: [
     { name: 'Locations', url: '/locations' },
     { name: locationTitle, url: `/locations/${encodeURIComponent(currentLocation.slug)}` },

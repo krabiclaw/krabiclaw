@@ -1,5 +1,5 @@
 <template>
-  <NuxtLayout :name="layoutName">
+  <NuxtLayout :name="template.layout">
     <section v-if="linksPage" :class="templateClass">
       <div :class="shellClass">
         <div :class="identityClass">
@@ -9,7 +9,7 @@
             :alt="brandName"
             :class="profileImageClass"
           >
-          <p v-if="isBlawby" class="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--blawby-accent-strong)]">{{ linksPage.page.title }}</p>
+          <p v-if="template.slug === 'blawby'" class="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--blawby-accent-strong)]">{{ linksPage.page.title }}</p>
           <h1 :class="headingClass">{{ linksPage.page.title }}</h1>
         </div>
 
@@ -37,24 +37,18 @@
 </template>
 
 <script setup lang="ts">
-import { TENANT_TYPES } from '~/utils/tenant-routing'
 import { ApiClientError, publicApiRequest } from '~/utils/api-clients'
 import { isPublicLinksPayload, isPublicLinksResponse, type PublicLinksItem, type PublicLinksPayload } from '~/utils/public-links-contract'
 
 definePageMeta({ layout: false })
 
-const tenantState = useTenantOrganization()
+const { id: organizationId, template, social_image: organizationSocialImage } = useTenantOrganization().organization
+const isTenant = template.slug !== 'platform'
 const route = useRoute()
 const { localePath } = useI18n()
 const locale = typeof route.params.locale === 'string' ? route.params.locale : 'en'
 const requestEvent = useRequestEvent()
-const organizationId = import.meta.server
-  ? (requestEvent?.context.organizationId as string | null | undefined) ?? tenantState.organizationId
-  : tenantState.organizationId
-const isTenant = import.meta.server
-  ? requestEvent?.context.tenantType === TENANT_TYPES.TENANT || tenantState.isTenant
-  : tenantState.isTenant
-if (!isTenant || !organizationId) {
+if (!isTenant) {
   throw createError({ statusCode: 404, statusMessage: 'Links page not found' })
 }
 
@@ -90,33 +84,21 @@ if (!data.value) throw createError({ statusCode: 404, statusMessage: 'Links page
 useState<PublicLinksPayload['localeRepresentations']>('public-locale-representations', () => []).value = data.value.localeRepresentations
 
 const linksPage = computed(() => data.value)
-const isBlawby = computed(() => linksPage.value?.organization.template === 'blawby')
-const layoutName = computed(() => isBlawby.value ? 'blawby' : 'saya')
 const brandName = computed(() => linksPage.value?.organization.name || linksPage.value?.page.title || '')
 const profileImageUrl = computed(() => linksPage.value?.organization.media.find(item => item.slot === 'logo')?.public_url || null)
 const { trackLinkClick: recordLinkClick } = useOrganizationConversionTracking()
 
-const templateClass = computed(() => isBlawby.value
-  ? 'min-h-[calc(100vh-8rem)] bg-default px-4 py-10 sm:px-6 sm:py-14'
-  : 'min-h-[calc(100vh-8rem)] bg-default px-4 py-10 sm:px-6 sm:py-14')
-const shellClass = computed(() => isBlawby.value
-  ? 'mx-auto max-w-md'
-  : 'mx-auto max-w-md')
-const identityClass = computed(() => isBlawby.value
-  ? 'text-center'
-  : 'text-center')
-const profileImageClass = computed(() => isBlawby.value
-  ? 'mx-auto size-18 rounded-full object-cover shadow-sm'
-  : 'mx-auto size-18 rounded-full object-cover shadow-sm')
-const headingClass = computed(() => isBlawby.value
+const templateClass = 'min-h-[calc(100vh-8rem)] bg-default px-4 py-10 sm:px-6 sm:py-14'
+const shellClass = 'mx-auto max-w-md'
+const identityClass = 'text-center'
+const profileImageClass = 'mx-auto size-18 rounded-full object-cover shadow-sm'
+const headingClass = computed(() => template.slug === 'blawby'
   ? 'mt-5 text-3xl font-semibold tracking-normal text-highlighted'
   : 'saya-display-md mt-5 text-default')
-const linkClass = computed(() => isBlawby.value
+const linkClass = computed(() => template.slug === 'blawby'
   ? 'group flex min-h-14 items-center rounded-lg border border-default bg-elevated px-5 py-4 text-center text-highlighted no-underline shadow-sm transition hover:-translate-y-0.5 hover:border-secondary hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-secondary'
   : 'group flex min-h-14 items-center rounded-full border border-primary/25 bg-primary/8 px-5 py-4 text-center text-default no-underline shadow-sm transition hover:-translate-y-0.5 hover:bg-primary/12 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary')
-const labelClass = computed(() => isBlawby.value
-  ? 'block truncate text-base font-semibold'
-  : 'block truncate text-base font-semibold')
+const labelClass = 'block truncate text-base font-semibold'
 
 function isHttpDestination(destination: string) {
   return /^https?:\/\//i.test(destination)
@@ -140,13 +122,11 @@ function trackLinkClick(item: PublicLinksItem) {
 }
 
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
 useSocialMetadata(() => ({
   path: '/links',
   socialImage: organizationSocialImage,
   title: linksPage.value?.page.title || brandName.value,
   description: linksPage.value?.organization.brand_description || '',
   discoverability: 'unlisted',
-  brand: { organizationName: brandName.value },
 }))
 </script>

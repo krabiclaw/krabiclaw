@@ -1,7 +1,8 @@
 import type { MaybeRefOrGetter } from 'vue'
 import type { memberSchedulingList } from '~/server/domain/member-scheduling'
+import type { Serialize } from 'nitro/types'
 
-type MembersResponse = Awaited<ReturnType<typeof memberSchedulingList>>
+type MembersResponse = Serialize<Awaited<ReturnType<typeof memberSchedulingList>>>
 
 /** One scoped read for assignment controls and calendar filters. */
 export function useMemberSchedulingList(organizationId: MaybeRefOrGetter<string | null | undefined>) {
@@ -15,7 +16,8 @@ export function useMemberSchedulingList(organizationId: MaybeRefOrGetter<string 
           && value.members.every(member => isRecord(member) && typeof member.id === 'string' && typeof member.name === 'string'
             && (member.image === null || typeof member.image === 'string') && typeof member.self === 'boolean'
             && (member.scheduling === null || isRecord(member.scheduling)))
-          && Array.isArray(value.teams) && value.teams.every(team => isRecord(team) && typeof team.id === 'string' && typeof team.name === 'string' && Array.isArray(team.member_user_ids) && team.member_user_ids.every(id => typeof id === 'string')),
+          && Array.isArray(value.teams) && value.teams.every(team => isRecord(team) && typeof team.id === 'string' && typeof team.name === 'string' && Array.isArray(team.members)
+            && team.members.every(member => isRecord(member) && typeof member.id === 'string' && typeof member.teamId === 'string' && typeof member.userId === 'string' && typeof member.createdAt === 'string')),
       })
     },
   )

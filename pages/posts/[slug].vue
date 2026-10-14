@@ -16,15 +16,14 @@ const isPublicPostResponse = (value: unknown): value is { post: DetailPost } =>
 
 const route = useRoute()
 const requestEvent = useRequestEvent()
-const { organizationId, organization, isPlatform, previewAuthorized } = useTenantOrganization()
-if (!organizationId) throw createError({ statusCode: 404 })
-const { organization: publicOrganization } = useOrganizationShellState()
+const { organization, previewAuthorized } = useTenantOrganization()
+const { id: organizationId } = organization
+const isPlatform = organization.template.slug === 'platform'
 const { locale } = useI18n()
 
 const slug = computed(() => String(route.params.slug))
-const organizationName = computed(() => organization?.name?.trim() ?? '')
-const logoUrl = computed(() => publicOrganization.value?.media.find(item => item.slot === 'logo')?.public_url || null)
-const postBrand = computed(() => ({ name: organizationName.value, logoUrl: logoUrl.value }))
+const organizationName = organization.name
+const postBrand = { name: organization.name, logoUrl: organization.logos.find(logo => logo.slot === 'logo')?.url ?? null }
 
 // One reader for the server render and client navigation: the SSR path calls
 // it directly and the client asks the public API, which calls the same one.
@@ -56,33 +55,21 @@ useState<DetailPost['localeRepresentations']>('public-locale-representations', (
 const post = computed(() => data.value?.post ?? null)
 // A post without a title is described by its own words, and titled by the
 // business that wrote it; nothing is invented for it.
-const seoTitle = computed(() => post.value?.title || post.value?.body?.split('\n').find(line => line.trim())?.slice(0, 70) || organizationName.value)
+const seoTitle = computed(() => post.value?.title || post.value?.body?.split('\n').find(line => line.trim())?.slice(0, 70) || organizationName)
 const seoDescription = computed(() => post.value?.body || post.value?.title || '')
-const { canonicalUrl, ogImageUrl } = useSocialMetadata(() => ({
-  path: post.value?.url || post.value?.path || `/posts/${slug.value}`,
+useSocialMetadata(() => post.value && ({
+  path: post.value.path,
   // A tenant's page names the business, as its other pages do; Krabiclaw's template adds its own name.
-  title: isPlatform || seoTitle.value === organizationName.value ? seoTitle.value : `${seoTitle.value} | ${organizationName.value}`,
+  title: isPlatform || seoTitle.value === organizationName ? seoTitle.value : `${seoTitle.value} | ${organizationName}`,
   description: seoDescription.value,
   pageType: 'article',
-  brand: { organizationName: organizationName.value },
-  socialImage: post.value?.social_image ?? null,
-  publishedAt: post.value?.published_at || null,
-  discoverability: post.value?.status === 'draft' ? 'private' : post.value?.visibility,
+  author: organizationName,
+  article: { type: 'Article', authorType: 'Organization', inLanguage: locale.value, imageUrl: post.value.social_image?.url },
+  socialImage: post.value.social_image,
+  publishedAt: post.value.published_at,
+  discoverability: post.value.status === 'draft' ? 'private' : post.value.visibility,
   breadcrumbs: [
-    { name: seoTitle.value, url: post.value?.url || post.value?.path || `/posts/${slug.value}` },
+    { name: seoTitle.value, url: post.value.path },
   ],
 }))
-
-useSchemaOrg([
-  computed(() => ({
-    '@type': 'Article',
-    headline: seoTitle.value,
-    description: seoDescription.value,
-    datePublished: post.value?.published_at,
-    image: ogImageUrl.value,
-    url: canonicalUrl.value,
-    author: { '@type': 'Organization', name: organizationName.value },
-    publisher: { '@type': 'Organization', name: organizationName.value, logo: logoUrl.value ? { '@type': 'ImageObject', url: logoUrl.value } : undefined },
-  })),
-])
 </script>

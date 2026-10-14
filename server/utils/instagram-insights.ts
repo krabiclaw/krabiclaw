@@ -24,7 +24,7 @@ export async function loadInstagramInsights(env: CloudflareEnv, organizationId: 
   if (!connection) return { status: 'not_connected', message: 'No Instagram professional account is connected. Connect one in Settings → Integrations → Instagram.' }
   const account = await readLinkedAccount(env, connection.account_id)
   if (!account) return { status: 'account_unlinked', message: 'The Instagram login this connection was made through is no longer linked. Connect Instagram again.' }
-  if (!account.scopes.includes(INSIGHTS_SCOPE)) return { status: 'permission_missing', message: 'Instagram has not granted access to insights for this account. Connect Instagram again and allow insights.' }
+  if (!account.scope?.split(',').some(scope => scope.trim() === INSIGHTS_SCOPE)) return { status: 'permission_missing', message: 'Instagram has not granted access to insights for this account. Connect Instagram again and allow insights.' }
 
   const context = await resolveOrganizationAnalyticsContext(env.DB, organizationId)
   const range = parseAnalyticsRange({ startDate: query.startDate, endDate: query.endDate, timeZone: context.timezone, now: new Date() })

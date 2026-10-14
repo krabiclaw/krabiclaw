@@ -1,12 +1,12 @@
 <template>
   <NuxtLayout name="blawby">
-    <BlawbySchedule />
+    <TenantPublicPage path="/schedule" />
   </NuxtLayout>
 </template>
 
 <script setup lang="ts">
-const { isBlawby } = usePublicTemplate()
-if (!isBlawby.value) throw createError({ statusCode: 404 })
+const { template } = useTenantOrganization().organization
+if (template.slug !== 'blawby') throw createError({ statusCode: 404 })
 
 definePageMeta({ layout: false })
 </script>

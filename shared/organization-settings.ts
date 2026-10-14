@@ -75,16 +75,23 @@ export interface OrganizationSettings {
     careers_email?: string
     whatsapp_phone?: string
   }
-  consultation?: Omit<import('../types/blawby').PublicConsultationSettings, 'contact_form_enabled' | 'metadata'> & {
+  consultation?: import('../types/blawby').PublicConsultationSettings & {
     metadata_json: Record<string, unknown> | null
     created_at: string
     updated_at: string
     updated_by: string | null
   }
-  compliance?: Omit<import('../types/blawby').PublicCompliance, 'media' | 'metadata'> & {
+  compliance?: Omit<import('../types/blawby').PublicCompliance, 'media'> & {
     metadata_json: Record<string, unknown> | null
     created_at: string
     updated_at: string
     updated_by: string | null
   }
 }
+
+const NONPROFIT_501C_MAX = 28
+export const NONPROFIT_STATUS_CANONICAL = new Set<string>([
+  ...Array.from({ length: NONPROFIT_501C_MAX }, (_, index) => `https://schema.org/Nonprofit501c${index + 1}`),
+  'https://schema.org/NonprofitANBI',
+  'https://schema.org/NonprofitSBBI',
+])

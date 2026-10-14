@@ -1,17 +1,17 @@
-import { APIError, betterAuth, type BetterAuthPlugin } from 'better-auth'
+import { APIError, betterAuth, type Account, type BetterAuthPlugin } from 'better-auth'
 import { createAuthMiddleware, getOAuthState, isAPIError } from 'better-auth/api'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { hashPassword } from 'better-auth/crypto'
 import { DISCORD_BOT_PERMISSIONS } from '~/server/utils/discord-bot'
 import { loginMethodForPath } from '~/shared/auth/login-method'
-import { admin, anonymous, bearer, genericOAuth, getOrgAdapter, hasPermission, jwt, lastLoginMethod, organization, phoneNumber } from 'better-auth/plugins'
+import { admin, anonymous, bearer, genericOAuth, getOrgAdapter, hasPermission, jwt, lastLoginMethod, organization, phoneNumber, type UserWithAnonymous } from 'better-auth/plugins'
 import { stripe as betterAuthStripe } from '@better-auth/stripe'
 import { oauthProvider } from '@better-auth/oauth-provider'
 import { cimd } from '@better-auth/cimd'
 import { fetchCimdMetadataResource } from '~/server/utils/cimd-metadata-fetch'
 import type { GenericEndpointContext } from '@better-auth/core'
 import { HTTPError, type H3Event } from 'nitro';
-import { createDb, execute, executeBatch, queryAll, queryFirst, schema, type BatchQuery } from '~/server/db'
+import { createDb, execute, executeBatch, queryAll, schema, type BatchQuery } from '~/server/db'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { sendWhatsAppOtp } from '~/server/utils/whatsapp'
 import { parsePhoneOrThrow } from '~/utils/phone'
@@ -376,9 +376,11 @@ function buildAuth(env: CloudflareEnv) {
       session: {
         create: {
           after: async (session) => {
-            const user = await queryFirst<{ id: string; email: string; emailVerified: number; isAnonymous: number | null }>(db, 'SELECT id, email, "emailVerified", "isAnonymous" FROM user WHERE id = ?', [session.userId])
+            const user = await (await createAuth(env).$context).adapter.findOne<Pick<UserWithAnonymous, 'id' | 'email' | 'emailVerified' | 'isAnonymous'>>({
+              model: 'user', where: [{ field: 'id', value: session.userId }], select: ['id', 'email', 'emailVerified', 'isAnonymous'],
+            })
             if (!user) throw new Error('A session was created for a user that does not exist')
-            await linkGuestIdentitiesByVerifiedEmail(db, { ...user, emailVerified: Boolean(user.emailVerified), isAnonymous: Boolean(user.isAnonymous) })
+            await linkGuestIdentitiesByVerifiedEmail(db, user)
           },
         },
       },
@@ -783,13 +785,7 @@ export async function findVerifiedAuthUserByPhone(
   phoneNumber: string,
 ): Promise<{ id: string; phoneNumber: string; phoneNumberVerified: boolean } | null> {
   const context = await createAuth(env).$context
-  const adapter = context.adapter as unknown as {
-    findOne<T>(_input: {
-      model: string
-      where: Array<{ field: string; value: string | boolean }>
-    }): Promise<T | null>
-  }
-  return await adapter.findOne({
+  return await context.adapter.findOne({
     model: 'user',
     where: [
       { field: 'phoneNumber', value: phoneNumber },
@@ -798,11 +794,7 @@ export async function findVerifiedAuthUserByPhone(
   })
 }
 
-export interface AuthUserIdentity {
-  id: string
-  name: string | null
-  image: string | null
-}
+export type AuthUserIdentity = Pick<ReturnType<typeof createAuth>['$Infer']['Session']['user'], 'id' | 'name' | 'image'>
 
 // content_documents stores author_id as a plain
 // reference — that's fine, it's just a foreign-looking string, not a query.
@@ -814,15 +806,7 @@ export async function findAuthUsersByIds(env: CloudflareEnv, userIds: Array<stri
   if (uniqueIds.length === 0) return new Map()
 
   const context = await createAuth(env).$context
-  const adapter = context.adapter as unknown as {
-    findMany<T>(_input: {
-      model: string
-      where: Array<{ field: string; operator: string; value: string[] }>
-      select?: string[]
-      limit?: number
-    }): Promise<T[]>
-  }
-  const rows = await adapter.findMany<AuthUserIdentity>({
+  const rows = await context.adapter.findMany<AuthUserIdentity>({
     model: 'user',
     where: [{ field: 'id', operator: 'in', value: uniqueIds }],
     select: ['id', 'name', 'image'],
@@ -836,27 +820,16 @@ export async function findAuthUsersByIds(env: CloudflareEnv, userIds: Array<stri
  * organization names by `account_id`, the user it belongs to, and the scopes
  * Better Auth recorded across every link of it.
  */
-export interface LinkedAccount {
-  id: string
-  userId: string
-  providerId: string
-  /** The provider's own id for the person, which for Meta is app-scoped. */
-  providerAccountId: string
-  scopes: string[]
-}
+type LinkedAccount = Pick<Account, 'id' | 'userId' | 'providerId' | 'accountId' | 'scope'>
 
 /** Reads a linked account through Better Auth's adapter. Null when it has been unlinked. */
 export async function readLinkedAccount(env: CloudflareEnv, accountId: string): Promise<LinkedAccount | null> {
   const context = await createAuth(env).$context
-  const adapter = context.adapter as unknown as {
-    findOne<T>(_input: { model: string; where: Array<{ field: string; value: string }> }): Promise<T | null>
-  }
-  const row = await adapter.findOne<{ id: string; userId: string; providerId: string; accountId: string; scope: string | null }>({
+  return context.adapter.findOne<LinkedAccount>({
     model: 'account',
     where: [{ field: 'id', value: accountId }],
+    select: ['id', 'userId', 'providerId', 'accountId', 'scope'],
   })
-  if (!row) return null
-  return { id: row.id, userId: row.userId, providerId: row.providerId, providerAccountId: row.accountId, scopes: (row.scope ?? '').split(/[,\s]+/).filter(Boolean) }
 }
 
 /**
@@ -908,7 +881,7 @@ export async function requireIntegrationAccount(
     || (account.userId !== expected.userId && account.id !== expected.currentAccountId)) {
     throw new HTTPError({ statusCode: 404, message: 'That account is not linked to you.' })
   }
-  const missing = expected.scopes.filter(scope => !account.scopes.includes(scope))
+  const missing = expected.scopes.filter(scope => !account.scope?.split(',').some(granted => granted.trim() === scope))
   if (missing.length) {
     throw new HTTPError({ statusCode: 403, message: `That account has not granted ${missing.join(', ')}. Connect it again.` })
   }
@@ -933,11 +906,7 @@ export async function getAuthSession(event: H3Event, env: CloudflareEnv): Promis
 export async function ensureInteractionUser(event: H3Event, env: CloudflareEnv): Promise<string> {
   const session = await getAuthSession(event, env)
   if (session?.user) return session.user.id
-  // createAuth's cached instance is typed as bare betterAuth, which erases
-  // plugin endpoints from `api`; anonymous() registers this one.
-  const auth = createAuth(env) as unknown as {
-    api: { signInAnonymous: (input: { headers: Headers; returnHeaders: true }) => Promise<{ headers: Headers; response: { user?: { id?: string } } | null }> }
-  }
+  const auth = createAuth(env)
   const { headers, response } = await auth.api.signInAnonymous({
     headers: event.req.headers,
     returnHeaders: true,

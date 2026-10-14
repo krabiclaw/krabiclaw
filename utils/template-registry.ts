@@ -1,10 +1,11 @@
+import type { LayoutKey } from 'nuxt/app'
 import type { PlatformIconName } from '~/components/platform/PlatformIcon.vue'
 export type PublicTemplateSlug = 'saya' | 'blawby' | 'platform'
 
 export interface PublicTemplateDefinition {
   slug: PublicTemplateSlug
   themeId: string
-  layout: string
+  layout: LayoutKey
   verticals: string[]
   serviceRoutes: {
     offeringsIndex: string | null
@@ -36,7 +37,7 @@ export interface PublicTemplateDefinition {
    * like any other (#903).
    */
   pageDocuments: {
-    recipes: Record<string, string>
+    recipes: Record<string, string> & { home: string }
     paths: string[]
     patterns?: string[]
     prefixes: string[]
@@ -178,13 +179,6 @@ export function resolvePublicTemplate(input: {
     throw new Error(`resolvePublicTemplate() found no compatible template for themeId="${themeId}" vertical="${vertical}".`)
   }
   return match
-}
-
-export function isBlawbyTemplate(input: {
-  themeId?: string | null
-  vertical?: string | null
-}) {
-  return resolvePublicTemplate(input).slug === 'blawby'
 }
 
 // The public Blawby API routes are a security gate, not just a rendering-path

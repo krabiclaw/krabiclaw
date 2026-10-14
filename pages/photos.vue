@@ -69,11 +69,9 @@
 definePageMeta({ layout: 'saya' })
 
 const { localePath, t } = useI18n()
-const { organizationId, organization } = useTenantOrganization()
-if (!organizationId) throw createError({ statusCode: 404 })
-
+const { organization } = useTenantOrganization()
 const { locations, media: photos, pending } = await usePublicPageData()
-const organizationName = computed(() => organization?.name?.trim() ?? '')
+const organizationName = organization.name
 
 const locationsById = computed(() => Object.fromEntries(locations.value.map(l => [l.id, l])))
 function locationTitle(photo) {
@@ -138,15 +136,12 @@ const lightboxItems = computed(() =>
 
 useSocialMetadata(() => ({
   path: '/photos',
-  title: `${t('saya.subnav.photos')} | ${organizationName.value}`,
+  title: `${t('saya.subnav.photos')} | ${organizationName}`,
   description: t('saya.photos.meta_description', {
     count: photos.value.length,
-    location: organizationName.value,
-    organization: organizationName.value,
+    location: organizationName,
+    organization: organizationName,
   }),
-  brand: {
-    organizationName: organizationName.value,
-  },
   breadcrumbs: [
     { name: t('saya.subnav.photos'), url: '/photos' },
   ],

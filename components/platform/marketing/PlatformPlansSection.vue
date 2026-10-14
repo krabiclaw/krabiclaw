@@ -24,7 +24,7 @@
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import { blockTextOrNull, blockMedia } from '~/utils/tenant-page-block-data'
-import { useSchemaOrg } from '~/composables/useSchemaOrg'
+import { useSchemaOrg } from '#imports'
 import type { Plan } from '~/composables/usePlans'
 import { STARTER_PLAN_ID, NEW_SALE_PAID_PLAN_IDS } from '~/shared/billing-model'
 
@@ -78,18 +78,17 @@ function offerFor(plan: Plan) {
 
 // The catalog is stated once, from the pricing page; the homepage repeats the
 // table but not the structured data.
-useSchemaOrg(() => {
-  if (variant.value !== 'pricing') return null
+useSchemaOrg(computed(() => {
+  if (variant.value !== 'pricing') return []
   const offers = plans.value.map(offerFor).filter((offer): offer is NonNullable<ReturnType<typeof offerFor>> => offer !== null)
-  if (!offers.length) return null
+  if (!offers.length) return []
   return {
-    '@context': 'https://schema.org',
     '@type': 'OfferCatalog',
     '@id': `${pageUrl}#offers`,
     name: 'Krabiclaw Pricing Plans',
     itemListElement: offers,
   }
-})
+}))
 </script>
 
 <style scoped>

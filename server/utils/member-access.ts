@@ -186,7 +186,7 @@ export async function resolveOrganizationMembership(
   return resolvedMembershipOf({
     userId: input.userId,
     organizationId: input.organizationId,
-    role: String(member.role),
+    role: member.role,
     memberId: member.id,
     organizationSlug: organization.slug,
     organizationName: organization.name,
@@ -212,7 +212,7 @@ export async function resolveMembership(
   return resolvedMembershipOf({
     userId: input.userId,
     organizationId: input.organizationId,
-    role: String(member.role),
+    role: member.role,
   })
 }
 
@@ -240,7 +240,7 @@ export async function resolveUserOrganization(
     id: organization.id,
     name: organization.name,
     slug: organization.slug,
-    role: String(member.role),
+    role: member.role,
     memberId: member.id,
   })
 }
@@ -249,7 +249,7 @@ export async function resolveUserOrganization(
 // complete membership (not just a bounded page for display) must walk every
 // page via its own total, or a large organization silently loses members
 // past the first 100.
-async function listAllOrganizationMembers(adapter: OrganizationAdapter, organizationId: string) {
+export async function listAllOrganizationMembers(adapter: OrganizationAdapter, organizationId: string) {
   const pageSize = 100
   const firstPage = await adapter.listMembers({ organizationId, limit: pageSize, offset: 0, sortBy: 'createdAt', sortOrder: 'asc' })
   const members = [...firstPage.members]
@@ -298,7 +298,7 @@ export async function listOrganizationNotificationMembers(
   // a duplicated alert.
   const byUserId = new Map<string, { id: string; email: string }>()
   for (const member of members) {
-    if (!member.user || !(isOrganizationWideRole(String(member.role)) || options.includeMemberIds?.includes(member.id))) continue
+    if (!(isOrganizationWideRole(member.role) || options.includeMemberIds?.includes(member.id))) continue
     byUserId.set(member.user.id, { id: member.user.id, email: member.user.email })
   }
   if (byUserId.size === 0) return []
@@ -308,32 +308,26 @@ export async function listOrganizationNotificationMembers(
   // adapter that owns it. Reading `member.user.phoneNumber` silently produced
   // undefined for everyone, which is a tenant hearing nothing on WhatsApp.
   const { createAuth } = await import('~/server/utils/auth')
-  const context = await createAuth(env).$context
-  const userAdapter = context.adapter as unknown as {
-    findMany<T>(_input: {
-      model: string
-      where: Array<{ field: string; operator: string; value: string[] }>
-      select?: string[]
-      limit?: number
-    }): Promise<T[]>
-  }
+  const auth = createAuth(env)
+  const context = await auth.$context
   const ids = [...byUserId.keys()]
-  const rows = await userAdapter.findMany<{ id: string; phoneNumber: string | null; phoneNumberVerified: boolean | number | null }>({
+  const rows = await context.adapter.findMany<Pick<typeof auth.$Infer.Session.user, 'id' | 'phoneNumber' | 'phoneNumberVerified'>>({
     model: 'user',
     where: [{ field: 'id', operator: 'in', value: ids }],
     select: ['id', 'phoneNumber', 'phoneNumberVerified'],
     limit: ids.length,
   })
-  const verifiedPhone = new Map(rows.map(row => [
-    row.id,
-    row.phoneNumber && row.phoneNumberVerified ? row.phoneNumber : null,
-  ]))
+  const usersById = new Map(rows.map(row => [row.id, row]))
 
-  return ids.map(id => ({
-    userId: id,
-    email: byUserId.get(id)!.email,
-    phone: verifiedPhone.get(id) ?? null,
-  }))
+  return ids.map(id => {
+    const user = usersById.get(id)
+    if (!user) throw new Error(`Better Auth user ${id} is missing for an organization notification member`)
+    return {
+      userId: id,
+      email: byUserId.get(id)!.email,
+      phone: user.phoneNumber && user.phoneNumberVerified ? user.phoneNumber : null,
+    }
+  })
 }
 
 export async function listUserOrganizations(env: CloudflareEnv, userId: string) {
@@ -341,32 +335,8 @@ export async function listUserOrganizations(env: CloudflareEnv, userId: string) 
   return await adapter.listOrganizations(userId)
 }
 
-export async function findOrganizationMemberById(
-  env: CloudflareEnv,
-  memberId: string,
-): Promise<{ id: string; userId: string; organizationId: string; role: string } | null> {
-  const adapter = await organizationAdapter(env)
-  const member = await adapter.findMemberById(memberId)
-  if (!member) return null
-  return {
-    id: member.id,
-    userId: member.userId,
-    organizationId: member.organizationId,
-    role: String(member.role),
-  }
-}
-
 export async function findOrganizationById(env: CloudflareEnv, organizationId: string) {
   return await organizationAdapter(env).then(adapter => adapter.findOrganizationById(organizationId))
-}
-
-export async function listOrganizationMembers(env: CloudflareEnv, organizationId: string) {
-  const adapter = await organizationAdapter(env)
-  return await listAllOrganizationMembers(adapter, organizationId)
-}
-
-export async function deleteOrganization(env: CloudflareEnv, organizationId: string): Promise<void> {
-  await organizationAdapter(env).then(adapter => adapter.deleteOrganization(organizationId))
 }
 
 /**

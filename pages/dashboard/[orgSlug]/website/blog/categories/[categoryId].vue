@@ -3,7 +3,7 @@
     id="organization-blog-category"
     :title="category?.name ?? 'Category'"
     :saving="saving"
-    :disabled="!form?.dirty || !name.trim()"
+    :disabled="(!form?.dirty && !actionError) || !name.trim()"
     :error="actionError || loadFailure"
     @cancel="reset(); revision += 1"
     @save="form?.submit()"
@@ -19,15 +19,15 @@
       />
     </template>
     <UForm v-if="category" ref="form" :key="revision" :state="{ name, description, parent }" class="space-y-6" @submit="save">
-      <UFormField label="Name" required>
+      <UFormField name="name" label="Name" required>
         <UInput v-model="name" autofocus class="w-full" />
       </UFormField>
-      <UFormField label="Description" help="Shown on the category's page and used as its search description.">
+      <UFormField name="description" label="Description" help="Shown on the category's page and used as its search description.">
         <UTextarea v-model="description" :rows="4" autoresize class="w-full" />
       </UFormField>
       <!-- Where it sits: under another category of the collection, or at the top. Its page's address does not change. -->
-      <UFormField label="Parent" help="Categories nest up to three levels deep.">
-        <USelect v-model="parent" :items="parentOptions" value-key="value" class="w-full" />
+      <UFormField name="parent" label="Parent" help="Categories nest up to three levels deep.">
+        <USelect v-model.nullable="parent" :items="parentOptions" value-key="value" class="w-full" />
       </UFormField>
     </UForm>
   </DashboardLeafPanel>
@@ -62,8 +62,7 @@ const localizationFields = computed(() => [
   { key: 'description', label: 'Description', source: category.value?.description, multiline: true },
 ])
 const { data: siblings } = await useArticleCategories(organizationId, () => category.value?.collection ?? 'blog')
-// The top of the collection is the empty choice; a category cannot sit under itself or anything under it.
-const TOP_LEVEL = ''
+// A category without a parent is top-level; it cannot sit under itself or anything under it.
 const parentOptions = computed(() => {
   const all = siblings.value ?? []
   const excluded = new Set<string>([categoryId.value])
@@ -71,15 +70,15 @@ const parentOptions = computed(() => {
     grew = false
     for (const row of all) if (row.parent_id && excluded.has(row.parent_id) && !excluded.has(row.id)) { excluded.add(row.id); grew = true }
   }
-  return [{ label: 'Top level', value: TOP_LEVEL }, ...all.filter(row => !excluded.has(row.id)).map(row => ({ label: row.name, value: row.id }))]
+  return [{ label: 'Top level', value: null }, ...all.filter(row => !excluded.has(row.id)).map(row => ({ label: row.name, value: row.id }))]
 })
 const name = ref('')
 const description = ref('')
-const parent = ref(TOP_LEVEL)
+const parent = ref<string | null>(null)
 function reset() {
   name.value = category.value?.name ?? ''
   description.value = category.value?.description ?? ''
-  parent.value = category.value?.parent_id ?? TOP_LEVEL
+  parent.value = category.value?.parent_id ?? null
 }
 watch(category, reset, { immediate: true })
 const form = useTemplateRef('form')
@@ -93,7 +92,7 @@ async function save() {
   actionError.value = ''
   try {
     await dashboardApi(`/api/editor/organizations/${organizationId}/blog/categories/${categoryId.value}`, {
-      method: 'PATCH', body: { name: name.value.trim(), description: description.value.trim() || null, parent_id: parent.value || null }, validate: isCategoryResponse,
+      method: 'PATCH', body: { name: name.value.trim(), description: description.value.trim() || null, parent_id: parent.value }, validate: isCategoryResponse,
     })
     await Promise.all([refresh(), refreshNuxtData(`article-categories:${organizationId}:${category.value?.collection}`)])
   } catch (cause) {

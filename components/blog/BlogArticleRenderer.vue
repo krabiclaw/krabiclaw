@@ -138,13 +138,19 @@
         <div v-else-if="block.type === 'how_to' && editable" class="space-y-2">
           <div v-for="(step, stepIndex) in howToSteps(block)" :key="stepIndex" class="flex items-center gap-2">
             <span class="w-5 shrink-0 text-right text-sm opacity-60">{{ stepIndex + 1 }}.</span>
-            <UInput :model-value="step.text || step.name || ''" placeholder="Step" class="w-full flex-1" @update:model-value="value => updateHowToStep(index, stepIndex, String(value))" />
+            <div class="flex-1 space-y-2">
+              <UInput :model-value="step.name" placeholder="Step name" aria-label="Step name" class="w-full" @update:model-value="value => updateHowToStep(index, stepIndex, 'name', String(value))" />
+              <UTextarea :model-value="step.text ?? undefined" placeholder="Instructions (optional)" aria-label="Step instructions" class="w-full" :rows="2" autoresize @update:model-value="value => updateHowToStep(index, stepIndex, 'text', String(value))" />
+            </div>
             <UButton icon="i-lucide-x" color="neutral" variant="ghost" size="xs" aria-label="Remove step" @click="removeHowToStep(index, stepIndex)" />
           </div>
           <UButton icon="i-lucide-plus" color="neutral" variant="soft" size="sm" @click="addHowToStep(index)">Add step</UButton>
         </div>
         <ol v-else-if="block.type === 'how_to' && isRenderable(block)" class="list-decimal space-y-2 pl-6 text-lg leading-8">
-          <li v-for="(step, stepIndex) in howToSteps(block)" :key="stepIndex">{{ step.text || step.name }}</li>
+          <li v-for="(step, stepIndex) in (block.data.steps as TenantPageHowToStep[])" :key="stepIndex">
+            <p class="font-semibold">{{ step.name }}</p>
+            <p v-if="step.text">{{ step.text }}</p>
+          </li>
         </ol>
         <div v-else-if="block.type === 'gallery'" class="grid gap-4 sm:grid-cols-2">
           <figure v-for="(item, itemIndex) in galleryItems(block)" :key="item.asset_id || itemIndex" class="space-y-2">
@@ -198,6 +204,7 @@ import { headingAnchor, renderMarkdownToHtml, sanitizeHtmlForSsr } from '~/utils
 import { sanitizeUrl } from '~/utils/sanitize'
 import { loadDomPurify } from '~/utils/dom-purify-loader'
 import { formatTimestamp } from '~/utils/timezone'
+import type { TenantPageHowToStep } from '~/utils/tenant-page-blocks'
 
 const props = withDefaults(defineProps<{
   title: string
@@ -364,29 +371,29 @@ function handleStructuralKey(index: number, block: BlogEditorBlock, event: Keybo
 }
 // Q&A records are attached to the block by the server for the article's path; the editor never holds them.
 function faqItems(block: BlogEditorBlock) { return Array.isArray(block.data.items) ? block.data.items as Array<{ title?: string; description?: string }> : [] }
-function howToSteps(block: BlogEditorBlock) { return Array.isArray(block.data.steps) ? block.data.steps as Array<{ name?: string; text?: string }> : [] }
+function howToSteps(block: BlogEditorBlock) { return block.data.steps as TenantPageHowToStep[] }
 /** One key of a block's data payload, for blocks edited field-by-field. */
 function updateBlockData(index: number, key: string, value: string) {
   const block = props.blocks[index]
   if (!block) return
   emit('update:block', index, { ...block, data: { ...block.data, [key]: value || null } })
 }
-function updateHowToStep(index: number, stepIndex: number, value: string) {
+function updateHowToStep(index: number, stepIndex: number, field: 'name' | 'text', value: string) {
   const block = props.blocks[index]
   if (!block) return
-  const steps = howToSteps(block).map((step, i) => i === stepIndex ? { ...step, text: value } : step)
+  const steps = howToSteps(block).map((step, i) => i === stepIndex ? { ...step, [field]: value } : step)
   emit('update:block', index, { ...block, data: { ...block.data, steps } })
 }
 function addHowToStep(index: number) {
   const block = props.blocks[index]
   if (!block) return
-  emit('update:block', index, { ...block, data: { ...block.data, steps: [...howToSteps(block), { text: '' }] } })
+  emit('update:block', index, { ...block, data: { ...block.data, steps: [...howToSteps(block), { name: '', text: '' }] } })
 }
 function removeHowToStep(index: number, stepIndex: number) {
   const block = props.blocks[index]
   if (!block) return
   const steps = howToSteps(block).filter((_, i) => i !== stepIndex)
-  emit('update:block', index, { ...block, data: { ...block.data, steps: steps.length ? steps : [{ text: '' }] } })
+  emit('update:block', index, { ...block, data: { ...block.data, steps } })
 }
 function isRenderable(block: BlogEditorBlock) { return block.data.status !== 'inactive' && block.data.render_enabled !== false }
 function blockMedia(block: BlogEditorBlock) { return Array.isArray(block.media) ? block.media.filter(item => item.slot === 'media') : [] }

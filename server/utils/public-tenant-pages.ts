@@ -30,7 +30,6 @@ import { summarizeProductPrices } from '~/utils/product-money'
 import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
 import { addressPlaceName, formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
 import { getVerticalCopy } from '~/utils/vertical-copy'
-import type { PublicBlawbyShellData } from '~/types/blawby'
 
 export interface PublicTenantPage {
   id: string
@@ -87,7 +86,6 @@ export interface PublicTenantPageProductRow {
 
 export interface PublicTenantPageHydrationResources {
   pages?: Promise<PublicTenantPageReferenceRow[]>
-  blawbyShell?: Promise<PublicBlawbyShellData>
 }
 
 /**
@@ -219,8 +217,8 @@ async function hydrateBlocks(
   // `social_post` documents, a different record from the
   // articles `organization_posts` reads, and a Saya home shows both.
   for (const block of blocks) {
-    if (block.type === 'page_grid' && Array.isArray(block.data.page_ids)) {
-      for (const value of block.data.page_ids) if (typeof value === 'string' && value.trim()) pageIds.add(value)
+    if (block.type === 'page_grid') {
+      for (const value of block.data.page_ids as string[]) pageIds.add(value)
     }
     if (block.type === 'product_grid') {
       if (Array.isArray(block.data.product_ids)) {
@@ -251,8 +249,7 @@ async function hydrateBlocks(
       data: { product_ids: [...productIds] }, media: [],
     }]
   }
-  const defaultContact = pagePath === '/contact' && template.slug === 'blawby' && blocks.length === 1 && blocks[0]?.type === 'hero'
-  const defaultLocationGrid = (pagePath === '/' && template.slug !== 'platform' || defaultContact) && !blocks.some(block => block.type === 'location_grid')
+  const defaultLocationGrid = pagePath === '/' && template.slug !== 'platform' && !blocks.some(block => block.type === 'location_grid')
   const addressVisible = template.slug !== 'blawby' || organizationRow.address_visibility === 'visible'
   const articlePrefix = template.serviceRoutes.articleDetailPrefix
   const [sourcePages, qaItemsBySource, sourceReviewRows, sourcePostRows] = await Promise.all([
@@ -346,20 +343,10 @@ async function hydrateBlocks(
     : locations
   if (defaultLocationGrid && defaultLocations.length) {
     blocks = [...blocks, {
-      id: defaultContact ? 'contact-locations' : 'homepage-locations', type: 'location_grid',
+      id: 'homepage-locations', type: 'location_grid',
       position: Math.max(-1, ...blocks.map(block => block.position)) + 1,
       data: { title: locationCopy.locationGroupLine(defaultLocations.length), description: locationCopy.findUsKicker, location_ids: defaultLocations.map(location => location.id) },
       media: [],
-    }]
-  }
-  if (defaultContact) {
-    const consultation = resources.blawbyShell
-      ? (await resources.blawbyShell).consultation
-      : await (await import('~/server/utils/professional-services')).getPublicConsultationSettings(db, organizationId)
-    if (consultation.contact_form_enabled) blocks = [...blocks, {
-      id: 'contact-form', type: 'contact_form',
-      position: Math.max(-1, ...blocks.map(block => block.position)) + 1,
-      data: {}, media: [],
     }]
   }
   if (homepageMenu) {
@@ -414,11 +401,11 @@ async function hydrateBlocks(
     }
   })
   return blocks.map(block => {
-    if (block.type === 'showcase' || block.type === 'language_reach' || block.type === 'steps') validateContentBlockData(block.type, block.data)
+    if (block.type === 'showcase' || block.type === 'language_reach' || block.type === 'steps' || block.type === 'how_to') validateContentBlockData(block.type, block.data)
     const data = { ...block.data }
-    if (block.type === 'page_grid' && Array.isArray(data.page_ids)) {
-      data.items = data.page_ids.map((id) => {
-        const page = typeof id === 'string' ? pageById.get(id) : undefined
+    if (block.type === 'page_grid') {
+      data.items = (data.page_ids as string[]).map((id) => {
+        const page = pageById.get(id)
         // A reference to a page that is gone or unpublished is a broken block,
         // not a row to quietly drop: the editor chose it and needs to know.
         if (!page) throw new HTTPError({ statusCode: 500, statusMessage: 'Tenant page reference is unavailable' })

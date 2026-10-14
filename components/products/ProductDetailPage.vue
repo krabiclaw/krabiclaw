@@ -323,7 +323,7 @@
 <script setup lang="ts">
 import WhoYouMeet from '~/components/booking/WhoYouMeet.vue'
 import type { Product, ProductPresentation } from '~/server/types/products'
-import { useSchemaOrg } from '~/composables/useSchemaOrg'
+import { useSchemaOrg } from '#imports'
 import type { CurrencyCode } from '~/shared/currencies'
 import { minorAmountToMajor, selectPrice, type Price } from '~/shared/prices'
 import { formatProductMoney } from '~/utils/product-money'
@@ -677,15 +677,13 @@ function sessionEvent(session: PublicProductSession) {
 
 useSchemaOrg(computed(() => {
   // Page documents keep their canonical SEO/schema; a directory is not a second Product page.
-  if (props.pageDocument || props.compact) return null
+  if (props.pageDocument || props.compact) return []
   const type = structuredDataType.value
   const list = schemaSessions.value
   const first = list[0]
   const last = list[list.length - 1]
   const dietUrls = extractDietarySchemaUrls(props.product)
   return {
-    // Without a context this node names no vocabulary and no parser reads it.
-    '@context': 'https://schema.org',
     '@type': type,
     name: props.product.name,
     description: props.product.description,

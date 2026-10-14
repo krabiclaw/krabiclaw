@@ -3,11 +3,6 @@ import { errorChainForTelemetry } from '~/shared/error-telemetry'
 import { getRequestDataMetrics } from '~/server/utils/request-metrics'
 
 export default definePlugin((nitroApp) => {
-  nitroApp.hooks.hook('request', async ({ req }) => {
-    if (import.meta.dev || import.meta.preset !== 'cloudflare-module' || req.runtime?.cloudflare?.env || !req.context?.nuxt?.['~internal'] || !req.context.nuxt['~rendering-error']) return
-    req.context.cloudflare = { env: (await import('cloudflare:workers')).env }
-  })
-
   nitroApp.hooks.hook('error', async (error, { event, tags }) => {
     // A 404 here is routinely a scanner bot probing for .env/wp-admin/phpinfo
     // paths, not a real server fault — logging every one at error severity

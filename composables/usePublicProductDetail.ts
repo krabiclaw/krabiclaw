@@ -66,7 +66,7 @@ export function isPublicProductDetailPayload(value: unknown): value is PublicPro
 export async function usePublicProductDetail(routeKind: ProductSurface) {
   const route = useRoute()
   const requestEvent = useRequestEvent()
-  const { organizationId } = useTenantOrganization()
+  const { id: organizationId } = useTenantOrganization().organization
   // An Experience's page is site-wide: /experiences/<product-slug> names the
   // Product in its only slug segment, where a vertical's product page names the
   // branch first. Same payload either way, so one composable serves both.
@@ -120,14 +120,14 @@ export async function usePublicProductDetail(routeKind: ProductSurface) {
 export async function usePublicPageProduct(pagePath: ComputedRef<string>, locale: ComputedRef<string>, productId: ComputedRef<string | null>) {
   const route = useRoute()
   const event = useRequestEvent()
-  const { organizationId } = useTenantOrganization()
+  const { id: organizationId } = useTenantOrganization().organization
   const scope = computed(() => typeof route.query.location_id === 'string' ? route.query.location_id : null)
   const { data, error } = await useAsyncData<PublicProductDetailPayload | null>(
     () => `page-product:${organizationId}:${pagePath.value}:${locale.value}:${productId.value}:${scope.value ?? ''}`,
     async (_nuxtApp, { signal }) => {
       if (!productId.value) return null
       if (import.meta.server) {
-        if (!event || !organizationId) throw createError({ statusCode: 500, statusMessage: 'Request context unavailable' })
+        if (!event) throw createError({ statusCode: 500, statusMessage: 'Request context unavailable' })
         const [{ cloudflareEnv }, { loadPublicPageProductDetail, publicProductDetailPayload }] = await Promise.all([
           import('~/server/utils/api-response'), import('~/server/utils/public-products'),
         ])

@@ -4,8 +4,12 @@
     <UAlert v-if="failure" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="failure" />
 
     <div>
-      <SettingRow v-model="draft.email" label="Email" :disabled="emailLocked || saving" />
-      <SettingRow v-model="draft.whatsapp" label="WhatsApp" :disabled="!phoneVerified || saving" />
+      <UFormField name="email" class="border-b border-default">
+        <SettingRow v-model="draft.email" label="Email" :disabled="emailLocked || saving" />
+      </UFormField>
+      <UFormField name="whatsapp">
+        <SettingRow v-model="draft.whatsapp" label="WhatsApp" :disabled="!phoneVerified || saving" />
+      </UFormField>
     </div>
 
     <NuxtLink v-if="!phoneVerified" to="/dashboard/account/profile/personal" class="block text-sm text-muted underline underline-offset-2">
@@ -48,7 +52,7 @@ watchEffect(() => {
 
 const form = useTemplateRef('form')
 const revision = ref(0)
-const dirty = computed(() => Boolean(form.value?.dirty))
+const dirty = computed(() => Boolean(form.value?.dirty || failure.value))
 
 function cancel() {
   if (!setting.value) return

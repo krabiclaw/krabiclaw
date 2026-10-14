@@ -48,9 +48,8 @@ definePageMeta({ layout: 'saya' })
 
 const route = useRoute()
 const requestEvent = useRequestEvent()
-const { organizationId, organization } = useTenantOrganization()
-if (!organizationId) throw createError({ statusCode: 404 })
-
+const { organization } = useTenantOrganization()
+const { id: organizationId } = organization
 const slug = computed(() => String(route.params.slug))
 const reviewId = computed(() => String(route.params.reviewId))
 
@@ -135,9 +134,6 @@ useSocialMetadata(() => ({
   title: review.value ? `${review.value.rating}-star review from ${review.value.author_name || 'Guest'}` : 'Review',
   description: String(review.value?.content || '').slice(0, 150),
   socialImage: review.value?.social_image ?? null,
-  brand: {
-    organizationName: String(review.value?.organization_name || ''),
-  },
   breadcrumbs: [
     { name: 'Locations', url: '/locations' },
     { name: String(review.value?.location_title || slug.value), url: `/locations/${slug.value}` },

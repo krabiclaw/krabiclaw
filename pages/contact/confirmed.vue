@@ -1,6 +1,6 @@
 <template>
-  <NuxtLayout :name="isBlawby ? 'blawby' : 'saya'">
-    <section v-if="isBlawby" class="mx-auto max-w-3xl px-4 py-24 text-center sm:px-6 lg:px-8">
+  <NuxtLayout :name="template.layout">
+    <section v-if="template.slug === 'blawby'" class="mx-auto max-w-3xl px-4 py-24 text-center sm:px-6 lg:px-8">
       <div class="mx-auto flex size-16 items-center justify-center rounded-full bg-[var(--blawby-primary-100)] text-[var(--blawby-primary)]">
         <svg class="size-9" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
           <path d="m5 12 4 4L19 6" />
@@ -43,8 +43,7 @@ import GuestAccountPrompt from '~/components/booking/GuestAccountPrompt.vue'
 definePageMeta({ layout: false })
 
 const { t } = useI18n()
-const { themeId } = useTenantOrganization()
-const isBlawby = themeId === 'blawby-theme-v1'
+const { template } = useTenantOrganization().organization
 
 // Always shows a generic success state rather than gating on the sessionStorage
 // handoff — a missing handoff (private browsing, storage quota, etc.) doesn't
@@ -52,7 +51,7 @@ const isBlawby = themeId === 'blawby-theme-v1'
 // beyond the generic copy either way.
 useSocialMetadata(() => ({
   path: '/contact/confirmed',
-  title: isBlawby ? 'Message received' : t('saya.contact_page.confirmed_title'),
+  title: template.slug === 'blawby' ? 'Message received' : t('saya.contact_page.confirmed_title'),
   description: 'Your message has been received.',
   socialImage: null,
   discoverability: 'private',

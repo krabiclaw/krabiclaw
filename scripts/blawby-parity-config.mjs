@@ -58,7 +58,7 @@ export const BLAWBY_PARITY_ROUTES = {
   },
   schedule: {
     path: '/schedule',
-    sections: ['schedule-hero', 'guidance', 'qa', 'reviews', 'consultation'],
+    sections: ['page-hero', 'guidance', 'qa', 'reviews', 'consultation'],
   },
   blog: {
     path: '/blog',

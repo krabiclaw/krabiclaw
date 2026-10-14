@@ -1,4 +1,5 @@
 import japaneseFontsUrl from '~/assets/css/japanese-fonts.css?url'
+import type { TenantOrganizationInfo } from '~/composables/useTenantOrganization'
 import { sitePaletteStyle } from '~/shared/site-palette'
 
 // A public layout's brand: the site's font preset (on its root and <html>, so
@@ -6,14 +7,15 @@ import { sitePaletteStyle } from '~/shared/site-palette'
 // Japanese faces on a Japanese page, and, on Saya and Blawby, the site's
 // palette with the visitor's light/dark preference. Every public template
 // uses this; the dashboard does not, so it never wears a site's choices.
-export function usePublicSiteBrand() {
-  const { fontPreset, palette } = useTenantOrganization()
+export function usePublicSiteBrand(organization: TenantOrganizationInfo | null = useTenantOrganization().organization) {
+  const fontPreset = organization?.fontPreset
+  const palette = organization?.palette
   const locale = useState<string>('public-locale', () => 'en')
   const paletteStyle = palette ? sitePaletteStyle(palette) : {}
   useHead(() => ({
     // <html> carries the palette too, for what renders outside the layout root
     // (the loading bar, body text).
-    htmlAttrs: { 'data-font-preset': fontPreset, ...(palette && { style: Object.entries(paletteStyle).map(([name, value]) => `${name}:${value}`).join(';') }) },
+    htmlAttrs: { ...(fontPreset && { 'data-font-preset': fontPreset }), ...(palette && { style: Object.entries(paletteStyle).map(([name, value]) => `${name}:${value}`).join(';') }) },
     link: locale.value === 'ja' ? [{ key: 'japanese-fonts', rel: 'stylesheet', href: japaneseFontsUrl }] : [],
   }))
 

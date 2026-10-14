@@ -86,7 +86,7 @@ const isPublicAnnouncement = (value: unknown): value is PublicAnnouncement =>
   && typeof value.dismissible === 'boolean'
   && (value.image_url === null || typeof value.image_url === 'string')
 
-const { organizationId } = useTenantOrganization()
+const { id: organizationId } = useTenantOrganization().organization
 const requestEvent = useRequestEvent()
 const route = useRoute()
 const { trackAnnouncementView, trackAnnouncementCtaClick } = useOrganizationConversionTracking()
@@ -99,7 +99,7 @@ const announcement = ref<PublicAnnouncement | null>(null)
 // thing that can break them, so it fetches nothing there.
 const isPublicSurface = !route.path.startsWith('/dashboard') && !route.path.startsWith('/api')
 
-if (organizationId && isPublicSurface) {
+if (isPublicSurface) {
   // SSR uses the existing request-scoped public provider, preserving tenant and
   // Cloudflare bindings without an HTTP request back into this same Worker.
   const { data, error } = await useAsyncData(

@@ -227,6 +227,9 @@ export default defineNuxtConfig({
       claimedPageRoutes = claimedRoutesFromPages(pages)
     },
     'nitro:config'(nitroConfig) {
+      if (typeof nitroConfig.errorHandler !== 'string') throw new Error('Nuxt must provide one native error handler')
+      nitroConfig.alias = { ...nitroConfig.alias, '#nuxt-native-error-handler': nitroConfig.errorHandler }
+      nitroConfig.errorHandler = resolve(import.meta.dirname, 'server/error-handler.ts')
       nitroConfig.handlers = nitroConfig.handlers?.filter(
         handler => handler.route !== '/api/_nuxt_icon/:collection',
       )
@@ -266,6 +269,7 @@ export default defineNuxtConfig({
 
   schemaOrg: {
     defaults: false,
+    reactive: true,
   },
 
   // Crawler guidance. @nuxtjs/robots owns /robots.txt and the X-Robots-Tag
@@ -300,8 +304,6 @@ export default defineNuxtConfig({
           '/reset-password',
           '/signup',
           '/tenant-404',
-          '/tenant-setup-incomplete',
-          '/tenant-setup-pending',
         ],
       },
     ],
@@ -419,14 +421,9 @@ export default defineNuxtConfig({
 
     // Auth/API/dashboard — never cache
     '/api/**':       { headers: { 'cache-control': 'no-store' } },
-    // The CMS is client rendered. It sits behind authentication, so there is no
-    // SEO to serve; its data is all organization-scoped and cannot be cached;
-    // and every navigation after the first is client side anyway. Rendering it
-    // on the server bought none of that and cost a second runtime for session
-    // and auth state to work in -- which on Cloudflare meant a nested Worker
-    // self-fetch with no bindings and a bespoke session provider to work around
-    // it. Nitro still serves `/server/api/**`; only the Vue pages move.
-    '/dashboard/**': { ssr: false, headers: { 'cache-control': 'no-store' } },
+    // Native client-only components own the CMS rendering boundary; Nuxt still
+    // renders the app shell and transports the host's public identity normally.
+    '/dashboard/**': { headers: { 'cache-control': 'no-store' } },
     '/auth/**':      { headers: { 'cache-control': 'no-store' } },
     '/signup':       { headers: { 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'" } },
     '/login':        { headers: { 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'" } },

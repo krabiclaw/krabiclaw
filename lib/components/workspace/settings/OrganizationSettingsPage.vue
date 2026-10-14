@@ -175,7 +175,6 @@ const descriptionCharactersRemaining = computed(() => 500 - form.brand_descripti
 function explicitSummary(value: string | null | undefined, empty = 'Not set') { return value?.trim() || empty }
 const STATUS_LABELS: Record<OrganizationStatus, string> = { active: 'Live', inactive: 'Draft', suspended: 'Suspended' }
 const domainSummary = computed(() => dashboard.organization.value?.custom_domain || dashboard.organization.value?.public_url || 'Not connected')
-const organizationLinks = useDashboardOrganizationLinks()
 const CONSULTATION_MODE_SUMMARIES = { native: 'Online service selector', external_url: 'External scheduler', native_disabled: 'Selector hidden' } as const
 const brandItems = computed<EditorNavigationItem[]>(() => [
   { id: 'name', label: 'Brand name', summary: explicitSummary(loadedSettings.value?.name), icon: 'i-lucide-type', to: `${brandPath.value}/name` },
@@ -194,11 +193,11 @@ const brandItems = computed<EditorNavigationItem[]>(() => [
 // lists and its Brand lead, because they are what the site is made of; the
 // settings a visitor never sees follow.
 const settingsItems = computed<EditorNavigationItem[]>(() => [
-  ...(organizationLinks.organizationPaths.value ? [
-    { id: 'pages', label: 'Pages', icon: 'i-lucide-file-text', to: organizationLinks.organizationPaths.value.pages },
-    { id: 'blog', label: 'Blog', icon: 'i-lucide-newspaper', to: organizationLinks.organizationPaths.value.blog },
-    { id: 'posts', label: 'Posts', icon: 'i-lucide-megaphone', to: organizationLinks.organizationPaths.value.posts },
-    { id: 'qa', label: 'Reviews and Q&A', icon: 'i-lucide-message-circle-question', to: organizationLinks.organizationPaths.value.qa },
+  ...(dashboard.organizationPaths.value ? [
+    { id: 'pages', label: 'Pages', icon: 'i-lucide-file-text', to: dashboard.organizationPaths.value.pages },
+    { id: 'blog', label: 'Blog', icon: 'i-lucide-newspaper', to: dashboard.organizationPaths.value.blog },
+    { id: 'posts', label: 'Posts', icon: 'i-lucide-megaphone', to: dashboard.organizationPaths.value.posts },
+    { id: 'qa', label: 'Reviews and Q&A', icon: 'i-lucide-message-circle-question', to: dashboard.organizationPaths.value.qa },
     { id: 'brand', label: 'Brand', summary: explicitSummary(loadedSettings.value?.name), icon: 'i-lucide-palette', to: brandPath.value },
   ] : []),
   { id: 'status', label: 'Status', summary: loadedSettings.value ? STATUS_LABELS[loadedSettings.value.status] : 'Not set', icon: 'i-lucide-radio', to: `${settingsPath.value}/status` },

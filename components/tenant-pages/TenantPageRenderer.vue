@@ -117,11 +117,12 @@
       </template>
 
       <template v-else-if="block.type === 'how_to'">
-        <section v-if="howToSteps(block).length" class="my-12">
+        <section class="my-12">
           <h2 v-if="text(block.data.title)" class="mb-6 text-2xl font-semibold">{{ text(block.data.title) }}</h2>
+          <p v-if="text(block.data.description)" class="mb-6 text-muted">{{ text(block.data.description) }}</p>
           <ol class="list-decimal space-y-4 pl-6">
-            <li v-for="(step, index) in howToSteps(block)" :key="index">
-              <p v-if="step.name" class="font-semibold">{{ step.name }}</p>
+            <li v-for="(step, index) in (block.data.steps as TenantPageHowToStep[])" :key="index">
+              <p class="font-semibold">{{ step.name }}</p>
               <p v-if="step.text" class="text-muted">{{ step.text }}</p>
             </li>
           </ol>
@@ -219,7 +220,7 @@
 
 <script setup lang="ts">
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
-import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
+import type { TenantPageBlock, TenantPageHowToStep } from '~/utils/tenant-page-blocks'
 import type { Component } from 'vue'
 import type { PublicTemplateSlug } from '~/utils/template-registry'
 import { tenantPageBlockPresentation } from '~/utils/tenant-page-presentation'
@@ -236,14 +237,18 @@ const props = withDefaults(defineProps<{ page: PublicTenantPage; template?: Publ
  * page for a template other than the host's — pages/contact/index.vue renders a
  * Saya section on a Blawby host — and the resolved template is the default.
  */
-const { template: resolvedTemplate } = usePublicTemplate()
-const template = computed<PublicTemplateSlug>(() => props.template ?? resolvedTemplate.value.slug)
+const { organization: tenantOrganization } = useTenantOrganization()
+const { template: resolvedTemplate } = tenantOrganization
+const template = computed<PublicTemplateSlug>(() => props.template ?? resolvedTemplate.slug)
 const platformHome = computed(() => template.value === 'platform' && props.page.path === '/')
 
 function presentationOf(block: TenantPageBlock): Component | null {
   return tenantPageBlockPresentation(template.value, block.type)
 }
-const sanitizer = useHtmlSanitizer()
+import { loadDomPurify } from '~/utils/dom-purify-loader'
+import { sanitizeHtmlForSsr } from '~/utils/markdown'
+
+const DOMPurify = import.meta.client ? await loadDomPurify() : { sanitize: sanitizeHtmlForSsr }
 const { t } = useI18n()
 /**
  * The page's blocks, in the order the page carries them — less the one the
@@ -269,7 +274,7 @@ function text(value: unknown): string {
 }
 
 function sanitize(value: string): string {
-  return sanitizer.sanitize(value)
+  return DOMPurify.sanitize(value)
 }
 
 /**
@@ -384,13 +389,6 @@ function teamItems(block: TenantPageBlock) {
 
 function donationItems(block: TenantPageBlock): GridItem[] {
   return asItems(block.data.tiers)
-}
-
-function howToSteps(block: TenantPageBlock): Array<{ name: string; text: string }> {
-  return Array.isArray(block.data.steps)
-    ? block.data.steps.filter((step): step is Record<string, unknown> => Boolean(step && typeof step === 'object'))
-      .map(step => ({ name: text(step.name), text: text(step.text) })).filter(step => step.name || step.text)
-    : []
 }
 
 function faqItems(block: TenantPageBlock): Array<{ question: string; answer: string }> {

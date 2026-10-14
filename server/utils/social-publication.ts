@@ -780,7 +780,7 @@ async function publishExternal(
   if (!account) return { channel: target.channel, target_id: target.target_id, status: 'skipped', code: 'account_unlinked', message: `The ${target.channel} account behind this connection is no longer linked. Connect it again.` }
   const appId = providerAppId(env, target.channel)
   const payloadHash = await postPayloadFingerprint(post, { channel: target.channel, target_id: target.target_id })
-  const claim = await claimPublication(db, env, organizationId, post, target, { appId, subjectId: account.providerAccountId }, payloadHash, deadline)
+  const claim = await claimPublication(db, env, organizationId, post, target, { appId, subjectId: account.accountId }, payloadHash, deadline)
   if (!('attemptId' in claim)) return claim
   const context: ChannelContext = {
     db, env, organizationId, post, caption: providerCaption(post.body, post.call_to_action), publication: claim.publication,
@@ -949,7 +949,7 @@ export async function reconcilePostPublication(env: CloudflareEnv, organizationI
   const connection = await readConnection(env, organizationId, publication.channel)
   const account = connection.accountId ? await readLinkedAccount(env, connection.accountId) : null
   if (!connection.connected || connection.targetId !== publication.provider_target_id || !account
-    || account.providerAccountId !== publication.provider_subject_id || providerAppId(env, publication.channel) !== publication.provider_app_id) {
+    || account.accountId !== publication.provider_subject_id || providerAppId(env, publication.channel) !== publication.provider_app_id) {
     throw new HTTPError({ statusCode: 409, statusMessage: `Reconciling needs the ${publication.channel} connection that made this publication (target ${publication.provider_target_id}); it is not connected now` })
   }
   if (publication.channel === 'discord') return await reconcileDiscordPublication(env, organizationId, publication, await discordTargetFor(env, connection), providerPostId)

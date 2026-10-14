@@ -174,8 +174,6 @@ function createTenantMcpServer(ctx: McpRequestContext): McpServer {
     recordRequestPhase(event, "mcp_execute", executionStartedAt);
     const isRender = isMcpRenderResponse(result);
     const failed = isRender && result.isError === true;
-    const structuredContent = isRender ? result.structuredContent : result;
-    const modelText = isRender && result.modelText ? result.modelText : JSON.stringify(structuredContent);
 
     const executionContext = event.context.mcpExecutionContext as { organizationId: string } | undefined;
     const resolvedOrganizationId = executionContext?.organizationId ?? null;
@@ -205,8 +203,11 @@ function createTenantMcpServer(ctx: McpRequestContext): McpServer {
       }
     }
     if (purgeFailure && !failed) return mcpToolErrorResult(purgeFailure, { status: 502, code: "PUBLIC_SITE_REFRESH_FAILED" });
+    const structuredJson = JSON.stringify(isRender ? result.structuredContent : result);
+    const structuredContent = JSON.parse(structuredJson);
+    const modelText = isRender && result.modelText ? result.modelText : structuredJson;
     const response = {
-      isError: failed, ...(failed ? {} : { structuredContent }), content: [{ type: "text" as const, text: failed ? JSON.stringify(structuredContent) : modelText }],
+      isError: failed, ...(failed ? {} : { structuredContent }), content: [{ type: "text" as const, text: failed ? structuredJson : modelText }],
       ...(isRender && result.privateMeta ? { _meta: result.privateMeta } : {}),
     };
     return response;

@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:002f179813758f70bba2feaf47076337482e367ecb42cb96015e67565046faef",
-  "documentationFingerprint": "sha256:46d6a832fc2dc54b278a8894f3a8f854748934f70d822b77ed2fbb58d6ccf182",
+  "fingerprint": "sha256:997ef69570b7c074aa28f9be5cc8dd954a38f1420decba8867615f4c51145deb",
+  "documentationFingerprint": "sha256:2ebcd33f17c77fb22e7bfe0b799fb8b31a4d6adab9719a83f7f4246734dc6f6f",
   "tools": [
     {
       "name": "append_content_block",
@@ -962,6 +962,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -983,7 +984,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -1067,6 +1070,7 @@
               "location_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -1196,8 +1200,10 @@
               "page_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
+                "minItems": 1,
                 "type": "array",
                 "uniqueItems": true
               },
@@ -1208,7 +1214,9 @@
                 ]
               }
             },
-            "required": [],
+            "required": [
+              "page_ids"
+            ],
             "type": "object"
           },
           "content_product_grid": {
@@ -1229,6 +1237,7 @@
               "product_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -2804,6 +2813,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -2825,7 +2835,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -2909,6 +2921,7 @@
               "location_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -3038,8 +3051,10 @@
               "page_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
+                "minItems": 1,
                 "type": "array",
                 "uniqueItems": true
               },
@@ -3050,7 +3065,9 @@
                 ]
               }
             },
-            "required": [],
+            "required": [
+              "page_ids"
+            ],
             "type": "object"
           },
           "content_product_grid": {
@@ -3071,6 +3088,7 @@
               "product_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -7677,10 +7695,7 @@
                 "type": "string"
               },
               "role": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "type": "string"
               },
               "status": {
                 "type": "string"
@@ -8872,6 +8887,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -8893,7 +8909,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -10672,6 +10690,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -10693,7 +10712,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -10777,6 +10798,7 @@
               "location_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -10906,8 +10928,10 @@
               "page_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
+                "minItems": 1,
                 "type": "array",
                 "uniqueItems": true
               },
@@ -10918,7 +10942,9 @@
                 ]
               }
             },
-            "required": [],
+            "required": [
+              "page_ids"
+            ],
             "type": "object"
           },
           "content_product_grid": {
@@ -10939,6 +10965,7 @@
               "product_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -15807,6 +15834,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -15828,7 +15856,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -15912,6 +15942,7 @@
               "location_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -16041,8 +16072,10 @@
               "page_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
+                "minItems": 1,
                 "type": "array",
                 "uniqueItems": true
               },
@@ -16053,7 +16086,9 @@
                 ]
               }
             },
-            "required": [],
+            "required": [
+              "page_ids"
+            ],
             "type": "object"
           },
           "content_product_grid": {
@@ -16074,6 +16109,7 @@
               "product_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -21225,6 +21261,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -21246,7 +21283,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -21330,6 +21369,7 @@
               "location_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -21459,8 +21499,10 @@
               "page_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
+                "minItems": 1,
                 "type": "array",
                 "uniqueItems": true
               },
@@ -21471,7 +21513,9 @@
                 ]
               }
             },
-            "required": [],
+            "required": [
+              "page_ids"
+            ],
             "type": "object"
           },
           "content_product_grid": {
@@ -21492,6 +21536,7 @@
               "product_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -24874,6 +24919,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -24895,7 +24941,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -24979,6 +25027,7 @@
               "location_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -25108,8 +25157,10 @@
               "page_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
+                "minItems": 1,
                 "type": "array",
                 "uniqueItems": true
               },
@@ -25120,7 +25171,9 @@
                 ]
               }
             },
-            "required": [],
+            "required": [
+              "page_ids"
+            ],
             "type": "object"
           },
           "content_product_grid": {
@@ -25141,6 +25194,7 @@
               "product_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -27754,41 +27808,57 @@
         "properties": {
           "team": {
             "properties": {
-              "created_at": {
+              "createdAt": {
                 "format": "date-time",
                 "type": "string"
               },
               "id": {
                 "type": "string"
               },
-              "member_user_ids": {
+              "members": {
                 "items": {
-                  "type": "string"
+                  "properties": {
+                    "createdAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "teamId": {
+                      "type": "string"
+                    },
+                    "userId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "teamId",
+                    "userId",
+                    "createdAt"
+                  ],
+                  "type": "object"
                 },
-                "type": "array",
-                "uniqueItems": true
+                "type": "array"
               },
               "name": {
                 "type": "string"
               },
-              "organization_id": {
+              "organizationId": {
                 "type": "string"
               },
-              "updated_at": {
+              "updatedAt": {
                 "format": "date-time",
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "type": "string"
               }
             },
             "required": [
               "id",
               "name",
-              "organization_id",
-              "created_at",
-              "updated_at",
-              "member_user_ids"
+              "organizationId",
+              "createdAt",
+              "members"
             ],
             "type": "object"
           }
@@ -29069,6 +29139,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -29090,7 +29161,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -29174,6 +29247,7 @@
               "location_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -29303,8 +29377,10 @@
               "page_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
+                "minItems": 1,
                 "type": "array",
                 "uniqueItems": true
               },
@@ -29315,7 +29391,9 @@
                 ]
               }
             },
-            "required": [],
+            "required": [
+              "page_ids"
+            ],
             "type": "object"
           },
           "content_product_grid": {
@@ -29336,6 +29414,7 @@
               "product_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -33238,6 +33317,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -33259,7 +33339,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -33343,6 +33425,7 @@
               "location_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -33472,8 +33555,10 @@
               "page_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
+                "minItems": 1,
                 "type": "array",
                 "uniqueItems": true
               },
@@ -33484,7 +33569,9 @@
                 ]
               }
             },
-            "required": [],
+            "required": [
+              "page_ids"
+            ],
             "type": "object"
           },
           "content_product_grid": {
@@ -33505,6 +33592,7 @@
               "product_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -39015,9 +39103,6 @@
                   "null"
                 ]
               },
-              "contact_form_enabled": {
-                "type": "boolean"
-              },
               "created_at": {
                 "type": "string"
               },
@@ -43349,6 +43434,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -43370,7 +43456,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -43454,6 +43542,7 @@
               "location_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -43583,8 +43672,10 @@
               "page_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
+                "minItems": 1,
                 "type": "array",
                 "uniqueItems": true
               },
@@ -43595,7 +43686,9 @@
                 ]
               }
             },
-            "required": [],
+            "required": [
+              "page_ids"
+            ],
             "type": "object"
           },
           "content_product_grid": {
@@ -43616,6 +43709,7 @@
               "product_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -47475,6 +47569,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -47496,7 +47591,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -47580,6 +47677,7 @@
               "location_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -47709,8 +47807,10 @@
               "page_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
+                "minItems": 1,
                 "type": "array",
                 "uniqueItems": true
               },
@@ -47721,7 +47821,9 @@
                 ]
               }
             },
-            "required": [],
+            "required": [
+              "page_ids"
+            ],
             "type": "object"
           },
           "content_product_grid": {
@@ -47742,6 +47844,7 @@
               "product_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -50792,10 +50895,7 @@
                 "type": "string"
               },
               "role": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "type": "string"
               },
               "status": {
                 "type": "string"
@@ -52603,10 +52703,7 @@
                   "type": "string"
                 },
                 "role": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
+                  "type": "string"
                 },
                 "status": {
                   "type": "string"
@@ -52664,8 +52761,7 @@
                   "required": [
                     "id",
                     "name",
-                    "email",
-                    "image"
+                    "email"
                   ],
                   "type": "object"
                 },
@@ -54876,41 +54972,57 @@
           "teams": {
             "items": {
               "properties": {
-                "created_at": {
+                "createdAt": {
                   "format": "date-time",
                   "type": "string"
                 },
                 "id": {
                   "type": "string"
                 },
-                "member_user_ids": {
+                "members": {
                   "items": {
-                    "type": "string"
+                    "properties": {
+                      "createdAt": {
+                        "format": "date-time",
+                        "type": "string"
+                      },
+                      "id": {
+                        "type": "string"
+                      },
+                      "teamId": {
+                        "type": "string"
+                      },
+                      "userId": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "teamId",
+                      "userId",
+                      "createdAt"
+                    ],
+                    "type": "object"
                   },
-                  "type": "array",
-                  "uniqueItems": true
+                  "type": "array"
                 },
                 "name": {
                   "type": "string"
                 },
-                "organization_id": {
+                "organizationId": {
                   "type": "string"
                 },
-                "updated_at": {
+                "updatedAt": {
                   "format": "date-time",
-                  "type": [
-                    "string",
-                    "null"
-                  ]
+                  "type": "string"
                 }
               },
               "required": [
                 "id",
                 "name",
-                "organization_id",
-                "created_at",
-                "updated_at",
-                "member_user_ids"
+                "organizationId",
+                "createdAt",
+                "members"
               ],
               "type": "object"
             },
@@ -56217,6 +56329,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -56238,7 +56351,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -56322,6 +56437,7 @@
               "location_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -56451,8 +56567,10 @@
               "page_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
+                "minItems": 1,
                 "type": "array",
                 "uniqueItems": true
               },
@@ -56463,7 +56581,9 @@
                 ]
               }
             },
-            "required": [],
+            "required": [
+              "page_ids"
+            ],
             "type": "object"
           },
           "content_product_grid": {
@@ -56484,6 +56604,7 @@
               "product_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -60310,6 +60431,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -60331,7 +60453,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -60415,6 +60539,7 @@
               "location_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -60544,8 +60669,10 @@
               "page_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
+                "minItems": 1,
                 "type": "array",
                 "uniqueItems": true
               },
@@ -60556,7 +60683,9 @@
                 ]
               }
             },
-            "required": [],
+            "required": [
+              "page_ids"
+            ],
             "type": "object"
           },
           "content_product_grid": {
@@ -60577,6 +60706,7 @@
               "product_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -64253,6 +64383,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -64274,7 +64405,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -64358,6 +64491,7 @@
               "location_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -64487,8 +64621,10 @@
               "page_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
+                "minItems": 1,
                 "type": "array",
                 "uniqueItems": true
               },
@@ -64499,7 +64635,9 @@
                 ]
               }
             },
-            "required": [],
+            "required": [
+              "page_ids"
+            ],
             "type": "object"
           },
           "content_product_grid": {
@@ -64520,6 +64658,7 @@
               "product_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -73056,6 +73195,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -73077,7 +73217,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -73161,6 +73303,7 @@
               "location_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -73290,8 +73433,10 @@
               "page_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
+                "minItems": 1,
                 "type": "array",
                 "uniqueItems": true
               },
@@ -73302,7 +73447,9 @@
                 ]
               }
             },
-            "required": [],
+            "required": [
+              "page_ids"
+            ],
             "type": "object"
           },
           "content_product_grid": {
@@ -73323,6 +73470,7 @@
               "product_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -74849,6 +74997,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -74870,7 +75019,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -74954,6 +75105,7 @@
               "location_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -75083,8 +75235,10 @@
               "page_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
+                "minItems": 1,
                 "type": "array",
                 "uniqueItems": true
               },
@@ -75095,7 +75249,9 @@
                 ]
               }
             },
-            "required": [],
+            "required": [
+              "page_ids"
+            ],
             "type": "object"
           },
           "content_product_grid": {
@@ -75116,6 +75272,7 @@
               "product_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -83437,41 +83594,57 @@
         "properties": {
           "team": {
             "properties": {
-              "created_at": {
+              "createdAt": {
                 "format": "date-time",
                 "type": "string"
               },
               "id": {
                 "type": "string"
               },
-              "member_user_ids": {
+              "members": {
                 "items": {
-                  "type": "string"
+                  "properties": {
+                    "createdAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "teamId": {
+                      "type": "string"
+                    },
+                    "userId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "teamId",
+                    "userId",
+                    "createdAt"
+                  ],
+                  "type": "object"
                 },
-                "type": "array",
-                "uniqueItems": true
+                "type": "array"
               },
               "name": {
                 "type": "string"
               },
-              "organization_id": {
+              "organizationId": {
                 "type": "string"
               },
-              "updated_at": {
+              "updatedAt": {
                 "format": "date-time",
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "type": "string"
               }
             },
             "required": [
               "id",
               "name",
-              "organization_id",
-              "created_at",
-              "updated_at",
-              "member_user_ids"
+              "organizationId",
+              "createdAt",
+              "members"
             ],
             "type": "object"
           }
@@ -84281,6 +84454,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -84302,7 +84476,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -86094,6 +86270,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -86115,7 +86292,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -86199,6 +86378,7 @@
               "location_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -86328,8 +86508,10 @@
               "page_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
+                "minItems": 1,
                 "type": "array",
                 "uniqueItems": true
               },
@@ -86340,7 +86522,9 @@
                 ]
               }
             },
-            "required": [],
+            "required": [
+              "page_ids"
+            ],
             "type": "object"
           },
           "content_product_grid": {
@@ -86361,6 +86545,7 @@
               "product_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -91269,9 +91454,6 @@
             },
             "type": "array"
           },
-          "contact_form_enabled": {
-            "type": "boolean"
-          },
           "context": {
             "type": "object"
           },
@@ -94648,6 +94830,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -94669,7 +94852,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -94753,6 +94938,7 @@
               "location_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -94882,8 +95068,10 @@
               "page_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
+                "minItems": 1,
                 "type": "array",
                 "uniqueItems": true
               },
@@ -94894,7 +95082,9 @@
                 ]
               }
             },
-            "required": [],
+            "required": [
+              "page_ids"
+            ],
             "type": "object"
           },
           "content_product_grid": {
@@ -94915,6 +95105,7 @@
               "product_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -98304,6 +98495,7 @@
                   ],
                   "type": "object"
                 },
+                "minItems": 1,
                 "type": "array"
               },
               "supply_items": {
@@ -98325,7 +98517,9 @@
                 "type": "array"
               }
             },
-            "required": [],
+            "required": [
+              "steps"
+            ],
             "type": "object"
           },
           "content_image": {
@@ -98409,6 +98603,7 @@
               "location_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -98538,8 +98733,10 @@
               "page_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
+                "minItems": 1,
                 "type": "array",
                 "uniqueItems": true
               },
@@ -98550,7 +98747,9 @@
                 ]
               }
             },
-            "required": [],
+            "required": [
+              "page_ids"
+            ],
             "type": "object"
           },
           "content_product_grid": {
@@ -98571,6 +98770,7 @@
               "product_ids": {
                 "items": {
                   "minLength": 1,
+                  "pattern": "\\S",
                   "type": "string"
                 },
                 "type": "array",
@@ -101057,41 +101257,57 @@
         "properties": {
           "team": {
             "properties": {
-              "created_at": {
+              "createdAt": {
                 "format": "date-time",
                 "type": "string"
               },
               "id": {
                 "type": "string"
               },
-              "member_user_ids": {
+              "members": {
                 "items": {
-                  "type": "string"
+                  "properties": {
+                    "createdAt": {
+                      "format": "date-time",
+                      "type": "string"
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "teamId": {
+                      "type": "string"
+                    },
+                    "userId": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "teamId",
+                    "userId",
+                    "createdAt"
+                  ],
+                  "type": "object"
                 },
-                "type": "array",
-                "uniqueItems": true
+                "type": "array"
               },
               "name": {
                 "type": "string"
               },
-              "organization_id": {
+              "organizationId": {
                 "type": "string"
               },
-              "updated_at": {
+              "updatedAt": {
                 "format": "date-time",
-                "type": [
-                  "string",
-                  "null"
-                ]
+                "type": "string"
               }
             },
             "required": [
               "id",
               "name",
-              "organization_id",
-              "created_at",
-              "updated_at",
-              "member_user_ids"
+              "organizationId",
+              "createdAt",
+              "members"
             ],
             "type": "object"
           }
@@ -101137,7 +101353,7 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:09bf22e5b283804b19d03c5ff35be494147eb0ad79d2c54953308e7995281124",
+        "create_product": "sha256:8377e05bf0862fe1ec350ea292e3d2259b27ff9cce2909aa0bdb4837579c8e58",
         "get_product": "sha256:68ec0688bc6c4811b074ee2bdf50bb9e83bc41760adba313030339156e6cbe46",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:ed2b8d9ead80fe1abb797f39ae69c813956fc9750e7a2636416e7abe6236801e",
@@ -101193,7 +101409,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:010b4cb1cd55f355ae72e255d70c3f17cecb18a68daf4345dee1774638635a7b",
-        "create_product": "sha256:09bf22e5b283804b19d03c5ff35be494147eb0ad79d2c54953308e7995281124",
+        "create_product": "sha256:8377e05bf0862fe1ec350ea292e3d2259b27ff9cce2909aa0bdb4837579c8e58",
         "get_product": "sha256:68ec0688bc6c4811b074ee2bdf50bb9e83bc41760adba313030339156e6cbe46",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -101237,13 +101453,13 @@
       "toolContracts": {
         "attach_media": "sha256:010b4cb1cd55f355ae72e255d70c3f17cecb18a68daf4345dee1774638635a7b",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "get_site_page": "sha256:eedb5ddc2727ef220891d589484efbe691ea56485f5e2a4f2313e0a780ba8609",
+        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "remove_media": "sha256:10dd93919469351b90cfa73d0fdc83dcf29d82c20a0d1b956c8def7600d708e9",
         "reorder_media": "sha256:a5bb761987df12ba7c4515cb334e9a79d10b811537ae0a845f8e68a7bb8235a3",
         "set_media": "sha256:4bf16ab96284e37a96cfd24355a24eff1426d3afcf1c45d0395365fe45a3e709",
-        "update_site_page": "sha256:c0da9ae2eca956f0bdc49b0c1e75ac3f57b292d25d18b88d6257e83ce0f66625"
+        "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
     },
     {
@@ -101259,7 +101475,7 @@
         "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_product": "sha256:68ec0688bc6c4811b074ee2bdf50bb9e83bc41760adba313030339156e6cbe46",
-        "get_site_page": "sha256:eedb5ddc2727ef220891d589484efbe691ea56485f5e2a4f2313e0a780ba8609",
+        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "save_media_attachment": "sha256:69bd4bf687fca2e9c3a05e5526c9b6e3a955245bdd06713e08942d433ad677dc",
         "set_media": "sha256:4bf16ab96284e37a96cfd24355a24eff1426d3afcf1c45d0395365fe45a3e709"
@@ -101274,9 +101490,9 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:09bf22e5b283804b19d03c5ff35be494147eb0ad79d2c54953308e7995281124",
+        "create_product": "sha256:8377e05bf0862fe1ec350ea292e3d2259b27ff9cce2909aa0bdb4837579c8e58",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
-        "get_site_page": "sha256:eedb5ddc2727ef220891d589484efbe691ea56485f5e2a4f2313e0a780ba8609",
+        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_website_draft": "sha256:80725c125b2784d23e295ad824ab528c6d1956f6b2d8597f59f46b2a43b87474",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -101286,8 +101502,8 @@
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "save_website_draft": "sha256:90560dcc9d52af64dd8bd3ec566827452ffdd74d7fc816ef728647e9a3aa735c",
         "update_menu": "sha256:1a67115670b262211f3ccceb55340a6003a92baf51e9926c2acd6238fcd5545f",
-        "update_organization_settings": "sha256:3de5f24e03b408330a39c15c3288fc740ccf4d0e2de4a772bd91038ca8f3539b",
-        "update_site_page": "sha256:c0da9ae2eca956f0bdc49b0c1e75ac3f57b292d25d18b88d6257e83ce0f66625"
+        "update_organization_settings": "sha256:e9db6807901edd4fa400c86f0c4f9b690927ff8bca927a7190ff8ab507a6d639",
+        "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
     },
     {
@@ -101323,13 +101539,13 @@
       "toolContracts": {
         "attach_media": "sha256:010b4cb1cd55f355ae72e255d70c3f17cecb18a68daf4345dee1774638635a7b",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "get_site_page": "sha256:eedb5ddc2727ef220891d589484efbe691ea56485f5e2a4f2313e0a780ba8609",
+        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_products": "sha256:f171bef83f856190c9aee9ab3cecac29c94e7ee4cadc3d2b2c9e788b37396b5c",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "set_media": "sha256:4bf16ab96284e37a96cfd24355a24eff1426d3afcf1c45d0395365fe45a3e709",
         "update_product": "sha256:7df47230ff1391080643737f89e04932a935158172d4ba05adc644f455b2e7d4",
-        "update_site_page": "sha256:c0da9ae2eca956f0bdc49b0c1e75ac3f57b292d25d18b88d6257e83ce0f66625"
+        "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
     },
     {
@@ -101363,9 +101579,9 @@
         "create_location": "sha256:ae5b3985d3356a979f678e6a24ed16b56719d1c28a8c5a7072c1d0b528c43cfe",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_guest_conversation": "sha256:4d6462fe91c70c95f5028b0593d026fa32ba54ef84d5be113995f58c56571adf",
-        "invite_organization_member": "sha256:5292b1c13581efbb2b4b575b88b15d31dc92278c94f57dfcf795274120bcdf89",
+        "invite_organization_member": "sha256:f520b4ade47c9c5a5faef9859564f32d1c9dddfd285efdcc27fa099fa60e8a24",
         "list_guest_conversations": "sha256:52234aefc87f59cc21dac690cca644fed2f78bd3461fe8a65a88953c5e278776",
-        "list_organization_members": "sha256:7fc7557e9e1a7e9536a5bbbd31cb36623b30e9db5630764a81425da9834d9c26",
+        "list_organization_members": "sha256:f47eb37ec4cfa1df500db883fdd207db7e2228a3839d64e08f4e52351f85b10e",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "reply_to_guest": "sha256:03666d869c938994de86f6e3380a5bb433d0dabba23e17570b63e79133800fef",
         "save_website_draft": "sha256:90560dcc9d52af64dd8bd3ec566827452ffdd74d7fc816ef728647e9a3aa735c",
@@ -101390,13 +101606,12 @@
     },
     {
       "slug": "manage-your-bookings",
-      "contentHash": "sha256:f8e3dd308acf1f5f0158dc0f19feeb628231a0ce4ef982afe5dd2da97d58992d",
+      "contentHash": "sha256:4b0fa50f547faf54ad82b6a4901dfaa6b26b82b370a9c355ae62b65976a1541a",
       "toolContracts": {
         "cancel_product_booking": "sha256:09fbbd2f3d89627aa78eb5b60d27b5e949edc7b8304b610422045cf5a89671a1",
         "confirm_product_booking": "sha256:30124315590810ca4e7e259836063d2878e2b2503acc6045b0525ca4daff8c33",
         "create_product_booking": "sha256:8aa4d7188344f54de6be6fa3574f5d3736a8d9dc6f9736c9831d927aec10e36d",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
-        "get_member_scheduling": "sha256:fe4a81a1b928b2e8ea93577b47cbbdb67be60a83586b5d57dec9524322bbd6fd",
         "get_product_booking": "sha256:1b6cb2d27c6bd3a8d7da1e8005e855af9c053bd84303d29df9a8705c56e61611",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_product_bookings": "sha256:ea80e0cc56ffb5b12058725b9644f50e50af6191c4a44493fb0be538224d7373",
@@ -101405,7 +101620,6 @@
         "reject_product_booking": "sha256:557fcf98b488029ac8081da295552e9ee2569dfc54a0ba561418a5ca7b8492d4",
         "replace_product_weekly_schedule": "sha256:d4f5ba8f99874961aa0d9cb91f22c8ef2b640aeeeff6a52fc8e7ed758fbf4ae2",
         "request_product_booking_change": "sha256:da50fa96ac71952ddaa8d3097a319ae2965b6e0ec0a3b52208b22cc5f6d95025",
-        "set_member_scheduling": "sha256:4917424bba3a8e887e87f7af783ae042161e738962e5e4b02c9d21b1ae946134",
         "update_product_session": "sha256:719c480fb7c4436732bfe437c820b50e4f7b37a2b23f6aa7e0634bbaf62ea776"
       }
     },
@@ -101427,12 +101641,12 @@
       "slug": "publish-a-post",
       "contentHash": "sha256:20b71a412abc2f5b707463326e643c5f540dba815c168559b15c3aa3274e44f2",
       "toolContracts": {
-        "create_blog_post": "sha256:cf92662971e7d7f4055421b6f4df9f525e1ec18cd033d9ce88593d512e9d8f10",
+        "create_blog_post": "sha256:0f4b0efcd6e4870e8f52b5594a906819baa0662faf65ad40046fad0acec50dbe",
         "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
         "get_channel_post": "sha256:698bf8872c9dd2a8620b91933ded4589e572e082603730a787b21b53f895d9e8",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_social_connections": "sha256:96a2be10163ed07a418b1ff7a6b240307f6129a8ccd172e521fa2cc3af2e14f4",
-        "publish_blog_post": "sha256:3032363caaee98878bbe72c1556c7c131b858b93e143cf03ee6338b55df7a3a6",
+        "publish_blog_post": "sha256:8b9880534e39b242f4c5c498b6a3a8297ddf07080007e51ce633d3286db0c5c7",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reconcile_post_publication": "sha256:f97049daa773708807be8f9f0a58a5ebbf76c5b38acb2592610a2d997b319843",
         "update_post": "sha256:b186430401e60fb65257100332ce0c4bd01b8e1c531ea8277dcc2910cfe356b0"

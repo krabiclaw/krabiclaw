@@ -97,7 +97,6 @@ test('isPrivateSeoPath accurately identifies non-indexable application and admin
   assert.equal(isPrivateSeoPath('/api/health'), true)
   assert.equal(isPrivateSeoPath('/dashboard'), true)
   assert.equal(isPrivateSeoPath('/auth/login'), true)
-  assert.equal(isPrivateSeoPath('/tenant-setup-pending'), true)
 
   assert.equal(isPrivateSeoPath('/'), false)
   assert.equal(isPrivateSeoPath('/blog'), false)

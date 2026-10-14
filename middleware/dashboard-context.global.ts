@@ -6,7 +6,7 @@
  * still completes the navigation; the layout shows its error.
  */
 export default defineNuxtRouteMiddleware(async (to, from) => {
-  if (!to.path.startsWith('/dashboard/')) return
+  if (import.meta.server || !to.path.startsWith('/dashboard/')) return
   const scope = useDashboardRouteScope(to).value
   if (!scope) return
 

@@ -34,7 +34,6 @@ useSocialMetadata(() => ({
     priceSelection: priceSelection.value,
   }, t),
   socialImage: detail.value.product.social_image,
-  brand: { organizationName: detail.value.brandName },
   breadcrumbs: [
     { name: 'Locations', url: '/locations' },
     { name: detail.value.location.title, url: `/locations/${detail.value.location.slug}` },

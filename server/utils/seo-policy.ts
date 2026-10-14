@@ -34,9 +34,6 @@ export const PRIVATE_EXACT_ROUTES = new Set([
   '/login',
   '/reset-password',
   '/signup',
-  '/tenant-404',
-  '/tenant-setup-incomplete',
-  '/tenant-setup-pending',
 ])
 
 // Paths that only a customer site answers. `/experiences` is not among them:

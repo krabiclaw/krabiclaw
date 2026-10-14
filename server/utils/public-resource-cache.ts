@@ -11,7 +11,7 @@ import { isNonProductionHost, normalizeHost } from '~/server/utils/tenant-hosts'
 //
 // Cache key: public~<organizationId>~v11~<contract>~<page>~<location>~<datasets>~<blogSlug>~<locale>,
 // each field percent-encoded (mirrors composables/usePublicPageRequest.ts's
-// usePublicPageKey(), minus `token` — cached entries are never preview/draft-authorized,
+// usePublicResourceKey() — cached entries are never preview/draft-authorized,
 // see the preview authorization guard in the shell and page services).
 // Raised from 60s to 300s once every bootstrap-relevant write path was confirmed to call
 // purgePublicResourceCache/purgePublicResourceCacheNow (dashboard editor routes + MCP were already

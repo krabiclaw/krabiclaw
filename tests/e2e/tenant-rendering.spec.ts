@@ -4,8 +4,8 @@ import {
   blawbyBaseURL, blawbyExtraHeaders,
   openTenantPage, potteryHouseBaseURL, potteryHouseExtraHeaders, waitForNuxtHydration,
 } from './helpers'
-import { testBaseUrl } from './test-env'
-import { loginAs } from './helpers/auth'
+import { testBaseUrl, tenantTestBaseUrl, tenantTestExtraHeaders } from './test-env'
+import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import mcpCatalog from '../../server/utils/mcp-catalog-snapshots/tenant.json' with { type: 'json' }
 
@@ -47,6 +47,140 @@ const tenants: Tenant[] = [
     forbidden: [/Ember & Slice/i, /No services/i],
   },
 ]
+
+test('unknown sites render an unbranded 404 while resolved tenant errors retain their identity', async ({ page }) => {
+  test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'The local tenant header exercises an unresolved host without changing deployed DNS.')
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  const unknown = await openTenantPage(page, `${testBaseUrl()}/`, { 'x-preview-tenant': 'no-such-organization' })
+  expect(unknown?.status()).toBe(404)
+  await expect(page.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
+  await expect(page.getByText('Error 404', { exact: true })).toBeVisible()
+  expect(await page.locator('body').innerText()).not.toMatch(/Krabiclaw|Ember & Slice|North Carolina Legal Services/)
+  await page.unrouteAll()
+  const missing = await openTenantPage(page, `${blawbyBaseURL}/no-such-page`, blawbyExtraHeaders)
+  expect(missing?.status()).toBe(404)
+  await expect(page.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
+  await expect(page.getByRole('img', { name: 'North Carolina Legal Services', exact: true })).toBeVisible()
+  const unsupported = await page.goto(`${blawbyBaseURL}/templates`)
+  expect(unsupported?.status()).toBe(404)
+  await expect(page.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
+  expect(errors).toEqual([])
+})
+
+test('Blawby authored contact sections retain their forms and selected locations', async ({ page, request }) => {
+  test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'The local production copy carries these existing contact pages.')
+  for (const tenant of [
+    { slug: 'krabiclaw-review-legal', documentId: 'ade2018e-693d-4b0e-8025-daf3143abb8a', locationIds: ['loc-554dde4c-3dcf-406f-ab9d-82038dd1b70c'] },
+    { slug: 'krabiclaw-onboarding-check', documentId: '8780bc6a-6e90-4db6-aac3-2cb1048fbe28', locationIds: ['e151c459-0437-477a-a27e-bb360128b43d', 'loc-5b52502a-0a3e-4410-b14c-d3662f74ae43'] },
+    { slug: 'cedar-legal-demo', documentId: 'cd961dbe-9250-4878-b05b-b7fe1e95591d', locationIds: ['loc-abce1341-c462-4e8d-ab8c-f4f6657f07cf'] },
+  ]) {
+    const headers = { 'x-preview-tenant': tenant.slug }
+    const response = await request.get(`${testBaseUrl()}/api/public/blawby/document`, { headers, params: { recipe: 'contact' } })
+    expect(response.status(), await response.text()).toBe(200)
+    const document = await response.json() as { route: { page: { id: string; blocks: Array<{ id: string; type: string; data: { title?: string; description?: string; location_ids?: string[]; items?: Array<{ id: string }> } }> } } }
+    expect(document.route.page.id).toBe(tenant.documentId)
+    expect(document.route.page.blocks.map(block => block.type)).toEqual(['hero', 'location_grid', 'contact_form'])
+    expect(document.route.page.blocks[1]).toMatchObject({ id: `block-contact-locations-${tenant.documentId}`, data: { title: 'Our locations', description: 'Contact', location_ids: tenant.locationIds } })
+    expect(document.route.page.blocks[1]!.data.items!.map(item => item.id)).toEqual(tenant.locationIds)
+    expect(document.route.page.blocks[2]!.id).toBe(`block-contact-form-${tenant.documentId}`)
+    await page.unrouteAll()
+    const rendered = await openTenantPage(page, `${testBaseUrl()}/contact`, headers)
+    expect(rendered?.status()).toBe(200)
+    await expect(page.getByRole('heading', { name: 'Our locations', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Send a message', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Send message', exact: true })).toHaveCount(1)
+  }
+  await page.unrouteAll()
+  const disabled = await openTenantPage(page, `${blawbyBaseURL}/contact`, blawbyExtraHeaders)
+  expect(disabled?.status()).toBe(200)
+  await expect(page.getByRole('heading', { name: 'Send a message', exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Send message', exact: true })).toHaveCount(0)
+})
+
+for (const tenant of [
+  { name: 'Saya', organizationId: 'org-demo', baseURL: tenantTestBaseUrl(), headers: tenantTestExtraHeaders(), path: '/about', schemaType: 'Organization' },
+  ...['/about', '/contact', '/schedule'].map(path => ({ name: 'Blawby', organizationId: 'org-ncls-blawby', baseURL: blawbyBaseURL, headers: blawbyExtraHeaders, path, schemaType: 'LegalService' })),
+  { name: 'Cedar Legal Demo', organizationId: '5WebMejsoVLyZLHC29wHH5GbQx1jlvCd', baseURL: testBaseUrl(), headers: { 'x-preview-tenant': 'cedar-legal-demo' }, path: '/contact', ownerId: 'ivUlJc9BoyZeFszowpbUEjh1pugcDHiT', schemaType: 'ProfessionalService' },
+]) {
+  test(`${tenant.name} ${tenant.path} CMS-authored HowTo persists and accompanies the public page schema`, async ({ page, request, baseURL }) => {
+    test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'Content writes use local D1 only.')
+    await loginAs(request, baseURL!)
+    let impersonated = false
+    try {
+      if ('ownerId' in tenant) {
+        const impersonation = await request.post(`${baseURL}/api/auth/admin/impersonate-user`, { headers: authRequestHeaders(baseURL!), data: { userId: tenant.ownerId } })
+        expect(impersonation.status(), await impersonation.text()).toBe(200)
+        impersonated = true
+        expect(await impersonation.json()).toMatchObject({ user: { id: tenant.ownerId } })
+      }
+      const inventory = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'list_site_pages', args: { organization_id: tenant.organizationId, locale: 'en' } })
+      expect(inventory.status()).toBe(200)
+      const about = mcpData<{ pages: Array<{ id: string; path: string }> }>(await inventory.json()).pages.find(item => item.path === tenant.path)
+      expect(about, 'the existing authored page must be available').toBeDefined()
+      const before = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_site_page', args: { organization_id: tenant.organizationId, variant_id: about!.id } })
+      expect(before.status()).toBe(200)
+      const original = mcpData<{ page: { document: { id: string }; blocks: Array<{ id: string; type: string }> } }>(await before.json()).page
+      if ('ownerId' in tenant) expect(original.blocks.map(block => block.type)).toEqual(['hero', 'location_grid', 'contact_form'])
+      const title = `Plan your visit ${crypto.randomUUID()}`
+      const steps = [{ name: 'Choose a time', text: 'Contact our team to choose a time for your visit.' }, { name: 'Prepare for your visit', text: 'Read the information our team sends before you arrive.' }]
+      const added: Array<{ id: string; updated_at: string }> = []
+      try {
+        for (const blockTitle of [title, null]) {
+          const written = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'append_content_block', args: { organization_id: tenant.organizationId, document_id: original.document.id, type: 'how_to', data: { title: blockTitle, steps } } })
+          expect(written.status()).toBe(200)
+          const changed = mcpData<{ blocks: Array<{ id: string; updated_at: string }> }>(await written.json()).blocks
+          expect(changed).toHaveLength(1)
+          added.push(changed[0]!)
+        }
+        const publicPage = await page.request.get(`${tenant.baseURL}/api/public/pages`, { headers: tenant.headers, params: { path: tenant.path } })
+        expect(publicPage.status(), await publicPage.text()).toBe(200)
+        expect(await publicPage.json()).toMatchObject({ page: { blocks: expect.arrayContaining(added.map((block, index) => expect.objectContaining({ id: block.id, type: 'how_to', data: { title: index ? null : title, steps } }))) } })
+        const errors: string[] = []
+        page.on('pageerror', error => errors.push(error.message))
+        const rendered = await openTenantPage(page, `${tenant.baseURL}${tenant.path}`, tenant.headers)
+        expect(rendered?.status()).toBe(200)
+        await expect(page.getByRole('heading', { name: title, exact: true })).toBeVisible()
+        if ('ownerId' in tenant) await expect(page.getByRole('button', { name: 'Send message', exact: true })).toHaveCount(1)
+        for (const step of steps) await expect(page.locator('main').getByText(step.text, { exact: true })).toHaveCount(2)
+        const nodes = await page.locator('script[type="application/ld+json"]').evaluateAll(elements => elements.flatMap(element => {
+          const schema = JSON.parse(element.textContent!)
+          return schema['@graph'] ?? [schema]
+        })) as Array<Record<string, unknown>>
+        const howTo = nodes.filter(node => node['@type'] === 'HowTo' && added.some(block => String(node['@id']).endsWith(`#howto-${block.id}`)))
+        expect(howTo).toHaveLength(2)
+        expect(howTo.find(node => String(node['@id']).endsWith(`#howto-${added[0]!.id}`))?.name).toBe(title)
+        expect(howTo.find(node => String(node['@id']).endsWith(`#howto-${added[1]!.id}`))?.name).toBe(await page.title())
+        const canonical = await page.locator('link[rel="canonical"]').getAttribute('href')
+        for (const node of howTo) {
+          expect(node.step).toEqual(steps.map((step, index) => expect.objectContaining({ '@type': 'HowToStep', position: index + 1, ...step })))
+          expect(String(node['@id']).startsWith(`${canonical}#`)).toBe(true)
+        }
+        expect(new Set(howTo.map(node => node['@id'])).size).toBe(2)
+        expect(nodes.some(node => (Array.isArray(node['@type']) ? node['@type'] : [node['@type']]).includes(tenant.schemaType))).toBe(true)
+        expect(errors).toEqual([])
+      } finally {
+        for (const block of added) {
+          const current = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_site_page', args: { organization_id: tenant.organizationId, variant_id: about!.id } })
+          expect(current.status()).toBe(200)
+          const stored = mcpData<{ page: { blocks: Array<{ id: string; updated_at: string }> } }>(await current.json()).page.blocks.find(item => item.id === block.id)
+          expect(stored).toBeDefined()
+          const removed = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'delete_content_block', args: { organization_id: tenant.organizationId, block_id: block.id, expected_updated_at: stored!.updated_at } })
+          expect(removed.status()).toBe(200)
+          expect(mcpData<{ blocks: unknown[] }>(await removed.json()).blocks).toEqual([])
+        }
+        const restored = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_site_page', args: { organization_id: tenant.organizationId, variant_id: about!.id } })
+        expect(restored.status()).toBe(200)
+        expect(mcpData<{ page: { blocks: Array<{ id: string }> } }>(await restored.json()).page.blocks.map(block => block.id)).toEqual(original.blocks.map(block => block.id))
+      }
+    } finally {
+      if (impersonated) {
+        const stopped = await request.post(`${baseURL}/api/auth/admin/stop-impersonating`, { headers: authRequestHeaders(baseURL!), data: {} })
+        expect(stopped.status(), await stopped.text()).toBe(200)
+      }
+    }
+  })
+}
 
 async function expectTenantDocument(page: Page, tenant: Tenant) {
   await expect(page.locator(tenant.shell)).toBeVisible()

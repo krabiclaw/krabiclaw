@@ -37,7 +37,6 @@ export interface OrganizationSettings {
   media: Array<{ asset_id: string; slot: string; public_url: string | null; thumbnail_url: string | null; kind: string; presentation?: LogoPresentation | null }>
   contact_email: string | null
   address_visibility?: PublicCompliance['address_visibility']
-  contact_form_enabled?: boolean
   /** What the site renders: its own palette, or its template's. Null on the platform template, whose palette is fixed. */
   palette: SitePalette | null
   palette_source: 'custom' | 'template' | null

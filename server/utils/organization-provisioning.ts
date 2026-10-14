@@ -21,6 +21,7 @@ import { renderNotificationEmail } from '~/server/emails/render'
 import { onboardingCompletedMessage } from '~/server/notifications/events'
 import { HTTPError } from 'nitro'
 import { isAPIError } from 'better-auth/api'
+import { isRecord } from '~/utils/api-clients'
 import { ONBOARDING_ORGANIZATION_MARKER, onboardingDraftWriteGuard, type SavedOnboardingDraft } from '~/server/utils/onboarding-drafts'
 
 type SetupEnv = CloudflareEnv & { PLATFORM_OWNER_EMAILS?: string }
@@ -28,20 +29,6 @@ type SetupEnv = CloudflareEnv & { PLATFORM_OWNER_EMAILS?: string }
 interface ExistingSubdomainRow {
   id: string
   onboarding_status: string | null
-}
-
-interface CreateOrganizationApi {
-  createOrganization(_input: {
-    body: {
-      name: string
-      slug: string
-      userId: string
-      keepCurrentActiveOrganization: true
-      metadata: Record<string, string>
-      default_currency: CurrencyCode
-      timezone: string
-    }
-  }): Promise<{ id: string }>
 }
 
 // Re-exported for existing callers (endpoint validation, tests) — the
@@ -106,7 +93,7 @@ export async function provisionOrganization(
     await executeBatch(db, [writeGuard])
     const adapter = await organizationAdapter(env)
     const member = await adapter.findMemberByOrgId({ userId, organizationId })
-    if (!member || !isOrganizationWideRole(String(member.role))) {
+    if (!member || !isOrganizationWideRole(member.role)) {
       return { status: 403, data: { error: 'Organization-level access required to provision this organization' } }
     }
 
@@ -283,7 +270,11 @@ async function emailOperatorOnboardingComplete(env: SetupEnv, db: D1Database, or
 export async function findOnboardingOrganization(env: CloudflareEnv, userId: string, identity: { draftId: string; slug: string }) {
   const adapter = await organizationAdapter(env)
   const existing = await adapter.findOrganizationBySlug(identity.slug)
-  if (!existing || organizationMetadata(existing.metadata)[ONBOARDING_ORGANIZATION_MARKER] !== identity.draftId) return null
+  if (!existing) return null
+  // The native adapter returns metadata as stored JSON; its parser is private.
+  const metadata = typeof existing.metadata === 'string' ? JSON.parse(existing.metadata) : existing.metadata
+  if (metadata != null && !isRecord(metadata)) throw new HTTPError({ statusCode: 500, statusMessage: `Stored metadata for organization ${existing.id} is invalid`, data: { code: 'INVALID_STORED_CONTENT', organization_id: existing.id } })
+  if (metadata?.[ONBOARDING_ORGANIZATION_MARKER] !== identity.draftId) return null
   const owner = await adapter.findMemberByOrgId({ userId, organizationId: existing.id })
   if (owner?.role !== 'owner') throw new HTTPError({ statusCode: 409, statusMessage: 'Website organization creation has no verified owner', data: { code: 'ONBOARDING_ORGANIZATION_OWNER_MISSING', draft_id: identity.draftId, organization_id: existing.id } })
   return { organizationId: existing.id }
@@ -291,11 +282,10 @@ export async function findOnboardingOrganization(env: CloudflareEnv, userId: str
 
 export async function createOrganization(env: CloudflareEnv, userId: string, name: string, identity: { draftId: string; slug: string }, facts: { defaultCurrency: CurrencyCode; timezone: string }) {
   const auth = createAuth(env)
-  const organizationApi = auth.api as unknown as CreateOrganizationApi
   const existing = await findOnboardingOrganization(env, userId, identity)
   if (existing) return existing
   try {
-    const organization = await organizationApi.createOrganization({
+    const organization = await auth.api.createOrganization({
       body: {
         name,
         slug: identity.slug,
@@ -318,18 +308,6 @@ export async function createOrganization(env: CloudflareEnv, userId: string, nam
     if (raced) return raced
     throw new HTTPError({ statusCode: 409, statusMessage: 'This website address is already taken. Choose another address.', data: { code: 'SUBDOMAIN_TAKEN', missing_fields: ['subdomain'], draft_id: identity.draftId }, cause: error })
   }
-}
-
-function organizationMetadata(value: unknown): Record<string, unknown> {
-  if (isMetadataRecord(value)) return { ...value }
-  if (typeof value !== 'string') return {}
-  const parsed: unknown = JSON.parse(value)
-  if (!isMetadataRecord(parsed)) throw new Error('Stored organization metadata is invalid')
-  return { ...parsed }
-}
-
-function isMetadataRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
 async function performSeeding(

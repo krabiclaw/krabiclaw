@@ -35,8 +35,9 @@ import { ARTICLE_COLLECTIONS, type ArticleCollection } from '~/utils/article-col
 
 const props = defineProps<{ collection: ArticleCollection }>()
 const { t, localePath } = useI18n()
-const { organization, isPlatform } = useTenantOrganization()
-const organizationName = computed(() => organization?.name?.trim() ?? '')
+const { organization } = useTenantOrganization()
+const isPlatform = organization.template.slug === 'platform'
+const organizationName = organization.name
 
 const { posts, categoryTree, index, localeRepresentations } = await usePublishedArticles(props.collection)
 // The index is read in every language the site publishes; the switcher offers them.
@@ -54,11 +55,10 @@ useSocialMetadata(() => ({
   schemaPageType: 'CollectionPage',
   schemaNodes: [itemList.value],
   // A page about the business: its image is the organization's.
-  socialImage: organization?.social_image ?? null,
+  socialImage: organization.social_image,
   // Krabiclaw's layout already titles every page with its own name.
-  title: isPlatform || !organizationName.value ? title.value : `${title.value} | ${organizationName.value}`,
-  description: index.value?.summary || t(props.collection === 'docs' ? 'saya.posts.docs_meta_description' : 'saya.posts.meta_description', { organization: organizationName.value }),
-  brand: { organizationName: organizationName.value },
+  title: isPlatform ? title.value : `${title.value} | ${organizationName}`,
+  description: index.value?.summary || t(props.collection === 'docs' ? 'saya.posts.docs_meta_description' : 'saya.posts.meta_description', { organization: organizationName }),
   breadcrumbs: [
     { name: t('saya.experience_detail.home'), url: localePath('/') },
     { name: label.value, url: localePath(path) },

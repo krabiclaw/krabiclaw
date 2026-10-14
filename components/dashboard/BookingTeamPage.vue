@@ -4,12 +4,14 @@
     <EditorNavigationList :groups="groups" :active-item="level.child.value" />
     <UButton v-if="team" class="mt-8" color="error" variant="ghost" :loading="saving" @click="remove">Delete team</UButton>
   </DashboardIndexPanel>
-  <DashboardLeafPanel v-else id="booking-team-setting" :title="concern === 'name' ? 'Team name' : 'Team members'" :lead="concern === 'members' ? 'Bookings can use the working hours of any included member.' : undefined" :save-label="creating ? 'Create team' : 'Save'" :saving="saving" :disabled="Boolean(loadError) || !form?.dirty || !valid" :error="saveError ?? (loadError ? getErrorMessage(loadError, 'Booking team could not be loaded') : '')" @cancel="reset(); revision += 1" @save="form?.submit()">
+  <DashboardLeafPanel v-else id="booking-team-setting" :title="concern === 'name' ? 'Team name' : 'Team members'" :lead="concern === 'members' ? 'Bookings can use the working hours of any included member.' : undefined" :save-label="creating ? 'Create team' : 'Save'" :saving="saving" :disabled="Boolean(loadError) || (!form?.dirty && !saveError) || !valid" :error="saveError ?? (loadError ? getErrorMessage(loadError, 'Booking team could not be loaded') : '')" @cancel="reset(); revision += 1" @save="form?.submit()">
     <UForm ref="form" :key="revision" :state="{ name, included }" @submit="save">
-      <UInput v-if="concern === 'name'" v-model="name" aria-label="Team name" variant="none" autofocus class="w-full" :ui="{ base: 'px-0 text-2xl md:text-2xl' }" />
-      <template v-else>
-        <SettingRow v-for="member in data?.members ?? []" :key="member.userId" :model-value="included.includes(member.userId)" :label="member.name" @update:model-value="value => toggle(member.userId, value)" />
-      </template>
+      <UFormField v-if="concern === 'name'" name="name">
+        <UInput v-model="name" aria-label="Team name" variant="none" autofocus class="w-full" :ui="{ base: 'px-0 text-2xl md:text-2xl' }" />
+      </UFormField>
+      <UFormField v-else name="included">
+        <SettingRow v-for="member in data?.members ?? []" :key="member.userId" :model-value="included.includes(member.userId)" :label="member.user.name" @update:model-value="value => toggle(member.userId, value)" />
+      </UFormField>
     </UForm>
   </DashboardLeafPanel>
 </template>
@@ -20,11 +22,17 @@ import SettingRow from '~/components/dashboard/SettingRow.vue'
 import { authClient } from '~/lib/auth-client'
 import { getErrorMessage } from '~/utils/errors'
 
+import { isOrganizationMembersData, organizationMembersKey } from '~/utils/organization-members'
+
 const props = defineProps<{ concern?: string }>()
 const route = useRoute()
 const level = useRouteLevel()
 const dashboard = useDashboardOrganization()
-const { data, error: loadError, refresh } = await useOrganizationMembers()
+const dashboardApi = useDashboardApi()
+const { data, error: loadError, refresh } = await useAsyncData(
+  () => organizationMembersKey(String(route.params.orgSlug)),
+  () => dashboardApi('/api/dashboard/members', { validate: isOrganizationMembersData }),
+)
 const teamId = computed(() => String(route.params.teamId))
 const creating = computed(() => teamId.value === 'new')
 const team = computed(() => data.value?.teams.find(team => team.id === teamId.value))
@@ -35,13 +43,13 @@ const createdTeamId = ref<string | null>(null)
 const saveError = ref<string | null>(null)
 const groups = computed(() => [{ id: 'team', items: [
   { id: 'name', label: 'Name', summary: team.value?.name ?? 'Choose a name', to: `${level.path.value}/name` },
-  ...(team.value ? [{ id: 'members', label: 'Members', summary: `${team.value.member_user_ids.length} members`, to: `${level.path.value}/members` }] : []),
+  ...(team.value ? [{ id: 'members', label: 'Members', summary: `${team.value.members.length} members`, to: `${level.path.value}/members` }] : []),
 ] }])
 watchEffect(() => {
   if (level.mode.value === 'yield') return
   if ((!creating.value && data.value && !team.value) || (props.concern && (!['name', 'members'].includes(props.concern) || (creating.value && props.concern !== 'name')))) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
 })
-function reset() { name.value = team.value?.name ?? ''; included.value = [...(team.value?.member_user_ids ?? [])]; saveError.value = null }
+function reset() { name.value = team.value?.name ?? ''; included.value = team.value?.members.map(member => member.userId) ?? []; saveError.value = null }
 watch([team, () => props.concern], reset, { immediate: true })
 function toggle(userId: string, value: boolean) { included.value = value ? [...new Set([...included.value, userId])] : included.value.filter(id => id !== userId) }
 const valid = computed(() => props.concern !== 'name' || Boolean(name.value.trim()))
@@ -74,8 +82,8 @@ async function save() {
       if (loadError.value) throw loadError.value
       const current = data.value?.teams.find(team => team.id === id)
       if (!current) throw new Error('This team no longer exists')
-      for (const userId of new Set([...current.member_user_ids, ...wanted])) {
-        if (current.member_user_ids.includes(userId) === wanted.includes(userId)) continue
+      for (const userId of new Set([...current.members.map(member => member.userId), ...wanted])) {
+        if (current.members.some(member => member.userId === userId) === wanted.includes(userId)) continue
         const body = { organizationId: organizationId(), teamId: id, userId }
         const result = wanted.includes(userId) ? await authClient.organization.addTeamMember(body) : await authClient.organization.removeTeamMember(body)
         if (result.error) throw new Error(result.error.message)
@@ -84,7 +92,7 @@ async function save() {
     await refresh()
     if (loadError.value) throw loadError.value
     const saved = data.value?.teams.find(team => team.id === id)
-    if (!saved || (props.concern === 'name' && saved.name !== wantedName) || (props.concern === 'members' && JSON.stringify([...saved.member_user_ids].sort()) !== JSON.stringify([...wanted].sort()))) throw new Error('The team changes could not be verified')
+    if (!saved || (props.concern === 'name' && saved.name !== wantedName) || (props.concern === 'members' && JSON.stringify(saved.members.map(member => member.userId).sort()) !== JSON.stringify([...wanted].sort()))) throw new Error('The team changes could not be verified')
     await refreshNuxtData(`member-scheduling-list:${organizationId()}`)
     await navigateTo(creating.value ? `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/team/groups/${encodeURIComponent(id)}` : level.to.value!)
   } catch (error) {
