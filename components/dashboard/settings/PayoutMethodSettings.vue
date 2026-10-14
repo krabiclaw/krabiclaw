@@ -55,6 +55,22 @@
     </section>
 
     <p v-if="payout" class="text-sm text-muted">{{ scheduleLabel }}.</p>
+
+    <!-- Stripe's surcharge: the business names a rate, Stripe bounds it per card and never applies it to debit or prepaid. -->
+    <section v-if="account?.status === 'ready'" data-testid="card-surcharge">
+      <h2 class="text-2xl font-semibold text-highlighted">Card surcharge</h2>
+      <p class="mt-2 text-base text-muted">Pass credit card fees on to the buyer. The surcharge is shown before they pay and included in the total. Stripe caps it for each card and never adds one to debit or prepaid cards.</p>
+      <div class="mt-6 flex flex-wrap items-end gap-4">
+        <UFormField label="Surcharge rate" description="Percent of the amount, up to Stripe’s cap for the card.">
+          <UInput v-model="surchargePercent" type="number" inputmode="decimal" min="0" max="100" step="0.01" :disabled="savingSurcharge" class="w-32" :ui="{ trailing: 'pe-2' }">
+            <template #trailing><span class="text-sm text-muted">%</span></template>
+          </UInput>
+        </UFormField>
+        <UButton :label="account.surchargeBasisPoints === null ? 'Turn on surcharge' : 'Save rate'" :loading="savingSurcharge" :disabled="!surchargeDirty" @click="saveSurcharge(parsedSurcharge)" />
+        <UButton v-if="account.surchargeBasisPoints !== null" label="Turn off" color="neutral" variant="outline" :loading="savingSurcharge" @click="saveSurcharge(null)" />
+      </div>
+      <p v-if="account.surchargeBasisPoints !== null" class="mt-3 text-sm text-muted">Surcharging is on at {{ account.surchargeBasisPoints / 100 }}%.</p>
+    </section>
     <PaymentsHelp />
   </div>
 </template>
@@ -81,6 +97,7 @@ interface ConnectedAccount {
   livemode: boolean
   status: ConnectStatus
   cardPaymentsStatus: CapabilityStatus | null
+  surchargeBasisPoints: number | null
   requirements: ConnectRequirement[]
   stripeRefreshedAt: string | null
   lastError: string | null
@@ -110,6 +127,7 @@ function isConnectedAccount(value: unknown): value is ConnectedAccount {
     && typeof value.status === 'string'
     && CONNECT_STATUSES.has(value.status as ConnectStatus)
     && (value.cardPaymentsStatus === null || (typeof value.cardPaymentsStatus === 'string' && CAPABILITY_STATUSES.has(value.cardPaymentsStatus as CapabilityStatus)))
+    && (value.surchargeBasisPoints === null || Number.isSafeInteger(value.surchargeBasisPoints))
     && Array.isArray(value.requirements)
     && value.requirements.every(isRequirement)
     && (value.stripeRefreshedAt === null || typeof value.stripeRefreshedAt === 'string')
@@ -166,6 +184,31 @@ const statusPresentation = computed<{ label: string; description: string; color:
     default: return { label: 'Not started', description: 'Stripe onboarding has not started.', color: 'neutral' }
   }
 })
+
+/** The rate as a percent in the field; basis points are what the account stores. */
+const surchargePercent = ref('')
+watch(account, (value) => { surchargePercent.value = value?.surchargeBasisPoints === null || value === null ? '3' : String(value.surchargeBasisPoints / 100) }, { immediate: true })
+const parsedSurcharge = computed(() => {
+  const points = Math.round(Number(surchargePercent.value) * 100)
+  return Number.isSafeInteger(points) && points >= 1 && points <= 10_000 ? points : null
+})
+const surchargeDirty = computed(() => parsedSurcharge.value !== null && parsedSurcharge.value !== account.value?.surchargeBasisPoints)
+const savingSurcharge = ref(false)
+async function saveSurcharge(points: number | null) {
+  savingSurcharge.value = true
+  errorMessage.value = null
+  try {
+    const response = await dashboardApi<{ success: true; account: ConnectedAccount }>('/api/dashboard/connect/surcharge', {
+      method: 'POST', body: { basis_points: points },
+      validate: (value): value is { success: true; account: ConnectedAccount } => isRecord(value) && value.success === true && isConnectedAccount(value.account),
+    })
+    setAccount(response.account)
+  } catch (error) {
+    errorMessage.value = getErrorMessage(error, 'The surcharge could not be saved')
+  } finally {
+    savingSurcharge.value = false
+  }
+}
 
 async function openDashboard() {
   openingDashboard.value = true

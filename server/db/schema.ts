@@ -1173,6 +1173,8 @@ export const stripe_connected_accounts = sqliteTable("stripe_connected_accounts"
 	status: text().default("creating").notNull(),
 	// Accounts v2 merchant.card_payments capability status.
 	card_payments_status: text(),
+	/** Pass on credit card fees: the surcharge rate in basis points, bounded by Stripe's maximum per card; NULL is off. */
+	surcharge_basis_points: integer(),
 	// Normalized requirements needed by the dashboard. Stripe remains the
 	// authority; Krabiclaw never collects or stores the requested KYC values.
 	requirements_json: text().default("[]").notNull(),
@@ -2320,6 +2322,8 @@ export const payments = sqliteTable("payments", {
  amount: integer().notNull(),
  price_snapshot_json: text().notNull(),
  tax_amount: integer().default(0).notNull(),
+ /** The credit-card surcharge Stripe applied, read from the PaymentIntent at settlement. */
+ surcharge_amount: integer().default(0).notNull(),
  captured_amount: integer().default(0).notNull(),
  refunded_amount: integer().default(0).notNull(),
  state: text().$type<'pending' | 'captured' | 'failed' | 'recovery' | 'refunded'>().default("pending").notNull(),
@@ -2340,8 +2344,12 @@ export const payment_attempts = sqliteTable("payment_attempts", {
  id: text().primaryKey(),
  payment_id: text().notNull().references(() => payments.id, { onDelete: "restrict" }),
  idempotency_key: text().notNull().unique(),
+ /** Hosted Checkout, before payments moved to the PaymentIntent the buyer confirms on the site. */
  stripe_checkout_id: text(),
  checkout_url: text(),
+ stripe_payment_intent_id: text(),
+ /** The amount and payment method the buyer was shown and confirmed: `{ payment_method_id, subtotal, surcharge, total, reviewed_at }`. */
+ review_json: text(),
  return_token: text().notNull(),
  status: text().default("creating").notNull(),
  expires_at: text().notNull(),
@@ -2436,7 +2444,7 @@ export const payment_usage_events = sqliteTable("payment_usage_events", {
  id: text().primaryKey(),
  organization_id: text().notNull(),
  payment_id: text().references(() => payments.id, { onDelete: "restrict" }),
- kind: text().$type<'captured_volume' | 'stripe_cost' | 'stripe_cost_adjustment'>().notNull(),
+ kind: text().$type<'captured_volume' | 'stripe_cost' | 'stripe_cost_adjustment' | 'ad_spend'>().notNull(),
  currency: text().notNull(),
  amount: integer().notNull(),
  billing_basis_json: text(),
