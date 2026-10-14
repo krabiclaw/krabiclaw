@@ -64,11 +64,12 @@ function stripeReadAdapter(stripe) {
     account: { retrieve: () => stripe.accounts.retrieve(null) },
     products: stripe.products,
     prices: stripe.prices,
+    subscriptions: stripe.subscriptions,
   }
 }
 
 function stripeMutationAdapter(stripe) {
-  return { products: stripe.products, prices: stripe.prices }
+  return { products: stripe.products, prices: stripe.prices, subscriptions: stripe.subscriptions }
 }
 
 function describeImageFiles() {

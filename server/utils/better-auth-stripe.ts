@@ -4,6 +4,10 @@
  * Subscription state itself is the plugin's: its webhook handlers own the
  * `subscription` table, and server/utils/billing-access.ts is the only reader.
  * This module resolves plan identity and canonical prices, nothing more.
+ *
+ * A subscription's quantity is the number of locations it covers (see
+ * `planPriceTiers`), which is what Better Auth records as `seats` and what its
+ * `upgrade` endpoint changes; no plan has a member-seat price.
  */
 import type Stripe from 'stripe'
 import type { StripePlan } from '@better-auth/stripe'
@@ -14,6 +18,7 @@ import {
 } from '~/shared/billing-model'
 import {
   assertStripeCatalogPrices,
+  PLAN_PRICE_LIST_EXPAND,
   selectStripeCatalogPrice,
 } from '~/server/utils/stripe-catalog'
 
@@ -41,6 +46,7 @@ export async function getBetterAuthStripePlans(
       active: true,
       type: 'recurring',
       limit: 100,
+      expand: PLAN_PRICE_LIST_EXPAND,
       ...(pricesStartingAfter ? { starting_after: pricesStartingAfter } : {}),
     })
     prices.push(...page.data)
@@ -69,9 +75,7 @@ export async function getBetterAuthStripePlans(
     if (!options.includeFeatureDisabled && !isNewSalePlan(planId)) continue
     if (planIds.has(planId)) throw new Error(`Stripe has multiple active products for plan ${planId}`)
 
-    const billablePrices = (pricesByProduct.get(product.id) ?? []).filter(
-      price => typeof price.unit_amount === 'number' && price.unit_amount > 0,
-    )
+    const billablePrices = pricesByProduct.get(product.id) ?? []
     const monthly = selectStripeCatalogPrice(product, billablePrices, 'month')
     if (!monthly) {
       throw new Error(`Stripe product ${product.id} for plan ${planId} is missing a canonical monthly price`)
@@ -96,9 +100,6 @@ export async function getBetterAuthStripePlans(
       ...(yearly?.lookup_key?.trim() ? { annualDiscountLookupKey: yearly.lookup_key.trim() } : {}),
       limits: getPlanEntitlements(planId),
       group: 'krabiclaw',
-      ...(product.metadata?.seat_price_id?.trim()
-        ? { seatPriceId: product.metadata.seat_price_id.trim() }
-        : {}),
     })
     planIds.add(planId)
   }

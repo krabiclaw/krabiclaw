@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:997ef69570b7c074aa28f9be5cc8dd954a38f1420decba8867615f4c51145deb",
-  "documentationFingerprint": "sha256:2ebcd33f17c77fb22e7bfe0b799fb8b31a4d6adab9719a83f7f4246734dc6f6f",
+  "fingerprint": "sha256:7ba51f151e1b1c17f2cb0e228337428c8467fd3054dffe4bb2bf037357ca9f2e",
+  "documentationFingerprint": "sha256:d9423bd77a8d18d9a7fd0d7c97b6d7f1c188d4d43ccbd4fa9ff1926d7a7650ac",
   "tools": [
     {
       "name": "append_content_block",
@@ -13635,7 +13635,7 @@
     {
       "name": "create_location",
       "title": "Create location",
-      "description": "Add a location to the selected business website. Repeat the same idempotency key with the same details on retry.",
+      "description": "Add a location to the selected business website. Every plan includes 2 locations; on Growth and Commerce each additional location is $49 per month, added to the plan by its owner in Billing first, and a location beyond those the plan covers is refused. Repeat the same idempotency key with the same details on retry.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -101576,7 +101576,7 @@
       "slug": "what-you-can-edit-through-chatgpt",
       "contentHash": "sha256:c7ab225c2c7ef78e2bedbb829ffea80ea2a606ee180c054ca788dd598d827ea7",
       "toolContracts": {
-        "create_location": "sha256:ae5b3985d3356a979f678e6a24ed16b56719d1c28a8c5a7072c1d0b528c43cfe",
+        "create_location": "sha256:857d86a8d7cdcc2b0ace643f0eb8ef401efcc4f33e878dc26aca56ac9f1bfa12",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_guest_conversation": "sha256:4d6462fe91c70c95f5028b0593d026fa32ba54ef84d5be113995f58c56571adf",
         "invite_organization_member": "sha256:f520b4ade47c9c5a5faef9859564f32d1c9dddfd285efdcc27fa099fa60e8a24",

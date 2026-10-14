@@ -19,6 +19,38 @@
           />
         </div>
 
+        <!-- The plan pays for the locations the site has; one more is added to it first, through Stripe's confirmation. -->
+        <div v-else-if="locations && locations.used >= locations.covered" data-location-limit class="flex min-h-0 flex-1 flex-col justify-center gap-4 px-6">
+          <h1 class="text-2xl font-bold leading-snug text-highlighted">
+            {{ onPaidPlan ? 'Add a location to your plan' : 'Choose a plan for more locations' }}
+          </h1>
+          <p class="text-[15px] leading-relaxed text-toned">
+            <template v-if="onPaidPlan">
+              Your plan covers {{ locations.covered }} locations and your site has {{ locations.used }}.
+              {{ INCLUDED_LOCATIONS }} locations are included, then {{ locationPrice }}.
+              Stripe shows what changes on your bill before you confirm.
+            </template>
+            <template v-else>
+              Basic includes {{ INCLUDED_LOCATIONS }} locations. Growth and Commerce include {{ INCLUDED_LOCATIONS }},
+              then {{ locationPrice }}.
+            </template>
+          </p>
+          <p v-if="limitError" class="text-sm text-error">{{ limitError }}</p>
+          <UButton
+            v-if="onPaidPlan"
+            class="self-start"
+            label="Add a location to your plan"
+            :loading="limitBusy"
+            @click="addLocationToPlan"
+          />
+          <UButton
+            v-else
+            class="self-start"
+            label="Choose a plan"
+            :to="`/dashboard/${orgSlug}/payments?tab=plan`"
+          />
+        </div>
+
         <template v-else-if="currentStep">
           <div class="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
             <OnboardingStepScreen :step="currentStep" @advance="goNext" />
@@ -69,6 +101,8 @@ import {
 } from '~/composables/useOnboardingFlow'
 import { useOnboardingDraft } from '~/composables/useOnboardingDraft'
 import { normalizeVertical, type OrganizationVertical } from '~/utils/vertical-copy'
+import { additionalLocationPrice, INCLUDED_LOCATIONS, isKnownRecurringPlan } from '~/shared/billing-model'
+import { isLocationCount } from '~/composables/useOrganizationSubscription'
 
 // Adding a location is a tile's worth of work reached from Locations, which is
 // where Back goes.
@@ -80,6 +114,35 @@ const config = useRuntimeConfig()
 const orgSlug = route.params.orgSlug as string
 
 const dashboard = useDashboardOrganization()
+const dashboardApi = useDashboardApi()
+const { setPlanLocations } = useOrganizationSubscription()
+
+type LocationBilling = { plan: string; billingInterval?: 'month' | 'year'; locations: { used: number; covered: number } }
+const isLocationBilling = (value: unknown): value is { success: true; billing: LocationBilling } =>
+  isRecord(value) && value.success === true && isRecord(value.billing) && typeof value.billing.plan === 'string' && isLocationCount(value.billing.locations)
+const { data: billingResponse, error: billingError } = await useAsyncData(
+  `location-new-billing:${String(route.params.orgSlug || '')}`,
+  () => dashboardApi('/api/billing/status', { validate: isLocationBilling }),
+)
+if (billingError.value) throw billingError.value
+const locations = computed(() => billingResponse.value?.billing.locations ?? null)
+const onPaidPlan = computed(() => isKnownRecurringPlan(billingResponse.value?.billing.plan))
+const locationPrice = computed(() => additionalLocationPrice(billingResponse.value?.billing.billingInterval))
+const limitBusy = ref(false)
+const limitError = ref('')
+async function addLocationToPlan() {
+  const organizationId = dashboard.organization.value?.id
+  if (!organizationId || !locations.value || limitBusy.value) return
+  limitBusy.value = true
+  limitError.value = ''
+  try {
+    await setPlanLocations(organizationId, locations.value.used + 1)
+  } catch (error) {
+    limitError.value = getErrorMessage(error, 'The location could not be added to your plan')
+  } finally {
+    limitBusy.value = false
+  }
+}
 const organizationData = computed(() => dashboard.organization.value as ApiRecord | null)
 const previewVertical = computed<OrganizationVertical>(() => normalizeVertical(organizationData.value?.vertical as string | undefined) as OrganizationVertical)
 const organizationLocations = computed(() => dashboard.locations.value)

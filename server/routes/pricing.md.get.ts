@@ -4,6 +4,7 @@ import { useRuntimeConfig } from 'nitro/runtime-config'
 import { cloudflareEnv, textResponse } from '~/server/utils/api-response'
 import { getCachedPlans, type EnvWithOrganizationCache, type Plan } from '~/server/utils/billing-plans'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
+import { additionalLocationPrice, INCLUDED_LOCATIONS } from '~/shared/billing-model'
 
 export function renderPlansMarkdown(plans: Plan[]): string {
   const lines: string[] = [
@@ -22,6 +23,9 @@ export function renderPlansMarkdown(plans: Plan[]): string {
 
     lines.push(`## ${plan.name}`)
     lines.push(`- **Price**: ${priceLabel}${annualPrice ? ` ($${annualPrice.amount / 100}/year)` : ''}`)
+    lines.push(`- **Locations**: ${INCLUDED_LOCATIONS} included${monthlyPrice
+      ? `, then ${additionalLocationPrice('month')}${annualPrice ? ` (${additionalLocationPrice('year')})` : ''}`
+      : ''}`)
     lines.push(`- **Tagline**: ${plan.tagline}`)
 
     if (plan.limits) {

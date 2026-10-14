@@ -21,6 +21,7 @@
                   <PlatformIcon name="check-solid" class="size-6" aria-hidden="true" />
                   <span class="sr-only">{{ comparisonValue(row, plan.id) }}</span>
                 </span>
+                <span v-else-if="row.planValue">{{ comparisonValue(row, plan.id) }}</span>
                 <span v-else><span aria-hidden="true">—</span><span class="sr-only">{{ comparisonValue(row, plan.id) }}</span></span>
               </td>
             </tr>

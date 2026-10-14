@@ -27,6 +27,43 @@ export const PAID_PLAN_PRICES: Readonly<Record<NewSalePlanId, { monthly: number;
   [COMMERCE_PLAN_ID]: Object.freeze({ monthly: 8900 }),
 })
 
+/** Locations every plan's price includes. */
+export const INCLUDED_LOCATIONS = 2
+
+/** USD cents for each location beyond the included ones, per billing interval. */
+export const ADDITIONAL_LOCATION_PRICES = Object.freeze({ monthly: 4900, annual: 58800 })
+
+/** Stripe's phrasing for the per-unit charge after an included allowance: "$49 per additional location per month". */
+export function additionalLocationPrice(interval: 'month' | 'year' = 'month'): string {
+  const cents = interval === 'year' ? ADDITIONAL_LOCATION_PRICES.annual : ADDITIONAL_LOCATION_PRICES.monthly
+  return `$${cents / 100} per additional location per ${interval}`
+}
+
+/**
+ * A paid plan's Stripe price is graduated: its subscription quantity is the
+ * number of locations it covers, the first tier is the plan amount for the
+ * included locations, and each further unit is one additional location.
+ */
+export function planPriceTiers(amount: number, interval: 'month' | 'year'): Array<{ up_to: number | 'inf'; flat_amount?: number; unit_amount?: number }> {
+  // Each tier sets only the charge it makes, so the invoice reads "Growth" and
+  // "1 location × Growth" with no $0.00 lines beside them.
+  return [
+    { up_to: INCLUDED_LOCATIONS, flat_amount: amount },
+    { up_to: 'inf', unit_amount: interval === 'year' ? ADDITIONAL_LOCATION_PRICES.annual : ADDITIONAL_LOCATION_PRICES.monthly },
+  ]
+}
+
+/**
+ * Locations an organization may have: the included ones on Basic, and on a
+ * paid plan the quantity its subscription is billed for. Quantities below the
+ * included count are charged the same flat tier, so they cover it too.
+ */
+export function coveredLocations(plan: string, quantity: number | null | undefined): number {
+  if (!isKnownRecurringPlan(plan)) return INCLUDED_LOCATIONS
+  if (!Number.isSafeInteger(quantity) || (quantity as number) < 1) throw new Error(`Subscription location quantity ${String(quantity)} is invalid`)
+  return Math.max(INCLUDED_LOCATIONS, quantity as number)
+}
+
 /**
  * A serializable view for consumers that need to render or test the policy
  * without duplicating its arrays. The arrays are readonly so callers cannot
