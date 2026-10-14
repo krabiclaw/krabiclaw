@@ -1,9 +1,9 @@
 <template>
- <DashboardLeafPanel id="personal-google-calendar" title="Google Calendar" lead="Hide times when your personal calendar is busy." :footer="Boolean(editor.record.value?.calendar_account_id)" :disabled="enabled === Boolean(editor.record.value?.calendar_ids.length)" :saving="editor.saving.value" :error="editor.error.value || connection.error.value || editor.record.value?.busy_error || ''" @cancel="revert" @save="save">
+ <DashboardLeafPanel id="personal-google-calendar" icon="i-logos-google-calendar" title="Google Calendar" lead="Hide times when your personal calendar is busy." :footer="Boolean(editor.record.value?.calendar_account_id)" :disabled="enabled === Boolean(editor.record.value?.calendar_ids.length)" :saving="editor.saving.value" :error="editor.error.value || connection.error.value || editor.record.value?.busy_error || ''" @cancel="revert" @save="save">
   <!-- Nothing to edit until the schedule has been read; a failed read is the error above. -->
   <template v-if="editor.loaded.value">
     <template v-if="editor.record.value?.calendar_account_id">
-     <div class="flex items-center gap-3 pb-6"><UIcon name="i-simple-icons-google" class="size-8" /><span class="text-base font-medium text-highlighted">Google Calendar</span><UBadge class="ml-auto" color="success" variant="subtle">Connected</UBadge></div>
+     <div class="flex items-center gap-3 pb-6"><UIcon name="i-logos-google-calendar" class="size-8" /><span class="text-base font-medium text-highlighted">Google Calendar</span><UBadge class="ml-auto" color="success" variant="subtle">Connected</UBadge></div>
      <SettingRow v-model="enabled" label="Avoid double bookings" />
     </template>
     <UButton v-else icon="i-simple-icons-google" size="xl" block :loading="editor.saving.value || connection.linking.value" @click="connect">Connect Google Calendar</UButton>

@@ -228,6 +228,8 @@ function setResolvedTenantContext(
   }
 }
 
+const SESSION_SCOPED_API_PREFIXES = ["/api/dashboard", "/api/organizations", "/api/mcp"] as const;
+
 export default defineHandler(async (event) => {
   // Nested self-fetches (i18n/icon/internal API calls during SSR) never carry
   // tenant context downstream handlers rely on — the real inbound request
@@ -244,6 +246,13 @@ export default defineHandler(async (event) => {
   // Diagnostics must still reach operational logs when tenant/D1 resolution fails.
   if (tenantPath === BROWSER_ERROR_PATH) return;
   if (tenantPath === "/api/auth" || tenantPath.startsWith("/api/auth/")) return;
+  // The dashboard, organization and MCP APIs are scoped by the session and the
+  // organization the request names, never by the host. Resolving the platform
+  // site for them cost every call its tenant row, its redirect lookups and the
+  // preview check before authentication ran: six D1 statements and 100-190 ms
+  // on a 401. Nothing on these paths reads the resolved tenant; the one shared
+  // helper, resolvePublicOrigin, answers the platform origin without it.
+  if (SESSION_SCOPED_API_PREFIXES.some(prefix => tenantPath === prefix || tenantPath.startsWith(`${prefix}/`))) return;
   // `/api/public/**` used to be skipped here because each of those routes
   // carried its own site id in the path. That id was a second answer to "which
   // tenant", arriving beside the host that already knew — and a route reachable

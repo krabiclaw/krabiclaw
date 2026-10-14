@@ -93,7 +93,7 @@ const items = computed<EditorNavigationItem[]>(() => {
       ...connection(s?.google_analytics ?? null) },
     { id: 'google-search-console', label: 'Google Search Console', lead: { icon: 'i-logos-google-search-console' }, to: `${base.value}/google-search-console`,
       ...connection(s?.google_search_console ?? null) },
-    { id: 'google-calendar', label: 'Google Calendar', lead: { icon: 'i-lucide-calendar-days' }, to: `${base.value}/google-calendar`,
+    { id: 'google-calendar', label: 'Google Calendar', lead: { icon: 'i-logos-google-calendar' }, to: `${base.value}/google-calendar`,
       ...(s?.google_calendar ? { summary: s.google_calendar.calendar_name, status: s.google_calendar.status === 'active' ? 'success' as const : 'error' as const } : { summary: 'Not connected' }) },
     { id: 'facebook', label: 'Facebook', lead: { icon: 'i-logos-facebook' }, to: `${base.value}/facebook`,
       ...connection(s?.facebook ?? null) },

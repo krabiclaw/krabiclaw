@@ -78,8 +78,10 @@ export async function loadPublicShellSource(
     setHeader(event, 'x-bootstrap-cache', useCache ? 'NO-KV' : 'SKIP')
   }
 
-  const { organization } = await loadPublicBase(event, organizationId, { previewAuthorized })
-  const sourceLocale = await getSourceLocale(db, organization.id)
+  const [{ organization }, sourceLocale] = await Promise.all([
+    loadPublicBase(event, organizationId, { previewAuthorized }),
+    getSourceLocale(db, organizationId),
+  ])
   const entitlement = await assertPublicOrganizationLanguageEntitlement(env, db, organization.id, locale ?? sourceLocale)
   options.signal?.throwIfAborted()
   const shellQueries: BatchQuery[] = []

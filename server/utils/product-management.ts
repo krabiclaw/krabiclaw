@@ -1,6 +1,6 @@
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { ASSIGNED_SERVICE_SQL } from '~/server/utils/member-access'
-import type { ProductBookingSetupInput } from '~/server/utils/availability'
+import type { ProductBookingSetupInput, SessionAvailability } from '~/server/utils/availability'
 import { HTTPError } from 'nitro'
 import { d1JsonArray, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
@@ -336,11 +336,26 @@ async function publicProductWindow(db: DbClient, organizationId: string, product
     if (!env) throw new Error('The organization environment is required to assess paid booking readiness')
     return setup ??= readStripeCheckoutSetup(db, organizationId, env)
   })
-  const activeLocationIds = bookableOnly ? new Set((await queryAll<{ id: string }>(db,
-    "SELECT id FROM business_locations WHERE organization_id = ? AND status = 'active'", [organizationId])).map(location => location.id)) : undefined
+  // Readiness needs the currency and the scheduled sessions; a catalog of N
+  // products read both N times. They are read once here and handed down.
+  const needsReadiness = products.filter(product => bookableOnly ? Boolean(product.booking || product.order_url) : product.kind === 'experience' || Boolean(product.booking))
+  const { listSessions } = await import('~/server/utils/availability')
+  const [activeLocationIds, currency, allSessions] = await Promise.all([
+    bookableOnly ? queryAll<{ id: string }>(db, "SELECT id FROM business_locations WHERE organization_id = ? AND status = 'active'", [organizationId]).then(rows => new Set(rows.map(location => location.id))) : undefined,
+    needsReadiness.some(product => !product.order_url) ? organizationDefaultCurrency(db, organizationId) : undefined,
+    needsReadiness.some(product => !product.order_url) ? listSessions(db, { organizationId, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 400 * 86_400_000).toISOString() }) : [],
+  ])
+  const sessionsByProduct = new Map<string, SessionAvailability[]>()
+  for (const session of allSessions) {
+    const list = sessionsByProduct.get(session.product_id) ?? []
+    list.push(session)
+    sessionsByProduct.set(session.product_id, list)
+  }
+  const readiness = (product: Product, extra: { requireActive?: boolean; activeLocationIds?: ReadonlySet<string> } = {}) =>
+    productBookingReadiness(db, organizationId, product, { env, paymentSetup, currency, sessions: sessionsByProduct.get(product.id) ?? [], ...extra })
   const visible = await Promise.all(products.map(async product => bookableOnly
-    ? Boolean(product.booking || product.order_url) && (await productBookingReadiness(db, organizationId, product, { env, paymentSetup, requireActive: true, activeLocationIds })).ready
-    : (product.kind !== 'experience' && !product.booking) || (await productBookingReadiness(db, organizationId, product, { env, paymentSetup })).ready))
+    ? Boolean(product.booking || product.order_url) && (await readiness(product, { requireActive: true, activeLocationIds })).ready
+    : (product.kind !== 'experience' && !product.booking) || (await readiness(product)).ready))
   const published = products.filter((_, index) => visible[index])
   return window ? published.slice(window.offset, window.offset + window.limit + 1) : published
 }
@@ -1552,7 +1567,7 @@ async function productCacheInvalidations(db: DbClient, organizationId: string, p
  * is per-location visibility. A withheld product is not sold out and a
  * disabled product is not unpublished.
  */
-export async function productBookingReadiness(db: DbClient, organizationId: string, product: Pick<Product, 'id' | 'active' | 'order_url' | 'booking' | 'locations'> & Pick<PlannedProduct, 'variants'>, options: { requireAllocation?: boolean; prepareAllocation?: boolean; requireActive?: boolean; locationId?: string; activeLocationIds?: ReadonlySet<string>; env?: CloudflareEnv; paymentSetup?: () => ReturnType<typeof readStripeCheckoutSetup> } = {}): Promise<{ ready: boolean; missing: string[]; allocation?: BatchQuery }> {
+export async function productBookingReadiness(db: DbClient, organizationId: string, product: Pick<Product, 'id' | 'active' | 'order_url' | 'booking' | 'locations'> & Pick<PlannedProduct, 'variants'>, options: { requireAllocation?: boolean; prepareAllocation?: boolean; requireActive?: boolean; locationId?: string; activeLocationIds?: ReadonlySet<string>; env?: CloudflareEnv; paymentSetup?: () => ReturnType<typeof readStripeCheckoutSetup>; /** The organization's currency and the product's scheduled sessions, when the caller already read them for a whole catalog. */ currency?: CurrencyCode; sessions?: SessionAvailability[] } = {}): Promise<{ ready: boolean; missing: string[]; allocation?: BatchQuery }> {
   const missing: string[] = []
   const requireActive = options.requireAllocation || options.requireActive
   const locations = product.locations.filter(location => (options.locationId === undefined || location.location_id === options.locationId) && (!options.activeLocationIds || options.activeLocationIds.has(location.location_id)))
@@ -1560,9 +1575,9 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
   if (product.order_url) return { ready: missing.length === 0, missing }
   if (!product.booking) missing.push('booking')
   else if (!product.booking.duration_minutes) missing.push('booking.duration_minutes')
-  const currency = await organizationDefaultCurrency(db, organizationId)
+  const currency = options.currency ?? await organizationDefaultCurrency(db, organizationId)
   const { listSessions, sessionAllocationPredicate } = await import('~/server/utils/availability')
-  const sessions = (await listSessions(db, { organizationId, productId: product.id, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 400 * 86_400_000).toISOString() }))
+  const sessions = (options.sessions ?? await listSessions(db, { organizationId, productId: product.id, fromInstant: new Date().toISOString(), toInstant: new Date(Date.now() + 400 * 86_400_000).toISOString() }))
     .filter(session => session.location_id === null
       ? options.locationId === undefined && Boolean(product.booking?.held_online)
       : locations.some(location => location.location_id === session.location_id && location.published && (!requireActive || location.active)))
