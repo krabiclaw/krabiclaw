@@ -47,7 +47,8 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   await expect(page).toHaveURL(/\/products\/new\/stay/)
   await page.getByRole('textbox', { name: 'Sleeps' }).fill('4')
   await page.getByRole('textbox', { name: 'Minimum nights' }).fill('2')
-  await page.getByRole('button', { name: 'Create place to stay', exact: true }).click()
+  // The index offers the same create action; the leaf's own save commits what it shows.
+  await page.locator('#dashboard-panel-product-stay').getByRole('button', { name: 'Create place to stay', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/dashboard/${slug}/products/(?!new)[^/?]+`))
   const productId = new URL(page.url()).pathname.split('/').at(-1)!
   const home = await call<{ product: { kind: string; unit_label: string; stay: Record<string, unknown> } }>('get_product', { product_id: productId })
