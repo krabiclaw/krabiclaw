@@ -258,25 +258,27 @@ export async function readStayCalendar(db: DbClient, access: StayAccess, input: 
 }
 
 /**
- * The claims for each night of a stay, generated in SQL so a long stay is
- * still one statement. With `version`, they are written only if the stay is
- * at that version, which is how a batch follows its own version-guarded update.
+ * Make a stay's night claims match its row as committed: release the nights it
+ * no longer holds, then claim the ones it lacks. Both read the dates and status
+ * from the stays row, never from the caller, so a batch whose version-guarded
+ * update lost a race converges on the winner's state instead of acting on its
+ * own parameters. A long stay is still one statement each.
  */
-function claimNightsQuery(organizationId: string, productId: string, stayId: string, checkIn: string, checkOut: string, version?: number): BatchQuery {
-  return {
-    query: `WITH RECURSIVE night(d) AS (SELECT ? UNION ALL SELECT date(d, '+1 day') FROM night WHERE date(d, '+1 day') < ?)
+function reconcileNightsQueries(organizationId: string, stayId: string): BatchQuery[] {
+  const row = `(SELECT check_in_date, check_out_date, status, overbooked, product_id FROM stays WHERE organization_id = ? AND id = ?)`
+  return [{
+    query: `DELETE FROM stay_nights WHERE organization_id = ? AND stay_id = ? AND EXISTS (SELECT 1 FROM ${row} st
+              WHERE st.status = 'cancelled' OR st.overbooked = 1 OR stay_nights.date < st.check_in_date OR stay_nights.date >= st.check_out_date)`,
+    params: [organizationId, stayId, organizationId, stayId],
+  }, {
+    query: `WITH RECURSIVE st AS ${row},
+              night(d) AS (SELECT check_in_date FROM st WHERE status <> 'cancelled' AND overbooked = 0
+                UNION ALL SELECT date(d, '+1 day') FROM night WHERE date(d, '+1 day') < (SELECT check_out_date FROM st))
             INSERT INTO stay_nights (organization_id, product_id, date, stay_id)
-            SELECT ?, ?, d, ? FROM night WHERE EXISTS (SELECT 1 FROM stays WHERE organization_id = ? AND id = ? AND status <> 'cancelled'${version === undefined ? '' : ' AND version = ?'})`,
-    params: [checkIn, checkOut, organizationId, productId, stayId, organizationId, stayId, ...(version === undefined ? [] : [version])],
-  }
-}
-
-/** Release a stay's nights, only if the stay reached `version` earlier in the same batch. */
-function releaseNightsQuery(organizationId: string, stayId: string, version: number): BatchQuery {
-  return {
-    query: 'DELETE FROM stay_nights WHERE organization_id = ? AND stay_id = ? AND EXISTS (SELECT 1 FROM stays WHERE organization_id = ? AND id = ? AND version = ?)',
-    params: [organizationId, stayId, organizationId, stayId, version],
-  }
+            SELECT ?, (SELECT product_id FROM st), d, ? FROM night
+             WHERE NOT EXISTS (SELECT 1 FROM stay_nights own WHERE own.organization_id = ? AND own.stay_id = ? AND own.date = night.d)`,
+    params: [organizationId, stayId, organizationId, stayId, organizationId, stayId],
+  }]
 }
 
 function isNightConflict(error: unknown): boolean {
@@ -353,7 +355,7 @@ export async function createStay(db: DbClient, access: StayAccess, input: Record
         params: [id, access.organizationId, home.product_id, fields.check_in_date, fields.check_out_date, fields.arrival_time, fields.adults, fields.children, fields.infants,
           fields.guest_name, fields.guest_surname, fields.guest_email, fields.guest_phone, fields.total_minor, home.currency, fields.notes, key, now, now, access.actorId, access.actorId],
       },
-      claimNightsQuery(access.organizationId, home.product_id, id, fields.check_in_date, fields.check_out_date),
+      ...reconcileNightsQueries(access.organizationId, id),
       organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.created', entityType: 'stay', entityId: id }),
     ], { operation: 'Create stay' })
   } catch (error) {
@@ -376,7 +378,7 @@ async function requireAppStay(db: DbClient, access: StayAccess, stayId: string, 
   return stay
 }
 
-/** The version-guarded update leads its batch; the statements after it are conditioned on its having applied. */
+/** The version-guarded update leads its batch; whether it applied is read from its result. */
 function versionChanged(results: unknown): boolean {
   return (results as Array<{ meta?: { changes?: number } }>)[0]?.meta?.changes === 1
 }
@@ -398,8 +400,7 @@ export async function updateStay(db: DbClient, access: StayAccess, stayId: strin
           fields.guest_email, fields.guest_phone, fields.total_minor, fields.notes, next, now, access.actorId, access.organizationId, stayId, current.version],
       },
       organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.updated', entityType: 'stay', entityId: stayId, onlyIfPreviousChangedOneRow: true }),
-      releaseNightsQuery(access.organizationId, stayId, next),
-      claimNightsQuery(access.organizationId, current.product_id, stayId, fields.check_in_date, fields.check_out_date, next),
+      ...reconcileNightsQueries(access.organizationId, stayId),
     ], { operation: 'Update stay' })
   } catch (error) {
     if (isNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay already holds one of these nights', 'check_in_date')
@@ -421,7 +422,7 @@ export async function cancelStay(db: DbClient, access: StayAccess, stayId: strin
       params: [now, reason, next, now, access.actorId, access.organizationId, stayId, current.version],
     },
     organizationEventQuery({ organizationId: access.organizationId, locationId: current.location_id, actorId: access.actorId, eventType: 'stay.cancelled', entityType: 'stay', entityId: stayId, onlyIfPreviousChangedOneRow: true }),
-    releaseNightsQuery(access.organizationId, stayId, next),
+    ...reconcileNightsQueries(access.organizationId, stayId),
   ], { operation: 'Cancel stay' })
   if (!versionChanged(results)) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
   return getStay(db, access, stayId)

@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:73e27ecd37092f14aedff22e52d2f12afabf13183f3f3cf2bba6ad98176f39b0",
-  "documentationFingerprint": "sha256:e8d12a41cf2679449d566cb1cec7b9ae3e43c0ed617c68e5adbc651387548fb0",
+  "fingerprint": "sha256:c7d2615bc3971e5fae10ea0dc7e0d25a6d6f9e6e3f9a16b86f4b7055cce1a665",
+  "documentationFingerprint": "sha256:74afcadb8e16cf60b5c0284098a21c319d10522d6b5bdf747dbae5a22cb04b9b",
   "tools": [
     {
       "name": "append_content_block",
@@ -72024,7 +72024,7 @@
     {
       "name": "record_stay_payment",
       "title": "Record stay payment",
-      "description": "Record money the host received outside Krabiclaw for a stay they took (cash, bank transfer, a card machine). A negative amount records a refund. Moves no money.",
+      "description": "Record money the host received outside KrabiClaw for a stay they took (cash, bank transfer, a card machine). A negative amount records a refund. Moves no money.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {

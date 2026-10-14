@@ -73,7 +73,8 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
 
   await page.getByRole('textbox', { name: 'Amount (THB)' }).fill('100')
   await page.getByRole('button', { name: 'Record payment' }).click()
-  await expect(page.getByText('Cash', { exact: true })).toBeVisible()
+  // The recorded row, not the method picker: it names the amount with its method.
+  await expect(page.getByRole('listitem').filter({ hasText: /100\.00 · Cash/ })).toBeVisible()
   const paid = await call<{ stay: { paid_minor: number; payment_status: string; payments: Array<{ method: string; amount_minor: number }> } }>('get_stay', { stay_id: stay.data!.stay.id })
   expect(paid.data!.stay).toMatchObject({ paid_minor: 100_00, payment_status: 'partial', payments: [{ method: 'cash', amount_minor: 100_00 }] })
 

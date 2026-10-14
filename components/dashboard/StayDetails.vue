@@ -26,7 +26,7 @@
 
       <template v-if="stay.owner === 'app'">
         <h2 class="mt-8 text-lg font-semibold text-highlighted">Payments</h2>
-        <p class="mt-1 text-sm text-muted">Money you received outside Krabiclaw. Recording it moves no money.</p>
+        <p class="mt-1 text-sm text-muted">Money you received outside KrabiClaw. Recording it moves no money.</p>
         <ul v-if="stay.payments.length" class="mt-4 divide-y divide-default border-y border-default">
           <li v-for="payment in stay.payments" :key="payment.id" class="flex items-center gap-4 py-3">
             <span class="min-w-0 flex-1">
@@ -82,7 +82,7 @@ const stay = computed(() => data.value?.stay ?? null)
 const manage = computed(() => data.value?.manage === true)
 
 const CHANNELS = { airbnb: 'Airbnb', vrbo: 'Vrbo', direct: 'You' } as const
-const METHODS: Record<StayPaymentMethod, string> = { cash: 'Cash', bank_transfer: 'Bank transfer', card_external: 'Card (outside Krabiclaw)', other: 'Other' }
+const METHODS: Record<StayPaymentMethod, string> = { cash: 'Cash', bank_transfer: 'Bank transfer', card_external: 'Card (outside KrabiClaw)', other: 'Other' }
 const methods = Object.entries(METHODS).map(([value, label]) => ({ value, label }))
 const channelName = computed(() => stay.value ? CHANNELS[stay.value.channel] : '')
 const guestName = computed(() => [stay.value?.guest_name, stay.value?.guest_surname].filter(Boolean).join(' ') || 'Guest')

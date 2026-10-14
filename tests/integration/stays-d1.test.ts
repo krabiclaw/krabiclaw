@@ -128,15 +128,26 @@ test('editing and cancelling a stay move and free exactly its nights, under its 
     const calendar = await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-09' })
     assert.deepEqual(calendar.nights.map(night => night.available), [true, true, true, true, false, false, false, true])
     assert.equal(calendar.nights[0]!.price_minor, 15_000)
-    const cancelled = await cancelStay(db, manager, stay.id, { expected_version: 2, reason: 'Guest changed plans' })
+    // Two edits from the same version race; whichever wins, the nights held are the winner's.
+    const racers = await Promise.allSettled([
+      updateStay(db, manager, stay.id, { expected_version: 2, check_in_date: '2026-11-20', check_out_date: '2026-11-22' }),
+      updateStay(db, manager, stay.id, { expected_version: 2, check_in_date: '2026-11-25', check_out_date: '2026-11-28' }),
+    ])
+    assert.equal(racers.filter(result => result.status === 'fulfilled').length, 1)
+    const winner = await getStay(db, manager, stay.id)
+    const held = await db.prepare('SELECT date FROM stay_nights WHERE stay_id = ? ORDER BY date').bind(stay.id).all<{ date: string }>()
+    const expected: string[] = []
+    for (let day = Date.parse(`${winner.check_in_date}T00:00:00Z`); day < Date.parse(`${winner.check_out_date}T00:00:00Z`); day += 86_400_000) expected.push(new Date(day).toISOString().slice(0, 10))
+    assert.deepEqual(held.results.map(row => row.date), expected)
+    const cancelled = await cancelStay(db, manager, stay.id, { expected_version: 3, reason: 'Guest changed plans' })
     assert.equal(cancelled.status, 'cancelled')
     assert.ok(cancelled.cancelled_at)
-    assert(((await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-05', to: '2026-11-08' })).nights).every(night => night.available))
-    await assert.rejects(updateStay(db, manager, stay.id, { expected_version: 3, adults: 1 }), code('STAY_NOT_EDITABLE'))
+    assert(((await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-05', to: '2026-11-30' })).nights).every(night => night.stay_id !== stay.id))
+    await assert.rejects(updateStay(db, manager, stay.id, { expected_version: 4, adults: 1 }), code('STAY_NOT_EDITABLE'))
     assert.deepEqual((await listStays(db, manager, { from: '2026-11-01', to: '2026-12-01' })).map(row => row.id).includes(stay.id), false)
     assert.equal((await listStays(db, manager, { from: '2026-11-01', to: '2026-12-01', includeCancelled: true })).some(row => row.id === stay.id), true)
     const audit = await db.prepare("SELECT event_name FROM activity_entries WHERE organization_id = ? AND event_name LIKE 'stay.%' ORDER BY occurred_at, event_name").bind(ORG).all<{ event_name: string }>()
-    assert.deepEqual(audit.results.map(row => row.event_name).sort(), ['stay.cancelled', 'stay.created', 'stay.created', 'stay.updated'])
+    assert.deepEqual(audit.results.map(row => row.event_name).sort(), ['stay.cancelled', 'stay.created', 'stay.created', 'stay.updated', 'stay.updated'])
   } finally {
     await runtime.dispose()
   }

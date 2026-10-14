@@ -766,7 +766,9 @@ function payload() {
     } : {}),
     details: form.details,
     active: form.active,
-    ...(form.kind === 'stay' ? { stay: {
+    // Stay settings are restated only when they are what is being saved, so a
+    // description save never writes back settings someone else changed.
+    ...(form.kind === 'stay' && (isNew.value || editorKey.value === 'stay') ? { stay: {
       ...(isNew.value ? { location_id: form.stay_location_id } : {}),
       check_in_time: form.check_in_time, check_out_time: form.check_out_time,
       max_guests: Number(form.max_guests), min_nights: Number(form.min_nights),
