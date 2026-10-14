@@ -75,7 +75,3 @@ test('the currency step is asked before anything is priced', () => {
   assert.ok(order.indexOf('currency') < order.indexOf('review'))
 })
 
-test('adding a location to an existing site does not ask for a currency', () => {
-  // That site already has one, and a location does not carry its own.
-  assert.equal(step('currency').flows.includes('add-location'), false)
-})

@@ -10,5 +10,5 @@ definePageMeta({ layout: 'dashboard' })
 
 const route = useRoute()
 const emit = defineEmits<{ advance: [] }>()
-const step = computed(() => onboardingStep(String(route.params.step ?? ''), 'new-site'))
+const step = computed(() => onboardingStep(String(route.params.step ?? '')))
 </script>

@@ -1,7 +1,7 @@
 // POST /api/dashboard/google-places/details
 // The place the owner picked in the business picker. Carries the picker's
 // autocomplete session token, which ends that Google session. Reviews are not
-// returned: the draft save, add-location and the Google Maps sync fetch and
+// returned: the draft save and the Google Maps sync fetch and
 // import them themselves.
 import { defineHandler } from 'nitro'
 import { readBody } from 'nitro/h3'

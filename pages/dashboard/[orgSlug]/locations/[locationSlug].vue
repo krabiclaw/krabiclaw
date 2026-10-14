@@ -4,8 +4,8 @@
     page shows it, each stating what it holds now. Every card is a level below
     this one; the gear opens the settings that a guest never sees.
   -->
-  <DashboardIndexPanel id="location-index" :title="location?.title || 'Location'" :auto-open="cards[0]?.to ?? null">
-    <template #right>
+  <DashboardIndexPanel id="location-index" :title="isNew ? 'New location' : location?.title || 'Location'" :auto-open="atLimit ? null : cards[0]?.to ?? null">
+    <template v-if="!isNew" #right>
       <UButton
         :to="`${level.path.value}/settings`"
         icon="i-lucide-settings"
@@ -16,8 +16,42 @@
       />
     </template>
 
+    <!--
+      The location before it exists: the sections creating it will not go
+      without, walked in order. A plan already paying for every location the site
+      has is extended first, through Stripe's confirmation.
+    -->
+    <template v-if="isNew">
+      <div v-if="atLimit && planLocations" data-location-limit class="space-y-4">
+        <h2 class="text-xl font-bold leading-snug text-highlighted">
+          {{ onPaidPlan ? 'Add a location to your plan' : 'Choose a plan for more locations' }}
+        </h2>
+        <p class="text-[15px] leading-relaxed text-toned">
+          <template v-if="onPaidPlan">
+            Your site has {{ planLocations.used }} locations, and your plan covers {{ planLocations.covered }}.
+            Plans include {{ INCLUDED_LOCATIONS }}, then {{ locationPrice }}.
+            Stripe shows what changes on your bill before you confirm.
+          </template>
+          <template v-else>
+            Basic includes {{ INCLUDED_LOCATIONS }} locations. Growth and Commerce include {{ INCLUDED_LOCATIONS }},
+            then {{ locationPrice }}.
+          </template>
+        </p>
+        <UAlert v-if="limitError" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="limitError" />
+        <UButton v-if="onPaidPlan" label="Add a location to your plan" :loading="limitBusy" @click="addLocationToPlan" />
+        <UButton v-else label="Choose a plan" :to="`/dashboard/${route.params.orgSlug}/payments?tab=plan`" />
+      </div>
+      <template v-else>
+        <div class="mb-6 flex justify-end">
+          <UButton :label="newLocation.createActionLabel.value" :loading="newLocation.creating.value" @click="newLocation.startOrCreate" />
+        </div>
+        <UAlert v-if="newLocation.createError.value" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="newLocation.createError.value" />
+        <EditorNavigationList :groups="navigationGroups" :active-item="level.child.value" />
+      </template>
+    </template>
+
     <UAlert
-      v-if="overviewError"
+      v-else-if="overviewError"
       color="error"
       variant="soft"
       icon="i-lucide-triangle-alert"
@@ -38,6 +72,10 @@ import { normalizeVertical, type OrganizationVertical } from '~/utils/vertical-c
 import { catalogLabel, catalogSummary, type CatalogCounts } from '~/utils/product-presentation'
 import { formatPostalAddress } from '~/utils/postal-address'
 import type { LocationReservationConfig } from '~/server/utils/reservations'
+import { NEW_LOCATION_SECTIONS, useNewLocation } from '~/lib/components/workspace/settings/LocationSettingsPage.vue'
+import { additionalLocationPrice, INCLUDED_LOCATIONS, isKnownRecurringPlan } from '~/shared/billing-model'
+import { isLocationCount } from '~/composables/useOrganizationSubscription'
+import { timezoneLabel } from '~/utils/timezone'
 
 // A location is a tile on Locations, a row on Menu; Locations is its pane and its Back.
 definePageMeta({ layout: 'dashboard' })
@@ -80,6 +118,46 @@ const level = useRouteLevel()
 const locationPath = level.path
 
 const organizationId = await useDashboardOrganizationId()
+const route = useRoute()
+const newLocation = useNewLocation(organizationId, null)
+const isNew = newLocation.isNew
+
+// Only the walk's own sections live under `new`; the rest belong to a location that exists.
+watchEffect(() => {
+  const child = level.child.value
+  if (isNew.value && child && !(NEW_LOCATION_SECTIONS as readonly string[]).includes(child)) {
+    showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
+  }
+})
+
+// What the plan pays for, read when a location is about to be added.
+type LocationBilling = { plan: string; billingInterval?: 'month' | 'year'; locations: { used: number; covered: number } }
+const isLocationBilling = (value: unknown): value is { success: true; billing: LocationBilling } =>
+  isRecord(value) && value.success === true && isRecord(value.billing) && typeof value.billing.plan === 'string' && isLocationCount(value.billing.locations)
+const { data: billingResponse, error: billingError } = await useAsyncData(
+  computed(() => `location-new-billing:${organizationId}:${isNew.value}`),
+  async () => isNew.value ? await dashboardApi('/api/billing/status', { validate: isLocationBilling }) : null,
+)
+if (billingError.value) throw billingError.value
+const planLocations = computed(() => billingResponse.value?.billing.locations ?? null)
+const atLimit = computed(() => isNew.value && planLocations.value !== null && planLocations.value.used >= planLocations.value.covered)
+const onPaidPlan = computed(() => isKnownRecurringPlan(billingResponse.value?.billing.plan))
+const locationPrice = computed(() => additionalLocationPrice(billingResponse.value?.billing.billingInterval))
+const { setPlanLocations } = useOrganizationSubscription()
+const limitBusy = ref(false)
+const limitError = ref('')
+async function addLocationToPlan() {
+  if (!planLocations.value || limitBusy.value) return
+  limitBusy.value = true
+  limitError.value = ''
+  try {
+    await setPlanLocations(organizationId, planLocations.value.used + 1)
+  } catch (error) {
+    limitError.value = getErrorMessage(error, 'The location could not be added to your plan')
+  } finally {
+    limitBusy.value = false
+  }
+}
 
 const locationId = computed(() => dashboardLocation.currentLocationId.value)
 
@@ -145,6 +223,13 @@ function scopedToLocation(path: string | undefined): string {
 }
 
 const cards = computed<HubCard[]>(() => {
+  if (isNew.value) {
+    const draft = newLocation.draft.value
+    return [
+      { id: 'name', title: 'Name', description: draft.title.trim() || 'Not named yet', to: `${locationPath.value}/name` },
+      { id: 'hours', title: 'Hours', description: draft.hours.timezone ? timezoneLabel(draft.hours.timezone) : 'Choose the time zone', to: `${locationPath.value}/hours` },
+    ]
+  }
   const resource = overview.value
   if (!resource) return []
   const loc = resource.location.location
@@ -197,7 +282,8 @@ const isOverviewResponse = (value: unknown): value is LocationOverviewResource =
   && isRecord(value.counts) && typeof value.counts.photos === 'number'
 
 const overviewKey = computed(() => `dashboard-location-overview:${organizationId}:${locationId.value}`)
-const { data: overview, error: overviewError } = await useAsyncData<LocationOverviewResource>(overviewKey, async () => {
+const { data: overview, error: overviewError } = await useAsyncData<LocationOverviewResource | null>(overviewKey, async () => {
+  if (isNew.value) return null
   const requestedLocationId = locationId.value
   if (!requestedLocationId) throw createError({ statusCode: 404, statusMessage: 'Location not found' })
   const shouldIncludeProducts = includeProducts.value
@@ -207,5 +293,5 @@ const { data: overview, error: overviewError } = await useAsyncData<LocationOver
   )
 })
 
-useSeoMeta({ title: () => `${location.value?.title || 'Location'} | Krabiclaw`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${isNew.value ? 'New location' : location.value?.title || 'Location'} | Krabiclaw`, robots: 'noindex, nofollow' })
 </script>
