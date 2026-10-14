@@ -1,6 +1,6 @@
 <template>
-  <DashboardLeafPanel id="google-calendar" title="Google Calendar" lead="See your bookings in Google Calendar." :footer="false" :error="failure || connection.error.value || calendar?.last_error || ''">
-    <IntegrationConnection logo="i-simple-icons-google" :connection="connected ? { name: 'Google Calendar', connectedAt: calendar!.created_at } : null" :disconnecting="saving" @disconnect="disconnect">
+  <DashboardLeafPanel id="google-calendar" icon="i-logos-google-calendar" title="Google Calendar" lead="See your bookings in Google Calendar." :footer="false" :error="failure || connection.error.value || calendar?.last_error || ''">
+    <IntegrationConnection logo="i-logos-google-calendar" :connection="connected ? { name: 'Google Calendar', connectedAt: calendar!.created_at } : null" :disconnecting="saving" @disconnect="disconnect">
       <UButton icon="i-simple-icons-google" size="xl" block :loading="saving || connection.linking.value" @click="connect">Connect Google Calendar</UButton>
     </IntegrationConnection>
     <p v-if="data?.cleanup_pending" class="mt-6 text-sm text-muted">Disconnecting…</p>

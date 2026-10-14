@@ -22,6 +22,6 @@ const groups=computed<EditorNavigationGroup[]>(()=>[
  {id:'deposit',label:'Reservation deposit',summary:editor.reservationForm.value.deposit_required ? 'Required' : 'Not required',to:to('deposit')},
  ]}]:[]),
  {id:'personal',items:[{id:'your-availability',label:'Your availability',to:`/dashboard/account/profile/calendar/${encodeURIComponent(organizationId)}`}]},
- {id:'connect',label:'Connect calendars',items:[{id:'google-calendar',label:'Google Calendar',lead:{icon:'i-simple-icons-google'},to:to('google-calendar')}]},
+ {id:'connect',label:'Connect calendars',items:[{id:'google-calendar',label:'Google Calendar',lead:{icon:'i-logos-google-calendar'},to:to('google-calendar')}]},
 ])
 </script>
