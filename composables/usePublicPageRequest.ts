@@ -27,16 +27,6 @@ export interface PublicPageRequest {
   locale: string | null;
 }
 
-export function getPublicCriticalHomeRequest(params: PublicPageRequest): PublicPageRequest {
-  return {
-    ...params,
-    page: 'home',
-    location: null,
-    datasets: ['content'],
-    blogSlug: null,
-  }
-}
-
 export function getPublicPageRequest(path: string): Omit<PublicPageRequest, "locale"> {
 
   // Location sub-pages: /locations/[slug]/*
@@ -230,12 +220,12 @@ const encodeKeyField = (value: string | null | undefined): string =>
 
 export const usePublicResourceKey = (
   resourceKind: 'shell' | 'page',
-  organizationId: string | null | undefined,
+  organizationId: string,
   params: PublicPageRequest,
 ) =>
   [
     resourceKind,
-    encodeKeyField(organizationId ?? "none"),
+    encodeKeyField(organizationId),
     encodeKeyField(params.page),
     encodeKeyField(params.location),
     encodeKeyField([...params.datasets].sort().join(',')),
@@ -243,13 +233,7 @@ export const usePublicResourceKey = (
     encodeKeyField(params.locale),
   ].join("~");
 
-export const usePublicPageKey = (
-  organizationId: string | null | undefined,
-  params: PublicPageRequest,
-) => usePublicResourceKey('page', organizationId, params)
-
 export const buildPublicPageUrl = (
-  organizationId: string | null | undefined,
   params: PublicPageRequest,
   resourceKind: 'shell' | 'page' = 'page',
 ) => {

@@ -1,5 +1,5 @@
 <template>
-  <NuxtLayout :name="isBlawby ? 'blawby' : 'saya'">
+  <NuxtLayout :name="template.layout">
   <div class="min-h-screen bg-default text-default">
     <div v-if="pending" class="flex min-h-screen items-center justify-center">
       <SayaIcon name="arrow-path" class="size-12 animate-spin text-muted" />
@@ -55,31 +55,30 @@ import { presentationForProduct } from '~/utils/product-presentation'
 import type { RenderedBookingPolicySummaryItem } from '~/server/utils/reservations'
 
 definePageMeta({ layout: false })
-const { isBlawby } = usePublicTemplate()
 
 const { locale, localePath, t } = useI18n()
 const route = useRoute()
 const justCopied = ref(false)
-const { organizationId } = useTenantOrganization()
+const { organization } = useTenantOrganization()
+const { id: organizationId, template } = organization
 
 const confirmation = ref<BookingConfirmationData | null>(null)
 const pending = ref(true)
 const loadError = ref<string | null>(null)
-const { organization } = useTenantOrganization()
 const copy = computed(() => getVerticalCopy((organization as { vertical?: string | null } | null)?.vertical, locale.value))
-const presentation = computed(() => confirmation.value?.productKind ? presentationForProduct(organization?.vertical, { kind: confirmation.value.productKind }) : null)
+const presentation = computed(() => confirmation.value?.productKind ? presentationForProduct(organization.vertical, { kind: confirmation.value.productKind }) : null)
 // Back to where the guest booked from: this location's own catalogue when the
 // booking names one, otherwise the site's.
 const browseHref = computed(() => {
   if (!presentation.value) return localePath('/')
   if (confirmation.value?.productKind === 'experience') return localePath(presentation.value.collectionPath)
-  if (isBlawby.value && !confirmation.value?.locationId) return localePath('/schedule')
+  if (template.slug === 'blawby' && !confirmation.value?.locationId) return localePath('/schedule')
   const locationSlug = confirmation.value?.locationSlug
   return localePath(locationSlug
     ? `/locations/${locationSlug}/${presentation.value.locationCollectionSegment}`
     : presentation.value.collectionPath)
 })
-const browseLabel = computed(() => confirmation.value?.productKind === 'experience' ? t('saya.header.experiences') : isBlawby.value && !confirmation.value?.locationId ? t('site_pages.schedule') : copy.value.reservationExploreLabel)
+const browseLabel = computed(() => confirmation.value?.productKind === 'experience' ? t('saya.header.experiences') : template.slug === 'blawby' && !confirmation.value?.locationId ? t('site_pages.schedule') : copy.value.reservationExploreLabel)
 const receiptTitle = computed(() => t(confirmation.value?.status === 'cancelled' ? 'saya.experience_cancel.cancelled_title' : confirmation.value?.status === 'pending' ? 'booking.request_received' : 'booking.confirmed'))
 const receiptDescription = computed(() => confirmation.value?.status === 'cancelled'
   ? t('saya.experience_cancel.cancelled_desc', { date: readableDate.value })

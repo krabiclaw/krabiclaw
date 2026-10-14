@@ -13,16 +13,21 @@ import { notifyPaymentFinancialEvent, reconcilePayoutEvent } from './notificatio
 import { recordCheckoutExpired, recordPaymentPaid } from '~/server/domain/booking-analytics'
 import { raiseSettledFailures } from '~/server/utils/notifications'
 import { paymentsBillingBasis } from './fx'
+import { deliverPaymentsUsage } from './usage'
 
 interface Hold {
   id:string; organization_id:string; product_id:string|null; variant_id:string|null; session_id:string|null; location_id:string|null; timezone:string|null
   buyer_user_id:string|null; request_id:string|null; quantity:number; status:string; expires_at:string; converted_booking_id:string|null; assigned_member_id:string|null; starts_at:string; ends_at:string
 }
-/** Provider retrieval, account/mode and frozen money checks precede every conversion; the paid analytics event follows it. */
+/** Provider retrieval, account/mode and frozen money checks precede every conversion; the paid analytics event and usage billing follow it. */
 export async function reconcilePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,intent:Stripe.PaymentIntent, env:CloudflareEnv) {
   const captured:{savedCard?:boolean}={}
   await settlePaymentIntent(db,stripe,payment,intent,env,captured)
-  if(captured.savedCard!==undefined)await recordPaymentPaid(db,await requirePayment(db,payment.organization_id,payment.id),intent.id,captured.savedCard)
+  if(captured.savedCard===undefined)return
+  await recordPaymentPaid(db,await requirePayment(db,payment.organization_id,payment.id),intent.id,captured.savedCard)
+  // The capture's usage event is billed now. A failed delivery fails the webhook
+  // and Stripe redelivers; the capture itself is idempotent on replay.
+  await deliverPaymentsUsage(db,env,payment.organization_id)
 }
 async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,intent:Stripe.PaymentIntent, env:CloudflareEnv, captured:{savedCard?:boolean}) {
   if (intent.livemode !== Boolean(payment.livemode) || intent.currency.toUpperCase() !== payment.currency || intent.metadata.krabiclaw_payment_id !== payment.id || (payment.stripe_payment_intent_id && payment.stripe_payment_intent_id !== intent.id)) throw new Error('Stripe PaymentIntent financial identity mismatch')

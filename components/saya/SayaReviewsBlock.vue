@@ -67,7 +67,7 @@ const profile = computed(() => {
   }
 })
 
-const homeCopy = computed(() => getVerticalCopy(organization?.vertical, locale.value))
+const homeCopy = computed(() => getVerticalCopy(organization.vertical, locale.value))
 const kicker = computed(() => blockText(props.block.data.description) || homeCopy.value.reviewsKicker)
 const heading = computed(() => blockText(props.block.data.title) || homeCopy.value.whatGuestsSayLabel)
 

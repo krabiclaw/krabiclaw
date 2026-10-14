@@ -206,10 +206,10 @@ publication failures remain visible and retryable through the canonical path.
 Better Auth Stripe still owns subscriptions. Its documented `onEvent` hook adds
 Metronome Payments invoice status alerts after the canonical customer, contract,
 platform and external-invoice validation. Native paid state is authoritative;
-an open invoice alone does not imply failure. The existing hourly reconciliation
-recovers capture/refund/dispute updates, recent native payout events and paid
-usage-invoice alerts even when no usage remains to deliver. It does not issue or
-collect an invoice.
+an open invoice alone does not imply failure. There is no scheduled
+reconciliation: the connected-account webhook owns capture, refund, dispute and
+payout state, and Stripe's own redelivery is the retry. Nothing here issues or
+collects an invoice.
 
 The preserved local environment intentionally has no automatic cron schedule and
 uses log-only customer mail. Its existing Stripe CLI listeners forward the native
@@ -302,8 +302,8 @@ Late or unfulfillable capture creates an automatic full-principal refund intent.
 Stripe account + livemode + native object identity scope every financial mutation.
 The connected snapshot webhook is separate from the subscription handler; durable
 outbox identity is namespaced by account/mode/event. Only minimal object identity
-is retained. Scheduled reconciliation recovers interrupted Checkout IDs, captures,
-refunds, lagged cost reports and undelivered usage. Stripe remains record authority.
+is retained. Stripe remains record authority; a webhook handler that fails
+returns non-2xx and Stripe redelivers the event until the write lands.
 
 Checkout is created only for a booked session through `createProductBooking`;
 there is no merchant payment link or MCP order checkout. Existing one-time order
@@ -382,8 +382,10 @@ currency usage remains visibly undelivered rather than being converted or billed
 
 Actual fees come from native platform all_fees itemized reports, including tax.
 Connected balance_transaction.fee alone is insufficient. Itemization can lag 96+
-hours; reconciliation respects provider availability and revisits 35 days for
-corrections. Unattributed items remain durable and are never charged to a tenant.
+hours; a daily task requests the report covering the last 35 days for late
+corrections, and Stripe's `reporting.report_run.succeeded` event on the platform
+webhook ingests it and bills the usage. Unattributed items remain durable and are
+never charged to a tenant.
 
 Native invoice/grace/collection defaults govern billing. Late closed-period positive
 costs roll to the current period as explicit adjustments. Negative closed/final

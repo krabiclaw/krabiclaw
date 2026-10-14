@@ -1,4 +1,3 @@
-import { queryFirst } from '~/server/db'
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { listOrganizationLocales } from '~/server/utils/organization-locales'
 
@@ -17,16 +16,7 @@ export default defineHandler(async (event) => {
   const db = env.db
   if (!db) return jsonResponse({ error: 'Database not available' }, { status: 500 })
 
-  const organization = await queryFirst<{ id: string }>(db, `
-    SELECT id
-    FROM organization
-    WHERE id = ? AND status = 'active'
-    LIMIT 1
-  `, [organizationId])
-
-  if (!organization) return jsonResponse({ error: 'Organization not found or inactive' }, { status: 404 })
-
-  const { locales } = await listOrganizationLocales(db, organization.id)
+  const { locales } = await listOrganizationLocales(db, organizationId)
   const publicLocales: PublicLocale[] = locales
     .filter(locale => locale.is_source || locale.status === 'published')
     .map(locale => ({

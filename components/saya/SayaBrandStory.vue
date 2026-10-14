@@ -52,7 +52,7 @@ const linkLabel = computed(() => blockText(props.block.data.label))
 const linkUrl = computed(() => blockText(props.block.data.url))
 // The eyebrow above the story. It is the one word here the block does not
 // carry, because it names the section rather than the site's own story.
-const kicker = computed(() => getVerticalCopy(organization?.vertical, locale.value).ourStoryKicker)
+const kicker = computed(() => getVerticalCopy(organization.vertical, locale.value).ourStoryKicker)
 
 /** An internal route takes the visitor's locale; an absolute URL is left alone. */
 function route(url: string) {

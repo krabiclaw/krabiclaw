@@ -132,6 +132,7 @@ test('publishing a platform guide indexes its public pages and preserves another
   const env: OrganizationChangeDrainEnv = {
     ...searchEnv,
     AI_SEARCH: { get: () => ({
+      info: async () => ({ id: 'test' }),
       update: async () => ({}),
       stats: async () => ({ queued: 0, running: 0, outdated: 0 }),
       items: {

@@ -172,17 +172,18 @@
 import { formatOpeningHours, getIsOpenNow } from '~/utils/formatters'
 import { getTodayHoursLabel, schemaOpeningHours } from '~/shared/reservation-hours'
 import { addressPlaceName, formatPostalAddress, schemaPostalAddress, type PostalAddress } from '~/utils/postal-address'
-const DOMPurify = useHtmlSanitizer()
+import { loadDomPurify } from '~/utils/dom-purify-loader'
+import { sanitizeHtmlForSsr } from '~/utils/markdown'
+
+const DOMPurify = import.meta.client ? await loadDomPurify() : { sanitize: sanitizeHtmlForSsr }
 
 definePageMeta({ layout: 'saya' })
 
 const { locale, localePath, t } = useI18n()
 
 const route = useRoute()
-const { organizationId, organization } = useTenantOrganization()
+const { organization } = useTenantOrganization()
 const locationCopy = computed(() => getVerticalCopy((organization as ApiValue)?.vertical, locale.value))
-if (!organizationId) throw createError({ statusCode: 404 })
-
 const slug = computed(() => String(route.params.slug))
 
 // Bootstrap: location data + page content (parking/notes) — 1 SSR call
@@ -213,9 +214,6 @@ useSocialMetadata(() => ({
   title: `Plan a visit · ${location.value?.title || slug.value}`,
   description: `Hours, address and directions for ${location.value?.title || slug.value}.`,
   socialImage: location.value?.social_image ?? null,
-  brand: {
-    organizationName: organizationName.value,
-  },
   breadcrumbs: [
     { name: 'Locations', url: '/locations' },
     { name: location.value?.title ?? slug.value, url: `/locations/${slug.value}` },

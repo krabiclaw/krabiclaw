@@ -108,9 +108,9 @@ const config = useRuntimeConfig()
 const organizationUrl = config.public.siteUrl
 
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
+const { social_image: organizationSocialImage, template: organizationTemplate } = useTenantOrganization().organization
+if (organizationTemplate.slug !== 'platform') throw createError({ statusCode: 404, statusMessage: 'Page not found', fatal: true })
 useSocialMetadata({
-  template: 'platform',
   path: '/templates',
   socialImage: organizationSocialImage,
   title: 'Templates',

@@ -20,7 +20,7 @@ export type ScheduledTaskName =
   | 'sessions-materialize'
   | 'stripe-ga4-intent-retention'
   | 'article-broadcast-send'
-  | 'payments-reconcile'
+  | 'stripe-fee-report-request'
 
 type TaskLoader = () => Promise<{ default: ScheduledTaskDefinition }>
 
@@ -29,9 +29,9 @@ export const SCHEDULED_TASKS: Readonly<Record<string, readonly ScheduledTaskName
   '*/5 * * * *': ['google-calendar-sync', 'social-card-backfill', 'sessions-materialize', 'article-broadcast-send'],
   '*/2 * * * *': ['public-resource-cache-invalidation'],
   '*/10 * * * *': ['domain-reconciliation', 'zaraz-analytics-reconciliation'],
-  '0 3 * * *': ['domain-reconciliation-daily', 'analytics-aggregate-daily', 'stripe-ga4-intent-retention'],
+  '0 3 * * *': ['domain-reconciliation-daily', 'analytics-aggregate-daily', 'stripe-ga4-intent-retention', 'stripe-fee-report-request'],
   '0 0 * * SUN': ['google-places-sync'],
-  '0 * * * *': ['review-request-automation', 'social-card-cleanup', 'payments-reconcile'],
+  '0 * * * *': ['review-request-automation', 'social-card-cleanup'],
 }
 
 const TASK_LOADERS: Readonly<Record<ScheduledTaskName, TaskLoader>> = {
@@ -47,7 +47,7 @@ const TASK_LOADERS: Readonly<Record<ScheduledTaskName, TaskLoader>> = {
   'sessions-materialize': async () => import('./tasks/sessions-materialize'),
   'google-places-sync': async () => import('./tasks/google-places-sync'),
   'review-request-automation': async () => import('./tasks/review-request-automation'),
-  'payments-reconcile': async () => import('./tasks/payments-reconcile'),
+  'stripe-fee-report-request': async () => import('./tasks/stripe-fee-report-request'),
   'article-broadcast-send': async () => import('./tasks/article-broadcast-send'),
 }
 

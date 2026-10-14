@@ -1,12 +1,11 @@
 import type { OrganizationSettings } from '../../shared/organization-settings'
-import { INTEGRATION_PROVIDERS } from '../../shared/organization-settings'
+import { INTEGRATION_PROVIDERS, NONPROFIT_STATUS_CANONICAL } from '../../shared/organization-settings'
 import type { MediaCategory } from '~/shared/media-placement-contract'
 import { sql } from "drizzle-orm"
 import { sqliteTable, integer, text, real, unique, uniqueIndex, index, check, foreignKey, primaryKey } from "drizzle-orm/sqlite-core"
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
 import type { CONTENT_DOCUMENT_KINDS } from "../../shared/content-registries"
 import { NOTIFICATION_CATEGORIES, type NotificationCategory } from "../../shared/notification-categories"
-import { NONPROFIT_STATUS_CANONICAL } from "../../utils/professional-service-schema"
 
 export const account = sqliteTable("account", {
 	id: text().primaryKey(),
@@ -308,7 +307,7 @@ export const teamMember = sqliteTable("teamMember", {
 	teamId: text().notNull().references(() => team.id, { onDelete: "cascade" }),
 	userId: text().notNull().references(() => user.id, { onDelete: "cascade" }),
 	membershipKey: text().unique(),
-	createdAt: integer({ mode: "timestamp" }),
+	createdAt: integer({ mode: "timestamp" }).notNull(),
 }, table => [index("teamMember_teamId_idx").on(table.teamId), index("teamMember_userId_idx").on(table.userId)]);
 
 // ---------------------------------------------------------------------------
@@ -1225,15 +1224,14 @@ export const oauthClient = sqliteTable("oauthClient", {
 	clientCredentialsScopes: text().default("[]").notNull(),
 	clientDiscoveryId: text(),
 	applicationType: text(),
-	public: integer().default(0).notNull(),
-	requirePKCE: integer().default(1).notNull(),
-	skipConsent: integer().default(0).notNull(),
+	requirePKCE: integer({ mode: "boolean" }).default(true).notNull(),
+	skipConsent: integer({ mode: "boolean" }).default(false).notNull(),
 	userId: text(),
 	metadata: text(),
-	disabled: integer().default(0).notNull(),
+	disabled: integer({ mode: "boolean" }).default(false).notNull(),
 	createdAt: integer({ mode: "timestamp" }).notNull(),
 	updatedAt: integer({ mode: "timestamp" }).notNull(),
-	enableEndSession: integer(),
+	enableEndSession: integer({ mode: "boolean" }),
 	subjectType: text(),
 	uri: text(),
 	icon: text(),
@@ -1245,14 +1243,14 @@ export const oauthClient = sqliteTable("oauthClient", {
 	softwareStatement: text(),
 	postLogoutRedirectUris: text(),
 	backchannelLogoutUri: text(),
-	backchannelLogoutSessionRequired: integer().default(0).notNull(),
+	backchannelLogoutSessionRequired: integer({ mode: "boolean" }).default(false).notNull(),
 	tokenEndpointAuthMethod: text(),
 	jwks: text(),
 	jwksUri: text(),
 	grantTypes: text(),
 	responseTypes: text(),
 	type: text(),
-	dpopBoundAccessTokens: integer().default(0).notNull(),
+	dpopBoundAccessTokens: integer({ mode: "boolean" }).default(false).notNull(),
 	referenceId: text(),
 });
 
@@ -1271,8 +1269,8 @@ export const oauthResource = sqliteTable("oauthResource", {
 	signingKeyId: text(),
 	allowedScopes: text(),
 	customClaims: text(),
-	dpopBoundAccessTokensRequired: integer().default(0).notNull(),
-	disabled: integer().default(0).notNull(),
+	dpopBoundAccessTokensRequired: integer({ mode: "boolean" }).default(false).notNull(),
+	disabled: integer({ mode: "boolean" }).default(false).notNull(),
 	createdAt: integer({ mode: "timestamp" }).notNull(),
 	updatedAt: integer({ mode: "timestamp" }).notNull(),
 	policyVersion: integer().default(1).notNull(),
@@ -1415,7 +1413,7 @@ export const subscription = sqliteTable("subscription", {
 	periodEnd: integer({ mode: "timestamp" }),
 	trialStart: integer({ mode: "timestamp" }),
 	trialEnd: integer({ mode: "timestamp" }),
-	cancelAtPeriodEnd: integer().default(0).notNull(),
+	cancelAtPeriodEnd: integer({ mode: "boolean" }).default(false).notNull(),
 	cancelAt: integer({ mode: "timestamp" }),
 	canceledAt: integer({ mode: "timestamp" }),
 	endedAt: integer({ mode: "timestamp" }),
@@ -1787,12 +1785,12 @@ export const user = sqliteTable("user", {
 	emailVerified: integer({ mode: "boolean" }).default(false).notNull(),
 	image: text(),
 	phoneNumber: text().unique(),
-	phoneNumberVerified: integer().default(0).notNull(),
+	phoneNumberVerified: integer({ mode: "boolean" }).default(false).notNull(),
 	role: text().default("user"),
-	banned: integer().default(0),
+	banned: integer({ mode: "boolean" }).default(false),
 	banReason: text(),
 	banExpires: integer({ mode: "timestamp" }),
-	isAnonymous: integer().default(0).notNull(),
+	isAnonymous: integer({ mode: "boolean" }).default(false).notNull(),
 	// Better Auth Stripe plugin user customer field. Organization subscriptions
 	// use organization.stripeCustomerId instead.
 	stripeCustomerId: text(),

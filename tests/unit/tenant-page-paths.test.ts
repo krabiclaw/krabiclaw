@@ -7,6 +7,7 @@ import {
 } from '../../build/claimed-public-routes.ts'
 import { isClaimedPublicPath, templateAllowsPageDocumentAt } from '../../shared/tenant-page-paths.ts'
 import { publicTemplateRegistry } from '../../utils/template-registry.ts'
+import { isTrackablePath } from '../../utils/pageview-path.ts'
 
 // The invariant: a path is writable when the site's template renders a tenant
 // page document there, or nothing claims the path and the template's catch-all
@@ -102,7 +103,7 @@ test('a constrained param claims only what it matches', () => {
   assert.equal(allows('saya', '/fr/about'), true)
 })
 
-test('the platform template holds its own marketing pages', () => {
+test('the platform owns its marketing pages and excludes private auth routes from pageviews', () => {
   // Krabiclaw's own site renders page documents through the same loader and the
   // same catch-all every customer site uses (#903).
   assert.equal(allows('platform', '/about'), true)
@@ -112,6 +113,12 @@ test('the platform template holds its own marketing pages', () => {
   // tenant-only route the platform template does not map still is not.
   assert.equal(allows('platform', '/our-story'), true)
   assert.equal(allows('platform', '/menu'), false)
+  for (const path of ['/oauth/login', '/oauth/consent', '/accept-invitation/nonexistent-invitation', '/login', '/forgot-password', '/reset-password']) {
+    assert.equal(isTrackablePath(path), false, path)
+  }
+  for (const path of ['/signup', '/ja/menu', '/th/reservations', '/oauth-notes', '/accept-invitation-story']) {
+    assert.equal(isTrackablePath(path), true, path)
+  }
 })
 
 test('claimed route matching follows case-insensitive literals and constraints', () => {

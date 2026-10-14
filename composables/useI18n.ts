@@ -7,7 +7,8 @@ export function useI18n() {
   const composer = useVueI18n()
   const publicLocale = useState<string>('public-locale', () => 'en')
   const sourceLocale = useState<string | null>('public-source-locale', () => null)
-  const { isPlatform } = useTenantOrganization()
+  const { template } = useTenantOrganization().organization
+  const isPlatform = template.slug === 'platform'
   const representations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
   const locales = computed(() => representations.value.map(item => ({ code: item.locale, name: item.label })))
 

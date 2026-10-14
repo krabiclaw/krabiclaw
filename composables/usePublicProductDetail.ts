@@ -64,9 +64,10 @@ export function isPublicProductDetailPayload(value: unknown): value is PublicPro
 }
 
 export async function usePublicProductDetail(routeKind: ProductSurface) {
+  const nuxtApp = useNuxtApp()
   const route = useRoute()
   const requestEvent = useRequestEvent()
-  const { organizationId } = useTenantOrganization()
+  const { id: organizationId } = useTenantOrganization().organization
   // An Experience's page is site-wide: /experiences/<product-slug> names the
   // Product in its only slug segment, where a vertical's product page names the
   // branch first. Same payload either way, so one composable serves both.
@@ -110,7 +111,14 @@ export async function usePublicProductDetail(routeKind: ProductSurface) {
     },
     { server: true, lazy: false },
   )
-  if (error.value) throw createError({ ...error.value, message: error.value.message, fatal: true })
+  if (error.value) {
+    const failure = error.value
+    if (import.meta.server) throw failure
+    throw nuxtApp.runWithContext(() => showError(failure))
+  }
+  watch(error, (failure) => {
+    if (failure) nuxtApp.runWithContext(() => showError(failure))
+  }, { flush: 'sync' })
   if (!data.value) throw createError({ statusCode: 404, statusMessage: 'Product not found', fatal: true })
   localeRepresentations.value = data.value.localeRepresentations
   return { organizationId, detail: data as Ref<PublicProductDetailPayload> }
@@ -118,16 +126,17 @@ export async function usePublicProductDetail(routeKind: ProductSurface) {
 
 /** The same public offering behind a page's explicit product binding. */
 export async function usePublicPageProduct(pagePath: ComputedRef<string>, locale: ComputedRef<string>, productId: ComputedRef<string | null>) {
+  const nuxtApp = useNuxtApp()
   const route = useRoute()
   const event = useRequestEvent()
-  const { organizationId } = useTenantOrganization()
+  const { id: organizationId } = useTenantOrganization().organization
   const scope = computed(() => typeof route.query.location_id === 'string' ? route.query.location_id : null)
   const { data, error } = await useAsyncData<PublicProductDetailPayload | null>(
     () => `page-product:${organizationId}:${pagePath.value}:${locale.value}:${productId.value}:${scope.value ?? ''}`,
     async (_nuxtApp, { signal }) => {
       if (!productId.value) return null
       if (import.meta.server) {
-        if (!event || !organizationId) throw createError({ statusCode: 500, statusMessage: 'Request context unavailable' })
+        if (!event) throw createError({ statusCode: 500, statusMessage: 'Request context unavailable' })
         const [{ cloudflareEnv }, { loadPublicPageProductDetail, publicProductDetailPayload }] = await Promise.all([
           import('~/server/utils/api-response'), import('~/server/utils/public-products'),
         ])
@@ -141,6 +150,13 @@ export async function usePublicPageProduct(pagePath: ComputedRef<string>, locale
       })
     },
   )
-  if (error.value) throw createError({ ...error.value, message: error.value.message, fatal: true })
+  if (error.value) {
+    const failure = error.value
+    if (import.meta.server) throw failure
+    throw nuxtApp.runWithContext(() => showError(failure))
+  }
+  watch(error, (failure) => {
+    if (failure) nuxtApp.runWithContext(() => showError(failure))
+  }, { flush: 'sync' })
   return data
 }

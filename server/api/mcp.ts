@@ -64,7 +64,7 @@ function resolveTenantToolMeta(toolName: string | null): McpToolMeta {
   return { domain: tool?.domain ?? null, isMutating: isMcpMutatingTool(tool) };
 }
 
-const MCP_INSTRUCTIONS = `Manage the selected business. Read current state and preserve unrelated values. Ask for missing business facts; never invent prices or booking details. Finish website changes and verify returned public URLs. Keep menu sections and order; experiences need bookings. Use revision and retry keys, and follow pagination. Publish or message only requested destinations. Payment reports are read-only; financial_action_required means the action remains incomplete. Report tool errors and partial outcomes plainly.`;
+const MCP_INSTRUCTIONS = `Manage the selected business. Read current state and preserve unrelated values. Ask for missing business facts; never invent prices or booking details. Finish website changes and verify returned public URLs. Keep menu sections and order; experiences need bookings. Use revision and retry keys, and follow pagination. Publish or message only requested destinations. Payment reports are read-only; financial_action_required means the action remains incomplete. Report tool errors and partial outcomes plainly. If a KrabiClaw capability described in its documentation has no tool in this list, the client's saved tool list is out of date, not the server: tell the user to follow https://krabiclaw.com/docs/refresh-krabiclaw-tools-in-chatgpt in a desktop browser (not the mobile app) and start a new chat.`;
 
 // H3's request context follows the SDK's original requestInfo into the factory.
 interface McpFactoryContext {
@@ -174,8 +174,6 @@ function createTenantMcpServer(ctx: McpRequestContext): McpServer {
     recordRequestPhase(event, "mcp_execute", executionStartedAt);
     const isRender = isMcpRenderResponse(result);
     const failed = isRender && result.isError === true;
-    const structuredContent = isRender ? result.structuredContent : result;
-    const modelText = isRender && result.modelText ? result.modelText : JSON.stringify(structuredContent);
 
     const executionContext = event.context.mcpExecutionContext as { organizationId: string } | undefined;
     const resolvedOrganizationId = executionContext?.organizationId ?? null;
@@ -205,8 +203,11 @@ function createTenantMcpServer(ctx: McpRequestContext): McpServer {
       }
     }
     if (purgeFailure && !failed) return mcpToolErrorResult(purgeFailure, { status: 502, code: "PUBLIC_SITE_REFRESH_FAILED" });
+    const structuredJson = JSON.stringify(isRender ? result.structuredContent : result);
+    const structuredContent = JSON.parse(structuredJson);
+    const modelText = isRender && result.modelText ? result.modelText : structuredJson;
     const response = {
-      isError: failed, ...(failed ? {} : { structuredContent }), content: [{ type: "text" as const, text: failed ? JSON.stringify(structuredContent) : modelText }],
+      isError: failed, ...(failed ? {} : { structuredContent }), content: [{ type: "text" as const, text: failed ? structuredJson : modelText }],
       ...(isRender && result.privateMeta ? { _meta: result.privateMeta } : {}),
     };
     return response;

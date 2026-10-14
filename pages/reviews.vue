@@ -66,8 +66,7 @@
 <script setup>
 definePageMeta({ layout: 'saya' })
 
-const { organizationId, organization } = useTenantOrganization()
-if (!organizationId) throw createError({ statusCode: 404 })
+const { organization } = useTenantOrganization()
 const { localePath, t } = useI18n()
 
 const { googleMaps, locations } = await usePublicPageData()
@@ -93,16 +92,13 @@ const hasMore = computed(() => visibleCount.value < allReviews.value.length)
 const remaining = computed(() => allReviews.value.length - visibleCount.value)
 function loadMore() { visibleCount.value += PAGE_SIZE }
 
-const organizationName = computed(() => organization?.name?.trim() || googleMaps.value?.business?.title?.trim() || '')
+const organizationName = organization.name
 
 useSocialMetadata(() => ({
   path: '/reviews',
-  title: `${t('saya.footer.reviews')} | ${organizationName.value}`,
-  description: t('saya.reviews_page.meta_description', { organization: organizationName.value }),
+  title: `${t('saya.footer.reviews')} | ${organizationName}`,
+  description: t('saya.reviews_page.meta_description', { organization: organizationName }),
   label: t('saya.footer.reviews'),
-  brand: {
-    organizationName: organizationName.value,
-  },
   breadcrumbs: [
     { name: t('saya.footer.reviews'), url: '/reviews' },
   ],
@@ -110,8 +106,8 @@ useSocialMetadata(() => ({
 
 useSchemaOrg([
   computed(() => ({
-    '@type': getBusinessSchemaTypes(organization?.vertical),
-    name: organizationName.value,
+    '@type': getBusinessSchemaTypes(organization.vertical),
+    name: organizationName,
     ...(googleReviewSummary.value ? {
       aggregateRating: {
         '@type': 'AggregateRating',

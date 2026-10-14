@@ -6,6 +6,7 @@ import { E2E_POTTERY_ORGANIZATION_ID, tenantTestExtraHeaders } from './test-env'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { generateReservationTimes, type OpeningHours, type SpecialHours } from '../../shared/reservation-hours'
 import { addLocalDays, localDateAt, localDateTimeToInstant } from '../../utils/timezone'
+import type { OrganizationMembersData } from '../../utils/organization-members'
 
 // Split out of mcp.spec.ts (owner tool-coverage tests) — see helpers/mcp.ts
 // for why. This group covers the bulk of an owner's MCP tool surface: site
@@ -945,13 +946,14 @@ test.describe('stateless MCP server', () => {
       try {
         const name = `Hosts ${crypto.randomUUID()}`
         teamId = (await call<{team:{id:string}}>('create_team',{name})).team.id
-        const membership = await call<{team:{member_user_ids:string[]}}>('set_team_member',{team_id:teamId,user_id:person!.userId,included:true})
-        expect(membership.team.member_user_ids).toContain(person!.userId)
+        const membership = await call<{team:OrganizationMembersData['teams'][number]}>('set_team_member',{team_id:teamId,user_id:person!.userId,included:true})
+        expect(membership.team.organizationId).toBe(organizationId)
+        expect(membership.team.members.map(member=>member.userId)).toContain(person!.userId)
         const nativeTeams = await request.get(`${baseURL}/api/auth/organization/list-teams`,{params:{organizationId}})
         expect(nativeTeams.status(),await nativeTeams.text()).toBe(200)
         expect(await nativeTeams.json()).toContainEqual(expect.objectContaining({id:teamId,name,organizationId}))
-        const removed = await call<{team:{member_user_ids:string[]}}>('set_team_member',{team_id:teamId,user_id:person!.userId,included:false})
-        expect(removed.team.member_user_ids).not.toContain(person!.userId)
+        const removed = await call<{team:OrganizationMembersData['teams'][number]}>('set_team_member',{team_id:teamId,user_id:person!.userId,included:false})
+        expect(removed.team.members.map(member=>member.userId)).not.toContain(person!.userId)
         const email = `invite-${crypto.randomUUID()}@playwright.example`
         const invited = await call<{invitation:{id:string;status:string;delivery:{status:string}}}>('invite_organization_member',{email,role:'member'})
         invitationId = invited.invitation.id

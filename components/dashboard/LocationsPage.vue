@@ -42,7 +42,7 @@ import { normalizeVertical, type OrganizationVertical } from '~/utils/vertical-c
 
 const route = useRoute()
 const dashboard = useDashboardOrganization()
-const { organizationPaths } = useDashboardOrganizationLinks()
+const { organizationPaths } = dashboard
 
 const organization = computed(() => dashboard.organization.value)
 

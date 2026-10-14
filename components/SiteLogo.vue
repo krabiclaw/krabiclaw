@@ -23,7 +23,7 @@ import { cfImageVariant } from '~/utils/cf-image'
 // only in its own mode. One component for every template's header and footer;
 // the default slot is what shows when the site has no logo.
 const props = defineProps<{ alt: string; size: 'sm' | 'md' | 'lg'; loading: 'eager' | 'lazy' }>()
-const { logos } = useTenantOrganization()
+const { logos } = useTenantOrganization().organization
 const logo = logos.find(item => item.slot === 'logo') ?? null
 const dark = logos.find(item => item.slot === 'logo_dark') ?? null
 const shown = logo

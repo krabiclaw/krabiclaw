@@ -62,7 +62,8 @@ import type { RenderedBookingPolicySummaryItem } from '~/server/utils/reservatio
 
 definePageMeta({ layout: 'saya' })
 
-const { organization, organizationId } = useTenantOrganization()
+const { organization } = useTenantOrganization()
+const { id: organizationId } = organization
 const { locale, localePath, t } = useI18n()
 const resCopy = computed(() => getVerticalCopy((organization as ApiValue)?.vertical, locale.value))
 const route = useRoute()

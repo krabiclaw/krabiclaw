@@ -74,9 +74,7 @@ const { localePath, t } = useI18n()
 definePageMeta({ layout: 'saya' })
 
 const route = useRoute()
-const { organizationId, organization } = useTenantOrganization()
-if (!organizationId) throw createError({ statusCode: 404 })
-
+const { organization } = useTenantOrganization()
 const slug = computed(() => String(route.params.slug))
 const organizationName = computed(() => String((organization as ApiValue)?.name ?? '').trim())
 
@@ -159,9 +157,6 @@ useSocialMetadata(() => ({
     organization: organizationName.value,
   }),
   socialImage: location.value?.social_image ?? null,
-  brand: {
-    organizationName: organizationName.value,
-  },
   breadcrumbs: [
     { name: t('saya.header.locations'), url: '/locations' },
     { name: location.value?.title ?? slug.value, url: `/locations/${slug.value}` },

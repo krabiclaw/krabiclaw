@@ -466,46 +466,6 @@ async function loadPublicPageSource(
     : [];
   options.signal?.throwIfAborted();
 
-  const sourceShell = await buildPublicShellPayload(db, organization, batchResults, shellIndexes, env)
-  sourceShell.platformMessages = language.platform_messages
-  const shell = (() => {
-    if (!localizedLocale) return sourceShell
-    const organizationLocalization = publicLocalizations.find(item => item.resourceType === 'organization' && item.resourceId === organizationId)
-    const localizedOrganization = organizationLocalization
-      ? projectExactLocalizedResource('organization', organization, organizationLocalization)
-      : { ...organization, name: null, brand_description: null, seo_title: null, seo_description: null }
-    const locations = projectExactLocalizedCollection('business_location', sourceShell.locations, publicLocalizations)
-    const {
-      name: _sourceBrandName,
-      brand_description: _sourceBrandDescription,
-      seo_title: _sourceSeoTitle,
-      seo_description: _sourceSeoDescription,
-      ...config
-    } = sourceShell.config
-    if (localizedOrganization.name) {
-      config.name = localizedOrganization.name
-      config.seo_title = localizedOrganization.name
-    }
-    if (localizedOrganization.brand_description) {
-      config.brand_description = localizedOrganization.brand_description
-      config.seo_description = localizedOrganization.brand_description
-    }
-    return {
-      ...sourceShell,
-      organization: {
-        ...sourceShell.organization,
-        name: localizedOrganization.name,
-        brand_description: localizedOrganization.brand_description,
-      },
-      locations,
-      config,
-      googleMaps: {
-        ...sourceShell.googleMaps,
-        business: null,
-      },
-    }
-  })()
-
   // Extract batch results by tracked index
   const locRows = idxLoc >= 0
     ? batchResults[idxLoc] as { results: Record<string, unknown>[] }
@@ -559,15 +519,103 @@ async function loadPublicPageSource(
     : null
   // These complete built-in routes may display an optional CMS content overlay.
   // The route remains valid when that optional overlay has no translated page.
-  const allowsMissingLocalizedTenantPage = page === 'location' || page === 'contact'
-    || page === 'reservations'
+  const allowsMissingLocalizedTenantPage = page === 'location'
+    || Boolean(contentPagePath && template.pageDocuments.optionalLocalizedPaths.includes(contentPagePath))
   if (contentPagePath && !tenantPage && locale && locale !== sourceLocale && !isPreviewAuthorized && !allowsMissingLocalizedTenantPage) {
     throw new HTTPError({ statusCode: 404, statusMessage: 'Localized page was not found' })
   }
   const contentRows: OrganizationContent[] = tenantPage ? tenantPageToContentRows(tenantPage) : []
 
+  const postRow = idxBlogPost >= 0
+    ? (batchResults[idxBlogPost] as { results: ApiRecord[] })?.results?.[0]
+    : undefined
+  if (postRow && (typeof postRow.id !== 'string' || typeof postRow.slug !== 'string')) {
+    throw new HTTPError({ statusCode: 500, statusMessage: 'Stored public blog post is invalid' })
+  }
+  const sourceLocationRow = locationId
+    ? (locRows.results ?? []).find(row => row.id === locationId)
+    : null
+  const sourceLocationSlug = typeof sourceLocationRow?.slug === 'string' ? sourceLocationRow.slug : null
+  let representationSourcePath = routePagePath ?? '/'
+  let representationDocumentId: string | undefined
+  let representationResource: { type: LocalizedResourceType; id: string; routeSuffix?: string } | undefined
+  if (postRow) {
+    const prefix = normalizedVertical === 'service' ? 'article' : 'blog'
+    representationSourcePath = `/${prefix}/${String(postRow.source_slug)}`
+    representationDocumentId = String(postRow.root_id)
+  } else if (locationId && sourceLocationSlug) {
+    const routeSuffix = page && page !== 'location' ? `/${page}` : ''
+    representationSourcePath = `/locations/${sourceLocationSlug}${routeSuffix}`
+    representationResource = { type: 'business_location', id: locationId, routeSuffix }
+  }
+  // These canonical reads depend on the resolved tenant and locale, not on
+  // one another. Serial D1 round trips made a full menu exceed the public
+  // request deadline even though its SQL completed quickly.
+  const [sourceShell, canonical, sourceCollections, localeRepresentations] = await Promise.all([
+    buildPublicShellPayload(db, organization, batchResults, shellIndexes, env),
+    includeProducts
+      ? listOrganizationProducts(db, { organizationId: orgId, kind: page === 'experiences' ? 'experience' : page === 'menu' ? 'dish' : undefined, publishedOnly: true, env })
+      : [],
+    includeProducts
+      ? locationId
+        ? Promise.all([
+            listCollections(db, { organizationId: orgId, locationId: null }),
+            listCollections(db, { organizationId: orgId, locationId }),
+          ]).then(collections => collections.flat())
+        : listCollections(db, { organizationId: orgId })
+      : [],
+    !representationResource && tenantPage?.localeRepresentations
+      ? tenantPage.localeRepresentations
+      : listPublicLocaleRepresentations(env, db, {
+          organizationId: orgId,
+          sourcePath: representationSourcePath,
+          resource: representationResource,
+          documentId: representationDocumentId,
+          publishedLocaleRoute: !representationResource && !representationDocumentId && Boolean(routePagePath),
+        }),
+  ])
+  options.signal?.throwIfAborted()
+  sourceShell.platformMessages = language.platform_messages
+  const shell = (() => {
+    if (!localizedLocale) return sourceShell
+    const organizationLocalization = publicLocalizations.find(item => item.resourceType === 'organization' && item.resourceId === organizationId)
+    const localizedOrganization = organizationLocalization
+      ? projectExactLocalizedResource('organization', organization, organizationLocalization)
+      : { ...organization, name: null, brand_description: null, seo_title: null, seo_description: null }
+    const locations = projectExactLocalizedCollection('business_location', sourceShell.locations, publicLocalizations)
+    const {
+      name: _sourceBrandName,
+      brand_description: _sourceBrandDescription,
+      seo_title: _sourceSeoTitle,
+      seo_description: _sourceSeoDescription,
+      ...config
+    } = sourceShell.config
+    if (localizedOrganization.name) {
+      config.name = localizedOrganization.name
+      config.seo_title = localizedOrganization.name
+    }
+    if (localizedOrganization.brand_description) {
+      config.brand_description = localizedOrganization.brand_description
+      config.seo_description = localizedOrganization.brand_description
+    }
+    return {
+      ...sourceShell,
+      organization: {
+        ...sourceShell.organization,
+        name: localizedOrganization.name,
+        brand_description: localizedOrganization.brand_description,
+      },
+      locations,
+      config,
+      googleMaps: {
+        ...sourceShell.googleMaps,
+        business: null,
+      },
+    }
+  })()
+
   let products: Product[] = []
-  let collections: Collection[] = []
+  let collections: Collection[] = sourceCollections
   if (includeProducts) {
     const locationCapabilityRows = (batchResults[shellIndexes.locations] as { results: Record<string, unknown>[] })?.results ?? []
     const activeLocationIds = new Set(locationCapabilityRows.map(location => String(location.id)))
@@ -582,7 +630,6 @@ async function loadPublicPageSource(
     // reassemble variants, prices and collections from its own SQL — the
     // catalog has one reader and a projection that disagreed with it is
     // exactly the drift this replaces.
-    const canonical = await listOrganizationProducts(db, { organizationId: orgId, kind: page === 'experiences' ? 'experience' : page === 'menu' ? 'dish' : undefined, publishedOnly: true, env })
     products = canonical.filter(product => product.locations.some(location => location.published
       && activeLocationIds.has(location.location_id) && (!locationSlug || location.location_id === locationId))
       || (!locationSlug && Boolean(product.order_url || product.booking?.held_online))).map((product) => {
@@ -599,12 +646,6 @@ async function loadPublicPageSource(
     // no groups rather than inventing one. A location page shows the site's
     // own collections and that location's — never another branch's, which a
     // Product offered at both would otherwise drag onto the page.
-    collections = locationId
-      ? [
-          ...await listCollections(db, { organizationId: orgId, locationId: null }),
-          ...await listCollections(db, { organizationId: orgId, locationId }),
-        ]
-      : await listCollections(db, { organizationId: orgId})
     if (localizedLocale) {
       collections = projectExactLocalizedCollection('collection', collections, publicLocalizations)
       products = projectExactLocalizedCollection('product', products, publicLocalizations).map(product => ({
@@ -744,23 +785,14 @@ async function loadPublicPageSource(
     : sourceMedia
 
   let blogPost: ApiRecord | null = null;
-  let sourceBlogPostIdentity: { id: string; slug: string } | null = null
-  if (idxBlogPost >= 0) {
-    const postRow = (batchResults[idxBlogPost] as { results: ApiRecord[] })
-      ?.results?.[0];
-    if (postRow) {
-      if (typeof postRow.id !== 'string' || typeof postRow.slug !== 'string') {
-        throw new HTTPError({ statusCode: 500, statusMessage: 'Stored public blog post is invalid' })
-      }
-      sourceBlogPostIdentity = { id: String(postRow.root_id), slug: String(postRow.source_slug) }
-      options.signal?.throwIfAborted();
-      const loadedBlocks = await getContentBlocksForDocument(db, postRow.id);
-      const contentBlocks = loadedBlocks
-        ? await attachPageQa(db, organizationId, tenantBlogPostPath({ themeId: organization.theme_id, vertical: organization.vertical }, String(postRow.source_slug)), loadedBlocks, localizedLocale ?? 'en')
-        : loadedBlocks
-      blogPost = (await localizeArticleCategories(env, db, orgId, localizedLocale ?? 'en',
-        [attachArticleCategory(attachCoverMedia({ ...postRow, content_blocks: contentBlocks }))], publicLocalizations))[0]!;
-    }
+  if (postRow) {
+    options.signal?.throwIfAborted();
+    const loadedBlocks = await getContentBlocksForDocument(db, String(postRow.id));
+    const contentBlocks = loadedBlocks
+      ? await attachPageQa(db, organizationId, tenantBlogPostPath({ themeId: organization.theme_id, vertical: organization.vertical }, String(postRow.source_slug)), loadedBlocks, localizedLocale ?? 'en')
+      : loadedBlocks
+    blogPost = (await localizeArticleCategories(env, db, orgId, localizedLocale ?? 'en',
+      [attachArticleCategory(attachCoverMedia({ ...postRow, content_blocks: contentBlocks }))], publicLocalizations))[0]!;
   }
 
   const sourceQaList = (requestedDatasets.has("qa") ? qaRows?.results ?? [] : []).map((row) => {
@@ -769,32 +801,6 @@ async function loadPublicPageSource(
   })
   const qaList = sourceQaList
 
-  const sourceLocationRow = locationId
-    ? (locRows.results ?? []).find(row => row.id === locationId)
-    : null
-  const sourceLocationSlug = typeof sourceLocationRow?.slug === 'string' ? sourceLocationRow.slug : null
-  let representationSourcePath = routePagePath ?? '/'
-  let representationDocumentId: string | undefined
-  let representationResource: { type: LocalizedResourceType; id: string; routeSuffix?: string } | undefined
-  if (sourceBlogPostIdentity) {
-    const prefix = normalizedVertical === 'service' ? 'article' : 'blog'
-    representationSourcePath = `/${prefix}/${sourceBlogPostIdentity.slug}`
-    representationDocumentId = sourceBlogPostIdentity.id
-  } else if (locationId && sourceLocationSlug) {
-    const routeSuffix = page && page !== 'location' ? `/${page}` : ''
-    representationSourcePath = `/locations/${sourceLocationSlug}${routeSuffix}`
-    representationResource = { type: 'business_location', id: locationId, routeSuffix }
-  }
-  const localeRepresentations = !representationResource && tenantPage?.localeRepresentations
-    ? tenantPage.localeRepresentations
-    : await listPublicLocaleRepresentations(env, db, {
-        organizationId: orgId,
-        
-        sourcePath: representationSourcePath,
-        resource: representationResource,
-        documentId: representationDocumentId,
-        publishedLocaleRoute: !representationResource && !representationDocumentId && Boolean(routePagePath),
-      })
   const pagePayload = {
     kind: page ?? 'home',
     success: true,

@@ -265,3 +265,10 @@ export interface SocialCardRenderPayload {
   logoUrl?: string | null
   backgroundImageUrl: string
 }
+
+/** Resolve a required page or media address against the site's canonical origin. */
+export function resolveSeoUrl(value: string, origin: string) {
+  const target = value.trim()
+  if (!target) throw new Error('SEO URL is required')
+  return new URL(target, origin).toString()
+}

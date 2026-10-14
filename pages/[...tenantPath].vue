@@ -1,5 +1,5 @@
 <template>
-  <NuxtLayout :name="isPlatform ? 'platform' : isBlawby ? 'blawby' : 'saya'">
+  <NuxtLayout :name="template.layout">
     <!--
       A localized home is its page document too: the `/` branch here rendered a
       template's own home component instead, which is how /th/ reached a
@@ -20,13 +20,8 @@ import { resolveTenantLocalePath, splitLocalePrefix } from '~/utils/tenant-local
 definePageMeta({ layout: false })
 
 const route = useRoute()
-const { isPlatform, organizationId } = useTenantOrganization()
-const { isBlawby } = usePublicTemplate()
+const { template, id: organizationId } = useTenantOrganization().organization
 // An unclaimed path is a page document on whichever site resolved, Krabiclaw's
-// own included: its marketing pages are ordinary documents now, and this is the
-// route that serves the ones no named route owns (#903). A path with no
-// published document still 404s here — there is nothing to fall back to.
-if (!organizationId) throw showNotFound()
 
 const segments = route.params.tenantPath
 const pagePath = computed(() => {
@@ -74,17 +69,14 @@ const localizedData = localeSegment.value
   ? await useAsyncData<{ route: LocalizedPublicRoute }>(`localized-route-${organizationId}-${pagePath.value}`, async (_nuxtApp, { signal }) => {
       if (import.meta.server) {
         if (!requestEvent) throw createError({ statusCode: 500, statusMessage: 'Request context unavailable' })
-        const [{ cloudflareEnv }, { queryFirst }, { resolveLocalizedPublicRoute }] = await Promise.all([
+        const [{ cloudflareEnv }, { resolveLocalizedPublicRoute }] = await Promise.all([
           import('~/server/utils/api-response'),
-          import('~/server/db'),
           import('~/server/utils/localization'),
         ])
         const env = cloudflareEnv(requestEvent)
         const db = env.db
         if (!db) throw createError({ statusCode: 503, statusMessage: 'Database unavailable' })
-        const organization = await queryFirst<{ id: string }>(db, 'SELECT id FROM organization WHERE id = ? AND status = \'active\' LIMIT 1', [organizationId])
-        if (!organization) throw createError({ statusCode: 404, statusMessage: 'Organization not found' })
-        return { route: await resolveLocalizedPublicRoute(env, db, organization.id, pagePath.value) }
+        return { route: await resolveLocalizedPublicRoute(env, db, organizationId, pagePath.value) }
       }
       const endpoint: string = `/api/public/localized-route`
       return await publicApiRequest(endpoint, {

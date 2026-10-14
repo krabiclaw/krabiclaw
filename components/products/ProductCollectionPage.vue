@@ -240,7 +240,7 @@
 
 <script setup lang="ts">
 import type { Collection, Product, ProductPresentation } from '~/server/types/products'
-import { useSchemaOrg } from '~/composables/useSchemaOrg'
+import { useSchemaOrg } from '#imports'
 import type { CurrencyCode } from '~/shared/currencies'
 import { formatProductMoney, formatProductPriceRange, summarizeProductPrices } from '~/utils/product-money'
 import { minorAmountToMajor, type Price } from '~/shared/prices'
@@ -248,7 +248,7 @@ import { PRICING_NOTE_HANDLE } from '~/shared/product-details'
 import { groupProductsByCollection, productLocationCollectionPath } from '~/utils/product-presentation'
 import { extractDietarySchemaUrls } from '~/utils/product-seo'
 import { getVerticalCopy } from '~/utils/vertical-copy'
-import { resolveSeoUrl } from '~/composables/useSeoUrls'
+import { resolveSeoUrl } from '~/utils/social-metadata'
 import ProductVariantPrices from '~/components/products/ProductVariantPrices.vue'
 
 interface LocationSummary { id: string; slug: string; title: string }

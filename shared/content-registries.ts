@@ -121,9 +121,9 @@ export function readContentFieldValue(data: Record<string, unknown>, path: Conte
 /** JSON Schema comes from the same field registry the editor and writer use. */
 function fieldSchema(key: string, field: TenantPageField): Record<string, unknown> {
   if (field.kind === 'record') return fieldsSchema(field.of ?? {})
-  if (field.kind === 'list') return { type: 'array', items: field.of ? fieldsSchema(field.of) : { type: 'string' } }
+  if (field.kind === 'list') return { type: 'array', ...(field.min !== undefined ? { minItems: field.min } : {}), items: field.of ? fieldsSchema(field.of) : { type: 'string' } }
   if (field.kind === 'number') return { type: 'integer', ...(field.min !== undefined ? { minimum: field.min } : {}), ...(field.max !== undefined ? { maximum: field.max } : {}) }
-  if (field.kind === 'reference' && key.endsWith('_ids')) return { type: 'array', items: { type: 'string', minLength: 1 }, uniqueItems: true }
+  if (field.kind === 'reference' && key.endsWith('_ids')) return { type: 'array', ...(field.min !== undefined ? { minItems: field.min } : {}), items: { type: 'string', minLength: 1, pattern: '\\S' }, uniqueItems: true }
   if (field.kind === 'calculator') return PRICING_CALCULATOR_SCHEMA
   return { type: field.required ? 'string' : ['string', 'null'], ...(field.options?.length ? { enum: [...field.options.map(option => option.value), ...(!field.required ? [null] : [])] } : {}), ...(field.kind === 'markdown' ? { description: 'Markdown.' } : {}) }
 }

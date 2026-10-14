@@ -66,15 +66,8 @@ const consultation = computed(() => document.value.shell.consultation)
 const canSchedule = computed(() => document.value.shell.canSchedule)
 const compliance = computed(() => document.value.shell.compliance)
 const pageLinks = computed(() => document.value.shell.pageLinks)
-provide('blawby-schema-context', { identity, compliance, consultation, canSchedule })
 const hydrated = ref(false)
 onMounted(() => { hydrated.value = true })
-
-// Every Blawby page/component builds and emits its own linked schema.org
-// @graph via useSocialMetadata's professionalService option (which always includes the shared
-// Organization/WebSite nodes) — see composables/useSocialMetadata.ts.
-// The layout no longer emits its own ad hoc JSON-LD so there's exactly one
-// canonical generation path for every route.
 
 useHead(() => ({
   htmlAttrs: { lang: publicLocale.value },

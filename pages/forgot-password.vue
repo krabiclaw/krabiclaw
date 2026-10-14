@@ -26,7 +26,6 @@ definePageMeta({ layout: 'access', auth: false })
 import { authClient } from '~/lib/auth-client'
 
 useSocialMetadata({
-  template: 'platform',
   schema: false,
   path: '/forgot-password',
   title: 'Reset your password',

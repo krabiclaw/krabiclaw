@@ -1,5 +1,5 @@
 <template>
-  <NuxtLayout :name="isBlawby ? 'blawby' : 'saya'">
+  <NuxtLayout :name="template.layout">
   <ProductDetailPage :key="`${detail.product.id}:${detail.location?.id ?? 'online'}:${Boolean(detail.scopeRequired)}`" :organization-id="organizationId" :vertical="detail.vertical" :product="detail.product" :location="detail.location" :organization-name="detail.brandName" :reviews="detail.reviews" :booking="detail.booking" :sessions="detail.sessions" :collection-name="detail.collectionName" :collection-siblings="detail.collectionSiblings" :currency="detail.currency"  :presentation="presentation" :scope-required="detail.scopeRequired" :locations="detail.locations" :online-available="detail.onlineAvailable">
   </ProductDetailPage>
   </NuxtLayout>
@@ -11,7 +11,7 @@ import { EXPERIENCE_PRESENTATION } from '~/utils/product-presentation'
 import { composeProductSeoDescription } from '~/utils/product-seo'
 
 definePageMeta({ layout: false })
-const { isBlawby } = usePublicTemplate()
+const { template } = useTenantOrganization().organization
 const resolved = await usePublicProductDetail('experiences')
 const organizationId = resolved.organizationId
 const detail = computed(() => resolved.detail.value)
@@ -34,7 +34,6 @@ useSocialMetadata(() => ({
     priceSelection: priceSelection.value,
   }, t),
   socialImage: detail.value.product.social_image,
-  brand: { organizationName: detail.value.brandName },
   breadcrumbs: detail.value.location ? [
     { name: 'Locations', url: '/locations' },
     { name: detail.value.location.title, url: `/locations/${detail.value.location.slug}` },

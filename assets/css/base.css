@@ -4,6 +4,7 @@
    the dashboard, not the operating system setting. */
 @custom-variant dark (&:where(.dark, .dark *));
 @source "../../utils/form-constants.ts";
+@source "../../error.vue";
 @source "../../.nuxt/ui/carousel.ts";
 @source "../../.nuxt/ui/button.ts";
 /* Shared public booking fields use the same control themes as the CMS. */

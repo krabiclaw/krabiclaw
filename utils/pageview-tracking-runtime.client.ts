@@ -70,11 +70,11 @@ export function registerPageviewTracking() {
   const win = window as Window & { __kc_pageview_tracking_registered?: boolean; zaraz?: ZarazPageviewApi }
   if (win.__kc_pageview_tracking_registered) { settleRegistration(); return }
 
-  const { isTenant, isPlatform } = useTenantOrganization()
-  if (!isTenant && !isPlatform) { settleRegistration(); return }
+  const nuxtApp = useNuxtApp()
+  if (nuxtApp.payload.error) { settleRegistration(); return }
+  useTenantOrganization()
   win.__kc_pageview_tracking_registered = true
 
-  const nuxtApp = useNuxtApp()
   const router = useRouter()
 
   // The collector answers `ignored` for a request it deliberately does not record (a known bot), and

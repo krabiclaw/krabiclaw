@@ -2,6 +2,7 @@ import { localizationError } from './localization-errors.ts'
 import { validateProductDetails, assertProductKind, ProductDetailError, productDetailsSchema, type ProductKind } from '../../shared/product-details.ts'
 
 import { LOCALIZED_RESOURCE_TYPES, type LocalizedResourceType } from '../../shared/content-registries.ts'
+import type { PublicTemplateSlug } from '../../utils/template-registry.ts'
 export { LOCALIZED_RESOURCE_TYPES, type LocalizedResourceType } from '../../shared/content-registries.ts'
 
 export type LocalizedValues = Record<string, unknown>
@@ -39,6 +40,7 @@ interface ResourceLocalizationDefinition {
   tenantScope: ResourceTenantScope
   fields: Readonly<Record<string, ValueShape>>
   route: LocalizedRouteAddressing
+  publishedRequiredFields?: Partial<Record<PublicTemplateSlug, readonly string[]>>
 }
 
 const POLICY_FIELDS = { additional_notes_html: 'text' } as const
@@ -51,7 +53,8 @@ const ADDRESS_FIELDS = { addressLines: 'string_array', locality: 'text',
 
 export const RESOURCE_LOCALIZATION_REGISTRY: Readonly<Record<LocalizedResourceType, ResourceLocalizationDefinition>> = Object.freeze({
   organization: { table: 'organization', tenantScope: 'self', fields: { name: 'text', brand_description: 'text', seo_title: 'text', seo_description: 'text',
-    compliance: { service_area: 'text', disclaimer: 'text', footer_disclaimer: 'text' }, consultation: { cta_label: 'text' } }, route: 'none' },
+    compliance: { service_area: 'text', disclaimer: 'text', footer_disclaimer: 'text' }, consultation: { cta_label: 'text' } }, route: 'none',
+    publishedRequiredFields: { blawby: ['name', 'consultation.cta_label'] } },
   business_location: { table: 'business_locations', tenantScope: 'organization_column', fields: { title: 'text', address: ADDRESS_FIELDS,
     description: 'text', short_description: 'text', seo_title: 'text', seo_description: 'text',
     reservation: { policy: POLICY_FIELDS } }, route: 'stored' },
@@ -117,6 +120,7 @@ export function validateLocalizedValues(
   resourceType: LocalizedResourceType,
   input: unknown,
   kind?: ProductKind,
+  context?: { publishedTemplate?: PublicTemplateSlug },
 ): LocalizedValues {
   if (!isRecord(input)) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'values must be an object')
   const definition = RESOURCE_LOCALIZATION_REGISTRY[resourceType]
@@ -134,6 +138,15 @@ export function validateLocalizedValues(
       localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', `${field} must be a string`, { field })
     }
     validateShape(field, value, shape, kind)
+  }
+  const requiredFields = context?.publishedTemplate ? definition.publishedRequiredFields?.[context.publishedTemplate] : undefined
+  const missing = requiredFields?.filter((field) => {
+    let value: unknown = input
+    for (const segment of field.split('.')) value = isRecord(value) ? value[segment] : undefined
+    return !isNonBlankText(value)
+  })
+  if (missing?.length) {
+    localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'Required organization fields must contain translated text', { missing })
   }
   return Object.fromEntries(Object.entries(input).sort(([left], [right]) => left.localeCompare(right)))
 }

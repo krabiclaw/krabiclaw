@@ -1,0 +1,1 @@
+ALTER TABLE `oauthClient` DROP COLUMN `public`;

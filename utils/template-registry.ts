@@ -1,10 +1,11 @@
+import type { LayoutKey } from 'nuxt/app'
 import type { PlatformIconName } from '~/components/platform/PlatformIcon.vue'
 export type PublicTemplateSlug = 'saya' | 'blawby' | 'platform'
 
 export interface PublicTemplateDefinition {
   slug: PublicTemplateSlug
   themeId: string
-  layout: string
+  layout: LayoutKey
   verticals: string[]
   serviceRoutes: {
     offeringsIndex: string | null
@@ -36,7 +37,9 @@ export interface PublicTemplateDefinition {
    * like any other (#903).
    */
   pageDocuments: {
-    recipes: Record<string, string>
+    recipes: Record<string, string> & { home: string }
+    /** Complete built-in routes whose authored overlay may lack a translation. */
+    optionalLocalizedPaths: string[]
     paths: string[]
     patterns?: string[]
     prefixes: string[]
@@ -66,6 +69,7 @@ export const publicTemplateRegistry: Record<PublicTemplateSlug, PublicTemplateDe
     // authored page overlay. Catalog and other location routes own their data.
     pageDocuments: {
       recipes: { home: '/', about: '/about', contact: '/contact', reservations: '/reservations' },
+      optionalLocalizedPaths: ['/contact', '/reservations'],
       paths: [],
       patterns: ['/locations/:slug()'],
       prefixes: [],
@@ -99,6 +103,7 @@ export const publicTemplateRegistry: Record<PublicTemplateSlug, PublicTemplateDe
         privacy: '/policies/privacy', terms: '/policies/terms',
         'third-party-notices': '/third-party-notices',
       },
+      optionalLocalizedPaths: [],
       paths: [],
       prefixes: ['/services/'],
       catchAll: true,
@@ -134,6 +139,7 @@ export const publicTemplateRegistry: Record<PublicTemplateSlug, PublicTemplateDe
     // at one of them would never be shown.
     pageDocuments: {
       recipes: { home: '/', about: '/about', pricing: '/pricing' },
+      optionalLocalizedPaths: [],
       // Only a path a route file still claims needs naming here. /experiences is
       // the Saya catalog's route on a customer host and Krabiclaw's own page on
       // this one. Everything else Krabiclaw publishes is an unclaimed path the
@@ -178,13 +184,6 @@ export function resolvePublicTemplate(input: {
     throw new Error(`resolvePublicTemplate() found no compatible template for themeId="${themeId}" vertical="${vertical}".`)
   }
   return match
-}
-
-export function isBlawbyTemplate(input: {
-  themeId?: string | null
-  vertical?: string | null
-}) {
-  return resolvePublicTemplate(input).slug === 'blawby'
 }
 
 // The public Blawby API routes are a security gate, not just a rendering-path

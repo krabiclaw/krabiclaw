@@ -108,6 +108,13 @@ export async function seedNewOrganization(
         },
       },
     ];
+    if (vertical === 'service' && definition.path === '/contact') {
+      const copy = getVerticalCopy(vertical, source.locale)
+      blocks.push({
+        id: uid('block'), type: 'location_grid', position: 1,
+        data: { title: copy.locationGroupLine(1), description: copy.findUsKicker, location_ids: [locationId] },
+      }, { id: uid('block'), type: 'contact_form', position: 2, data: {} })
+    }
     pagesToCreate.push({
       trustedSystemPage: definition.pageType === 'system',
       data: {
@@ -130,7 +137,7 @@ export async function seedNewOrganization(
       schedule_path: '/schedule',
       confirmation_path: '/contact/confirmed',
       tracking_enabled: false,
-      metadata_json: { contact_form_enabled: true },
+      metadata_json: null,
     }, writeGuard)
   }
 

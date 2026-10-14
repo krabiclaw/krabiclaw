@@ -1,7 +1,6 @@
 import type { Subscription } from '@better-auth/stripe'
 import { HTTPError } from 'nitro'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
-import { betterAuthTimestampToIso } from '~/server/utils/better-auth-timestamps'
 import { getPlanEntitlements, type EntitlementsMap } from '~/server/utils/billing-entitlements'
 
 /**
@@ -86,8 +85,7 @@ export function planFromSubscriptions(
     if (row.referenceId !== organizationId) continue
     if (row.status !== 'active' && row.status !== 'trialing') continue
     if (row.periodEnd != null) {
-      const periodEnd = Date.parse(betterAuthTimestampToIso(row.periodEnd, 'subscription.periodEnd'))
-      if (periodEnd <= now.getTime()) continue
+      if (row.periodEnd.getTime() <= now.getTime()) continue
     }
     if (found) subscriptionStateInvalid(organizationId, 'has multiple current subscriptions')
     found = true

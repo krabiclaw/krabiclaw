@@ -19,9 +19,9 @@ const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 const { locale, t } = useI18n()
 const { organization } = useTenantOrganization()
 
-const presentation = computed(() => resolveProductPresentation(organization?.vertical))
-const homeCopy = computed(() => getVerticalCopy(organization?.vertical, locale.value))
-const brandName = computed(() => String(organization?.name ?? '').trim())
+const presentation = computed(() => resolveProductPresentation(organization.vertical))
+const homeCopy = computed(() => getVerticalCopy(organization.vertical, locale.value))
+const brandName = organization.name
 
 const items = computed(() => blockRecords(props.block.data.items).map((item) => {
   const media = blockRecords(item.media)[0] ?? null
@@ -61,7 +61,7 @@ const featured = computed(() => ({
   kicker: blockText(props.block.data.description)
     || (allExperiences.value ? homeCopy.value.experiencesPageTitle : presentation.value?.locationCollectionSegment === 'menu' ? t('saya.footer.menu') : t('saya.footer.products')),
   heading: blockText(props.block.data.title)
-    || (allFeatured.value ? t('saya.posts.featured') : allExperiences.value ? t('saya.experiences.collection_title', { organization: brandName.value }) : presentation.value?.locationCollectionSegment === 'menu' ? t('saya.footer.menu') : t('saya.products.collection_title', { organization: brandName.value })),
+    || (allFeatured.value ? t('saya.posts.featured') : allExperiences.value ? t('saya.experiences.collection_title', { organization: brandName }) : presentation.value?.locationCollectionSegment === 'menu' ? t('saya.footer.menu') : t('saya.products.collection_title', { organization: brandName })),
   linkTarget: allExperiences.value ? '/experiences' : presentation.value?.collectionPath ?? null,
 }))
 </script>

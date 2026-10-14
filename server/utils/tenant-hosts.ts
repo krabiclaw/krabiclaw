@@ -71,19 +71,19 @@ export function environmentTenantAliasHostname(platformHost: string, tenantSlug:
   return `${tenantSlug}-${environment}.${rootDomain}`
 }
 
-export function environmentTenantAliasSlug(host: string, env: TenantHostEnv): string {
+export function environmentTenantAliasSlug(host: string, env: TenantHostEnv): string | null {
   const hostname = hostnameOf(host).toLowerCase().replace(/\.$/, '')
   const platformHost = normalizeHost(env.NUXT_PUBLIC_PLATFORM_DOMAIN).toLowerCase()
   const match = platformHost.match(ENVIRONMENT_PLATFORM_HOST_PATTERN)
-  if (!match) return ''
+  if (!match) return null
 
   const [, environment, rootDomain] = match
-  if (!environment || !rootDomain) return ''
+  if (!environment || !rootDomain) return null
   const suffix = `-${environment}.${rootDomain}`
-  if (!hostname.endsWith(suffix)) return ''
+  if (!hostname.endsWith(suffix)) return null
 
   const slug = hostname.slice(0, -suffix.length)
-  return TENANT_SLUG_PATTERN.test(slug) ? slug : ''
+  return TENANT_SLUG_PATTERN.test(slug) ? slug : null
 }
 
 // Only hosts that cannot express tenant identity in their hostname use the
