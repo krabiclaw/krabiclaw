@@ -615,6 +615,8 @@ export async function getGoogleAdsPerformanceSummary(
   costMicros: number
   conversions: number
   averageCpcMicros: number
+  /** The account's currency, which `costMicros` is in. */
+  currencyCode: string
 }> {
   const cid = cleanCustomerId(customerId)
   const headers = googleAdsHeaders(accessToken, developerToken)
@@ -626,7 +628,7 @@ export async function getGoogleAdsPerformanceSummary(
     method: 'POST',
     headers,
     body: JSON.stringify({
-      query: `SELECT metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions FROM customer WHERE segments.date BETWEEN '${start}' AND '${end}'`,
+      query: `SELECT customer.currency_code, metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions FROM customer WHERE segments.date BETWEEN '${start}' AND '${end}'`,
     }),
   })
 
@@ -637,10 +639,13 @@ export async function getGoogleAdsPerformanceSummary(
 
   const data = await response.json() as {
     results?: Array<{
+      customer?: { currencyCode?: string }
       metrics?: { clicks?: string; impressions?: string; costMicros?: string; conversions?: number }
     }>
   }
 
+  const currencyCode = data.results?.[0]?.customer?.currencyCode
+  if (data.results?.length && !currencyCode) throw new Error('Google Ads did not report the account currency')
   let clicks = 0
   let impressions = 0
   let costMicros = 0
@@ -654,5 +659,5 @@ export async function getGoogleAdsPerformanceSummary(
   }
 
   const averageCpcMicros = clicks > 0 ? Math.round(costMicros / clicks) : 0
-  return { clicks, impressions, costMicros, conversions, averageCpcMicros }
+  return { clicks, impressions, costMicros, conversions, averageCpcMicros, currencyCode: currencyCode ?? '' }
 }

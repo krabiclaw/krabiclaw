@@ -246,7 +246,7 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
         checkoutFingerprint = fingerprint
       }
       checkoutRequestKey.value ??= crypto.randomUUID()
-      type CheckoutResponse = { success: true; status: 'checkout'; payment_id: string; checkout_url: string; expires_at: string }
+      type CheckoutResponse = { success: true; status: 'checkout'; payment_id: string; pay_path: string; purchase_claim: string; expires_at: string }
       type BookingResponse = { success: true; status: 'pending' | 'confirmed'; operational_booking_id: string; request_id: string; booking_id: string; cancellation_token: string; starts_at: string; ends_at: string; timezone: string; message: string; quoted_value?: ConversionValue | null; measurement?: SubmissionMeasurement; policy_summary?: ApiRecord | null }
       const response = await publicApiMutation<CheckoutResponse | BookingResponse>(
         `/api/public/products/${encodeURIComponent(context.value.product.slug)}/book`,
@@ -265,15 +265,14 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
             page_event_id: await pageEventId(),
           },
           validate: (value): value is CheckoutResponse | BookingResponse =>
-            isRecord(value) && value.success === true && ((value.status === 'checkout' && typeof value.checkout_url === 'string' && typeof value.payment_id === 'string' && isValidInstant(value.expires_at))
+            isRecord(value) && value.success === true && ((value.status === 'checkout' && typeof value.pay_path === 'string' && value.pay_path.startsWith('/pay/') && typeof value.purchase_claim === 'string' && typeof value.payment_id === 'string' && isValidInstant(value.expires_at))
               || (typeof value.booking_id === 'string' && typeof value.cancellation_token === 'string' && typeof value.operational_booking_id === 'string' && typeof value.request_id === 'string'
                 && (value.status === 'pending' || value.status === 'confirmed') && typeof value.message === 'string' && isValidInstant(value.starts_at) && isValidInstant(value.ends_at) && typeof value.timezone === 'string' && isValidTimezone(value.timezone))),
         },
       )
       if (response.status === 'checkout') {
-        const target = new URL(response.checkout_url)
-        if (target.protocol !== 'https:' || target.hostname !== 'checkout.stripe.com') throw new Error('Invalid secure payment handoff')
-        await navigateTo(target.toString(), { external: true })
+        // The site's own pay page; the claim rides in the fragment, which never leaves the browser.
+        await navigateTo({ path: response.pay_path, hash: `#${response.purchase_claim}` })
         return
       }
       mirrorSubmission('booking_submit', response.measurement, context.value.location?.id ?? null, response.quoted_value)

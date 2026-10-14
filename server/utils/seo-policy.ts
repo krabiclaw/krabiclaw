@@ -57,6 +57,7 @@ export const TENANT_ONLY_ROUTE_PREFIXES = [
   '/locations/',
   '/menu/',
   '/order/',
+  '/pay/',
   '/photos/',
   '/qa/',
   '/reservations/',

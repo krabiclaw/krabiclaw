@@ -32,13 +32,16 @@ export type CheckoutInput = CheckoutInputBase & (
   | { subjectType: 'booking'; productId: string; variantId: string; sessionId: string }
   | { subjectType: 'reservation'; locationId: string; startsAt: string; endsAt: string; timezone: string }
 )
-/** Stripe Checkout owns payment; one atomic batch owns the guest request, expiring capacity hold and immutable purchase. */
+/** The amount the buyer was shown and confirmed on the site, kept on the attempt until Stripe answers. */
+export interface PaymentReview { payment_method_id: string; subtotal: number; surcharge: number; total: number; reviewed_at: string }
+export interface PaymentHandoff { payment_id: string; pay_path: string; purchase_claim: string; expires_at: string }
+/** Stripe's PaymentIntent owns payment; one atomic batch owns the guest request, expiring capacity hold and immutable purchase. */
 export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: CloudflareEnv, input: CheckoutInput, retry = false) {
   if (!Number.isSafeInteger(input.quantity) || input.quantity < 1 || input.quantity > 99 || !input.idempotencyKey.trim() || input.idempotencyKey.trim().length > 200) throw new HTTPError({ statusCode: 400, statusMessage: 'A quantity of 1–99 and an idempotency key of 1–200 characters are required' })
   const origin = new URL(input.returnOrigin)
   if (origin.protocol !== 'https:' || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) throw new Error('Payments return origin must be an HTTPS origin')
   const key = `checkout:${input.organizationId}:${input.idempotencyKey.trim()}`
-  const previous = await queryFirst<{id:string;payment_id:string;checkout_url:string|null;expires_at:string;return_token:string;status:string}>(db,'SELECT id,payment_id,checkout_url,expires_at,return_token,status FROM payment_attempts WHERE idempotency_key=?',[key])
+  const previous = await queryFirst<{id:string;payment_id:string;stripe_payment_intent_id:string|null;expires_at:string;return_token:string;status:string}>(db,'SELECT id,payment_id,stripe_payment_intent_id,expires_at,return_token,status FROM payment_attempts WHERE idempotency_key=?',[key])
   if(previous?.status==='failed')throw new HTTPError({statusCode:409,statusMessage:'Checkout was rejected; start a new request',data:{code:'checkout_failed'}})
   const now = new Date().toISOString()
   let price: Pick<Price, 'unit_amount' | 'currency' | 'tax_behavior'> | undefined
@@ -120,6 +123,8 @@ export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: C
     automaticTax = acceptance.automaticTax
   }
   if(!price || !connected?.stripeAccountId || automaticTax === undefined || !methodConfigurationId)throw new Error('Immutable checkout price or connected account is missing')
+  // Stripe Tax calculated the hosted Checkout's tax. The on-site payment does not run Stripe Tax calculations yet, so a business registered for it is refused rather than charged without tax.
+  if (automaticTax) throw new HTTPError({ statusCode: 409, statusMessage: 'This business collects tax through Stripe Tax, which online payments on the site do not calculate yet', data: { code: 'stripe_tax_unsupported' } })
   const amount = price.unit_amount*purchaseQuantity
   assertMinorAmount(amount)
   const id = previous?.payment_id ?? crypto.randomUUID(), attemptId = previous?.id ?? crypto.randomUUID(), holdId = crypto.randomUUID()
@@ -127,9 +132,10 @@ export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: C
   const returnHash=await tokenHash(returnToken)
   const expiresAt = previous?.expires_at ?? new Date(Date.now()+60*60*1000).toISOString()
   if (expiresAt<=now) throw new HTTPError({statusCode:409,statusMessage:'Checkout hold expired; start a new request',data:{code:'checkout_expired'}})
-  if (previous?.checkout_url) {
+  const handoff = (paymentId: string): PaymentHandoff => ({ payment_id: paymentId, pay_path: `/pay/${encodeURIComponent(paymentId)}`, purchase_claim: returnToken, expires_at: expiresAt })
+  if (previous?.stripe_payment_intent_id) {
     await recordCheckoutStarted(db, await requirePayment(db,input.organizationId,previous.payment_id), null)
-    return {payment_id:previous.payment_id,checkout_url:previous.checkout_url,expires_at:expiresAt}
+    return handoff(previous.payment_id)
   }
   if (!previous) {
     const billingFx = await quotePaymentsBillingFx(stripe, price.currency)
@@ -169,31 +175,50 @@ export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: C
       throw new HTTPError({statusCode:409,statusMessage:'This time no longer has capacity for your party'})
     }
   }
-  // A signed-in buyer's Customer at this business: Stripe's Checkout offers, saves and removes their cards here only.
+  // A signed-in buyer's Customer at this business: the Payment Element offers, saves and removes their cards here only.
   const customer=input.buyerUserId?await connectedBuyerCustomer(db,stripe,input.buyerUserId,connected.stripeAccountId,connected.livemode):null
-  let opened:string
+  const surcharge = await surchargeBasisPoints(db, input.organizationId, connected.stripeAccountId)
   try {
-  const checkout = await stripe.checkout.sessions.create({mode:'payment',integration_identifier:'krabiclaw_payments_aqpfkmvz',...(customer?{customer:customer.customerId,saved_payment_method_options:{payment_method_save:'enabled' as const,payment_method_remove:'enabled' as const,allow_redisplay_filters:['always' as const]}}:{}),automatic_tax:{enabled:automaticTax},line_items:[{price_data:{currency:price.currency.toLowerCase(),unit_amount:price.unit_amount,tax_behavior:price.tax_behavior,product_data:{name:projectionTitle,...(projectionTaxCode?{tax_code:projectionTaxCode}:{}),metadata:input.subjectType === 'booking' ? {krabiclaw_variant_id:input.variantId} : {krabiclaw_location_id:input.locationId}}},quantity:purchaseQuantity}],payment_method_configuration:methodConfigurationId,
-    payment_intent_data:{application_fee_amount:0,metadata:{krabiclaw_payment_id:id}},metadata:{krabiclaw_payment_id:id},client_reference_id:id,
-    expires_at:Math.floor(Date.parse(expiresAt)/1000),success_url:new URL(`/account?payment_id=${encodeURIComponent(id)}&purchase_claim=${encodeURIComponent(returnToken)}`,origin).toString(),cancel_url:new URL('/account?payment=cancelled',origin).toString(),
-  },{stripeAccount:connected.stripeAccountId,idempotencyKey:key})
-  if (!checkout.url || checkout.livemode !== connected.livemode) throw new Error('Stripe Checkout returned invalid scoped handoff')
-  await execute(db,`UPDATE payment_attempts SET stripe_checkout_id=?,checkout_url=?,status='open',error=NULL,updated_at=? WHERE id=?`,[checkout.id,checkout.url,new Date().toISOString(),attemptId])
-  opened=checkout.url
+    const intent = await stripe.paymentIntents.create({
+      amount, currency: price.currency.toLowerCase(),
+      ...(customer ? { customer: customer.customerId } : {}),
+      // The connected configuration the acceptance check verified: cards, Link and the wallets, nothing that pays later.
+      payment_method_configuration: methodConfigurationId,
+      automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
+      application_fee_amount: 0,
+      description: projectionTitle,
+      metadata: { krabiclaw_payment_id: id },
+      // Stripe reports, per card, whether a surcharge may apply and how much at most; the amount is set when the buyer confirms.
+      ...(surcharge !== null ? { amount_details: { surcharge: { enforce_validation: 'enabled' } } } : {}),
+    } as Stripe.PaymentIntentCreateParams, { stripeAccount: connected.stripeAccountId, idempotencyKey: key })
+    if (intent.livemode !== connected.livemode || !intent.client_secret) throw new Error('Stripe returned a PaymentIntent outside the connected mode')
+    await executeBatch(db, [
+      { query: `UPDATE payment_attempts SET stripe_payment_intent_id=?,status='open',error=NULL,updated_at=? WHERE id=?`, params: [intent.id, new Date().toISOString(), attemptId] },
+      { query: 'UPDATE payments SET stripe_payment_intent_id=?,updated_at=? WHERE id=?', params: [intent.id, new Date().toISOString(), id] },
+    ], { operation: 'Record the payment intent' })
   } catch(error) {
-    // A prior attempt may have reached Stripe even when its handoff was lost.
-    // Only a first-call content/auth rejection proves no Checkout was created.
+    // A prior attempt may have reached Stripe even when its response was lost.
+    // Only a first-call content/auth rejection proves no intent was created.
     const rejected=!previous&&(error instanceof stripe.errors.StripeInvalidRequestError||error instanceof stripe.errors.StripeAuthenticationError||error instanceof stripe.errors.StripePermissionError)&&error.headers?.['stripe-should-retry']!=='true'
     const failedAt=new Date().toISOString()
     await executeBatch(db,[
-      {query:"UPDATE payment_attempts SET error=?,updated_at=?,status=CASE WHEN ? THEN 'failed' ELSE status END WHERE id=?",params:[error instanceof Error?error.message.slice(0,500):'Provider checkout failed',failedAt,Number(rejected),attemptId]},
+      {query:"UPDATE payment_attempts SET error=?,updated_at=?,status=CASE WHEN ? THEN 'failed' ELSE status END WHERE id=?",params:[error instanceof Error?error.message.slice(0,500):'Provider payment intent failed',failedAt,Number(rejected),attemptId]},
       ...(rejected?[
         {query:"UPDATE payment_checkout_holds SET status='released' WHERE payment_id=? AND status='active'",params:[id]},
         {query:"UPDATE payments SET state='failed',updated_at=? WHERE id=? AND captured_amount=0",params:[failedAt,id]},
       ]:[]),
-    ],{operation:'Record rejected or uncertain Checkout creation'})
+    ],{operation:'Record rejected or uncertain payment intent creation'})
     throw error
   }
   await recordCheckoutStarted(db, await requirePayment(db,input.organizationId,id), customer?.savedCards ?? 0)
-  return {payment_id:id,checkout_url:opened,expires_at:expiresAt}
+  return handoff(id)
+}
+
+/** The business's pass-on-credit-card-fees rate on this connected account, or null when it does not pass them on. */
+export async function surchargeBasisPoints(db: DbClient, organizationId: string, stripeAccountId: string): Promise<number | null> {
+  const row = await queryFirst<{ surcharge_basis_points: number | null }>(db, 'SELECT surcharge_basis_points FROM stripe_connected_accounts WHERE organization_id=? AND stripe_account_id=?', [organizationId, stripeAccountId])
+  const points = row?.surcharge_basis_points ?? null
+  if (points === null) return null
+  if (!Number.isSafeInteger(points) || points <= 0 || points > 10_000) throw new Error('Surcharge rate is invalid')
+  return points
 }

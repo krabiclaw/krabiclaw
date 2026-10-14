@@ -21,6 +21,8 @@ export type ScheduledTaskName =
   | 'stripe-ga4-intent-retention'
   | 'article-broadcast-send'
   | 'stripe-fee-report-request'
+  | 'payments-expire-attempts'
+  | 'marketing-ad-spend-daily'
 
 type TaskLoader = () => Promise<{ default: ScheduledTaskDefinition }>
 
@@ -29,9 +31,9 @@ export const SCHEDULED_TASKS: Readonly<Record<string, readonly ScheduledTaskName
   '*/5 * * * *': ['google-calendar-sync', 'social-card-backfill', 'sessions-materialize', 'article-broadcast-send'],
   '*/2 * * * *': ['public-resource-cache-invalidation'],
   '*/10 * * * *': ['domain-reconciliation', 'zaraz-analytics-reconciliation'],
-  '0 3 * * *': ['domain-reconciliation-daily', 'analytics-aggregate-daily', 'stripe-ga4-intent-retention', 'stripe-fee-report-request'],
+  '0 3 * * *': ['domain-reconciliation-daily', 'analytics-aggregate-daily', 'stripe-ga4-intent-retention', 'stripe-fee-report-request', 'marketing-ad-spend-daily'],
   '0 0 * * SUN': ['google-places-sync'],
-  '0 * * * *': ['review-request-automation', 'social-card-cleanup'],
+  '0 * * * *': ['review-request-automation', 'social-card-cleanup', 'payments-expire-attempts'],
 }
 
 const TASK_LOADERS: Readonly<Record<ScheduledTaskName, TaskLoader>> = {
@@ -49,6 +51,8 @@ const TASK_LOADERS: Readonly<Record<ScheduledTaskName, TaskLoader>> = {
   'review-request-automation': async () => import('./tasks/review-request-automation'),
   'stripe-fee-report-request': async () => import('./tasks/stripe-fee-report-request'),
   'article-broadcast-send': async () => import('./tasks/article-broadcast-send'),
+  'payments-expire-attempts': async () => import('./tasks/payments-expire-attempts'),
+  'marketing-ad-spend-daily': async () => import('./tasks/marketing-ad-spend-daily'),
 }
 
 export function getScheduledTaskNames(cron: string): readonly ScheduledTaskName[] {
