@@ -39,7 +39,7 @@ import EditorNavigationList from '~/components/dashboard/EditorNavigationList.vu
 import type { EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import { authClient } from '~/lib/auth-client'
-import { additionalLocationPrice, INCLUDED_LOCATIONS, STARTER_PLAN_ID, isKnownBillingPlan, isNewSalePlan } from '~/shared/billing-model'
+import { ADDITIONAL_LOCATION_PRICES, additionalLocationPrice, INCLUDED_LOCATIONS, STARTER_PLAN_ID, isKnownBillingPlan, isNewSalePlan } from '~/shared/billing-model'
 import { isLocationCount } from '~/composables/useOrganizationSubscription'
 import { paymentMoney } from '~/shared/payment-display'
 import { isCurrencyCode } from '~/shared/currencies'
@@ -50,7 +50,7 @@ const dashboardApi = useDashboardApi()
 const dashboard = useDashboardOrganization()
 const { trackSubscriptionCheckoutSuccess } = useAnalytics()
 const { startOrganizationCheckout, setPlanLocations } = useOrganizationSubscription()
-const { plans, displayPrice } = await usePlans()
+const { plans, formatPrice } = await usePlans()
 const { formatExactDateTime } = useHumanTime()
 
 const errorMessage = ref('')
@@ -88,13 +88,27 @@ const scheduledPlan = computed(() => {
   const scheduled = billing.value?.scheduledPlan
   return scheduled ? { name: plans.value.find(plan => plan.id === scheduled.plan)?.name ?? scheduled.plan, at: scheduled.at } : null
 })
+// What the subscription charges each interval: the plan's amount for the
+// included locations plus each additional one, the same tiers Stripe bills.
+const planCharge = computed(() => {
+  const status = billing.value
+  const plan = currentPlan.value
+  if (!status || !plan) return null
+  const interval = status.billingInterval ?? 'month'
+  const base = plan.prices.find(price => price.interval === interval)?.amount
+  if (base === undefined) return null
+  const additional = Math.max(0, status.locations.covered - INCLUDED_LOCATIONS)
+    * (interval === 'year' ? ADDITIONAL_LOCATION_PRICES.annual : ADDITIONAL_LOCATION_PRICES.monthly)
+  return `${formatPrice(base + additional)}/${interval === 'year' ? 'yr' : 'mo'}`
+})
+
 const planSummary = computed(() => {
   const status = billing.value
   if (!status) return ''
   if (onStarter.value) return 'Free'
   const parts: string[] = []
-  const price = currentPlan.value ? displayPrice(currentPlan.value, false) : null
-  if (price) parts.push(`${price}/mo`)
+  const charge = planCharge.value
+  if (charge) parts.push(charge)
   if (status.subscriptionStatus === 'past_due') parts.push('Payment past due')
   else if (scheduledPlan.value) parts.push(`Changes to ${scheduledPlan.value.name} on ${formatExactDateTime(scheduledPlan.value.at)}`)
   else if (status.currentPeriodEnd) parts.push(`${status.cancelAtPeriodEnd ? 'Ends' : 'Renews'} ${formatExactDateTime(status.currentPeriodEnd)}`)
