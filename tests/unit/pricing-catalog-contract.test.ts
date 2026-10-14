@@ -80,6 +80,26 @@ test('Commerce inherits Growth capabilities and participates in native subscript
   assert.equal(classifyStripePlanChange('commerce', 'commerce', true), null)
 })
 
+test('Marketing is Commerce plus ad management at USD 99, above Commerce', () => {
+  const marketing = getPlanEntitlements('marketing')
+  const commerce = getPlanEntitlements('commerce')
+  for (const [capability, value] of Object.entries(commerce)) {
+    if (capability !== 'plan' && capability !== 'marketing') assert.equal(marketing[capability], value)
+  }
+  assert.equal(marketing.payments, true)
+  assert.equal(marketing.marketing, true)
+  assert.equal(commerce.marketing, false)
+  assert.equal(getPlanEntitlements('growth').marketing, false)
+  assertStripeCatalogPrices('marketing', price('price-marketing-month', 'month', 9900))
+  assert.throws(() => assertStripeCatalogPrices('marketing', price('price-marketing-month', 'month', 8900)), /monthly price/)
+  assert.throws(() => assertStripeCatalogPrices('marketing', price('price-marketing-month', 'month', 9900), price('price-marketing-year', 'year', 118800)), /no authorized annual price/)
+  assert.equal(classifyStripePlanChange('commerce', 'marketing', true), 'upgrade')
+  assert.equal(classifyStripePlanChange('marketing', 'growth', true), 'downgrade')
+  const ads = PRICING_COMPARISON.flatMap(group => [...group.rows]).find(row => row.id === 'ads.google')!
+  assert.equal(comparisonValue(ads, 'commerce'), 'Not included')
+  assert.equal(comparisonValue(ads, 'marketing'), 'Included')
+})
+
 test('display rename preserves provider identities and metadata selects one canonical offer', () => {
   const renamed = { ...product, name: 'Grow' }
   assert.equal(selectStripeCatalogPrice(renamed, [monthly, annual], 'month')?.id, monthly.id)

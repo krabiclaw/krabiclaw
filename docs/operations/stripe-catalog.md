@@ -74,7 +74,7 @@ applied separately with the commands below. This prevents unrelated product
 metadata copy from blocking an application or incident release.
 
 Public plan reads share the canonical `ORGANIZATION_CACHE` catalog entry
-`stripe-plans:v6:<actual app.buildId>` for up to one hour. Tenant CMS content
+`stripe-plans:v7:<actual app.buildId>` for up to one hour. Tenant CMS content
 purges do not refresh this global entry. A genuine new application build selects
 a fresh entry; restarting the same built Worker retains its persistent cache.
 After catalog changes, verify the actual public plan and Markdown reads as well
