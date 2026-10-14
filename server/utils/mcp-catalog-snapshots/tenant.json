@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:062f93b3ca2eb05f513143b2605c021435dd3a35d1187bc232b59d9af3743390",
-  "documentationFingerprint": "sha256:c570dfd33188158bf21288bd5576208c2f12801ff4adf184c5c6617a2a152420",
+  "fingerprint": "sha256:2d1eec4a34c5bcdb592a1d8050e65a7d865e42ac9a17781e372171c85fbcca2d",
+  "documentationFingerprint": "sha256:6fa1e584f586dfac1bbc5a14e5f125d9edcec3b8a6b1a9d8de59ea82c2734088",
   "tools": [
     {
       "name": "append_content_block",
@@ -41998,6 +41998,18 @@
           },
           "pricing": {
             "properties": {
+              "ad_spend_rate": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "ad_spend_rate_percent": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "captured_volume_rate": {
                 "type": "number"
               },
@@ -42019,6 +42031,8 @@
               "units",
               "captured_volume_rate",
               "captured_volume_rate_percent",
+              "ad_spend_rate",
+              "ad_spend_rate_percent",
               "validated_at"
             ],
             "type": [

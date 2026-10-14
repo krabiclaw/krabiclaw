@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "1946ba8f-9fc9-4533-a301-9e6eba4003a3",
+  "id": "e84f7a58-cf69-4627-86c0-1fb0a86b04b4",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -7117,6 +7117,20 @@
           "notNull": false,
           "autoincrement": false
         },
+        "stripe_payment_intent_id": {
+          "name": "stripe_payment_intent_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "review_json": {
+          "name": "review_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "return_token": {
           "name": "return_token",
           "type": "text",
@@ -8541,6 +8555,14 @@
         },
         "tax_amount": {
           "name": "tax_amount",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": 0
+        },
+        "surcharge_amount": {
+          "name": "surcharge_amount",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,
@@ -13616,6 +13638,13 @@
         "card_payments_status": {
           "name": "card_payments_status",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "surcharge_basis_points": {
+          "name": "surcharge_basis_points",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

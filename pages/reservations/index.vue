@@ -397,17 +397,17 @@ async function handleReservation() {
     }
     reservationRequestKey ??= crypto.randomUUID()
     type ReservationReceipt = { success: true; status: 'confirmed'; id: string; request_id: string; operational_reservation_id: string; starts_at: string; ends_at: string; timezone: string; cancellationToken: string; policy_summary?: ApiRecord | null; measurement?: SubmissionMeasurement }
-      | { success: true; status: 'checkout'; payment_id: string; checkout_url: string; expires_at: string }
+      | { success: true; status: 'checkout'; payment_id: string; pay_path: string; purchase_claim: string; expires_at: string }
     const res = await publicApiMutation(`/api/public/reservations`, {
       method: 'POST',
       body: { ...details, idempotency_key: reservationRequestKey, locale: locale.value, page_event_id: await pageEventId() },
       validate: (value): value is ReservationReceipt => isRecord(value) && value.success === true && (
-        value.status === 'checkout' ? typeof value.payment_id === 'string' && typeof value.checkout_url === 'string' && /^https:\/\/checkout\.stripe\.com\//.test(value.checkout_url) && isValidInstant(value.expires_at)
+        value.status === 'checkout' ? typeof value.payment_id === 'string' && typeof value.pay_path === 'string' && value.pay_path.startsWith('/pay/') && typeof value.purchase_claim === 'string' && isValidInstant(value.expires_at)
         : value.status === 'confirmed' && typeof value.id === 'string' && typeof value.request_id === 'string' && typeof value.operational_reservation_id === 'string' && typeof value.cancellationToken === 'string'
           && isValidInstant(value.starts_at) && isValidInstant(value.ends_at) && typeof value.timezone === 'string' && isValidTimezone(value.timezone)),
     })
     if (res.status === 'checkout') {
-      await navigateTo(res.checkout_url, { external: true })
+      await navigateTo({ path: res.pay_path, hash: `#${res.purchase_claim}` })
       return
     }
     setBookingConfirmation({

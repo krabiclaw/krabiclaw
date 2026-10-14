@@ -263,6 +263,7 @@ test('getGoogleAdsPerformanceSummary queries customer aggregates and calculates 
     return Response.json({
       results: [
         {
+          customer: { currencyCode: 'USD' },
           metrics: { clicks: '100', impressions: '2000', costMicros: '50000000', conversions: 10 },
         },
       ],
@@ -270,6 +271,7 @@ test('getGoogleAdsPerformanceSummary queries customer aggregates and calculates 
   })
 
   const summary = await getGoogleAdsPerformanceSummary('test-token', 'dev-tok', '331-742-7925', '2026-09-01', '2026-09-30')
+  assert.equal(summary.currencyCode, 'USD')
   assert.equal(summary.clicks, 100)
   assert.equal(summary.impressions, 2000)
   assert.equal(summary.costMicros, 50000000)

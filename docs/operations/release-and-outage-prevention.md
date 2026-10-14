@@ -365,7 +365,7 @@ except for one constraint, which is why it needs a replacement database:
   `every_home_has_stay_settings`.
 
 The complete applied v16 chain (`0000_baseline` through
-`0006_native_full_refunds`) and its Drizzle metadata remain unchanged in
+`0007_payment_intents`) and its Drizzle metadata remain unchanged in
 `migrations-history/v16/`; an older export passes through its forward
 migrations before the copy.
 

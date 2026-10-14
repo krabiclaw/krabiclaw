@@ -72,11 +72,11 @@ const { data: billingResponse, error: billingError, refresh: refreshBilling } = 
 const billing = computed(() => billingResponse.value?.billing ?? null)
 
 // What Payments costs, and the usage billing behind it, read from the same place the Earnings fees come from.
-type Pricing = { captured_volume_rate_percent: string; livemode: boolean }
+type Pricing = { captured_volume_rate_percent: string; ad_spend_rate_percent: string | null; livemode: boolean }
 type Credit = { id: string; source_id: string; currency: string; amount: number }
 type UsageBilling = { configured: boolean; account?: { status: string }; pricing: Pricing | null; credits: Credit[] }
 const isUsageBilling = (value: unknown): value is UsageBilling => isRecord(value) && typeof value.configured === 'boolean'
-  && (value.pricing === null || (isRecord(value.pricing) && typeof value.pricing.captured_volume_rate_percent === 'string' && typeof value.pricing.livemode === 'boolean'))
+  && (value.pricing === null || (isRecord(value.pricing) && (value.pricing.ad_spend_rate_percent === null || typeof value.pricing.ad_spend_rate_percent === 'string') && typeof value.pricing.captured_volume_rate_percent === 'string' && typeof value.pricing.livemode === 'boolean'))
   && (!value.configured || (isRecord(value.account) && typeof value.account.status === 'string'))
   && Array.isArray(value.credits) && value.credits.every(row => isRecord(row) && typeof row.id === 'string' && typeof row.source_id === 'string' && isCurrencyCode(row.currency) && Number.isSafeInteger(row.amount))
 // Lazy on purpose: this reads Metronome's invoices and each one's Stripe collection
@@ -136,7 +136,7 @@ const groups = computed<EditorNavigationGroup[]>(() => [{
   items: [
     { id: 'plan', label: currentPlan.value?.name ?? 'Plan', summary: planSummary.value, action: { label: onStarter.value ? 'Choose a plan' : 'Manage' } },
     ...(billing.value ? [{ id: 'locations', label: 'Locations', summary: locationsSummary.value, ...(onStarter.value || billing.value.subscriptionStatus !== 'active' || scheduledPlan.value || billing.value.cancelAtPeriodEnd ? {} : { action: { label: 'Change' } }) }] : []),
-    ...(usage.value?.pricing ? [{ id: 'fees', label: 'Payments fees', summary: `${usage.value.pricing.captured_volume_rate_percent}% of each payment, plus Stripe’s fees. Fees aren’t returned after a refund or dispute.` }] : []),
+    ...(usage.value?.pricing ? [{ id: 'fees', label: 'Payments fees', summary: `${usage.value.pricing.captured_volume_rate_percent}% of each payment, plus Stripe’s fees${usage.value.pricing.ad_spend_rate_percent === null ? '' : `, and ${usage.value.pricing.ad_spend_rate_percent}% of Google Ads spend on campaigns we manage`}. Fees aren’t returned after a refund or dispute.` }] : []),
     ...(usage.value && usage.value.configured === false && billing.value && getPlanEntitlements(billing.value.plan).payments === true ? [{ id: 'usage:pending', label: 'Payments fees', summary: 'Getting ready. Fees for payments you take before then are billed once it’s done.' }] : []),
     ...(usage.value?.account && ['servicing', 'closing'].includes(usage.value.account.status) ? [{ id: 'usage:finalize', label: 'Previous Payments billing', summary: 'Charges from earlier payments still apply; end it once they are settled.', action: { label: 'End' } }] : []),
     ...(usage.value?.credits ?? []).map(credit => ({ id: `credit:${credit.id}`, label: `Pending credit ${paymentMoney(-credit.amount, credit.currency)}`, summary: 'Issue the credit in Stripe, then verify its credit note here.', action: { label: 'Verify' } })),
