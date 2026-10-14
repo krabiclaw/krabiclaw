@@ -6,7 +6,7 @@ import { useOnboardingState, type OnboardingPlacePreview } from '~/composables/u
 import { formatPostalAddress, postalAddressFromAnswers } from '~/utils/postal-address'
 import { isOrganizationFontPreset } from '~/shared/organization-fonts'
 import { LOGO_SHAPES, type LogoShape } from '~/shared/media-placement-contract'
-import { WEBSITE_DRAFT_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
+import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
 
 /**
  * Every server call the flow makes, and the shapes they answer with. The step
@@ -317,7 +317,7 @@ export function useOnboardingDraft() {
 
     state.value.draftId = draft.draftId
     state.value.draftRevision = draft.updatedAt
-    if (!WEBSITE_DRAFT_VERTICALS.includes(draft.vertical as OrganizationVertical)) throw new Error(`Saved website draft has an unknown business type: ${String(draft.vertical)}`)
+    if (!ALL_VERTICALS.includes(draft.vertical as OrganizationVertical)) throw new Error(`Saved website draft has an unknown business type: ${String(draft.vertical)}`)
     state.value.vertical = draft.vertical as OrganizationVertical
     state.value.source = draft.sourceType === 'google_places' ? 'google_places' : 'manual'
     state.value.placeId = typeof draft.placeId === 'string' && draft.placeId ? draft.placeId : null

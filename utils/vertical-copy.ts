@@ -12,12 +12,6 @@ export type OrganizationVertical =
 // 'restaurant' | 'experience' union that silently omits new verticals.
 export const ALL_VERTICALS: OrganizationVertical[] = ["restaurant", "experience", "service", "lodging"];
 
-// The verticals a website draft (the dashboard wizard and save_website_draft)
-// can start. A draft asks for a public address and opening hours, which a
-// vacation rental would have to invent; a lodging organization is created by
-// the native app through POST /api/organizations instead.
-export const WEBSITE_DRAFT_VERTICALS: OrganizationVertical[] = ALL_VERTICALS.filter(vertical => vertical !== "lodging");
-
 type LocaleCode = "en" | "th" | "ja" | "vi";
 
 type VerticalCopy = {

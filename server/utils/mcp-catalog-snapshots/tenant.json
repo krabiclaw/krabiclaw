@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:7ba51f151e1b1c17f2cb0e228337428c8467fd3054dffe4bb2bf037357ca9f2e",
-  "documentationFingerprint": "sha256:d9423bd77a8d18d9a7fd0d7c97b6d7f1c188d4d43ccbd4fa9ff1926d7a7650ac",
+  "fingerprint": "sha256:89c2e5acd49041b64eaeff7ad36076240a1170a4180a095ddfa775f0ac25cef2",
+  "documentationFingerprint": "sha256:f0af6b747f9f785e4d6e246c408c398063a137b17215650307192ce785fc6fbb",
   "tools": [
     {
       "name": "append_content_block",
@@ -50593,7 +50593,8 @@
             "enum": [
               "restaurant",
               "experience",
-              "service"
+              "service",
+              "lodging"
             ],
             "type": "string"
           }
@@ -79592,7 +79593,8 @@
             "enum": [
               "restaurant",
               "experience",
-              "service"
+              "service",
+              "lodging"
             ],
             "type": "string"
           }
@@ -79718,7 +79720,8 @@
             "enum": [
               "restaurant",
               "experience",
-              "service"
+              "service",
+              "lodging"
             ],
             "type": "string"
           }
@@ -101493,14 +101496,14 @@
         "create_product": "sha256:8377e05bf0862fe1ec350ea292e3d2259b27ff9cce2909aa0bdb4837579c8e58",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
-        "get_website_draft": "sha256:80725c125b2784d23e295ad824ab528c6d1956f6b2d8597f59f46b2a43b87474",
+        "get_website_draft": "sha256:fccf7d7281ba30d1e79163929e61abec1893c2e910460c4068364a65784a7bac",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
         "list_products": "sha256:f171bef83f856190c9aee9ab3cecac29c94e7ee4cadc3d2b2c9e788b37396b5c",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
-        "save_website_draft": "sha256:90560dcc9d52af64dd8bd3ec566827452ffdd74d7fc816ef728647e9a3aa735c",
+        "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
         "update_menu": "sha256:1a67115670b262211f3ccceb55340a6003a92baf51e9926c2acd6238fcd5545f",
         "update_organization_settings": "sha256:e9db6807901edd4fa400c86f0c4f9b690927ff8bca927a7190ff8ab507a6d639",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
@@ -101574,7 +101577,7 @@
   "publicDocumentation": [
     {
       "slug": "what-you-can-edit-through-chatgpt",
-      "contentHash": "sha256:c7ab225c2c7ef78e2bedbb829ffea80ea2a606ee180c054ca788dd598d827ea7",
+      "contentHash": "sha256:7a565f4a22374eabd30bd127559d7e9c638768d21b4df33c386204453f12ca18",
       "toolContracts": {
         "create_location": "sha256:857d86a8d7cdcc2b0ace643f0eb8ef401efcc4f33e878dc26aca56ac9f1bfa12",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
@@ -101584,7 +101587,7 @@
         "list_organization_members": "sha256:f47eb37ec4cfa1df500db883fdd207db7e2228a3839d64e08f4e52351f85b10e",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "reply_to_guest": "sha256:03666d869c938994de86f6e3380a5bb433d0dabba23e17570b63e79133800fef",
-        "save_website_draft": "sha256:90560dcc9d52af64dd8bd3ec566827452ffdd74d7fc816ef728647e9a3aa735c",
+        "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
         "update_organization_member_role": "sha256:7091eda99b109bbf611aa3f7b316e12785275ab87bc4caed50371b288f981dda",
         "update_product_session": "sha256:719c480fb7c4436732bfe437c820b50e4f7b37a2b23f6aa7e0634bbaf62ea776"
       }

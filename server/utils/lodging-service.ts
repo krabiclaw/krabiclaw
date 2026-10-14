@@ -32,7 +32,6 @@ async function callLodging(env: CloudflareEnv, method: 'DELETE' | 'POST', path: 
   const response = await fetch(`${baseUrl}${path}`, {
     method,
     redirect: 'manual',
-    signal: AbortSignal.timeout(10_000),
     headers: { [LODGING_INTERNAL_CALLER.header]: secret, ...(body ? { 'content-type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   })

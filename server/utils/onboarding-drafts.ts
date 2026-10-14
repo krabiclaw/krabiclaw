@@ -5,7 +5,7 @@ import { execute, queryAll, queryFirst, type BatchQuery } from '~/server/db'
 import { creationRequestHash } from '~/server/utils/organization-events'
 import { isCurrencyCode } from '~/shared/currencies'
 import { isValidTimezone } from '~/utils/timezone'
-import { WEBSITE_DRAFT_VERTICALS } from '~/utils/vertical-copy'
+import { ALL_VERTICALS } from '~/utils/vertical-copy'
 import { getPhoneCountry, parsePhone } from '~/utils/phone'
 import type { PlaceDetails, PlaceReview } from '~/server/utils/google-places'
 import type { CurrencyCode } from '~/shared/currencies'
@@ -182,7 +182,7 @@ export interface OnboardingDraftPayload {
 }
 
 function defaultProductCategory(vertical: OrganizationVertical): string {
-  if (vertical === 'experience') return 'Experiences'
+  if (vertical === 'experience' || vertical === 'lodging') return 'Experiences'
   if (vertical === 'service') return 'Services'
   return 'Menu'
 }
@@ -519,7 +519,7 @@ export function normalizeOnboardingDraftInput(input: OnboardingDraftInput, exist
   const previous = existing?.source.details
   const name = answer(raw, 'name') ?? answer(input as unknown as Record<string, unknown>, 'name') ?? place?.name ?? previous?.name ?? ''
   const vertical = input.vertical ?? existing?.preview.vertical
-  if (!name || typeof vertical !== 'string' || !WEBSITE_DRAFT_VERTICALS.includes(vertical as OrganizationVertical)) throw new HTTPError({ statusCode: 400, statusMessage: 'Business name and type are required', data: { missing_fields: [...(!name ? ['name'] : []), ...(!vertical ? ['vertical'] : [])] } })
+  if (!name || typeof vertical !== 'string' || !ALL_VERTICALS.includes(vertical as OrganizationVertical)) throw new HTTPError({ statusCode: 400, statusMessage: 'Business name and type are required', data: { missing_fields: [...(!name ? ['name'] : []), ...(!vertical ? ['vertical'] : [])] } })
   const sourceLocale = answer(raw, 'sourceLocale', previous?.sourceLocale)
   if (!sourceLocale || !platformLocale(sourceLocale)) throw new HTTPError({ statusCode: 400, statusMessage: 'Choose a supported website language', data: { missing_fields: ['source_locale'] } })
   if (previous && previous.sourceLocale !== sourceLocale) throw new HTTPError({ statusCode: 409, statusMessage: 'Existing draft content cannot be relabelled into another language' })

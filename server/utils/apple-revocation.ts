@@ -42,7 +42,6 @@ export async function exchangeAppleAuthorizationCode(env: CloudflareEnv, code: s
   const clientSecret = await appleClientSecret(env)
   const response = await fetch(`${APPLE}/auth/token`, {
     method: 'POST',
-    signal: AbortSignal.timeout(10_000),
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ client_id: env.APPLE_APP_BUNDLE_ID, client_secret: clientSecret, code, grant_type: 'authorization_code' }),
   })
@@ -62,7 +61,6 @@ export async function exchangeAppleAuthorizationCode(env: CloudflareEnv, code: s
 export async function revokeAppleGrant(env: CloudflareEnv, grant: { refreshToken: string; clientSecret: string }): Promise<void> {
   const response = await fetch(`${APPLE}/auth/revoke`, {
     method: 'POST',
-    signal: AbortSignal.timeout(10_000),
     headers: { 'content-type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({ client_id: env.APPLE_APP_BUNDLE_ID, client_secret: grant.clientSecret, token: grant.refreshToken, token_type_hint: 'refresh_token' }),
   })
