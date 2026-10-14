@@ -227,7 +227,8 @@ const presentation = computed(() => {
   )
 })
 const heading = computed(() => {
-  const count = allRangeItems.value.length
+  // A stay is one commitment however many of its moments are listed.
+  const count = new Set(allRangeItems.value.map(item => item.stayId ?? item.id)).size
   return `You have ${bookingCountLabel(presentation.value, count)}`
 })
 const emptyTitle = computed(() => activeRange.value === 'today'

@@ -858,7 +858,7 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   create_stay: { ...W, idempotentHint: true },
   update_stay: D,
   cancel_stay: D,
-  record_stay_payment: W,
+  record_stay_payment: { ...W, idempotentHint: true },
   delete_stay_payment: D,
   set_stay_nights: { ...D, idempotentHint: true },
   append_content_block: { ...W, openWorldHint: true },

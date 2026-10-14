@@ -1224,6 +1224,7 @@ export const stay_nights = sqliteTable("stay_nights", {
 
 // Row meaning: the host recorded receiving (or, negative, refunding) this
 //   amount for an app stay outside Stripe. Not Krabiclaw-processed volume.
+// `idempotency_key` makes a retried record the same row, never a second payment.
 // Deletion: cascades from the stay. A mistaken entry is deleted by the host.
 export const stay_payments = sqliteTable("stay_payments", {
 	id: text().primaryKey(),
@@ -1235,10 +1236,12 @@ export const stay_payments = sqliteTable("stay_payments", {
 	paid_on: text().notNull(),
 	reference: text(),
 	note: text(),
+	idempotency_key: text().notNull(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	created_by: text().notNull(),
 }, (table) => [
 	foreignKey({ columns: [table.organization_id, table.stay_id], foreignColumns: [stays.organization_id, stays.id], name: "stay_payments_stay_scope_fk" }).onDelete("cascade"),
+	unique("stay_payments_idempotency_unique").on(table.organization_id, table.idempotency_key),
 	index("stay_payments_stay_idx").on(table.stay_id, table.paid_on),
 	check("stay_payments_amount_check", sql`amount_minor <> 0 AND length(currency) = 3 AND currency = upper(currency)`),
 	check("stay_payments_method_check", sql`method IN ('cash', 'bank_transfer', 'card_external', 'other')`),

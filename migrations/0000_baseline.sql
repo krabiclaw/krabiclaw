@@ -1863,6 +1863,7 @@ CREATE TABLE `stay_payments` (
 	`paid_on` text NOT NULL,
 	`reference` text,
 	`note` text,
+	`idempotency_key` text NOT NULL,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	`created_by` text NOT NULL,
 	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
@@ -1874,6 +1875,7 @@ CREATE TABLE `stay_payments` (
 );
 --> statement-breakpoint
 CREATE INDEX `stay_payments_stay_idx` ON `stay_payments` (`stay_id`,`paid_on`);--> statement-breakpoint
+CREATE UNIQUE INDEX `stay_payments_idempotency_unique` ON `stay_payments` (`organization_id`,`idempotency_key`);--> statement-breakpoint
 CREATE TABLE `stays` (
 	`id` text PRIMARY KEY NOT NULL,
 	`organization_id` text NOT NULL,

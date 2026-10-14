@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "35745c86-73a8-4274-8828-5597d61823f1",
+  "id": "f6454711-e4d4-4da7-9d34-4022df7873cc",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -13076,6 +13076,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "created_at": {
           "name": "created_at",
           "type": "text",
@@ -13100,6 +13107,14 @@
             "paid_on"
           ],
           "isUnique": false
+        },
+        "stay_payments_idempotency_unique": {
+          "name": "stay_payments_idempotency_unique",
+          "columns": [
+            "organization_id",
+            "idempotency_key"
+          ],
+          "isUnique": true
         }
       },
       "foreignKeys": {

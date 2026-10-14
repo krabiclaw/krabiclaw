@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:f944f23c4034e2223f2f4ce94193b49d9be112de04569553a67708a69ca90b64",
-  "documentationFingerprint": "sha256:147e8603975134e5f6eabe577165058e0b26d47abe25a7dd406ad61cb8484363",
+  "fingerprint": "sha256:73e27ecd37092f14aedff22e52d2f12afabf13183f3f3cf2bba6ad98176f39b0",
+  "documentationFingerprint": "sha256:e8d12a41cf2679449d566cb1cec7b9ae3e43c0ed617c68e5adbc651387548fb0",
   "tools": [
     {
       "name": "append_content_block",
@@ -8288,6 +8288,10 @@
                 ],
                 "type": "string"
               },
+              "timezone": {
+                "minLength": 1,
+                "type": "string"
+              },
               "total_minor": {
                 "type": "integer"
               },
@@ -8309,6 +8313,7 @@
               "id",
               "product_id",
               "location_id",
+              "timezone",
               "channel",
               "owner",
               "status",
@@ -28564,6 +28569,10 @@
                 ],
                 "type": "string"
               },
+              "timezone": {
+                "minLength": 1,
+                "type": "string"
+              },
               "total_minor": {
                 "type": "integer"
               },
@@ -28585,6 +28594,7 @@
               "id",
               "product_id",
               "location_id",
+              "timezone",
               "channel",
               "owner",
               "status",
@@ -33525,6 +33535,10 @@
                 ],
                 "type": "string"
               },
+              "timezone": {
+                "minLength": 1,
+                "type": "string"
+              },
               "total_minor": {
                 "type": "integer"
               },
@@ -33546,6 +33560,7 @@
               "id",
               "product_id",
               "location_id",
+              "timezone",
               "channel",
               "owner",
               "status",
@@ -52177,6 +52192,10 @@
                 ],
                 "type": "string"
               },
+              "timezone": {
+                "minLength": 1,
+                "type": "string"
+              },
               "total_minor": {
                 "type": "integer"
               },
@@ -52198,6 +52217,7 @@
               "id",
               "product_id",
               "location_id",
+              "timezone",
               "channel",
               "owner",
               "status",
@@ -52560,6 +52580,10 @@
                   ],
                   "type": "string"
                 },
+                "timezone": {
+                  "minLength": 1,
+                  "type": "string"
+                },
                 "total_minor": {
                   "type": "integer"
                 },
@@ -52581,6 +52605,7 @@
                 "id",
                 "product_id",
                 "location_id",
+                "timezone",
                 "channel",
                 "owner",
                 "status",
@@ -57316,6 +57341,10 @@
                   ],
                   "type": "string"
                 },
+                "timezone": {
+                  "minLength": 1,
+                  "type": "string"
+                },
                 "total_minor": {
                   "type": "integer"
                 },
@@ -57337,6 +57366,7 @@
                 "id",
                 "product_id",
                 "location_id",
+                "timezone",
                 "channel",
                 "owner",
                 "status",
@@ -72002,6 +72032,12 @@
             "description": "Whole minor units; negative for a refund, never zero.",
             "type": "integer"
           },
+          "idempotency_key": {
+            "description": "Caller-supplied durable key. A retry with it returns the stay without a second payment.",
+            "maxLength": 200,
+            "minLength": 1,
+            "type": "string"
+          },
           "method": {
             "enum": [
               "cash",
@@ -72037,7 +72073,8 @@
           "stay_id",
           "amount_minor",
           "method",
-          "paid_on"
+          "paid_on",
+          "idempotency_key"
         ],
         "type": "object"
       },
@@ -72260,6 +72297,10 @@
                 ],
                 "type": "string"
               },
+              "timezone": {
+                "minLength": 1,
+                "type": "string"
+              },
               "total_minor": {
                 "type": "integer"
               },
@@ -72281,6 +72322,7 @@
               "id",
               "product_id",
               "location_id",
+              "timezone",
               "channel",
               "owner",
               "status",
@@ -72321,6 +72363,7 @@
       },
       "annotations": {
         "destructiveHint": false,
+        "idempotentHint": true,
         "openWorldHint": false,
         "readOnlyHint": false
       },
@@ -87100,6 +87143,10 @@
                   ],
                   "type": "string"
                 },
+                "timezone": {
+                  "minLength": 1,
+                  "type": "string"
+                },
                 "total_minor": {
                   "type": "integer"
                 },
@@ -87121,6 +87168,7 @@
                 "id",
                 "product_id",
                 "location_id",
+                "timezone",
                 "channel",
                 "owner",
                 "status",
@@ -105393,6 +105441,10 @@
                 ],
                 "type": "string"
               },
+              "timezone": {
+                "minLength": 1,
+                "type": "string"
+              },
               "total_minor": {
                 "type": "integer"
               },
@@ -105414,6 +105466,7 @@
               "id",
               "product_id",
               "location_id",
+              "timezone",
               "channel",
               "owner",
               "status",

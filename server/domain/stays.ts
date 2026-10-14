@@ -35,6 +35,8 @@ export interface Stay {
   id: string
   product_id: string
   location_id: string
+  /** The home's location timezone: its dates and times are read in it. */
+  timezone: string
   channel: typeof STAY_CHANNELS[number]
   owner: 'app' | 'channel'
   status: typeof STAY_STATUSES[number]
@@ -155,7 +157,7 @@ function amount(value: unknown, field: string, allowNegative = false): number {
   return value
 }
 
-const STAY_COLUMNS = `s.id, s.product_id, c.location_id, s.channel, s.owner, s.status, s.overbooked, s.check_in_date, s.check_out_date, s.arrival_time,
+const STAY_COLUMNS = `s.id, s.product_id, c.location_id, l.timezone, s.channel, s.owner, s.status, s.overbooked, s.check_in_date, s.check_out_date, s.arrival_time,
   s.adults, s.children, s.infants, s.guest_name, s.guest_surname, s.guest_email, s.guest_phone, s.user_id, s.total_minor, s.currency, s.notes,
   s.provider, s.external_booking_id, s.channel_booking_id, s.cancelled_at, s.cancellation_reason, s.version, s.created_at, s.updated_at`
 
@@ -200,6 +202,7 @@ export async function listStays(db: DbClient, access: StayAccess, input: { from:
   const scope = visibleHomes(access)
   const rows = await queryAll<Record<string, unknown>>(db, `
     SELECT ${STAY_COLUMNS} FROM stays s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
+      JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
      WHERE s.organization_id = ? AND s.check_in_date < ? AND s.check_out_date > ?
        ${input.productId ? 'AND s.product_id = ?' : ''} ${input.includeCancelled ? '' : "AND s.status <> 'cancelled'"} AND ${scope.sql}
      ORDER BY s.check_in_date, s.id`, [access.organizationId, to, from, ...(input.productId ? [input.productId] : []), ...scope.params])
@@ -210,6 +213,7 @@ export async function getStay(db: DbClient, access: StayAccess, stayId: string):
   const scope = visibleHomes(access)
   const row = await queryFirst<Record<string, unknown>>(db, `
     SELECT ${STAY_COLUMNS} FROM stays s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
+      JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
      WHERE s.organization_id = ? AND s.id = ? AND ${scope.sql}`, [access.organizationId, stayId, ...scope.params])
   if (!row) fail(404, 'STAY_NOT_FOUND', 'That stay is not in this organization')
   const stay = mapStay(row)
@@ -431,16 +435,37 @@ export async function recordStayPayment(db: DbClient, access: StayAccess, stayId
   const amountMinor = amount(input.amount_minor, 'amount_minor', true)
   if (amountMinor === 0) fail(422, 'INVALID_AMOUNT', 'amount_minor must not be zero', 'amount_minor')
   if (!STAY_PAYMENT_METHODS.includes(input.method as StayPaymentMethod)) fail(422, 'INVALID_STAY_FIELD', `method must be one of ${STAY_PAYMENT_METHODS.join(', ')}`, 'method')
+  const paidOn = date(input.paid_on, 'paid_on')
+  const key = typeof input.idempotency_key === 'string' ? input.idempotency_key.trim() : ''
+  if (!key || key.length > 200) fail(422, 'INVALID_STAY_FIELD', 'idempotency_key must be 1 to 200 characters', 'idempotency_key')
+  // A retry of a payment that was recorded returns the stay as it is; the same key for a different payment is refused.
+  const replay = async () => {
+    const existing = await queryFirst<{ stay_id: string; amount_minor: number; method: string; paid_on: string }>(db,
+      'SELECT stay_id, amount_minor, method, paid_on FROM stay_payments WHERE organization_id = ? AND idempotency_key = ?', [access.organizationId, key])
+    if (!existing) return null
+    if (existing.stay_id !== stayId || existing.amount_minor !== amountMinor || existing.method !== input.method || existing.paid_on !== paidOn) fail(409, 'IDEMPOTENCY_CONFLICT', 'This idempotency_key was already used for a different payment', 'idempotency_key')
+    return getStay(db, access, stayId)
+  }
+  const earlier = await replay()
+  if (earlier) return earlier
   const id = crypto.randomUUID()
-  await executeBatch(db, [
-    {
-      query: `INSERT INTO stay_payments (id, organization_id, stay_id, amount_minor, currency, method, paid_on, reference, note, created_at, created_by)
-              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      params: [id, access.organizationId, stayId, amountMinor, stay.currency, input.method, date(input.paid_on, 'paid_on'),
-        optionalText(input.reference, 'reference', 200), optionalText(input.note, 'note', 1000), new Date().toISOString(), access.actorId],
-    },
-    organizationEventQuery({ organizationId: access.organizationId, locationId: stay.location_id, actorId: access.actorId, eventType: 'stay.payment_recorded', entityType: 'stay', entityId: stayId, metadata: { payment_id: id, amount_minor: amountMinor } }),
-  ], { operation: 'Record stay payment' })
+  try {
+    await executeBatch(db, [
+      {
+        query: `INSERT INTO stay_payments (id, organization_id, stay_id, amount_minor, currency, method, paid_on, reference, note, idempotency_key, created_at, created_by)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        params: [id, access.organizationId, stayId, amountMinor, stay.currency, input.method, paidOn,
+          optionalText(input.reference, 'reference', 200), optionalText(input.note, 'note', 1000), key, new Date().toISOString(), access.actorId],
+      },
+      organizationEventQuery({ organizationId: access.organizationId, locationId: stay.location_id, actorId: access.actorId, eventType: 'stay.payment_recorded', entityType: 'stay', entityId: stayId, metadata: { payment_id: id, amount_minor: amountMinor } }),
+    ], { operation: 'Record stay payment' })
+  } catch (error) {
+    if (/UNIQUE constraint failed: stay_payments\.organization_id, stay_payments\.idempotency_key/.test(error instanceof Error ? error.message : String(error))) {
+      const concurrent = await replay()
+      if (concurrent) return concurrent
+    }
+    throw error
+  }
   return getStay(db, access, stayId)
 }
 

@@ -350,9 +350,17 @@ const createKey = useState(createKeyName, () => crypto.randomUUID())
 // A walk opened from a filtered Catalog already knows the kind it is creating.
 if (isNew.value && !form.kind && PRODUCT_KINDS.includes(route.query.kind as ProductKind)) form.kind = route.query.kind as ProductKind
 
+/**
+ * The location a price is read and written for: a place to stay is priced at
+ * its own location; anything else at the catalog's scope.
+ */
+function priceLocationId(): string | null {
+  return form.kind === 'stay' ? form.stay_location_id || null : locationId.value
+}
+
 /** What this location and currency pays for one variant, as a major-unit string. */
 function variantPriceMajor(variant: Product['variants'][number]): string {
-  const price = selectPrice(variant.prices, { currency, location_id: locationId.value, at: new Date().toISOString() })
+  const price = selectPrice(variant.prices, { currency, location_id: priceLocationId(), at: new Date().toISOString() })
   return price ? minorAmountToMajor(price.unit_amount, price.currency) : ''
 }
 
@@ -363,6 +371,7 @@ watch(product, (row) => { if (row) loadForm(row) }, { immediate: true })
 
 function loadForm(row: Product) {
   form.kind = row.kind
+  form.stay_location_id = row.stay?.location_id ?? ''
   form.name = row.name
   form.description = row.description
   form.order_url = row.order_url ?? ''
@@ -400,7 +409,6 @@ function loadForm(row: Product) {
   form.online_payment_required = row.booking?.online_payment_required ?? false
   form.held_online = row.booking?.held_online ?? false
   form.booking_capacity = row.booking?.default_capacity === null || row.booking === null ? '' : String(row.booking.default_capacity)
-  form.stay_location_id = row.stay?.location_id ?? ''
   form.check_in_time = row.stay?.check_in_time ?? '15:00'
   form.check_out_time = row.stay?.check_out_time ?? '11:00'
   form.max_guests = row.stay ? String(row.stay.max_guests) : ''
@@ -550,7 +558,7 @@ function priceSummary(): string {
   if (row.variants.length > 1) return `${row.variants.length} variants`
   const variant = row.variants[0]
   if (!variant) return 'No price set'
-  const price = selectPrice(variant.prices, { currency, location_id: locationId.value, at: new Date().toISOString() })
+  const price = selectPrice(variant.prices, { currency, location_id: priceLocationId(), at: new Date().toISOString() })
   const amount = formatProductMoney(price)
   if (amount) return amount
   // Priced in words — "Contact us for group pricing" — is a price the merchant
@@ -686,7 +694,7 @@ function buildCatalog() {
   // price, another currency, a recurring term — is restated untouched, with
   // its own id, so editing the one amount on screen cannot silently retire the
   // ones that are not.
-  const selection = { currency, location_id: locationId.value, at: new Date().toISOString() }
+  const selection = { currency, location_id: priceLocationId(), at: new Date().toISOString() }
   const carry = (price: Price) => ({
     id: price.id, unit_amount: price.unit_amount, currency: price.currency, location_id: price.location_id,
     active: price.active, type: price.type, recurring_interval: price.recurring_interval,
@@ -701,7 +709,7 @@ function buildCatalog() {
     // An empty box is not a price of zero. Zero is typed, and means free.
     if (!typed) return variant.prices.filter(price => price.id !== governing?.id).map(carry)
     if (!governing) {
-      return [...variant.prices.map(carry), { unit_amount: majorAmountToMinor(typed, currency), currency, location_id: locationId.value }]
+      return [...variant.prices.map(carry), { unit_amount: majorAmountToMinor(typed, currency), currency, location_id: priceLocationId() }]
     }
     return variant.prices.map(price => (price.id === governing.id
       ? { ...carry(price), unit_amount: majorAmountToMinor(typed, price.currency) }

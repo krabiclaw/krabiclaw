@@ -69,7 +69,7 @@ import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialo
 import type { StayDetail, StayPaymentMethod } from '~/server/domain/stays'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
-import { formatCalendarDate } from '~/utils/timezone'
+import { formatCalendarDate, localDateAt } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
 
 const props = defineProps<{ stayId: string }>()
@@ -126,7 +126,9 @@ const rows = computed(() => {
 
 const actionError = ref<string | null>(null)
 const busy = ref<string | null>(null)
-const draft = reactive({ amount: '', method: 'cash' as StayPaymentMethod, paid_on: new Date().toISOString().slice(0, 10), reference: '' })
+// The payment day defaults to today where the home is; one key per payment being entered, kept across retries.
+const homeToday = () => stay.value ? localDateAt(new Date(), stay.value.timezone) : ''
+const draft = reactive({ amount: '', method: 'cash' as StayPaymentMethod, paid_on: homeToday(), reference: '', key: crypto.randomUUID() })
 
 async function run(key: string, action: () => Promise<unknown>, failure: string) {
   busy.value = key
@@ -151,10 +153,11 @@ async function recordPayment() {
     const minor = majorAmountToMinor(negative ? typed.slice(1) : typed, value.currency as Parameters<typeof majorAmountToMinor>[1])
     await dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/payments`, {
       method: 'POST', validate: isStay,
-      body: { amount_minor: negative ? -minor : minor, method: draft.method, paid_on: draft.paid_on, reference: draft.reference || undefined },
+      body: { amount_minor: negative ? -minor : minor, method: draft.method, paid_on: draft.paid_on, reference: draft.reference || undefined, idempotency_key: draft.key },
     })
     draft.amount = ''
     draft.reference = ''
+    draft.key = crypto.randomUUID()
   }, 'The payment could not be recorded')
 }
 
