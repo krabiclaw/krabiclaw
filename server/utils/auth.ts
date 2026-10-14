@@ -136,6 +136,7 @@ export interface CloudflareEnv {
   BETTER_AUTH_URL?: string
   GOOGLE_CLIENT_ID: string
   GOOGLE_CLIENT_SECRET: string
+  APPLE_APP_BUNDLE_ID: string
   STRIPE_SECRET_KEY?: string
   STRIPE_WEBHOOK_SECRET?: string
   STRIPE_CONNECT_WEBHOOK_SECRET?: string
@@ -143,6 +144,8 @@ export interface CloudflareEnv {
   AI_SEARCH?: AiSearchNamespace
   AI_SEARCH_INSTANCE_ID?: string
   PLATFORM_SEARCH_REINDEX_SECRET?: string
+  LODGING_SERVICE_SECRET?: string
+  LODGING_API_URL?: string
   CF_ACCOUNT_ID?: string
   CLOUDFLARE_API_TOKEN?: string
   CLOUDFLARE_IMAGES_API_TOKEN?: string
@@ -394,6 +397,25 @@ function buildAuth(env: CloudflareEnv) {
       user: {
         delete: {
           before: async (user) => {
+            // An organization keeps an owner. Deleting its only owner would leave
+            // a business nobody can manage, so ownership is transferred or the
+            // organization deleted first.
+            const soleOwned = await queryAll<{ name: string }>(db, `
+              SELECT o.name FROM member m JOIN organization o ON o.id = m."organizationId"
+              WHERE m."userId" = ? AND (',' || m.role || ',') LIKE '%,owner,%'
+                AND NOT EXISTS (
+                  SELECT 1 FROM member other
+                  WHERE other."organizationId" = m."organizationId" AND other."userId" <> m."userId"
+                    AND (',' || other.role || ',') LIKE '%,owner,%'
+                )
+              ORDER BY o.name
+            `, [user.id])
+            if (soleOwned.length) {
+              throw new APIError('BAD_REQUEST', {
+                code: 'SOLE_ORGANIZATION_OWNER',
+                message: `Transfer ownership of, or delete, ${soleOwned.map(organization => organization.name).join(', ')} before deleting your account.`,
+              })
+            }
             // A deleted account's Customer at every business it paid goes with it, and the cards saved there.
             await deleteBuyerCustomers(db, stripeClient, user.id)
             await execute(db, "DELETE FROM activity_entries WHERE kind='notification' AND scope_kind='global' AND target_user_id=?", [user.id])
@@ -533,7 +555,7 @@ function buildAuth(env: CloudflareEnv) {
     },
     plugins: [
       bearer(),
-      lastLoginMethod({ customResolveMethod: ctx => loginMethodForPath(ctx.path) }),
+      lastLoginMethod({ customResolveMethod: ctx => loginMethodForPath(ctx.path, ctx.body) }),
       jwt({
         // The plugin's default after-hook mints a fresh JWT on every
         // /get-session — reading the jwks row, decrypting the private key and
@@ -639,7 +661,7 @@ function buildAuth(env: CloudflareEnv) {
         adminRoles: ['admin'],
         defaultRole: 'user',
         roles: platformAdminRoles,
-        impersonationSessionDuration: 60 * 60,
+        impersonationSessionDuration: 15 * 60,
       }),
       phoneNumber({
         sendOTP: async ({ phoneNumber: phone, code }) => {
@@ -736,6 +758,15 @@ function buildAuth(env: CloudflareEnv) {
       }),
     ],
     socialProviders: {
+      // The native app signs in with the identity token Sign in with Apple hands
+      // it. Better Auth verifies that token against Apple's keys with the app's
+      // bundle id as audience, so no client secret is involved and there is no
+      // web redirect flow. Apple is not a trusted linking provider: an existing
+      // account links it explicitly, and only with a verified email claim.
+      apple: {
+        clientId: env.APPLE_APP_BUNDLE_ID,
+        appBundleIdentifier: env.APPLE_APP_BUNDLE_ID,
+      },
       google: {
         clientId: env.GOOGLE_CLIENT_ID,
         clientSecret: env.GOOGLE_CLIENT_SECRET,
