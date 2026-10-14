@@ -164,7 +164,7 @@
               <span class="block text-[11px] text-muted">{{ formatCalendarDate(dayKey, 'en', { weekday: 'short' }) }}</span>
             </NuxtLink>
             <div class="min-w-0">
-              <AgendaRow v-for="item in itemsOn(dayKey)" :key="item.id" :item="item" :to="personalScope ? undefined : `${level.path.value}/${dayKey}/${item.kind}/${encodeURIComponent(item.id.slice(item.kind.length + 1))}`" />
+              <AgendaRow v-for="item in itemsOn(dayKey)" :key="item.id" :item="item" :to="personalScope ? undefined : `${level.path.value}/${dayKey}/${item.kind}/${encodeURIComponent(item.stayId ?? item.id.slice(item.kind.length + 1))}`" />
             </div>
           </div>
         </div>
@@ -261,7 +261,7 @@ useSeoMeta({ title: 'Calendar | Krabiclaw', robots: 'noindex, nofollow' })
 const props = defineProps<{ personalScope?: boolean }>()
 
 // Named here rather than imported: the agenda module is the server's, and a value import would bundle it.
-const AGENDA_KINDS = ['reservation', 'booking', 'post'] as const satisfies readonly AgendaKind[]
+const AGENDA_KINDS = ['reservation', 'booking', 'post', 'stay'] as const satisfies readonly AgendaKind[]
 // Weeks start on Sunday, as Airbnb's do.
 const WEEKDAYS = [
   { short: 'S', rest: 'un', long: 'Sunday' }, { short: 'M', rest: 'on', long: 'Monday' }, { short: 'T', rest: 'ue', long: 'Tuesday' },

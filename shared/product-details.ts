@@ -1,6 +1,6 @@
 /** Named product facts shared by validation, CMS, MCP, localization and templates. */
-export const PRODUCT_KINDS = ['dish', 'experience', 'service', 'item'] as const
-export const PRODUCT_KIND_LABELS = { dish: 'Food or drink', experience: 'Experience or class', service: 'Service or appointment', item: 'Physical item' } as const
+export const PRODUCT_KINDS = ['dish', 'experience', 'service', 'item', 'stay'] as const
+export const PRODUCT_KIND_LABELS = { dish: 'Food or drink', experience: 'Experience or class', service: 'Service or appointment', item: 'Physical item', stay: 'Place to stay' } as const
 export type ProductKind = typeof PRODUCT_KINDS[number]
 export type ProductDetailValue = string | string[] | boolean
 export type ProductDetails = Partial<Record<ProductDetailKey, ProductDetailValue>>
@@ -29,7 +29,9 @@ const DETAIL_FIELDS = {
   included_items: { name: 'What is included', description: 'Items or work included in the stated price, shown in their own public section.', value_type: 'list.single_line_text', kinds: ['experience', 'service'] },
   what_to_bring: { name: 'What to bring', description: 'Items customers should bring, shown in the preparation section.', value_type: 'list.single_line_text', kinds: ['experience', 'service'] },
   preparation: { name: 'Before you arrive', description: 'Preparation instructions shown to customers before a session or appointment.', value_type: 'multi_line_text', kinds: ['experience', 'service'] },
-  cancellation_policy: { name: 'Cancellation policy', description: 'The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.', value_type: 'multi_line_text', kinds: ['experience', 'service'] },
+  cancellation_policy: { name: 'Cancellation policy', description: 'The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.', value_type: 'multi_line_text', kinds: ['experience', 'service', 'stay'] },
+  house_rules: { name: 'House rules', description: 'The host’s rules for guests staying in the home, shown with the listing.', value_type: 'multi_line_text', kinds: ['stay'] },
+  amenities: { name: 'Amenities', description: 'What the home offers guests, such as Wifi or a kitchen.', value_type: 'list.single_line_text', kinds: ['stay'] },
   materials: { name: 'Materials', description: 'Materials the item is made from, shown in its details.', value_type: 'list.single_line_text', kinds: ['item'] },
   dimensions: { name: 'Dimensions', description: 'Item measurements including their units, shown in its details.', value_type: 'single_line_text', kinds: ['item'] },
   care_instructions: { name: 'Care instructions', description: 'How to care for the item, shown in its details.', value_type: 'multi_line_text', kinds: ['item'] },
@@ -44,7 +46,7 @@ export function productDetailFields(kind: ProductKind): ProductDetailField[] {
 export function productDetailKey(field: Pick<ProductDetailField, 'key'>): ProductDetailKey { return field.key }
 export function isProductDetailLocalizable(field: ProductDetailField): boolean { return field.localizable }
 export function assertProductKind(value: unknown): ProductKind {
-  if (typeof value !== 'string' || !PRODUCT_KINDS.includes(value as ProductKind)) throw new ProductDetailError('kind must be dish, experience, service or item')
+  if (typeof value !== 'string' || !PRODUCT_KINDS.includes(value as ProductKind)) throw new ProductDetailError('kind must be dish, experience, service, item or stay')
   return value as ProductKind
 }
 export function validateProductDetails(kind: ProductKind, value: unknown, localizableOnly = false): ProductDetails {

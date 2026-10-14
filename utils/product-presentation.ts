@@ -35,8 +35,26 @@ export const EXPERIENCE_PRESENTATION: ProductPresentation = {
   structuredDataType: 'Event',
 }
 
+/**
+ * A place to stay reads the same on every vertical. It is listed among its
+ * location's products, and schema.org calls it an Accommodation.
+ */
+export const STAY_PRESENTATION: ProductPresentation = {
+  feature: 'products',
+  collectionPath: '/products',
+  locationCollectionSegment: 'products',
+  productPath: (locationSlug, productSlug) => `/locations/${encodeURIComponent(locationSlug)}/products/${encodeURIComponent(productSlug)}`,
+  collectionLabel: 'Places to stay',
+  itemLabel: 'Place to stay',
+  itemLabelPlural: 'Places to stay',
+  collectionGroupLabel: 'Collection',
+  collectionGroupLabelPlural: 'Collections',
+  structuredDataType: 'Accommodation',
+}
+
 /** The surface this product is read on, and the paths and words that go with it. */
 export function presentationForProduct(vertical: string | null | undefined, product: Pick<Product, 'kind'>, themeId?: string): ProductPresentation {
+  if (product.kind === 'stay') return STAY_PRESENTATION
   return product.kind === 'experience' ? EXPERIENCE_PRESENTATION : product.kind === 'dish' ? requireProductPresentation('restaurant') : requireProductPresentation(product.kind === 'service' ? 'service' : 'experience', themeId)
 }
 

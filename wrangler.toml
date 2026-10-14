@@ -88,8 +88,8 @@ MCP_DIAGNOSTICS_ENABLED = "true"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-production-v16"
-database_id = "754caf79-1e59-4e5e-93d7-18449df90e3b"
+database_name = "krabiclaw-production-v17"
+database_id = "e81e48eb-8ac6-4c9e-af31-5cef2946c52d"
 migrations_dir = "migrations"
 remote = false
 
@@ -227,8 +227,8 @@ E2E_ALLOW_DEV_ROUTES = "true"
 
 [[env.staging.d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-staging-v16"
-database_id = "76622a9c-bb92-4c1d-ab2c-206ff2594600"
+database_name = "krabiclaw-staging-v17"
+database_id = "a9c8e8f0-eb44-4058-b251-f629276de5b5"
 migrations_dir = "migrations"
 remote = false
 

@@ -59,7 +59,7 @@ const locationOptions = computed(() => [
 ])
 const kindOptions = computed(() => [
   { label: 'All booking types', value: AGENDA_FILTER_ALL },
-  ...props.kinds.map(kind => ({ label: kind === 'reservation' ? 'Reservations' : kind === 'booking' ? 'Bookings' : 'Posts', value: kind })),
+  ...props.kinds.map(kind => ({ label: kind === 'reservation' ? 'Reservations' : kind === 'booking' ? 'Bookings' : kind === 'stay' ? 'Stays' : 'Posts', value: kind })),
 ])
 const memberOptions = computed(() => [
   { label: 'All assigned people', value: AGENDA_FILTER_ALL },

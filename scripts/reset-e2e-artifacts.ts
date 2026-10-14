@@ -68,7 +68,7 @@ const eligibleOrgIds = `
   SELECT o.id FROM organization o
   WHERE o.slug LIKE 'e2e-%'
     AND EXISTS (SELECT 1 FROM member m WHERE m.organizationId = o.id
-                AND m.userId IN ('user-e2e-onboarding-wizard', 'user-e2e-lodging-native')
+                AND m.userId IN ('user-e2e-onboarding-wizard', 'user-e2e-lodging-native', 'user-e2e-lodging-host')
                 AND instr(',' || replace(m.role, ' ', '') || ',', ',owner,') > 0)
     AND o.createdAt < ${cutoffUnixSeconds}
   LIMIT ${batchSize}

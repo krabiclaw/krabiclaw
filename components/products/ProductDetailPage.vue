@@ -448,7 +448,7 @@ const isAvailable = computed(() =>
   // booking form otherwise asked for an option it had none to offer.
   && (Boolean(props.product.order_url) || sellableVariants.value.length > 0))
 const canOrderExternally = computed(() => isAvailable.value && Boolean(props.product.order_url))
-const externalActionLabel = computed(() => props.product.kind === 'experience' || props.product.kind === 'service' ? t('saya.experience_detail.book_now') : t('saya.cta.order_now'))
+const externalActionLabel = computed(() => props.product.kind === 'experience' || props.product.kind === 'service' || props.product.kind === 'stay' ? t('saya.experience_detail.book_now') : t('saya.cta.order_now'))
 const canEnquire = computed(() => props.product.kind !== 'experience' && isAvailable.value && !props.product.order_url && enquiryOnly.value)
 const canBook = computed(() => !props.scopeRequired && Boolean(props.booking) && isAvailable.value && !props.product.order_url && !enquiryOnly.value && (props.vertical !== 'service' || offer.value !== null))
 

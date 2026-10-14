@@ -91,6 +91,8 @@ export const E2E_AUTH_FIXTURES: readonly E2eAuthFixture[] = [
     'lodging-native',
     // Joins that organization through an invite link.
     'lodging-invitee',
+    // Owns the lodging organization the stays spec creates, with its homes and stays.
+    'lodging-host',
     ...[
       'inaccessible',
       'wrong-site',
