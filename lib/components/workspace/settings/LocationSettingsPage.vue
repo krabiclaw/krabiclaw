@@ -101,12 +101,14 @@ export function useNewLocation(organizationId: string, openKey: NewLocationSecti
         },
         validate: (value): value is { success: true; location: { slug: string } } =>
           isRecord(value) && value.success === true && isRecord(value.location) && typeof value.location.slug === 'string',
+      }).catch((error: unknown) => {
+        createError.value = getErrorMessage(error, 'The location could not be added')
+        return null
       })
+      if (!response) return
+      draft.value = blankLocationDraft()
       await dashboard.refresh()
       await navigateTo(`/dashboard/${String(route.params.orgSlug)}/locations/${response.location.slug}`, { replace: true })
-      draft.value = blankLocationDraft()
-    } catch (error) {
-      createError.value = getErrorMessage(error, 'The location could not be added')
     } finally {
       creating.value = false
     }
