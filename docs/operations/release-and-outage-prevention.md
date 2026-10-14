@@ -369,6 +369,11 @@ The complete applied v16 chain (`0000_baseline` through
 `migrations-history/v16/`; an older export passes through its forward
 migrations before the copy.
 
+Prepared in WNAM on 2026-10-14: staging v17
+`a9c8e8f0-eb44-4058-b251-f629276de5b5`, built with `wrangler d1 migrations
+apply` and loaded from `krabiclaw-staging-v16` (87 tables, 78,725 rows;
+`foreign_key_check` empty). Production v17 is created at its own cutover.
+
 ```sh
 node --experimental-strip-types scripts/pull-production-snapshot.ts --staging --source krabiclaw-staging-v15 --out staging-v16-initial.sqlite
 node --experimental-strip-types scripts/pull-production-snapshot.ts --production --source krabiclaw-production-v15 --out production-v16-initial.sqlite
