@@ -405,6 +405,20 @@ business does not touch buyers' Customers.
 
 ## Metronome operating billing
 
+### Ad spend (Marketing plan)
+
+The Marketing plan's usage fee is a share of Google Ads spend. The daily
+`marketing:ad-spend-daily` task reads, for each business whose plan grants
+`marketing` and whose Google Ads account is connected, Google's cost for the day
+two days back (a day Google has finished counting), and queues it as an
+`ad_spend` usage event (`google_ads:<customer>:<date>`, USD cents) delivered
+through the same Metronome path as captured volume, as `payments_ad_spend`.
+Metronome prices it at the ad-spend rate on the Payments rate card:
+`validatePaymentsRateCard` accepts that third flat rate, and the plan screen and
+`get_payments_usage` show it as `ad_spend_rate_percent`. A Google Ads account
+in a currency other than USD, or a day whose spend changed after it was queued,
+fails the task for that business rather than being converted or overwritten.
+
 KrabiClaw Payments: **1.4% of payment volume, plus Stripe fees.** Billed after
 use. KrabiClaw Payments fees aren't returned after a refund or dispute. The
 subscription is billed separately. Public pricing follows the Stripe and

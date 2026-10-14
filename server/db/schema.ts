@@ -2444,7 +2444,7 @@ export const payment_usage_events = sqliteTable("payment_usage_events", {
  id: text().primaryKey(),
  organization_id: text().notNull(),
  payment_id: text().references(() => payments.id, { onDelete: "restrict" }),
- kind: text().$type<'captured_volume' | 'stripe_cost' | 'stripe_cost_adjustment'>().notNull(),
+ kind: text().$type<'captured_volume' | 'stripe_cost' | 'stripe_cost_adjustment' | 'ad_spend'>().notNull(),
  currency: text().notNull(),
  amount: integer().notNull(),
  billing_basis_json: text(),
