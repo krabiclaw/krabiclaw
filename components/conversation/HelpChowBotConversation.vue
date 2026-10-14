@@ -104,7 +104,7 @@
           <template #trailing>
             <UChatPromptSubmit
               :status="promptStatus"
-              color="primary"
+              color="neutral"
               variant="solid"
               size="xs"
               :aria-label="isLoading ? 'Stop generating' : 'Send message'"

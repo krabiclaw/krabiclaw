@@ -69,7 +69,7 @@
             :title="personalScope ? `${booking.organizationName} requested a change` : 'Change requested'"
             :description="`${booking.pendingChange.afterLabel} · ${booking.pendingChange.partySize} ${booking.pendingChange.partySize === 1 ? 'guest' : 'guests'}${personalScope ? '' : ` · Waiting for ${firstName(booking.guestName ?? '')} to respond`}`"
             :actions="personalScope ? [
-              { label: 'Accept', color: 'primary' as const, loading: answering === 'accept', onClick: () => answerChange('accept') },
+              { label: 'Accept', color: 'neutral' as const, loading: answering === 'accept', onClick: () => answerChange('accept') },
               { label: 'Decline', color: 'neutral' as const, variant: 'soft' as const, loading: answering === 'decline', onClick: () => answerChange('decline') },
             ] : undefined"
           />

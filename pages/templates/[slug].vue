@@ -36,7 +36,7 @@
               </div>
             </div>
             <div class="ml-auto">
-              <PlatformAccountCta :to="template.ctaTo" :label="template.ctaLabel" variant="gradient" size="md" />
+              <PlatformAccountCta :to="template.ctaTo" :label="template.ctaLabel" size="md" />
             </div>
           </div>
         </div>
@@ -105,7 +105,7 @@
                 <PlatformIcon name="arrow-up-right" class="size-4" />
                 {{ isNclsShowcase ? 'Open customer site' : 'Open demo' }}
               </PlatformButton>
-              <PlatformAccountCta :to="template.ctaTo" :label="template.ctaLabel" variant="gradient" size="md" />
+              <PlatformAccountCta :to="template.ctaTo" :label="template.ctaLabel" size="md" />
             </div>
           </div>
           <p v-if="isNclsShowcase" class="mt-3 text-xs text-muted">
@@ -189,7 +189,7 @@
               <p class="mt-1 text-sm text-muted">{{ template.tagline }}</p>
 
               <div class="mt-6 space-y-3">
-                <PlatformAccountCta :to="template.ctaTo" :label="template.ctaLabel" variant="gradient" size="lg" block />
+                <PlatformAccountCta :to="template.ctaTo" :label="template.ctaLabel" size="lg" block />
                 <PlatformButton variant="outline" size="lg" block @click="openDemoPreview">
                   <PlatformIcon name="arrow-up-right" class="size-4" />
                   {{ template.demoLabel }}

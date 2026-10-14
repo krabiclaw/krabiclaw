@@ -28,7 +28,7 @@
 const props = withDefaults(defineProps<{
   external?: boolean
   to?: string
-  variant?: 'solid' | 'gradient' | 'outline' | 'ghost'
+  variant?: 'solid' | 'outline' | 'ghost'
   size?: 'sm' | 'md' | 'lg' | 'xl'
   block?: boolean
   loading?: boolean
@@ -62,11 +62,9 @@ const sizeClass = computed(() => ({
 }[props.size]))
 
 const variantClass = computed(() => ({
-  // Coral does not flip with the theme, so the label must not either.
-  // `text-inverted` is navy in dark mode; `on-primary` is the token the
-  // dashboard's Nuxt UI buttons already use.
-  solid: 'bg-primary text-on-primary hover:bg-primary/90',
-  gradient: 'bg-(image:--kc-cta-gradient) text-on-primary shadow-(shadow:--kc-cta-shadow) hover:opacity-90',
+  // Monochrome, as Nuxt UI's neutral solid button: navy in light, white in
+  // dark. Coral marks status and selection, not actions.
+  solid: 'bg-inverted text-inverted hover:bg-inverted/90',
   outline: 'border border-default text-default hover:bg-muted',
   ghost: 'text-default hover:bg-muted',
 }[props.variant]))

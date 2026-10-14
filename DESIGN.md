@@ -330,8 +330,10 @@ link do. Long text is one bordered textarea.
 **Sizes come from the theme.** Controls are `lg` — 16px text, 44px tall, 8px
 radius — and the commit bar's Save is the one `xl` (48px). Body text is 16px
 `text-highlighted`; sub-labels and counters are 14px `text-muted`. Focus is a
-2px `text-highlighted` ring, not the brand colour; coral is for Save and the
-lit tab. Switches are black, as Airbnb's are.
+2px `text-highlighted` ring, not the brand colour. Buttons, Save included,
+are neutral: navy in light, white in dark. Coral marks status and selection
+only — the lit tab, today's date, unread dots, the chosen bar. Switches are
+black, as Airbnb's are.
 
 ## Canvas
 

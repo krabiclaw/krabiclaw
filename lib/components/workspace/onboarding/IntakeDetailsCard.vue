@@ -110,7 +110,6 @@
 
       <div v-if="actionLabel" class="grid gap-3">
         <UButton
-          color="primary"
           block
           :loading="loading"
           :disabled="disabled || !canSubmit"

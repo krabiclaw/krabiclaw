@@ -73,7 +73,7 @@
 
           <!-- One action: sign up when signed out, the dashboard when signed in. -->
           <div v-if="ctaLabel && ctaUrl" ref="heroActions" class="kc-parallax-intro__actions" :inert="heroActionCovered" :style="{ pointerEvents: heroActionCovered ? 'none' : undefined }">
-            <PlatformAccountCta :label="ctaLabel" :to="ctaUrl" variant="gradient" size="xl" />
+            <PlatformAccountCta :label="ctaLabel" :to="ctaUrl" size="xl" />
           </div>
         </div>
       </div>
