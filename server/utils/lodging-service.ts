@@ -44,16 +44,16 @@ async function callLodging(env: CloudflareEnv, method: 'DELETE' | 'POST', path: 
 }
 
 export async function deleteLodgingUser(env: CloudflareEnv, userId: string) {
-  await callLodging(env, 'DELETE', `/internal/users/${encodeURIComponent(userId)}`)
+  await callLodging(env, 'DELETE', `/api/internal/users/${encodeURIComponent(userId)}`)
 }
 
 export async function deleteLodgingOrganization(env: CloudflareEnv, organizationId: string) {
-  await callLodging(env, 'DELETE', `/internal/organizations/${encodeURIComponent(organizationId)}`)
+  await callLodging(env, 'DELETE', `/api/internal/organizations/${encodeURIComponent(organizationId)}`)
 }
 
 export async function notifyLodgingMembershipChanged(
   env: CloudflareEnv,
   change: { organizationId: string; userId: string } & ({ change: 'removed' } | { change: 'role_changed'; role: string }),
 ) {
-  await callLodging(env, 'POST', '/internal/membership-changed', change)
+  await callLodging(env, 'POST', '/api/internal/membership-changed', change)
 }
