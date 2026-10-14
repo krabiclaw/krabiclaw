@@ -307,11 +307,22 @@ for (const target of [
       const paused = mcpData<{ product: { active: boolean; publications: Array<{ organization_id: string; published: boolean }> } }>(await (await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: target.org, product_id: product.id } })).json()).product
       expect(paused.active).toBe(false)
       expect(paused.publications).toContainEqual(expect.objectContaining({ organization_id: target.org, published: true }))
+      const pausedView = page.waitForResponse(response => new URL(response.url()).pathname === '/api/public/conversion-events'
+        && response.request().postDataJSON()?.event_name === 'product_view' && response.request().postDataJSON()?.product_id === product.id)
       await openTenantPage(page, `${target.base}${publicPath}`, target.headers)
       await expect(page.getByRole('heading', { name: product.name, level: 1, exact: true })).toBeVisible()
       await expect(page.getByText(detail, { exact: true })).toBeVisible()
       await expect(page.locator(`a[href="${externalUrl}"]:visible`)).toHaveCount(0)
       await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', `${target.base}${publicPath}`)
+      const pausedViewResponse = await pausedView
+      expect(pausedViewResponse.status()).toBe(201)
+      const pausedViewId = (await pausedViewResponse.json()).id
+      const events = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'query_organization_analytics', args: {
+        organization_id: target.org, mode: 'events', filters: { event_name: 'product_view', entity_id: product.id },
+      } })
+      expect(mcpData<{ rows: Array<Record<string, unknown>> }>(await events.json()).rows).toContainEqual(expect.objectContaining({
+        event_id: pausedViewId, subject: { type: 'product', id: product.id },
+      }))
     } finally {
       expect((await page.request.delete(`${editor}/${product.id}`)).status()).toBe(200)
     }

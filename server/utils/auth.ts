@@ -354,6 +354,8 @@ function buildAuth(env: CloudflareEnv) {
       cookieCache: {
         enabled: true,
         maxAge: 5 * 60, // Cache duration in seconds
+        // Better Auth refreshes the v16 boolean contract from the same session.
+        version: 'v16',
       },
     },
     user: {

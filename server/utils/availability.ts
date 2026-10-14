@@ -274,7 +274,7 @@ async function sessionProviders(db: DbClient, config: ProductBookingConfigRecord
  * no longer cover, and one inserts the slots they do. A slot that comes back
  * reopens its own row; a claimed slot is never moved or cancelled here.
  */
-async function prepareProviderHoursSessions(db: DbClient, config: ProductBookingConfigRecord, input: { actorId: string; now: string }): Promise<BatchQuery[]> {
+export async function prepareProviderHoursSessions(db: DbClient, config: ProductBookingConfigRecord, input: { actorId: string; now: string }): Promise<BatchQuery[]> {
   const duration = resolvedDuration(config)
   const providers = await queryAll<{ member_id: string; timezone: string; windows_json: string; time_off_json: string }>(db, `
     SELECT ms.member_id, ms.timezone, ms.windows_json, ms.time_off_json FROM member_scheduling ms
@@ -310,7 +310,10 @@ async function prepareProviderHoursSessions(db: DbClient, config: ProductBooking
         ON CONFLICT (product_id, starts_at, assigned_member_id) WHERE location_id IS NULL AND assigned_member_id IS NOT NULL DO UPDATE SET
           ends_at=excluded.ends_at, source_occurrence_key=excluded.source_occurrence_key, timezone=excluded.timezone, capacity=excluded.capacity,
           status='scheduled', updated_at=excluded.updated_at, updated_by=excluded.updated_by
-          WHERE ${unclaimed}
+          WHERE ${unclaimed} AND (product_sessions.ends_at IS NOT excluded.ends_at
+            OR product_sessions.source_occurrence_key IS NOT excluded.source_occurrence_key
+            OR product_sessions.timezone IS NOT excluded.timezone OR product_sessions.capacity IS NOT excluded.capacity
+            OR product_sessions.status IS NOT excluded.status)
         ON CONFLICT DO NOTHING`,
       params: [config.organization_id, config.product_id, provider.member_id, provider.member_id, provider.timezone, config.default_capacity, input.now, input.now, input.actorId, input.actorId, JSON.stringify(slots)],
     })

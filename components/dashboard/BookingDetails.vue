@@ -197,7 +197,7 @@
           <p class="text-sm leading-relaxed text-muted">{{ item.text }}</p>
         </div>
       </div>
-      <p v-else class="text-sm text-muted">No cancellation terms have been configured for this booking.</p>
+      <p v-else-if="!booking.policy?.additional_notes_html" class="text-sm text-muted">No cancellation terms have been configured for this booking.</p>
       <div v-if="booking.policy?.additional_notes_html" class="border-t border-default pt-4 text-sm text-muted">
         <!-- Canonical booking-policy writes sanitize this CMS-authored HTML before persistence. -->
         <!-- eslint-disable-next-line vue/no-v-html -->
@@ -290,6 +290,7 @@ import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDia
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
 import { dashboardColumnWidths } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import { getErrorMessage } from '~/utils/errors'
+import { htmlToPlainText } from '~/utils/markdown'
 
 const props = defineProps<{
   bookingType: DashboardRecordType
@@ -349,7 +350,7 @@ const notesSummary = computed(() => {
 
 const guestCountLabel = computed(() => `${booking.value?.partySize ?? 0} ${(booking.value?.partySize ?? 0) === 1 ? 'guest' : 'guests'}`)
 const cancellationSummary = computed(() => booking.value?.policy?.items.find(item => item.id === 'cancellation')?.text
-  ?? 'No cancellation terms have been configured.')
+  ?? (booking.value?.policy?.additional_notes_html ? htmlToPlainText(booking.value.policy.additional_notes_html) : 'No cancellation terms have been configured.'))
 const messageTo = computed(() => {
   if (!booking.value?.threadId) return null
   return `/dashboard/${orgSlug.value}/messages/${encodeURIComponent(booking.value.threadId)}`
