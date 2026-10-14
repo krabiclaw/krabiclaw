@@ -14,7 +14,7 @@ const product = { id: 'prod-existing', metadata: { plan_id: 'growth', monthly_pr
 const price = (id: string, interval: 'month' | 'year', amount: number, additional = interval === 'year' ? 58800 : 4900) => ({
   id, product: product.id, active: true, unit_amount: null, currency: 'usd', recurring: { interval, interval_count: 1 }, lookup_key: null,
   billing_scheme: 'tiered', tiers_mode: 'graduated',
-  tiers: [{ up_to: 2, flat_amount: amount, unit_amount: 0 }, { up_to: null, flat_amount: null, unit_amount: additional }],
+  tiers: [{ up_to: 2, flat_amount: amount, unit_amount: null }, { up_to: null, flat_amount: null, unit_amount: additional }],
 }) as unknown as Stripe.Price
 const withPlanAmount = (base: Stripe.Price, amount: number) => ({ ...base, tiers: [{ ...base.tiers![0]!, flat_amount: amount }, base.tiers![1]!] }) as Stripe.Price
 const monthly = price('price-month', 'month', 4900)
@@ -36,6 +36,9 @@ test('missing, wrong-currency and fabricated zero paid prices cannot become the 
   // The flat per-unit price the plan was sold at before is not the per-location offer.
   const flat = { ...monthly, billing_scheme: 'per_unit', tiers_mode: null, tiers: undefined, unit_amount: 4900 } as unknown as Stripe.Price
   assert.equal(selectStripeCatalogPrice({ ...product, metadata: { plan_id: 'growth' } } as Stripe.Product, [flat], 'month'), null)
+  // An explicit $0.00 charge in a tier prints a $0.00 invoice line; the offer sets none.
+  const zeroLines = { ...monthly, tiers: [{ up_to: 2, flat_amount: 4900, unit_amount: 0 }, { up_to: null, flat_amount: 0, unit_amount: 4900 }] } as unknown as Stripe.Price
+  assert.throws(() => assertStripeCatalogPrices('growth', zeroLines), /monthly price/)
 })
 
 test('each additional location is USD 49 a month or USD 588 a year on every paid plan', () => {

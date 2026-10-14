@@ -34,8 +34,8 @@ function hasPlanTiers(price: Stripe.Price, amount: number, interval: 'month' | '
     && price.tiers.every((tier, index) => {
       const want = expected[index]!
       return (tier.up_to ?? 'inf') === want.up_to
-        && (tier.flat_amount ?? 0) === want.flat_amount
-        && (tier.unit_amount ?? 0) === want.unit_amount
+        && tier.flat_amount === (want.flat_amount ?? null)
+        && tier.unit_amount === (want.unit_amount ?? null)
     })
 }
 

@@ -171,9 +171,14 @@ function normalizePrice(price) {
     unit_amount: price.unit_amount ?? null,
     billing_scheme: price.billing_scheme ?? null,
     tiers_mode: price.tiers_mode ?? null,
-    // Stripe reports the last tier's bound as null; the create shape is 'inf'.
+    // In the create shape: the last bound is 'inf', and a charge Stripe reports
+    // as null was never set, so it is absent rather than zero.
     tiers: Array.isArray(price.tiers)
-      ? price.tiers.map(tier => ({ up_to: tier.up_to ?? 'inf', flat_amount: tier.flat_amount ?? 0, unit_amount: tier.unit_amount ?? 0 }))
+      ? price.tiers.map(tier => ({
+          up_to: tier.up_to ?? 'inf',
+          ...(tier.flat_amount === null || tier.flat_amount === undefined ? {} : { flat_amount: tier.flat_amount }),
+          ...(tier.unit_amount === null || tier.unit_amount === undefined ? {} : { unit_amount: tier.unit_amount }),
+        }))
       : null,
     lookup_key: typeof price.lookup_key === 'string' ? price.lookup_key : null,
     metadata: normalizeMetadata(price.metadata),

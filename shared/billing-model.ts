@@ -44,10 +44,12 @@ export function additionalLocationPrice(interval: 'month' | 'year' = 'month'): s
  * number of locations it covers, the first tier is the plan amount for the
  * included locations, and each further unit is one additional location.
  */
-export function planPriceTiers(amount: number, interval: 'month' | 'year') {
+export function planPriceTiers(amount: number, interval: 'month' | 'year'): Array<{ up_to: number | 'inf'; flat_amount?: number; unit_amount?: number }> {
+  // Each tier sets only the charge it makes, so the invoice reads "Growth" and
+  // "1 location × Growth" with no $0.00 lines beside them.
   return [
-    { up_to: INCLUDED_LOCATIONS, flat_amount: amount, unit_amount: 0 },
-    { up_to: 'inf' as const, flat_amount: 0, unit_amount: interval === 'year' ? ADDITIONAL_LOCATION_PRICES.annual : ADDITIONAL_LOCATION_PRICES.monthly },
+    { up_to: INCLUDED_LOCATIONS, flat_amount: amount },
+    { up_to: 'inf', unit_amount: interval === 'year' ? ADDITIONAL_LOCATION_PRICES.annual : ADDITIONAL_LOCATION_PRICES.monthly },
   ]
 }
 
