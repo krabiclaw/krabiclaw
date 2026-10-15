@@ -287,7 +287,7 @@ function reconcileNightsQueries(organizationId: string, stayId: string): BatchQu
   const row = `(SELECT check_in_date, check_out_date, status, overbooked, product_id FROM stays WHERE organization_id = ? AND id = ?)`
   return [{
     query: `DELETE FROM stay_nights WHERE organization_id = ? AND stay_id = ? AND EXISTS (SELECT 1 FROM ${row} st
-              WHERE st.status = 'cancelled' OR st.overbooked = 1 OR stay_nights.date < st.check_in_date OR stay_nights.date >= st.check_out_date)`,
+              WHERE st.status = 'cancelled' OR st.overbooked = 1 OR stay_nights.product_id <> st.product_id OR stay_nights.date < st.check_in_date OR stay_nights.date >= st.check_out_date)`,
     params: [organizationId, stayId, organizationId, stayId],
   }, {
     query: `WITH RECURSIVE st AS ${row},
@@ -580,4 +580,87 @@ export async function importStayNights(db: DbClient, access: StayAccess, product
     },
     organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.nights_imported', entityType: 'product', entityId: home.product_id, metadata: { from: nights[0]!.date, to: nights.at(-1)!.date, nights: nights.length } }),
   ], { operation: 'Import stay nights' })
+}
+
+/** A channel's booking as its current state reads, ready to land as a stay. */
+export interface ChannelBooking {
+  provider: 'channex'
+  external_booking_id: string
+  channel_booking_id: string | null
+  channel: (typeof STAY_CHANNELS)[number]
+  revision_id: string
+  provider_updated_at: string
+  cancelled: boolean
+  check_in_date: string
+  check_out_date: string
+  adults: number
+  children: number
+  infants: number
+  guest_name: string | null
+  guest_surname: string | null
+  guest_email: string | null
+  guest_phone: string | null
+  total_minor: number
+  currency: string
+}
+
+/**
+ * Lands a channel booking on a home (conflict rule 1). A channel stay always
+ * lands: if one of its nights is already held, it is stored overbooked and
+ * holds no night, for the host to resolve. A delivery older than the stay
+ * already stored changes nothing, so repeated and out-of-order deliveries are
+ * harmless. Returns the stay as stored.
+ */
+export async function applyChannelBooking(db: DbClient, organizationId: string, productId: string, booking: ChannelBooking): Promise<Stay & { applied: boolean }> {
+  date(booking.check_in_date, 'check_in_date')
+  date(booking.check_out_date, 'check_out_date')
+  if (booking.check_out_date <= booking.check_in_date) throw new Error(`Channel booking ${booking.external_booking_id} ends before it starts`)
+  if (booking.adults < 1) throw new Error(`Channel booking ${booking.external_booking_id} has no adult guest`)
+  if (!/^[A-Z]{3}$/.test(booking.currency)) throw new Error(`Channel booking ${booking.external_booking_id} has an invalid currency`)
+  const existing = await queryFirst<{ id: string; provider_updated_at: string | null }>(db,
+    'SELECT id, provider_updated_at FROM stays WHERE provider = ? AND external_booking_id = ?', [booking.provider, booking.external_booking_id])
+  if (existing && existing.provider_updated_at !== null && existing.provider_updated_at >= booking.provider_updated_at) {
+    return { ...(await storedStay(db, organizationId, existing.id)), applied: false }
+  }
+  const id = existing?.id ?? crypto.randomUUID()
+  const now = new Date().toISOString()
+  const write = (overbooked: 0 | 1): BatchQuery[] => [{
+    query: `INSERT INTO stays (id, organization_id, product_id, channel, owner, status, overbooked, check_in_date, check_out_date, adults, children, infants,
+              guest_name, guest_surname, guest_email, guest_phone, total_minor, currency, provider, external_booking_id, channel_booking_id, revision_id,
+              provider_updated_at, cancelled_at, created_at, updated_at, created_by, updated_by)
+            VALUES (?, ?, ?, ?, 'channel', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT (provider, external_booking_id) WHERE external_booking_id IS NOT NULL DO UPDATE SET
+              product_id = excluded.product_id, channel = excluded.channel, status = excluded.status, overbooked = excluded.overbooked,
+              check_in_date = excluded.check_in_date, check_out_date = excluded.check_out_date, adults = excluded.adults, children = excluded.children,
+              infants = excluded.infants, guest_name = excluded.guest_name, guest_surname = excluded.guest_surname, guest_email = excluded.guest_email,
+              guest_phone = excluded.guest_phone, total_minor = excluded.total_minor, currency = excluded.currency, channel_booking_id = excluded.channel_booking_id,
+              revision_id = excluded.revision_id, provider_updated_at = excluded.provider_updated_at,
+              cancelled_at = CASE WHEN excluded.status = 'cancelled' THEN COALESCE(stays.cancelled_at, excluded.cancelled_at) ELSE NULL END,
+              version = stays.version + 1, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+            WHERE stays.organization_id = excluded.organization_id AND (stays.provider_updated_at IS NULL OR stays.provider_updated_at < excluded.provider_updated_at)`,
+    params: [id, organizationId, productId, booking.channel, booking.cancelled ? 'cancelled' : 'confirmed', overbooked, booking.check_in_date, booking.check_out_date,
+      booking.adults, booking.children, booking.infants, booking.guest_name, booking.guest_surname, booking.guest_email, booking.guest_phone,
+      booking.total_minor, booking.currency, booking.provider, booking.external_booking_id, booking.channel_booking_id, booking.revision_id,
+      booking.provider_updated_at, booking.cancelled ? now : null, now, now, 'channex', 'channex'],
+  },
+  ...reconcileNightsQueries(organizationId, id),
+  organizationEventQuery({ organizationId, actorId: null, eventType: existing ? 'stay.updated' : 'stay.created', entityType: 'stay', entityId: id, metadata: { channel: booking.channel, overbooked: overbooked === 1 } }),
+  ]
+  try {
+    await executeBatch(db, write(0), { operation: 'Apply channel booking' })
+  } catch (error) {
+    if (!isNightConflict(error)) throw error
+    // Rule 1: another stay holds one of these nights. The channel stay still lands, flagged and holding none.
+    await executeBatch(db, write(1), { operation: 'Apply overbooked channel booking' })
+  }
+  return { ...(await storedStay(db, organizationId, id)), applied: true }
+}
+
+async function storedStay(db: DbClient, organizationId: string, stayId: string): Promise<Stay> {
+  const row = await queryFirst<Record<string, unknown>>(db, `
+    SELECT ${STAY_COLUMNS} FROM stays s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
+      JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
+     WHERE s.organization_id = ? AND s.id = ?`, [organizationId, stayId])
+  if (!row) throw new Error(`Stay ${stayId} is not in organization ${organizationId}`)
+  return mapStay(row)
 }

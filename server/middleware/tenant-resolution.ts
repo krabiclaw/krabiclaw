@@ -228,7 +228,7 @@ function setResolvedTenantContext(
   }
 }
 
-const SESSION_SCOPED_API_PREFIXES = ["/api/dashboard", "/api/organizations", "/api/mcp", "/api/lodging", "/api/internal/lodging", "/api/invite-links"] as const;
+const SESSION_SCOPED_API_PREFIXES = ["/api/dashboard", "/api/organizations", "/api/mcp", "/api/lodging", "/api/internal/lodging", "/api/invite-links", "/api/integrations/channex"] as const;
 
 export default defineHandler(async (event) => {
   // Nested self-fetches (i18n/icon/internal API calls during SSR) never carry
