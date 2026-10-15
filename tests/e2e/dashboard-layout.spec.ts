@@ -641,6 +641,7 @@ test.describe('dashboard pane hierarchy', () => {
         expect(record, 'The final Catalog row names a real organization record').toBeDefined()
         await expect(rows.last()).toContainText(record!.name)
       }
+      await expect(nav).toBeVisible()
       const headerBefore = await header.boundingBox()
       const navBefore = await nav.boundingBox()
       const bodyBox = await body.boundingBox()
