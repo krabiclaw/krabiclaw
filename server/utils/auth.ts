@@ -155,6 +155,8 @@ export interface CloudflareEnv {
   APPLE_KEY_ID?: string
   APPLE_PRIVATE_KEY?: string
   LODGING_SERVICE_SECRET?: string
+  CHANNEX_BASE_URL?: string
+  CHANNEX_API_KEY?: string
   LODGING_API_URL?: string
   CF_ACCOUNT_ID?: string
   CLOUDFLARE_API_TOKEN?: string
