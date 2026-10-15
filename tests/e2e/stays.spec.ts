@@ -88,4 +88,35 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   const cancelled = await call<{ stay: { status: string; cancelled_at: string | null } }>('get_stay', { stay_id: stay.data!.stay.id })
   expect(cancelled.data!.stay.status).toBe('cancelled')
   expect(cancelled.data!.stay.cancelled_at).toBeTruthy()
+
+  // The native app's routes are the same domain: every write is read back through MCP.
+  const api = (path: string) => `${baseURL}/api/dashboard/${path}${path.includes('?') ? '&' : '?'}org=${encodeURIComponent(slug)}`
+  const homes = await request.get(api('stay-homes'))
+  expect(homes.status(), await homes.text()).toBe(200)
+  expect((await homes.json() as { homes: Array<{ product_id: string; name: string; max_guests: number; min_nights: number }> }).homes)
+    .toEqual([expect.objectContaining({ product_id: productId, name: 'Cliff Cabin', max_guests: 4, min_nights: 2 })])
+
+  const later = [localDay(10), localDay(13)] as const
+  const made = await request.post(api('stays'), { headers, data: { product_id: productId, check_in_date: later[0], check_out_date: later[1], adults: 2, guest_name: 'Kai', total_minor: 450_00, idempotency_key: `${slug}-native` } })
+  expect(made.status(), await made.text()).toBe(201)
+  const native = (await made.json() as { stay: { id: string; version: number } }).stay
+  const edited = await request.patch(api(`stays/${native.id}`), { headers, data: { expected_version: native.version, guest_name: 'Kai Mendes' } })
+  expect(edited.status(), await edited.text()).toBe(200)
+  const nativeRead = await call<{ stay: { guest_name: string; check_in_date: string; total_minor: number } }>('get_stay', { stay_id: native.id })
+  expect(nativeRead.data!.stay).toMatchObject({ guest_name: 'Kai Mendes', check_in_date: later[0], total_minor: 450_00 })
+
+  const listed = await request.get(api(`stays?from=${later[0]}&to=${later[1]}`))
+  expect(listed.status(), await listed.text()).toBe(200)
+  expect((await listed.json() as { stays: Array<{ id: string }> }).stays.map(stay => stay.id)).toEqual([native.id])
+
+  const closedNight = localDay(20)
+  const closed = await request.put(api(`stay-homes/${productId}/nights`), { headers, data: { from: closedNight, to: localDay(21), closed: true } })
+  expect(closed.status(), await closed.text()).toBe(200)
+  const nativeCalendar = await request.get(api(`stay-homes/${productId}/calendar?from=${later[0]}&to=${localDay(21)}`))
+  expect(nativeCalendar.status(), await nativeCalendar.text()).toBe(200)
+  const nights = (await nativeCalendar.json() as { nights: Array<{ date: string; available: boolean; stay_id: string | null; closed: boolean }> }).nights
+  expect(nights.filter(night => night.stay_id === native.id).map(night => night.date)).toEqual([later[0], localDay(11), localDay(12)])
+  expect(nights.find(night => night.date === closedNight)).toMatchObject({ available: false, closed: true })
+  const mcpCalendar = await call<{ nights: Array<{ date: string; closed: boolean }> }>('get_stay_calendar', { product_id: productId, from: closedNight, to: localDay(21) })
+  expect(mcpCalendar.data!.nights).toEqual([expect.objectContaining({ date: closedNight, closed: true })])
 })
