@@ -157,6 +157,7 @@ export interface CloudflareEnv {
   LODGING_SERVICE_SECRET?: string
   CHANNEX_BASE_URL?: string
   CHANNEX_API_KEY?: string
+  CHANNEX_WEBHOOK_SECRET?: string
   LODGING_API_URL?: string
   CF_ACCOUNT_ID?: string
   CLOUDFLARE_API_TOKEN?: string

@@ -22,6 +22,13 @@
       "when": 1792023508942,
       "tag": "0002_product_channel_mappings",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792045717209,
+      "tag": "0003_channel_sync_log",
+      "breakpoints": true
     }
   ]
 }

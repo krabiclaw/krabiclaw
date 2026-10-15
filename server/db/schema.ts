@@ -1289,6 +1289,34 @@ export const product_channel_mappings = sqliteTable("product_channel_mappings", 
 	check("product_channel_mappings_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 ]);
 
+// Every exchange with a channel that changed or refused something: a booking
+// revision applied (then acknowledged once Channex confirms it), one ignored because its home is not
+// connected, one that failed and will come back through the feed, an ARI push
+// and its warnings. It records ids and outcomes, never guest names or
+// messages. A revision for a home nobody connected has no organization.
+export const channel_sync_log = sqliteTable("channel_sync_log", {
+	id: text().primaryKey(),
+	organization_id: text().references(() => organization.id, { onDelete: "cascade" }),
+	product_id: text(),
+	provider: text().$type<'channex'>().notNull(),
+	direction: text().$type<'inbound' | 'outbound'>().notNull(),
+	kind: text().$type<'booking_revision' | 'availability' | 'restrictions'>().notNull(),
+	external_id: text().notNull(),
+	status: text().$type<'applied' | 'acknowledged' | 'ignored_disconnected' | 'failed' | 'needs_review' | 'pushed'>().notNull(),
+	detail: text(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+}, (table) => [
+	index("channel_sync_log_external_idx").on(table.provider, table.kind, table.external_id),
+	index("channel_sync_log_product_idx").on(table.product_id, table.created_at),
+	index("channel_sync_log_org_idx").on(table.organization_id, table.created_at),
+	check("channel_sync_log_provider_check", sql`provider = 'channex'`),
+	check("channel_sync_log_direction_check", sql`direction IN ('inbound', 'outbound')`),
+	check("channel_sync_log_kind_check", sql`kind IN ('booking_revision', 'availability', 'restrictions')`),
+	check("channel_sync_log_status_check", sql`status IN ('applied', 'acknowledged', 'ignored_disconnected', 'failed', 'needs_review', 'pushed')`),
+	check("channel_sync_log_failed_check", sql`status NOT IN ('failed', 'needs_review') OR detail IS NOT NULL`),
+	check("channel_sync_log_created_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
+]);
+
 // ---------------------------------------------------------------------------
 // Inventory.
 //
