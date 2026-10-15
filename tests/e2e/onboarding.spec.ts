@@ -145,7 +145,14 @@ test('a new owner builds a draft and creates a site through the routed flow', as
     const frame = page.frame({ url: /preview_token=/ })
     expect(frame).not.toBeNull()
     await frame!.evaluate(() => { window.location.href = window.location.pathname })
+    await frame!.waitForURL(`${organizationOrigin}/`)
     await expect(preview.locator('body')).toContainText(name)
+    const config = await frame!.evaluate(async () => {
+      const response = await fetch('/api/public/config')
+      return { status: response.status, body: await response.json() }
+    })
+    expect(config.status).toBe(200)
+    expect(config.body).toMatchObject({ success: true, config: { default_currency: 'THB' } })
   }
 
   // Nobody else can see it yet. `request` has its own cookie jar, so this asks
@@ -156,7 +163,9 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   const asAnyone = tenantHostIsAddressable()
     ? { url: `${organizationOrigin}/`, headers: {} }
     : { url: `${baseURL}/`, headers: { 'x-preview-tenant': organizationSubdomain(organizationOrigin) } }
-  expect(await (await request.get(asAnyone.url, { headers: asAnyone.headers })).text()).not.toContain(name)
+  const anonymousPreview = await request.get(asAnyone.url, { headers: asAnyone.headers })
+  expect(anonymousPreview.status()).toBe(404)
+  expect(await anonymousPreview.text()).not.toContain(name)
 
   // Contact: the phone picker arrives seeded with that country, and the number
   // is accepted the way a Thai owner writes it, trunk zero included.

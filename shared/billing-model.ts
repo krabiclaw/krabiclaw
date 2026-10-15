@@ -1,20 +1,24 @@
 /**
  * Canonical billing-plan policy shared by server loaders and client billing
  * callers. Stripe may retain products for plans that are no longer sold; those
- * catalog records are not runtime billing identities or entitlement sources.
+ * catalog records remain runtime identities only for the contracts already
+ * using them; only the current offers may be purchased.
  */
 
 export const STARTER_PLAN_ID = 'free' as const
 export const GROWTH_PLAN_ID = 'growth' as const
 export const COMMERCE_PLAN_ID = 'commerce' as const
 export const MARKETING_PLAN_ID = 'marketing' as const
+export const BUSINESS_PLAN_ID = 'business' as const
 
 /** Paid plans that may be purchased or attached to a new handoff. */
-export const NEW_SALE_PAID_PLAN_IDS = Object.freeze([GROWTH_PLAN_ID, COMMERCE_PLAN_ID, MARKETING_PLAN_ID] as const)
+export const NEW_SALE_PAID_PLAN_IDS = Object.freeze([GROWTH_PLAN_ID, BUSINESS_PLAN_ID] as const)
 
 /** Recurring plan identities accepted by runtime billing projections. */
 export const KNOWN_RECURRING_PLAN_IDS = Object.freeze([
   ...NEW_SALE_PAID_PLAN_IDS,
+  COMMERCE_PLAN_ID,
+  MARKETING_PLAN_ID,
 ] as const)
 
 export type StarterPlanId = typeof STARTER_PLAN_ID
@@ -25,8 +29,7 @@ export type BillingPlanId = StarterPlanId | KnownRecurringPlanId
 /** Fixed USD recurring offers. An absent annual amount authorizes no annual offer. */
 export const PAID_PLAN_PRICES: Readonly<Record<NewSalePlanId, { monthly: number; annual?: number }>> = Object.freeze({
   [GROWTH_PLAN_ID]: Object.freeze({ monthly: 4900, annual: 58800 }),
-  [COMMERCE_PLAN_ID]: Object.freeze({ monthly: 8900 }),
-  [MARKETING_PLAN_ID]: Object.freeze({ monthly: 9900 }),
+  [BUSINESS_PLAN_ID]: Object.freeze({ monthly: 9900 }),
 })
 
 /** Locations every plan's price includes. */

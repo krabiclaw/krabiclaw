@@ -26,7 +26,7 @@
       <UFormField v-else-if="concern === 'payment'" name="online_payment_required">
         <SettingRow v-model="p.form.online_payment_required" :disabled="!paymentEntitled && !p.form.online_payment_required" label="Require online payment for paid sessions" />
         <template v-if="!paymentEntitled">
-          <p class="mt-4 text-sm text-muted">Online payments require Commerce. Paid sessions can be booked without online payment when this setting is off.</p>
+          <p class="mt-4 text-sm text-muted">Online payments require Business. Paid sessions can be booked without online payment when this setting is off.</p>
           <UButton class="mt-3" :to="`/dashboard/${route.params.orgSlug}/payments?tab=plan`" variant="outline">View plans</UButton>
         </template>
       </UFormField>

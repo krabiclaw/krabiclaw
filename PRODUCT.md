@@ -33,8 +33,11 @@ not establish Checkout, refund or buyer-account availability.
 
 ## Plans
 
-Runtime identities are `free` and `growth`; one organization subscription covers
-its sites. Customer display names, Stripe product IDs, price IDs and lookup keys
+New subscriptions use `growth` ($49/month or $588/year) and `business` ($99/month);
+`free` is Basic with no subscription. Business includes Growth, online payments
+and managed advertising. Commerce and Marketing remain existing subscription
+identities with their original prices and entitlements. One organization
+subscription covers its sites. Customer display names, Stripe product IDs, price IDs and lookup keys
 are separate concepts. Renaming a plan label does not authorize an ID migration.
 
 | Field | Canonical source |
@@ -45,7 +48,7 @@ are separate concepts. Renaming a plan label does not authorize an ID migration.
 | Starter presentation and CTAs | `server/utils/billing-plans.ts`; Starter has no Stripe subscription product |
 | Runtime entitlement policy | `server/utils/billing-entitlements.ts` |
 | Current organization access | Better Auth subscription rows read by `server/utils/billing-access.ts`, then the actual operation gate |
-| Free/Growth comparison rows | `shared/pricing-comparison.ts`, reading the runtime entitlement policy |
+| Public plan comparison rows | `shared/pricing-comparison.ts`, reading the runtime entitlement policy |
 
 Paid billing surfaces consume `/api/billing/plans`. Entitlements grant capability,
 not presentation copy. An active/trialing subscription must satisfy the canonical

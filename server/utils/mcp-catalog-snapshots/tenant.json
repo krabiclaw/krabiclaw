@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:4a6fa57421eabfa84eadec0de1d0202ab35f9e9768331368354ddeb6e9d70baf",
-  "documentationFingerprint": "sha256:a081bd54a7a1a734d329678ab0802b139fbccd9c8837f490f13ce2e7e1ba081d",
+  "fingerprint": "sha256:ccbd1ba47cebee780d618436d22f1b5ad61743f0ffd8a4bb0d09b9ec131c9ac9",
+  "documentationFingerprint": "sha256:e921878b7a4d422b819dbabae14adb4baa4b5f2b0a99046bbef0e55044074745",
   "tools": [
     {
       "name": "append_content_block",
@@ -14357,7 +14357,7 @@
     {
       "name": "create_location",
       "title": "Create location",
-      "description": "Add a location to the selected business website. Every plan includes 2 locations; on Growth and Commerce each additional location is $49 per month, added to the plan by its owner in Billing first, and a location beyond those the plan covers is refused. Repeat the same idempotency key with the same details on retry.",
+      "description": "Add a location to the selected business website. Every plan includes 2 locations; on Growth and Business each additional location is $49 per month, added to the plan by its owner in Billing first, and a location beyond those the plan covers is refused. Repeat the same idempotency key with the same details on retry.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -107144,7 +107144,7 @@
       "slug": "what-you-can-edit-through-chatgpt",
       "contentHash": "sha256:7a565f4a22374eabd30bd127559d7e9c638768d21b4df33c386204453f12ca18",
       "toolContracts": {
-        "create_location": "sha256:857d86a8d7cdcc2b0ace643f0eb8ef401efcc4f33e878dc26aca56ac9f1bfa12",
+        "create_location": "sha256:b25656237d93d456c98da74d8281ec6d1d05435e6a7657a18c14b82654b79b9b",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_guest_conversation": "sha256:4d6462fe91c70c95f5028b0593d026fa32ba54ef84d5be113995f58c56571adf",
         "invite_organization_member": "sha256:f520b4ade47c9c5a5faef9859564f32d1c9dddfd285efdcc27fa099fa60e8a24",
