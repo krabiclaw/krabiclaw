@@ -11,7 +11,7 @@
             </span>
           </NuxtLink>
           <p class="mt-3.5 max-w-75 text-[13px] leading-relaxed text-muted">
-            The AI-managed web operating layer for local and professional businesses. Empowering independent owners globally. 🦀
+            Websites for restaurants, experiences, and law firms. Manage yours with your AI assistant or the dashboard.
           </p>
         </div>
 
@@ -33,16 +33,13 @@
 </template>
 
 <script setup lang="ts">
-// Approved shell terminology: `Professional Services` and `MCP`. #939 owns the
-// canonical /services and /mcp route migration; until then these point at the
-// destinations that work today.
 const COLUMNS = [
   {
     title: 'Solutions',
     links: [
       { label: 'Restaurants', to: '/restaurants' },
       { label: 'Experiences', to: '/experiences' },
-      { label: 'Professional Services', to: '/legal' },
+      { label: 'Law firms', to: '/legal' },
     ],
   },
   {
