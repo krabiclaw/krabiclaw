@@ -48,7 +48,7 @@ test('Products remains readable on a narrow mobile viewport', async ({ page }) =
 
 test('Products section links reach their relevant published destinations', async ({ page }) => {
   const destinations = [
-    { label: 'Explore website builder', path: '/templates', heading: /Beautiful templates/ },
+    { label: 'Explore website builder', path: '/templates', heading: /Your business\.\s*Its own kind of beautiful\./ },
     { label: 'Explore AI management', path: '/docs/mcp-setup', heading: /Connect KrabiClaw to ChatGPT/ },
     { label: 'Read the inbox guide', path: '/docs/handle-inquiries-and-reservation-requests', heading: /Handle inquiries and reservation requests/ },
     { label: 'Explore Calendar and bookings', path: '/docs/category/calendar-and-bookings', heading: /Calendar and bookings/ },

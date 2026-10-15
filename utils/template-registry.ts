@@ -1,5 +1,4 @@
 import type { LayoutKey } from 'nuxt/app'
-import type { PlatformIconName } from '~/components/platform/PlatformIcon.vue'
 export type PublicTemplateSlug = 'saya' | 'blawby' | 'platform'
 
 export interface PublicTemplateDefinition {
@@ -211,220 +210,132 @@ export function organizationSupportsBlawbyTemplate(input: {
 // template identity to keep in sync.
 
 export interface TemplateMarketingFeature {
-  icon: PlatformIconName
   label: string
   description: string
-}
-
-export interface TemplateMarketingSpec {
-  label: string
-  value: string
 }
 
 export type TemplateMarketingStatus = 'available' | 'coming_soon'
-
-export interface TemplateMarketingSeo {
-  title: string
-  description: string
-}
-
 export type MarketedTemplateSlug = Exclude<PublicTemplateSlug, 'platform'>
 
 export interface TemplateMarketingMetadata {
   slug: MarketedTemplateSlug
   displayName: string
   tagline: string
-  /** Short positioning copy for the /templates index card. */
   summary: string
-  /** Longer positioning copy for the /templates/[slug] detail page. */
   description: string
-  /** Human-readable vertical labels for card/detail display (see publicTemplateRegistry.verticals for the machine-matched values). */
   supportedVerticals: string[]
   status: TemplateMarketingStatus
-  /**
-   * Marketing-visibility gate. False keeps a registry entry usable for
-   * tenant rendering while excluding it from the public /templates index
-   * and from resolving a /templates/[slug] detail route (404 instead).
-   */
+  /** False keeps a theme usable by tenants while hiding its marketing pages. */
   published: boolean
   priceLabel: string
-  priceNote: string
-  /**
-   * Structured-data price backing `priceLabel`'s schema.org Offer. Null when
-   * the template is a paid-plan benefit rather than a separately free offer.
-   */
   schemaOffer: { price: string, priceCurrency: string } | null
-  /**
-   * Canonical live-demo destination.
-   * - Blawby: the NCLS-approved production showcase, a literal URL —
-   *   `https://www.northcarolinalegalservices.org` — presented as an approved customer
-   *   site, not a synthetic fixture.
-   * - Saya: null. Saya's demo runs on an ephemeral seeded subdomain that
-   *   differs between dev and production (`demo.<platformHostname>`), so
-   *   the route component resolves it at runtime the same way
-   *   pages/templates.vue always has, rather than this static registry
-   *   hardcoding an environment-dependent host.
-   */
+  /** Blawby uses its approved customer showcase; Saya resolves its demo host at runtime. */
   demoUrl: string | null
   demoLabel: string
-  /**
-   * Root-relative path to a real screenshot of this template's live demo site,
-   * shown as the /templates index card's visual (see pages/templates/index.vue).
-   * Null falls back to a letter-avatar placeholder.
-   */
-  previewImageUrl: string | null
-  /**
-   * Root-relative or absolute URL to this template's brand logo, shown in the
-   * small avatar badges on the /templates index card and /templates/[slug]
-   * detail page (preview banner, sticky nav, sidebar). Null falls back to the
-   * same letter-avatar placeholder as `previewImageUrl` above.
-   */
+  /** Real website screenshot, shared by the index and detail page. */
+  previewImageUrl: string
+  /** Original illustration for this theme's editorial story. */
+  artworkUrl: string
   logoUrl: string | null
   ctaLabel: string
   ctaTo: string
   features: TemplateMarketingFeature[]
   included: string[]
-  specs: TemplateMarketingSpec[]
-  /** Ascending sort order for the /templates index. */
   sortOrder: number
-  /**
-   * SEO copy for this template's detail page. Consumed as-is by
-   * useSocialMetadata (the shared public-page metadata composer, itself a thin
-   * adapter over the #259 composeSocialMetadata contract) — this is data,
-   * not a new metadata/OG pipeline.
-   */
-  seo: TemplateMarketingSeo
+  seo: { title: string, description: string }
 }
 
 export const publicTemplateMarketing: Record<MarketedTemplateSlug, TemplateMarketingMetadata> = {
   saya: {
     slug: 'saya',
     displayName: 'Saya',
-    tagline: 'Elegant & minimal, built for local businesses',
-    summary: 'Editorial restaurant and experience websites with Google Places imports.',
-    description: 'The flagship Krabiclaw theme. Editorial typography, location-centric navigation, and Google Places imports — designed for local businesses that want to look as good online as they do in person.',
+    tagline: 'Make your place\ntheir next stop.',
+    summary: 'A website for the food you serve, the things you make, and the experiences people come back for.',
+    description: 'Bring your restaurant or experience to life with generous photography, thoughtful menus, and a clear path to visit or book. Saya puts the details guests need alongside the story that makes your place yours.',
     supportedVerticals: ['Restaurants', 'Experiences'],
     status: 'available',
     published: true,
-    priceLabel: 'Free',
-    priceNote: 'No purchase needed — start building immediately',
+    priceLabel: 'Included on every plan',
     schemaOffer: { price: '0', priceCurrency: 'USD' },
     demoUrl: null,
-    previewImageUrl: '/templates/saya-preview.jpg',
+    demoLabel: 'Explore the live demo',
+    previewImageUrl: '/images/products/kikuzuki.png',
+    artworkUrl: '/images/templates/saya-food-and-craft.png',
     logoUrl: '/saya-logo.png',
-    demoLabel: 'View live demo',
-    ctaLabel: 'Get started free',
+    ctaLabel: 'Start free',
     ctaTo: '/signup',
     features: [
       {
-        icon: 'map-pin',
-        label: 'Location pages',
-        description: 'Hours, map embed, address, offerings preview, reviews, photos, and Q&A — all under one location URL.',
+        label: 'A menu worth exploring.',
+        description: 'Give each dish its own photos, description, and price. Organize your menu into sections so guests can find a favorite before they arrive.',
       },
       {
-        icon: 'star',
-        label: 'Reviews & ratings',
-        description: 'Star distribution histogram, owner replies, and a filterable review feed.',
+        label: 'The right place. The right details.',
+        description: 'Keep each location’s hours, address, photos, and offerings together. Make it easy for guests to choose where to visit.',
       },
       {
-        icon: 'list',
-        label: 'Full offerings',
-        description: 'Sections, item photos, prices, details, and availability — all editable through ChatGPT.',
-      },
-      {
-        icon: 'sparkles',
-        label: 'ChatGPT Plugin',
-        description: 'Update content, generate descriptions, publish posts, and manage your site by chatting directly in ChatGPT.',
+        label: 'Make the next step obvious.',
+        description: 'Introduce a class or experience with photos and practical details, then guide guests toward available times and booking. Give restaurant guests a clear way to request a table.',
       },
     ],
     included: [
-      'Homepage with hero, location grid, and review highlights',
-      'Location sub-pages: offerings, reviews, photos, Q&A, contact',
-      'Unified Inbox for reservations and inquiries',
-      'Google Places imports (Growth plan)',
-      'ChatGPT Plugin for content management',
-      'Reservation form',
-      'Brand story / about page',
-      'SEO-optimised with schema markup',
-      'Mobile-first responsive layout',
-      'Dark mode support',
-      'Multi-location support (Growth plan)',
-      'Custom domain (Growth plan)',
-    ],
-    specs: [
-      { label: 'Price', value: 'Free' },
-      { label: 'Locations', value: '1 on Starter / multiple on Growth' },
-      { label: 'Mobile', value: 'Fully responsive' },
-      { label: 'Languages', value: 'EN / TH' },
+      'Restaurant menus and dish pages',
+      'Experience pages and booking flows',
+      'Location pages with hours and directions',
+      'Photos, reviews, and guest questions',
+      'Posts, articles, and your brand story',
+      'A responsive website for every screen',
     ],
     sortOrder: 1,
     seo: {
-      title: 'Saya Theme',
-      description: 'The Saya theme — editorial design, Google Places imports, AI content management. Free on all plans.',
+      title: 'Saya — Restaurant and Experience Website Template',
+      description: 'Create a restaurant or experience website with Saya. Showcase menus, locations, and bookable experiences. Included on every KrabiClaw plan.',
     },
   },
   blawby: {
     slug: 'blawby',
     displayName: 'Blawby',
-    tagline: 'Professional-service sites for firms and practices',
-    summary: 'Service and practice-area pages, article publishing, and consultation-focused CTAs for professional-service businesses.',
-    description: 'The Blawby theme is built for professional-service businesses — law firms, clinics, and consultancies — with dedicated service/practice-area pages, article publishing, compliance/policy content, and consultation-oriented calls to action. Approved live on North Carolina Legal Services’ production site.',
-    supportedVerticals: ['Professional services', 'Legal & consulting'],
+    tagline: 'Your firm.\nA clear way forward.',
+    summary: 'A focused website for solo lawyers and small law firms. Help people understand your practice and take the first step.',
+    description: 'People looking for a lawyer need to know who you help, who they will work with, and how to get started. Blawby gives your practice areas, your people, and your consultation process room to speak clearly.',
+    supportedVerticals: ['Solo lawyers', 'Small law firms'],
     status: 'available',
     published: true,
-    priceLabel: 'Included on Growth',
-    priceNote: 'Approved customer showcase: North Carolina Legal Services',
-    schemaOffer: null,
+    priceLabel: 'Included on every plan',
+    schemaOffer: { price: '0', priceCurrency: 'USD' },
     demoUrl: 'https://www.northcarolinalegalservices.org',
-    previewImageUrl: '/templates/blawby-preview.jpg',
+    previewImageUrl: '/images/products/ncls.jpg',
+    artworkUrl: '/images/templates/blawby-law-office.png',
     logoUrl: 'https://imagedelivery.net/Frxyb2_d_vGyiaXhS5xqCg/27bc2bf2-8582-4ed1-e77c-45d7a3215b00/public',
-    demoLabel: 'View live customer site',
-    ctaLabel: 'Get started',
+    demoLabel: 'Explore the live customer site',
+    ctaLabel: 'Start free',
     ctaTo: '/signup',
     features: [
       {
-        icon: 'briefcase',
-        label: 'Service & practice-area pages',
-        description: 'Dedicated pages per service or practice area, each with its own canonical URL and structured data.',
+        label: 'Help people find their kind of help.',
+        description: 'Give each practice area a dedicated page. Explain the matters you handle, answer common questions, and show visitors how to contact your firm.',
       },
       {
-        icon: 'file-text',
-        label: 'Article publishing',
-        description: 'A full blog/article system for legal updates, guidance, and firm news, editable through ChatGPT.',
+        label: 'Put your people at the heart of it.',
+        description: 'Introduce the lawyers behind your firm and explain how you work. Publish useful articles and firm news in your own voice.',
       },
       {
-        icon: 'shield-check',
-        label: 'Compliance & policy pages',
-        description: 'Privacy policy, terms, and third-party notices ready out of the box for regulated professional services.',
-      },
-      {
-        icon: 'calendar',
-        label: 'Consultation CTAs',
-        description: 'Schedule and contact flows built around booking a consultation rather than a table or tour.',
+        label: 'A clear first step.',
+        description: 'Bring consultation details, contact information, and scheduling links into a straightforward journey from reading about your firm to requesting a conversation.',
       },
     ],
     included: [
-      'Homepage with services overview and firm positioning',
-      'Service / practice-area detail pages',
-      'Article publishing for firm news and legal guidance',
-      'About, pricing, and donate pages',
-      'Consultation scheduling and contact flows',
-      'Privacy, terms, and third-party notices pages',
-      'ChatGPT Plugin for content management',
-      'Professional-service structured data (schema.org)',
-      'Mobile-first responsive layout',
-      'Custom domain (Growth plan)',
-    ],
-    specs: [
-      { label: 'Price', value: 'Included on Growth' },
-      { label: 'Live showcase', value: 'www.northcarolinalegalservices.org' },
-      { label: 'Mobile', value: 'Fully responsive' },
-      { label: 'Structured data', value: 'ProfessionalService' },
+      'Practice-area and service pages',
+      'Your firm’s story and people',
+      'Consultation and contact pages',
+      'Articles, legal updates, and firm news',
+      'Privacy, terms, and notices pages',
+      'A responsive website for every screen',
     ],
     sortOrder: 2,
     seo: {
-      title: 'Blawby Theme',
-      description: 'The Blawby theme for professional-service businesses — service pages, article publishing, and consultation CTAs. See it live on North Carolina Legal Services.',
+      title: 'Blawby — Website Template for Lawyers and Law Firms',
+      description: 'Build a law firm website with Blawby. Present your practice areas, introduce your people, and guide visitors toward a consultation. Included on every KrabiClaw plan.',
     },
   },
 }

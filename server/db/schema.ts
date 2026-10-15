@@ -1317,6 +1317,29 @@ export const channel_sync_log = sqliteTable("channel_sync_log", {
 	check("channel_sync_log_created_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
 ]);
 
+// What a channel was last told about one night of one connected home. A push
+// marks its nights pending, then pushed or needs_review with the reason; a
+// pending night whose request never returned stays pending. The calendar
+// shows it, so a night the channel did not take is never silently out of date.
+export const channel_night_pushes = sqliteTable("channel_night_pushes", {
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	product_id: text().notNull(),
+	provider: text().$type<'channex'>().notNull(),
+	date: text().notNull(),
+	state: text().$type<'pending' | 'pushed' | 'needs_review'>().notNull(),
+	detail: text(),
+	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.product_id, table.provider, table.date], name: "channel_night_pushes_pk" }),
+	foreignKey({ columns: [table.product_id, table.provider], foreignColumns: [product_channel_mappings.product_id, product_channel_mappings.provider], name: "channel_night_pushes_mapping_fk" }).onDelete("cascade"),
+	index("channel_night_pushes_state_idx").on(table.organization_id, table.state),
+	check("channel_night_pushes_provider_check", sql`provider = 'channex'`),
+	check("channel_night_pushes_state_check", sql`state IN ('pending', 'pushed', 'needs_review')`),
+	check("channel_night_pushes_detail_check", sql`state <> 'needs_review' OR detail IS NOT NULL`),
+	check("channel_night_pushes_date_check", sql`date(date) IS date`),
+	check("channel_night_pushes_updated_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
+]);
+
 // ---------------------------------------------------------------------------
 // Inventory.
 //
