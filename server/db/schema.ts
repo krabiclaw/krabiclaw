@@ -1250,6 +1250,73 @@ export const stay_payments = sqliteTable("stay_payments", {
 	check("stay_payments_created_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
 ]);
 
+// A place to stay as Channex and Airbnb know it, and how far its import got.
+// The Airbnb listing and channel are known from the start; the Channex
+// property, room type and rate plan are filled in as the import creates them,
+// stage by stage. import_property holds the listing details the host approved
+// (what the Channex property, room type and rate plan are created from), and
+// import_calendar the Airbnb calendar the inventory stage writes and verifies;
+// both are cleared when the import completes. Deleting the home deletes the mapping.
+export const product_channel_mappings = sqliteTable("product_channel_mappings", {
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	product_id: text().notNull(),
+	provider: text().$type<'channex'>().notNull(),
+	listing_id: text().notNull(),
+	channel_id: text().notNull(),
+	property_id: text(),
+	room_type_id: text(),
+	rate_plan_id: text(),
+	import_stage: text().$type<'property' | 'room' | 'rate' | 'inventory' | 'verify_inventory' | 'mapping' | 'activate' | 'reservations' | 'complete'>().notNull(),
+	import_property: text(),
+	import_calendar: text(),
+	enabled: integer({ mode: "boolean" }).default(false).notNull(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.product_id, table.provider], name: "product_channel_mappings_pk" }),
+	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "product_channel_mappings_home_scope_fk" }).onDelete("cascade"),
+	uniqueIndex("product_channel_mappings_listing_unique").on(table.provider, table.listing_id),
+	uniqueIndex("product_channel_mappings_property_unique").on(table.provider, table.property_id).where(sql`property_id IS NOT NULL`),
+	uniqueIndex("product_channel_mappings_room_type_unique").on(table.provider, table.room_type_id).where(sql`room_type_id IS NOT NULL`),
+	uniqueIndex("product_channel_mappings_rate_plan_unique").on(table.provider, table.rate_plan_id).where(sql`rate_plan_id IS NOT NULL`),
+	index("product_channel_mappings_org_idx").on(table.organization_id),
+	check("product_channel_mappings_provider_check", sql`provider = 'channex'`),
+	check("product_channel_mappings_stage_check", sql`import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'complete')`),
+	check("product_channel_mappings_ids_check", sql`(import_stage = 'property' OR property_id IS NOT NULL) AND (import_stage IN ('property', 'room') OR room_type_id IS NOT NULL) AND (import_stage IN ('property', 'room', 'rate') OR rate_plan_id IS NOT NULL)`),
+	check("product_channel_mappings_calendar_check", sql`import_calendar IS NULL OR (json_valid(import_calendar) AND json_type(import_calendar) = 'array')`),
+	check("product_channel_mappings_property_json_check", sql`import_property IS NULL OR (json_valid(import_property) AND json_type(import_property) = 'object')`),
+	check("product_channel_mappings_enabled_check", sql`enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('reservations', 'complete'))`),
+	check("product_channel_mappings_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
+]);
+
+// Every exchange with a channel that changed or refused something: a booking
+// revision applied (then acknowledged once Channex confirms it), one ignored because its home is not
+// connected, one that failed and will come back through the feed, an ARI push
+// and its warnings. It records ids and outcomes, never guest names or
+// messages. A revision for a home nobody connected has no organization.
+export const channel_sync_log = sqliteTable("channel_sync_log", {
+	id: text().primaryKey(),
+	organization_id: text().references(() => organization.id, { onDelete: "cascade" }),
+	product_id: text(),
+	provider: text().$type<'channex'>().notNull(),
+	direction: text().$type<'inbound' | 'outbound'>().notNull(),
+	kind: text().$type<'booking_revision' | 'availability' | 'restrictions'>().notNull(),
+	external_id: text().notNull(),
+	status: text().$type<'applied' | 'acknowledged' | 'ignored_disconnected' | 'failed' | 'needs_review' | 'pushed'>().notNull(),
+	detail: text(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+}, (table) => [
+	index("channel_sync_log_external_idx").on(table.provider, table.kind, table.external_id),
+	index("channel_sync_log_product_idx").on(table.product_id, table.created_at),
+	index("channel_sync_log_org_idx").on(table.organization_id, table.created_at),
+	check("channel_sync_log_provider_check", sql`provider = 'channex'`),
+	check("channel_sync_log_direction_check", sql`direction IN ('inbound', 'outbound')`),
+	check("channel_sync_log_kind_check", sql`kind IN ('booking_revision', 'availability', 'restrictions')`),
+	check("channel_sync_log_status_check", sql`status IN ('applied', 'acknowledged', 'ignored_disconnected', 'failed', 'needs_review', 'pushed')`),
+	check("channel_sync_log_failed_check", sql`status NOT IN ('failed', 'needs_review') OR detail IS NOT NULL`),
+	check("channel_sync_log_created_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
+]);
+
 // ---------------------------------------------------------------------------
 // Inventory.
 //
@@ -1341,6 +1408,37 @@ export const organization_integrations = sqliteTable("organization_integrations"
 	check("organization_integrations_verification_check", sql`(provider = 'google_search_console') = (verified IS NOT NULL) AND (verification_token IS NULL OR provider = 'google_search_console') AND (verified IS NULL OR verified IN (0, 1))`),
 	check("organization_integrations_calendar_check", sql`(provider = 'google_calendar') = (status IS NOT NULL) AND (status IS NULL OR status IN ('active', 'disabled', 'error')) AND (provider = 'google_calendar' OR (status IS NULL AND last_error IS NULL))`),
 	check("organization_integrations_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
+]);
+
+// An organization's Airbnb account, connected through Channex. It is one row
+// per organization with its own lifecycle: a Channex group and a temporary
+// setup property, a single-use sign-in bound to the person who started it,
+// then the connected channel. operation_id is the lock one setup step holds;
+// pending_step names a provider write that was sent and may have applied, so
+// a failure there is held for review instead of being repeated.
+export const channex_connections = sqliteTable("channex_connections", {
+	organization_id: text().primaryKey().references(() => organization.id, { onDelete: "cascade" }),
+	status: text().$type<'not_connected' | 'authorizing' | 'connected' | 'disconnecting' | 'needs_review'>().notNull(),
+	operation_id: text(),
+	pending_step: text(),
+	group_id: text(),
+	setup_property_id: text(),
+	state_hash: text(),
+	authorization_url: text(),
+	authorization_user_id: text().references(() => user.id, { onDelete: "set null" }),
+	authorization_title: text(),
+	authorization_expires_at: text(),
+	channel_id: text(),
+	connected_at: text(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+}, (table) => [
+	uniqueIndex("channex_connections_group_unique").on(table.group_id).where(sql`group_id IS NOT NULL`),
+	uniqueIndex("channex_connections_channel_unique").on(table.channel_id).where(sql`channel_id IS NOT NULL`),
+	check("channex_connections_status_check", sql`status IN ('not_connected', 'authorizing', 'connected', 'disconnecting', 'needs_review')`),
+	check("channex_connections_connected_check", sql`status <> 'connected' OR (channel_id IS NOT NULL AND group_id IS NOT NULL AND connected_at IS NOT NULL)`),
+	check("channex_connections_authorizing_check", sql`status <> 'authorizing' OR (authorization_url IS NOT NULL AND state_hash IS NOT NULL AND authorization_expires_at IS NOT NULL AND authorization_title IS NOT NULL)`),
+	check("channex_connections_instants_check", sql`(authorization_expires_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', authorization_expires_at, '+0 days') IS authorization_expires_at) AND (connected_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', connected_at, '+0 days') IS connected_at) AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 ]);
 
 // ---------------------------------------------------------------------------

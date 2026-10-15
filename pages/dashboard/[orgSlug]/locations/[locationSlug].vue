@@ -33,7 +33,7 @@
             Stripe shows what changes on your bill before you confirm.
           </template>
           <template v-else>
-            Basic includes {{ INCLUDED_LOCATIONS }} locations. Growth and Commerce include {{ INCLUDED_LOCATIONS }},
+            Basic includes {{ INCLUDED_LOCATIONS }} locations. Growth and Business include {{ INCLUDED_LOCATIONS }},
             then {{ locationPrice }}.
           </template>
         </p>

@@ -170,7 +170,7 @@ export async function assertOrganizationLanguageEntitlement(
   // still insists on `published`.
   const satisfied = requires === 'plan' || (requires === 'published' ? row.locale_status === 'published' : Boolean(row.locale_status))
   if (entitlements.additional_languages !== true) {
-    localizationError(402, 'LANGUAGE_ENTITLEMENT_REQUIRED', 'Publishing additional languages requires Growth or Commerce.', {
+    localizationError(402, 'LANGUAGE_ENTITLEMENT_REQUIRED', 'Publishing additional languages requires Growth or Business.', {
       organization_id: organizationId,
       locale,
       dashboard_url: billingUrl(row.organization_slug),

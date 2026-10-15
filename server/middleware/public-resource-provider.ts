@@ -16,7 +16,9 @@ export default defineHandler((event) => {
     if (options.resourceKind === 'config') {
       const db = cloudflareEnv(event).db
       if (!db) throw new HTTPError({ statusCode: 500, statusMessage: 'Database not available' })
-      return finalizeRequestMetrics(event, 'public-config-ssr', await getPublicConfig(db, options.organizationId))
+      return finalizeRequestMetrics(event, 'public-config-ssr', await getPublicConfig(db, options.organizationId, {
+        previewAuthorized: options.organizationId === event.context.organizationId && event.context.previewAuthorized === true,
+      }))
     }
     if (options.resourceKind === 'shell') {
       const payload = await loadPublicShell(event, options.organizationId, {

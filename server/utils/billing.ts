@@ -6,9 +6,11 @@ import { hasPermission } from 'better-auth/plugins'
 import { organizationAdapter } from '~/server/utils/member-access'
 import { getPlanEntitlements, type EntitlementsMap } from '~/server/utils/billing-entitlements'
 import { entitlingSubscription, getOrganizationEntitlements, planFromSubscriptions, readOrganizationSubscriptions } from '~/server/utils/billing-access'
-import { coveredLocations } from '~/shared/billing-model'
+import { coveredLocations, isKnownRecurringPlan } from '~/shared/billing-model'
+import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { createStripeClient } from '~/server/utils/stripe-client'
 import { createStripePlanLoader } from '~/server/utils/better-auth-stripe'
+import { recurringPriceAmount } from '~/server/utils/stripe-catalog'
 import { organizationAccessControl, organizationRoles } from '~/utils/organization-access'
 
 export interface BillingEnv {
@@ -26,6 +28,7 @@ export interface OrganizationBillingStatus {
   /** Better Auth's subscription schedule for a plan change at the end of the period. */
   stripeScheduleId?: string
   billingInterval?: 'month' | 'year'
+  subscriptionPrice?: { name: string; amount: number; currency: CurrencyCode; interval: 'month' | 'year' }
   locations: OrganizationLocations
   entitlements: EntitlementsMap
 }
@@ -88,6 +91,30 @@ export async function getOrganizationBillingStatus(
     locations: { used, covered: coveredLocations(plan, entitling?.seats) },
     entitlements: getPlanEntitlements(plan),
   }
+}
+
+
+/** Explicit dashboard price read; entitlement and location checks need only Better Auth's state. */
+export async function getOrganizationSubscriptionPrice(
+  env: CloudflareEnv,
+  status: OrganizationBillingStatus,
+): Promise<OrganizationBillingStatus['subscriptionPrice']> {
+  if (!status.stripeSubscriptionId) return undefined
+  const native = await getStripe(env).subscriptions.retrieve(status.stripeSubscriptionId, { expand: ['items.data.price.product', 'items.data.price.tiers'] })
+  const customerId = typeof native.customer === 'string' ? native.customer : native.customer.id
+  if (customerId !== status.stripeCustomerId) throw new Error('Stripe subscription customer does not match its organization')
+  const items = native.items.data.filter(item => typeof item.price.product !== 'string'
+    && !item.price.product.deleted && isKnownRecurringPlan(item.price.product.metadata.plan_id))
+  if (items.length !== 1) throw new Error('Stripe subscription must contain exactly one matching plan price')
+  const item = items[0]!
+  const product = item.price.product
+  if (typeof product === 'string' || product.deleted) throw new Error('Stripe subscription product is unavailable')
+  if (status.plan !== 'free' && product.metadata.plan_id !== status.plan) throw new Error('Stripe subscription plan does not match Better Auth')
+  const interval = billingInterval(item.price.recurring?.interval)
+  if (!interval || item.price.recurring?.interval_count !== 1) throw new Error('Stripe subscription has an unsupported billing interval')
+  const currency = item.price.currency.toUpperCase()
+  if (!isCurrencyCode(currency)) throw new Error(`Stripe subscription has unsupported currency ${item.price.currency}`)
+  return { name: product.name, amount: recurringPriceAmount(item.price, item.quantity), currency, interval }
 }
 
 function billingInterval(value: string | undefined): 'month' | 'year' | undefined {

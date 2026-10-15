@@ -61,7 +61,6 @@ const localWorkerCommand = [
   'corepack yarn wrangler dev .output/server/index.mjs --env e2e',
   '--assets .output/public',
   `--port ${port}`,
-  `--host localhost:${port}`,
   '--var E2E_ALLOW_DEV_ROUTES:true',
   `--var E2E_DEV_ROUTE_SECRET:${localDevRouteSecret}`,
   ...(!liveGooglePlaces ? ['--var GOOGLE_PLACES_API_KEY:'] : []),

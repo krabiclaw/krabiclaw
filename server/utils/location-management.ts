@@ -231,7 +231,7 @@ export async function createLocation(
       data: {
         error: isKnownRecurringPlan(locations.plan)
           ? `Your plan covers ${locations.covered} locations. Add a location to your plan in Billing (${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}), then create it.`
-          : `Basic includes ${INCLUDED_LOCATIONS} locations. Choose Growth or Commerce in Billing to add more.`,
+          : `Basic includes ${INCLUDED_LOCATIONS} locations. Choose Growth or Business in Billing to add more.`,
         code: 'LOCATION_LIMIT',
         locations: { used: locations.used, covered: locations.covered },
       },

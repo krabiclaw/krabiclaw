@@ -339,12 +339,10 @@ error, never a free payment. The surcharged total is confirmed with
 `amount_to_confirm` and the named surcharge, so Stripe's receipts and refunds carry
 it; `payments.surcharge_amount` records what Stripe charged.
 
-**Expiry.** A hosted Checkout expired itself; a PaymentIntent waits. The hourly
-`payments:expire-attempts` task abandons intents whose attempt `expires_at` has
-passed, and Stripe's `canceled` answer is settled through the same path as the
-webhook: the payment fails, the hold is released, the attempt is `expired` and
-`payment_checkout_expired` is recorded. Capacity itself is time-bound in every
-availability query, so a hold never blocks past its `expires_at` either way.
+**Expiry.** The buyer's time to pay is the attempt's `expires_at`. Every
+availability query ignores a hold past it, and the confirm endpoint refuses an
+attempt past it, so an unpaid intent simply stays unused at Stripe. A capture that
+lands late anyway takes the unfulfillable-capture path and is refunded.
 
 A business with Stripe Tax configured is refused (409 `stripe_tax_unsupported`)
 rather than charged without the tax Checkout used to calculate.

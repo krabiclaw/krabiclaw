@@ -34,15 +34,6 @@ export async function recordCheckoutStarted(db: DbClient, payment: Payment, save
   })
 }
 
-export async function recordCheckoutExpired(db: DbClient, payment: Payment) {
-  const subject = await paymentSubject(db, payment)
-  await recordOrganizationConversionEvent(db, null, {
-    organizationId: payment.organization_id, eventName: 'payment_checkout_expired', stage: 'occurred', surface: 'stripe',
-    locationId: payment.location_id, productId: subject.productId, variantId: subject.variantId,
-    entityType: 'payment', entityId: payment.id, properties: { member_id: subject.memberId },
-  })
-}
-
 /** A captured payment: its value excludes tax, its collected amount is what the buyer paid. */
 export async function recordPaymentPaid(db: DbClient, payment: Payment, intentId: string, savedCard: boolean) {
   const subject = await paymentSubject(db, payment)

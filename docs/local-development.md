@@ -15,6 +15,13 @@ setup. `.env` is the single local configuration for Nuxt, Wrangler, setup script
 and E2E tests; `.env.example` is the maintained template. Both `yarn dev` and
 `yarn dev:worker` use port 3000 by default.
 
+The built local Worker must receive each tenant's `<subdomain>.localhost`
+hostname, including onboarding and editor preview iframes. Leave Wrangler's
+`dev.host` and `--host` unset: these override the forwarded hostname rather
+than choosing the local listening address. The `e2e` environment sets
+`routes = []` so Wrangler does not infer a production upstream hostname from
+inherited deployment routes. Use `--port` to choose another local port.
+
 `yarn dev` also starts a second local Worker, `krabiclaw-guest-inbox-hub`, from
 `server/cloudflare/dev/wrangler.toml`. Wrangler's platform proxy cannot host a
 Durable Object whose class lives in the proxied Worker, so under `nuxt dev` the

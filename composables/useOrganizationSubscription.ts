@@ -63,7 +63,7 @@ export const useOrganizationSubscription = () => {
   const dashboard = useDashboardOrganization()
   const dashboardApi = useDashboardApi()
   const { trackSubscriptionUpgrade, trackSubscriptionDowngrade } = useAnalytics()
-  const { startSubscriptionCheckout, analyticsIntentError } = useSubscriptionCheckout()
+  const { startSubscriptionCheckout } = useSubscriptionCheckout()
 
   // Stripe's hosted portal: card, invoices, receipts, cancelling. The plugin
   // exposes nothing else for those, so nothing here draws them.
@@ -134,8 +134,5 @@ export const useOrganizationSubscription = () => {
     await navigateTo(confirmUrl, { external: true })
   }
 
-  // Forwarded so a checkout that went through with its billing analytics intent
-  // unrecorded is visible to whatever renders this, rather than ending in a ref
-  // nobody reads — which is the same silence in a newer place.
-  return { startOrganizationCheckout, setPlanLocations, openBillingPortal, analyticsIntentError }
+  return { startOrganizationCheckout, setPlanLocations, openBillingPortal }
 }
