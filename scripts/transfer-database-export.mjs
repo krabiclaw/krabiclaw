@@ -181,7 +181,7 @@ export const TARGET_INVARIANT_QUERIES = {
   placements_show_live_assets: `SELECT p.id FROM media_placements p JOIN media_assets a ON a.id = p.asset_id
     WHERE p.status = 'active' AND a.status = 'deleted'`,
   media_keys_live_under_their_organization: `SELECT id FROM media_assets
-    WHERE r2_key IS NOT NULL AND r2_key NOT LIKE 'organizations/' || organization_id || '/%'`,
+    WHERE r2_key IS NOT NULL AND instr(r2_key, 'organizations/' || organization_id || '/') <> 1`,
   retired_site_names_are_gone: `SELECT id FROM analytics_summaries WHERE kind = 'site_day'
     UNION ALL SELECT id FROM content_blocks WHERE data_json ->> '$.source' LIKE 'site\\_%' ESCAPE '\\'
     UNION ALL SELECT id FROM activity_entries WHERE json_type(payload_json, '$.visibility_scope') IS NOT NULL OR instr(payload_json ->> '$.deep_link', '/sites/') > 0`,
@@ -201,7 +201,7 @@ export const TARGET_INVARIANT_QUERIES = {
   localized_resource_owner_scope: `SELECT r.id FROM resource_localizations r WHERE NOT (
     ${Object.entries(LOCALIZED_OWNER_TABLES).map(([type, table]) => `(r.resource_type = '${type}' AND EXISTS (SELECT 1 FROM ${table} o WHERE o.id = r.resource_id AND ${type === 'organization' ? 'o.id' : 'o.organization_id'} = r.organization_id))`).join(' OR ')})`,
   activity_request_scope: `SELECT e.id FROM activity_entries e WHERE e.scope_kind = 'request' AND NOT EXISTS (
-    SELECT 1 FROM requests r WHERE r.id = e.request_id AND r.kind IN ('contact','reservation','booking'))`,
+    SELECT 1 FROM requests r WHERE r.id = e.request_id AND r.kind IN ('contact','reservation','booking','stay'))`,
   // The retired model must leave no trace.
   no_hero_description: "SELECT id FROM content_blocks WHERE type = 'hero' AND json_type(data_json, '$.description') IS NOT NULL",
   no_slug_cased_page_titles: "SELECT id FROM content_documents WHERE kind = 'page' AND title IN ('home','about','contact','location','services','pricing','donate','schedule','privacy','terms','third-party-notices')",
