@@ -38,19 +38,32 @@ function rejection(result: Record<string, unknown>): string | null {
   return null
 }
 
+async function connectedMapping(db: DbClient, env: ChannexEnv, organizationId: string, productId: string): Promise<Mapping | null> {
+  const mapping = await queryFirst<Mapping>(db, `SELECT property_id, room_type_id, rate_plan_id FROM product_channel_mappings
+    WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND enabled = 1`, [organizationId, productId])
+  if (mapping && (!env.CHANNEX_BASE_URL?.trim() || !env.CHANNEX_API_KEY?.trim())) throw new Error('CHANNEX_BASE_URL and CHANNEX_API_KEY are required to change a home connected to Channex')
+  return mapping
+}
+
+/**
+ * Refuse a night change to a connected home that could not then be pushed.
+ * Called before the write, so a change is never stored without its push.
+ */
+export async function requireChannelPush(db: DbClient, env: ChannexEnv, organizationId: string, productId: string): Promise<void> {
+  await connectedMapping(db, env, organizationId, productId)
+}
+
 /**
  * Push these nights of one home. A home with no enabled Channex mapping has
  * nothing to push and returns null. Nights before today where the home is
  * are skipped: Channex does not take past dates.
  */
 export async function pushStayNights(db: DbClient, env: ChannexEnv, organizationId: string, home: StayHome, nights: readonly StayNight[]): Promise<ChannelPush | null> {
-  const mapping = await queryFirst<Mapping>(db, `SELECT property_id, room_type_id, rate_plan_id FROM product_channel_mappings
-    WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND enabled = 1`, [organizationId, home.product_id])
+  const mapping = await connectedMapping(db, env, organizationId, home.product_id)
   if (!mapping) return null
   const from = today(home.timezone)
   const pushed = nights.filter(night => night.date >= from)
   if (!pushed.length) return null
-  if (!env.CHANNEX_BASE_URL?.trim() || !env.CHANNEX_API_KEY?.trim()) throw new Error('CHANNEX_BASE_URL and CHANNEX_API_KEY are required to push a connected home')
   const dates = JSON.stringify(pushed.map(night => night.date))
   const span = `${pushed[0]!.date}..${pushed.at(-1)!.date}`
   const mark = async (outcome: { state: 'pending' } | ChannelPush) => await execute(db, `

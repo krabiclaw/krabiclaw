@@ -5,7 +5,7 @@ import { organizationEventQuery } from '~/server/utils/organization-events'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
-import { pushStayNights, type ChannelPush } from '~/server/integrations/channex/ari'
+import { pushStayNights, requireChannelPush, type ChannelPush } from '~/server/integrations/channex/ari'
 
 /**
  * Places to stay: the one implementation of stays, nights and offline
@@ -378,6 +378,7 @@ export async function createStay(db: DbClient, env: ChannexEnv, access: StayAcce
   if (!key || key.length > 200) fail(422, 'INVALID_STAY_FIELD', 'idempotency_key must be 1 to 200 characters', 'idempotency_key')
   const home = await readStayHome(db, access, input.product_id)
   const fields = stayFields(input, home)
+  await requireChannelPush(db, env, access.organizationId, home.product_id)
   const replay = async () => {
     const existing = await queryFirst<{ id: string; product_id: string; check_in_date: string; check_out_date: string; guest_name: string; total_minor: number }>(db,
       'SELECT id, product_id, check_in_date, check_out_date, guest_name, total_minor FROM stays WHERE organization_id = ? AND idempotency_key = ?', [access.organizationId, key])
@@ -433,6 +434,7 @@ export async function updateStay(db: DbClient, env: ChannexEnv, access: StayAcce
   const current = await requireAppStay(db, access, stayId, input.expected_version)
   const home = await readStayHome(db, access, current.product_id)
   const fields = stayFields({ ...current, ...input }, home)
+  await requireChannelPush(db, env, access.organizationId, home.product_id)
   const next = current.version + 1
   const now = new Date().toISOString()
   let results: unknown
@@ -463,6 +465,7 @@ export async function updateStay(db: DbClient, env: ChannexEnv, access: StayAcce
 export async function cancelStay(db: DbClient, env: ChannexEnv, access: StayAccess, stayId: string, input: { expected_version: unknown; reason?: unknown }): Promise<StayDetail & { channel_push: ChannelPush | null }> {
   const current = await requireAppStay(db, access, stayId, input.expected_version)
   const reason = optionalText(input.reason, 'reason', 500)
+  await requireChannelPush(db, env, access.organizationId, current.product_id)
   const next = current.version + 1
   const now = new Date().toISOString()
   const results = await executeBatch(db, [
@@ -551,6 +554,7 @@ export async function setStayNights(db: DbClient, env: ChannexEnv, access: StayA
   }
   const reset = input.reset === true
   if (reset === (Object.keys(patch).length > 0)) fail(422, 'INVALID_STAY_FIELD', reset ? 'reset cannot be combined with night settings' : 'Name at least one night setting to change, or reset')
+  await requireChannelPush(db, env, access.organizationId, home.product_id)
   const now = new Date().toISOString()
   const columns = Object.keys(patch)
   const nights = `WITH RECURSIVE night(d) AS (SELECT ? UNION ALL SELECT date(d, '+1 day') FROM night WHERE date(d, '+1 day') < ?)`
