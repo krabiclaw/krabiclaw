@@ -1,0 +1,2 @@
+ALTER TABLE `stays` ADD `request_id` text REFERENCES requests(id) ON UPDATE no action ON DELETE set null;--> statement-breakpoint
+CREATE UNIQUE INDEX `stays_request_unique` ON `stays` (`request_id`) WHERE request_id IS NOT NULL;

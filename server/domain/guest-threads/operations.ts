@@ -3,7 +3,7 @@ import { recordBookingCancelled, recordBookingDecision } from '~/server/domain/b
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { isReservedTestDomain, shouldSendRealEmail } from '~/server/utils/email-delivery'
 import type { ReplyEmailEnv } from '~/server/utils/submission-messages'
-import { getGuestRequest, getThreadOperationalRecord, requestActions, requestSummary, type ThreadOperationalRecord } from '~/server/domain/requests'
+import { getGuestRequest, getThreadOperationalRecord, partySizeIsMinimum, requestActions, requestSummary, type ThreadOperationalRecord } from '~/server/domain/requests'
 import { deliverGuestThreadEmail, getDeliveryById, isDeliverySent } from './deliveries'
 import { findEntryByDedupeKey, parseEntryPayload } from './entries'
 import { discardMessagePhotos, listMessagePhotos, MessagePhotoRejection, messagePhotoPlacements, uploadMessagePhotos, type MessagePhoto } from './attachments'
@@ -125,7 +125,8 @@ async function successfulOutcome(
 }
 
 function sourceMutationPlan(context: ThreadContext, action: string): SourceMutationPlan | null {
-  if (context.thread.kind === 'contact' || !context.record) return null
+  // A stay is changed from its own screen; its thread converses about it.
+  if (context.thread.kind === 'contact' || context.thread.kind === 'stay' || !context.record || context.record.kind === 'stay') return null
   const { kind, status: beforeStatus } = context.record
   // Pending review and confirmed appointments share the same temporal guard.
   if (context.record.ends_at <= new Date().toISOString() || isBookingComplete(context.record, new Date().toISOString())) return null
@@ -193,7 +194,7 @@ function operationEntryQuery(
         booking: {
           starts_at: context.record!.starts_at, ends_at: context.record!.ends_at,
           timezone: context.record!.timezone, party_size: context.record!.party_size,
-          party_size_is_minimum: context.thread.kind !== 'contact' && context.thread.payload.party_size_is_minimum,
+          party_size_is_minimum: partySizeIsMinimum(context.thread),
           location_id: context.record!.location_id, product_id: context.record!.product_id,
         },
       }),
@@ -331,7 +332,7 @@ async function renderStatusUpdate(env: ReplyEmailEnv, db: DbClient, context: Thr
     : action === 'confirm' ? context.thread.kind === 'reservation' ? 'reservations.confirmed' : 'booking.confirmed'
       : context.thread.kind === 'reservation' ? 'saya.reservation_cancel.cancelled_title' : 'saya.experience_cancel.cancelled_title'
   const subject = `${labels[titleKey]} — ${guest.productTitle ?? guest.organizationName}`
-  const guests = labels['saya.experience_detail.guest_count']!.replace('{count}', `${context.record.party_size}${context.thread.kind !== 'contact' && context.thread.payload.party_size_is_minimum ? '+' : ''}`)
+  const guests = labels['saya.experience_detail.guest_count']!.replace('{count}', `${context.record.party_size}${partySizeIsMinimum(context.thread) ? '+' : ''}`)
   const body = [guest.locationName, formatTimestamp(context.record.starts_at, guest.locale, context.record.timezone, { year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), guests].filter(Boolean).join(' · ')
   const organizationLogoUrl = await organizationLogo(db, context.thread.organization_id)
   const email = await renderNotificationEmail(guestThreadStatusMessage({ locale: guest.locale, organizationName: guest.organizationName, organizationLogoUrl, heading: subject, body }), { platformDomain: getPlatformDomain(env) })
@@ -368,7 +369,7 @@ async function sendStatusUpdate(
       if (payload.afterStatus !== context.record.status || payload.operational_booking_id !== context.record.id
         || Reflect.get(booking, 'starts_at') !== context.record.starts_at || Reflect.get(booking, 'ends_at') !== context.record.ends_at
         || Reflect.get(booking, 'timezone') !== context.record.timezone || Reflect.get(booking, 'party_size') !== context.record.party_size
-        || Reflect.get(booking, 'party_size_is_minimum') !== (context.thread.kind !== 'contact' && context.thread.payload.party_size_is_minimum)
+        || Reflect.get(booking, 'party_size_is_minimum') !== (partySizeIsMinimum(context.thread))
         || Reflect.get(booking, 'location_id') !== context.record.location_id || Reflect.get(booking, 'product_id') !== context.record.product_id) return conflict('Status update was superseded by a booking change')
       outcome = await deliverGuestThreadEmail(db, {
         delivery,

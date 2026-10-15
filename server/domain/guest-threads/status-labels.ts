@@ -14,6 +14,11 @@ const OPERATIONAL_STATUS_LABELS: Record<GuestThreadSubmissionType, Record<string
     completed: 'Completed',
     cancelled: 'Cancelled',
   },
+  stay: {
+    pending: 'Pending',
+    confirmed: 'Confirmed',
+    cancelled: 'Cancelled',
+  },
 }
 
 export function formatOperationalStatusLabel(type: GuestThreadSubmissionType, status: string): string {

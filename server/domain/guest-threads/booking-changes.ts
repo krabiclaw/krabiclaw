@@ -123,8 +123,10 @@ function localParts(instant: string, timezone: string): { label: string; date: s
  */
 async function loadSource(db: DbClient, thread: GuestThreadRow): Promise<Source> {
   if (thread.kind === 'contact') throw new HTTPError({ statusCode: 400, message: 'This conversation is not a reservation or booking' })
+  // A stay's dates and party are changed on the stay itself, not proposed through its thread.
+  if (thread.kind === 'stay') throw new HTTPError({ statusCode: 400, message: 'Change a stay from the stay itself' })
   const record = await getThreadOperationalRecord(db, thread.id)
-  if (!record) throw new HTTPError({ statusCode: 409, message: 'This conversation has no booking or reservation to change' })
+  if (!record || record.kind === 'stay') throw new HTTPError({ statusCode: 409, message: 'This conversation has no booking or reservation to change' })
   const payload = thread.payload as { party_size_is_minimum: boolean; notes: string | null; guest: { name: string; email: string; phone: string | null } }
   return {
     assignedMemberId: record.assigned_member_id,

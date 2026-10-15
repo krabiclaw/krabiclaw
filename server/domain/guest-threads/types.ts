@@ -6,7 +6,7 @@ export type GuestThreadEntryKind = 'submission' | 'message' | 'operation' | 'ass
 export type GuestThreadActorKind = 'guest' | 'member' | 'system'
 export type GuestThreadChannel = 'web' | 'email' | 'whatsapp' | 'system'
 export type ConversationState = 'needs_attention' | 'waiting_on_guest' | 'resolved'
-export type GuestThreadSubmissionType = 'contact' | 'reservation' | 'booking'
+export type GuestThreadSubmissionType = 'contact' | 'reservation' | 'booking' | 'stay'
 export type GuestThreadDeliveryChannel = 'email' | 'whatsapp'
 export type GuestThreadDeliveryProvider = 'resend' | 'meta' | 'log_only'
 export type GuestThreadDeliveryPurpose = 'owner_alert' | 'guest_acknowledgement' | 'member_reply' | 'status_update'
@@ -176,7 +176,7 @@ export interface GuestThreadDetailViewModel {
   locationLabel: string | null
   conversationState: ConversationState | null
   source: ThreadDetailSourceModel
-  operationalRecord: Pick<ThreadOperationalRecord, 'id' | 'kind' | 'status' | 'starts_at' | 'ends_at' | 'timezone' | 'party_size'> | null
+  operationalRecord: Pick<ThreadOperationalRecord, 'id' | 'kind' | 'status' | 'starts_at' | 'ends_at' | 'timezone' | 'party_size' | 'check_in_date' | 'check_out_date'> | null
   entries: GuestThreadEntryViewModel[]
   /** What can be done to the booking. Where the conversation lives is below, separately. */
   availableActions: string[]

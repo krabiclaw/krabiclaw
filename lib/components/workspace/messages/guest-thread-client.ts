@@ -34,6 +34,7 @@ export type ThreadDetail = GuestThreadDetailViewModel
 */
 export function threadRecordTitle(type: SubmissionType, vertical: string | null | undefined): string {
   if (type === 'contact') return 'Message'
+  if (type === 'stay') return 'Stay'
   if (type === 'booking') return EXPERIENCE_PRESENTATION.itemLabel
   return resolveBookingPresentation('reservation', vertical).label
 }
@@ -41,6 +42,7 @@ export function threadRecordTitle(type: SubmissionType, vertical: string | null 
 /** The plural, for the filter that narrows the list to this kind. */
 export function threadFilterLabel(type: SubmissionType, vertical: string | null | undefined): string {
   if (type === 'contact') return 'Direct messages'
+  if (type === 'stay') return 'Stays'
   if (type === 'booking') return EXPERIENCE_PRESENTATION.itemLabelPlural
   return resolveBookingPresentation('reservation', vertical).labelPlural
 }
