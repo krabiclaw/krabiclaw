@@ -14,7 +14,7 @@ Source reconciliation: 2026-10-04 against staging `baa1bd2ee`, current PRODUCT.m
 | Start date | May 2026 | First repository commit that renamed the project to KrabiClaw: 2026-05-03 |
 | Initial commitment | Full time | Confirmed by the owner on 2026-09-07 |
 | Product type | Web SaaS | Product contract and pricing model |
-| Business model | Free Starter and paid subscription | PRODUCT.md; paid display name and prices belong to Stripe |
+| Business model | Free Basic, Growth and Business subscriptions | PRODUCT.md; paid display name and prices belong to Stripe |
 | Primary audience | Restaurants, experience operators, and professional-service businesses | `PRODUCT.md` and `CONTEXT.md` |
 | MCP endpoint | https://krabiclaw.com/api/mcp | `docs/mcp.md` |
 | MCP registry identity | io.github.paulchrisluke/krabiclaw | Historical listing; re-verify live status before reuse (#941) |
@@ -38,6 +38,8 @@ The next restaurant campaign should show a supported task being completed: the r
 Review-request sending is currently paid, with the Free decision open. WhatsApp business notifications require paid messaging; authentication OTP is separate. Saya/Blawby provisioning and Growth marketing disagree. Community/Priority support copy does not establish a service promise. Do not publish settled comparison claims until these discrepancies are resolved. Customer GA4/Search Console integration, automatic social synchronization and ranking guarantees are not established by internal analytics or a tool name.
 
 [#939](https://github.com/paulchrisluke/krabiclaw/issues/939) and #941 retain their approved-design/released-UI gates. This profile reconciliation does not approve final launch collateral, replace their design source, or complete either issue.
+
+Owner-approved pricing consolidation (2026-10-15): Basic is free; Growth is $49/month or $588/year; Business is $99/month and includes Growth, payments and managed advertising. Both paid plans include two locations, then $49 per additional location per month ($588/year on annual Growth). Payments: “1.4% of payment volume, plus Stripe fees.” Managed advertising: “10% of monthly ad spend for campaigns we manage.” Ad spend is billed by Google separately. Commerce and Marketing are retained customer contracts, unavailable for new subscriptions after cutover. Current public amounts, names and bullets remain Stripe-owned.
 
 ### Paul's voice
 

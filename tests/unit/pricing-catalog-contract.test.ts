@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type Stripe from 'stripe'
-import { assertStripeCatalogPrices, selectStripeCatalogPrice } from '../../server/utils/stripe-catalog.ts'
+import { assertStripeCatalogPrices, recurringPriceAmount, selectStripeCatalogPrice } from '../../server/utils/stripe-catalog.ts'
 import { PRICING_COMPARISON, comparisonValue } from '../../shared/pricing-comparison.ts'
 import { getPlanEntitlements } from '../../server/utils/billing-entitlements.ts'
 import { classifyStripePlanChange } from '../../shared/stripe-ga4.ts'
-import { additionalLocationPrice, coveredLocations } from '../../shared/billing-model.ts'
+import { additionalLocationPrice, assertNewSalePlan, coveredLocations } from '../../shared/billing-model.ts'
 import { renderPlansMarkdown } from '../../server/routes/pricing.md.get.ts'
 import type { Plan } from '../../server/utils/billing-plans.ts'
 
@@ -44,7 +44,7 @@ test('missing, wrong-currency and fabricated zero paid prices cannot become the 
 test('each additional location is USD 49 a month or USD 588 a year on every paid plan', () => {
   assert.throws(() => assertStripeCatalogPrices('growth', price('price-month', 'month', 4900, 8900)), /monthly price/)
   assert.throws(() => assertStripeCatalogPrices('growth', monthly, price('price-year', 'year', 58800, 4900)), /annual price/)
-  assert.throws(() => assertStripeCatalogPrices('commerce', price('price-commerce-month', 'month', 8900, 8900)), /monthly price/)
+  assert.throws(() => assertStripeCatalogPrices('business', price('price-business-month', 'month', 9900, 9900)), /monthly price/)
   assert.equal(coveredLocations('free', null), 2)
   assert.equal(coveredLocations('growth', 1), 2)
   assert.equal(coveredLocations('growth', 2), 2)
@@ -54,15 +54,16 @@ test('each additional location is USD 49 a month or USD 588 a year on every paid
   assert.equal(additionalLocationPrice('year'), '$588 per additional location per year')
 })
 
-test('Commerce requires the approved USD 89 monthly offer and rejects an invented annual offer', () => {
-  const commerce = price('price-commerce-month', 'month', 8900)
-  assertStripeCatalogPrices('commerce', commerce)
-  for (const amount of [0, 4900, 9900, 14900]) {
-    assert.throws(() => assertStripeCatalogPrices('commerce', withPlanAmount(commerce, amount)), /monthly price/)
+test('Business requires the approved USD 99 monthly offer and rejects an invented annual offer', () => {
+  const business = price('price-business-month', 'month', 9900)
+  assertStripeCatalogPrices('business', business)
+  for (const amount of [0, 4900, 8900, 14900]) {
+    assert.throws(() => assertStripeCatalogPrices('business', withPlanAmount(business, amount)), /monthly price/)
   }
-  assert.throws(() => assertStripeCatalogPrices('commerce', { ...commerce, currency: 'eur' }), /monthly price/)
-  assert.throws(() => assertStripeCatalogPrices('commerce', commerce, price('price-commerce-year', 'year', 106800)), /no authorized annual price/)
-  assert.throws(() => assertStripeCatalogPrices('invented_plan', commerce), /Unknown paid plan/)
+  assert.throws(() => assertStripeCatalogPrices('business', { ...business, currency: 'eur' }), /monthly price/)
+  assert.throws(() => assertStripeCatalogPrices('business', business, price('price-business-year', 'year', 118800)), /no authorized annual price/)
+  for (const retired of ['commerce', 'marketing']) assert.throws(() => assertNewSalePlan(retired), /Unknown paid plan/)
+  assert.throws(() => assertStripeCatalogPrices('invented_plan', business), /Unknown paid plan/)
 })
 
 test('Commerce inherits Growth capabilities and participates in native subscription transitions', () => {
@@ -80,24 +81,28 @@ test('Commerce inherits Growth capabilities and participates in native subscript
   assert.equal(classifyStripePlanChange('commerce', 'commerce', true), null)
 })
 
-test('Marketing is Commerce plus ad management at USD 99, above Commerce', () => {
+test('Business combines payments and ad management while existing contracts retain their capabilities', () => {
+  const business = getPlanEntitlements('business')
   const marketing = getPlanEntitlements('marketing')
   const commerce = getPlanEntitlements('commerce')
-  for (const [capability, value] of Object.entries(commerce)) {
-    if (capability !== 'plan' && capability !== 'marketing') assert.equal(marketing[capability], value)
+  for (const [capability, value] of Object.entries(marketing)) {
+    if (capability !== 'plan') assert.equal(business[capability], value)
   }
+  assert.equal(business.payments, true)
+  assert.equal(business.marketing, true)
   assert.equal(marketing.payments, true)
   assert.equal(marketing.marketing, true)
+  assert.equal(commerce.payments, true)
   assert.equal(commerce.marketing, false)
   assert.equal(getPlanEntitlements('growth').marketing, false)
-  assertStripeCatalogPrices('marketing', price('price-marketing-month', 'month', 9900))
-  assert.throws(() => assertStripeCatalogPrices('marketing', price('price-marketing-month', 'month', 8900)), /monthly price/)
-  assert.throws(() => assertStripeCatalogPrices('marketing', price('price-marketing-month', 'month', 9900), price('price-marketing-year', 'year', 118800)), /no authorized annual price/)
-  assert.equal(classifyStripePlanChange('commerce', 'marketing', true), 'upgrade')
+  assert.equal(classifyStripePlanChange('commerce', 'business', true), 'upgrade')
+  assert.equal(classifyStripePlanChange('marketing', 'business', true), 'upgrade')
   assert.equal(classifyStripePlanChange('marketing', 'growth', true), 'downgrade')
+  assert.equal(classifyStripePlanChange('business', 'growth', true), 'downgrade')
+  assert.equal(classifyStripePlanChange('business', 'free', true), 'downgrade')
   const ads = PRICING_COMPARISON.flatMap(group => [...group.rows]).find(row => row.id === 'ads.google')!
   assert.equal(comparisonValue(ads, 'commerce'), 'Not included')
-  assert.equal(comparisonValue(ads, 'marketing'), 'Included')
+  assert.equal(comparisonValue(ads, 'business'), 'Included')
 })
 
 test('display rename preserves provider identities and metadata selects one canonical offer', () => {
@@ -157,4 +162,17 @@ test('renderPlansMarkdown generates accurate, machine-readable markdown specific
   assert.ok(md.includes('Custom Domain: Not included'))
   assert.ok(md.includes('- **Locations**: 2 included\n'))
   assert.ok(md.includes('- **Locations**: 2 included, then $49 per additional location per month\n'))
+})
+
+
+test('the current contract charge uses its exact native price and quantity, including retired flat prices', () => {
+  const flat = { ...monthly, id: 'price-original-flat', billing_scheme: 'per_unit', tiers_mode: null, tiers: undefined, unit_amount: 8900 } as unknown as Stripe.Price
+  assert.equal(recurringPriceAmount(flat, 1), 8900)
+  assert.equal(recurringPriceAmount(flat, 3), 26700)
+  const business = price('price-business-month', 'month', 9900)
+  assert.equal(recurringPriceAmount(business, 2), 9900)
+  assert.equal(recurringPriceAmount(business, 5), 24600)
+  assert.throws(() => recurringPriceAmount(business, null), /quantity/)
+  assert.throws(() => recurringPriceAmount(business, -1), /quantity/)
+  assert.throws(() => recurringPriceAmount({ ...business, tiers: undefined }, 2), /billing scheme/)
 })

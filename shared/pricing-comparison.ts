@@ -22,7 +22,7 @@ export interface PricingComparisonRow {
 
 export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly PricingComparisonRow[] }> = [
   { title: 'Your website', rows: [
-    { id: 'site.management', label: 'Business website', detail: 'Restaurant, experience or professional-service site.', included: 'Included' },
+    { id: 'site.management', label: 'Business website', detail: 'Restaurant, experience or law firm website.', included: 'Included' },
     { id: 'themes.public', label: 'Saya and Blawby themes', detail: 'The theme follows your business type.', included: 'Included' },
     { id: 'site.management', label: 'Krabiclaw subdomain', detail: 'A hosted address for your site.', included: 'Included' },
     { id: 'site.seo', label: 'Structured search metadata', detail: 'Business-type metadata supports search discovery; search ranking or indexing is not guaranteed.', included: 'Included' },
@@ -34,7 +34,7 @@ export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly P
     { id: 'catalog.products', label: 'Menus, offerings and photos', detail: 'Manage products and media for your business type.', included: 'Included' },
     { id: 'media.management', label: 'Image and video library', detail: 'Upload and place supported media on your site; videos need a poster image.', included: 'Included' },
     { id: 'analytics.reports', label: 'Website analytics', detail: 'Read available organization-scoped reports. Connected Google reports require provider setup.', included: 'Included' },
-    { id: 'locations.included', label: 'Locations', detail: `${INCLUDED_LOCATIONS} locations included on every plan. Growth and Commerce add more at ${additionalLocationPrice()}.`, planValue: planId => isKnownRecurringPlan(planId)
+    { id: 'locations.included', label: 'Locations', detail: `${INCLUDED_LOCATIONS} locations included on every plan. Growth and Business add more at ${additionalLocationPrice()}.`, planValue: planId => isKnownRecurringPlan(planId)
       ? `${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}`
       : `${INCLUDED_LOCATIONS} included` },
     { id: 'locations.management', label: 'Locations and calendar', detail: 'Manage location details and available dates.', included: 'Included' },

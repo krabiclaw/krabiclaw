@@ -46,6 +46,30 @@ export function planPriceAmount(price: Stripe.Price): number {
   return amount
 }
 
+/** The recurring charge for the native subscription quantity, including its original price tiers. */
+export function recurringPriceAmount(price: Stripe.Price, quantity: number | null | undefined): number {
+  if (!Number.isSafeInteger(quantity) || (quantity as number) < 1 || price.transform_quantity) throw new Error(`Stripe price ${price.id} has an unsupported subscription quantity`)
+  let amount: number
+  if (price.billing_scheme === 'per_unit' && Number.isSafeInteger(price.unit_amount)) {
+    amount = price.unit_amount! * quantity!
+  } else if (price.billing_scheme === 'tiered' && price.tiers_mode === 'graduated' && price.tiers?.length) {
+    let lower = 0
+    amount = 0
+    for (const tier of price.tiers) {
+      const upper = tier.up_to ?? Infinity
+      if (upper <= lower || (tier.flat_amount === null && typeof tier.flat_amount_decimal === 'string')
+        || (tier.unit_amount === null && typeof tier.unit_amount_decimal === 'string')) throw new Error(`Stripe price ${price.id} has unsupported subscription tiers`)
+      if (quantity! > lower) amount += (tier.flat_amount ?? 0) + (Math.min(quantity!, upper) - lower) * (tier.unit_amount ?? 0)
+      lower = upper
+    }
+    if (quantity! > lower) throw new Error(`Stripe price ${price.id} does not cover its subscription quantity`)
+  } else {
+    throw new Error(`Stripe price ${price.id} has an unsupported subscription billing scheme`)
+  }
+  if (!Number.isSafeInteger(amount) || amount < 0) throw new Error(`Stripe price ${price.id} has an invalid subscription amount`)
+  return amount
+}
+
 /** Plan prices are read with their tiers, which Stripe lists only when expanded. */
 export const PLAN_PRICE_LIST_EXPAND = ['data.tiers']
 

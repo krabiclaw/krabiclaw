@@ -39,7 +39,7 @@ import EditorNavigationList from '~/components/dashboard/EditorNavigationList.vu
 import type { EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import { authClient } from '~/lib/auth-client'
-import { ADDITIONAL_LOCATION_PRICES, additionalLocationPrice, INCLUDED_LOCATIONS, STARTER_PLAN_ID, isKnownBillingPlan, isNewSalePlan } from '~/shared/billing-model'
+import { additionalLocationPrice, INCLUDED_LOCATIONS, STARTER_PLAN_ID, isKnownBillingPlan, isNewSalePlan } from '~/shared/billing-model'
 import { isLocationCount } from '~/composables/useOrganizationSubscription'
 import { paymentMoney } from '~/shared/payment-display'
 import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
@@ -51,7 +51,7 @@ const dashboardApi = useDashboardApi()
 const dashboard = useDashboardOrganization()
 const { trackSubscriptionCheckoutSuccess } = useAnalytics()
 const { startOrganizationCheckout, setPlanLocations } = useOrganizationSubscription()
-const { plans, formatPrice } = await usePlans()
+const { plans } = await usePlans()
 const { formatExactDateTime } = useHumanTime()
 
 const errorMessage = ref('')
@@ -60,14 +60,15 @@ const sheetError = ref('')
 const busy = ref(false)
 const choosing = ref(false)
 
-interface BillingStatus { organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; subscriptionStatus?: string; currentPeriodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month' | 'year'; locations: { used: number; covered: number }; scheduledPlan?: { plan: string; at: string } | null }
+interface BillingStatus { organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; subscriptionStatus?: string; currentPeriodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month' | 'year'; subscriptionPrice?: { name: string; amount: number; currency: string; interval: 'month' | 'year' }; locations: { used: number; covered: number }; scheduledPlan?: { plan: string; at: string } | null }
 const isBillingResponse = (value: unknown): value is { success: true; billing: BillingStatus } =>
   isRecord(value) && value.success === true && isRecord(value.billing) && typeof value.billing.organizationId === 'string' && isKnownBillingPlan(value.billing.plan)
   && isLocationCount(value.billing.locations)
+  && (value.billing.subscriptionPrice === undefined || (isRecord(value.billing.subscriptionPrice) && typeof value.billing.subscriptionPrice.name === 'string' && Number.isSafeInteger(value.billing.subscriptionPrice.amount) && isCurrencyCode(value.billing.subscriptionPrice.currency) && ['month', 'year'].includes(String(value.billing.subscriptionPrice.interval))))
   && (value.billing.scheduledPlan === undefined || value.billing.scheduledPlan === null || (isRecord(value.billing.scheduledPlan) && isKnownBillingPlan(value.billing.scheduledPlan.plan) && typeof value.billing.scheduledPlan.at === 'string'))
 const { data: billingResponse, error: billingError, refresh: refreshBilling } = await useAsyncData(
   computed(() => `dashboard-billing:${String(route.params.orgSlug || '')}`),
-  () => dashboardApi('/api/billing/status', { validate: isBillingResponse }),
+  () => dashboardApi('/api/billing/status', { query: { includePrice: 'true' }, validate: isBillingResponse }),
 )
 const billing = computed(() => billingResponse.value?.billing ?? null)
 
@@ -83,24 +84,17 @@ const isUsageBilling = (value: unknown): value is UsageBilling => isRecord(value
 // invoice, and the plan rows above it do not wait on that provider round trip.
 const { data: usage, error: usageError, refresh: refreshUsage } = await useAsyncData(() => `payments-billing:${route.params.orgSlug}`, () => dashboardApi<UsageBilling>('/api/dashboard/payments/billing', { validate: isUsageBilling }), { lazy: true })
 
-const currentPlan = computed(() => plans.value.find(plan => plan.id === billing.value?.plan) ?? null)
-const onStarter = computed(() => billing.value?.plan === STARTER_PLAN_ID)
+const currentPlan = computed(() => billing.value?.subscriptionPrice ?? plans.value.find(plan => plan.id === billing.value?.plan) ?? null)
+const onStarter = computed(() => billing.value?.plan === STARTER_PLAN_ID && !billing.value.stripeSubscriptionId)
 const scheduledPlan = computed(() => {
   const scheduled = billing.value?.scheduledPlan
   return scheduled ? { name: plans.value.find(plan => plan.id === scheduled.plan)?.name ?? scheduled.plan, at: scheduled.at } : null
 })
-// What the subscription charges each interval: the plan's amount for the
-// included locations plus each additional one, the same tiers Stripe bills.
+// The current contract's price comes from Stripe, including retired contracts;
+// the public catalog describes only plans available for a new purchase.
 const planCharge = computed(() => {
-  const status = billing.value
-  const plan = currentPlan.value
-  if (!status || !plan) return null
-  const interval = status.billingInterval ?? 'month'
-  const base = plan.prices.find(price => price.interval === interval)?.amount
-  if (base === undefined) return null
-  const additional = Math.max(0, status.locations.covered - INCLUDED_LOCATIONS)
-    * (interval === 'year' ? ADDITIONAL_LOCATION_PRICES.annual : ADDITIONAL_LOCATION_PRICES.monthly)
-  return `${formatPrice(base + additional)}/${interval === 'year' ? 'yr' : 'mo'}`
+  const price = billing.value?.subscriptionPrice
+  return price ? `${paymentMoney(price.amount, price.currency)}/${price.interval === 'year' ? 'yr' : 'mo'}` : null
 })
 
 const planSummary = computed(() => {
@@ -121,7 +115,8 @@ const locationPrice = computed(() => additionalLocationPrice(billing.value?.bill
 const locationsSummary = computed(() => {
   const locations = billing.value?.locations
   if (!locations) return ''
-  if (onStarter.value) return `${locations.used} of ${INCLUDED_LOCATIONS} included. Growth and Commerce add more locations.`
+  if (onStarter.value) return `${locations.used} of ${INCLUDED_LOCATIONS} included. Growth and Business add more locations.`
+  if (!isNewSalePlan(billing.value?.plan)) return `${locations.used} in use, ${locations.covered} on your existing plan. Stripe shows the price before you confirm a change.`
   return `${locations.used} in use, ${locations.covered} on your plan · ${INCLUDED_LOCATIONS} included, then ${locationPrice.value}`
 })
 // Lowering below the locations in use would bill for fewer than the site has.
@@ -129,14 +124,16 @@ const locationsMinimum = computed(() => Math.max(INCLUDED_LOCATIONS, billing.val
 const locationsQuantity = ref(INCLUDED_LOCATIONS)
 const locationsOpen = ref(false)
 const locationsChanged = computed(() => locationsQuantity.value !== billing.value?.locations.covered)
-const locationsDialogNote = computed(() => `${INCLUDED_LOCATIONS} included, then ${locationPrice.value}. Stripe shows what changes on your bill before you confirm.`)
+const locationsDialogNote = computed(() => billing.value && isNewSalePlan(billing.value.plan)
+  ? `${INCLUDED_LOCATIONS} included, then ${locationPrice.value}. Stripe shows what changes on your bill before you confirm.`
+  : 'Your existing plan and price continue. Stripe shows what changes on your bill before you confirm.')
 
 const groups = computed<EditorNavigationGroup[]>(() => [{
   id: 'billing',
   items: [
     { id: 'plan', label: currentPlan.value?.name ?? 'Plan', summary: planSummary.value, action: { label: onStarter.value ? 'Choose a plan' : 'Manage' } },
     ...(billing.value ? [{ id: 'locations', label: 'Locations', summary: locationsSummary.value, ...(onStarter.value || billing.value.subscriptionStatus !== 'active' || scheduledPlan.value || billing.value.cancelAtPeriodEnd ? {} : { action: { label: 'Change' } }) }] : []),
-    ...(usage.value?.pricing ? [{ id: 'fees', label: 'Payments fees', summary: `${usage.value.pricing.captured_volume_rate_percent}% of each payment, plus Stripe’s fees${usage.value.pricing.ad_spend_rate_percent === null ? '' : `, and ${usage.value.pricing.ad_spend_rate_percent}% of Google Ads spend on campaigns we manage`}. Fees aren’t returned after a refund or dispute.` }] : []),
+    ...(usage.value?.pricing ? [{ id: 'fees', label: 'Payments fees', summary: `${usage.value.pricing.captured_volume_rate_percent}% of payment volume, plus Stripe fees.${usage.value.pricing.ad_spend_rate_percent === null ? '' : ` ${usage.value.pricing.ad_spend_rate_percent}% of monthly ad spend for campaigns we manage.`} Fees aren’t returned after a refund or dispute.` }] : []),
     ...(usage.value && usage.value.configured === false && billing.value && getPlanEntitlements(billing.value.plan).payments === true ? [{ id: 'usage:pending', label: 'Payments fees', summary: 'Getting ready. Fees for payments you take before then are billed once it’s done.' }] : []),
     ...(usage.value?.account && ['servicing', 'closing'].includes(usage.value.account.status) ? [{ id: 'usage:finalize', label: 'Previous Payments billing', summary: 'Charges from earlier payments still apply; end it once they are settled.', action: { label: 'End' } }] : []),
     ...(usage.value?.credits ?? []).map(credit => ({ id: `credit:${credit.id}`, label: `Pending credit ${paymentMoney(-credit.amount, credit.currency)}`, summary: 'Issue the credit in Stripe, then verify its credit note here.', action: { label: 'Verify' } })),

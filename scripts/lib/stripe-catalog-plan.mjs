@@ -7,16 +7,16 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { basename, dirname } from 'node:path'
-import { INCLUDED_LOCATIONS, NEW_SALE_PAID_PLAN_IDS, PAID_PLAN_PRICES, planPriceTiers } from '../../shared/billing-model.ts'
+import { NEW_SALE_PAID_PLAN_IDS, PAID_PLAN_PRICES, planPriceTiers } from '../../shared/billing-model.ts'
 
-export const CATALOG_PLAN_SCHEMA_VERSION = 11
+export const CATALOG_PLAN_SCHEMA_VERSION = 12
 export const CATALOG_APPLY_JOURNAL_SCHEMA_VERSION = 1
 export const CATALOG_APPLY_JOURNAL_KIND = 'stripe-catalog-apply-journal'
 export const CATALOG_PLAN_KIND = 'stripe-catalog-plan'
 export const OFFERED_PLAN_IDS = Object.freeze([...NEW_SALE_PAID_PLAN_IDS, 'site_language'])
-export const RETIRED_PLAN_IDS = Object.freeze(['managed', 'seo_accelerator'])
+export const RETIRED_PLAN_IDS = Object.freeze(['commerce', 'marketing', 'managed', 'seo_accelerator'])
 export const RETIRED_ADDON_TYPES = Object.freeze(['translation', 'seasonal', 'gbp_setup'])
-export const CATALOG_PLAN_SCOPES = Object.freeze(['full', 'retirement-only'])
+export const CATALOG_PLAN_SCOPES = Object.freeze(['full', 'offers-only', 'retirement-only'])
 export const STRIPE_CATALOG_REQUEST_TIMEOUT_MS = 10_000
 const SUPPORTED_OPERATION_TYPES = new Set([
   'archive_product',
@@ -25,7 +25,6 @@ const SUPPORTED_OPERATION_TYPES = new Set([
   'create_product',
   'create_price',
   'deactivate_price',
-  'migrate_subscription_price',
   'update_product',
 ])
 const CLOSED_SUBSCRIPTION_STATUSES = new Set(['canceled', 'incomplete_expired'])
@@ -54,7 +53,7 @@ export const PLAN_DEFINITIONS = Object.freeze([
     badge: 'Most Popular',
     imagePath: 'scripts/assets/stripe/growth.jpg',
     features: [
-      'Business websites for restaurants, experiences and professional services',
+      'Business websites for restaurants, experiences and law firms',
       'Your own domain (yourbusiness.com)',
       'Update supported content, menus and photos through ChatGPT',
       'Bookings, consultation requests and ticketed experiences',
@@ -64,10 +63,10 @@ export const PLAN_DEFINITIONS = Object.freeze([
     ],
   },
   {
-    name: 'Commerce',
-    description: 'Everything in Growth, plus online payments for bookings and one-time orders.',
-    planId: 'commerce',
-    amountCents: PAID_PLAN_PRICES.commerce.monthly,
+    name: 'Business',
+    description: 'Everything in Growth, plus online payments and Google Ads campaigns run from your dashboard and ChatGPT.',
+    planId: 'business',
+    amountCents: PAID_PLAN_PRICES.business.monthly,
     perLocation: true,
     highlighted: false,
     features: [
@@ -76,17 +75,6 @@ export const PLAN_DEFINITIONS = Object.freeze([
       'Buyer receipts and purchase history',
       'Refund, dispute and payout management',
       '1.4% of payment volume, plus Stripe fees.',
-    ],
-  },
-  {
-    name: 'Marketing',
-    description: 'Everything in Commerce, plus Google Ads campaigns and omnichannel launches run from your dashboard and ChatGPT.',
-    planId: 'marketing',
-    amountCents: PAID_PLAN_PRICES.marketing.monthly,
-    perLocation: true,
-    highlighted: false,
-    features: [
-      'Everything in Commerce',
       'Create, clone, pause and budget Google Ads search campaigns',
       'One launch across Google Ads, Instagram, Facebook, Discord and your site',
       'Ad spend, clicks, impressions and conversions in your analytics',
@@ -143,7 +131,7 @@ export function assertCatalogModeKey(key, requiredMode = 'test') {
 function normalizeCatalogPlanScope(value = 'full') {
   const scope = String(value ?? '').trim().toLowerCase() || 'full'
   if (!CATALOG_PLAN_SCOPES.includes(scope)) {
-    throw new Error(`Unsupported Stripe catalog plan scope ${scope}. Expected full or retirement-only.`)
+    throw new Error(`Unsupported Stripe catalog plan scope ${scope}. Expected full, offers-only or retirement-only.`)
   }
   return scope
 }
@@ -213,8 +201,9 @@ async function listAll(list, params) {
     const page = await list({ ...params, ...(startingAfter ? { starting_after: startingAfter } : {}) })
     rows.push(...(page.data ?? []))
     if (!page.has_more || page.data?.length === 0) break
-    startingAfter = page.data[page.data.length - 1]?.id
-    if (!startingAfter) throw new Error('Stripe list response reported more rows without a final id.')
+    const nextCursor = page.data[page.data.length - 1]?.id
+    if (!nextCursor || nextCursor === startingAfter) throw new Error('Stripe list response reported more rows without an advancing cursor.')
+    startingAfter = nextCursor
   }
   return rows
 }
@@ -249,10 +238,11 @@ export async function readCatalogSnapshot(readAdapter, { accountMode = 'unknown'
       .map(normalizePrice)
       .sort((a, b) => a.id.localeCompare(b.id))
   }
-  // Subscriptions billed on any offered plan product, so a price replacement
-  // can move them before the old price is retired. Only the fields that move
-  // are kept, so renewals do not read as drift.
-  const planProductIds = new Set(products.filter(product => NEW_SALE_PAID_PLAN_IDS.includes(productPlanId(product))).map(product => product.id))
+  // Catalog archival must preserve every existing contract, including plans
+  // no longer sold. Keep their prices, quantities and renewal terms signed.
+  const planProductIds = new Set(products
+    .filter(product => [...NEW_SALE_PAID_PLAN_IDS, ...RETIRED_PLAN_IDS].includes(productPlanId(product)))
+    .map(product => product.id))
   const subscriptions = []
   if (planProductIds.size > 0) {
     for (const subscription of await listAll(readAdapter.subscriptions.list.bind(readAdapter.subscriptions), { status: 'all', limit: 100 })) {
@@ -272,8 +262,20 @@ function normalizeSubscription(subscription) {
     id: String(subscription.id),
     status: subscription.status ?? null,
     schedule: typeof subscription.schedule === 'string' ? subscription.schedule : subscription.schedule?.id ?? null,
+    billing_cycle_anchor: subscription.billing_cycle_anchor ?? null,
+    cancel_at: subscription.cancel_at ?? null,
+    cancel_at_period_end: subscription.cancel_at_period_end ?? null,
+    collection_method: subscription.collection_method ?? null,
+    trial_start: subscription.trial_start ?? null,
+    trial_end: subscription.trial_end ?? null,
     items: (subscription.items?.data ?? [])
-      .map(item => ({ id: String(item.id), price: item.price?.id ?? null, quantity: item.quantity ?? null }))
+      .map(item => ({
+        id: String(item.id),
+        price: item.price?.id ?? null,
+        quantity: item.quantity ?? null,
+        current_period_start: item.current_period_start ?? null,
+        current_period_end: item.current_period_end ?? null,
+      }))
       .sort((a, b) => a.id.localeCompare(b.id)),
   }
 }
@@ -286,11 +288,10 @@ export async function createCatalogPlan({
   canonicalProductIds,
   canonicalProducts,
   scope = 'full',
-  retirementOnly = false,
 }) {
   const snapshot = await readCatalogSnapshot(readAdapter, { accountMode })
   const describedImages = imageFiles ?? await filesAdapter?.describeImageFiles?.() ?? {}
-  const planningScope = normalizeCatalogPlanScope(retirementOnly ? 'retirement-only' : scope)
+  const planningScope = normalizeCatalogPlanScope(scope)
   return buildCatalogPlan({
     snapshot,
     imageFiles: describedImages,
@@ -393,7 +394,7 @@ function isRecurringBasePrice(price, seatPriceId) {
 /**
  * The one active price matching the definition at this interval, or null when
  * it has to be created. A price at another amount or scheme is not canonical:
- * it is retired by the signed plan after its subscriptions move.
+ * it is archived for new sales while existing subscriptions retain it.
  */
 function resolveCanonicalPrice(product, prices, definition, interval, seatPriceId) {
   const desired = desiredPriceParams(definition, interval)
@@ -511,43 +512,32 @@ function resolveCanonicalProducts(snapshot, canonicalProductIds) {
   }
 }
 
-function assertRetirementOnlyGrowthSafety(snapshot, productsByPlan) {
-  const growthProducts = productsByPlan.get('growth') ?? []
-  if (growthProducts.length !== 1) {
-    const ids = growthProducts.map(product => product.id).join(', ') || 'none'
-    throw new Error(`Retirement-only catalog planning requires exactly one active canonical Growth product; found ${growthProducts.length} (${ids}).`)
-  }
-  const growth = growthProducts[0]
-  const definition = PLAN_DEFINITIONS.find(candidate => candidate.planId === 'growth')
-  const prices = [...(snapshot.pricesByProduct[growth.id] ?? [])].sort((a, b) => a.id.localeCompare(b.id))
-  const seatPriceId = growth.metadata?.seat_price_id?.trim()
-  if (!resolveCanonicalPrice(growth, prices, definition, 'month', seatPriceId)) {
-    throw new Error(`Retirement-only catalog planning requires the canonical Growth monthly price on ${growth.id}.`)
-  }
-  return growth
-}
-
-export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductIds, canonicalProducts, scope = 'full', retirementOnly = false }) {
-  const planningScope = normalizeCatalogPlanScope(retirementOnly ? 'retirement-only' : scope)
-  if (planningScope === 'retirement-only') {
-    // Retirement-only planning must not let a canonical override hide an
-    // ambiguous Growth catalog.  Validate the live active set before the
-    // general resolver (which otherwise accepts an explicit duplicate
-    // override) so every retirement plan proves one and only one Growth
-    // product is present.
-    const activeGrowthProducts = snapshot.products
-      .filter(product => product.active !== false && productPlanId(product) === 'growth')
-      .sort((a, b) => a.id.localeCompare(b.id))
-    if (activeGrowthProducts.length !== 1) {
-      const ids = activeGrowthProducts.map(product => product.id).join(', ') || 'none'
-      throw new Error(`Retirement-only catalog planning requires exactly one active canonical Growth product; found ${activeGrowthProducts.length} (${ids}).`)
+function assertRetirementOnlyOfferSafety(snapshot, productsByPlan) {
+  for (const definition of PLAN_DEFINITIONS.filter(candidate => NEW_SALE_PAID_PLAN_IDS.includes(candidate.planId))) {
+    const products = productsByPlan.get(definition.planId) ?? []
+    if (products.length !== 1) {
+      const ids = products.map(product => product.id).join(', ') || 'none'
+      throw new Error(`Retirement-only catalog planning requires exactly one active canonical ${definition.name} product; found ${products.length} (${ids}).`)
+    }
+    const product = products[0]
+    const prices = [...(snapshot.pricesByProduct[product.id] ?? [])].sort((a, b) => a.id.localeCompare(b.id))
+    const seatPriceId = product.metadata?.seat_price_id?.trim()
+    if (!resolveCanonicalPrice(product, prices, definition, 'month', seatPriceId)) {
+      throw new Error(`Retirement-only catalog planning requires the canonical ${definition.name} monthly price on ${product.id}.`)
+    }
+    if (definition.annualAmountCents && !resolveCanonicalPrice(product, prices, definition, 'year', seatPriceId)) {
+      throw new Error(`Retirement-only catalog planning requires the canonical ${definition.name} annual price on ${product.id}.`)
     }
   }
+}
+
+export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductIds, canonicalProducts, scope = 'full' }) {
+  const planningScope = normalizeCatalogPlanScope(scope)
   const { canonicalIds, productsByPlan } = resolveCanonicalProducts(
     snapshot,
     canonicalProductIds ?? canonicalProducts,
   )
-  if (planningScope === 'retirement-only') assertRetirementOnlyGrowthSafety(snapshot, productsByPlan)
+  if (planningScope === 'retirement-only') assertRetirementOnlyOfferSafety(snapshot, productsByPlan)
   const canonicalOperations = []
   const destructiveOperations = []
 
@@ -647,38 +637,6 @@ export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductId
       })
     }
 
-    // Every open subscription billed on this plan, on any of its products, moves
-    // to the canonical price for its interval before an old price is retired.
-    // Quantity is the locations covered; the included ones cost the same.
-    if (definition.perLocation) {
-      const planProductIds = new Set(snapshot.products.filter(product => productPlanId(product) === definition.planId).map(product => product.id))
-      const pricesById = new Map(Object.values(snapshot.pricesByProduct).flat().map(price => [price.id, price]))
-      for (const subscription of snapshot.subscriptions ?? []) {
-        for (const item of subscription.items) {
-          const price = pricesById.get(item.price)
-          if (!price || !planProductIds.has(price.product)) continue
-          const interval = price.recurring?.interval
-          const target = interval === 'year' ? annual : interval === 'month' ? canonical : null
-          if (interval !== 'month' && interval !== 'year') throw new Error(`Subscription ${subscription.id} is billed on ${definition.planId} price ${price.id} with no plan interval.`)
-          if (interval === 'year' && !definition.annualAmountCents) throw new Error(`Subscription ${subscription.id} is billed annually on ${definition.planId}, which has no annual price.`)
-          const quantity = Math.max(INCLUDED_LOCATIONS, item.quantity ?? 1)
-          if (target && price.id === target.id) continue
-          if (subscription.schedule) throw new Error(`Subscription ${subscription.id} has schedule ${subscription.schedule}; release it before its price is replaced.`)
-          if (subscription.items.length !== 1) throw new Error(`Subscription ${subscription.id} has ${subscription.items.length} items; a plan subscription has one.`)
-          canonicalOperations.push({
-            type: 'migrate_subscription_price',
-            planId: definition.planId,
-            subscriptionId: subscription.id,
-            itemId: item.id,
-            fromPriceId: price.id,
-            price: target ? target.id : { ref: { kind: 'price', planId: interval === 'year' ? `${definition.planId}_annual` : definition.planId } },
-            quantity,
-            expected: subscription,
-          })
-        }
-      }
-    }
-
     for (const duplicate of products.filter(product => product.id !== existing?.id)) {
       for (const price of [...(snapshot.pricesByProduct[duplicate.id] ?? [])]
         .filter(price => price.active !== false)
@@ -739,7 +697,9 @@ export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductId
     }
   }
 
-  const operations = [...canonicalOperations, ...destructiveOperations]
+  const operations = planningScope === 'offers-only'
+    ? canonicalOperations
+    : [...canonicalOperations, ...destructiveOperations]
 
   const plan = {
     schemaVersion: CATALOG_PLAN_SCHEMA_VERSION,
@@ -818,7 +778,6 @@ function operationIdentity(operation) {
     priceId: operation?.priceId ?? null,
     defaultPriceId: operation?.defaultPriceId ?? null,
     product: operation?.product?.id ?? operation?.product?.ref?.planId ?? null,
-    subscriptionId: operation?.subscriptionId ?? null,
   }
 }
 
@@ -853,6 +812,7 @@ function sanitizeError(error) {
   return sanitizeEvidence({
     name: error?.name ?? 'Error',
     message: error?.message ?? String(error),
+    detail: error?.detail?.message,
     code: error?.code,
     status: error?.status,
   })
@@ -985,10 +945,6 @@ function findCurrentProduct(snapshot, productId) {
   return snapshot.products.find(product => product.id === productId) ?? null
 }
 
-function findCurrentSubscription(snapshot, subscriptionId) {
-  return (snapshot.subscriptions ?? []).find(subscription => subscription.id === subscriptionId) ?? null
-}
-
 function findCurrentPrice(snapshot, priceId) {
   return Object.values(snapshot.pricesByProduct).flat().find(price => price.id === priceId) ?? null
 }
@@ -1049,10 +1005,7 @@ function operationAlreadyApplied(snapshot, operation, context, entry) {
       ? findCurrentProduct(snapshot, knownId)
       : snapshot.products.find(candidate =>
           candidate.active !== false
-          && (
-            candidate.metadata?.plan_id === operation.params?.metadata?.plan_id
-            || candidate.metadata?.product_family === operation.params?.metadata?.product_family
-          ),
+          && productCatalogId(candidate) === operation.planId,
         )
     return Boolean(product && product.active !== false && matchesProductPatch(product, operation.params))
   }
@@ -1069,11 +1022,6 @@ function operationAlreadyApplied(snapshot, operation, context, entry) {
     const productId = resolveProductId(operation, context)
     const product = productId ? findCurrentProduct(snapshot, productId) : null
     return Boolean(product && product.active !== false && matchesProductPatch(product, resolveReference(operation.params, context)))
-  }
-  if (operation.type === 'migrate_subscription_price') {
-    const priceId = resolveReference(operation.price, context)
-    const item = findCurrentSubscription(snapshot, operation.subscriptionId)?.items.find(candidate => candidate.id === operation.itemId)
-    return Boolean(priceId && item && item.price === priceId && item.quantity === operation.quantity)
   }
   // Uploaded files are not enumerable through the catalog API. A journaled
   // applied state is the only safe proof; never upload a second file solely
@@ -1093,10 +1041,7 @@ function inferredAppliedEvidence(snapshot, operation, context, entry) {
       ? findCurrentProduct(snapshot, knownId)
       : snapshot.products.find(candidate =>
           candidate.active !== false
-          && (
-            candidate.metadata?.plan_id === operation.params?.metadata?.plan_id
-            || candidate.metadata?.product_family === operation.params?.metadata?.product_family
-          )
+          && productCatalogId(candidate) === operation.planId
           && matchesProductPatch(candidate, operation.params),
         )
     return product?.id ? { id: product.id } : {}
@@ -1114,7 +1059,6 @@ function inferredAppliedEvidence(snapshot, operation, context, entry) {
     const productId = resolveProductId(operation, context)
     return productId ? { id: productId } : {}
   }
-  if (operation.type === 'migrate_subscription_price') return { id: operation.subscriptionId }
   return entry.evidence ?? {}
 }
 
@@ -1164,10 +1108,7 @@ function assertOperationPrecondition(snapshot, plan, operation, context, entry) 
     return { alreadyApplied: false }
   }
   if (operation.type === 'create_product') {
-    // create_product's own params never carry metadata (a later update_product
-    // sets it once the product/price IDs exist), so identity must resolve
-    // through productCatalogId's plan_id/product_family reader against the
-    // operation's planId, not operation.params.metadata.
+    // Resolve product identity consistently through plan_id/product_family.
     const duplicate = snapshot.products.find(candidate =>
       candidate.active !== false
       && productCatalogId(candidate) !== ''
@@ -1195,23 +1136,11 @@ function assertOperationPrecondition(snapshot, plan, operation, context, entry) 
     if (productId) assertSignedProductPrecondition(snapshot, plan, productId, planId)
     return { alreadyApplied: false }
   }
-  if (operation.type === 'migrate_subscription_price') {
-    const current = findCurrentSubscription(snapshot, operation.subscriptionId)
-    if (!current || !valuesEqual(current, operation.expected)) {
-      throw new Error(`Provider snapshot drift detected for subscription ${operation.subscriptionId}.`)
-    }
-    const priceId = resolveReference(operation.price, context)
-    const target = typeof priceId === 'string' ? findCurrentPrice(snapshot, priceId) : null
-    if (!target || target.active === false) {
-      throw new Error(`Provider precondition failed: replacement price for subscription ${operation.subscriptionId} is not active.`)
-    }
-    return { alreadyApplied: false }
-  }
   throw new Error(`Unsupported Stripe catalog operation: ${operation.type}`)
 }
 
 async function assertCanonicalReadiness(plan, snapshot, filesAdapter) {
-  assertCatalogAccountBinding(plan, snapshot)
+  assertCatalogSnapshotBoundary(plan, snapshot)
   const remainingPlan = buildCatalogPlan({
     snapshot,
     imageFiles: imageFilesFromPlan(plan),
@@ -1234,9 +1163,12 @@ async function assertCanonicalReadiness(plan, snapshot, filesAdapter) {
   return remainingPlan
 }
 
-function assertCatalogAccountBinding(plan, snapshot) {
+function assertCatalogSnapshotBoundary(plan, snapshot) {
   if (snapshot.accountId !== plan.accountId) {
     throw new Error(`Stripe catalog plan belongs to account ${plan.accountId}, not ${snapshot.accountId}.`)
+  }
+  if (!valuesEqual(snapshot.subscriptions, plan.providerSnapshot.subscriptions)) {
+    throw new Error('Provider subscription contracts changed since catalog review; prices, quantities and renewal terms must remain unchanged.')
   }
 }
 
@@ -1254,7 +1186,6 @@ export class CatalogApplyIncompleteError extends Error {
 export async function applyCatalogPlan({
   plan,
   confirmedSha256,
-  key,
   readAdapter,
   mutationAdapter,
   filesAdapter,
@@ -1265,7 +1196,8 @@ export async function applyCatalogPlan({
     throw new Error('Stripe catalog apply requires an explicit journal path.')
   }
   assertCatalogPlanSchema(plan)
-  assertCatalogModeKey(key, requiredMode)
+  if (typeof readAdapter?.assertMode !== 'function') throw new Error('Stripe catalog apply requires an authenticated provider mode guard.')
+  await readAdapter.assertMode(requiredMode)
   const hash = assertPlanIntegrity(plan, confirmedSha256)
   if (plan.accountMode !== requiredMode) throw new Error(`Stripe catalog apply requires a ${requiredMode}-mode plan.`)
   if (!Array.isArray(plan.operations)) throw new Error('Stripe catalog plan operations must be an array.')
@@ -1282,7 +1214,7 @@ export async function applyCatalogPlan({
   }
 
   const initialSnapshot = await readCatalogSnapshot(readAdapter, { accountMode: plan.accountMode })
-  assertCatalogAccountBinding(plan, initialSnapshot)
+  assertCatalogSnapshotBoundary(plan, initialSnapshot)
   let journal
   const journalExists = existsSync(journalPath)
   if (journalExists) {
@@ -1333,16 +1265,6 @@ export async function applyCatalogPlan({
       const result = await mutationAdapter.prices.update(operation.priceId, { active: false }, requestOptions)
       return mutationEvidence(result, { id: operation.priceId })
     }
-    if (operation.type === 'migrate_subscription_price') {
-      const price = resolveReference(operation.price, context)
-      if (typeof price !== 'string') throw new Error(`Unable to resolve the replacement price for subscription ${operation.subscriptionId}.`)
-      // Same amount for the included locations, so nothing is prorated.
-      const result = await mutationAdapter.subscriptions.update(operation.subscriptionId, {
-        items: [{ id: operation.itemId, price, quantity: operation.quantity }],
-        proration_behavior: 'none',
-      }, requestOptions)
-      return mutationEvidence(result, { id: operation.subscriptionId })
-    }
     if (operation.type === 'update_product') {
       const productId = resolveProductId(operation, context)
       if (!productId) throw new Error('Unable to resolve product for product update.')
@@ -1360,7 +1282,7 @@ export async function applyCatalogPlan({
     let snapshot
     try {
       snapshot = await readCatalogSnapshot(readAdapter, { accountMode: plan.accountMode })
-      assertCatalogAccountBinding(plan, snapshot)
+      assertCatalogSnapshotBoundary(plan, snapshot)
       const precondition = assertOperationPrecondition(snapshot, plan, operation, context, entry)
       if (precondition.alreadyApplied) {
         entry.status = 'applied'
@@ -1402,16 +1324,16 @@ export async function applyCatalogPlan({
   let remainingPlan
   try {
     finalSnapshot = await readCatalogSnapshot(readAdapter, { accountMode: plan.accountMode })
-    assertCatalogAccountBinding(plan, finalSnapshot)
+    assertCatalogSnapshotBoundary(plan, finalSnapshot)
     remainingPlan = buildCatalogPlan({
       snapshot: finalSnapshot,
       imageFiles: imageFilesFromPlan(plan),
       canonicalProductIds: plan.canonicalProductIds,
       scope: plan.scope,
     })
-  } catch (_error) {
+  } catch (error) {
     journal.status = 'incomplete'
-    journal.nextSafeAction = 'Review final provider drift and regenerate a new plan; this journal cannot claim completion.'
+    journal.nextSafeAction = `Review final provider drift (${sanitizeError(error).message}) and regenerate a new plan; this journal cannot claim completion.`
     persistApplyJournal(journalPath, journal)
     throw new CatalogApplyIncompleteError(
       `Stripe catalog apply could not prove zero remaining operations; status=incomplete.`,

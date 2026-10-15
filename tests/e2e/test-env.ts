@@ -81,15 +81,13 @@ export function kikuzukiTestBaseUrl() {
 /**
  * Can a tenant be reached at its own hostname here?
  *
- * No on localhost: wrangler serves every hostname from the same origin and
- * tenant resolution cannot read identity out of it, which is why those runs
- * carry x-preview-tenant instead. An iframe cannot send a header, so anything
- * that frames a tenant by URL — the onboarding preview, the page editor's
- * preview — is only exercisable where this returns true (staging and
- * production).
+ * The local Worker preserves <tenant>.localhost, so iframe previews use their
+ * real tenant hostname. Shared preview origins that require x-preview-tenant
+ * cannot convey tenant identity from an iframe URL.
  */
 export function tenantHostIsAddressable(): boolean {
-  return !usesSharedTenantHost(new URL(testBaseUrl()))
+  const base = new URL(testBaseUrl())
+  return base.hostname === 'localhost' || !usesSharedTenantHost(base)
 }
 
 export function tenantTestExtraHeaders(): Record<string, string> {

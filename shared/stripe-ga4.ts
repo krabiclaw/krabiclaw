@@ -1,5 +1,3 @@
-import { STARTER_PLAN_ID, NEW_SALE_PAID_PLAN_IDS } from './billing-model'
-
 export const STRIPE_GA4_PURCHASE_TYPES = [
   'initial_subscription',
   'subscription_renewal',
@@ -52,9 +50,9 @@ export function buildStripeSubscriptionMetadata(
   return metadata
 }
 
-const PLAN_RANK: Record<string, number> = Object.fromEntries(
-  [STARTER_PLAN_ID, ...NEW_SALE_PAID_PLAN_IDS].map((plan, rank) => [plan, rank]),
-)
+// Retired contracts can still move to a current offer or cancel. Their rank
+// remains part of those transitions even though they are no longer for sale.
+const PLAN_RANK: Record<string, number> = { free: 0, growth: 1, commerce: 2, marketing: 3, business: 3 }
 
 export function classifyStripePlanChange(
   currentPlan: string | null | undefined,
@@ -72,7 +70,7 @@ export function classifyStripePlanChange(
 
   const currentRank = PLAN_RANK[normalizedCurrent]
   if (typeof currentRank !== 'number') return null
-  return nextRank > currentRank ? 'upgrade' : 'downgrade'
+  return nextRank >= currentRank ? 'upgrade' : 'downgrade'
 }
 
 export function isStripeGa4PurchaseType(value: unknown): value is StripeGa4PurchaseType {
