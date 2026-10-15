@@ -6,6 +6,48 @@ import type { TodayFeedPayload } from '../../shared/dashboard-today'
 
 const ORG = '/dashboard/ember-slice-demo'
 
+test('Upcoming keeps its navigation and loading visible while its real first page is pending', async ({ page, baseURL }) => {
+  await loginAs(page.request, baseURL!)
+  await dismissPreviewToolbar(page)
+  await page.setViewportSize({ width: 390, height: 844 })
+  const isUpcoming = (url: URL) => url.pathname === '/api/dashboard/today' && url.searchParams.get('range') === 'upcoming'
+  const panel = page.locator('#dashboard-panel-org-today')
+  const loading = panel.locator('[aria-live="polite"] .animate-spin')
+
+  for (const phase of ['open', 'reload'] as const) {
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
+    let held = false
+    await page.route(isUpcoming, async route => {
+      if (!held) {
+        held = true
+        await pending
+      }
+      await route.continue()
+    })
+    const requested = page.waitForRequest(request => isUpcoming(new URL(request.url())))
+    try {
+      const response = phase === 'open'
+        ? await page.goto(`${ORG}?locationId=loc-demo&range=upcoming`)
+        : await page.reload()
+      expect(response?.status()).toBe(200)
+      await requested
+      await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toHaveAttribute('aria-selected', 'true')
+      await expect(page.getByRole('tab', { name: 'Today', exact: true })).toBeVisible()
+      await expect(loading).toBeVisible()
+      const completed = page.waitForResponse(response => isUpcoming(new URL(response.url())))
+      release()
+      expect((await completed).status()).toBe(200)
+      await expect(loading).toBeHidden()
+      await expect(panel.getByText('Upcoming could not be loaded', { exact: true })).toHaveCount(0)
+      await expect(page.getByRole('heading', { name: 'Your upcoming schedule', exact: true })).toBeVisible()
+    } finally {
+      release()
+      await page.unrouteAll({ behavior: 'wait' })
+    }
+  }
+})
+
 test('Today quick actions retain their item and location concern through navigation', async ({ page, baseURL }, testInfo) => {
   await loginAs(page.request, baseURL!)
   await dismissPreviewToolbar(page)

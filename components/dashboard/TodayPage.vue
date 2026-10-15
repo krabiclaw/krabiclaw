@@ -64,7 +64,7 @@
         />
       </div>
 
-      <div v-else-if="!activeLoading && !activeError" class="py-24 text-center">
+      <div v-else-if="!activeLoading && !activeError && !hasMore" class="py-24 text-center">
         <img
           src="https://imagedelivery.net/Frxyb2_d_vGyiaXhS5xqCg/0b7e08d0-6b7d-471b-2957-9845392cc200/w=224"
           alt=""
@@ -259,7 +259,6 @@ function addDays(dateKey: string, days: number): string {
 function minDate(left: string, right: string): string { return left < right ? left : right }
 
 resetUpcoming()
-if (activeRange.value === 'upcoming') await loadUpcoming()
 // Nuxt carries the previous async-data value into a new reactive key while
 // fetching. A card for the previous scope must never remain actionable.
 watch(todayKey, () => { todayData.value = undefined }, { flush: 'sync' })
@@ -283,6 +282,7 @@ watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refreshAgenda() }
 const loadMoreSentinel = ref<HTMLElement | null>(null)
 let loadMoreObserver: IntersectionObserver | null = null
 onMounted(() => {
+  if (activeRange.value === 'upcoming') void loadUpcoming()
   if (!('IntersectionObserver' in window)) return
   loadMoreObserver = new IntersectionObserver(entries => {
     if (entries.some(entry => entry.isIntersecting)) void loadMore()
@@ -293,5 +293,8 @@ watch(loadMoreSentinel, (element, previous) => {
   if (previous) loadMoreObserver?.unobserve(previous)
   if (element) loadMoreObserver?.observe(element)
 }, { flush: 'post' })
-onBeforeUnmount(() => loadMoreObserver?.disconnect())
+onBeforeUnmount(() => {
+  upcomingEpoch += 1
+  loadMoreObserver?.disconnect()
+})
 </script>
