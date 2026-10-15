@@ -125,7 +125,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.deepEqual(await db.prepare(`SELECT d.channel, d.status FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id
       WHERE e.request_id = ? AND d.purpose = 'member_reply'`).bind(ana.request_id).first(), { channel: 'email', status: 'sent' })
     const cancel = await executeGuestThreadOperation(db, { threadId: ana.request_id, organizationId: ORG, action: 'cancel', actorUserId: OWNER, idempotencyKey: 'cancel-1', env })
-    assert.equal(cancel.ok, false)
+    assert.deepEqual(cancel, { ok: false, status: 409, reason: 'invalid_transition', message: '"cancel" is not a valid action for the current state' })
     assert.equal(await db.prepare('SELECT status FROM stays WHERE id = ?').bind(ana.id).first('status'), 'confirmed')
 
     // A stay's thread leaves Current two days after its check-out date, after check-out everywhere.
