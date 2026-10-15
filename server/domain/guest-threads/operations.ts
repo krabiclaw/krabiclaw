@@ -1,3 +1,4 @@
+import { HTTPError } from 'nitro'
 import { visitRefundQueries } from '~/server/domain/payments/visit-refund'
 import { recordBookingCancelled, recordBookingDecision } from '~/server/domain/booking-analytics'
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -483,8 +484,6 @@ async function executeReply(
   context: ThreadContext,
   input: ExecuteOperationInput,
 ): Promise<OperationOutcome> {
-  const summary = await requestSummary(db, context.thread)
-  if (!summary.guestEmail) return { ok: false, status: 400, reason: 'no_guest_email' }
   const body = (input.body ?? '').trim()
   const photoInput = input.photos ?? []
   const photoCount = Array.isArray(photoInput) ? photoInput.length : photoInput.sourceIds.length
@@ -503,6 +502,24 @@ async function executeReply(
   const deliveryKey = deliveryDedupeKey(input)
   let entry = await findEntryByDedupeKey(db, dedupeKey)
   if (entry && !matchesReply(entry)) return conflict()
+  if (entry) {
+    const earlier = await getDeliveryById(db, deliveryKey)
+    if (!earlier || earlier.entry_id !== entry.id) throw new Error('Reply delivery receipt does not match its ledger entry')
+    if (isDeliverySent(earlier)) {
+      await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id, { conversationState: 'waiting_on_guest' })
+      return successfulOutcome(db, context)
+    }
+  }
+
+  // A channel conversation may retain its recorded participant after a booking
+  // revision clears contact. A new or pending send uses the stay's current email.
+  let guestEmail = context.thread.payload.guest.email
+  if (context.thread.kind === 'stay') {
+    const stay = await queryFirst<{ guest_email: string | null }>(db, 'SELECT guest_email FROM stays WHERE organization_id = ? AND request_id = ?', [context.thread.organization_id, context.thread.id])
+    if (!stay) return { ok: false, status: 404, reason: 'source_not_found' }
+    guestEmail = stay.guest_email?.trim() || null
+  }
+  if (!guestEmail) return { ok: false, status: 400, reason: 'no_guest_email' }
 
   if (!entry) {
     const entryId = crypto.randomUUID()
@@ -543,7 +560,7 @@ async function executeReply(
             WHERE id = ? AND request_id = ?
             ON CONFLICT(id) DO NOTHING
           `,
-          params: [deliveryId, emailProvider(input.env, summary.guestEmail), now, now, entryId, context.thread.id],
+          params: [deliveryId, emailProvider(input.env, guestEmail), now, now, entryId, context.thread.id],
         },
         ...messagePhotoPlacements(organizationId, entryId, assetIds, now),
       ], { operation: 'guest thread reply receipt' })
@@ -573,7 +590,7 @@ async function executeReply(
   const outcome = await deliverGuestThreadEmail(db, {
     delivery,
     env: input.env,
-    to: summary.guestEmail,
+    to: guestEmail,
     fromName,
     subject: replySubject(context.thread.kind, fromName),
     email: await renderMemberReply(input.env, db, context.thread.organization_id, fromName, entry),
@@ -585,7 +602,10 @@ async function executeReply(
     await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id, { conversationState: 'waiting_on_guest' })
     return await successfulOutcome(db, context)
   }
-  return { ok: false, status: 502, reason: 'delivery_failed', message: outcome.error ?? 'Email provider rejected the reply' }
+  if (typeof outcome.error !== 'string' || !outcome.error.trim()) {
+    throw new HTTPError({ statusCode: 502, statusMessage: 'Failed email delivery did not provide its error', data: { code: 'INVALID_DELIVERY_RESPONSE', field: 'error' } })
+  }
+  return { ok: false, status: 502, reason: 'delivery_failed', message: outcome.error }
 }
 
 const ENDED_OCCURRENCE_MESSAGE = 'This conversation is past because its booking has ended'

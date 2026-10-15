@@ -1446,7 +1446,8 @@ test.describe('dashboard pane hierarchy', () => {
     const productId = (await response.json() as { product: { id: string } }).product.id
     let pageId: string | null = null
     try {
-      await expect(page).toHaveURL(new RegExp(`${services}/products/${productId}(/photo)?$`))
+      await expect(page).toHaveURL(`${services}/products/${productId}/price`)
+      await expectPanes(page, ['product', 'product-price'])
       // Read back through other paths than the one that wrote it.
       const product = (await (await page.request.get(`${editor}/products/${productId}`)).json() as { product: { kind: string; active: boolean; name: string; variants: unknown[]; publications: Array<{ published: boolean }>; booking: unknown; page: { id: string; path: string; title: string } | null } }).product
       expect(product).toMatchObject({ kind: 'service', active: false, name, publications: [{ published: false }], booking: null })

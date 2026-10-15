@@ -461,7 +461,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     let sourceFiles = files
     assert(ledger.length > 0, 'Source migration ledger is missing')
     let recognized = false
-    for (const directory of [MIGRATIONS_DIRECTORY, 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11', 'migrations-history/v10', 'migrations-history/v9', 'migrations-history/v8', 'migrations-history/v7']) {
+    for (const directory of [MIGRATIONS_DIRECTORY, 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11', 'migrations-history/v10', 'migrations-history/v9', 'migrations-history/v8', 'migrations-history/v7']) {
       const candidates = readdirSync(resolve(directory)).filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort()
       if (ledger.length > candidates.length || !ledger.every((name, index) => name === candidates[index])) continue
       const expected = new Database(':memory:')
@@ -564,13 +564,13 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       stage.exec(normalizedTable)
     }
     // An older archived chain reaches v11 through v11's forward migrations, which the v12 baseline absorbed.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v11').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v11', name), 'utf8'))
       }
     }
     // An older archived chain reaches v12 through v12's forward migrations, which the v13 baseline absorbed.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v12').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v12', name), 'utf8'))
       }
@@ -589,7 +589,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // start empty; existing booking commitments and source languages keep every
     // recorded fact. The new nullable fields stay unknown until an owner sets
     // them or a native financial event supplies its actual billing basis.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v13').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v13', name), 'utf8'))
       }
@@ -618,7 +618,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     }
     // v15 relaxes the calendar group CHECK only. Older chains still pass
     // through v14's canonical content data migration before the exact copy.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v14').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v14', name), 'utf8'))
       }
@@ -662,19 +662,31 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     // retired public OAuth flag, team member times, the Google Ads provider,
     // invite links, full-remaining refunds and payment intents). Older chains pass through it before the exact copy; a v16
     // source already ran its pending ones above.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v16'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v17', 'migrations-history/v16'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v16').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v16', name), 'utf8'))
       }
     }
-    if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
-      // The current baseline introduced tables an older chain never had (v17's
-      // places to stay). A forward migration may change one of them, so the
-      // stage gets each one, empty, before the forward chain runs.
-      for (const statement of baseSql.split('--> statement-breakpoint')) {
+    // A baseline can introduce tables an older chain never had (v17's places to
+    // stay), and a later forward migration may change one of them, so the stage
+    // gets each such table, empty, before that chain's forward migrations run.
+    const withBaselineTables = baseline => {
+      for (const statement of baseline.split('--> statement-breakpoint')) {
         const table = statement.match(/CREATE TABLE `([^`]+)`/u)?.[1]
         if (table && !tableNames(stage).includes(table)) stage.exec(statement)
       }
+    }
+    // v18 absorbs v17's deployed forward chain (Channex connections, channel
+    // mappings, the sync log, night pushes and stay threads). Older chains pass
+    // through it before the exact copy; a v17 source already ran its pending ones above.
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v17'].includes(sourceDirectory)) {
+      withBaselineTables(readFileSync('migrations-history/v17/0000_baseline.sql', 'utf8'))
+      for (const name of readdirSync('migrations-history/v17').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
+        stage.exec(readFileSync(resolve('migrations-history/v17', name), 'utf8'))
+      }
+    }
+    if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
+      withBaselineTables(baseSql)
       for (const name of files.slice(1)) stage.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8'))
     }
     const names = tableNames(stage)

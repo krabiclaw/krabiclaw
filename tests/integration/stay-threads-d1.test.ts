@@ -13,7 +13,7 @@ import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
 // A stay's guest conversation lives in the one inbox: a host stay with a guest
-// email opens it, a channel booking opens it once, the member who looks after
+// email or phone opens it, a channel booking opens it once, the member who looks after
 // the home sees it, it moves to Past after check-out, it is answered like any
 // thread, and a stay is changed from its own screen rather than its thread.
 
@@ -67,7 +67,14 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     })
     assert.deepEqual(await opening(ana.request_id), { actor_kind: 'member', actor_user_id: OWNER, channel: 'system' })
 
-    // Without an email there is nothing to converse through; adding one later opens it.
+    // A guest reachable by phone alone has a thread too; a reply has no address to go to and says so.
+    const dee = await createStay(db, {}, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(30), check_out_date: day(31), adults: 1, guest_name: 'Dee', guest_phone: '+15557770000', total_minor: 15_000 })
+    assert.ok(dee.request_id)
+    assert.deepEqual(JSON.parse((await thread(dee.request_id))!.payload_json).guest, { name: 'Dee', email: null, phone: '+15557770000' })
+    assert.deepEqual(await executeGuestThreadOperation(db, { threadId: dee.request_id, organizationId: ORG, action: 'reply', body: 'Hi', actorUserId: OWNER, idempotencyKey: 'dee-reply', env }),
+      { ok: false, status: 400, reason: 'no_guest_email' })
+
+    // With neither an email nor a phone there is nothing to converse through; adding an email later opens it.
     const bo = await createStay(db, {}, manager, { product_id: cabin.id, idempotency_key: 'bo', check_in_date: day(10), check_out_date: day(12), adults: 1, guest_name: 'Bo', total_minor: 30_000 })
     assert.equal(bo.request_id, null)
     const boWithEmail = await updateStay(db, {}, manager, bo.id, { expected_version: bo.version, guest_email: 'bo@example.test' })
@@ -77,6 +84,18 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     const boAgain = await updateStay(db, {}, manager, bo.id, { expected_version: boWithEmail.version, guest_surname: 'Lee', guest_phone: '+15559990000' })
     assert.equal(boAgain.request_id, boWithEmail.request_id)
     assert.deepEqual(JSON.parse((await thread(boAgain.request_id!))!.payload_json).guest, { name: 'Bo Lee', email: 'bo@example.test', phone: '+15559990000' })
+    // Clearing one contact is reflected exactly; clearing the last is refused before either row changes.
+    const boByEmail = await updateStay(db, {}, manager, bo.id, { expected_version: boAgain.version, guest_phone: null })
+    assert.deepEqual(JSON.parse((await thread(boByEmail.request_id!))!.payload_json).guest, { name: 'Bo Lee', email: 'bo@example.test', phone: null })
+    const boByPhone = await updateStay(db, {}, manager, bo.id, { expected_version: boByEmail.version, guest_email: null, guest_phone: '+15559990000' })
+    assert.deepEqual(JSON.parse((await thread(boByPhone.request_id!))!.payload_json).guest, { name: 'Bo Lee', email: null, phone: '+15559990000' })
+    await assert.rejects(updateStay(db, {}, manager, bo.id, { expected_version: boByPhone.version, guest_phone: null }), {
+      status: 422, data: { code: 'STAY_THREAD_CONTACT_REQUIRED', fields: ['guest_email', 'guest_phone'] },
+    })
+    assert.deepEqual(await db.prepare('SELECT guest_email, guest_phone, request_id, version FROM stays WHERE id = ?').bind(bo.id).first(), {
+      guest_email: null, guest_phone: '+15559990000', request_id: boByPhone.request_id, version: boByPhone.version,
+    })
+    assert.deepEqual(JSON.parse((await thread(boByPhone.request_id!))!.payload_json).guest, { name: 'Bo Lee', email: null, phone: '+15559990000' })
     // Two edits race on one version, one bringing an address and one not. Whichever is saved, the
     // thread follows the stay as saved: none when no address was saved, never the losing edit's.
     const cy = await createStay(db, {}, manager, { product_id: cabin.id, idempotency_key: 'cy', check_in_date: day(14), check_out_date: day(16), adults: 1, guest_name: 'Cy', total_minor: 30_000 })
@@ -93,7 +112,7 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     const booking = {
       provider: 'channex' as const, external_booking_id: 'bk-1', channel: 'airbnb' as const, channel_booking_id: 'HMABC', revision_id: 'rev-1', provider_updated_at: '2026-10-15T00:00:00Z',
       cancelled: false, check_in_date: day(20), check_out_date: day(23), adults: 2, children: 0, infants: 0,
-      guest_name: 'Kai', guest_surname: null, guest_email: 'kai@guest.airbnb.example', guest_phone: null, total_minor: 50_000, currency: 'USD',
+      guest_name: 'Kai', guest_surname: null, guest_email: 'kai@guest.airbnb.example', guest_phone: '+15558880000', total_minor: 50_000, currency: 'USD',
     }
     const kai = await applyChannelBooking(db, ORG, cabin.id, booking)
     assert.ok(kai.request_id)
@@ -101,20 +120,42 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.deepEqual(await opening(kai.request_id), { actor_kind: 'system', actor_user_id: null, channel: 'system' })
     const kaiRevised = await applyChannelBooking(db, ORG, cabin.id, { ...booking, revision_id: 'rev-2', provider_updated_at: '2026-10-15T01:00:00Z', adults: 3 })
     assert.equal(kaiRevised.request_id, kai.request_id)
+    const kaiReply = { threadId: kai.request_id, organizationId: ORG, action: 'reply' as const, body: 'Hi Kai', actorUserId: OWNER, idempotencyKey: 'kai-sent', env }
+    const kaiSent = await executeGuestThreadOperation(db, kaiReply)
+    assert.deepEqual([kaiSent.ok, kaiSent.status], [true, 200])
+    // A channel can clear optional guest data. Its revision lands and its
+    // conversation keeps its recorded participant, which is never a reply route.
+    const kaiCleared = await applyChannelBooking(db, ORG, cabin.id, { ...booking, revision_id: 'rev-3', provider_updated_at: '2026-10-15T02:00:00Z', guest_name: null, guest_email: null, guest_phone: null })
+    assert.equal(kaiCleared.applied, true)
+    assert.deepEqual(await db.prepare('SELECT guest_name, guest_email, guest_phone, request_id, revision_id, version FROM stays WHERE id = ?').bind(kai.id).first(), {
+      guest_name: null, guest_email: null, guest_phone: null, request_id: kai.request_id, revision_id: 'rev-3', version: kaiRevised.version + 1,
+    })
+    assert.deepEqual(JSON.parse((await thread(kai.request_id))!.payload_json).guest, { name: 'Kai', email: 'kai@guest.airbnb.example', phone: '+15558880000' })
+    const kaiReplay = await executeGuestThreadOperation(db, kaiReply)
+    assert.deepEqual([kaiReplay.ok, kaiReplay.status], [true, 200])
+    assert.deepEqual(await executeGuestThreadOperation(db, { threadId: kai.request_id, organizationId: ORG, action: 'reply', body: 'Hi Kai', actorUserId: OWNER, idempotencyKey: 'kai-no-email', env }),
+      { ok: false, status: 400, reason: 'no_guest_email' })
+    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM stay_nights WHERE stay_id = ?').bind(kai.id).first('n'), 3)
+    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM activity_entries WHERE request_id = ?').bind(kai.request_id).first('n'), 2)
+    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id WHERE e.request_id = ?').bind(kai.request_id).first('n'), 1)
+    assert.equal(await findSubmissionByPhone(db, '+15558880000'), undefined)
+    await applyChannelBooking(db, ORG, cabin.id, { ...booking, revision_id: 'rev-4', provider_updated_at: '2026-10-15T03:00:00Z', guest_name: null, guest_email: null, guest_phone: ' +15556660000 ' })
+    assert.deepEqual(await findSubmissionByPhone(db, '+15556660000'), { submissionType: 'stay', submissionId: kai.request_id, organizationId: ORG })
+    assert.equal(await findSubmissionByPhone(db, '+15558880000'), undefined)
     // A channel's blank address is no address: no thread opens on it.
-    const blank = await applyChannelBooking(db, ORG, cabin.id, { ...booking, external_booking_id: 'bk-blank', check_in_date: day(40), check_out_date: day(41), guest_email: ' ' })
+    const blank = await applyChannelBooking(db, ORG, cabin.id, { ...booking, external_booking_id: 'bk-blank', check_in_date: day(40), check_out_date: day(41), guest_email: ' ', guest_phone: '' })
     assert.equal(blank.request_id, null)
-    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM requests WHERE kind = 'stay'").first('n'), 4)
+    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM requests WHERE kind = 'stay'").first('n'), 5)
 
     // The inbox lists them with their nights; the member who looks after the home sees them, another member does not.
     const principal = (userId: string, role: string) => memberAccessPrincipal({ userId, role, organizationId: ORG }, { env })
     const listed = await listGuestThreads(db, ORG, { userId: OWNER, type: 'stay' })
-    assert.deepEqual(listed.map(row => row.id).sort(), [ana.request_id, boWithEmail.request_id, cyThread, kai.request_id].sort())
+    assert.deepEqual(listed.map(row => row.id).sort(), [ana.request_id, boWithEmail.request_id, cyThread, dee.request_id, kai.request_id].sort())
     const anaRow = listed.find(row => row.id === ana.request_id)!
     const nights = (from: string, to: string) => [from, to].map(date => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' }).format(new Date(`${date}T00:00:00Z`)))
     const [anaIn, anaOut] = nights(day(3), day(6))
     assert.deepEqual([anaRow.submissionType, anaRow.whenLabel, anaRow.operationalStatusLabel, anaRow.mailbox], ['stay', `${anaIn} – ${anaOut} · 2 guests`, 'Confirmed', 'current'])
-    assert.equal((await listGuestThreads(db, ORG, { userId: CLEANER, principal: principal(CLEANER, 'member') })).length, 4)
+    assert.equal((await listGuestThreads(db, ORG, { userId: CLEANER, principal: principal(CLEANER, 'member') })).length, 5)
     assert.deepEqual(await listGuestThreads(db, ORG, { userId: OUTSIDER, principal: principal(OUTSIDER, 'member') }), [])
 
     // The thread is answered like any other; a stay is changed from its own screen, not its thread.
@@ -139,6 +180,17 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     assert.deepEqual(await findSubmissionByPhone(db, '+15551230000'), { submissionType: 'stay', submissionId: ana.request_id, organizationId: ORG })
     await db.prepare("UPDATE stays SET status = 'cancelled', cancelled_at = '2026-10-15T00:00:00.000Z' WHERE id = ?").bind(ana.id).run()
     assert.equal(await findSubmissionByPhone(db, '+15551230000'), undefined)
+
+    // A cancellation with no current guest data releases the channel's nights
+    // without deleting its conversation, history, or creating a delivery.
+    const kaiCancelled = await applyChannelBooking(db, ORG, cabin.id, { ...booking, revision_id: 'rev-5', provider_updated_at: '2026-10-15T04:00:00Z', cancelled: true, guest_name: null, guest_email: null, guest_phone: null })
+    assert.equal(kaiCancelled.applied, true)
+    assert.deepEqual(await db.prepare('SELECT status, request_id, revision_id FROM stays WHERE id = ?').bind(kai.id).first(), { status: 'cancelled', request_id: kai.request_id, revision_id: 'rev-5' })
+    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM stay_nights WHERE stay_id = ?').bind(kai.id).first('n'), 0)
+    assert.deepEqual(JSON.parse((await thread(kai.request_id))!.payload_json).guest, { name: 'Kai', email: 'kai@guest.airbnb.example', phone: '+15558880000' })
+    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM requests WHERE kind = 'stay'").first('n'), 5)
+    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM activity_entries WHERE request_id = ?').bind(kai.request_id).first('n'), 2)
+    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id WHERE e.request_id = ?').bind(kai.request_id).first('n'), 1)
   } finally {
     await runtime.dispose()
   }

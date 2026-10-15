@@ -135,7 +135,7 @@ export async function assertRoleAllows(
   input: { organizationId: string; role: string; permissions: OrganizationPermissions; message?: string },
 ): Promise<void> {
   if (await roleAllows(input)) return
-  throw new HTTPError({ statusCode: 403, message: input.message ?? 'Access denied' })
+  throw new HTTPError({ statusCode: 403, message: input.message ?? 'Access denied', data: { code: 'FORBIDDEN', field: 'permissions' } })
 }
 
 // All surfaces use the provider adapter with the configured organization options.

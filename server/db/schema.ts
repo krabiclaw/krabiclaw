@@ -116,7 +116,7 @@ export const requests = sqliteTable("requests", {
 	check("requests_instants_check", sql`(resolved_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', resolved_at, '+0 days') IS resolved_at) AND (archived_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', archived_at, '+0 days') IS archived_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
  foreignKey({ columns: [table.organization_id, table.location_id], foreignColumns: [business_locations.organization_id, business_locations.id], name: "requests_location_scope_fk" }),
  check("requests_payload_check", sql`json_valid(payload_json) AND json_type(payload_json) = 'object'`),
- check("requests_guest_payload_check", sql`(json_type(payload_json, '$.guest.name') IS 'text' AND json_type(payload_json, '$.guest.email') IS 'text' AND (json_type(payload_json, '$.guest.phone') IS 'text' OR json_type(payload_json, '$.guest.phone') IS 'null'))`),
+ check("requests_guest_payload_check", sql`(json_type(payload_json, '$.guest.name') IS 'text' AND (json_type(payload_json, '$.guest.email') IS 'text' OR (kind = 'stay' AND json_type(payload_json, '$.guest.email') IS 'null')) AND (json_type(payload_json, '$.guest.phone') IS 'text' OR json_type(payload_json, '$.guest.phone') IS 'null') AND (json_type(payload_json, '$.guest.email') IS 'text' OR json_type(payload_json, '$.guest.phone') IS 'text'))`),
  check("requests_message_payload_check", sql`kind <> 'contact' OR json_type(payload_json, '$.message') IS 'text'`),
  check("requests_scope_check", sql`organization_id IS NOT NULL`),
  check("requests_state_check", sql`conversation_state IS NOT NULL`),
@@ -1168,7 +1168,7 @@ export const stays = sqliteTable("stays", {
 	guest_phone: text(),
 	user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
 	// The guest conversation about this stay, in the one inbox. NULL when the
-	// stay has no guest contact to converse with. Losing the thread does not
+	// stay has no guest email or phone to converse with. Losing the thread does not
 	// lose the stay. Its writer keeps it in the stay's organization; a
 	// composite FK here would rebuild stays and cascade its nights and payments.
 	request_id: text().references((): AnySQLiteColumn => requests.id, { onDelete: "set null" }),

@@ -61,7 +61,9 @@ export const guestRequestSchema = z.discriminatedUnion('kind', [
   }) }),
   threadScope.extend({ kind: z.literal('reservation'), payload: threadPayload.extend({ guest: guest.extend({ phone: z.string() }) }) }),
   threadScope.extend({ kind: z.literal('booking'), payload: threadPayload }),
-  threadScope.extend({ kind: z.literal('stay'), payload: z.object({ guest }) }),
+  // A stay's guest may be reachable by phone alone; the database requires an email or a phone.
+  threadScope.extend({ kind: z.literal('stay'), payload: z.object({ guest: guest.extend({ email: z.string().nullable() })
+    .refine(contact => contact.email !== null || contact.phone !== null, 'A stay conversation needs the guest\'s email or phone') }) }),
 ])
 export type GuestRequest = z.infer<typeof guestRequestSchema>
 export type BookingRequest = Extract<GuestRequest, { kind: 'reservation' | 'booking' }>
@@ -221,11 +223,13 @@ export function requestInsertQueries(request: Omit<GuestRequest, 'archived_at' |
  * stays row as committed, never from the caller: a write that lost its version
  * race opens nothing with details that were not saved.
  *
- * A stay whose guest has a name and an email opens a thread once; a later write
- * that brings the email opens it then. The host who took the stay, or the
+ * A stay whose guest has a name and an email or a phone opens a thread once; a
+ * later write that brings one opens it then. The host who took the stay, or the
  * channel it came from, opens it. A thread already open takes the stay's current
- * guest and home location; its address is the last one the guest gave, since a
- * conversation cannot lose the address it is held at (requests_guest_payload_check).
+ * guest and home location exactly for a host edit. A channel revision always
+ * lands; when it no longer supplies a complete named contact, the conversation
+ * retains its recorded participant as history. Reply routing reads the stay's
+ * current contact, never that historical participant.
  */
 export function stayThreadQueries(input: { organizationId: string; stayId: string; now: string; openedBy: { userId: string } | 'channel' }): BatchQuery[] {
   const id = crypto.randomUUID()
@@ -233,20 +237,21 @@ export function stayThreadQueries(input: { organizationId: string; stayId: strin
   const stay = `stays st JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
     WHERE st.id = ? AND st.organization_id = ?`
   const name = "trim(coalesce(st.guest_name, '') || ' ' || coalesce(st.guest_surname, ''))"
-  // A blank address is no address: it neither opens a thread nor replaces the one the thread holds.
+  // Blank contacts are absent; a complete participant has a name and at least one contact.
   const email = "nullif(trim(st.guest_email), '')"
+  const phone = "nullif(trim(st.guest_phone), '')"
+  const participant = `json_set(payload_json, '$.guest.name', ${name}, '$.guest.email', ${email}, '$.guest.phone', ${phone})`
   return [{
     query: `UPDATE requests SET location_id = c.location_id,
-        payload_json = json_set(payload_json, '$.guest.name', coalesce(nullif(${name}, ''), json_extract(payload_json, '$.guest.name')),
-          '$.guest.email', coalesce(${email}, json_extract(payload_json, '$.guest.email')), '$.guest.phone', st.guest_phone)
+        payload_json = ${host ? participant : `CASE WHEN ${name} <> '' AND (${email} IS NOT NULL OR ${phone} IS NOT NULL) THEN ${participant} ELSE payload_json END`}
       FROM ${stay} AND requests.id = st.request_id AND requests.kind = 'stay'`,
     params: [input.stayId, input.organizationId],
   }, {
     // A booking the channel brought is new to the host; one the host took waits on its guest.
     query: `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, conversation_state, resolved_at, payload_json, created_at, updated_at)
       SELECT ?, 'stay', st.organization_id, c.location_id, NULL, NULL, ?, NULL,
-        json_object('guest', json_object('name', ${name}, 'email', ${email}, 'phone', st.guest_phone)), ?, ?
-      FROM ${stay} AND st.request_id IS NULL AND ${email} IS NOT NULL AND ${name} <> ''`,
+        json_object('guest', json_object('name', ${name}, 'email', ${email}, 'phone', ${phone})), ?, ?
+      FROM ${stay} AND st.request_id IS NULL AND (${email} IS NOT NULL OR ${phone} IS NOT NULL) AND ${name} <> ''`,
     params: [id, host ? 'waiting_on_guest' : 'needs_attention', input.now, input.now, input.stayId, input.organizationId],
   }, {
     query: `INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, payload_json, dedupe_key, sequence, occurred_at, created_at)

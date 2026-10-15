@@ -66,7 +66,7 @@ export interface Stay {
   provider: 'channex' | null
   external_booking_id: string | null
   channel_booking_id: string | null
-  /** The guest conversation about this stay in the inbox; null when the guest has no email to write to. */
+  /** The guest conversation in the inbox; null until a named contact opens one. An existing conversation is retained. */
   request_id: string | null
   cancelled_at: string | null
   cancellation_reason: string | null
@@ -141,6 +141,16 @@ const TIME = /^([01]\d|2[0-3]):[0-5]\d$/
 
 function fail(statusCode: number, code: string, message: string, field?: string): never {
   throw new HTTPError({ statusCode, statusMessage: message, data: { code, ...(field ? { field } : {}) } })
+}
+
+function locationFailure(result: { status: number; data: unknown }): never {
+  const data = result.data
+  if (typeof data !== 'object' || data === null) fail(502, 'INVALID_LOCATION_RESPONSE', 'Location operation returned invalid error data', 'data')
+  const error = 'error' in data ? data.error : undefined
+  const code = 'code' in data ? data.code : undefined
+  if (typeof error !== 'string' || !error.trim()) fail(502, 'INVALID_LOCATION_RESPONSE', 'Location operation did not return its error message', 'data.error')
+  if (typeof code !== 'string' || !code.trim()) fail(502, 'INVALID_LOCATION_RESPONSE', 'Location operation did not return its error code', 'data.code')
+  throw new HTTPError({ statusCode: result.status, statusMessage: error, data })
 }
 
 function date(value: unknown, field: string): string {
@@ -380,10 +390,7 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   // The product's checks are the ones a valid request can still fail, so it is written first.
   if (zone !== null && zone !== home.timezone) {
     const moved = await updateLocation(db as D1Database, access.organizationId, home.location_id, { timezone: zone }, access.actorId, env)
-    if (moved.status !== 200) {
-      const data = moved.data as { error?: string; code?: string }
-      throw new HTTPError({ statusCode: moved.status, statusMessage: data.error ?? 'The time zone could not be changed', data: { code: data.code ?? 'LOCATION_NOT_UPDATED', field: 'timezone' } })
-    }
+    if (moved.status !== 200) locationFailure(moved)
   }
   const updated = await readStayHome(db, access, productId)
   if (!pushes || updated.channel?.status !== 'connected') return { home: updated, channel_push: null }
@@ -404,11 +411,10 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
     title: home.name, timezone: home.timezone, phone: home.phone, email: home.email,
     address: { regionCode: home.country, addressLines: [home.address], locality: home.city, administrativeArea: home.state ?? undefined, postalCode: home.zip_code ?? undefined },
   }, access.actorId, { idempotencyKey })
-  if (located.status !== 201 || !('location' in located.data)) {
-    const data = located.data as { error?: string; code?: string }
-    throw new HTTPError({ statusCode: located.status, statusMessage: data.error ?? 'The location could not be created', data: { code: data.code ?? 'LOCATION_NOT_CREATED' } })
-  }
-  const locationId = (located.data as { location: { id: string } }).location.id
+  if (located.status !== 201) locationFailure(located)
+  const location = 'location' in located.data ? located.data.location : undefined
+  if (!location || typeof location.id !== 'string' || !location.id.trim()) fail(502, 'INVALID_LOCATION_RESPONSE', 'Location creation did not return the location id', 'data.location.id')
+  const locationId = location.id
   const product = await createProduct(db, {
     organizationId: access.organizationId, actor: { actorId: access.actorId }, idempotencyKey,
     product: {
@@ -642,6 +648,9 @@ export async function updateStay(db: DbClient, env: ChannexEnv, access: StayAcce
   const current = await requireAppStay(db, access, stayId, input.expected_version)
   const home = await readStayHome(db, access, current.product_id)
   const fields = stayFields({ ...current, ...input }, home)
+  if (current.request_id !== null && fields.guest_email === null && fields.guest_phone === null) {
+    throw new HTTPError({ statusCode: 422, statusMessage: 'An existing guest conversation requires a guest email or phone', data: { code: 'STAY_THREAD_CONTACT_REQUIRED', fields: ['guest_email', 'guest_phone'] } })
+  }
   await requireChannelPush(db, env, access.organizationId, home.product_id)
   const next = current.version + 1
   const now = new Date().toISOString()
