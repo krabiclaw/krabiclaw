@@ -40,7 +40,11 @@ test('sign-in does not apply the password policy; choosing a password does', asy
     for (const email of ['without-password@proof.example', 'with-password@proof.example', 'nobody@proof.example']) {
       assert.deepEqual(await post('/sign-in/email', { email, password: 'lowercaseonly' }), rejected, email)
     }
-    assert.equal((await post('/sign-in/email', { email: 'with-password@proof.example', password: 'ProofPassword123!' })).status, 200)
+    const signedIn = await auth.handler(new Request(`${BASE}/api/auth/sign-in/email`, { method: 'POST', headers: { 'content-type': 'application/json', origin: BASE }, body: JSON.stringify({ email: 'with-password@proof.example', password: 'ProofPassword123!' }) }))
+    assert.equal(signedIn.status, 200)
+    const cookie = signedIn.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+    const session = await auth.handler(new Request(`${BASE}/api/auth/get-session`, { headers: { cookie } }))
+    assert.equal((await session.json() as { user: { id: string } }).user.id, 'with-password')
 
     // Choosing a password still meets the policy.
     assert.deepEqual(await post('/sign-up/email', { name: 'C', email: 'new@proof.example', password: 'lowercaseonly' }), { status: 400, code: 'INVALID_PASSWORD' })
