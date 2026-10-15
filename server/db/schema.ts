@@ -1250,6 +1250,45 @@ export const stay_payments = sqliteTable("stay_payments", {
 	check("stay_payments_created_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
 ]);
 
+// A place to stay as Channex and Airbnb know it, and how far its import got.
+// The Airbnb listing and channel are known from the start; the Channex
+// property, room type and rate plan are filled in as the import creates them,
+// stage by stage. import_property holds the listing details the host approved
+// (what the Channex property, room type and rate plan are created from), and
+// import_calendar the Airbnb calendar the inventory stage writes and verifies;
+// both are cleared when the import completes. Deleting the home deletes the mapping.
+export const product_channel_mappings = sqliteTable("product_channel_mappings", {
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	product_id: text().notNull(),
+	provider: text().$type<'channex'>().notNull(),
+	listing_id: text().notNull(),
+	channel_id: text().notNull(),
+	property_id: text(),
+	room_type_id: text(),
+	rate_plan_id: text(),
+	import_stage: text().$type<'property' | 'room' | 'rate' | 'inventory' | 'verify_inventory' | 'mapping' | 'activate' | 'reservations' | 'complete'>().notNull(),
+	import_property: text(),
+	import_calendar: text(),
+	enabled: integer({ mode: "boolean" }).default(false).notNull(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.product_id, table.provider], name: "product_channel_mappings_pk" }),
+	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "product_channel_mappings_home_scope_fk" }).onDelete("cascade"),
+	uniqueIndex("product_channel_mappings_listing_unique").on(table.provider, table.listing_id),
+	uniqueIndex("product_channel_mappings_property_unique").on(table.provider, table.property_id).where(sql`property_id IS NOT NULL`),
+	uniqueIndex("product_channel_mappings_room_type_unique").on(table.provider, table.room_type_id).where(sql`room_type_id IS NOT NULL`),
+	uniqueIndex("product_channel_mappings_rate_plan_unique").on(table.provider, table.rate_plan_id).where(sql`rate_plan_id IS NOT NULL`),
+	index("product_channel_mappings_org_idx").on(table.organization_id),
+	check("product_channel_mappings_provider_check", sql`provider = 'channex'`),
+	check("product_channel_mappings_stage_check", sql`import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'complete')`),
+	check("product_channel_mappings_ids_check", sql`(import_stage = 'property' OR property_id IS NOT NULL) AND (import_stage IN ('property', 'room') OR room_type_id IS NOT NULL) AND (import_stage IN ('property', 'room', 'rate') OR rate_plan_id IS NOT NULL)`),
+	check("product_channel_mappings_calendar_check", sql`import_calendar IS NULL OR (json_valid(import_calendar) AND json_type(import_calendar) = 'array')`),
+	check("product_channel_mappings_property_json_check", sql`import_property IS NULL OR (json_valid(import_property) AND json_type(import_property) = 'object')`),
+	check("product_channel_mappings_enabled_check", sql`enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('reservations', 'complete'))`),
+	check("product_channel_mappings_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
+]);
+
 // ---------------------------------------------------------------------------
 // Inventory.
 //

@@ -15,6 +15,13 @@
       "when": 1792022857692,
       "tag": "0001_channex_connections",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792023508942,
+      "tag": "0002_product_channel_mappings",
+      "breakpoints": true
     }
   ]
 }

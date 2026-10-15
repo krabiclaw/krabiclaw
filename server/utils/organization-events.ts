@@ -8,7 +8,7 @@ export type OrganizationEventType =
   | 'review.received' | 'review.replied'
   | 'location.created' | 'location.updated'
   | 'experience.created'
-  | 'stay.created' | 'stay.updated' | 'stay.cancelled' | 'stay.payment_recorded' | 'stay.payment_deleted' | 'stay.nights_changed'
+  | 'stay.created' | 'stay.updated' | 'stay.cancelled' | 'stay.payment_recorded' | 'stay.payment_deleted' | 'stay.nights_changed' | 'stay.nights_imported'
   | 'domain.connected' | 'domain.verified' | 'domain.failed'
   | 'canonical_domain_changed' | 'cloudflare_create_failed' | 'cloudflare_delete_failed'
   | 'domain_added' | 'domain_deleted' | 'domain_state_changed'
