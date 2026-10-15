@@ -135,8 +135,10 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     // Without the Channex configuration a connected home's nights are not changed at all.
     await assert.rejects(setStayNights(db, {}, manager, { product_id: connected, from: day(40), to: day(41), closed: true }), /CHANNEX_BASE_URL and CHANNEX_API_KEY are required/)
     assert.equal((await readStayCalendar(db, manager, { productId: connected, from: day(40), to: day(41) })).nights[0]!.closed, false)
-    // A home whose channel is disconnected sends nothing.
+    // A home whose channel is disconnected sends nothing, and says it is disconnected.
+    assert.deepEqual(closed.home.channel, { provider: 'channex', status: 'connected' })
     const offline = await setStayNights(db, env, manager, { product_id: local, from: day(5), to: day(6), closed: true })
+    assert.deepEqual(offline.home.channel, { provider: 'channex', status: 'disconnected' })
     assert.equal(offline.channel_push, null)
     assert.deepEqual(offline.nights.map(night => night.channel), [null])
     assert.deepEqual(channex.take(), [])

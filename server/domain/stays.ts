@@ -101,6 +101,12 @@ export interface StayHome {
   check_out_time: string
   max_guests: number
   min_nights: number
+  /**
+   * The channel this home is connected to, if any. null is a home kept only in
+   * Krabiclaw: its night changes go nowhere else. A connected home pushes its
+   * nights; one importing or disconnected does not.
+   */
+  channel: { provider: 'channex'; status: 'importing' | 'connected' | 'disconnected' } | null
 }
 
 export interface StayNight {
@@ -185,11 +191,13 @@ function requireManager(access: StayAccess): asserts access is StayAccess & { ma
 async function stayHomes(db: DbClient, access: StayAccess, productId: string | null): Promise<StayHome[]> {
   const scope = visibleHomes(access)
   const rows = await queryAll<Record<string, unknown>>(db, `
-    SELECT p.id AS product_id, p.name, c.location_id, l.timezone, o.default_currency, c.check_in_time, c.check_out_time, c.max_guests, c.min_nights
+    SELECT p.id AS product_id, p.name, c.location_id, l.timezone, o.default_currency, c.check_in_time, c.check_out_time, c.max_guests, c.min_nights,
+           m.enabled AS channel_enabled, m.import_stage AS channel_stage
       FROM product_stay_configs c
       JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
       JOIN organization o ON o.id = c.organization_id
+      LEFT JOIN product_channel_mappings m ON m.organization_id = c.organization_id AND m.product_id = c.product_id AND m.provider = 'channex'
      WHERE c.organization_id = ? ${productId ? 'AND c.product_id = ?' : ''} AND ${scope.sql}
      ORDER BY p.name, p.id`, [access.organizationId, ...(productId ? [productId] : []), ...scope.params])
   if (!rows.length) return []
@@ -207,6 +215,10 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
       product_id: String(row.product_id), name: String(row.name), location_id: String(row.location_id), timezone: String(row.timezone),
       currency: row.default_currency, base_price_minor: base ? base.unit_amount : null,
       check_in_time: String(row.check_in_time), check_out_time: String(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
+      channel: row.channel_stage === null ? null : {
+        provider: 'channex',
+        status: Number(row.channel_enabled) === 1 ? 'connected' : row.channel_stage === 'reservations' || row.channel_stage === 'complete' ? 'disconnected' : 'importing',
+      },
     }
   })
 }
