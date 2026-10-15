@@ -1,7 +1,6 @@
 import { APIError, betterAuth, type Account, type BetterAuthPlugin } from 'better-auth'
 import { createAuthMiddleware, getOAuthState, isAPIError } from 'better-auth/api'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
-import { hashPassword } from 'better-auth/crypto'
 import { DISCORD_BOT_PERMISSIONS } from '~/server/utils/discord-bot'
 import { loginMethodForPath } from '~/shared/auth/login-method'
 import { admin, anonymous, bearer, genericOAuth, getOrgAdapter, hasPermission, jwt, lastLoginMethod, organization, phoneNumber, type UserWithAnonymous } from 'better-auth/plugins'
@@ -303,6 +302,16 @@ async function prepareAccountDeletion(env: CloudflareEnv, db: ReturnType<typeof 
   if (await hasLodgingMembership(db, userId)) await deleteLodgingUser(env, userId)
 }
 
+/** Where a password is chosen, and the body field that carries it. */
+const NEW_PASSWORD_FIELD: Record<string, 'password' | 'newPassword'> = {
+  '/sign-up/email': 'password',
+  '/admin/create-user': 'password',
+  '/change-password': 'newPassword',
+  '/reset-password': 'newPassword',
+  '/set-password': 'newPassword',
+  '/admin/set-user-password': 'newPassword',
+}
+
 export function createAuth(env: CloudflareEnv) {
   if (!env?.DB) throw new HTTPError({ statusCode: 503, statusMessage: 'Database unavailable' })
   const d1 = unwrapInstrumentedD1(env.DB)
@@ -393,6 +402,15 @@ function buildAuth(env: CloudflareEnv) {
       before: createAuthMiddleware(async (ctx) => {
         if (ctx.path === '/phone-number/verify' && ctx.body?.updatePhoneNumber !== true) {
           throw new APIError('BAD_REQUEST', { message: 'A phone number is verified from your account profile, not used to sign in.' })
+        }
+        // The policy applies where a password is chosen. It is not part of
+        // password.hash: Better Auth also hashes on sign-in for an email with
+        // no password, and a policy error there tells the caller so.
+        const field = NEW_PASSWORD_FIELD[ctx.path]
+        const chosen = field ? ctx.body?.[field] : undefined
+        if (typeof chosen === 'string') {
+          const passwordError = validatePassword(chosen)
+          if (passwordError) throw APIError.from('BAD_REQUEST', { code: 'INVALID_PASSWORD', message: passwordError })
         }
       }),
       after: createAuthMiddleware(async (ctx) => {
@@ -563,18 +581,6 @@ function buildAuth(env: CloudflareEnv) {
       requireEmailVerification: true,
       minPasswordLength: 8,
       maxPasswordLength: 128,
-      password: {
-        async hash(password: string) {
-          const passwordError = validatePassword(password)
-          if (passwordError) {
-            throw APIError.from('BAD_REQUEST', {
-              code: 'INVALID_PASSWORD',
-              message: passwordError,
-            })
-          }
-          return hashPassword(password)
-        },
-      },
       autoSignIn: false,
       revokeSessionsOnPasswordReset: true,
       sendResetPassword: async ({ user, url }) => {
