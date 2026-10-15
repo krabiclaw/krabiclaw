@@ -17,6 +17,7 @@ import { requestBookingChange } from '~/server/domain/guest-threads/booking-chan
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
 import { readPaymentDetails } from '~/server/domain/payments'
+import { canRetryGuestReservationRefund } from '~/server/domain/payments/visit-refund'
 import {paymentDisplay,paymentRefundsDisplay,paymentOrderDisplay,type PaymentDisplay,type PaymentRefundDisplay,type PaymentOrderDisplay} from '~/shared/payment-display'
 
 export type DashboardBookingType = 'reservation' | 'booking'
@@ -115,6 +116,8 @@ export interface DashboardBookingDetails {
   payments: Array<{payment:PaymentDisplay;refunds:PaymentRefundDisplay[];order:PaymentOrderDisplay|null}> | null
   /** The guest's own self-service cancellation is still open. */
   guestCanCancel: boolean
+  /** An interrupted deposit refund can resume the already-recorded guest cancellation. */
+  guestCanRetryCancellation: boolean
   /** The business's phone for this booking, as the guest reaches it. */
   contactPhone: string | null
 }
@@ -299,6 +302,8 @@ async function composeBookingDetails(
   }))
   const now = new Date().toISOString()
   const complete = isBookingComplete({ status: row.status as BookingStatus, ends_at: row.ends_at }, now)
+  const guestCanRetryCancellation = Boolean(reader.buyerUserId && type === 'reservation' && row.status === 'cancelled' && row.cancellation_used_at
+    && await canRetryGuestReservationRefund(db, { organizationId: row.organization_id, reservationId: row.operational_id, requestId: row.id, buyerUserId: reader.buyerUserId }))
   return {
     assignedMemberId: row.assigned_member_id, assignedMemberName:provider?.name??null,providerConflict:Boolean(provider?.conflict),providerCalendarStatus: scheduling?.calendar_ids.length && scheduling.calendar_status !== 'ready' ? scheduling.busy_error || `Busy-calendar status: ${scheduling.calendar_status}` : null,operationalUpdatedAt:row.operational_updated_at,
     id: row.id,
@@ -341,6 +346,7 @@ async function composeBookingDetails(
     // The same rule the public cancel route applies, read here so the screen
     // does not offer a cancellation the write would refuse.
     guestCanCancel: ['pending', 'confirmed'].includes(row.status) && row.ends_at > now && !complete && !row.cancellation_used_at,
+    guestCanRetryCancellation,
     contactPhone: contact?.contactPhone ?? null,
   }
 }
@@ -475,6 +481,7 @@ async function composePurchaseDetails(db: DbClient, scope: BookingScope, payment
     locations: [],
     payments: [{ payment: paymentDisplay(detail.payment), refunds: paymentRefundsDisplay(detail.refunds), order: paymentOrderDisplay(detail.order) }],
     guestCanCancel: false,
+    guestCanRetryCancellation: false,
     contactPhone: contact?.contactPhone ?? null,
   }
 }

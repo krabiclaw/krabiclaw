@@ -24,12 +24,13 @@
             v-if="!readOnly"
             icon="i-lucide-plus"
             :aria-label="addLabel"
+            :to="addTo"
             color="neutral"
             variant="soft"
             size="sm"
             square
             data-testid="list-editor-add"
-            @click="$emit('add')"
+            @click="!addTo && $emit('add')"
           />
         </div>
       </Teleport>
@@ -175,6 +176,8 @@ const props = defineProps<{
   emptyIcon: string
   /** Names the add control for screen readers, e.g. "Add a question". */
   addLabel?: string
+  /** A creation level is a link; inline list actions keep the add event. */
+  addTo?: string
   readOnly?: boolean
   error?: string | null
   /** Lists with a persisted order gain move controls in the edit state. */

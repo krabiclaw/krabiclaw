@@ -1,8 +1,8 @@
 <template>
-  <DashboardIndexPanel id="locations" :title="locationsLabel">
+  <DashboardIndexPanel id="locations" :title="choosingHours ? 'Choose a location' : locationsLabel">
     <template #right>
       <UButton
-        v-if="organizationPaths"
+        v-if="organizationPaths && !choosingHours"
         :to="organizationPaths.newLocation"
         icon="i-lucide-plus"
         color="neutral"
@@ -39,8 +39,10 @@ import { getErrorMessage } from '~/utils/errors'
 import { resolveCmsCapabilities } from '~/config/cms-registry'
 import { resolvePublicTemplate } from '~/utils/template-registry'
 import { normalizeVertical, type OrganizationVertical } from '~/utils/vertical-copy'
+import { locationHoursPath } from '~/server/utils/dashboard-links'
 
 const route = useRoute()
+const choosingHours = computed(() => route.query.action === 'hours')
 const dashboard = useDashboardOrganization()
 const { organizationPaths } = dashboard
 
@@ -73,7 +75,7 @@ const tiles = computed<OrganizationLocationSelectorItem[]>(() => locations.value
     imageUrl: location.picture_url,
     eyebrow: '',
     summary: lines.length ? lines.join(', ') : 'Address not set',
-    to: `/dashboard/${orgSlug.value}/locations/${location.slug}`,
+    to: choosingHours.value ? locationHoursPath(orgSlug.value, location.slug) : `/dashboard/${orgSlug.value}/locations/${location.slug}`,
   }
 }))
 

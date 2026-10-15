@@ -366,6 +366,15 @@ cancellation, allocation release and full refund intent in one guarded D1 batch;
 provider retry and interrupted-refund recovery remain durable. Ordinary cancellation
 is distinct.
 
+Guest cancellation of a paid table reservation automatically refunds the remaining
+deposit unless the cancellation deadline saved with that reservation has passed.
+A saved `free_cancellation_until_minutes: null` means no deadline: cancellation
+still triggers the automatic refund. Cancelling after a configured deadline
+releases the table without an automatic refund. The reservation's saved terms,
+rather than the location's current settings, decide this outcome. Experience and
+service booking terms do not currently define an executable automatic-refund
+deadline; their guests contact the business about a refund.
+
 Buyer ownership uses Better Auth identity. Signing in on any device reads the same
 owned purchases. A guest acts on a business's own site as an anonymous Better Auth
 user. Better Auth links that guest's records when they sign in in the same browser,

@@ -36,14 +36,14 @@ async function assignedThreadScope(principal?: MemberAccessPrincipal | null) {
  * booking rather than printing a fabricated slot.
  */
 const OPERATIONAL_RECORDS_SQL = `(
-    SELECT b.request_id, b.status, b.party_size, s.starts_at, s.ends_at, s.timezone, NULL AS check_in_date, NULL AS check_out_date
+    SELECT b.request_id, b.status, b.party_size, s.starts_at, s.ends_at, s.timezone, NULL AS check_in_date, NULL AS check_out_date, b.assigned_member_id
       FROM bookings b JOIN product_sessions s ON s.id = b.product_session_id
      WHERE b.request_id IS NOT NULL
     UNION ALL
-    SELECT r.request_id, r.status, r.party_size, r.starts_at, r.ends_at, r.timezone, NULL, NULL
+    SELECT r.request_id, r.status, r.party_size, r.starts_at, r.ends_at, r.timezone, NULL, NULL, NULL
       FROM reservations r WHERE r.request_id IS NOT NULL
     UNION ALL
-    SELECT st.request_id, st.status, st.adults + st.children, ${STAY_THREAD_STARTS_SQL('st')}, ${STAY_THREAD_ENDS_SQL('st')}, l.timezone, st.check_in_date, st.check_out_date
+    SELECT st.request_id, st.status, st.adults + st.children, ${STAY_THREAD_STARTS_SQL('st')}, ${STAY_THREAD_ENDS_SQL('st')}, l.timezone, st.check_in_date, st.check_out_date, c.assigned_member_id
       FROM stays st
       JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
@@ -80,7 +80,7 @@ function mailboxFields(row: { archived_at: string | null; record_ends_at: string
 // can only concatenate the stored UTC instant.
 const SOURCE_PREVIEW_SQL = `SUBSTR(CASE WHEN gt.kind = 'contact' THEN json_extract(gt.payload_json, '$.message') ELSE NULLIF(TRIM(json_extract(gt.payload_json, '$.notes')), '') END, 1, 160)`
 
-const SOURCE_PREVIEW_COLUMNS = `op.starts_at AS record_starts_at, op.ends_at AS record_ends_at, op.timezone AS record_timezone, op.party_size AS record_party_size,
+const SOURCE_PREVIEW_COLUMNS = `op.starts_at AS record_starts_at, op.ends_at AS record_ends_at, op.timezone AS record_timezone, op.party_size AS record_party_size, op.assigned_member_id,
       op.check_in_date AS record_check_in_date, op.check_out_date AS record_check_out_date,
       json_extract(gt.payload_json, '$.party_size_is_minimum') AS party_size_is_minimum`
 
@@ -160,6 +160,10 @@ export async function getGuestThreadOperationSummary(
     where += ' AND gt.location_id = ?'
     params.push(opts.locationId)
   }
+  if (opts.assignedMemberId) {
+    where += ' AND op.assigned_member_id = ?'
+    params.push(opts.assignedMemberId)
+  }
   // The counts beside a mailbox are that mailbox's counts.
   if (opts.mailbox) {
     const mailbox = mailboxWhere(opts.mailbox, new Date().toISOString())
@@ -212,12 +216,14 @@ async function countUnreadThreadIds(
 }
 
 type GuestThreadListRow = GuestThreadRow & {
+  assigned_member_id: string | null
   guest_name: string
   location_title: string | null
   organization_name?: string | null
   organization_vertical?: string | null
   latest_message_body: string | null
   latest_message_kind: 'message' | null
+  latest_message_actor_kind: string | null
   latest_message_photos: number
   source_preview: string | null
   record_starts_at: string | null
@@ -256,6 +262,10 @@ export async function listGuestThreads(
   if (opts.locationId) {
     where += ' AND gt.location_id = ?'
     params.push(opts.locationId)
+  }
+  if (opts.assignedMemberId) {
+    where += ' AND op.assigned_member_id = ?'
+    params.push(opts.assignedMemberId)
   }
   if (opts.type) {
     where += ' AND gt.kind = ?'
@@ -304,6 +314,7 @@ export async function listGuestThreads(
         WHERE request_id = gt.id AND kind = 'message' ${opts.buyerAudience ? "AND ((actor_kind='guest' AND channel IN ('web','email','whatsapp')) OR (actor_kind='member' AND event_name='thread.member_reply'))" : ''}
         ORDER BY sequence DESC LIMIT 1
       ) AS latest_message_kind,
+      (SELECT actor_kind FROM activity_entries WHERE request_id = gt.id AND kind = 'message' ORDER BY sequence DESC LIMIT 1) AS latest_message_actor_kind,
       (
         SELECT COUNT(*) FROM media_placements mp
         WHERE mp.owner_type = 'activity_entry' AND mp.slot = 'attachments' AND mp.status = 'active'
@@ -338,6 +349,11 @@ export async function listGuestThreads(
       submissionType: row.kind,
       contextLabel: preview ?? '',
       locationLabel: row.location_title,
+      locationId: row.location_id,
+      assignedMemberId: row.assigned_member_id,
+      occurrenceAt: row.record_starts_at,
+      timeZone: row.record_timezone,
+      latestMessageFromGuest: row.latest_message_actor_kind === 'guest',
       conversationState: opts.buyerAudience ? null : row.conversation_state,
       operationalStatus: row.operational_status,
       operationalStatusLabel: row.operational_status ? formatOperationalStatusLabel(row.kind, row.operational_status) : null,
@@ -378,6 +394,10 @@ export async function listOrganizationGuestThreads(
   if (opts.locationId) {
     where += ' AND gt.location_id = ?'
     params.push(opts.locationId)
+  }
+  if (opts.assignedMemberId) {
+    where += ' AND op.assigned_member_id = ?'
+    params.push(opts.assignedMemberId)
   }
   if (opts.type) {
     where += ' AND gt.kind = ?'
@@ -427,6 +447,7 @@ export async function listOrganizationGuestThreads(
         WHERE request_id = gt.id AND kind = 'message'
         ORDER BY sequence DESC LIMIT 1
       ) AS latest_message_kind,
+      (SELECT actor_kind FROM activity_entries WHERE request_id = gt.id AND kind = 'message' ORDER BY sequence DESC LIMIT 1) AS latest_message_actor_kind,
       (
         SELECT COUNT(*) FROM media_placements mp
         WHERE mp.owner_type = 'activity_entry' AND mp.slot = 'attachments' AND mp.status = 'active'
@@ -462,6 +483,11 @@ export async function listOrganizationGuestThreads(
       submissionType: row.kind,
       contextLabel,
       locationLabel: row.location_title,
+      locationId: row.location_id,
+      assignedMemberId: row.assigned_member_id,
+      occurrenceAt: row.record_starts_at,
+      timeZone: row.record_timezone,
+      latestMessageFromGuest: row.latest_message_actor_kind === 'guest',
       conversationState: row.conversation_state,
       operationalStatus: row.operational_status,
       operationalStatusLabel: row.operational_status ? formatOperationalStatusLabel(row.kind, row.operational_status) : null,
@@ -523,7 +549,7 @@ export async function updateThreadProjectionIfLatestEntry(
   db: DbClient,
   threadId: string,
   entryId: string,
-  update: { conversationState: ConversationState },
+  update: { conversationState: ConversationState; preserveUnansweredGuestMessages?: boolean },
 ): Promise<void> {
   await execute(db, `
     UPDATE requests
@@ -541,7 +567,21 @@ export async function updateThreadProjectionIfLatestEntry(
               AND later.sequence > projected.sequence
           )
       )
-  `, [update.conversationState, update.conversationState, entryId, entryId, threadId, entryId])
+      AND (? = 0 OR NOT EXISTS (
+        SELECT 1 FROM activity_entries guest_message
+        WHERE guest_message.request_id = requests.id
+          AND guest_message.kind = 'message' AND guest_message.actor_kind = 'guest'
+          AND NOT EXISTS (
+            SELECT 1 FROM activity_entries reply
+            JOIN guest_thread_deliveries delivery ON delivery.entry_id = reply.id
+            WHERE reply.request_id = guest_message.request_id
+              AND reply.kind = 'message' AND reply.actor_kind = 'member'
+              AND reply.event_name = 'thread.member_reply'
+              AND reply.sequence > guest_message.sequence
+              AND delivery.status IN ('accepted', 'sent', 'delivered', 'read')
+          )
+      ))
+  `, [update.conversationState, update.conversationState, entryId, entryId, threadId, entryId, update.preserveUnansweredGuestMessages ? 1 : 0])
 }
 
 /**

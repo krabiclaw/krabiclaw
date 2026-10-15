@@ -5,7 +5,7 @@
     list. A payout opens as a leaf of this level.
   -->
   <DashboardIndexPanel id="earnings-payouts" title="Paid" column="reading">
-    <div class="pb-24">
+    <div>
       <UAlert v-if="error" color="error" :description="error.message" />
       <template v-else-if="data">
         <template v-if="data.configured === false">

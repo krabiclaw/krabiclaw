@@ -55,7 +55,7 @@
       </div>
     </template>
 
-    <div class="pb-28">
+    <div>
       <UAlert
         v-if="locationError"
         class="mb-6"

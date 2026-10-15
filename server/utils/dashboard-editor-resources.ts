@@ -243,19 +243,17 @@ export async function loadDashboardBlogPost(
 export async function loadDashboardProduct(
   event: H3Event,
   organizationId: string,
-  locationId: string,
+  locationId: string | null,
   productId: string,
 ) {
   const { db, organization } = await requireProductAccess(event, organizationId, productId)
   const product = await getProduct(db, organization.id, productId)
   // The catalog is organization-owned, so being offered here is what makes
   // this location's editor the right place to open it.
-  if (!product.locations.some(entry => entry.location_id === locationId)) {
+  if (locationId !== null && !product.locations.some(entry => entry.location_id === locationId)) {
     throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found at this location' })
   }
-  // Media placements are site-scoped, and the editor shows the photograph the
-  // public page shows — the same hydration the location list does, so opening
-  // one product and listing them cannot disagree about its cover.
-  const [hydrated] = await hydrateProductMedia(db, organizationId, [product])
+  // Both editor scopes show the same organization-owned media as the catalog.
+  const [hydrated] = await hydrateProductMedia(db, organization.id, [product])
   return { success: true as const, product: hydrated! }
 }

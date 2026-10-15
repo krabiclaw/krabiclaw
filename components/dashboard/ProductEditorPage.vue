@@ -195,6 +195,7 @@ function sectionPath(section: string) {
 }
 
 const organizationId = await useDashboardOrganizationId()
+const { refresh: refreshCatalog } = useProductCatalog(organizationId, ref(null))
 const dashboard = useDashboardOrganization()
 const { locations: organizationLocations, error: locationsError } = await useOrganizationLocations()
 const location = computed(() => organizationLocations.value.find(entry => entry.id === locationId.value) ?? null)
@@ -288,6 +289,7 @@ const loadError = computed(() => (loadFailure.value && !isNotFoundError(loadFail
 async function reload() {
   await refresh()
   if (loadFailure.value) throw loadFailure.value
+  await refreshCatalog()
 }
 
 // ── The weekly schedule ─────────────────────────────────
@@ -829,6 +831,7 @@ async function commit(bookingConcern?: BookingConcern) {
         method: 'PUT', body: { active: true, published: false }, validate: isRecord,
       })
       if (createCollectionId.value) await setCollectionMembership(created.product.id, createCollectionId.value, true)
+      await refreshCatalog()
       // The record it became, not the `new` form it was, so Back from a saved
       // product goes to Catalog and never to an empty Add screen.
       clearNuxtState([draftKey, createKeyName])

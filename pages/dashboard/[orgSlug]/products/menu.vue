@@ -48,10 +48,10 @@ const organizationId = await useDashboardOrganizationId()
 const locationId = useLocationScope()
 const catalog = useProductCatalog(organizationId, locationId)
 await catalog.load
-const { locations, error: locationsError } = await useOrganizationLocations()
+const { locations, error: locationsError } = await useOrganizationLocations({ includeInactive: true })
 
 const ALL_LOCATIONS = 'all'
-const locationItems = computed(() => [{ label: 'All locations', value: ALL_LOCATIONS }, ...locations.value.map(location => ({ label: location.title, value: location.id }))])
+const locationItems = computed(() => [{ label: 'All locations', value: ALL_LOCATIONS }, ...locations.value.map(location => ({ label: `${location.title}${location.status === 'active' ? '' : ` (${location.status})`}`, value: location.id }))])
 function setLocation(value: string) {
   void navigateTo(router.resolve({ path: level.path.value, query: { ...route.query, location_id: value === ALL_LOCATIONS ? undefined : value } }).fullPath)
 }

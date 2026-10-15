@@ -6,7 +6,7 @@
     :saving="post.editor.publishing.value"
     :disabled="!selected.length"
     :save-label="selected.length > 1 ? `Publish to ${selected.length}` : 'Publish'"
-    :error="post.editor.error.value ?? ''"
+    :error="post.loadError.value || post.editor.error.value || ''"
     @cancel="post.revert"
     @save="publish"
   >
@@ -106,6 +106,18 @@ const rows = computed(() => {
     }
   })
   return [website, ...social]
+})
+
+// A prepared article post arrives with Facebook chosen for review. The saved
+// connection still decides whether that choice is available and names its Page.
+const route = useRoute()
+let preparedSelectionApplied = false
+watchEffect(() => {
+  if (preparedSelectionApplied || route.query.channel !== 'facebook') return
+  const facebook = rows.value.find(row => row.channel === 'facebook')
+  if (!facebook) return
+  preparedSelectionApplied = true
+  if (facebook.selectable) selected.value = ['facebook']
 })
 
 function toggle(channel: 'organization' | SocialChannel, checked: boolean) {
