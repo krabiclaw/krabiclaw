@@ -733,6 +733,7 @@ test.describe('dashboard pane hierarchy', () => {
     const body = panel.locator(':scope > [data-slot="body"]')
     const cards = panel.getByTestId('today-card')
     await expect(cards.first()).toBeVisible()
+    await expect(page.getByTestId('dashboard-mobile-nav')).toBeVisible()
     const bodyBox = await body.boundingBox()
     expect(bodyBox).not.toBeNull()
     await page.mouse.move(bodyBox!.x + 4, bodyBox!.y + bodyBox!.height / 2)
@@ -784,6 +785,7 @@ test.describe('dashboard pane hierarchy', () => {
       } else {
         await expect(last).toBeVisible()
       }
+      await expect(nav).toBeVisible()
       const headerBefore = await header.boundingBox()
       const navBefore = await nav.boundingBox()
       const bodyBox = await body.boundingBox()
