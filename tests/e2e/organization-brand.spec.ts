@@ -95,6 +95,9 @@ function expectOnlyFamilies(loaded: Array<{ family: string }>, families: string[
 }
 
 test('Sarabun saves through Brand and renders for its Saya tenant in English, Thai and Japanese', async ({ browser, playwright }) => {
+  // Eight full navigations, fresh guest contexts, font-file checks and restoration
+  // share this journey budget; each assertion keeps its own existing deadline.
+  test.setTimeout(90_000)
   const organizationId = E2E_KIKUZUKI_ORGANIZATION_ID
   const baseURL = testBaseUrl()
   const owner = await playwright.request.newContext({ baseURL })

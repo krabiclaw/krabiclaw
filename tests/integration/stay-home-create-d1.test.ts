@@ -10,6 +10,7 @@ import createHomeRoute from '../../server/api/dashboard/stay-homes/index.post.ts
 import listHomesRoute from '../../server/api/dashboard/stay-homes/index.get.ts'
 import editHomeRoute from '../../server/api/dashboard/stay-homes/[productId].patch.ts'
 import { getLocation } from '../../server/utils/location-management.ts'
+import { createStayHome, stayHomeInput } from '../../server/domain/stays.ts'
 
 // A home added by hand through the native app's route: its details are
 // checked field by field, it becomes a new location and an unpublished stay,
@@ -65,11 +66,25 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     const count = async (table: string) => await db.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE organization_id = ?`).bind(ORG).first('n')
     const owner = await cookieFor('owner')
 
+    assert.deepEqual(await call('', 'GET'), {
+      status: 401,
+      body: { status: 401, message: 'Authentication required', data: { code: 'UNAUTHORIZED', field: 'session' } },
+    })
+
     // Each problem names its field, and nothing is written.
     assert.deepEqual(refusal(await call(owner, 'POST', { ...cabin, city: ' ' })), { status: 422, code: 'MISSING_DETAIL', field: 'city' })
     assert.deepEqual(refusal(await call(owner, 'POST', { ...cabin, country: 'us' })), { status: 422, code: 'INVALID_DETAIL', field: 'country' })
     assert.deepEqual(refusal(await call(owner, 'POST', { ...cabin, check_in_time: '3pm' })), { status: 422, code: 'INVALID_DETAIL', field: 'check_in_time' })
     assert.deepEqual(refusal(await call(owner, 'POST', { ...cabin, max_guests: 0 })), { status: 422, code: 'INVALID_DETAIL', field: 'max_guests' })
+    for (const idempotency_key of ['a'.repeat(201), '   ']) {
+      assert.deepEqual(await call(owner, 'POST', { ...cabin, idempotency_key }), {
+        status: 400, body: { error: 'idempotency_key must be 1 to 200 characters', code: 'VALIDATION_ERROR', field: 'idempotency_key' },
+      })
+    }
+    // The canonical location error reaches another domain caller intact too.
+    await assert.rejects(createStayHome(env, db, { organizationId: ORG, actorId: 'owner', manage: true }, stayHomeInput(cabin), 'a'.repeat(201)), {
+      status: 400, data: { error: 'idempotency_key must be 1 to 200 characters.', code: 'INVALID_LOCATION_FIELD', field: 'idempotency_key' },
+    })
     assert.deepEqual([await count('business_locations'), await count('products')], [0, 0])
 
     // A member who looks after homes does not add them.
@@ -78,12 +93,14 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     const home = {
       name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: null, channel: null,
     }
-    const created = await call(owner, 'POST', cabin)
+    const keyedCabin = { ...cabin, idempotency_key: 'a'.repeat(200) }
+    const created = await call(owner, 'POST', keyedCabin)
     assert.equal(created.status, 201)
     const made = created.body.home as { product_id: string; location_id: string }
     assert.deepEqual(created.body, { home: { product_id: made.product_id, location_id: made.location_id, ...home } })
     // The same key returns the same home; nothing new is made.
-    assert.deepEqual(await call(owner, 'POST', cabin), created)
+    assert.deepEqual(await call(owner, 'POST', keyedCabin), created)
+    assert.deepEqual(await call(owner, 'POST', { ...keyedCabin, idempotency_key: ` ${keyedCabin.idempotency_key} ` }), created)
     assert.deepEqual([await count('business_locations'), await count('products')], [1, 1])
 
     // Read back through other paths: the homes list, the location and the stay's publication.
@@ -99,7 +116,9 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     const second = await call(owner, 'POST', { ...cabin, idempotency_key: 'loft', name: 'River Loft', base_price_minor: undefined, state: undefined, zip_code: undefined })
     assert.equal(second.status, 201)
     assert.equal((second.body.home as { base_price_minor: number | null }).base_price_minor, null)
-    assert.deepEqual(refusal(await call(owner, 'POST', { ...cabin, idempotency_key: 'barn', name: 'Barn' })), { status: 402, code: 'LOCATION_LIMIT' })
+    assert.deepEqual(refusal(await call(owner, 'POST', { ...cabin, idempotency_key: 'barn', name: 'Barn' })), {
+      status: 402, error: 'Basic includes 2 locations. Choose Growth or Business in Billing to add more.', code: 'LOCATION_LIMIT', locations: { used: 2, covered: 2 },
+    })
     assert.deepEqual([await count('business_locations'), await count('products')], [2, 2])
 
     // Editing: each problem names its field and changes nothing.
