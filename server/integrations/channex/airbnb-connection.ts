@@ -1,10 +1,9 @@
 import { HTTPError } from 'nitro'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { createLocation } from '~/server/utils/location-management'
-import { createProduct } from '~/server/utils/product-management'
-import { importStayNights, type StayAccess } from '~/server/domain/stays'
+import { createStayHome, importStayNights, stayHomeInput, type StayAccess } from '~/server/domain/stays'
 import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
+import { isValidTimezone } from '~/utils/timezone'
 import { channexCreate, channexGet, channexRequest, ChannexError } from './client'
 import { ChannexDataError, object, relationship, string, type JsonRecord, type Resource } from './data'
 import { CALENDAR_NIGHTS, DETAIL_FIELDS, PROPERTY_TYPES, listingCalendar, listingDetails, type DetailField, type ListingDetails, type ListingNight } from './airbnb-listing'
@@ -90,7 +89,6 @@ export interface ImportInput {
   checkOutTime: unknown
 }
 
-const TIME = /^([01]\d|2[0-3]):[0-5]\d$/
 
 /** Where Airbnb sends the person back after signing in: the native app. */
 export const AIRBNB_CALLBACK = 'krabiclaw://airbnb/callback'
@@ -349,42 +347,24 @@ export class AirbnbConnection {
         return value.trim()
       }
       const values = Object.fromEntries(DETAIL_FIELDS.map(key => [key, field(key)])) as Record<DetailField, string>
-      if (!/^[A-Z]{2}$/.test(values.country) || !(PROPERTY_TYPES as readonly string[]).includes(values.propertyType)) fail(422, 'INVALID_DETAIL', 'Check the country and property type')
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(values.email)) fail(422, 'INVALID_DETAIL', 'Enter a valid contact email')
-      if (values.phone.length > 32 || values.zipCode.length > 32) fail(422, 'INVALID_DETAIL', 'The phone number or postal code is too long')
-      try { new Intl.DateTimeFormat('en', { timeZone: values.timezone }) } catch { fail(422, 'INVALID_DETAIL', 'Choose a valid time zone') }
+      if (!(PROPERTY_TYPES as readonly string[]).includes(values.propertyType)) fail(422, 'INVALID_DETAIL', 'Check the property type')
       for (const key of ['childBeds', 'infantCots'] as const) {
         if (!/^\d+$/.test(values[key]) || Number(values[key]) > details.maxGuests) fail(422, 'INVALID_DETAIL', `${key} must be between zero and the guest capacity`)
       }
       if (details.defaultOccupancy > details.maxGuests) fail(422, 'INVALID_DETAIL', "The included guest count exceeds the listing's capacity")
-      for (const [key, value] of [['checkInTime', input.checkInTime], ['checkOutTime', input.checkOutTime]] as const) {
-        if (typeof value !== 'string' || !TIME.test(value)) fail(422, 'INVALID_DETAIL', `${key} must be a 24-hour HH:MM time`)
-      }
       const organization = await queryFirst<{ default_currency: string }>(this.db, 'SELECT default_currency FROM organization WHERE id = ?', [this.organizationId])
       if (!organization || !isCurrencyCode(organization.default_currency)) throw new Error(`Organization ${this.organizationId} has no supported default currency`)
       if (details.currency !== organization.default_currency) {
         fail(422, 'CURRENCY_MISMATCH', `This listing is priced in ${details.currency} and this organization sells in ${organization.default_currency}. Import stopped; nothing was created.`)
       }
+      if (!isValidTimezone(values.timezone)) fail(422, 'INVALID_DETAIL', 'Choose a valid time zone')
       const calendar = await listingCalendar(this.env, channelId, listingId, values.timezone)
-
-      const key = `airbnb-listing:${listingId}`
-      const located = await createLocation(this.env, this.db as D1Database, this.organizationId, {
-        title: details.title, timezone: values.timezone, phone: values.phone, email: values.email,
-        address: { regionCode: values.country, addressLines: [values.address], locality: values.city, administrativeArea: values.state, postalCode: values.zipCode },
-      }, this.userId, { idempotencyKey: key })
-      if (located.status !== 201 || !('location' in located.data)) {
-        const data = located.data as { error?: string; code?: string }
-        throw new HTTPError({ statusCode: located.status, message: data.error ?? 'The location could not be created', data: { code: data.code ?? 'LOCATION_NOT_CREATED' } })
-      }
-      const locationId = (located.data as { location: { id: string } }).location.id
-      const product = await createProduct(this.db, {
-        organizationId: this.organizationId, actor: { actorId: this.userId }, idempotencyKey: key,
-        product: {
-          kind: 'stay', name: details.title,
-          variants: [{ name: details.title, prices: [{ unit_amount: provided(() => minorUnits(details.nightlyRate, organization.default_currency)), currency: organization.default_currency }] }],
-          stay: { location_id: locationId, check_in_time: input.checkInTime as string, check_out_time: input.checkOutTime as string, max_guests: details.maxGuests, min_nights: calendar[0]!.minStay, assigned_member_id: null, assigned_team_id: null },
-        },
-      })
+      // The home itself is checked and made as a home added by hand is.
+      const home = await createStayHome(this.env, this.db, this.manager(), stayHomeInput({
+        name: details.title, timezone: values.timezone, address: values.address, city: values.city, state: values.state, country: values.country,
+        zip_code: values.zipCode, phone: values.phone, email: values.email, check_in_time: input.checkInTime, check_out_time: input.checkOutTime,
+        max_guests: details.maxGuests, min_nights: calendar[0]!.minStay, base_price_minor: provided(() => minorUnits(details.nightlyRate, organization.default_currency)),
+      }), `airbnb-listing:${listingId}`)
       const property: ImportProperty = {
         title: details.title, currency: details.currency, timezone: values.timezone, property_type: values.propertyType, email: values.email, phone: values.phone,
         country: values.country, state: values.state, city: values.city, address: values.address, zip_code: values.zipCode, max_guests: details.maxGuests,
@@ -393,11 +373,11 @@ export class AirbnbConnection {
       // The nights land before the mapping: until the mapping exists a retry
       // runs this whole step again (the location and product replay by their
       // idempotency key, the nights upsert), so no import is left without its calendar.
-      await importStayNights(this.db, this.manager(), product.id, provided(() => calendar.map(night => importedNight(night, organization.default_currency))))
+      await importStayNights(this.db, this.manager(), home.product_id, provided(() => calendar.map(night => importedNight(night, organization.default_currency))))
       await execute(this.db, `INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, import_stage, import_property, import_calendar)
         VALUES (?, ?, 'channex', ?, ?, 'property', ?, ?) ON CONFLICT (product_id, provider) DO NOTHING`,
-      [this.organizationId, product.id, listingId, channelId, JSON.stringify(property), JSON.stringify(calendar)])
-      return { product_id: product.id, stage: 'property', waiting: false }
+      [this.organizationId, home.product_id, listingId, channelId, JSON.stringify(property), JSON.stringify(calendar)])
+      return { product_id: home.product_id, stage: 'property', waiting: false }
     })
   }
 
