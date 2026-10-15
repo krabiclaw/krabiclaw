@@ -93,7 +93,7 @@ useSchemaOrg(computed(() => {
 
 <style scoped>
 .kc-pricing-plans { background: #171b31; padding: 0 0 5rem; }
-.kc-pricing-plans__rail { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1.5rem; max-width: 88rem; margin: 0 auto; padding: 0 2rem; }
+.kc-pricing-plans__rail { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; max-width: 88rem; margin: 0 auto; padding: 0 2rem; }
 .kc-pricing-plans__hint { text-align: center; color: #bbc0cf; font-size: .8rem; margin: 2rem 1.5rem 0; }
 @media (max-width: 1200px) { .kc-pricing-plans__rail { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; padding: 0 1.25rem 1rem; gap: 1rem; } .kc-pricing-plans__rail > * { flex: 0 0 86%; min-width: 0; scroll-snap-align: center; } }
 </style>

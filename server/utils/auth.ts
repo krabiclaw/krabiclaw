@@ -5,7 +5,7 @@ import { hashPassword } from 'better-auth/crypto'
 import { DISCORD_BOT_PERMISSIONS } from '~/server/utils/discord-bot'
 import { loginMethodForPath } from '~/shared/auth/login-method'
 import { admin, anonymous, bearer, genericOAuth, getOrgAdapter, hasPermission, jwt, lastLoginMethod, organization, phoneNumber, type UserWithAnonymous } from 'better-auth/plugins'
-import { stripe as betterAuthStripe } from '@better-auth/stripe'
+import { stripe as betterAuthStripe, type Subscription } from '@better-auth/stripe'
 import { oauthProvider } from '@better-auth/oauth-provider'
 import { cimd } from '@better-auth/cimd'
 import { fetchCimdMetadataResource } from '~/server/utils/cimd-metadata-fetch'
@@ -41,6 +41,7 @@ import { cleanupOrganizationBeforeDelete } from '~/server/utils/tenant-deletion'
 import { APPLE_AUTHORIZATION_CODE_HEADER, exchangeAppleAuthorizationCode, revokeAppleGrant } from '~/server/utils/apple-revocation'
 import { deleteLodgingOrganization, deleteLodgingUser, hasLodgingMembership, isLodgingOrganization, notifyLodgingMembershipChanged } from '~/server/utils/lodging-service'
 import { reconcileZarazAnalytics } from '~/server/utils/zaraz-analytics'
+import { isKnownRecurringPlan, isNewSalePlan, normalizeBillingPlanId } from '~/shared/billing-model'
 
 type MemberRow = InferSelectModel<typeof schema.member>
 
@@ -393,6 +394,35 @@ function buildAuth(env: CloudflareEnv) {
       before: createAuthMiddleware(async (ctx) => {
         if (ctx.path === '/phone-number/verify' && ctx.body?.updatePhoneNumber !== true) {
           throw new APIError('BAD_REQUEST', { message: 'A phone number is verified from your account profile, not used to sign in.' })
+        }
+        // Retired prices remain configured so Better Auth can maintain their
+        // existing contracts. Their only upgrade action is changing the current
+        // contract's location quantity; Better Auth still authorizes the member
+        // and reference before performing that change.
+        const requestedPlan = ctx.path === '/subscription/upgrade' ? normalizeBillingPlanId(ctx.body?.plan) : null
+        if (isKnownRecurringPlan(requestedPlan) && !isNewSalePlan(requestedPlan)) {
+          const body = ctx.body
+          const subscription = typeof body.subscriptionId === 'string'
+            ? await ctx.context.adapter.findOne<Subscription>({ model: 'subscription', where: [{ field: 'stripeSubscriptionId', value: body.subscriptionId }] })
+            : null
+          if (!subscription || body.customerType !== 'organization' || body.referenceId !== subscription.referenceId
+            || subscription.plan !== requestedPlan || !['active', 'trialing'].includes(subscription.status)
+            || (subscription.periodEnd && subscription.periodEnd <= new Date())
+            || subscription.stripeScheduleId || subscription.cancelAtPeriodEnd
+            || (body.annual === true) !== (subscription.billingInterval === 'year')
+            || !Number.isSafeInteger(body.seats) || body.seats < 1 || body.seats === subscription.seats
+            || body.scheduleAtPeriodEnd === true) {
+            throw new APIError('BAD_REQUEST', { message: 'This plan is available only on an existing subscription. Choose Growth or Business for a new plan.' })
+          }
+          const [plans, native] = await Promise.all([
+            loadStripePlans(),
+            stripeClient.subscriptions.retrieve(subscription.stripeSubscriptionId!),
+          ])
+          const plan = plans.find(row => row.name === requestedPlan)
+          const priceId = body.annual === true ? plan?.annualDiscountPriceId : plan?.priceId
+          if (!priceId || native.items.data.filter(item => item.price.id === priceId).length !== 1) {
+            throw new APIError('BAD_REQUEST', { message: 'This subscription’s existing price cannot be changed through a location update.' })
+          }
         }
       }),
       after: createAuthMiddleware(async (ctx) => {

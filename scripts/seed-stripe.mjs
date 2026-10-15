@@ -10,6 +10,7 @@
 //   yarn stripe:catalog:plan
 //   STRIPE_SECRET_KEY=sk_test_... node scripts/seed-stripe.mjs --dry-run --plan-file .tmp/stripe-catalog-plan.json
 //   STRIPE_SECRET_KEY=sk_test_... node scripts/seed-stripe.mjs --dry-run --require-test-mode --plan-file .tmp/stripe-catalog-plan.json
+//   STRIPE_SECRET_KEY=sk_test_... node scripts/seed-stripe.mjs --dry-run --offers-only --plan-file .tmp/stripe-offers-plan.json
 //   STRIPE_SECRET_KEY=sk_test_... node scripts/seed-stripe.mjs --dry-run --retirement-only --plan-file .tmp/stripe-retirement-plan.json
 //   STRIPE_SECRET_KEY=sk_test_... node scripts/seed-stripe.mjs --apply \
 //     --plan-file .tmp/stripe-catalog-plan.json --confirm-sha256 <sha256> \
@@ -69,7 +70,7 @@ function stripeReadAdapter(stripe) {
 }
 
 function stripeMutationAdapter(stripe) {
-  return { products: stripe.products, prices: stripe.prices, subscriptions: stripe.subscriptions }
+  return { products: stripe.products, prices: stripe.prices }
 }
 
 function describeImageFiles() {
@@ -185,6 +186,7 @@ export function parseCli(argv) {
       'require-test-mode': { type: 'boolean' },
       'require-live-mode': { type: 'boolean' },
       'retirement-only': { type: 'boolean' },
+      'offers-only': { type: 'boolean' },
       'plan-file': { type: 'string' },
       'journal-file': { type: 'string' },
       'journal-path': { type: 'string' },
@@ -197,6 +199,7 @@ export function parseCli(argv) {
     allowPositionals: false,
   })
   if (values['dry-run'] && values.apply) throw new Error('Choose either --dry-run or --apply, not both.')
+  if (values['offers-only'] && values['retirement-only']) throw new Error('Choose either --offers-only or --retirement-only, not both.')
   if (values['require-test-mode'] && values['require-live-mode']) throw new Error('Choose either --require-test-mode or --require-live-mode, not both.')
   const apply = Boolean(values.apply)
   const ownershipFile = values['ownership-file'] ? resolve(values['ownership-file']) : null
@@ -204,7 +207,7 @@ export function parseCli(argv) {
   const rollbackOwnership = Boolean(values['rollback-ownership'])
   if (verifyOwnership && (!ownershipFile || apply)) throw new Error('--verify-ownership requires --ownership-file without --apply.')
   if (rollbackOwnership && (!ownershipFile || !apply)) throw new Error('--rollback-ownership requires --ownership-file and --apply.')
-  if (ownershipFile && (values['retirement-only'] || values['canonical-product'])) throw new Error('Ownership cutover cannot include catalog changes.')
+  if (ownershipFile && (values['retirement-only'] || values['offers-only'] || values['canonical-product'])) throw new Error('Ownership cutover cannot include catalog changes.')
   const planFile = values['plan-file'] ? resolve(String(values['plan-file'])) : null
   const journalValue = values['journal-file'] ?? values['journal-path']
   if (values['journal-file'] && values['journal-path'] && String(values['journal-file']) !== String(values['journal-path'])) {
@@ -217,8 +220,8 @@ export function parseCli(argv) {
   if (apply && Object.keys(canonicalProductIds).length > 0) {
     throw new Error('--canonical-product is only valid when generating a catalog plan.')
   }
-  if (apply && values['retirement-only']) {
-    throw new Error('--retirement-only is only valid when generating a catalog plan.')
+  if (apply && (values['retirement-only'] || values['offers-only'])) {
+    throw new Error('--retirement-only and --offers-only are only valid when generating a catalog plan.')
   }
   if (apply && !journalFile) throw new Error('--apply requires an explicit --journal-file.')
   if (apply && planFile && journalFile && sameExistingFile(planFile, journalFile)) {
@@ -232,7 +235,7 @@ export function parseCli(argv) {
     rollbackOwnership,
     requireTestMode: Boolean(values['require-test-mode']),
     requireLiveMode: Boolean(values['require-live-mode']),
-    retirementOnly: Boolean(values['retirement-only']),
+    scope: values['retirement-only'] ? 'retirement-only' : values['offers-only'] ? 'offers-only' : 'full',
     planFile,
     journalFile,
     journalPath: journalFile,
@@ -412,7 +415,7 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
       accountMode: mode,
       imageFiles: describeImageFiles(),
       canonicalProductIds: cli.canonicalProductIds,
-      retirementOnly: cli.retirementOnly,
+      scope: cli.scope,
     })
     if (cli.planFile) {
       writePlan(cli.planFile, plan)

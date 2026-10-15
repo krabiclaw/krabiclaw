@@ -7,7 +7,7 @@ export type EntitlementsMap = Record<string, EntitlementValue>
  * does not define application capability policy.
  */
 export function getPlanEntitlements(plan: string): EntitlementsMap {
-  if (plan !== 'free' && plan !== 'growth' && plan !== 'commerce' && plan !== 'marketing') {
+  if (plan !== 'free' && plan !== 'growth' && plan !== 'commerce' && plan !== 'marketing' && plan !== 'business') {
     throw new Error(`Unsupported runtime billing plan "${plan}"`)
   }
   const base: EntitlementsMap = {
@@ -27,10 +27,11 @@ export function getPlanEntitlements(plan: string): EntitlementsMap {
     case 'growth':
     case 'commerce':
     case 'marketing':
+    case 'business':
       return {
         ...base,
         payments: plan !== 'growth',
-        marketing: plan === 'marketing',
+        marketing: plan === 'marketing' || plan === 'business',
         custom_pages: true,
         google_places: true,
         custom_domains: true,

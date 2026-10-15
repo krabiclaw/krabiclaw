@@ -2,9 +2,9 @@
 
 `scripts/seed-stripe.mjs` reconciles the new-sale recurring catalog for Basic
 (free, with no Stripe product), Growth (`$49` per month or `$588` per year), and
-Commerce (`$89` per month). Commerce includes Growth's features and Payments and
-has no annual price. Every plan includes 2 locations; Growth and Commerce charge
-`$49` per additional location per month (`$588` per year on annual Growth).
+Business (`$99` per month). Business includes Growth's features, online payments
+and managed Google Ads campaigns, and has no annual price. Every plan includes
+2 locations; Growth and Business charge `$49` per additional location per month (`$588` per year on annual Growth).
 
 Each paid plan price is one graduated Stripe price whose subscription quantity
 is the number of locations it covers: the first tier (up to 2) is a flat fee of
@@ -13,23 +13,27 @@ The product's `unit_label` is `location`. Keeping it one price on one
 subscription item is what lets Better Auth's plan changes and its location
 quantity changes (`seats`) use Stripe's portal confirmation, which refuses
 subscriptions with more than one item. `shared/billing-model.ts` owns the fixed
-USD amounts and the tiers (`planPriceTiers`). Managed (`$149`)
-and SEO Accelerator (`$349`) are retired from new offers. Every product and
-price, including already-archived products and inactive or one-time prices, is
+USD amounts and the tiers (`planPriceTiers`). Commerce (`$89`), Marketing (`$99`),
+Managed (`$149`) and SEO Accelerator (`$349`) are retired from new offers. Every
+product and price, including already-archived products and inactive or one-time prices, is
 read into the reviewed snapshot. Only products whose metadata explicitly names
-`plan_id=managed|seo_accelerator` or `addon_type=translation|seasonal|gbp_setup`
-are retired; unknown products are never classified by name. For each still-active
+`plan_id=commerce|marketing|managed|seo_accelerator` or
+`addon_type=translation|seasonal|gbp_setup` are retired; unknown products are never classified by name. For each still-active
 retired product whose default price is active, the plan first clears that exact
 default price, then deactivates every independently active price before archiving
 the product, including duplicates. Inactive products are never cleared or
-archived. Retired products are never created, updated, or marketed, and an absent retired product
-produces no operation. Retired plan
-identities are not valid runtime entitlements; the runtime sale model accepts
-only Basic, Growth and Commerce. Historical fulfillment rows remain raw read-only audit
-history, while archiving a product or price prevents new purchases.
+archived. Retired products are never created or marketed, and an absent retired
+product produces no operation. Commerce and Marketing remain valid existing
+subscription identities with their original capabilities; they cannot be
+purchased as new subscriptions or selected as a plan change. Existing customers
+retain their exact price IDs, quantities, schedules and renewal terms. Better
+Auth Stripe owns their subscription lifecycle. Historical fulfillment rows
+remain raw read-only audit history.
 
 The script does not create one-time credit, add-on, or auto-top-up products, and
-it never changes a price amount.
+it never changes a price amount or writes a subscription. Business retains the
+usage charges: 1.4% of payment volume, plus Stripe fees, and 10% of monthly ad
+spend for campaigns we manage. Ad spend is separate.
 
 The default mode is read-only. It proves the exact Stripe account, lists every
 product and all of its active and inactive prices, writes no product/price/file
@@ -42,20 +46,40 @@ STRIPE_SECRET_KEY=rk_test_... yarn stripe:catalog:plan \
   > .tmp/stripe-catalog-plan.json
 ```
 
-When the reviewed change is limited to retiring unused catalog families, use
-the signed retirement-only scope. It requires exactly one active canonical
-Growth product with an active USD 49 monthly price and, when an annual price is
-present, an exact USD 588 annual price, but emits no Growth product,
-price, or image operation and does not require the local Growth image:
+For a replacement offer, use the two signed scopes to keep the deployed
+application and provider catalog compatible throughout the cutover:
+
+1. Generate and apply an `--offers-only` plan. It creates or reconciles current
+   offers without clearing defaults, deactivating prices or archiving products.
+2. Deploy the application that sells Growth and Business and resolves existing
+   subscriptions on their historical prices through Better Auth.
+3. Generate and apply an `--retirement-only` plan. It archives the retired
+   families only after proving exactly one active canonical Growth and Business
+   product, their USD 49 and USD 99 monthly prices, and Growth's USD 588 annual
+   price. It emits no offer product, price or image mutations and does not need
+   local product images.
 
 ```bash
-STRIPE_SECRET_KEY=rk_test_... yarn stripe:catalog:plan -- \
-  --retirement-only --plan-file .tmp/stripe-retirement-plan.json
+node scripts/seed-stripe.mjs --dry-run --require-test-mode --offers-only \
+  --plan-file .tmp/stripe-offers-plan.json
+node scripts/seed-stripe.mjs --apply --require-test-mode \
+  --plan-file .tmp/stripe-offers-plan.json --confirm-sha256 <offersPlanSha256> \
+  --journal-file .tmp/stripe-offers-apply.json
+
+# Deploy through the canonical application release workflow, then:
+node scripts/seed-stripe.mjs --dry-run --require-test-mode --retirement-only \
+  --plan-file .tmp/stripe-retirement-plan.json
+node scripts/seed-stripe.mjs --apply --require-test-mode \
+  --plan-file .tmp/stripe-retirement-plan.json --confirm-sha256 <retirementPlanSha256> \
+  --journal-file .tmp/stripe-retirement-apply.json
 ```
 
-The scope is part of the plan schema and SHA. Missing or ambiguous Growth
-identity, a wrong monthly amount, or any other Growth safety drift fails closed;
-the plan then contains only metadata-classified retirement operations.
+Use `--require-live-mode` for the authorized live account. Scope flags are only
+for plan generation; apply reads the signed scope from the reviewed file. The
+scope is part of the schema and SHA, and conflicting scope flags are rejected.
+Missing or ambiguous replacement offers, or an incorrect price, fail closed.
+The default full scope reconciles offers and retirements together; use the two
+scopes above when application support must be deployed between those operations.
 
 Release preflight runs the same read-only planner with an explicit test-mode
 guard. The guard is checked before the Stripe client is constructed, and all
@@ -74,7 +98,7 @@ applied separately with the commands below. This prevents unrelated product
 metadata copy from blocking an application or incident release.
 
 Public plan reads share the canonical `ORGANIZATION_CACHE` catalog entry
-`stripe-plans:v7:<actual app.buildId>` for up to one hour. Tenant CMS content
+for the actual application build for up to one hour. Tenant CMS content
 purges do not refresh this global entry. A genuine new application build selects
 a fresh entry; restarting the same built Worker retains its persistent cache.
 After catalog changes, verify the actual public plan and Markdown reads as well
@@ -119,11 +143,11 @@ mutation may have succeeded without a durable result.
 
 The signed operation order creates or reconciles each offered plan's canonical
 product, required monthly price, any supported unambiguous existing annual price,
-and configured image first. Commerce does not require a product image. The full
+and configured image first. Business does not require a product image. The full
 planner also reconciles the existing Site Language catalog family.
 For active retired products, it clears a signed active default price before
-deactivating prices and archiving the product. The planner never invents an
-annual amount when no annual price exists. The operator re-reads the provider
+deactivating prices and archiving the product. The planner creates an annual price only when the canonical offer defines its
+exact amount. The operator re-reads the provider
 and proves that no canonical operation remains before each deactivation or
 archival mutation. Every operation re-checks its
 reviewed provider precondition, and already-applied operations are skipped only
@@ -141,7 +165,7 @@ STRIPE_SECRET_KEY=rk_test_... yarn stripe:catalog:plan -- \
 ```
 
 The override must name an offered paid plan and an active product whose `metadata.plan_id`
-matches exactly; retired Managed/SEO overrides are rejected. The signed plan
+matches exactly; retired-plan overrides are rejected. The signed plan
 records its resolved `canonicalProductIds` selection. For every non-canonical
 offered-plan duplicate, and for every active retired product, the plan deactivates
 all active prices (recurring or one-time) and archives the product, each guarded by the
@@ -160,31 +184,21 @@ never selected or deactivated. The plan snapshot includes each price's tiers,
 `lookup_key` and normalized metadata, so these inputs are covered by the review
 hash.
 
-The snapshot also records every open subscription billed on a paid plan product
-(its status, schedule, and items' price and quantity). A subscription on a
-non-canonical plan price gets a signed `migrate_subscription_price` operation
-before any price is deactivated: its one item moves to the canonical price for
-its interval at quantity `max(2, current quantity)`, with
-`proration_behavior: none`, which charges the same amount. A subscription with a
-schedule or more than one item fails planning closed. The subscription's
-reviewed state is its precondition, and an already-moved item is recognized on
-resume. Deactivating a price does not change a subscription on it; migration is
-what keeps Better Auth able to resolve every subscription's plan.
+The signed snapshot records every open subscription billed on an offered or
+retired paid plan product, including already-archived products. It includes the
+status, schedule, billing-cycle anchor, cancellation and trial settings,
+collection method, and each item's exact price ID, quantity and billing-period
+boundaries. Every apply read and the final read-back must match that contract
+snapshot. A concurrent subscription change stops the apply visibly; review and
+regenerate the plan rather than overwriting the change.
 
-A price replacement changes what the deployed Worker accepts as canonical, so
-apply it to an account together with the application release that reads that
-shape: the previous build rejects the new prices and the new build rejects the
-old ones.
-
-Subscription webhooks sent while the catalog is half replaced, or before the
-release that reads it, reach a plan loader that rejects the catalog. Better Auth
-Stripe's `customer.subscription.updated` handler logs that error and still
-answers 200, so Stripe does not retry and the Better Auth row keeps its old
-`seats`. After the apply completes, read each migrated subscription's `seats`
-back from the `subscription` table and resend any event that did not land
-(`stripe events resend <evt> --webhook-endpoint <we_…>`, the
-`/api/auth/stripe/webhook` endpoint). The 2026-10-14 rollout resent four live
-and three test events this way.
+Catalog reconciliation never migrates, reprices, changes quantities, releases
+schedules, or otherwise updates subscriptions. Stripe's native archival blocks
+new sales while existing subscriptions continue on their original prices. Better
+Auth's plan definitions retain the original exact historical price IDs so signed
+webhooks can resolve them even after archival. A customer-initiated plan or
+location change continues through Better Auth's native hosted confirmation.
+[Stripe product and price archival](https://docs.stripe.com/products-prices/manage-prices).
 
 Apply defaults to test mode (`sk_test_` or `rk_test_`). Live apply requires
 `--require-live-mode` on the reviewed plan and apply commands. Apply is refused
@@ -196,9 +210,9 @@ journal starts. During resume, each pending operation revalidates its signed
 target and canonical safety boundary against a fresh snapshot. A failed
 operation performs no mutation from that operation; earlier journaled
 operations remain applied and are reported as such. Use a restricted
-key for the selected mode with read-account plus the catalog/file permissions required for
-this task, and subscription write when the plan migrates subscriptions;
-never place a key in a plan file or commit it.
+key for the selected mode with read-account, subscription read and the catalog/file
+permissions required for this task. Catalog apply needs no subscription write.
+Never place a key in a plan file or commit it.
 
 For an authorized production catalog change, use the configured live key in the
 environment and retain the same account, snapshot, SHA and journal safeguards:
