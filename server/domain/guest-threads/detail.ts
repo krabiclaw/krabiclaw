@@ -1,6 +1,6 @@
 import { buyerRequestActivityPath } from '~/server/domain/payments/buyer'
 import { d1JsonStringSet, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { getGuestRequest, getThreadOperationalRecord, requestSummary, requestActions } from '~/server/domain/requests'
+import { getGuestRequest, getThreadOperationalRecord, requestSummary, requestActions, stayPreview } from '~/server/domain/requests'
 import { formatOperationalStatusLabel } from './status-labels'
 import { resolveGuestThreadMailbox } from './mailbox'
 import { listThreadEntries, parseEntryPayload, isBuyerVisibleThreadEntry } from './entries'
@@ -90,7 +90,7 @@ export async function getGuestThreadDetail(
     contextLabel: summary.contextLabel,
     locationLabel: summary.locationTitle,
     conversationState: audience ? null : thread.conversation_state,
-    operationalRecord: record ? { id: record.id, kind: record.kind, status: record.status, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, party_size: record.party_size } : null,
+    operationalRecord: record ? { id: record.id, kind: record.kind, status: record.status, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, party_size: record.party_size, check_in_date: record.check_in_date, check_out_date: record.check_out_date } : null,
     source: {
       submissionType: thread.kind,
       submissionId: thread.id,
@@ -98,7 +98,15 @@ export async function getGuestThreadDetail(
       operationalStatusLabel: record ? formatOperationalStatusLabel(thread.kind, record.status) : null,
       fields: thread.kind === 'contact'
         ? { subject: thread.payload.subject, message: thread.payload.message, locationTitle: summary.locationTitle, productTitle: summary.productTitle }
-        : {
+        : thread.kind === 'stay'
+          ? {
+              // A stay is its nights in its own dates; it has no start time to localize.
+              whenLabel: record?.check_in_date && record.check_out_date ? stayPreview({ check_in_date: record.check_in_date, check_out_date: record.check_out_date, party_size: record.party_size }) : null,
+              startsAt: null, endsAt: null, timezone: record?.timezone ?? null,
+              guests: record ? String(record.party_size) : null, partySize: record?.party_size ?? null,
+              notes: null, locationTitle: summary.locationTitle, productTitle: summary.productTitle,
+            }
+          : {
             whenLabel: record ? new Intl.DateTimeFormat('en-US', { timeZone: record.timezone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(record.starts_at)) : null,
             startsAt: record?.starts_at ?? null,
             endsAt: record?.ends_at ?? null,

@@ -50,7 +50,7 @@ export function parseGuestThreadListQuery(
   return {
     organizationId: read('organization_id') || null,
     locationId: read('location_id') || null,
-    type: type === 'contact' || type === 'reservation' || type === 'booking' ? type as GuestThreadSubmissionType : null,
+    type: type === 'contact' || type === 'reservation' || type === 'booking' || type === 'stay' ? type as GuestThreadSubmissionType : null,
     conversationState: conversationState === 'needs_attention' || conversationState === 'waiting_on_guest' || conversationState === 'resolved'
       ? conversationState as ConversationState
       : null,

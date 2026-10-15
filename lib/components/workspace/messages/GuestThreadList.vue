@@ -273,7 +273,7 @@ const pastOnly = computed(() => route.query.archived !== undefined)
 const withoutArchived = computed(() => { const { archived: _archived, ...rest } = route.query; return rest })
 const activeType = computed<SubmissionType | null>(() => {
   const value = route.query.filter
-  return value === 'contact' || value === 'reservation' || value === 'booking' ? value : null
+  return value === 'contact' || value === 'reservation' || value === 'booking' || value === 'stay' ? value : null
 })
 const unreadOnly = computed(() => route.query.unread === '1')
 const updatesView = computed(() => route.query.view === 'updates')
@@ -337,13 +337,15 @@ const typeOptions = computed(() => {
   const kinds: SubmissionType[] = []
   if (effectiveFeatureSet.value.has('reservations')) kinds.push('reservation')
   if (effectiveFeatureSet.value.has('products')) kinds.push('booking')
+  // A lodging business's places to stay each carry their guest's conversation.
+  if (vertical.value && normalizeVertical(vertical.value) === 'lodging') kinds.push('stay')
   if (kinds.length === 0) return [{ value: null, label: 'All', icon: 'i-lucide-message-square' }]
   return [
     { value: null, label: 'All', icon: 'i-lucide-message-square' },
     ...kinds.map(kind => ({
       value: kind,
       label: threadFilterLabel(kind, vertical.value),
-      icon: kind === 'reservation' ? 'i-lucide-utensils' : 'i-lucide-ticket',
+      icon: kind === 'reservation' ? 'i-lucide-utensils' : kind === 'stay' ? 'i-lucide-bed-double' : 'i-lucide-ticket',
     })),
     { value: 'contact' as const, label: threadFilterLabel('contact', vertical.value), icon: 'i-lucide-mail' },
   ]
@@ -356,7 +358,7 @@ const emptyTitle = computed(() => {
 const emptyDescription = computed(() => {
   if (route.query.query) return `Nothing matched “${route.query.query}”.`
   if (filtersApplied.value) return 'Try a different filter, or clear them to see everything.'
-  if (pastOnly.value) return 'Conversations move here when their reservation or experience ends, or when you archive them.'
+  if (pastOnly.value) return 'Conversations move here when their reservation, experience or stay ends, or when you archive them.'
   return props.personalScope ? 'Your conversations with businesses will appear here.' : 'New guest conversations will appear here.'
 })
 

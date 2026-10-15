@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:fce578993825461cb47a2af9192a8ffbcca0af243fecdff99af71c29671f2450",
-  "documentationFingerprint": "sha256:73495f39594faab627ce4cb00dec8e283cc8688feb64415cb0ad64b5495688ee",
+  "fingerprint": "sha256:5ac50d24383bd01a629e8fc91c7aba27fd7c348a846830e031bed6fcd840d016",
+  "documentationFingerprint": "sha256:ff87a350d4062bfd237ba88cd82551a6de5ce5da954bce82d72190d698ae9276",
   "tools": [
     {
       "name": "append_content_block",
@@ -8306,6 +8306,13 @@
                   "null"
                 ]
               },
+              "request_id": {
+                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest; null when the guest has no email.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "status": {
                 "enum": [
                   "pending",
@@ -8361,6 +8368,7 @@
               "provider",
               "external_booking_id",
               "channel_booking_id",
+              "request_id",
               "cancelled_at",
               "cancellation_reason",
               "version",
@@ -28858,6 +28866,13 @@
                   "null"
                 ]
               },
+              "request_id": {
+                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest; null when the guest has no email.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "status": {
                 "enum": [
                   "pending",
@@ -28913,6 +28928,7 @@
               "provider",
               "external_booking_id",
               "channel_booking_id",
+              "request_id",
               "cancelled_at",
               "cancellation_reason",
               "version",
@@ -33850,6 +33866,13 @@
                   "null"
                 ]
               },
+              "request_id": {
+                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest; null when the guest has no email.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "status": {
                 "enum": [
                   "pending",
@@ -33905,6 +33928,7 @@
               "provider",
               "external_booking_id",
               "channel_booking_id",
+              "request_id",
               "cancelled_at",
               "cancellation_reason",
               "version",
@@ -38586,7 +38610,20 @@
                 "type": "object"
               },
               "operational_record": {
+                "description": "For a stay, check_in_date and check_out_date are its nights and id is the stay for get_stay; its starts_at and ends_at only order and archive the conversation.",
                 "properties": {
+                  "check_in_date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "check_out_date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "ends_at": {
                     "type": "string"
                   },
@@ -38596,7 +38633,8 @@
                   "kind": {
                     "enum": [
                       "booking",
-                      "reservation"
+                      "reservation",
+                      "stay"
                     ],
                     "type": "string"
                   },
@@ -38620,7 +38658,9 @@
                   "starts_at",
                   "ends_at",
                   "timezone",
-                  "party_size"
+                  "party_size",
+                  "check_in_date",
+                  "check_out_date"
                 ],
                 "type": [
                   "object",
@@ -38640,7 +38680,8 @@
                 "enum": [
                   "contact",
                   "reservation",
-                  "booking"
+                  "booking",
+                  "stay"
                 ],
                 "type": "string"
               },
@@ -52751,6 +52792,13 @@
                   "null"
                 ]
               },
+              "request_id": {
+                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest; null when the guest has no email.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "status": {
                 "enum": [
                   "pending",
@@ -52806,6 +52854,7 @@
               "provider",
               "external_booking_id",
               "channel_booking_id",
+              "request_id",
               "cancelled_at",
               "cancellation_reason",
               "version",
@@ -53236,6 +53285,13 @@
                     "null"
                   ]
                 },
+                "request_id": {
+                  "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest; null when the guest has no email.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "status": {
                   "enum": [
                     "pending",
@@ -53291,6 +53347,7 @@
                 "provider",
                 "external_booking_id",
                 "channel_booking_id",
+                "request_id",
                 "cancelled_at",
                 "cancellation_reason",
                 "version",
@@ -54926,7 +54983,8 @@
             "enum": [
               "contact",
               "reservation",
-              "booking"
+              "booking",
+              "stay"
             ],
             "type": "string"
           }
@@ -58399,6 +58457,13 @@
                     "null"
                   ]
                 },
+                "request_id": {
+                  "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest; null when the guest has no email.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "status": {
                   "enum": [
                     "pending",
@@ -58454,6 +58519,7 @@
                 "provider",
                 "external_booking_id",
                 "channel_booking_id",
+                "request_id",
                 "cancelled_at",
                 "cancellation_reason",
                 "version",
@@ -73381,6 +73447,13 @@
                   "null"
                 ]
               },
+              "request_id": {
+                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest; null when the guest has no email.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "status": {
                 "enum": [
                   "pending",
@@ -73436,6 +73509,7 @@
               "provider",
               "external_booking_id",
               "channel_booking_id",
+              "request_id",
               "cancelled_at",
               "cancellation_reason",
               "version",
@@ -82516,7 +82590,20 @@
                 "type": "object"
               },
               "operational_record": {
+                "description": "For a stay, check_in_date and check_out_date are its nights and id is the stay for get_stay; its starts_at and ends_at only order and archive the conversation.",
                 "properties": {
+                  "check_in_date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "check_out_date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "ends_at": {
                     "type": "string"
                   },
@@ -82526,7 +82613,8 @@
                   "kind": {
                     "enum": [
                       "booking",
-                      "reservation"
+                      "reservation",
+                      "stay"
                     ],
                     "type": "string"
                   },
@@ -82550,7 +82638,9 @@
                   "starts_at",
                   "ends_at",
                   "timezone",
-                  "party_size"
+                  "party_size",
+                  "check_in_date",
+                  "check_out_date"
                 ],
                 "type": [
                   "object",
@@ -82570,7 +82660,8 @@
                 "enum": [
                   "contact",
                   "reservation",
-                  "booking"
+                  "booking",
+                  "stay"
                 ],
                 "type": "string"
               },
@@ -84436,7 +84527,20 @@
                 "type": "object"
               },
               "operational_record": {
+                "description": "For a stay, check_in_date and check_out_date are its nights and id is the stay for get_stay; its starts_at and ends_at only order and archive the conversation.",
                 "properties": {
+                  "check_in_date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "check_out_date": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "ends_at": {
                     "type": "string"
                   },
@@ -84446,7 +84550,8 @@
                   "kind": {
                     "enum": [
                       "booking",
-                      "reservation"
+                      "reservation",
+                      "stay"
                     ],
                     "type": "string"
                   },
@@ -84470,7 +84575,9 @@
                   "starts_at",
                   "ends_at",
                   "timezone",
-                  "party_size"
+                  "party_size",
+                  "check_in_date",
+                  "check_out_date"
                 ],
                 "type": [
                   "object",
@@ -84490,7 +84597,8 @@
                 "enum": [
                   "contact",
                   "reservation",
-                  "booking"
+                  "booking",
+                  "stay"
                 ],
                 "type": "string"
               },
@@ -88324,6 +88432,13 @@
                     "null"
                   ]
                 },
+                "request_id": {
+                  "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest; null when the guest has no email.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "status": {
                   "enum": [
                     "pending",
@@ -88379,6 +88494,7 @@
                 "provider",
                 "external_booking_id",
                 "channel_booking_id",
+                "request_id",
                 "cancelled_at",
                 "cancellation_reason",
                 "version",
@@ -106735,6 +106851,13 @@
                   "null"
                 ]
               },
+              "request_id": {
+                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest; null when the guest has no email.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "status": {
                 "enum": [
                   "pending",
@@ -106790,6 +106913,7 @@
               "provider",
               "external_booking_id",
               "channel_booking_id",
+              "request_id",
               "cancelled_at",
               "cancellation_reason",
               "version",
@@ -107030,14 +107154,14 @@
         "cancel_product_booking": "sha256:09fbbd2f3d89627aa78eb5b60d27b5e949edc7b8304b610422045cf5a89671a1",
         "cancel_table_reservation": "sha256:671384fbe0abd846ad44296506d6acbb68fab9adeaecd53802aa98d9619a74c3",
         "confirm_product_booking": "sha256:30124315590810ca4e7e259836063d2878e2b2503acc6045b0525ca4daff8c33",
-        "get_guest_conversation": "sha256:4d6462fe91c70c95f5028b0593d026fa32ba54ef84d5be113995f58c56571adf",
+        "get_guest_conversation": "sha256:6a0cc3fef767411569af75a68be2abcb91cefbcd3f8feba7835500b32b3c589b",
         "get_product_booking": "sha256:1b6cb2d27c6bd3a8d7da1e8005e855af9c053bd84303d29df9a8705c56e61611",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
-        "list_guest_conversations": "sha256:52234aefc87f59cc21dac690cca644fed2f78bd3461fe8a65a88953c5e278776",
+        "list_guest_conversations": "sha256:153f745faeac94cd2caaec6ec20d496592da104ce72fc9615fd39184c5502166",
         "list_location_reviews": "sha256:b09a24e98ab12f02cb71581d1afc290edd559790a17c4c55308f9b0e059b46fb",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "reject_product_booking": "sha256:557fcf98b488029ac8081da295552e9ee2569dfc54a0ba561418a5ca7b8492d4",
-        "reply_to_guest": "sha256:03666d869c938994de86f6e3380a5bb433d0dabba23e17570b63e79133800fef",
+        "reply_to_guest": "sha256:32b18d18a182751c3fb2fb6eb156f34359d42d7b4aaa2ae7c435345fe80438d2",
         "request_product_booking_change": "sha256:da50fa96ac71952ddaa8d3097a319ae2965b6e0ec0a3b52208b22cc5f6d95025",
         "request_table_reservation_change": "sha256:f94a16f948498d413eb39b8542a85707c2dec4f2a369f73aaebdd83b305030a4"
       }
@@ -107158,15 +107282,15 @@
       },
       "toolContracts": {
         "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
-        "get_guest_conversation": "sha256:4d6462fe91c70c95f5028b0593d026fa32ba54ef84d5be113995f58c56571adf",
+        "get_guest_conversation": "sha256:6a0cc3fef767411569af75a68be2abcb91cefbcd3f8feba7835500b32b3c589b",
         "get_organization_analytics": "sha256:aad678e4cef26c11f2a5304b650d582662912ff4a1395bffb04b7d791778db43",
         "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
-        "list_guest_conversations": "sha256:52234aefc87f59cc21dac690cca644fed2f78bd3461fe8a65a88953c5e278776",
+        "list_guest_conversations": "sha256:153f745faeac94cd2caaec6ec20d496592da104ce72fc9615fd39184c5502166",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
-        "reply_to_guest": "sha256:03666d869c938994de86f6e3380a5bb433d0dabba23e17570b63e79133800fef",
+        "reply_to_guest": "sha256:32b18d18a182751c3fb2fb6eb156f34359d42d7b4aaa2ae7c435345fe80438d2",
         "update_product": "sha256:72bbda52826f463b9ebebb2ed91e6ef12189ae4e1de2886b8f02e592d8a6b236"
       }
     }
@@ -107178,12 +107302,12 @@
       "toolContracts": {
         "create_location": "sha256:b25656237d93d456c98da74d8281ec6d1d05435e6a7657a18c14b82654b79b9b",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
-        "get_guest_conversation": "sha256:4d6462fe91c70c95f5028b0593d026fa32ba54ef84d5be113995f58c56571adf",
+        "get_guest_conversation": "sha256:6a0cc3fef767411569af75a68be2abcb91cefbcd3f8feba7835500b32b3c589b",
         "invite_organization_member": "sha256:f520b4ade47c9c5a5faef9859564f32d1c9dddfd285efdcc27fa099fa60e8a24",
-        "list_guest_conversations": "sha256:52234aefc87f59cc21dac690cca644fed2f78bd3461fe8a65a88953c5e278776",
+        "list_guest_conversations": "sha256:153f745faeac94cd2caaec6ec20d496592da104ce72fc9615fd39184c5502166",
         "list_organization_members": "sha256:f47eb37ec4cfa1df500db883fdd207db7e2228a3839d64e08f4e52351f85b10e",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
-        "reply_to_guest": "sha256:03666d869c938994de86f6e3380a5bb433d0dabba23e17570b63e79133800fef",
+        "reply_to_guest": "sha256:32b18d18a182751c3fb2fb6eb156f34359d42d7b4aaa2ae7c435345fe80438d2",
         "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
         "update_organization_member_role": "sha256:7091eda99b109bbf611aa3f7b316e12785275ab87bc4caed50371b288f981dda",
         "update_product_session": "sha256:719c480fb7c4436732bfe437c820b50e4f7b37a2b23f6aa7e0634bbaf62ea776"
@@ -107260,12 +107384,12 @@
       "toolContracts": {
         "cancel_table_reservation": "sha256:671384fbe0abd846ad44296506d6acbb68fab9adeaecd53802aa98d9619a74c3",
         "create_table_reservation": "sha256:412c62d5987f89d7d7c7bf57ac2038c65f4101181bb4762341e0a937766c948b",
-        "get_guest_conversation": "sha256:4d6462fe91c70c95f5028b0593d026fa32ba54ef84d5be113995f58c56571adf",
+        "get_guest_conversation": "sha256:6a0cc3fef767411569af75a68be2abcb91cefbcd3f8feba7835500b32b3c589b",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
-        "list_guest_conversations": "sha256:52234aefc87f59cc21dac690cca644fed2f78bd3461fe8a65a88953c5e278776",
+        "list_guest_conversations": "sha256:153f745faeac94cd2caaec6ec20d496592da104ce72fc9615fd39184c5502166",
         "list_product_bookings": "sha256:ea80e0cc56ffb5b12058725b9644f50e50af6191c4a44493fb0be538224d7373",
         "list_reservation_inquiries": "sha256:85cb564470d0026c00b8727287edb2a6c2d403fec987c2ac13f4aaaa28e5d171",
-        "reply_to_guest": "sha256:03666d869c938994de86f6e3380a5bb433d0dabba23e17570b63e79133800fef",
+        "reply_to_guest": "sha256:32b18d18a182751c3fb2fb6eb156f34359d42d7b4aaa2ae7c435345fe80438d2",
         "request_table_reservation_change": "sha256:f94a16f948498d413eb39b8542a85707c2dec4f2a369f73aaebdd83b305030a4",
         "update_reservation_policy": "sha256:f1e5e7eda32993dc7be3ffc459ceb97517ed309bb144d2a5f29a0f0b082f784f"
       }

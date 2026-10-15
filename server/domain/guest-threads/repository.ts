@@ -1,9 +1,9 @@
-import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
+import { REQUEST_CURRENT_BUYER_SQL, STAY_THREAD_ENDS_SQL, STAY_THREAD_STARTS_SQL, stayPreview } from '~/server/domain/requests'
 import { BUYER_UNREAD_THREAD_SQL, buyerUnreadThreadParams } from './entries'
 import { messagePreview } from './attachments'
 import { execute, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
-import { assignedBookingSql, roleAllows, assertRoleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { assignedBookingSql, assignedHomeSql, roleAllows, assertRoleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import type {
   ConversationState,
   GuestThreadListItemViewModel,
@@ -19,7 +19,13 @@ const SOURCE_GUEST_NAME_SQL = "json_extract(gt.payload_json, '$.guest.name')"
 async function assignedThreadScope(principal?: MemberAccessPrincipal | null) {
   if (!principal || await roleAllows({ ...principal, permissions: { operations: ['read'] } })) return { sql: '', params: [] as string[] }
   await assertRoleAllows({ ...principal, permissions: { operations: ['assigned'] } })
-  return { sql: ` AND EXISTS (SELECT 1 FROM bookings b WHERE b.request_id = gt.id AND b.organization_id = gt.organization_id AND (${assignedBookingSql('b')}))`, params: [principal.userId] }
+  // Bookings assigned to them, and the stays at homes they look after.
+  return {
+    sql: ` AND (EXISTS (SELECT 1 FROM bookings b WHERE b.request_id = gt.id AND b.organization_id = gt.organization_id AND (${assignedBookingSql('b')}))
+      OR EXISTS (SELECT 1 FROM stays st JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
+        WHERE st.request_id = gt.id AND st.organization_id = gt.organization_id AND ${assignedHomeSql('c')}))`,
+    params: [principal.userId, principal.userId, principal.userId],
+  }
 }
 /**
  * The operational record a thread refers to.
@@ -30,12 +36,18 @@ async function assignedThreadScope(principal?: MemberAccessPrincipal | null) {
  * booking rather than printing a fabricated slot.
  */
 const OPERATIONAL_RECORDS_SQL = `(
-    SELECT b.request_id, b.status, b.party_size, s.starts_at, s.ends_at, s.timezone
+    SELECT b.request_id, b.status, b.party_size, s.starts_at, s.ends_at, s.timezone, NULL AS check_in_date, NULL AS check_out_date
       FROM bookings b JOIN product_sessions s ON s.id = b.product_session_id
      WHERE b.request_id IS NOT NULL
     UNION ALL
-    SELECT r.request_id, r.status, r.party_size, r.starts_at, r.ends_at, r.timezone
+    SELECT r.request_id, r.status, r.party_size, r.starts_at, r.ends_at, r.timezone, NULL, NULL
       FROM reservations r WHERE r.request_id IS NOT NULL
+    UNION ALL
+    SELECT st.request_id, st.status, st.adults + st.children, ${STAY_THREAD_STARTS_SQL('st')}, ${STAY_THREAD_ENDS_SQL('st')}, l.timezone, st.check_in_date, st.check_out_date
+      FROM stays st
+      JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
+      JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
+     WHERE st.request_id IS NOT NULL
   )`
 const OPERATIONAL_RECORD_SQL = `
   LEFT JOIN ${OPERATIONAL_RECORDS_SQL} op ON op.request_id = gt.id`
@@ -69,6 +81,7 @@ function mailboxFields(row: { archived_at: string | null; record_ends_at: string
 const SOURCE_PREVIEW_SQL = `SUBSTR(CASE WHEN gt.kind = 'contact' THEN json_extract(gt.payload_json, '$.message') ELSE NULLIF(TRIM(json_extract(gt.payload_json, '$.notes')), '') END, 1, 160)`
 
 const SOURCE_PREVIEW_COLUMNS = `op.starts_at AS record_starts_at, op.ends_at AS record_ends_at, op.timezone AS record_timezone, op.party_size AS record_party_size,
+      op.check_in_date AS record_check_in_date, op.check_out_date AS record_check_out_date,
       json_extract(gt.payload_json, '$.party_size_is_minimum') AS party_size_is_minimum`
 
 /*
@@ -92,14 +105,23 @@ const PLACE_IMAGE_COLUMNS = `COALESCE(ma_hero.kind, ma_logo.kind) AS place_image
       COALESCE(ma_hero.thumbnail_url, ma_logo.thumbnail_url) AS place_image_thumbnail_url,
       COALESCE(ma_hero.public_url, ma_logo.public_url) AS place_image_public_url`
 
+/** A stay's nights, read from its dates; it has no start time to localize. */
+function stayRecordLabel(row: { record_check_in_date: string | null; record_check_out_date: string | null; record_party_size: number | null }): string | null {
+  if (!row.record_check_in_date || !row.record_check_out_date || row.record_party_size === null) return null
+  return stayPreview({ check_in_date: row.record_check_in_date, check_out_date: row.record_check_out_date, party_size: row.record_party_size })
+}
+
 function sourcePreviewText(row: {
   source_preview: string | null
   record_starts_at: string | null
   record_timezone: string | null
   record_party_size: number | null
+  record_check_in_date: string | null
+  record_check_out_date: string | null
   party_size_is_minimum: unknown
 }): string | null {
   if (row.source_preview) return row.source_preview
+  if (row.record_check_in_date) return stayRecordLabel(row)
   if (!row.record_starts_at || !row.record_timezone || row.record_party_size === null) return null
   const when = formatThreadWhenLabel(row.record_starts_at, row.record_timezone)
   const size = `${row.record_party_size}${row.party_size_is_minimum ? '+' : ''}`
@@ -152,7 +174,7 @@ export async function getGuestThreadOperationSummary(
       SUM(CASE WHEN gt.conversation_state != 'resolved' AND gt.kind = 'reservation' THEN 1 ELSE 0 END) AS reservations,
       SUM(CASE WHEN gt.conversation_state != 'resolved' AND gt.kind = 'booking' THEN 1 ELSE 0 END) AS experienceBookings
     FROM requests gt${OPERATIONAL_RECORD_SQL}
-    WHERE gt.kind IN ('contact', 'reservation', 'booking') AND ${where}
+    WHERE gt.kind IN ('contact', 'reservation', 'booking', 'stay') AND ${where}
   `, params)
 
   const unreadThreads = opts.userId
@@ -176,7 +198,7 @@ async function countUnreadThreadIds(
   const rows = await queryAll<{ id: string }>(db, `
     SELECT gt.id
     FROM requests gt${OPERATIONAL_RECORD_SQL}
-    WHERE gt.kind IN ('contact', 'reservation', 'booking') AND ${where}
+    WHERE gt.kind IN ('contact', 'reservation', 'booking', 'stay') AND ${where}
       AND EXISTS (
         SELECT 1 FROM activity_entries n
         JOIN activity_entries notification_entry ON notification_entry.id = n.parent_id
@@ -202,6 +224,8 @@ type GuestThreadListRow = GuestThreadRow & {
   record_ends_at: string | null
   record_timezone: string | null
   record_party_size: number | null
+  record_check_in_date: string | null
+  record_check_out_date: string | null
   party_size_is_minimum: unknown
   operational_status: string | null
   place_image_kind: string | null
@@ -292,7 +316,7 @@ export async function listGuestThreads(
     FROM requests gt${OPERATIONAL_RECORD_SQL}
     JOIN organization o ON o.id=gt.organization_id
     LEFT JOIN business_locations bl ON bl.id = gt.location_id${PLACE_IMAGE_SQL}
-    WHERE gt.kind IN ('contact', 'reservation', 'booking') AND ${where}
+    WHERE gt.kind IN ('contact', 'reservation', 'booking', 'stay') AND ${where}
     ${unreadFilter}
     ORDER BY gt.updated_at DESC
     LIMIT ?
@@ -327,9 +351,9 @@ export async function listGuestThreads(
       // Two renditions of one asset, not two sources: a row 60px wide takes the
       // thumbnail, and an asset with no rendition yet is served at full size.
       imageUrl: mediaStillUrl({ kind: row.place_image_kind, public_url: row.place_image_public_url, thumbnail_url: row.place_image_thumbnail_url }),
-      whenLabel: row.record_starts_at && row.record_timezone
-        ? formatThreadWhenLabel(row.record_starts_at, row.record_timezone)
-        : null,
+      whenLabel: row.record_check_in_date ? stayRecordLabel(row)
+        : row.record_starts_at && row.record_timezone ? formatThreadWhenLabel(row.record_starts_at, row.record_timezone)
+          : null,
       ...mailboxFields(row, now, opts.buyerAudience),
       ...(opts.buyerAudience ? {canArchive:false,canUnarchive:false} : {}),
     })
@@ -415,7 +439,7 @@ export async function listOrganizationGuestThreads(
     FROM requests gt${OPERATIONAL_RECORD_SQL}
     LEFT JOIN business_locations bl ON bl.id = gt.location_id
     LEFT JOIN organization s ON s.id = gt.organization_id${PLACE_IMAGE_SQL}
-    WHERE gt.kind IN ('contact', 'reservation', 'booking') AND ${where}
+    WHERE gt.kind IN ('contact', 'reservation', 'booking', 'stay') AND ${where}
     ${unreadFilter}
     ORDER BY gt.updated_at DESC, gt.id
     LIMIT ? OFFSET ?
@@ -451,9 +475,9 @@ export async function listOrganizationGuestThreads(
       // Two renditions of one asset, not two sources: a row 60px wide takes the
       // thumbnail, and an asset with no rendition yet is served at full size.
       imageUrl: mediaStillUrl({ kind: row.place_image_kind, public_url: row.place_image_public_url, thumbnail_url: row.place_image_thumbnail_url }),
-      whenLabel: row.record_starts_at && row.record_timezone
-        ? formatThreadWhenLabel(row.record_starts_at, row.record_timezone)
-        : null,
+      whenLabel: row.record_check_in_date ? stayRecordLabel(row)
+        : row.record_starts_at && row.record_timezone ? formatThreadWhenLabel(row.record_starts_at, row.record_timezone)
+          : null,
       ...mailboxFields(row, now),
     })
   }

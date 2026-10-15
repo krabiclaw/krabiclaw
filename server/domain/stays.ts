@@ -11,6 +11,7 @@ import { selectPrice, type Price } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
 import { pushStayNights, requireChannelPush, type ChannelPush } from '~/server/integrations/channex/ari'
 import { isValidTimezone } from '~/utils/timezone'
+import { stayThreadQueries } from '~/server/domain/requests'
 
 /**
  * Places to stay: the one implementation of stays, nights and offline
@@ -65,6 +66,8 @@ export interface Stay {
   provider: 'channex' | null
   external_booking_id: string | null
   channel_booking_id: string | null
+  /** The guest conversation about this stay in the inbox; null when the guest has no email to write to. */
+  request_id: string | null
   cancelled_at: string | null
   cancellation_reason: string | null
   version: number
@@ -177,7 +180,7 @@ function amount(value: unknown, field: string, allowNegative = false): number {
 
 const STAY_COLUMNS = `s.id, s.product_id, c.location_id, l.timezone, s.channel, s.owner, s.status, s.overbooked, s.check_in_date, s.check_out_date, s.arrival_time,
   s.adults, s.children, s.infants, s.guest_name, s.guest_surname, s.guest_email, s.guest_phone, s.user_id, s.total_minor, s.currency, s.notes,
-  s.provider, s.external_booking_id, s.channel_booking_id, s.cancelled_at, s.cancellation_reason, s.version, s.created_at, s.updated_at`
+  s.provider, s.external_booking_id, s.channel_booking_id, s.request_id, s.cancelled_at, s.cancellation_reason, s.version, s.created_at, s.updated_at`
 
 function mapStay(row: Record<string, unknown>): Stay {
   return { ...row, overbooked: Number(row.overbooked) === 1 } as unknown as Stay
@@ -607,6 +610,7 @@ export async function createStay(db: DbClient, env: ChannexEnv, access: StayAcce
           fields.guest_name, fields.guest_surname, fields.guest_email, fields.guest_phone, fields.total_minor, home.currency, fields.notes, key, now, now, access.actorId, access.actorId],
       },
       ...reconcileNightsQueries(access.organizationId, id),
+      ...stayThreadQueries({ organizationId: access.organizationId, stayId: id, now, openedBy: { userId: access.actorId } }),
       organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.created', entityType: 'stay', entityId: id }),
     ], { operation: 'Create stay' })
   } catch (error) {
@@ -653,6 +657,7 @@ export async function updateStay(db: DbClient, env: ChannexEnv, access: StayAcce
       },
       organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.updated', entityType: 'stay', entityId: stayId, onlyIfPreviousChangedOneRow: true }),
       ...reconcileNightsQueries(access.organizationId, stayId),
+      ...stayThreadQueries({ organizationId: access.organizationId, stayId, now, openedBy: { userId: access.actorId } }),
     ], { operation: 'Update stay' })
   } catch (error) {
     if (isNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay already holds one of these nights', 'check_in_date')
@@ -881,6 +886,7 @@ export async function applyChannelBooking(db: DbClient, organizationId: string, 
       booking.provider_updated_at, booking.cancelled ? now : null, now, now, 'channex', 'channex'],
   },
   ...reconcileNightsQueries(organizationId, id),
+  ...stayThreadQueries({ organizationId, stayId: id, now, openedBy: 'channel' }),
   organizationEventQuery({ organizationId, actorId: null, eventType: existing ? 'stay.updated' : 'stay.created', entityType: 'stay', entityId: id, metadata: { channel: booking.channel, overbooked: overbooked === 1 } }),
   ]
   try {

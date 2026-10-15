@@ -1167,6 +1167,11 @@ export const stays = sqliteTable("stays", {
 	guest_email: text(),
 	guest_phone: text(),
 	user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
+	// The guest conversation about this stay, in the one inbox. NULL when the
+	// stay has no guest contact to converse with. Losing the thread does not
+	// lose the stay. Its writer keeps it in the stay's organization; a
+	// composite FK here would rebuild stays and cascade its nights and payments.
+	request_id: text().references((): AnySQLiteColumn => requests.id, { onDelete: "set null" }),
 	total_minor: integer().notNull(),
 	currency: text().notNull(),
 	notes: text(),
@@ -1189,6 +1194,7 @@ export const stays = sqliteTable("stays", {
 	unique("stays_org_id_unique").on(table.organization_id, table.id),
 	uniqueIndex("stays_idempotency_unique").on(table.organization_id, table.idempotency_key).where(sql`idempotency_key IS NOT NULL`),
 	uniqueIndex("stays_provider_booking_unique").on(table.provider, table.external_booking_id).where(sql`external_booking_id IS NOT NULL`),
+	uniqueIndex("stays_request_unique").on(table.request_id).where(sql`request_id IS NOT NULL`),
 	index("stays_product_dates_idx").on(table.product_id, table.check_in_date, table.check_out_date),
 	index("stays_org_dates_idx").on(table.organization_id, table.check_in_date, table.status),
 	check("stays_dates_check", sql`date(check_in_date, '+0 days') IS check_in_date AND date(check_out_date, '+0 days') IS check_out_date AND check_out_date > check_in_date`),
