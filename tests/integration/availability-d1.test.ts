@@ -16,8 +16,10 @@ import {
   sessionMoveQuery,
   updateSession,
 } from '../../server/utils/availability.ts'
-import { requestInsertQueries, threadPayloadForGuest, getThreadOperationalRecord } from '../../server/domain/requests.ts'
+import { requestInsertQueries, threadPayloadForGuest, getThreadOperationalRecord, getGuestRequest } from '../../server/domain/requests.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
+import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
+import { updateThreadProjectionIfLatestEntry } from '../../server/domain/guest-threads/repository.ts'
 import { occurrenceKey } from '../../shared/bookings.ts'
 import { addLocalDays, localDateTimeToInstant, localNow } from '../../utils/timezone.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
@@ -508,6 +510,11 @@ test('one provider\'s online offerings exclude overlapping pending requests and 
     assert.equal((await executeGuestThreadOperation(db, confirm)).ok, true)
     assert.equal((await executeGuestThreadOperation(db, confirm)).ok, true)
     assert.equal((await getThreadOperationalRecord(db, winner.requestId))?.status, 'confirmed')
+    assert.equal((await getGuestRequest(db, winner.requestId, ORG))?.conversation_state, 'resolved', 'a delivered decision finishes its booking review')
+    const guestReply = await appendEntry(db, { threadId: winner.requestId, kind: 'message', actorKind: 'guest', channel: 'web', body: 'One more question', dedupeKey: 'question-after-confirmation' })
+    await updateThreadProjectionIfLatestEntry(db, winner.requestId, guestReply.id, { conversationState: 'needs_attention' })
+    assert.equal((await executeGuestThreadOperation(db, confirm)).ok, true)
+    assert.equal((await getGuestRequest(db, winner.requestId, ORG))?.conversation_state, 'needs_attention', 'replaying an older decision does not answer a new guest message')
     assert.equal(await db.prepare('SELECT COUNT(*) n FROM bookings').first('n'), 1)
     const moved = await sessionMoveQuery(db, { bookingId: record!.id, organizationId: ORG, productId: winner.productId, sessionId: winner.sessionId, partySize: 1, now: new Date().toISOString() })
     assert.equal((await db.prepare(moved.query).bind(...moved.params!).run()).meta.changes, 1, 'same-session changes exclude the allocation being moved')
@@ -540,6 +547,15 @@ test('one provider\'s online offerings exclude overlapping pending requests and 
     // its required booking still exists when that operation is replayed.
     await db.prepare('DELETE FROM bookings WHERE id = ?').bind(record!.id).run()
     await assert.rejects(executeGuestThreadOperation(db, cancel), { statusCode: 404, message: 'The conversation has no matching booking or reservation', data: { code: 'REQUEST_OPERATIONAL_RECORD_NOT_FOUND', request_id: winner.requestId } })
+
+    const questionRequest = 'thread-question-before-confirmation'
+    await db.batch(requestInsertQueries({ id: questionRequest, kind: 'booking', organization_id: ORG, location_id: null, user_id: null, review_id: null, conversation_state: 'needs_attention', resolved_at: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@example.com' }), created_at: NOW, updated_at: NOW }).map(query => db.prepare(query.query).bind(...query.params!)))
+    await claimSessionCapacity(db, { ...winner, requestId: questionRequest })
+    const question = await appendEntry(db, { threadId: questionRequest, kind: 'message', actorKind: 'guest', channel: 'web', body: 'Can I bring my notes?', dedupeKey: 'question-before-confirmation' })
+    await updateThreadProjectionIfLatestEntry(db, questionRequest, question.id, { conversationState: 'needs_attention' })
+    assert.equal((await executeGuestThreadOperation(db, { ...confirm, threadId: questionRequest })).ok, true)
+    assert.equal((await getThreadOperationalRecord(db, questionRequest))?.status, 'confirmed')
+    assert.equal((await getGuestRequest(db, questionRequest, ORG))?.conversation_state, 'needs_attention', 'confirming a booking does not answer a separate guest message')
   } finally { await runtime.dispose() }
 })
 

@@ -185,7 +185,11 @@ export async function listAgenda(
     { query: `SELECT 1 AS present FROM product_booking_configs WHERE organization_id ${scopeSql} LIMIT 1`, params: [scopeParam] },
     { query: `SELECT 1 AS present FROM reservations WHERE organization_id ${scopeSql} LIMIT 1`, params: [scopeParam] },
     // A buyer's calendar is not filtered by branch; the business's is.
-    { query: `SELECT l.id, l.organization_id, l.title FROM business_locations l WHERE l.organization_id = ? AND l.organization_id ${scopeSql} ORDER BY l.title, l.id`, params: [scope.organizationId ?? '', scopeParam] },
+    { query: `SELECT l.id, l.organization_id, l.title FROM business_locations l WHERE l.organization_id = ? AND l.organization_id ${scopeSql}
+        ${staff ? `AND (EXISTS (SELECT 1 FROM requests r JOIN bookings b ON b.request_id = r.id AND b.organization_id = r.organization_id
+          WHERE r.organization_id = l.organization_id AND r.location_id = l.id AND ${assignedBookingSql('b')})
+          OR EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = l.organization_id AND c.location_id = l.id AND ${assignedHomeSql('c')}))` : ''}
+        ORDER BY l.title, l.id`, params: [scope.organizationId ?? '', scopeParam, ...(staff ? [staff.userId, staff.userId, staff.userId] : [])] },
     // A business with a place to stay has arrivals and departures; a buyer's agenda has none.
     { query: 'SELECT 1 AS present FROM product_stay_configs WHERE organization_id = ? LIMIT 1', params: [scope.organizationId ?? ''] },
   ], { operation: 'Read the agenda scope' })

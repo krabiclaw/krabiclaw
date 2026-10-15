@@ -29,8 +29,8 @@ import type {
   GuestThreadSubmissionType,
 } from './types'
 
-// A thread is never resolved by hand. Cancelling resolves it as a consequence
-// of the booking's own lifecycle; there is no separate resolve/reopen for a
+// A thread is never resolved by hand. Booking decisions resolve their review
+// through the booking's own lifecycle; there is no separate resolve/reopen for a
 // member to reach for. Archive and unarchive say where the conversation is
 // filed, not what state it is in, and touch neither the booking nor
 // conversation_state.
@@ -386,7 +386,16 @@ async function sendStatusUpdate(
   } catch (error) {
     deliveryError = describeErrorForTelemetry(error)
   }
-  if (deliveryError === undefined && isDeliverySent(outcome)) return await successfulOutcome(db, context)
+  if (deliveryError === undefined && isDeliverySent(outcome)) {
+    if (input.action === 'confirm') {
+      // Confirming answers the booking request, not a separate guest message.
+      // A retry must also leave newer conversation activity on its own state.
+      await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id, {
+        conversationState: 'resolved', preserveUnansweredGuestMessages: true,
+      })
+    }
+    return await successfulOutcome(db, context)
+  }
   if (deliveryError !== undefined) console.error({ event: 'guest_status_email_failed', organization_id: context.thread.organization_id, request_id: context.thread.id, error: deliveryError })
   const currentRecord = await getThreadOperationalRecord(db, context.thread.id)
   if (!currentRecord) return { ok: false, status: 404, reason: 'source_not_found' }

@@ -55,6 +55,15 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   expect(home.error).toBeNull()
   expect(home.data!.product).toMatchObject({ kind: 'stay', unit_label: 'night', stay: { location_id: location.id, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2 } })
 
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`/dashboard/${slug}/products`)
+  const stayTile = page.getByTestId('catalog-section-stay').getByTestId(`selector-item-${productId}`)
+  await expect(stayTile).toHaveAttribute('href', `/dashboard/${slug}/products/${productId}`)
+  await expect(stayTile).toHaveAccessibleName('Cliff Cabin')
+  await stayTile.click()
+  await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}`)
+  await expect(page.locator('#dashboard-panel-product').getByRole('heading', { name: 'Cliff Cabin', exact: true })).toBeVisible()
+
   // A stay arriving today holds its nights; another on them is refused.
   const checkIn = localDay(0)
   const checkOut = localDay(2)
@@ -122,4 +131,87 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   expect(nights.find(night => night.date === closedNight)).toMatchObject({ available: false, closed: true })
   const mcpCalendar = await call<{ nights: Array<{ date: string; closed: boolean }> }>('get_stay_calendar', { product_id: productId, from: closedNight, to: localDay(21) })
   expect(mcpCalendar.data!.nights).toEqual([expect.objectContaining({ date: closedNight, closed: true })])
+})
+
+test('a cleaner sees only assigned-home arrivals and departures on Today and Upcoming', async ({ page, browser, baseURL }) => {
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates local stays and uses disposable actors')
+  await loginAs(page.request, baseURL!, 'user-e2e-lodging-host')
+  const headers = authRequestHeaders(baseURL!)
+  const slug = `e2e-stays-${crypto.randomUUID().slice(0, 8)}`
+  const created = await page.request.post('/api/auth/organization/create', { headers, data: { name: `Cleaner ${slug}`, slug, default_currency: 'THB', timezone: TIME_ZONE } })
+  expect(created.status(), await created.text()).toBe(200)
+  const organizationId = (await created.json() as { id: string }).id
+  const provisioned = await page.request.post('/api/organizations', { headers, data: { organizationId, name: `Cleaner ${slug}`, subdomain: slug, vertical: 'lodging', sourceLocale: 'en' } })
+  expect(provisioned.status(), await provisioned.text()).toBe(200)
+  const api = (path: string) => `/api/dashboard/${path}?org=${encodeURIComponent(slug)}`
+  const call = <T>(name: string, args: Record<string, unknown>) => tool<T>(page.request, baseURL!, organizationId, name, args)
+  const cleaner = await browser.newContext({ baseURL: baseURL! })
+  try {
+    await loginAs(cleaner.request, baseURL!, 'user-e2e-demo-role-owner')
+    const offered = await page.request.post(`/api/organizations/${organizationId}/invite-links`, { data: { role: 'member' } })
+    expect(offered.status(), await offered.text()).toBe(201)
+    const token = (await offered.json() as { token: string }).token
+    const accepted = await cleaner.request.post(`/api/invite-links/${encodeURIComponent(token)}/accept`, { data: {} })
+    expect(accepted.status(), await accepted.text()).toBe(200)
+    const memberId = (await accepted.json() as { memberId: string }).memberId
+    const locations = await call<{ locations: Array<{ id: string }> }>('list_locations', {})
+    expect(locations.error).toBeNull()
+    expect(locations.data!.locations).toHaveLength(1)
+    const madeHome = await page.request.post(api('stay-homes'), { data: { name: 'Assigned Cabin', timezone: TIME_ZONE, address: '1 Test Road', city: 'Krabi', country: 'TH',
+      state: null, zip_code: null, phone: null, email: null, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1,
+      base_price_minor: null, idempotency_key: crypto.randomUUID() } })
+    expect(madeHome.status(), await madeHome.text()).toBe(201)
+    const assignedHome = (await madeHome.json() as { home: { product_id: string; location_id: string } }).home
+    const otherHome = await call<{ product: { id: string } }>('create_product', { kind: 'stay', name: 'Other Cabin', idempotency_key: crypto.randomUUID(), stay: {
+      location_id: locations.data!.locations[0]!.id, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1,
+      assigned_member_id: null, assigned_team_id: null,
+    } })
+    expect(otherHome.error).toBeNull()
+    const homes = [assignedHome, { product_id: otherHome.data!.product.id, location_id: locations.data!.locations[0]!.id }]
+    const assigned = await call('update_product', { product_id: homes[0]!.product_id, stay: { assigned_member_id: memberId } })
+    expect(assigned.error).toBeNull()
+    const stays: Array<{ id: string }> = []
+    for (const [index, home] of homes.entries()) {
+      const made = await page.request.post(api('stays'), { data: { product_id: home.product_id, check_in_date: localDay(0), check_out_date: localDay(2), adults: 2,
+        guest_name: index === 0 ? 'Ana' : 'Private', guest_surname: 'Silva', total_minor: 30_000, idempotency_key: crypto.randomUUID() } })
+      expect(made.status(), await made.text()).toBe(201)
+      stays.push((await made.json() as { stay: { id: string } }).stay)
+    }
+    const todayResponse = await cleaner.request.get(api('today'))
+    expect(todayResponse.status(), await todayResponse.text()).toBe(200)
+    const today = await todayResponse.json() as import('../../shared/dashboard-today').TodayFeedPayload
+    const arrivalPath = `/dashboard/${slug}/bookings/stay/${stays[0]!.id}`
+    expect(today.cards).toEqual([expect.objectContaining({ id: `stay:${stays[0]!.id}:arrival`, to: arrivalPath, priority: 'schedule', bookingKind: 'stay',
+      headline: 'Ana arrives today with 2 guests', description: 'Assigned Cabin', locationId: homes[0]!.location_id })])
+    expect(today.locations.map(location => location.id)).toEqual([homes[0]!.location_id])
+    const upcomingResponse = await cleaner.request.get(api('today'), { params: { range: 'upcoming', from: localDay(1), to: localDay(7) } })
+    expect(upcomingResponse.status(), await upcomingResponse.text()).toBe(200)
+    const upcoming = await upcomingResponse.json() as import('../../shared/dashboard-today').TodayFeedPayload
+    expect(upcoming.cards).toEqual([expect.objectContaining({ id: `stay:${stays[0]!.id}:departure`, to: arrivalPath, priority: 'schedule', bookingKind: 'stay',
+      headline: 'Ana leaves in 2 days with 2 guests', description: 'Assigned Cabin', locationId: homes[0]!.location_id })])
+    const denied = await cleaner.request.get(api(`stays/${stays[1]!.id}`))
+    expect(denied.status()).toBe(404)
+    const deniedLocation = await cleaner.request.get(api('today'), { params: { locationId: homes[1]!.location_id } })
+    expect(deniedLocation.status()).toBe(404)
+
+    const cleanerPage = await cleaner.newPage()
+    await cleanerPage.setViewportSize({ width: 390, height: 844 })
+    expect((await cleanerPage.goto(`/dashboard/${slug}`))?.status()).toBe(200)
+    const arrival = cleanerPage.getByTestId('today-card')
+    await expect(arrival).toHaveCount(1)
+    await expect(arrival).toHaveAttribute('href', arrivalPath)
+    await arrival.click()
+    await expect(cleanerPage.getByRole('heading', { name: 'Ana Silva', level: 1, exact: true })).toBeVisible()
+    await expect(cleanerPage.getByRole('button', { name: 'Cancel stay', exact: true })).toHaveCount(0)
+    await expect(cleanerPage.getByRole('button', { name: 'Record payment', exact: true })).toHaveCount(0)
+    await cleanerPage.goto(`/dashboard/${slug}?range=upcoming`)
+    const departure = cleanerPage.getByTestId('today-card')
+    await expect(departure).toHaveCount(1)
+    await expect(departure).toContainText('Ana leaves in 2 days with 2 guests')
+    await expect(departure).toHaveAttribute('href', `${arrivalPath}?range=upcoming`)
+    await departure.click()
+    await expect(cleanerPage.getByRole('heading', { name: 'Ana Silva', level: 1, exact: true })).toBeVisible()
+  } finally {
+    await cleaner.close()
+  }
 })

@@ -353,12 +353,13 @@ export async function listDashboardLocations(
   db: DbClient,
   organizationId: string,
   assignedUserId?: string,
+  includeInactive = false,
 ) {
 
   const locations = await queryAll<Omit<DashboardLocationRow, 'media' | 'social_image' | 'address'> & { address: string | null }>(db, `
     SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address
     FROM business_locations l
-    WHERE l.organization_id = ? AND l.status = 'active'
+    WHERE l.organization_id = ? ${includeInactive ? '' : "AND l.status = 'active'"}
       ${assignedUserId ? `AND EXISTS (SELECT 1 FROM product_locations pl JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id
         WHERE pl.organization_id = l.organization_id AND pl.location_id = l.id AND (${ASSIGNED_SERVICE_SQL}))` : ''}
     ORDER BY l.title ASC

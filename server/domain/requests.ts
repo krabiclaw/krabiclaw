@@ -334,7 +334,7 @@ export async function cancelBookingRequest(db: DbClient, input: {
   const record = await getThreadOperationalRecord(db, current.id)
   if (!record || record.organization_id !== input.organizationId || record.kind !== current.kind) return null
   if (input.buyerUserId && (current.user_id !== input.buyerUserId || record.user_id !== input.buyerUserId)) return null
-  async function readCancelled() {
+  async function readCancelled(changed = false) {
     const request = await getGuestRequest(db, input.id, input.organizationId, input.kind)
     const cancelled = await getThreadOperationalRecord(db, input.id)
     if (!request || request.kind === 'contact' || request.kind === 'stay' || !request.payload.cancellation.used_at || !cancelled || cancelled.status !== 'cancelled' || cancelled.organization_id !== input.organizationId || cancelled.kind !== request.kind) return null
@@ -345,7 +345,16 @@ export async function cancelBookingRequest(db: DbClient, input: {
     const before = JSON.parse(entry.payload_json).beforeStatus
     if (!['pending', 'confirmed'].includes(before)) throw new Error('Cancellation audit has no valid prior status')
     if (cancelled.kind === 'booking') await recordBookingCancelled(db, { organizationId: input.organizationId, bookingId: cancelled.id, cancelledBy: 'guest', actorUserId: input.buyerUserId ?? null })
-    return { request, record: cancelled, wasConfirmed: before === 'confirmed', changed: false }
+    if (cancelled.kind === 'reservation') {
+      const refund = await queryFirst<{ payment_id: string; idempotency_key: string }>(db, `SELECT r.payment_id,r.idempotency_key FROM payment_refunds r
+        JOIN payments p ON p.id=r.payment_id WHERE p.organization_id=? AND p.subject_type='reservation' AND p.subject_id=?
+          AND r.idempotency_key='guest-cancelled-reservation:'||p.subject_id`, [input.organizationId, cancelled.id])
+      if (refund) {
+        if (!input.env.STRIPE_SECRET_KEY) throw new Error('Stripe is not configured')
+        await executeRefund(db, createStripeClient(input.env.STRIPE_SECRET_KEY, 'payments'), await requirePayment(db, input.organizationId, refund.payment_id), null, refund.idempotency_key, 'requested_by_customer', input.buyerUserId ?? null, input.env)
+      }
+    }
+    return { request, record: cancelled, wasConfirmed: before === 'confirmed', changed }
   }
   if (record.status === 'cancelled') return await readCancelled()
   if (!canCancelBookingRequest(record, input.now)) return null
@@ -358,7 +367,7 @@ export async function cancelBookingRequest(db: DbClient, input: {
   const table = record.kind === 'booking' ? 'bookings' : 'reservations'
   const refund = record.kind === 'reservation' ? await guestReservationRefundQueries(db, {
     organizationId: input.organizationId, reservationId: record.id, requestId: input.id, startsAt: record.starts_at, now: input.now, buyerUserId: input.buyerUserId,
-  }) : { queries: [], guard: null, refund: null }
+  }) : { queries: [], guard: null }
   const [consumed, released] = await executeBatch(db, [
     {
       query: `UPDATE requests SET
@@ -390,13 +399,5 @@ export async function cancelBookingRequest(db: DbClient, input: {
   if (!row) return await readCancelled()
   if ((released?.meta?.changes ?? 0) !== 1) throw new Error('Cancellation consumed the token without releasing the booking')
 
-  const request = parseGuestRequest(row)
-  if (request.kind === 'contact' || request.kind === 'stay') throw new Error(`Cancellation returned a ${request.kind} thread`)
-  if (record.kind === 'booking') await recordBookingCancelled(db, { organizationId: input.organizationId, bookingId: record.id, cancelledBy: 'guest', actorUserId: input.buyerUserId ?? null })
-  // The deposit goes back the moment the table is released: Stripe's full-remaining refund, under the cancellation's own key.
-  if (refund.refund) {
-    if (!input.env.STRIPE_SECRET_KEY) throw new Error('Stripe is not configured')
-    await executeRefund(db, createStripeClient(input.env.STRIPE_SECRET_KEY, 'payments'), await requirePayment(db, input.organizationId, refund.refund.paymentId), null, refund.refund.key, 'requested_by_customer', input.buyerUserId ?? null, input.env)
-  }
-  return { request, record: { ...record, status: 'cancelled' }, wasConfirmed: record.status === 'confirmed', changed: true }
+  return await readCancelled(true)
 }

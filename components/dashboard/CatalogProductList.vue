@@ -19,22 +19,30 @@
       />
     </div>
 
-    <div v-if="!rows.length" class="rounded-2xl border border-default bg-elevated px-6 py-20 text-center">
-      <UIcon name="i-lucide-layout-grid" class="mx-auto size-6 text-muted" />
-      <h2 class="mt-5 text-base font-semibold text-highlighted">No {{ activeFilterLabel.toLowerCase() }} yet</h2>
-    </div>
-    <EditorNavigationList v-else :groups="groups" :active-item="activeItem" />
+    <p v-if="!rows.length" class="py-5 text-sm text-muted">No {{ activeFilterLabel.toLowerCase() }} yet.</p>
+    <OrganizationLocationSelector
+      v-else
+      :items="items"
+      :active-item="activeItem"
+      :label-heading-level="itemHeadingLevel"
+      rows-on-mobile
+      missing-image-label="No photo"
+      missing-image-hint="Add one in this item’s photo editor."
+    />
   </div>
 </template>
 
 <script setup lang="ts">
-import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
-import type { Product } from '~/server/types/products'
-import { PRODUCT_KINDS, PRODUCT_KIND_LABELS, type ProductKind } from '~/shared/product-details'
+import OrganizationLocationSelector, { type OrganizationLocationSelectorItem } from '~/components/dashboard/OrganizationLocationSelector.vue'
+import type { Collection, Product } from '~/server/types/products'
+import { PRODUCT_KINDS, type ProductKind } from '~/shared/product-details'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
+import { productAvailabilityPath } from '~/server/utils/dashboard-links'
 
 const props = defineProps<{
   products: Product[]
+  collections: Collection[]
+  locations: ReadonlyArray<{ id: string; title: string; status: string }>
   /** The list's own path, which the kind filters link to. */
   path: string
   /** What one product costs in this scope. */
@@ -42,11 +50,13 @@ const props = defineProps<{
   activeItem?: string | null
   /** A list of one kind — Experiences, Services — with no kind filters of its own. */
   fixedKind?: ProductKind
+  itemHeadingLevel?: 2 | 3
 }>()
 
 const route = useRoute()
 const router = useRouter()
 const catalogPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/products`)
+const choosingAvailability = computed(() => route.query.action === 'availability')
 
 // Kind is the product's own, so the filters are kinds, named the same on every
 // template. `item` is the generic kind and reads as Products.
@@ -61,7 +71,7 @@ const activeFilterLabel = computed(() => kind.value === 'all' ? 'Products' : KIN
 
 /** A path in this catalog's scope: the explicit location and kind ride along, nothing else does. */
 function scoped(path: string, query: Record<string, string | undefined> = {}) {
-  return router.resolve({ path, query: { location_id: route.query.location_id, ...query } }).fullPath
+  return router.resolve({ path, query: { location_id: route.query.location_id, action: choosingAvailability.value ? 'availability' : undefined, ...query } }).fullPath
 }
 function filterTo(value: ProductKind | 'all') {
   return scoped(props.path, { kind: value === 'all' ? undefined : value })
@@ -69,14 +79,23 @@ function filterTo(value: ProductKind | 'all') {
 
 // The server orders by name.
 const rows = computed(() => props.products.filter(product => kind.value === 'all' || product.kind === kind.value))
-const groups = computed<EditorNavigationGroup[]>(() => [{
-  id: 'catalog',
-  items: rows.value.map(product => ({
+const items = computed<OrganizationLocationSelectorItem[]>(() => rows.value.map(product => ({
     id: product.id,
     label: product.name,
-    summary: [PRODUCT_KIND_LABELS[product.kind], props.priceLabel(product) || 'No price set'].join(' · '),
-    lead: { image: mediaStillUrl(product.image ?? undefined) ?? null, icon: 'i-lucide-image' },
-    to: scoped(`${catalogPath.value}/${product.id}`),
-  })),
-}])
+    eyebrow: [...product.collections.map(membership => {
+      const collection = props.collections.find(row => row.id === membership.collection_id)
+      if (!collection) throw createError({ statusCode: 500, statusMessage: 'An item’s section could not be loaded' })
+      return collection.name
+    }), props.priceLabel(product) || 'No price set'].join(' · '),
+    summary: [product.booking?.held_online ? 'Online' : null, ...product.locations.map(binding => {
+      const location = props.locations.find(row => row.id === binding.location_id)
+      if (!location) throw createError({ statusCode: 500, statusMessage: 'An item’s location could not be loaded' })
+      const status = [location.status !== 'active' ? location.status : null, !binding.published ? 'Not listed' : null, !binding.active ? 'Unavailable' : null].filter(Boolean)
+      return `${location.title}${status.length ? ` (${status.join(', ')})` : ''}`
+    })].filter(Boolean).join(' · ') || 'No locations set',
+    imageUrl: mediaStillUrl(product.image),
+    to: choosingAvailability.value
+      ? productAvailabilityPath(String(route.params.orgSlug), product.id, typeof route.query.location_id === 'string' ? route.query.location_id : undefined)
+      : scoped(`${catalogPath.value}/${product.id}`),
+  })))
 </script>

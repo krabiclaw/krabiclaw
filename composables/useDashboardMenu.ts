@@ -4,12 +4,11 @@ import { authClient } from '~/lib/auth-client'
 import { useMediaQuery } from '@vueuse/core'
 
 /**
- * How many Cancel/Save footers are mounted. While one is, a leaf is open as a
- * sheet, and the phone's tab bar goes away under it. DashboardPanelFooter
- * counts itself in and out; the layout reads the count.
+ * Inline commit footers replace the phone's tab bar. A leaf drawer covers the
+ * existing shell instead, preserving the size and scroll of its parent.
  */
-export function useDashboardLeafFooters() {
-  return useState<number>('dashboard-leaf-footers', () => 0)
+export function useDashboardInlineFooters() {
+  return useState<number>('dashboard-inline-footers', () => 0)
 }
 
 /**

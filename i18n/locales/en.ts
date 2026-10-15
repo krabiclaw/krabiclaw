@@ -505,6 +505,7 @@ export default {
       "checking": "Checking reservation details...",
       "cancel_visit": "Cancel your visit?",
       "reservation_for": "Reservation for:",
+      "retry_refund": "Retry deposit refund",
       "date": "Date:",
       "time": "Time:",
       "guests": "Guests:",
@@ -518,7 +519,8 @@ export default {
       "make_new": "Make a New Reservation",
       "toast_cancelled": "Reservation cancelled",
       "toast_error": "Error",
-      "toast_cancel_failed": "Failed to cancel reservation"
+      "toast_cancel_failed": "Failed to cancel reservation",
+      "toast_refund_failed": "Could not retry your deposit refund. Please try again."
     },
     "experience_cancel": {
       "title": "Cancel booking",

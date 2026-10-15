@@ -1,4 +1,5 @@
 import { getGuestRequest, getThreadOperationalRecord } from '~/server/domain/requests'
+import { canRetryGuestReservationRefund } from '~/server/domain/payments/visit-refund'
 import { queryFirst } from '~/server/db'
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { hashReservationCancelToken, readBearerToken } from '~/server/utils/reservation-cancel-token'
@@ -92,6 +93,7 @@ export default defineHandler(async (event) => {
       timezone: record.timezone,
       guests: `${record.party_size}${request.payload.party_size_is_minimum ? '+' : ''}`,
       status: record.status,
+      can_retry_cancellation: record.kind === 'reservation' && await canRetryGuestReservationRefund(db, { organizationId, reservationId: record.id, requestId: request.id }),
       locale,
       product_id: record.product_id,
       product_kind: productKind,

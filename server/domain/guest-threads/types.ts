@@ -98,6 +98,11 @@ export interface GuestThreadListItemViewModel {
   submissionType: GuestThreadSubmissionType
   contextLabel: string
   locationLabel: string | null
+  locationId: string | null
+  assignedMemberId: string | null
+  occurrenceAt: string | null
+  timeZone: string | null
+  latestMessageFromGuest: boolean
   conversationState: ConversationState | null
   operationalStatus: string | null
   operationalStatusLabel: string | null
@@ -197,6 +202,7 @@ export interface ListGuestThreadsOptions {
   buyerAudience?: boolean
   organizationId?: string | null
   locationId?: string | null
+  assignedMemberId?: string | null
   principal?: MemberAccessPrincipal | null
   userId: string
   type?: GuestThreadSubmissionType | null
