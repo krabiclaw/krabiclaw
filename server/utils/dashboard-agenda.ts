@@ -275,9 +275,9 @@ export async function listAgenda(
   // home's check-in time and leave on the checkout date at its checkout time,
   // both in the location's zone. Members see the homes they look after.
   const stayRows = requestedKinds.has('stay') && scope.organizationId ? queryAll<{
-    id: string; organization_id: string; product_id: string; product_name: string; status: string; check_in_date: string; check_out_date: string
+    id: string; organization_id: string; product_id: string; product_name: string; status: string; overbooked: number; check_in_date: string; check_out_date: string
     guest_name: string | null; guest_surname: string | null; party_size: number; location_id: string; location_title: string; timezone: string; check_in_time: string; check_out_time: string
-  }>(db, `SELECT st.id, st.organization_id, st.product_id, p.name AS product_name, st.status, st.check_in_date, st.check_out_date, st.guest_name, st.guest_surname,
+  }>(db, `SELECT st.id, st.organization_id, st.product_id, p.name AS product_name, st.status, st.overbooked, st.check_in_date, st.check_out_date, st.guest_name, st.guest_surname,
         st.adults + st.children AS party_size, c.location_id, l.title AS location_title, l.timezone, c.check_in_time, c.check_out_time
       FROM stays st
       JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
@@ -335,13 +335,15 @@ export async function listAgenda(
   for (const stay of query.assignedMemberId ? [] : stays) {
     if (!isValidTimezone(stay.timezone)) throw new Error(`Timezone is not configured for stay ${stay.id}`)
     const guest = [stay.guest_name, stay.guest_surname].filter(Boolean).join(' ') || 'Guest'
+    // Rule 1: a channel stay that landed on held nights shows flagged wherever its arrival and departure do.
+    const title = Number(stay.overbooked) === 1 ? `Overbooked · ${guest}` : guest
     for (const [moment, day, time] of [['arrival', stay.check_in_date, stay.check_in_time], ['departure', stay.check_out_date, stay.check_out_time]] as const) {
       if (day < query.from || day > query.to) continue
       const instant = localDateTimeToInstant(day, time, stay.timezone, 'compatible').toISOString()
       items.push({
         assignedMemberId: null, assignedMemberName: null, id: `stay:${stay.id}:${moment}`, requestId: null, operationalBookingId: null, operationalReservationId: null,
         stayId: stay.id, stayMoment: moment, kind: 'stay', startsAt: instant, endsAt: null, dayKey: day, timeZone: stay.timezone, showTimeZone: false,
-        title: guest, subtitle: `${moment === 'arrival' ? 'Checking in' : 'Checking out'} · ${stay.party_size === 1 ? '1 guest' : `${stay.party_size} guests`}`,
+        title, subtitle: `${moment === 'arrival' ? 'Checking in' : 'Checking out'} · ${stay.party_size === 1 ? '1 guest' : `${stay.party_size} guests`}`,
         status: stay.status, organizationId: stay.organization_id, locationId: stay.location_id, locationTitle: stay.location_title,
         guestImageUrl: null, resourceImageUrl: null, resourceTitle: stay.product_name, partySize: stay.party_size,
         to: `/dashboard/${organizationPath}/bookings/stay/${encodeURIComponent(stay.id)}`,
