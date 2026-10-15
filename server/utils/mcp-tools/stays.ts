@@ -24,13 +24,16 @@ const stayProperties = {
   version: { type: 'integer' }, created_at: text, updated_at: text,
 }
 const stay = { type: 'object', properties: stayProperties, required: Object.keys(stayProperties) }
-const stayDetail = { type: 'object', properties: { ...stayProperties, payments: { type: 'array', items: payment }, paid_minor: { type: 'integer' }, payment_status: { type: ['string', 'null'], enum: ['unpaid', 'partial', 'paid', 'overpaid', null] } },
+const channelPush = { type: ['object', 'null'], description: "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.", properties: { state: { type: 'string', enum: ['pushed', 'needs_review'] }, detail: nullableText }, required: ['state', 'detail'] }
+const stayDetail = { type: 'object', properties: { ...stayProperties, payments: { type: 'array', items: payment }, paid_minor: { type: 'integer' }, payment_status: { type: ['string', 'null'], enum: ['unpaid', 'partial', 'paid', 'overpaid', null] }, channel_push: channelPush },
   required: [...Object.keys(stayProperties), 'payments', 'paid_minor', 'payment_status'] }
-const home = { type: 'object', properties: { product_id: text, name: text, location_id: text, timezone: text, currency: text, base_price_minor: { type: ['integer', 'null'] }, check_in_time: text, check_out_time: text, max_guests: { type: 'integer' }, min_nights: { type: 'integer' } },
-  required: ['product_id', 'name', 'location_id', 'timezone', 'currency', 'base_price_minor', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights'] }
-const night = { type: 'object', properties: { date: day, available: { type: 'boolean' }, stay_id: nullableText, closed: { type: 'boolean' }, price_minor: { type: ['integer', 'null'] }, min_stay_arrival: { type: ['integer', 'null'] }, min_stay_through: { type: ['integer', 'null'] }, max_stay: { type: ['integer', 'null'] }, closed_to_arrival: { type: 'boolean' }, closed_to_departure: { type: 'boolean' }, source: { type: ['string', 'null'], enum: ['host', 'import', null] } },
-  required: ['date', 'available', 'stay_id', 'closed', 'price_minor', 'min_stay_arrival', 'min_stay_through', 'max_stay', 'closed_to_arrival', 'closed_to_departure', 'source'] }
-const calendar = { type: 'object', properties: { home, nights: { type: 'array', items: night }, stays: { type: 'array', items: stay } }, required: ['home', 'nights', 'stays'] }
+const home = { type: 'object', properties: { product_id: text, name: text, location_id: text, timezone: text, currency: text, base_price_minor: { type: ['integer', 'null'] }, check_in_time: text, check_out_time: text, max_guests: { type: 'integer' }, min_nights: { type: 'integer' },
+  channel: { type: ['object', 'null'], description: 'The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.', properties: { provider: { type: 'string', enum: ['channex'] }, status: { type: 'string', enum: ['importing', 'connected', 'disconnected'] } }, required: ['provider', 'status'] } },
+  required: ['product_id', 'name', 'location_id', 'timezone', 'currency', 'base_price_minor', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'channel'] }
+const night = { type: 'object', properties: { date: day, available: { type: 'boolean' }, stay_id: nullableText, closed: { type: 'boolean' }, price_minor: { type: ['integer', 'null'] }, min_stay_arrival: { type: ['integer', 'null'] }, min_stay_through: { type: ['integer', 'null'] }, max_stay: { type: ['integer', 'null'] }, closed_to_arrival: { type: 'boolean' }, closed_to_departure: { type: 'boolean' }, source: { type: ['string', 'null'], enum: ['host', 'import', null] },
+  channel: { type: ['object', 'null'], properties: { state: { type: 'string', enum: ['pending', 'pushed', 'needs_review'] }, detail: nullableText }, required: ['state', 'detail'] } },
+  required: ['date', 'available', 'stay_id', 'closed', 'price_minor', 'min_stay_arrival', 'min_stay_through', 'max_stay', 'closed_to_arrival', 'closed_to_departure', 'source', 'channel'] }
+const calendar = { type: 'object', properties: { home, nights: { type: 'array', items: night }, stays: { type: 'array', items: stay }, channel_push: channelPush }, required: ['home', 'nights', 'stays'] }
 const guestFields = {
   check_in_date: day, check_out_date: { ...day, description: 'The morning the guest leaves; the stay holds the nights before it.' }, arrival_time: time,
   adults: { type: 'integer', minimum: 1, maximum: 99 }, children: { type: 'integer', minimum: 0, maximum: 99 }, infants: { type: 'integer', minimum: 0, maximum: 99 },
@@ -75,15 +78,15 @@ export async function handleStaysTools(ctx: McpExecutorContext): Promise<unknown
     case 'list_stays': return { stays: await listStays(db, access, { from: args.from, to: args.to, productId: args.product_id as string | undefined, includeCancelled: args.include_cancelled === true }) }
     case 'get_stay': return { stay: await getStay(db, access, requiredString(args, 'stay_id')) }
     case 'get_stay_calendar': return readStayCalendar(db, access, { productId: requiredString(args, 'product_id'), from: args.from, to: args.to })
-    case 'create_stay': return { stay: await createStay(db, access, { ...args, product_id: requiredString(args, 'product_id'), idempotency_key: requiredString(args, 'idempotency_key') }) }
+    case 'create_stay': return { stay: await createStay(db, env, access, { ...args, product_id: requiredString(args, 'product_id'), idempotency_key: requiredString(args, 'idempotency_key') }) }
     case 'update_stay': {
       const { stay_id: _id, ...patch } = args
-      return { stay: await updateStay(db, access, requiredString(args, 'stay_id'), patch as Record<string, unknown> & { expected_version: unknown }) }
+      return { stay: await updateStay(db, env, access, requiredString(args, 'stay_id'), patch as Record<string, unknown> & { expected_version: unknown }) }
     }
-    case 'cancel_stay': return { stay: await cancelStay(db, access, requiredString(args, 'stay_id'), { expected_version: args.expected_version, reason: args.reason }) }
+    case 'cancel_stay': return { stay: await cancelStay(db, env, access, requiredString(args, 'stay_id'), { expected_version: args.expected_version, reason: args.reason }) }
     case 'record_stay_payment': return { stay: await recordStayPayment(db, access, requiredString(args, 'stay_id'), args) }
     case 'delete_stay_payment': return { stay: await deleteStayPayment(db, access, requiredString(args, 'stay_id'), requiredString(args, 'payment_id')) }
-    case 'set_stay_nights': return setStayNights(db, access, { ...args, product_id: requiredString(args, 'product_id'), from: args.from, to: args.to })
+    case 'set_stay_nights': return setStayNights(db, env, access, { ...args, product_id: requiredString(args, 'product_id'), from: args.from, to: args.to })
     default: return NOT_HANDLED
   }
 }

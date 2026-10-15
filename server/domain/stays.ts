@@ -6,6 +6,8 @@ import { createLocation } from '~/server/utils/location-management'
 import { createProduct } from '~/server/utils/product-management'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price } from '~/shared/prices'
+import type { ChannexEnv } from '~/server/integrations/channex/client'
+import { pushStayNights, requireChannelPush, type ChannelPush } from '~/server/integrations/channex/ari'
 import { isValidTimezone } from '~/utils/timezone'
 
 /**
@@ -99,6 +101,12 @@ export interface StayHome {
   check_out_time: string
   max_guests: number
   min_nights: number
+  /**
+   * The channel this home is connected to, if any. null is a home kept only in
+   * Krabiclaw: its night changes go nowhere else. A connected home pushes its
+   * nights; one importing or disconnected does not.
+   */
+  channel: { provider: 'channex'; status: 'importing' | 'connected' | 'disconnected' } | null
 }
 
 export interface StayNight {
@@ -113,6 +121,8 @@ export interface StayNight {
   closed_to_arrival: boolean
   closed_to_departure: boolean
   source: 'host' | 'import' | null
+  /** What the connected channel last took for this night; null when the home has no channel or the night was never pushed. */
+  channel: { state: 'pending' | 'pushed' | 'needs_review'; detail: string | null } | null
 }
 
 const MAX_LIST_DAYS = 400
@@ -181,11 +191,13 @@ function requireManager(access: StayAccess): asserts access is StayAccess & { ma
 async function stayHomes(db: DbClient, access: StayAccess, productId: string | null): Promise<StayHome[]> {
   const scope = visibleHomes(access)
   const rows = await queryAll<Record<string, unknown>>(db, `
-    SELECT p.id AS product_id, p.name, c.location_id, l.timezone, o.default_currency, c.check_in_time, c.check_out_time, c.max_guests, c.min_nights
+    SELECT p.id AS product_id, p.name, c.location_id, l.timezone, o.default_currency, c.check_in_time, c.check_out_time, c.max_guests, c.min_nights,
+           m.enabled AS channel_enabled, m.import_stage AS channel_stage
       FROM product_stay_configs c
       JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
       JOIN organization o ON o.id = c.organization_id
+      LEFT JOIN product_channel_mappings m ON m.organization_id = c.organization_id AND m.product_id = c.product_id AND m.provider = 'channex'
      WHERE c.organization_id = ? ${productId ? 'AND c.product_id = ?' : ''} AND ${scope.sql}
      ORDER BY p.name, p.id`, [access.organizationId, ...(productId ? [productId] : []), ...scope.params])
   if (!rows.length) return []
@@ -203,6 +215,10 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
       product_id: String(row.product_id), name: String(row.name), location_id: String(row.location_id), timezone: String(row.timezone),
       currency: row.default_currency, base_price_minor: base ? base.unit_amount : null,
       check_in_time: String(row.check_in_time), check_out_time: String(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
+      channel: row.channel_stage === null ? null : {
+        provider: 'channex',
+        status: Number(row.channel_enabled) === 1 ? 'connected' : row.channel_stage === 'reservations' || row.channel_stage === 'complete' ? 'disconnected' : 'importing',
+      },
     }
   })
 }
@@ -337,13 +353,15 @@ export async function getStay(db: DbClient, access: StayAccess, stayId: string):
 export async function readStayCalendar(db: DbClient, access: StayAccess, input: { productId: string; from: unknown; to: unknown }): Promise<{ home: StayHome; nights: StayNight[]; stays: Stay[] }> {
   const { from, to } = range(input, MAX_CALENDAR_DAYS)
   const home = await readStayHome(db, access, input.productId)
-  const [overrides, claims, stays] = await Promise.all([
+  const [overrides, claims, pushes, stays] = await Promise.all([
     queryAll<Record<string, unknown>>(db, 'SELECT * FROM product_nights WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ?', [access.organizationId, input.productId, from, to]),
     queryAll<{ date: string; stay_id: string }>(db, 'SELECT date, stay_id FROM stay_nights WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ?', [access.organizationId, input.productId, from, to]),
+    queryAll<{ date: string; state: 'pending' | 'pushed' | 'needs_review'; detail: string | null }>(db, 'SELECT date, state, detail FROM channel_night_pushes WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ?', [access.organizationId, input.productId, from, to]),
     listStays(db, access, { from, to, productId: input.productId }),
   ])
   const overrideByDate = new Map(overrides.map(row => [String(row.date), row]))
   const claimByDate = new Map(claims.map(row => [row.date, row.stay_id]))
+  const pushByDate = new Map(pushes.map(row => [row.date, { state: row.state, detail: row.detail }]))
   const nights: StayNight[] = []
   for (let offset = 0; offset < days(from, to); offset++) {
     const night = new Date(Date.parse(`${from}T00:00:00Z`) + offset * 86_400_000).toISOString().slice(0, 10)
@@ -359,9 +377,25 @@ export async function readStayCalendar(db: DbClient, access: StayAccess, input: 
       closed_to_arrival: Number(row?.closed_to_arrival ?? 0) === 1,
       closed_to_departure: Number(row?.closed_to_departure ?? 0) === 1,
       source: row ? row.source as 'host' | 'import' : null,
+      channel: pushByDate.get(night) ?? null,
     })
   }
   return { home, nights, stays }
+}
+
+/**
+ * Tell the home's channel, if it has one, the current state of these nights.
+ * The outcome is part of the write's result; a night the channel did not take
+ * reads needs_review on the calendar.
+ */
+async function pushNights(db: DbClient, env: ChannexEnv, access: StayAccess, productId: string, ranges: ReadonlyArray<readonly [string, string]>): Promise<ChannelPush | null> {
+  let outcome: ChannelPush | null = null
+  for (const [from, to] of ranges) {
+    const { home, nights } = await readStayCalendar(db, { organizationId: access.organizationId, actorId: access.actorId, manage: true }, { productId, from, to })
+    const pushed = await pushStayNights(db, env, access.organizationId, home, nights)
+    if (pushed && (!outcome || pushed.state === 'needs_review')) outcome = pushed
+  }
+  return outcome
 }
 
 /**
@@ -438,12 +472,13 @@ function stayFields(input: Record<string, unknown>, home: StayHome): StayFields 
  * offers guests and channels; a stay the host enters is the host's own
  * decision, so those rules do not refuse it. Only another stay does.
  */
-export async function createStay(db: DbClient, access: StayAccess, input: Record<string, unknown> & { product_id: string; idempotency_key: string }): Promise<StayDetail> {
+export async function createStay(db: DbClient, env: ChannexEnv, access: StayAccess, input: Record<string, unknown> & { product_id: string; idempotency_key: string }): Promise<StayDetail & { channel_push: ChannelPush | null }> {
   requireManager(access)
   const key = typeof input.idempotency_key === 'string' ? input.idempotency_key.trim() : ''
   if (!key || key.length > 200) fail(422, 'INVALID_STAY_FIELD', 'idempotency_key must be 1 to 200 characters', 'idempotency_key')
   const home = await readStayHome(db, access, input.product_id)
   const fields = stayFields(input, home)
+  await requireChannelPush(db, env, access.organizationId, home.product_id)
   const replay = async () => {
     const existing = await queryFirst<{ id: string; product_id: string; check_in_date: string; check_out_date: string; guest_name: string; total_minor: number }>(db,
       'SELECT id, product_id, check_in_date, check_out_date, guest_name, total_minor FROM stays WHERE organization_id = ? AND idempotency_key = ?', [access.organizationId, key])
@@ -452,8 +487,10 @@ export async function createStay(db: DbClient, access: StayAccess, input: Record
       || existing.guest_name !== fields.guest_name || existing.total_minor !== fields.total_minor) fail(409, 'IDEMPOTENCY_CONFLICT', 'This idempotency_key was already used for a different stay', 'idempotency_key')
     return getStay(db, access, existing.id)
   }
+  // A replay pushes again, so retrying a create whose push did not land repairs it.
+  const pushed = async (stay: StayDetail) => ({ ...stay, channel_push: await pushNights(db, env, access, stay.product_id, [[stay.check_in_date, stay.check_out_date]]) })
   const earlier = await replay()
-  if (earlier) return earlier
+  if (earlier) return pushed(earlier)
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
   try {
@@ -472,11 +509,11 @@ export async function createStay(db: DbClient, access: StayAccess, input: Record
     if (isNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay already holds one of these nights', 'check_in_date')
     if (/UNIQUE constraint failed: stays\.organization_id, stays\.idempotency_key/.test(error instanceof Error ? error.message : String(error))) {
       const concurrent = await replay()
-      if (concurrent) return concurrent
+      if (concurrent) return pushed(concurrent)
     }
     throw error
   }
-  return getStay(db, access, id)
+  return pushed(await getStay(db, access, id))
 }
 
 async function requireAppStay(db: DbClient, access: StayAccess, stayId: string, expectedVersion: unknown): Promise<StayDetail> {
@@ -493,10 +530,11 @@ function versionChanged(results: unknown): boolean {
   return (results as Array<{ meta?: { changes?: number } }>)[0]?.meta?.changes === 1
 }
 
-export async function updateStay(db: DbClient, access: StayAccess, stayId: string, input: Record<string, unknown> & { expected_version: unknown }): Promise<StayDetail> {
+export async function updateStay(db: DbClient, env: ChannexEnv, access: StayAccess, stayId: string, input: Record<string, unknown> & { expected_version: unknown }): Promise<StayDetail & { channel_push: ChannelPush | null }> {
   const current = await requireAppStay(db, access, stayId, input.expected_version)
   const home = await readStayHome(db, access, current.product_id)
   const fields = stayFields({ ...current, ...input }, home)
+  await requireChannelPush(db, env, access.organizationId, home.product_id)
   const next = current.version + 1
   const now = new Date().toISOString()
   let results: unknown
@@ -517,12 +555,17 @@ export async function updateStay(db: DbClient, access: StayAccess, stayId: strin
     throw error
   }
   if (!versionChanged(results)) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
-  return getStay(db, access, stayId)
+  const stay = await getStay(db, access, stayId)
+  // The nights it released and the nights it now holds.
+  const ranges = [[current.check_in_date, current.check_out_date], [stay.check_in_date, stay.check_out_date]] as const
+  const changed = current.check_in_date === stay.check_in_date && current.check_out_date === stay.check_out_date ? [] : ranges
+  return { ...stay, channel_push: await pushNights(db, env, access, stay.product_id, changed) }
 }
 
-export async function cancelStay(db: DbClient, access: StayAccess, stayId: string, input: { expected_version: unknown; reason?: unknown }): Promise<StayDetail> {
+export async function cancelStay(db: DbClient, env: ChannexEnv, access: StayAccess, stayId: string, input: { expected_version: unknown; reason?: unknown }): Promise<StayDetail & { channel_push: ChannelPush | null }> {
   const current = await requireAppStay(db, access, stayId, input.expected_version)
   const reason = optionalText(input.reason, 'reason', 500)
+  await requireChannelPush(db, env, access.organizationId, current.product_id)
   const next = current.version + 1
   const now = new Date().toISOString()
   const results = await executeBatch(db, [
@@ -535,7 +578,7 @@ export async function cancelStay(db: DbClient, access: StayAccess, stayId: strin
     ...reconcileNightsQueries(access.organizationId, stayId),
   ], { operation: 'Cancel stay' })
   if (!versionChanged(results)) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
-  return getStay(db, access, stayId)
+  return { ...await getStay(db, access, stayId), channel_push: await pushNights(db, env, access, current.product_id, [[current.check_in_date, current.check_out_date]]) }
 }
 
 /** Record money the host received (or, negative, refunded) outside Stripe for a stay they took. */
@@ -596,7 +639,7 @@ export async function deleteStayPayment(db: DbClient, access: StayAccess, stayId
  * night's current value; `price_minor: null` returns a night to the base
  * price. `reset: true` removes every override in the range instead.
  */
-export async function setStayNights(db: DbClient, access: StayAccess, input: Record<string, unknown> & { product_id: string; from: unknown; to: unknown }): Promise<{ home: StayHome; nights: StayNight[]; stays: Stay[] }> {
+export async function setStayNights(db: DbClient, env: ChannexEnv, access: StayAccess, input: Record<string, unknown> & { product_id: string; from: unknown; to: unknown }): Promise<{ home: StayHome; nights: StayNight[]; stays: Stay[]; channel_push: ChannelPush | null }> {
   requireManager(access)
   const { from, to } = range(input, MAX_CALENDAR_DAYS)
   const home = await readStayHome(db, access, input.product_id)
@@ -611,6 +654,7 @@ export async function setStayNights(db: DbClient, access: StayAccess, input: Rec
   }
   const reset = input.reset === true
   if (reset === (Object.keys(patch).length > 0)) fail(422, 'INVALID_STAY_FIELD', reset ? 'reset cannot be combined with night settings' : 'Name at least one night setting to change, or reset')
+  await requireChannelPush(db, env, access.organizationId, home.product_id)
   const now = new Date().toISOString()
   const columns = Object.keys(patch)
   const nights = `WITH RECURSIVE night(d) AS (SELECT ? UNION ALL SELECT date(d, '+1 day') FROM night WHERE date(d, '+1 day') < ?)`
@@ -626,7 +670,8 @@ export async function setStayNights(db: DbClient, access: StayAccess, input: Rec
         },
     organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.nights_changed', entityType: 'product', entityId: home.product_id, metadata: { from, to, reset, fields: columns.join(',') } }),
   ], { operation: 'Set stay nights' })
-  return readStayCalendar(db, access, { productId: home.product_id, from, to })
+  const channelPush = await pushNights(db, env, access, home.product_id, [[from, to]])
+  return { ...await readStayCalendar(db, access, { productId: home.product_id, from, to }), channel_push: channelPush }
 }
 
 /** One night of a channel's calendar as an import reads it. */
