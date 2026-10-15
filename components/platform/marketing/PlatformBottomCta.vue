@@ -1,5 +1,12 @@
 <template>
-  <PlatformCoastalScene v-if="page.recipe === 'products'" :block="block" :page="page" closing />
+  <section v-if="page.path === '/plugin'" class="kc-mcp-cta" data-parity-section="cta">
+    <div><h2>{{ title }}</h2><p v-if="description">{{ description }}</p></div>
+    <div class="kc-mcp-cta__actions">
+      <PlatformAccountCta v-if="label && url" :label="label" :to="url" size="xl" class="kc-mcp-cta__start" />
+      <NuxtLink v-if="secondaryLabel && secondaryUrl" :to="secondaryUrl">{{ secondaryLabel }} <span aria-hidden="true">↗</span></NuxtLink>
+    </div>
+  </section>
+  <PlatformCoastalScene v-else-if="page.recipe === 'products'" :block="block" :page="page" closing />
   <section v-else-if="page.path === '/pricing'" class="kc-pricing-cta" data-parity-section="cta">
     <img v-if="mediaStillUrl(media)" :src="mediaStillUrl(media)!" :alt="media?.alt_text ?? ''" loading="lazy" decoding="async">
     <div><h2>{{ title }}</h2><p v-if="description">{{ description }}</p><PlatformAccountCta v-if="label" :label="label" :to="url || '/signup'" size="lg" /></div>
@@ -53,4 +60,18 @@ const size = computed<'md' | 'lg'>(() => (LARGE_PAGES.has(props.page.path) ? 'lg
 .kc-pricing-cta > div { position: relative; z-index: 1; max-width: 35rem; }
 .kc-pricing-cta h2 { font-size: clamp(2.5rem, 5vw, 4rem); font-weight: 400; letter-spacing: -.04em; line-height: 1.1; }
 .kc-pricing-cta p { margin-bottom: 2rem; }
+</style>
+
+<style scoped>
+.kc-mcp-cta { display: grid; grid-template-columns: 1.3fr 1fr; align-items: center; gap: 5rem; padding: clamp(4rem, 7.5vw, 7.5rem) max(7%, calc((100% - 86rem) / 2)); background: #eeb5a2; color: #171b31; }
+.kc-mcp-cta h2 { margin: 0; max-width: 17ch; font-size: clamp(2.7rem, 5vw, 5rem); font-weight: 400; letter-spacing: -.045em; line-height: 1.04; white-space: pre-line; text-wrap: balance; }
+.kc-mcp-cta p { max-width: 35rem; margin: 1.5rem 0 0; color: #5c4541; font-size: clamp(1.05rem, 1.5vw, 1.4rem); line-height: 1.6; }
+.kc-mcp-cta__actions { display: flex; flex-direction: column; align-items: center; justify-self: end; gap: 1.5rem; }
+.kc-mcp-cta :deep(.kc-mcp-cta__start) { background: #171b31; color: #fff; border-radius: 999px; padding: 1rem 2rem; }
+.kc-mcp-cta__actions > a { color: #171b31; font-size: .95rem; text-decoration: none; }
+.kc-mcp-cta__actions > a:hover { text-decoration: underline; }
+@media (max-width: 767px) {
+  .kc-mcp-cta { grid-template-columns: 1fr; gap: 2rem; }
+  .kc-mcp-cta__actions { align-items: start; justify-self: start; }
+}
 </style>
