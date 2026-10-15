@@ -103,7 +103,7 @@ test('an Airbnb sign-in completes only for its own person and state, and an unce
     assert.deepEqual(await owner.complete(channex.token!, 'chan-1'), { connected: true })
     const stored = await db.prepare('SELECT status, channel_id, state_hash, authorization_url, operation_id FROM channex_connections WHERE organization_id = ?').bind(ORG).first()
     assert.deepEqual(stored, { status: 'connected', channel_id: 'chan-1', state_hash: null, authorization_url: null, operation_id: null })
-    assert.deepEqual(await owner.status(), { status: 'connected', connected_at: (await db.prepare('SELECT connected_at FROM channex_connections').first<{ connected_at: string }>())!.connected_at, listing_count: 0 })
+    assert.deepEqual(await owner.status(), { status: 'connected', connected_at: (await db.prepare('SELECT connected_at FROM channex_connections').first<{ connected_at: string }>())!.connected_at, listing_count: 0, channel_active: false })
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()
@@ -127,6 +127,30 @@ test('a refused provider write releases the lock; one that may have applied keep
     const groupsBefore = channex.seen.filter(request => request.path === '/groups').length
     await assert.rejects(owner.start(), code('CONNECTION_BUSY'))
     assert.equal(channex.seen.filter(request => request.path === '/groups').length, groupsBefore)
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+test('a lock its request abandoned is released when no write was named, and held for review when one was', async () => {
+  const { runtime, db } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    const owner = new AirbnbConnection(db, env, ORG, OWNER)
+    const stale = new Date(Date.now() - 16 * 60 * 1000).toISOString()
+    // A request ended between taking the lock and naming any provider write.
+    await db.prepare("INSERT INTO channex_connections (organization_id, status, operation_id, updated_at) VALUES (?, 'not_connected', 'dead-request', ?)").bind(ORG, stale).run()
+    assert.equal((await owner.start()).authorization_url, 'https://www.airbnb.com/oauth2/auth?client_id=x')
+    // A lock this fresh is a request still running.
+    await db.prepare("UPDATE channex_connections SET operation_id = 'live-request', updated_at = ? WHERE organization_id = ?").bind(new Date().toISOString(), ORG).run()
+    await assert.rejects(owner.start(), code('CONNECTION_BUSY'))
+    // A request ended after naming a provider write that may have applied.
+    await db.prepare("UPDATE channex_connections SET operation_id = 'dead-writer', pending_step = 'create_group', updated_at = ? WHERE organization_id = ?").bind(stale, ORG).run()
+    await assert.rejects(owner.start(), code('CONNECTION_BUSY'))
+    assert.deepEqual(await db.prepare('SELECT status, operation_id, pending_step FROM channex_connections').first(), { status: 'needs_review', operation_id: 'dead-writer', pending_step: 'create_group' })
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()

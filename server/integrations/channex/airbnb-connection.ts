@@ -37,6 +37,8 @@ export interface AirbnbListing { id: string; title: string; city: string; countr
 /** Where Airbnb sends the person back after signing in: the native app. */
 export const AIRBNB_CALLBACK = 'krabiclaw://airbnb/callback'
 const SIGN_IN_LIFETIME_MS = 2 * 60 * 60 * 1000
+/** A lock untouched this long belongs to a request that ended without releasing it. */
+const ABANDONED_LOCK_MS = 15 * 60 * 1000
 
 function fail(statusCode: number, code: string, message: string): never {
   throw new HTTPError({ statusCode, message, data: { code } })
@@ -88,7 +90,17 @@ export class AirbnbConnection {
   private async locked<T>(action: (row: ConnectionRow) => Promise<T>): Promise<T> {
     await execute(this.db, "INSERT INTO channex_connections (organization_id, status) VALUES (?, 'not_connected') ON CONFLICT (organization_id) DO NOTHING", [this.organizationId])
     const operationId = crypto.randomUUID()
-    const taken = await execute(this.db, 'UPDATE channex_connections SET operation_id = ?, updated_at = ? WHERE organization_id = ? AND operation_id IS NULL', [operationId, now(), this.organizationId])
+    // Every step under the lock writes updated_at, so a lock left untouched for
+    // ABANDONED_LOCK_MS belongs to a request the runtime ended before its catch
+    // could run. With no provider write named it is released; with one, the
+    // write may have applied, so the connection is held for review instead.
+    const abandonedBefore = new Date(Date.now() - ABANDONED_LOCK_MS).toISOString()
+    await execute(this.db, `UPDATE channex_connections SET status = 'needs_review', updated_at = ?
+      WHERE organization_id = ? AND operation_id IS NOT NULL AND pending_step IS NOT NULL AND updated_at < ? AND status <> 'needs_review'`,
+    [now(), this.organizationId, abandonedBefore])
+    const taken = await execute(this.db, `UPDATE channex_connections SET operation_id = ?, updated_at = ?
+      WHERE organization_id = ? AND (operation_id IS NULL OR (pending_step IS NULL AND updated_at < ?))`,
+    [operationId, now(), this.organizationId, abandonedBefore])
     if (!taken.meta.changes) fail(409, 'CONNECTION_BUSY', 'Airbnb setup is running or needs review. Refresh before continuing.')
     const row = (await this.row())!
     try {
@@ -129,12 +141,17 @@ export class AirbnbConnection {
     })
   }
 
-  async status(): Promise<{ status: ConnectionStatus; connected_at: string | null; listing_count: number }> {
+  /**
+   * `connected` means the Airbnb account is authorized. Its channel exchanges
+   * nothing until a listing is imported and the channel activated, which
+   * `channel_active` reports.
+   */
+  async status(): Promise<{ status: ConnectionStatus; connected_at: string | null; listing_count: number; channel_active: boolean }> {
     const row = await this.row()
-    if (!row) return { status: 'not_connected', connected_at: null, listing_count: 0 }
-    if (row.status !== 'connected') return { status: row.status, connected_at: row.connected_at, listing_count: 0 }
+    if (!row) return { status: 'not_connected', connected_at: null, listing_count: 0, channel_active: false }
+    if (row.status !== 'connected') return { status: row.status, connected_at: row.connected_at, listing_count: 0, channel_active: false }
     const channel = await this.channel(row, row.channel_id!, new Set())
-    return { status: row.status, connected_at: row.connected_at, listing_count: channel.ratePlans.length }
+    return { status: row.status, connected_at: row.connected_at, listing_count: channel.ratePlans.length, channel_active: channel.active }
   }
 
   /** A single-use Airbnb sign-in link for the person asking. */
