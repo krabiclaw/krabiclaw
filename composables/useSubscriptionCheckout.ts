@@ -30,9 +30,6 @@ function checkoutReturnUrls(plan: string): { successUrl: string; cancelUrl: stri
 export function useSubscriptionCheckout() {
   const dashboardApi = useDashboardApi()
   const { getBillingAnalyticsContext } = useAnalytics()
-  // Null until an intent fails to record. Checkout does not stop for it, but the
-  // caller can see that this checkout will be missing from billing analytics.
-  const analyticsIntentError = ref<string | null>(null)
 
   async function startSubscriptionCheckout(input: SubscriptionCheckoutInput): Promise<StripeGa4IntentAction> {
     // Validate the requested plan before touching analytics, browser state, or
@@ -48,22 +45,15 @@ export function useSubscriptionCheckout() {
     input.onAction?.(action)
 
     const analyticsContext = getBillingAnalyticsContext()
-    analyticsIntentError.value = null
-    try {
-      await recordBillingAnalyticsIntent(dashboardApi, {
-        organizationId: input.organizationId,
-        subscriptionId: input.subscriptionId ?? null,
-        action,
-        ...analyticsContext,
-        previousPriceId: input.previousPriceId ?? null,
-        newPriceId: input.newPriceId ?? null,
-        effectiveTiming: action === 'downgrade' ? 'period_end' : 'immediate',
-      })
-    } catch (error) {
-      // Checkout continues — a missing analytics intent must never cost a sale —
-      // but it is the caller's to know about, not a console's.
-      analyticsIntentError.value = error instanceof Error ? error.message : String(error)
-    }
+    await recordBillingAnalyticsIntent(dashboardApi, {
+      organizationId: input.organizationId,
+      subscriptionId: input.subscriptionId ?? null,
+      action,
+      ...analyticsContext,
+      previousPriceId: input.previousPriceId ?? null,
+      newPriceId: input.newPriceId ?? null,
+      effectiveTiming: action === 'downgrade' ? 'period_end' : 'immediate',
+    })
 
     // Checkout runs from a click, not a render, so the session is read the
     // imperative way Better Auth provides for exactly that.
@@ -116,5 +106,5 @@ export function useSubscriptionCheckout() {
     return action
   }
 
-  return { startSubscriptionCheckout, analyticsIntentError }
+  return { startSubscriptionCheckout }
 }

@@ -7,6 +7,7 @@ import { organizationAdapter } from '~/server/utils/member-access'
 import { getPlanEntitlements, type EntitlementsMap } from '~/server/utils/billing-entitlements'
 import { entitlingSubscription, getOrganizationEntitlements, planFromSubscriptions, readOrganizationSubscriptions } from '~/server/utils/billing-access'
 import { coveredLocations, isKnownRecurringPlan } from '~/shared/billing-model'
+import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { createStripeClient } from '~/server/utils/stripe-client'
 import { createStripePlanLoader } from '~/server/utils/better-auth-stripe'
 import { recurringPriceAmount } from '~/server/utils/stripe-catalog'
@@ -27,7 +28,7 @@ export interface OrganizationBillingStatus {
   /** Better Auth's subscription schedule for a plan change at the end of the period. */
   stripeScheduleId?: string
   billingInterval?: 'month' | 'year'
-  subscriptionPrice?: { name: string; amount: number; currency: string; interval: 'month' | 'year' }
+  subscriptionPrice?: { name: string; amount: number; currency: CurrencyCode; interval: 'month' | 'year' }
   locations: OrganizationLocations
   entitlements: EntitlementsMap
 }
@@ -111,7 +112,9 @@ export async function getOrganizationSubscriptionPrice(
   if (status.plan !== 'free' && product.metadata.plan_id !== status.plan) throw new Error('Stripe subscription plan does not match Better Auth')
   const interval = billingInterval(item.price.recurring?.interval)
   if (!interval || item.price.recurring?.interval_count !== 1) throw new Error('Stripe subscription has an unsupported billing interval')
-  return { name: product.name, amount: recurringPriceAmount(item.price, item.quantity), currency: item.price.currency, interval }
+  const currency = item.price.currency.toUpperCase()
+  if (!isCurrencyCode(currency)) throw new Error(`Stripe subscription has unsupported currency ${item.price.currency}`)
+  return { name: product.name, amount: recurringPriceAmount(item.price, item.quantity), currency, interval }
 }
 
 function billingInterval(value: string | undefined): 'month' | 'year' | undefined {
