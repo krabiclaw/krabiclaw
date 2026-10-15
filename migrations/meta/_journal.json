@@ -36,6 +36,13 @@
       "when": 1792050155928,
       "tag": "0004_channel_night_pushes",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792061300785,
+      "tag": "0005_stay_threads",
+      "breakpoints": true
     }
   ]
 }

@@ -20,7 +20,7 @@ const stayProperties = {
   status: { type: 'string', enum: [...STAY_STATUSES] }, overbooked: { type: 'boolean' }, check_in_date: day, check_out_date: day, arrival_time: time,
   adults: { type: 'integer' }, children: { type: 'integer' }, infants: { type: 'integer' }, guest_name: nullableText, guest_surname: nullableText,
   guest_email: nullableText, guest_phone: nullableText, user_id: nullableText, total_minor: { type: 'integer' }, currency: text, notes: nullableText,
-  provider: nullableText, external_booking_id: nullableText, channel_booking_id: nullableText, cancelled_at: nullableText, cancellation_reason: nullableText,
+  provider: nullableText, external_booking_id: nullableText, channel_booking_id: nullableText, request_id: { ...nullableText, description: 'The guest conversation about this stay, for get_guest_conversation and reply_to_guest; null when the guest has no email.' }, cancelled_at: nullableText, cancellation_reason: nullableText,
   version: { type: 'integer' }, created_at: text, updated_at: text,
 }
 const stay = { type: 'object', properties: stayProperties, required: Object.keys(stayProperties) }
@@ -28,8 +28,9 @@ const channelPush = { type: ['object', 'null'], description: "What the home's co
 const stayDetail = { type: 'object', properties: { ...stayProperties, payments: { type: 'array', items: payment }, paid_minor: { type: 'integer' }, payment_status: { type: ['string', 'null'], enum: ['unpaid', 'partial', 'paid', 'overpaid', null] }, channel_push: channelPush },
   required: [...Object.keys(stayProperties), 'payments', 'paid_minor', 'payment_status'] }
 const home = { type: 'object', properties: { product_id: text, name: text, location_id: text, timezone: text, currency: text, base_price_minor: { type: ['integer', 'null'] }, check_in_time: text, check_out_time: text, max_guests: { type: 'integer' }, min_nights: { type: 'integer' },
+  assigned_member_id: { ...nullableText, description: 'The member (member id) who looks after this home.' }, assigned_team_id: { ...nullableText, description: 'The team that looks after this home.' },
   channel: { type: ['object', 'null'], description: 'The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.', properties: { provider: { type: 'string', enum: ['channex'] }, status: { type: 'string', enum: ['importing', 'connected', 'disconnected'] } }, required: ['provider', 'status'] } },
-  required: ['product_id', 'name', 'location_id', 'timezone', 'currency', 'base_price_minor', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'channel'] }
+  required: ['product_id', 'name', 'location_id', 'timezone', 'currency', 'base_price_minor', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'assigned_member_id', 'assigned_team_id', 'channel'] }
 const night = { type: 'object', properties: { date: day, available: { type: 'boolean' }, stay_id: nullableText, closed: { type: 'boolean' }, price_minor: { type: ['integer', 'null'] }, min_stay_arrival: { type: ['integer', 'null'] }, min_stay_through: { type: ['integer', 'null'] }, max_stay: { type: ['integer', 'null'] }, closed_to_arrival: { type: 'boolean' }, closed_to_departure: { type: 'boolean' }, source: { type: ['string', 'null'], enum: ['host', 'import', null] },
   channel: { type: ['object', 'null'], properties: { state: { type: 'string', enum: ['pending', 'pushed', 'needs_review'] }, detail: nullableText }, required: ['state', 'detail'] } },
   required: ['date', 'available', 'stay_id', 'closed', 'price_minor', 'min_stay_arrival', 'min_stay_through', 'max_stay', 'closed_to_arrival', 'closed_to_departure', 'source', 'channel'] }

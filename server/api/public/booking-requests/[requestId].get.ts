@@ -47,7 +47,7 @@ export default defineHandler(async (event) => {
 
   const request = await getGuestRequest(db, requestId, organizationId)
   const record = request ? await getThreadOperationalRecord(db, request.id) : null
-  if (!request || request.kind === 'contact' || !record || record.organization_id !== organizationId) {
+  if (!request || request.kind === 'contact' || request.kind === 'stay' || !record || record.organization_id !== organizationId) {
     return jsonResponse({ error: 'Booking not found' }, { status: 404 })
   }
 

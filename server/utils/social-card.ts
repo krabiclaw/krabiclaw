@@ -300,7 +300,8 @@ export async function refreshSocialCard(input: {
   await executeBatch(db, [{ query: "UPDATE media_placements SET status = 'pending' WHERE owner_type = ? AND owner_id = ? AND slot = 'social_card'", params: [owner.owner_type, owner.owner_id] }])
 
   if (!env.IMAGES) throw new Error('Cloudflare Images binding is required to render social cards')
-  const png = await renderOgImagePng(payload, { images: env.IMAGES })
+  if (!env.NUXT_PUBLIC_PLATFORM_DOMAIN) throw new Error('NUXT_PUBLIC_PLATFORM_DOMAIN is required to render social cards')
+  const png = await renderOgImagePng(payload, { images: env.IMAGES, publicOrigin: env.NUXT_PUBLIC_PLATFORM_DOMAIN })
   const uploaded = await uploadResolvedMediaToAssetStore({
     db,
     env,
