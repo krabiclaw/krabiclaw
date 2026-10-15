@@ -116,21 +116,77 @@ Messages and a launcher Menu at `/dashboard/account/menu` — is reached only by
 Switch to Personal, which sets the active organization to none. Opening a page
 never changes it.
 
+### Today and Upcoming
+
+Today is the viewer's current work and booked activity. Upcoming is the same
+card list for future occurrences and preparation tied to real dates. Both use
+the existing `TodayAgendaCard` presentation: one small time or status line,
+headline, location or context, image and badge, with the entire card a link.
+An undated task states its status rather than inventing an appointment time.
+
+Owner/admin cards order outstanding decisions, replies and current failures
+before scheduled activity, then at most two factual performance or content
+opportunities, then relevant quick actions. Assigned service members see only
+their own authorized appointments and related work. Lodging members see only
+the arrivals and departures at homes assigned to them through Better Auth
+members or teams. Quick actions are not outstanding work and do not contribute
+to its count.
+
+The card is an entrance to its data owner, never a second editor or task
+database. A reply opens its conversation; a decision opens its booking; a
+missing photo opens that Product's photo; a draft opens its article or post.
+An article-to-Facebook suggestion opens the canonical short Post creation
+flow with that article prepared, then the existing publishing controls for
+review. A performance card retains its exact reporting dates in Insights.
+An action needing an item or location asks for that target explicitly and
+preserves it into the existing editor. Catalog's `action=availability` mode
+selects an item and opens its availability concern.
+Locations' `action=hours` mode similarly chooses the location before opening
+its dated-hours editor and guest-visible reason.
+
+Current domain state determines whether work remains outstanding. Reading a
+notification does not complete it; several notifications for one concern make
+one card. Resolved work disappears, while unresolved work survives midnight.
+Booking occurrences retain their own location's timezone. Future bookings
+needing a decision belong in Today now and retain their actual booking date.
+
+Stay cards read the canonical agenda and open `O/bookings/stay/:stayId`.
+The existing stay domain owns homes, assignments, nights and payments; Today
+projects its arrivals and departures rather than creating a lodging service or
+second lifecycle. Cleaner cards show the guest's first name, party size, home,
+location and check-in or checkout time. Access to each stay and its conversation
+is authorized by the existing member or team assignment. Owners receive stay
+conversation work through the same guest inbox as other booked activity.
+Lodging does not offer the appointment-assignee filter: the home's assignment
+controls its stays.
+
 ### Catalog
 
-**Catalog opens on three entries — Menu, Experiences, Services — and All
-items.** They are ways into the catalog, not groupings anyone creates, and
-every organization has all three whatever its template. Each opens a view
-suited to its task; every offering, from anywhere, opens the one Product
-editor at `O/products/:productId`.
+**Catalog is one page with Menu, Experiences, Products and Services.** Each
+type heads its own offering list, with menu sections opening their existing
+membership editor. The records are full-width thumbnail rows on mobile and
+square photo tiles on desktop, using the same selector presentation as
+Locations. There is no All items launcher. Dishes without a section remain
+directly reachable under Menu; an empty type states that it has no items.
+Organizations with stay offerings also show Places to stay in this same list,
+opening the existing Product editor.
 
-| Entry | URL | First working screen |
+Every offering, from anywhere, opens the one Product editor at
+`O/products/:productId`. Each row names its actual sections, price and location
+relationships. Missing photos and prices say No photo and No price set.
+Online is read from the booking configuration; absent location assignments do
+not imply every location. Inactive locations and withheld or unavailable
+offerings retain their names and state. The root location filter is explicit
+in `?location_id=` and narrows the authorized catalog without changing it.
+
+| View | URL | First working screen |
 | --- | --- | --- |
-| Menu | `O/products/menu?location_id=` | the chosen location's sections, in the order guests see them |
+| Catalog | `O/products?location_id=` | Menu, Experiences, Products and Services, in that order |
+| Edit menu | `O/products/menu?location_id=` | the chosen location's sections, in the order guests see them |
 | A section | `O/products/menu/:collectionId?location_id=` | its items, in order |
-| Experiences | `O/products/experiences` | every experience; location is an optional filter |
-| Services | `O/products/services` | every service; location is an optional filter |
-| All items | `O/products/all` | everything, of every kind, filtered by `?kind` |
+| Experiences | `O/products/experiences` | a focused view of experiences, using the same offering list |
+| Services | `O/products/services` | a focused view of services, using the same offering list |
+| Select an offering | `O/products/all?action=availability` | the contextual selection for an availability action |
 
 **A menu belongs to a location.** With one location the Menu opens on it and
 names it. With several, a location must be chosen before its sections can be
@@ -146,6 +202,11 @@ the model. **Remove from section**, **stop offering at a location** and
 **delete the item** are three different actions: removing an item from a
 section changes that section's membership and nothing else, and deleting a
 section never deletes what was in it.
+
+A shared section opens without a location query; a location-owned section
+opens with its own location id. Membership and order are always edited from
+the complete organization catalog. A location filter must never turn a full
+membership replacement into a replacement of only the visible subset.
 
 Services and Experiences have no grouping step. A service's overview leads
 with Assigned team member (the booking assignment concern: who guests' bookable
@@ -195,7 +256,7 @@ editor or writer, and it never grants or hides an authorization.
 
 | Airbnb | KrabiClaw |
 | --- | --- |
-| Listings holds homes, experiences and services | Catalog opens on Menu, Experiences and Services, plus All items; each is a view of the same Products |
+| Listings holds homes, experiences and services | Catalog groups Menu, Experiences, Products and Services on one page; each is a view of the same Products |
 | Homes and experiences have different editors | One Product editor at `O/products/:productId` for every kind: kind changes wording and rows, not the route or the editor |
 | Listing editor rows preview their values and open one concern | Product, location, page, post and member records do the same |
 | Pricing and availability link to the calendar; Earnings links to payouts | Catalog links to Calendar and member availability; Earnings links to the organization's Payments |
@@ -381,15 +442,22 @@ is a canvas. Describing it is a field, and fields decompose.
 
 | Width | Chrome | Detail |
 | --- | --- | --- |
-| `< md` (768) | Bottom nav | Full-screen sheet: ✕ top-left, the title in the body, commit bar pinned at the base |
-| `≥ md` | Top nav | — |
+| `< md` (768) | Bottom nav | Modal leaf drawer over its visible parent: ✕ top-left, title in the body, commit bar pinned at the base |
+| `md` to `< lg` | Top nav | The same modal leaf drawer |
 | `≥ lg` (1024) | Top nav | Pane beside the index |
 
 `md` swaps navigation chrome. `lg` swaps index/detail topology. One component
-owns both renderings of a node, and there is no separate mobile screen. The
-topology itself is CSS; the single JavaScript breakpoint is
-`useDashboardPane()`, and it decides only whether an index opens a child on
-arrival — something CSS cannot express, because it is a navigation.
+owns both renderings of a node, and there is no separate mobile screen.
+`useDashboardPane()` is the shared JavaScript breakpoint: it selects the leaf's
+drawer or inline host and decides whether an index opens a child on arrival.
+The index columns otherwise follow the route hierarchy through CSS.
+
+Below `lg`, `DashboardLeafPanel` uses the native `UDrawer` with a backdrop,
+modal focus and swipe dismissal. Its nearest parent index remains visible
+underneath; deeper ancestors still yield. Index-to-index navigation remains one
+screen at a time. One persistent editor instance is teleported between the
+drawer and desktop pane, so resizing preserves its draft and form state.
+The drawer does not create another route, editor or draft owner.
 
 **The two columns show the deepest two levels, not the first two.** Depth is
 unbounded, and opening a child re-roots the frame: the index column becomes the
@@ -437,7 +505,7 @@ Depth is counted in matched records, not URL segments: a directory's
 | Mode | When | What the level renders |
 | --- | --- | --- |
 | `index` | nothing below me is open | my content, the full width of the frame |
-| `pair` | one of my children is open | my content as the index column, the child as the detail |
+| `pair` | one of my children is open | my content as the desktop index column; below `lg`, the backdrop for a leaf drawer or hidden for a child index |
 | `yield` | something deeper than my child is open | nothing but the route beneath me |
 
 **A level in `yield` renders no rail.** It is hidden, not unmounted, so going
@@ -525,21 +593,25 @@ popover, a filter chip, a confirmation — is not in it.
 
 At two columns Airbnb's leaf has no Close and no Back of its own: the index's
 Back is the way out and Save is the only control it draws. Both Close and Cancel
-belong to the sheet the leaf becomes below `lg`, where it covers the list it came
-from and needs its own way back.
+belong to the drawer the leaf becomes below `lg`, where its parent remains
+visible behind the backdrop and it needs its own way back.
 
 One shell owns that, so a leaf states what it commits and nothing about width.
 
 ### Where a level goes when it closes
 
-Back, Close and Cancel are **links** to `useRouteLevel().to`, a push to the
-level above. Nothing in the dashboard calls `router.back()`.
+Back, Close and Cancel navigate to `useRouteLevel().to`, a push to the level
+above with its query preserved. Close, Cancel, backdrop, Escape and swipe
+dismissal all discard the leaf's unsaved edits through its existing cancel
+handler, then return to that same parent after the drawer closes. Save keeps
+the record's existing commit and navigation behavior. A direct leaf URL has
+the same parent and dismissal behavior. Nothing calls `router.back()`.
 
 Measured on a live Airbnb host account (2026-09-21): their in-app Back went to
 `/hosting/listings` while the previous history entry was the leaf that had just
 been cancelled — Back, Cancel and Close all pushed. The destination is a
 property of where you are, so a deep link, a reload, and a redirect after a save
-all answer the same thing, and a sheet you just closed can never become the
+all answer the same thing, and a drawer you just closed can never become the
 place Back leads. Reading history is what produced the loop where closing a
 sheet and then pressing Back reopened it.
 
@@ -594,7 +666,7 @@ record, never in a plain `reactive`.
 ## Committing
 
 Cancel on the left, Save on the right, pinned to the base of the detail pane
-(the sheet below `lg`). Cancel is a text button; Save is the only filled
+(the drawer below `lg`). Cancel is a text button; Save is the only filled
 control on screen. Save is disabled until there is something to save.
 Dismissing discards the draft.
 

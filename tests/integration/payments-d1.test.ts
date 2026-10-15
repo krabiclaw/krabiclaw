@@ -10,7 +10,8 @@ import { claimSessionCapacity } from '../../server/utils/availability.ts'
 import { ingestStripeFeeReport, stripeFeeMinor } from '../../server/domain/payments/costs.ts'
 import { buyerActivities, buyerPaymentActivityPath, claimCheckoutReturn, tokenHash } from '../../server/domain/payments/buyer.ts'
 import { loadBuyerBookingDetails } from '../../server/utils/dashboard-booking-details.ts'
-import { requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
+import { cancelBookingRequest, requestInsertQueries, threadPayloadForGuest } from '../../server/domain/requests.ts'
+import { claimReservation, listReservationSlots, upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import { getGuestThreadDetail } from '../../server/domain/guest-threads/detail.ts'
 import { listGuestThreads } from '../../server/domain/guest-threads/repository.ts'
@@ -21,6 +22,7 @@ import { deliverPaymentsUsage, paymentsUsageStatus, reconcileNativeBillingCredit
 import { getStripe } from '../../server/utils/billing.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { approveRefundAuthorization, executeRefund, requirePayment } from '../../server/domain/payments/index.ts'
+import { canRetryGuestReservationRefund } from '../../server/domain/payments/visit-refund.ts'
 import { mcpFinancialApprovalErrorResult } from '../../server/utils/mcp-financial-handoff.ts'
 import { handlePaymentsTools } from '../../server/utils/mcp-tools/payments.ts'
 import { resolveOrganizationMembership } from '../../server/utils/member-access.ts'
@@ -52,6 +54,141 @@ async function payable(db:D1Database,id:string,expires='2099-09-30T00:00:00.000Z
  await db.prepare("INSERT INTO payment_attempts(id,payment_id,idempotency_key,stripe_payment_intent_id,return_token,status,expires_at,created_at,updated_at) VALUES(?,?,?,?,'test-return-proof','open',?,?,?)").bind(`a:${id}`,id,`checkout:${id}`,`pi_${id}`,expires,NOW,NOW).run()
  await db.prepare("INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,buyer_user_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at,assigned_member_id) VALUES(?,?,'product','variant','price','session','guest',?,1,10000,'USD','2099-10-01T13:00:00.000Z','2099-10-01T14:00:00.000Z','active',?,?,'host-member')").bind(`h:${id}`,ORG,id,expires,NOW).run()
 }
+
+async function paidReservation(db: D1Database, env: CloudflareEnv, cutoff: number | null) {
+ const startsAt = '2099-10-01T13:00:00.000Z', endsAt = '2099-10-01T15:00:00.000Z'
+ await db.prepare("INSERT INTO business_locations(id,organization_id,slug,title,status,timezone,opening_hours) VALUES('dining',?,'dining','Dining','active','UTC',?)").bind(ORG, JSON.stringify({ periods: [{ open: { day: 0, hour: 0, minute: 0 } }] })).run()
+ // A later change to the business's current policy cannot change terms already accepted at Checkout.
+ await upsertLocationReservationConfig(db, { organizationId: ORG, locationId: 'dining', patch: { slot_capacity: 1, free_cancellation_until_minutes: 2880 }, actorId: 'verified', env })
+ const opening = { id: 'deposit-request', kind: 'reservation' as const, organization_id: ORG, location_id: 'dining', user_id: 'verified', review_id: null, conversation_state: 'needs_attention' as const, resolved_at: null, payload: { ...threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com', phone: '+12025550123' }), cancellation: { token_hash: 'deposit-token-hash', expires_at: '2100-01-01T00:00:00.000Z', used_at: null } }, created_at: NOW, updated_at: NOW }
+ await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
+ const terms = { policy_type: 'reservation', free_cancellation_until_minutes: cutoff, reschedule_allowed: true, reschedule_cutoff_minutes: null, deposit_required: true, deposit_amount: 10000, deposit_currency: 'USD', deposit_tax_behavior: 'exclusive' }
+ await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,location_id,currency,amount,tax_amount,captured_amount,state,stripe_payment_intent_id,stripe_charge_id,price_snapshot_json,created_at,updated_at) VALUES('deposit',?,'verified','acct_seller',0,'reservation','dining','USD',10000,500,10500,'captured','pi_deposit','ch_deposit',?,?,?)").bind(ORG, JSON.stringify({ title: 'Dining reservation deposit', reservation: terms }), NOW, NOW).run()
+ await db.prepare("INSERT INTO payment_checkout_holds(id,organization_id,location_id,timezone,buyer_user_id,request_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at) VALUES('deposit-hold',?,'dining','UTC','verified','deposit-request','deposit',1,10000,'USD',?,?,'active','2100-01-01T00:00:00.000Z',?)").bind(ORG, startsAt, endsAt, NOW).run()
+ await claimReservation(db, { organizationId: ORG, locationId: 'dining', reservationId: 'deposit-reservation', requestId: opening.id, userId: 'verified', timezone: 'UTC', startsAt, endsAt, date: '2099-10-01', timeSlot: '13:00', partySize: 1, capturedPaymentId: 'deposit', capturedAt: NOW })
+ await db.prepare("UPDATE payments SET subject_id='deposit-reservation' WHERE id='deposit'").run()
+ await db.prepare("UPDATE payment_checkout_holds SET status='converted',converted_reservation_id='deposit-reservation' WHERE id='deposit-hold'").run()
+ return { id: opening.id, organizationId: ORG, kind: 'reservation' as const, env }
+}
+
+test('guest table cancellation uses its accepted deadline and Stripe full remaining refund for both buyer and token credentials', { timeout: 120_000 }, async t => {
+ for (const credentials of [{ buyerUserId: 'verified' }, { tokenHash: 'deposit-token-hash' }]) {
+  for (const policy of [{ cutoff: null, now: '2099-10-01T12:59:00.000Z', refundable: true }, { cutoff: 120, now: '2099-10-01T11:00:00.000Z', refundable: true }, { cutoff: 120, now: '2099-10-01T11:00:00.001Z', refundable: false }]) {
+   const { db, runtime } = await boot()
+   try {
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+    const input = { ...await paidReservation(db, env, policy.cutoff), ...credentials, now: policy.now }
+    const originalFetch = globalThis.fetch
+    let creations = 0
+    const fetchMock = t.mock.method(globalThis, 'fetch', async (request, init) => {
+     const url = new URL(request instanceof Request ? request.url : String(request))
+     if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
+     assert.equal(new Headers(init?.headers).get('stripe-account'), 'acct_seller')
+     if (url.pathname === '/v1/refunds' && init?.method === 'POST') {
+      creations++
+      const params = new URLSearchParams(String(init.body))
+      assert.equal(params.get('payment_intent'), 'pi_deposit')
+      assert.equal(params.has('amount'), false)
+      assert.equal(new Headers(init.headers).get('idempotency-key'), 'krabiclaw-refund:deposit:guest-cancelled-reservation:deposit-reservation')
+      return Response.json({ id: 're_deposit', object: 'refund', amount: 10500, currency: 'usd', status: 'succeeded', payment_intent: 'pi_deposit', reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: params.get('metadata[krabiclaw_refund_id]') } })
+     }
+     assert.equal(init?.method, 'GET')
+     assert.equal(url.pathname, '/v1/charges/ch_deposit')
+     return Response.json({ id: 'ch_deposit', object: 'charge', livemode: false, amount: 10500, amount_refunded: 10500, currency: 'usd', payment_intent: 'pi_deposit', billing_details: { email: 'verified@example.com' } })
+    })
+    try {
+     const before = await listReservationSlots(db, { organizationId: ORG, locationId: 'dining', date: '2099-10-01' })
+     assert.equal(before.slots.find(slot => slot.time_slot === '13:00')?.remaining, 0)
+     assert.equal((await cancelBookingRequest(db, input))?.changed, true)
+     assert.deepEqual(await db.prepare("SELECT status,cancellation_reason FROM reservations WHERE id='deposit-reservation'").first(), { status: 'cancelled', cancellation_reason: 'guest_cancelled' })
+     assert.equal(await db.prepare("SELECT json_extract(payload_json,'$.cancellation.used_at') used_at FROM requests WHERE id='deposit-request'").first('used_at'), policy.now)
+     assert.deepEqual(await db.prepare("SELECT state,refunded_amount FROM payments WHERE id='deposit'").first(), { state: policy.refundable ? 'refunded' : 'captured', refunded_amount: policy.refundable ? 10500 : 0 })
+     assert.deepEqual((await db.prepare("SELECT amount,status,created_by FROM payment_refunds WHERE payment_id='deposit'").all()).results, policy.refundable ? [{ amount: 10500, status: 'succeeded', created_by: 'buyerUserId' in credentials ? 'verified' : null }] : [])
+     assert.equal(creations, Number(policy.refundable))
+     const after = await listReservationSlots(db, { organizationId: ORG, locationId: 'dining', date: '2099-10-01' })
+     assert.equal(after.slots.find(slot => slot.time_slot === '13:00')?.remaining, 1)
+    } finally { fetchMock.mock.restore() }
+   } finally { await runtime.dispose() }
+  }
+ }
+})
+
+test('authorized guest cancellation replay recovers an interrupted Stripe refund without another cancellation or refund intent', { timeout: 120_000 }, async t => {
+ for (const credentials of [{ buyerUserId: 'verified' }, { tokenHash: 'deposit-token-hash' }]) {
+  const { db, runtime } = await boot()
+  try {
+   const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+   const scope = { ...await paidReservation(db, env, 120), now: '2099-10-01T11:00:00.000Z' }
+   const input = { ...scope, ...credentials }
+   const originalFetch = globalThis.fetch
+   let creations = 0
+   const keys = new Set<string>()
+   let nativeRefund: Record<string, unknown> | null = null
+   const fetchMock = t.mock.method(globalThis, 'fetch', async (request, init) => {
+    const url = new URL(request instanceof Request ? request.url : String(request))
+    if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
+    assert.equal(new Headers(init?.headers).get('stripe-account'), 'acct_seller')
+    if (url.pathname === '/v1/refunds' && init?.method === 'POST') {
+     creations++
+     const params = new URLSearchParams(String(init.body))
+     assert.equal(params.has('amount'), false)
+     keys.add(new Headers(init.headers).get('idempotency-key')!)
+     nativeRefund = { id: 're_recovered', object: 'refund', amount: 10500, currency: 'usd', status: 'succeeded', payment_intent: 'pi_deposit', reason: 'requested_by_customer', metadata: { krabiclaw_refund_id: params.get('metadata[krabiclaw_refund_id]') } }
+     if (creations === 1) return Response.json({ error: { type: 'api_error', message: 'Native response interrupted' } }, { status: 503, headers: { 'stripe-should-retry': 'false' } })
+     return Response.json(nativeRefund)
+    }
+    assert.equal(init?.method, 'GET')
+    if (url.pathname === '/v1/refunds/re_recovered') return Response.json(nativeRefund)
+    assert.equal(url.pathname, '/v1/charges/ch_deposit')
+    return Response.json({ id: 'ch_deposit', object: 'charge', livemode: false, amount: 10500, amount_refunded: 10500, currency: 'usd', payment_intent: 'pi_deposit', billing_details: { email: 'verified@example.com' } })
+   })
+   try {
+    const protectedTables = ['reservations', 'requests', 'activity_entries', 'payments', 'payment_refunds']
+    const before = await Promise.all(protectedTables.map(async table => (await db.prepare(`SELECT * FROM ${table} ORDER BY id`).all()).results))
+    for (const wrong of [{ buyerUserId: 'other' }, { tokenHash: 'wrong-token' }, { tokenHash: 'deposit-token-hash', now: '2100-01-01T00:00:00.000Z' }]) assert.equal(await cancelBookingRequest(db, { ...scope, ...wrong }), null)
+    assert.deepEqual(await Promise.all(protectedTables.map(async table => (await db.prepare(`SELECT * FROM ${table} ORDER BY id`).all()).results)), before)
+    assert.equal(creations, 0)
+    await assert.rejects(() => cancelBookingRequest(db, input), /Native response interrupted/u)
+    assert.equal(await db.prepare("SELECT status FROM reservations WHERE id='deposit-reservation'").first('status'), 'cancelled')
+    const intent = await db.prepare("SELECT id,idempotency_key,amount,status,error,attempted_at FROM payment_refunds WHERE payment_id='deposit'").first<{ id: string; idempotency_key: string; amount: number | null; status: string; error: string; attempted_at: string }>()
+    assert(intent)
+    assert.equal(intent.amount, null)
+    assert.equal(intent.status, 'creating')
+    assert.match(intent.error, /Native response interrupted/u)
+    assert.ok(intent.attempted_at)
+    const cancellation = await db.prepare("SELECT * FROM activity_entries WHERE request_id='deposit-request' AND event_name='reservation.cancel'").first()
+    assert(cancellation)
+    const interruptedDetails = await loadBuyerBookingDetails(db, 'verified', 'reservation', scope.id)
+    assert.equal(interruptedDetails.status, 'cancelled')
+    assert.equal(interruptedDetails.guestCanCancel, false)
+    assert.equal(interruptedDetails.guestCanRetryCancellation, true)
+    await assert.rejects(() => loadBuyerBookingDetails(db, 'other', 'reservation', scope.id), error => error instanceof HTTPError && error.statusCode === 404)
+    const tokenScope = { organizationId: ORG, reservationId: 'deposit-reservation', requestId: scope.id }
+    assert.equal(await canRetryGuestReservationRefund(db, tokenScope), true)
+    for (const foreign of [{ organizationId: 'another-org' }, { reservationId: 'another-reservation' }, { requestId: 'another-request' }, { buyerUserId: 'other' }]) assert.equal(await canRetryGuestReservationRefund(db, { ...tokenScope, ...foreign }), false)
+    assert.equal(await cancelBookingRequest(db, { ...scope, buyerUserId: 'other' }), null)
+    assert.equal(await cancelBookingRequest(db, { ...scope, tokenHash: 'wrong-token' }), null)
+    assert.equal(await cancelBookingRequest(db, { ...scope, tokenHash: 'deposit-token-hash', now: '2100-01-01T00:00:00.000Z' }), null)
+    assert.equal(creations, 1)
+    // Eligibility was fixed when cancellation committed; recovery still returns the deposit after the deadline.
+    const retry = { ...input, now: '2099-10-01T12:00:00.000Z' }
+    assert.equal((await cancelBookingRequest(db, retry))?.changed, false)
+    assert.equal((await cancelBookingRequest(db, retry))?.changed, false)
+    assert.equal(creations, 2)
+    assert.deepEqual([...keys], ['krabiclaw-refund:deposit:guest-cancelled-reservation:deposit-reservation'])
+    assert.deepEqual((await db.prepare("SELECT id,idempotency_key,stripe_refund_id,amount,status,error FROM payment_refunds WHERE payment_id='deposit'").all()).results, [{ id: intent.id, idempotency_key: intent.idempotency_key, stripe_refund_id: 're_recovered', amount: 10500, status: 'succeeded', error: null }])
+    assert.deepEqual(await db.prepare("SELECT state,refunded_amount FROM payments WHERE id='deposit'").first(), { state: 'refunded', refunded_amount: 10500 })
+    const refundedDetails = await loadBuyerBookingDetails(db, 'verified', 'reservation', scope.id)
+    assert.equal(refundedDetails.guestCanRetryCancellation, false)
+    assert.equal(await canRetryGuestReservationRefund(db, tokenScope), false)
+    assert.deepEqual(refundedDetails.payments?.flatMap(payment => payment.refunds.map(refund => ({ amount: refund.amount, status: refund.status }))), [{ amount: 10500, status: 'succeeded' }])
+    assert.deepEqual((await db.prepare("SELECT * FROM activity_entries WHERE request_id='deposit-request' AND event_name='reservation.cancel'").all()).results, [cancellation])
+    assert.equal(await db.prepare("SELECT COUNT(*) n FROM activity_entries WHERE request_id='deposit-request' AND event_name='payment.refund_succeeded'").first('n'), 1)
+    assert.equal((await listReservationSlots(db, { organizationId: ORG, locationId: 'dining', date: '2099-10-01' })).slots.find(slot => slot.time_slot === '13:00')?.remaining, 1)
+   } finally { fetchMock.mock.restore() }
+  } finally { await runtime.dispose() }
+ }
+})
 test('an active payment hold consumes the canonical session capacity until release', { timeout: 120_000 }, async () => {
  const { db, runtime } = await boot()
  try {

@@ -163,7 +163,9 @@ export default defineNuxtConfig({
     fetchTimeout: 5000,
     serverBundle: false,
     clientBundle: {
-      scan: true,
+      scan: {
+        globInclude: ['**/*.{vue,jsx,tsx,md,mdc,mdx}', '{server/utils,shared}/dashboard-today.ts'],
+      },
       icons: [
         'lucide:menu',
         'lucide:panel-left-close',

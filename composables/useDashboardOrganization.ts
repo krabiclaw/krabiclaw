@@ -1,4 +1,5 @@
 import { dashboardFetch, type DashboardRequestScope } from '~/composables/dashboardFetch'
+import type { OrganizationVertical } from '~/utils/vertical-copy'
 
 /**
  * The tenant, as the dashboard reads it.
@@ -14,7 +15,7 @@ export interface DashboardOrganization {
   slug: string
   role: string
   theme_id: string
-  vertical: 'restaurant' | 'experience' | 'service' | null
+  vertical: OrganizationVertical | null
   subdomain: string | null
   custom_domain: string | null
   public_url: string | null
@@ -66,6 +67,7 @@ const isDashboardOrganization = (value: unknown): value is DashboardOrganization
   && typeof value.slug === 'string'
   && typeof value.role === 'string'
   && typeof value.theme_id === 'string'
+  && (value.vertical === null || typeof value.vertical === 'string')
   && (value.subdomain === null || typeof value.subdomain === 'string')
   && (value.public_url === null || typeof value.public_url === 'string')
   && typeof value.status === 'string'

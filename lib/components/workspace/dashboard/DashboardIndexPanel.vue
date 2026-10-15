@@ -1,7 +1,7 @@
 <template>
   <UDashboardPanel
     :id="id"
-    :class="level.mode.value === 'yield' ? 'hidden' : pair ? 'hidden lg:flex' : undefined"
+    :class="level.mode.value === 'yield' ? 'hidden' : pair && !childLeaves ? 'hidden lg:flex' : undefined"
     :data-yield="level.mode.value === 'yield' ? '' : undefined"
     :default-size="pair ? 50 : undefined"
     :ui="ui"
@@ -65,7 +65,7 @@
   choosing a child would leave the mode; it opens one when the mode closes.
 */
 import type { RouteLocationRaw } from 'vue-router'
-import { dashboardColumnWidths, dashboardPanelActionsKey, type DashboardColumn } from './dashboardPanelContext'
+import { dashboardColumnWidths, dashboardPanelActionsKey, dashboardLeafParentKey, type DashboardColumn } from './dashboardPanelContext'
 
 const props = defineProps<{
   id: string
@@ -84,6 +84,7 @@ const props = defineProps<{
 
 const level = useRouteLevel()
 const pair = computed(() => level.mode.value === 'pair')
+const childLeaves = ref(0)
 // Beside a child, a column wider than a leaf narrows to the pair's index column.
 const width = computed((): string | undefined => {
   const column: DashboardColumn | undefined = props.column
@@ -98,6 +99,13 @@ const heading = computed((): boolean => {
 })
 // Read through the instance: vue-tsc cannot type `props.id` here (TS2590), and the id is a plain string.
 const instance = getCurrentInstance()
+provide(dashboardLeafParentKey, { leaves: childLeaves, focus: () => {
+  const heading = document.getElementById(`dashboard-panel-${String(instance?.props.id ?? '')}`)?.querySelector<HTMLElement>('h1')
+  if (heading) {
+    heading.tabIndex = -1
+    heading.focus({ preventScroll: true })
+  }
+} })
 // Not prefixed `dashboard-panel-`: that prefix names panes, and this is a slot inside one.
 const actionsId = computed(() => `${String(instance?.props.id ?? '')}-list-actions`)
 provide(dashboardPanelActionsKey, actionsId)

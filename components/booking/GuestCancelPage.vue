@@ -42,7 +42,9 @@
           </div>
           <h2 class="saya-display saya-italic text-3xl">{{ copy('cancelled_title') }}</h2>
           <p class="mt-4 text-muted">{{ t(`saya.${keyPrefix}.cancelled_desc`, { date: readableDate }) }}</p>
+          <p v-if="cancelError" class="mt-4 text-sm text-error">{{ cancelError }}</p>
           <div class="mt-10">
+            <SayaButton v-if="booking.can_retry_cancellation && !cancellationSubmitted" class="mb-3" size="lg" block :loading="loading" @click="handleCancel">{{ t('saya.reservation_cancel.retry_refund') }}</SayaButton>
             <SayaButton :to="localePath('/')" variant="soft">{{ copy('back_home') }}</SayaButton>
           </div>
         </div>
@@ -97,6 +99,7 @@ interface GuestBookingView {
   timezone: string
   guests: string
   status: string
+  can_retry_cancellation: boolean
   product_name: string | null
   product_kind: ProductKind | null
 }
@@ -145,7 +148,7 @@ async function handleCancel() {
     cancellationSubmitted.value = true
   } catch (err) {
     const message = (err as { data?: { error?: string } })?.data?.error
-    cancelError.value = message || copy('toast_cancel_failed')
+    cancelError.value = message || (booking.value?.can_retry_cancellation ? t('saya.reservation_cancel.toast_refund_failed') : copy('toast_cancel_failed'))
   } finally {
     loading.value = false
   }

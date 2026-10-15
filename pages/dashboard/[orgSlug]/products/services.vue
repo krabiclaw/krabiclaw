@@ -16,7 +16,7 @@
       />
     </div>
     <UAlert v-if="loadError" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Services could not be loaded" :description="loadError" />
-    <CatalogProductList v-else :products="catalog.products.value" :path="level.path.value" :price-label="priceLabel" :active-item="level.child.value" fixed-kind="service" />
+    <CatalogProductList v-else :products="catalog.products.value" :collections="catalog.collections.value" :locations="locations" :path="level.path.value" :price-label="priceLabel" :active-item="level.child.value" fixed-kind="service" />
   </DashboardIndexPanel>
 </template>
 
@@ -34,7 +34,7 @@ const organizationId = await useDashboardOrganizationId()
 const locationId = useLocationScope()
 const catalog = useProductCatalog(organizationId, locationId)
 await catalog.load
-const { locations, error: locationsError } = await useOrganizationLocations()
+const { locations, error: locationsError } = await useOrganizationLocations({ includeInactive: true })
 const { priceLabel } = useCatalogPrice(locationId, locations)
 
 const ALL_LOCATIONS = 'all'

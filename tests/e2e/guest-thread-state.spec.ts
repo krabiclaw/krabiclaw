@@ -9,6 +9,7 @@ import type {
 import { loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { E2E_DEMO_ORGANIZATION_ID, E2E_POTTERY_ORGANIZATION_ID, devLoginHeaders, potteryHouseTestExtraHeaders, tenantTestExtraHeaders, testBaseUrl } from './test-env'
+import type { TodayFeedPayload } from '../../shared/dashboard-today'
 
 interface NotificationView {
   id: string
@@ -600,13 +601,31 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   await dismissPreviewToolbar(page)
 
   await page.goto(`${baseURL}/dashboard/ember-slice-demo`)
-  const heading = page.getByRole('heading', { name: /^You have \d+ (?:bookings?|reservations?)$/ })
-  await expect(heading).toBeVisible()
+  // Today counts outstanding work now; this new reservation is a review card
+  // whose whole-card link must still open the exact booking's actions.
+  const todayResponse = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo' } })
+  await expectStatus(todayResponse, 200)
+  const todayFeed = await todayResponse.json() as TodayFeedPayload
+  const reviewCard = todayFeed.cards.find(card => card.id === `attention:${bookingIds[0]}`)
+  expect(reviewCard?.headline).toBe(`Review ${guestName}’s reservation`)
+  expect(reviewCard?.to).toBe(`/dashboard/ember-slice-demo/bookings/reservation/${bookingIds[0]}`)
+  await expect(page.getByRole('heading', { name: /^You have \d+ things? to do$/ })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Today', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Filter bookings', exact: true })).toBeVisible()
 
-  await page.getByRole('link', { name: new RegExp(`${firstName} arrives today`) }).click()
+  const upcomingResponse = await page.request.get('/api/dashboard/today', { params: {
+    org: 'ember-slice-demo', range: 'upcoming', from: localToday.date,
+    to: localDateAt(new Date(now + 5 * 86_400_000), timezone),
+  } })
+  await expectStatus(upcomingResponse, 200)
+  const upcomingFeed = await upcomingResponse.json() as TodayFeedPayload
+  const upcomingCard = upcomingFeed.cards.find(card => card.id === `reservation:${upcomingBookingId}`)
+  expect(upcomingCard?.to).toBe(`/dashboard/ember-slice-demo/bookings/reservation/${upcomingBookingId}`)
+  expect(localDateAt(new Date(upcomingCard!.occurrenceAt!), timezone) > localToday.date).toBe(true)
+  expect(upcomingFeed.cards.some(card => card.id === `reservation:${bookingIds[0]}`)).toBe(false)
+
+  await page.getByTestId('today-card').filter({ hasText: reviewCard!.headline }).click()
   await expect(page.getByRole('heading', { name: 'Currently hosting', exact: true })).toBeVisible()
   await expect(page.getByText(guestName, { exact: true }).first()).toBeVisible()
   await expect(page.getByText(guestEmail, { exact: true })).toHaveCount(0)

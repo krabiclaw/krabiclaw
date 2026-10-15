@@ -5,7 +5,7 @@
     :saving="post.editor.saving.value"
     :disabled="post.saveDisabled.value"
     :save-label="post.saveLabel.value"
-    :error="post.editor.error.value ?? ''"
+    :error="post.loadError.value || post.editor.error.value || ''"
     @cancel="post.revert"
     @save="post.save"
   >

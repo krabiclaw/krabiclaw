@@ -19,7 +19,7 @@ export default defineHandler(async (event) => {
 
     const managesCatalog = await roleAllows({ ...organization, permissions: { products: ['read'] } })
     if (!managesCatalog) await assertRoleAllows({ ...organization, permissions: { products: ['assigned'] } })
-    const locations = await listDashboardLocations(db, organization.id, managesCatalog ? undefined : organization.userId)
+    const locations = await listDashboardLocations(db, organization.id, managesCatalog ? undefined : organization.userId, query.status === 'all')
     return jsonResponse({ success: true as const, locations })
   }
 

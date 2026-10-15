@@ -11,7 +11,7 @@ test('a named cancellation policy is its two cutoffs, and only those cutoffs rea
   assert.equal(cancellationTierOf({ free_cancellation_until_minutes: 1440, reschedule_allowed: true, reschedule_cutoff_minutes: 240 }), null)
   assert.equal(cancellationTierOf({ free_cancellation_until_minutes: 1440, reschedule_allowed: false, reschedule_cutoff_minutes: 1440 }), null)
   assert.equal(cancellationSummary({ free_cancellation_until_minutes: 180, reschedule_allowed: true, reschedule_cutoff_minutes: 180 }), 'Custom · free until 3 hours before')
-  assert.equal(cancellationSummary({ free_cancellation_until_minutes: null }), 'Not set')
+  assert.equal(cancellationSummary({ free_cancellation_until_minutes: null }), 'No deadline')
 })
 
 test('settings cards state their values in one line', () => {
