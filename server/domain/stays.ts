@@ -2,8 +2,11 @@ import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedHomeSql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery } from '~/server/utils/organization-events'
+import { createLocation } from '~/server/utils/location-management'
+import { createProduct } from '~/server/utils/product-management'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price } from '~/shared/prices'
+import { isValidTimezone } from '~/utils/timezone'
 
 /**
  * Places to stay: the one implementation of stays, nights and offline
@@ -213,6 +216,91 @@ export async function readStayHome(db: DbClient, access: StayAccess, productId: 
   const [home] = await stayHomes(db, access, productId)
   if (!home) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
   return home
+}
+
+/** A new place to stay: the location it is at and its stay rules, checked. */
+export interface NewStayHome {
+  name: string
+  timezone: string
+  address: string
+  city: string
+  state: string | null
+  /** ISO 3166-1 alpha-2, upper case. */
+  country: string
+  zip_code: string | null
+  phone: string | null
+  email: string | null
+  check_in_time: string
+  check_out_time: string
+  max_guests: number
+  min_nights: number
+  base_price_minor: number | null
+}
+
+/** Read a new home's details from a request body; each problem names its field. */
+export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
+  const text = (key: string, max: number, required: boolean): string | null => {
+    const value = body[key]
+    if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) {
+      if (required) fail(422, 'MISSING_DETAIL', `${key} is required`, key)
+      return null
+    }
+    if (typeof value !== 'string' || value.trim().length > max) fail(422, 'INVALID_DETAIL', `${key} must be text of at most ${max} characters`, key)
+    return value.trim()
+  }
+  const whole = (key: string, min: number, max: number, required: boolean): number | null => {
+    const value = body[key]
+    if (value === undefined || value === null) {
+      if (required) fail(422, 'MISSING_DETAIL', `${key} is required`, key)
+      return null
+    }
+    if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) fail(422, 'INVALID_DETAIL', `${key} must be a whole number from ${min} to ${max}`, key)
+    return value
+  }
+  const home: NewStayHome = {
+    name: text('name', 200, true)!, timezone: text('timezone', 64, true)!,
+    address: text('address', 200, true)!, city: text('city', 100, true)!, state: text('state', 100, false),
+    country: text('country', 2, true)!, zip_code: text('zip_code', 32, false),
+    phone: text('phone', 32, false), email: text('email', 254, false),
+    check_in_time: text('check_in_time', 5, true)!, check_out_time: text('check_out_time', 5, true)!,
+    max_guests: whole('max_guests', 1, 99, true)!, min_nights: whole('min_nights', 1, 365, true)!,
+    base_price_minor: whole('base_price_minor', 0, Number.MAX_SAFE_INTEGER, false),
+  }
+  if (!/^[A-Z]{2}$/.test(home.country)) fail(422, 'INVALID_DETAIL', 'country must be a two-letter ISO country code', 'country')
+  if (!isValidTimezone(home.timezone)) fail(422, 'INVALID_DETAIL', 'Choose a valid time zone', 'timezone')
+  if (home.email !== null && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(home.email)) fail(422, 'INVALID_DETAIL', 'Enter a valid contact email', 'email')
+  for (const key of ['check_in_time', 'check_out_time'] as const) {
+    if (!TIME.test(home[key])) fail(422, 'INVALID_DETAIL', `${key} must be a 24-hour HH:MM time`, key)
+  }
+  return home
+}
+
+/**
+ * Add a place to stay: a new location of this organization (its plan's
+ * location billing applies) and an unpublished stay at it, priced per night in
+ * the organization's currency. A home added by hand and one imported from a
+ * channel are made here, the same way. The key replays both writes.
+ */
+export async function createStayHome(env: Parameters<typeof createLocation>[0], db: DbClient, access: StayAccess, home: NewStayHome, idempotencyKey: string): Promise<StayHome> {
+  requireManager(access)
+  const located = await createLocation(env, db as D1Database, access.organizationId, {
+    title: home.name, timezone: home.timezone, phone: home.phone, email: home.email,
+    address: { regionCode: home.country, addressLines: [home.address], locality: home.city, administrativeArea: home.state ?? undefined, postalCode: home.zip_code ?? undefined },
+  }, access.actorId, { idempotencyKey })
+  if (located.status !== 201 || !('location' in located.data)) {
+    const data = located.data as { error?: string; code?: string }
+    throw new HTTPError({ statusCode: located.status, statusMessage: data.error ?? 'The location could not be created', data: { code: data.code ?? 'LOCATION_NOT_CREATED' } })
+  }
+  const locationId = (located.data as { location: { id: string } }).location.id
+  const product = await createProduct(db, {
+    organizationId: access.organizationId, actor: { actorId: access.actorId }, idempotencyKey,
+    product: {
+      kind: 'stay', name: home.name,
+      ...(home.base_price_minor === null ? {} : { variants: [{ name: home.name, prices: [{ unit_amount: home.base_price_minor }] }] }),
+      stay: { location_id: locationId, check_in_time: home.check_in_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, assigned_member_id: null, assigned_team_id: null },
+    },
+  })
+  return await readStayHome(db, access, product.id)
 }
 
 /** Stays overlapping [from, to), newest check-in last. Cancelled stays are included only when asked for. */
