@@ -668,6 +668,13 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       }
     }
     if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
+      // The current baseline introduced tables an older chain never had (v17's
+      // places to stay). A forward migration may change one of them, so the
+      // stage gets each one, empty, before the forward chain runs.
+      for (const statement of baseSql.split('--> statement-breakpoint')) {
+        const table = statement.match(/CREATE TABLE `([^`]+)`/u)?.[1]
+        if (table && !tableNames(stage).includes(table)) stage.exec(statement)
+      }
       for (const name of files.slice(1)) stage.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8'))
     }
     const names = tableNames(stage)

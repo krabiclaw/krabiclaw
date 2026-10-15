@@ -20,6 +20,8 @@ import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-reso
  * those links back here through `request_id`.
  *
  * A contact thread has neither and is not forced into the booking model.
+ * A stay thread is the conversation about a place-to-stay `stays` row, which
+ * links back through `stays.request_id`; the stay owns its dates and guests.
  */
 
 const guest = z.object({ name: z.string(), email: z.string(), phone: z.string().nullable(), locale: z.string().optional() })
@@ -59,9 +61,11 @@ export const guestRequestSchema = z.discriminatedUnion('kind', [
   }) }),
   threadScope.extend({ kind: z.literal('reservation'), payload: threadPayload.extend({ guest: guest.extend({ phone: z.string() }) }) }),
   threadScope.extend({ kind: z.literal('booking'), payload: threadPayload }),
+  threadScope.extend({ kind: z.literal('stay'), payload: z.object({ guest }) }),
 ])
 export type GuestRequest = z.infer<typeof guestRequestSchema>
 export type BookingRequest = Extract<GuestRequest, { kind: 'reservation' | 'booking' }>
+export type StayRequest = Extract<GuestRequest, { kind: 'stay' }>
 export type GuestRequestKind = GuestRequest['kind']
 export type ThreadPayload = z.infer<typeof threadPayload>
 
@@ -74,10 +78,19 @@ export interface BookingOperator {
   guestAcknowledgement: boolean
 }
 
-/** The operational record a thread links to, when it has one. */
+/**
+ * The operational record a thread links to, when it has one.
+ *
+ * A stay is whole nights, not an instant: its `starts_at` is its check-in date
+ * at midnight UTC and its `ends_at` is midnight UTC two days after its
+ * check-out date, the moment its thread leaves Current. That is after
+ * check-out in every time zone, and SQL can say it without the home's clock.
+ * Its dates are `check_in_date` and `check_out_date`; nothing formats
+ * `starts_at` as a local time.
+ */
 export interface ThreadOperationalRecord {
   assigned_member_id: string | null
-  kind: 'booking' | 'reservation'
+  kind: 'booking' | 'reservation' | 'stay'
   id: string
   status: BookingStatus
   party_size: number
@@ -89,6 +102,17 @@ export interface ThreadOperationalRecord {
   product_name: string | null
   organization_id: string
   user_id: string | null
+  check_in_date: string | null
+  check_out_date: string | null
+}
+
+/** A stay's thread instants, as described on ThreadOperationalRecord; `alias` is the stays row. */
+export const STAY_THREAD_STARTS_SQL = (alias: string) => `${alias}.check_in_date || 'T00:00:00.000Z'`
+export const STAY_THREAD_ENDS_SQL = (alias: string) => `date(${alias}.check_out_date, '+2 days') || 'T00:00:00.000Z'`
+
+/** Whether the party size is a minimum ("4+"); only bookings and reservations say so. */
+export function partySizeIsMinimum(request: GuestRequest): boolean {
+  return (request.kind === 'booking' || request.kind === 'reservation') && request.payload.party_size_is_minimum
 }
 
 export function parseGuestRequest(row: Record<string, unknown>): GuestRequest {
@@ -102,7 +126,7 @@ export const REQUEST_CURRENT_BUYER_SQL = `r.user_id IS NOT NULL
  AND NOT EXISTS(SELECT 1 FROM reservations v WHERE v.request_id=r.id AND (v.user_id IS NULL OR v.user_id<>r.user_id OR v.organization_id<>r.organization_id OR r.kind<>'reservation'))`
 
 export async function getGuestRequest(db: DbClient, id: string, organizationId?: string, kind?: GuestRequestKind, buyerUserId?:string): Promise<GuestRequest | null> {
-  const row = await queryFirst<Record<string, unknown>>(db, `SELECT r.* FROM requests r WHERE r.id = ? AND r.kind IN ('contact', 'reservation', 'booking')${organizationId ? ' AND r.organization_id = ?' : ''}${kind ? ' AND r.kind = ?' : ''}${buyerUserId?` AND r.user_id=? AND ${REQUEST_CURRENT_BUYER_SQL}`:''}`, [id, ...(organizationId ? [organizationId] : []), ...(kind ? [kind] : []),...(buyerUserId?[buyerUserId]:[])])
+  const row = await queryFirst<Record<string, unknown>>(db, `SELECT r.* FROM requests r WHERE r.id = ? AND r.kind IN ('contact', 'reservation', 'booking', 'stay')${organizationId ? ' AND r.organization_id = ?' : ''}${kind ? ' AND r.kind = ?' : ''}${buyerUserId?` AND r.user_id=? AND ${REQUEST_CURRENT_BUYER_SQL}`:''}`, [id, ...(organizationId ? [organizationId] : []), ...(kind ? [kind] : []),...(buyerUserId?[buyerUserId]:[])])
   return row ? parseGuestRequest(row) : null
 }
 
@@ -116,7 +140,8 @@ export async function getGuestRequest(db: DbClient, id: string, organizationId?:
 export async function getThreadOperationalRecord(db: DbClient, requestId: string): Promise<ThreadOperationalRecord | null> {
   const record = await queryFirst<ThreadOperationalRecord>(db, `
     SELECT 'booking' AS kind, b.id, b.status, b.party_size, s.starts_at, s.ends_at, s.timezone,
-           s.location_id, b.product_id, p.name AS product_name, b.assigned_member_id, b.organization_id, b.user_id
+           s.location_id, b.product_id, p.name AS product_name, b.assigned_member_id, b.organization_id, b.user_id,
+           NULL AS check_in_date, NULL AS check_out_date
       FROM bookings b
       JOIN requests owner ON owner.id = b.request_id AND owner.kind = 'booking' AND owner.organization_id = b.organization_id
       JOIN product_sessions s ON s.id = b.product_session_id AND s.product_id = b.product_id AND s.organization_id = b.organization_id
@@ -124,12 +149,21 @@ export async function getThreadOperationalRecord(db: DbClient, requestId: string
      WHERE b.request_id = ?
     UNION ALL
     SELECT 'reservation', r.id, r.status, r.party_size, r.starts_at, r.ends_at, r.timezone,
-           r.location_id, NULL, NULL, NULL, r.organization_id, r.user_id
+           r.location_id, NULL, NULL, NULL, r.organization_id, r.user_id, NULL, NULL
       FROM reservations r
       JOIN requests owner ON owner.id = r.request_id AND owner.kind = 'reservation' AND owner.organization_id = r.organization_id
      WHERE r.request_id = ?
+    UNION ALL
+    SELECT 'stay', st.id, st.status, st.adults + st.children, ${STAY_THREAD_STARTS_SQL('st')}, ${STAY_THREAD_ENDS_SQL('st')}, l.timezone,
+           c.location_id, st.product_id, p.name, c.assigned_member_id, st.organization_id, st.user_id, st.check_in_date, st.check_out_date
+      FROM stays st
+      JOIN requests owner ON owner.id = st.request_id AND owner.kind = 'stay' AND owner.organization_id = st.organization_id
+      JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
+      JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
+      JOIN products p ON p.organization_id = st.organization_id AND p.id = st.product_id
+     WHERE st.request_id = ?
      LIMIT 1
-  `, [requestId, requestId])
+  `, [requestId, requestId, requestId])
   if (record) return record
   const request = await queryFirst<{ kind: GuestRequestKind; uncaptured_checkout: number | null }>(db, `
     SELECT r.kind,
@@ -165,7 +199,7 @@ export async function getThreadOperationalRecord(db: DbClient, requestId: string
  * A new thread has not been archived by anyone, so it carries no archive state.
  */
 export function requestInsertQueries(request: Omit<GuestRequest, 'archived_at' | 'archived_by_user_id'>, claimedBy?: BatchQuery): BatchQuery[] {
-  const provenance = request.kind !== 'contact' && 'provenance' in request.payload ? request.payload.provenance : undefined
+  const provenance = (request.kind === 'booking' || request.kind === 'reservation') && 'provenance' in request.payload ? request.payload.provenance : undefined
   const values = [request.id, request.kind, request.organization_id, request.location_id, request.user_id, request.review_id,
     request.conversation_state, request.resolved_at, JSON.stringify(request.payload), request.created_at, request.updated_at]
   return [{
@@ -180,6 +214,48 @@ export function requestInsertQueries(request: Omit<GuestRequest, 'archived_at' |
       SELECT ?, id, 'submission', 'request', ?, ?, ?, json_object('kind', kind), ?, 1, created_at, created_at FROM requests WHERE id = ? AND changes() = 1`,
     params: [crypto.randomUUID(), provenance?.actor_user_id ? 'member' : 'guest', provenance?.actor_user_id ?? request.user_id, provenance?.actor_user_id ? 'system' : 'web', `request:${request.id}:submission`, request.id],
   }, publicResourceCacheInvalidationQuery(request.organization_id, 'guest-thread-create')]
+}
+
+/**
+ * The conversation about a stay, kept in the stay's own batch and read from the
+ * stays row as committed, never from the caller: a write that lost its version
+ * race opens nothing with details that were not saved.
+ *
+ * A stay whose guest has a name and an email opens a thread once; a later write
+ * that brings the email opens it then. The host who took the stay, or the
+ * channel it came from, opens it. A thread already open takes the stay's current
+ * guest and home location; its address is the last one the guest gave, since a
+ * conversation cannot lose the address it is held at (requests_guest_payload_check).
+ */
+export function stayThreadQueries(input: { organizationId: string; stayId: string; now: string; openedBy: { userId: string } | 'channel' }): BatchQuery[] {
+  const id = crypto.randomUUID()
+  const host = input.openedBy !== 'channel' ? input.openedBy.userId : null
+  const stay = `stays st JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
+    WHERE st.id = ? AND st.organization_id = ?`
+  const name = "trim(coalesce(st.guest_name, '') || ' ' || coalesce(st.guest_surname, ''))"
+  // A blank address is no address: it neither opens a thread nor replaces the one the thread holds.
+  const email = "nullif(trim(st.guest_email), '')"
+  return [{
+    query: `UPDATE requests SET location_id = c.location_id,
+        payload_json = json_set(payload_json, '$.guest.name', coalesce(nullif(${name}, ''), json_extract(payload_json, '$.guest.name')),
+          '$.guest.email', coalesce(${email}, json_extract(payload_json, '$.guest.email')), '$.guest.phone', st.guest_phone)
+      FROM ${stay} AND requests.id = st.request_id AND requests.kind = 'stay'`,
+    params: [input.stayId, input.organizationId],
+  }, {
+    // A booking the channel brought is new to the host; one the host took waits on its guest.
+    query: `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, conversation_state, resolved_at, payload_json, created_at, updated_at)
+      SELECT ?, 'stay', st.organization_id, c.location_id, NULL, NULL, ?, NULL,
+        json_object('guest', json_object('name', ${name}, 'email', ${email}, 'phone', st.guest_phone)), ?, ?
+      FROM ${stay} AND st.request_id IS NULL AND ${email} IS NOT NULL AND ${name} <> ''`,
+    params: [id, host ? 'waiting_on_guest' : 'needs_attention', input.now, input.now, input.stayId, input.organizationId],
+  }, {
+    query: `INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, payload_json, dedupe_key, sequence, occurred_at, created_at)
+      SELECT ?, id, 'submission', 'request', ?, ?, 'system', json_object('kind', kind, 'stay_id', ?), ?, 1, created_at, created_at FROM requests WHERE id = ? AND changes() = 1`,
+    params: [crypto.randomUUID(), host ? 'member' : 'system', host, input.stayId, `request:${id}:submission`, id],
+  }, {
+    query: 'UPDATE stays SET request_id = ? WHERE id = ? AND organization_id = ? AND request_id IS NULL AND EXISTS (SELECT 1 FROM requests WHERE id = ?)',
+    params: [id, input.stayId, input.organizationId, id],
+  }, publicResourceCacheInvalidationQuery(input.organizationId, 'guest-thread-create')]
 }
 
 interface GuestThreadInput { name: string; email: string; phone?: string | null; locale?: string; notes?: string | null; ipHash?: string | null; partySizeIsMinimum?: boolean }
@@ -200,7 +276,8 @@ export function threadPayloadForGuest(input: GuestThreadInput): ThreadPayload {
  * because the clock says so.
  */
 export function requestActions(record: ThreadOperationalRecord | null, now: string): string[] {
-  if (!canCancelBookingRequest(record, now)) return []
+  // A stay is changed and cancelled from its own screen; its thread is the conversation.
+  if (record?.kind === 'stay' || !canCancelBookingRequest(record, now)) return []
   return record.kind === 'booking' && record.status === 'pending' ? ['confirm', 'reject', 'change', 'cancel'] : ['change', 'cancel']
 }
 
@@ -208,8 +285,15 @@ export function canCancelBookingRequest(record: ThreadOperationalRecord | null, 
   return Boolean(record && ['pending', 'confirmed'].includes(record.status) && record.ends_at > now && !isBookingComplete(record, now))
 }
 
+/** A stay's nights and party, in the stay's own dates: "Mar 3 – Mar 6 · 2 guests". */
+export function stayPreview(record: { check_in_date: string; check_out_date: string; party_size: number }): string {
+  const day = (date: string) => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' }).format(new Date(`${date}T00:00:00Z`))
+  return `${day(record.check_in_date)} – ${day(record.check_out_date)} · ${record.party_size} ${record.party_size === 1 ? 'guest' : 'guests'}`
+}
+
 export function requestPreview(request: GuestRequest, record: ThreadOperationalRecord | null): string {
   if (request.kind === 'contact') return request.payload.message.replace(/\s+/g, ' ').trim().slice(0, 160)
+  if (request.kind === 'stay') return record?.check_in_date && record.check_out_date ? stayPreview({ check_in_date: record.check_in_date, check_out_date: record.check_out_date, party_size: record.party_size }) : ''
   if (request.payload.notes) return request.payload.notes.replace(/\s+/g, ' ').trim().slice(0, 160)
   // With no operational record there is nothing to summarize, and inventing a
   // date would make a broken thread look ordinary.
@@ -241,14 +325,14 @@ export async function cancelBookingRequest(db: DbClient, input: {
   id: string; organizationId: string; kind: BookingRequest['kind']; now: string; env: CloudflareEnv
 } & ({ tokenHash: string; buyerUserId?: never } | { buyerUserId: string; tokenHash?: never })): Promise<{ request: BookingRequest; record: ThreadOperationalRecord; wasConfirmed: boolean; changed: boolean } | null> {
   const current = await getGuestRequest(db, input.id, input.organizationId, input.kind)
-  if (!current || current.kind === 'contact') return null
+  if (!current || current.kind === 'contact' || current.kind === 'stay') return null
   const record = await getThreadOperationalRecord(db, current.id)
   if (!record || record.organization_id !== input.organizationId || record.kind !== current.kind) return null
   if (input.buyerUserId && (current.user_id !== input.buyerUserId || record.user_id !== input.buyerUserId)) return null
   async function readCancelled() {
     const request = await getGuestRequest(db, input.id, input.organizationId, input.kind)
     const cancelled = await getThreadOperationalRecord(db, input.id)
-    if (!request || request.kind === 'contact' || !request.payload.cancellation.used_at || !cancelled || cancelled.status !== 'cancelled' || cancelled.organization_id !== input.organizationId || cancelled.kind !== request.kind) return null
+    if (!request || request.kind === 'contact' || request.kind === 'stay' || !request.payload.cancellation.used_at || !cancelled || cancelled.status !== 'cancelled' || cancelled.organization_id !== input.organizationId || cancelled.kind !== request.kind) return null
     if (input.buyerUserId ? request.user_id !== input.buyerUserId || cancelled.user_id !== input.buyerUserId
       : request.payload.cancellation.token_hash !== input.tokenHash || !request.payload.cancellation.expires_at || request.payload.cancellation.expires_at <= input.now) return null
     const entry = await queryFirst<{ payload_json: string }>(db, 'SELECT payload_json FROM activity_entries WHERE request_id = ? AND dedupe_key = ?', [input.id, `${cancelled.kind}:${cancelled.id}:guest-cancel`])
@@ -302,7 +386,7 @@ export async function cancelBookingRequest(db: DbClient, input: {
   if ((released?.meta?.changes ?? 0) !== 1) throw new Error('Cancellation consumed the token without releasing the booking')
 
   const request = parseGuestRequest(row)
-  if (request.kind === 'contact') throw new Error('Cancellation returned a contact thread')
+  if (request.kind === 'contact' || request.kind === 'stay') throw new Error(`Cancellation returned a ${request.kind} thread`)
   if (record.kind === 'booking') await recordBookingCancelled(db, { organizationId: input.organizationId, bookingId: record.id, cancelledBy: 'guest', actorUserId: input.buyerUserId ?? null })
   // The deposit goes back the moment the table is released: Stripe's full-remaining refund, under the cancellation's own key.
   if (refund.refund) {

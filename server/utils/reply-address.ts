@@ -1,17 +1,19 @@
-export type ReplySubmissionType = 'contact' | 'reservation' | 'booking'
+export type ReplySubmissionType = 'contact' | 'reservation' | 'booking' | 'stay'
 
 const TOKEN_BYTES = 12
 
-const TYPE_TO_CODE: Record<ReplySubmissionType, 'c' | 'r' | 'e'> = {
+const TYPE_TO_CODE: Record<ReplySubmissionType, 'c' | 'r' | 'e' | 's'> = {
   contact: 'c',
   reservation: 'r',
   booking: 'e',
+  stay: 's',
 }
 
-const CODE_TO_TYPE: Record<'c' | 'r' | 'e', ReplySubmissionType> = {
+const CODE_TO_TYPE: Record<'c' | 'r' | 'e' | 's', ReplySubmissionType> = {
   c: 'contact',
   r: 'reservation',
   e: 'booking',
+  s: 'stay',
 }
 
 function compactUuid(value: string): string | null {
@@ -68,9 +70,9 @@ export function buildReplyLocalPart(submissionType: ReplySubmissionType, submiss
 }
 
 export function parseReplyLocalPart(local: string): { submissionType: ReplySubmissionType; submissionId: string; token: string } | null {
-  const compactMatch = /^r([cre])([0-9a-f]{32})([0-9a-f]{24})$/i.exec(local)
+  const compactMatch = /^r([cres])([0-9a-f]{32})([0-9a-f]{24})$/i.exec(local)
   if (compactMatch) {
-    const code = compactMatch[1]!.toLowerCase() as 'c' | 'r' | 'e'
+    const code = compactMatch[1]!.toLowerCase() as 'c' | 'r' | 'e' | 's'
     return {
       submissionType: CODE_TO_TYPE[code],
       submissionId: expandUuid(compactMatch[2]!.toLowerCase()),

@@ -179,7 +179,7 @@ interface GuestThreadReplyNotificationInput extends OrganizationContext {
   locationId?: string | null
   threadId: string
   sourceEntryId: string
-  submissionType: 'contact' | 'reservation' | 'booking'
+  submissionType: 'contact' | 'reservation' | 'booking' | 'stay'
   submissionId: string
   guestName: string
   guestEmail?: string | null
