@@ -75,9 +75,9 @@ if ((target === 'production' || (target === 'staging' && values['delta-from'])) 
 const deltaFrom = values['delta-from'] ? resolve(values['delta-from']) : null
 
 const wrangler = resolve('node_modules/wrangler/bin/wrangler.js')
+const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CF_ACCOUNT_ID
+const apiToken = process.env.CLOUDFLARE_API_TOKEN
 if (values.source === 'DB' && !values['source-file']) {
-  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID || process.env.CF_ACCOUNT_ID
-  const apiToken = process.env.CLOUDFLARE_API_TOKEN
   const workerName = readWranglerConfig({ config: 'wrangler.toml' }).name
   if (!accountId || !apiToken || !workerName) throw new Error('Production snapshot requires a configured Cloudflare account, API token and Worker name.')
   const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/scripts/${workerName}/settings`, {
@@ -234,13 +234,34 @@ try {
     if (JSON.stringify(ledgered) !== JSON.stringify(migrationFiles)) {
       throw new Error(`${target} D1 records migrations [${ledgered.join(', ')}] but the repository has [${migrationFiles.join(', ')}]; no data was written. Build it with \`wrangler d1 migrations apply\`, not by executing the baseline file.`)
     }
-    // A remote `--file` import prints its upload progress to stdout ahead of
-    // the JSON even with `--json`, and an interrupted import exits zero with
-    // no JSON at all — so success is the parsed result, not the exit code.
-    const importOutput = run(['d1', 'execute', 'DB', ...destination, '--file', payloadPath, '--json'], true)
-    const imported = JSON.parse(importOutput.slice(importOutput.indexOf('['))) as Array<{ success: boolean }>
-    if (!Array.isArray(imported) || imported.length === 0 || imported.some(result => result.success !== true)) {
-      throw new Error(`${target} import did not return a successful D1 result`)
+    if (deltaFrom && target !== 'local') {
+      if (!accountId || !apiToken) throw new Error('Remote delta requires a configured Cloudflare account and API token.')
+      const config = readWranglerConfig({ config: 'wrangler.toml', env: target === 'staging' ? 'staging' : undefined })
+      const databaseId = config.d1_databases.find((database: { binding: string; database_id?: string }) => database.binding === 'DB')?.database_id
+      if (!databaseId) throw new Error(`${target} delta requires an explicit DB database_id in wrangler.toml.`)
+      // One normal query batch is atomic and retains foreign-key deferral.
+      // A live delta must not use the blocking bulk-import operation.
+      const response = await fetch(`https://api.cloudflare.com/client/v4/accounts/${accountId}/d1/database/${databaseId}/query`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${apiToken}`, 'content-type': 'application/json' },
+        body: JSON.stringify({ sql: readFileSync(payloadPath, 'utf8') }),
+      })
+      if (!response.ok) throw new Error(`${target} delta query failed: HTTP ${response.status}`)
+      const applied = await response.json().catch(() => {
+        throw new Error(`${target} delta query returned invalid JSON: HTTP ${response.status}`)
+      }) as { success?: boolean; result?: Array<{ success?: boolean } | null> } | null
+      if (applied?.success !== true || !Array.isArray(applied.result) || applied.result.length === 0 || applied.result.some(result => result?.success !== true)) {
+        throw new Error(`${target} delta query did not return successful D1 results: HTTP ${response.status}`)
+      }
+    } else {
+      // A remote `--file` import prints its upload progress to stdout ahead of
+      // the JSON even with `--json`, and an interrupted import exits zero with
+      // no JSON at all — so success is the parsed result, not the exit code.
+      const importOutput = run(['d1', 'execute', 'DB', ...destination, '--file', payloadPath, '--json'], true)
+      const imported = JSON.parse(importOutput.slice(importOutput.indexOf('['))) as Array<{ success: boolean }>
+      if (!Array.isArray(imported) || imported.length === 0 || imported.some(result => result.success !== true)) {
+        throw new Error(`${target} import did not return a successful D1 result`)
+      }
     }
     if (!deltaFrom) {
       // Cross-environment payloads deliberately leave the destination's signing keys

@@ -394,6 +394,8 @@ test('Krabiclaw social viewer keyboard navigation changes the visible media', as
   for (const channelMark of await channelMarks.all()) await expect(channelMark).toHaveText(/\S/)
   await expect(socialCard.locator('time, a')).toHaveCount(0)
   await expect(firstCard.locator('time, a')).toHaveCount(0)
+  // Autoplay may advance during page load; select the first card through the carousel.
+  await page.locator('[data-social-posts=block]').getByRole('tab', { name: 'Go to slide 1', exact: true }).click()
   // The viewer opens on the card that was clicked; the first card puts the first picture at the top.
   await firstCard.click()
   const viewer = page.getByRole('dialog', { name: 'Media Lightbox' })

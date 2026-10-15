@@ -6,6 +6,12 @@ import type { TodayFeedPayload } from '../../shared/dashboard-today'
 
 const ORG = '/dashboard/ember-slice-demo'
 
+test.beforeEach(async ({ page }) => {
+  await page.addLocatorHandler(page.getByRole('region', { name: 'Analytics notice', exact: true }), async notice => {
+    await notice.getByRole('button', { name: 'Reject', exact: true }).click()
+  })
+})
+
 test('Upcoming keeps its navigation and loading visible while its real first page is pending', async ({ page, baseURL }) => {
   await loginAs(page.request, baseURL!)
   await dismissPreviewToolbar(page)

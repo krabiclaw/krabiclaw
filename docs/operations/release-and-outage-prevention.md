@@ -154,8 +154,12 @@ The replacement is prepared while the old Worker stays live. Use the existing
 delta, specifying the old database with `--source`. The script refuses
 unexpected source tables or columns, validates copied rows, checks foreign keys
 and target schema, and previews rows changed or deleted since the initial
-export. The delta inserts newly created rows only. Inspect changed and deleted
-keys before retiring the old database; carry important edits explicitly,
+export. The delta inserts newly created rows only. Remote `--delta-from` sends
+the whole payload to D1's normal query API as one atomic batch, retaining
+foreign-key deferral and keeping SQL out of process arguments. Bulk imports
+make D1 unavailable while they run. During replacement, use bulk import only
+for the initial load before the new database is bound. Inspect changed and
+deleted keys before retiring the old database; carry important edits explicitly,
 without overwriting new-database writes. There is no write freeze or
 maintenance response in the application.
 
