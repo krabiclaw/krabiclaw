@@ -3,6 +3,7 @@ import { HTTPError } from 'nitro'
 import { execute, queryFirst, type DbClient } from '~/server/db'
 import { isOrganizationFontPreset, resolveOrganizationFontPreset, type OrganizationFontPreset } from '~/shared/organization-fonts'
 import { parseSitePalette, type SitePalette } from '~/shared/site-palette'
+import { publicTenantVisibilitySql } from '~/server/utils/public-base'
 
 export interface OrganizationConfig {
   palette?: SitePalette
@@ -116,7 +117,7 @@ export const deleteConfig = async (
 }
 
 /** Canonical public site settings and announcement, shared by API and SSR. */
-export async function getPublicConfig(db: DbClient, organizationId: string) {
+export async function getPublicConfig(db: DbClient, organizationId: string, options: { previewAuthorized?: boolean } = {}) {
   const organization = await queryFirst<{
     id: string
     default_currency: string
@@ -130,7 +131,7 @@ export async function getPublicConfig(db: DbClient, organizationId: string) {
       LEFT JOIN media_placements amp ON amp.organization_id = o.id AND amp.owner_type = 'organization'
         AND amp.owner_id = o.id AND amp.slot = 'announcement' AND amp.sort_order = 0 AND amp.status = 'active'
       LEFT JOIN media_assets ama ON ama.id = amp.asset_id AND ama.status = 'active'
-     WHERE o.id = ? AND o.status = 'active' AND o.onboarding_status = 'active'
+     WHERE o.id = ? AND ${publicTenantVisibilitySql('o', options.previewAuthorized)}
      LIMIT 1
   `, [organizationId])
 

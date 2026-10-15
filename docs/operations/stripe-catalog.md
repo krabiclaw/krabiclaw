@@ -53,7 +53,13 @@ application and provider catalog compatible throughout the cutover:
    offers without clearing defaults, deactivating prices or archiving products.
 2. Deploy the application that sells Growth and Business and resolves existing
    subscriptions on their historical prices through Better Auth.
-3. Generate and apply an `--retirement-only` plan. It archives the retired
+3. Update the account's native customer portal configuration before retirement.
+   Add the new offered Product/Price IDs and retain the exact historical entries
+   needed for existing subscriptions' quantity confirmations. Stripe validates
+   every submitted price as active when saving this product list, including
+   unchanged entries. An already-saved historical entry continues to support
+   native quantity confirmation after its product and price are archived.
+4. Generate and apply an `--retirement-only` plan. It archives the retired
    families only after proving exactly one active canonical Growth and Business
    product, their USD 49 and USD 99 monthly prices, and Growth's USD 588 annual
    price. It emits no offer product, price or image mutations and does not need
@@ -66,7 +72,8 @@ node scripts/seed-stripe.mjs --apply --require-test-mode \
   --plan-file .tmp/stripe-offers-plan.json --confirm-sha256 <offersPlanSha256> \
   --journal-file .tmp/stripe-offers-apply.json
 
-# Deploy through the canonical application release workflow, then:
+# Deploy through the canonical application release workflow and update the
+# native customer portal configuration before retiring existing price entries:
 node scripts/seed-stripe.mjs --dry-run --require-test-mode --retirement-only \
   --plan-file .tmp/stripe-retirement-plan.json
 node scripts/seed-stripe.mjs --apply --require-test-mode \
@@ -107,12 +114,22 @@ as the native zero-operation read-back.
 Paid-plan changes also require the target account's native Stripe customer
 portal configuration. Better Auth Stripe uses `subscription_update_confirm` for
 its hosted confirmation. Enable subscription updates, allow price and quantity
-changes, and select only the canonical offered Product/Price IDs from that
-account's verified catalog; after a price replacement, select the new IDs.
-Quantity is how an owner adds or removes locations on their plan. Read the saved products with
+changes, and add the canonical offered Product/Price IDs from that account's
+verified catalog. Retain historical Product/Price entries for existing
+subscriptions' quantity changes, including entries whose product or price will
+be archived; removing them can prevent native confirmation on the original
+contract. Archive retired products and prices to exclude them from new plan
+choices, and verify the actual portal's available alternatives after archival.
+Better Auth's saleability guard also rejects new subscriptions and plan changes
+to retired identities. Quantity is how an owner adds or removes locations on
+their plan. Read the saved products with
 `expand=['features.subscription_update.products']`; the ordinary configuration
 response omits them. Preserve existing cancellation, payment-method, invoice,
 proration and timing settings unless the operator explicitly changes them.
+Save this configuration while all submitted prices are still active: Stripe
+rejects an updated product list containing inactive prices even when those
+entries were already present. A failed API response is not a saved change; read
+the expanded configuration back and compare the exact products and settings.
 Verify an actual Better Auth plan-change confirmation and its signed webhook
 read-back. New subscription Checkout alone does not qualify an existing
 subscription's plan-change flow. The catalog planner does not configure this
