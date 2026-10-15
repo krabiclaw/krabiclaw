@@ -234,13 +234,13 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
   },
   {
     id: 'templates-blawby-page',
-    title: 'Blawby Template',
+    title: 'Blawby Template for Law Firms',
     path: '/templates/blawby',
-    snippet: 'Professional-service sites with service pages, article publishing, and consultation CTAs.',
-    body: 'The Blawby template is built for professional-service businesses — service/practice-area pages, article publishing, compliance/policy content, and consultation-focused CTAs. Live on North Carolina Legal Services.',
+    snippet: 'Websites for solo lawyers and small law firms, with practice-area pages and clear consultation steps.',
+    body: 'The Blawby template helps solo lawyers and small law firms present their practice areas, introduce their people, publish firm news, and guide visitors toward a consultation. See the live North Carolina Legal Services website.',
     icon: 'layout-template',
     section: 'Platform',
-    keywords: ['blawby', 'template', 'theme', 'professional service', 'legal', 'law firm', 'ncls'],
+    keywords: ['blawby', 'template', 'theme', 'legal', 'lawyer', 'solo lawyer', 'law firm', 'small law firm', 'practice area', 'consultation', 'ncls'],
     surfaces: ['public', 'docs', 'blog', 'help', 'chowbot'],
   },
 ]
