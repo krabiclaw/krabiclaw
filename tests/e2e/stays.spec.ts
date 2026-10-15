@@ -93,8 +93,11 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   const api = (path: string) => `${baseURL}/api/dashboard/${path}${path.includes('?') ? '&' : '?'}org=${encodeURIComponent(slug)}`
   const homes = await request.get(api('stay-homes'))
   expect(homes.status(), await homes.text()).toBe(200)
-  expect((await homes.json() as { homes: Array<{ product_id: string; name: string; max_guests: number; min_nights: number }> }).homes)
-    .toEqual([expect.objectContaining({ product_id: productId, name: 'Cliff Cabin', max_guests: 4, min_nights: 2 })])
+  // The editor created the home without a nightly price, so it has no base price; its currency is the organization's.
+  expect((await homes.json() as { homes: unknown[] }).homes).toEqual([{
+    product_id: productId, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null,
+    check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2,
+  }])
 
   const later = [localDay(10), localDay(13)] as const
   const made = await request.post(api('stays'), { headers, data: { product_id: productId, check_in_date: later[0], check_out_date: later[1], adults: 2, guest_name: 'Kai', total_minor: 450_00, idempotency_key: `${slug}-native` } })
@@ -103,7 +106,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   const edited = await request.patch(api(`stays/${native.id}`), { headers, data: { expected_version: native.version, guest_name: 'Kai Mendes' } })
   expect(edited.status(), await edited.text()).toBe(200)
   const nativeRead = await call<{ stay: { guest_name: string; check_in_date: string; total_minor: number } }>('get_stay', { stay_id: native.id })
-  expect(nativeRead.data!.stay).toMatchObject({ guest_name: 'Kai Mendes', check_in_date: later[0], total_minor: 450_00 })
+  expect(nativeRead.data!.stay).toMatchObject({ guest_name: 'Kai Mendes', check_in_date: later[0], check_out_date: later[1], total_minor: 450_00 })
 
   const listed = await request.get(api(`stays?from=${later[0]}&to=${later[1]}`))
   expect(listed.status(), await listed.text()).toBe(200)
