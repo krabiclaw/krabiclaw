@@ -1,5 +1,19 @@
 <template>
-  <PlatformCoastalScene v-if="page.recipe === 'products'" :block="block" :page="page" />
+  <section v-if="page.path === '/plugin'" class="kc-mcp-hero" data-parity-section="hero">
+    <div class="kc-mcp-hero__copy">
+      <p v-if="eyebrow" class="kc-mcp-hero__eyebrow">{{ eyebrow }}</p>
+      <h1>{{ title }}</h1>
+      <p v-if="subtitle" class="kc-mcp-hero__subtitle">{{ subtitle }}</p>
+      <div class="kc-mcp-hero__actions">
+        <PlatformAccountCta v-if="ctaLabel && ctaUrl" :label="ctaLabel" :to="ctaUrl" size="xl" class="kc-mcp-hero__start" />
+        <NuxtLink v-if="secondaryLabel && secondaryUrl" :to="secondaryUrl" class="kc-mcp-hero__link">{{ secondaryLabel }} <span aria-hidden="true">↗</span></NuxtLink>
+      </div>
+    </div>
+    <figure v-if="pluginImage && mediaStillUrl(pluginImage)" class="kc-mcp-hero__art">
+      <img :src="mediaStillUrl(pluginImage)!" :alt="pluginImage.alt_text || ''" :width="pluginImage.width ?? undefined" :height="pluginImage.height ?? undefined" fetchpriority="high" decoding="async">
+    </figure>
+  </section>
+  <PlatformCoastalScene v-else-if="page.recipe === 'products'" :block="block" :page="page" />
   <template v-else-if="page.path === '/'">
     <section
       ref="homeHero"
@@ -97,18 +111,6 @@
     <p v-if="subtitle">{{ subtitle }}</p>
   </section>
 
-  <!-- The plugin header: the app icon beside the title, the account CTA at the end of the row. -->
-  <div v-else-if="page.path === '/plugin'" class="flex flex-col gap-6 md:flex-row md:items-center md:justify-between" data-parity-section="hero">
-    <div class="flex items-center gap-6">
-      <img src="/platform/apple-touch-icon.png" alt="Krabiclaw app icon" class="size-24 rounded-[28px] border border-default shadow-lg">
-      <div>
-        <h1 class="m-0 text-3xl font-extrabold tracking-tight text-default md:text-4xl">{{ title }}</h1>
-        <p v-if="subtitle" class="mt-2 text-lg text-muted">{{ subtitle }}</p>
-      </div>
-    </div>
-    <PlatformAccountCta v-if="ctaLabel" :label="ctaLabel" :to="ctaUrl || '/signup'" size="xl" />
-  </div>
-
   <!--
     The vertical pages and Features: centered, an icon pill, a two-line headline
     whose second line is the gradient, and two CTAs. The gradient's stops are the
@@ -141,21 +143,14 @@ import PlatformCoastalScene from '~/components/platform/marketing/PlatformCoasta
 import type { PlatformIconName } from '~/components/platform/PlatformIcon.vue'
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
-import { blockStrings, blockText, blockTextOrNull } from '~/utils/tenant-page-block-data'
+import { blockStrings, blockText, blockTextOrNull, blockMedia } from '~/utils/tenant-page-block-data'
+import { mediaStillUrl } from '~/shared/media-placement-contract'
 
 /**
- * The hero of one of Krabiclaw's own marketing pages.
- *
- * Six pages, five shapes: the homepage's parallax artwork and intro, the
- * About header, the Pricing header with its pinging pill, the plugin header
- * with the app icon, and the centered hero the vertical pages and Features
- * share. Each shape is the markup the page rendered before it was a document,
- * chosen by the page path the way BlawbyPageHero chooses its own.
- *
- * `title` may carry "\n" where the original forced a line break, and
- * `accent` names the part of it rendered in the gradient. The vertical
- * accent decides which gradient that is. On the home shape,
- * `rotating_accents` closes the headline with one phrase at a time.
+ * Each marketing page renders its authored headline and media in its own
+ * presentation. The MCP page’s split composition takes precedence over the
+ * shared products recipe. Homepage artwork and parallax keep their own path.
+ * `title` preserves authored line breaks; `accent` marks a highlighted line.
  */
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 
@@ -362,6 +357,7 @@ onBeforeUnmount(() => {
   if (homeHeroFrame !== null) window.cancelAnimationFrame(homeHeroFrame)
 })
 
+const pluginImage = computed(() => blockMedia(props.block, 'media')[0])
 const eyebrow = computed(() => blockTextOrNull(props.block.data.eyebrow))
 const eyebrowIcon = computed(() => blockTextOrNull(props.block.data.eyebrow_icon) as PlatformIconName | null)
 const title = computed(() => blockText(props.block.data.title))
@@ -680,4 +676,21 @@ const gradientClass = computed(() => GRADIENT_CLASS[props.page.path] ?? GRADIENT
 .kc-pricing-hero { background: #171b31; color: white; text-align: center; padding: 5rem 1.5rem 3rem; }
 .kc-pricing-hero h1 { font-size: clamp(2.3rem, 5vw, 4rem); line-height: 1.1; letter-spacing: -.04em; margin: 0; font-weight: 400; }
 .kc-pricing-hero p { max-width: 42rem; margin: 1.5rem auto 0; color: #bbc0cf; line-height: 1.6; }
+</style>
+
+<style scoped>
+.kc-mcp-hero { display: grid; grid-template-columns: 1.05fr 1fr; align-items: center; gap: clamp(2.5rem, 6vw, 6rem); padding: clamp(4rem, 7vw, 7rem) max(7%, calc((100% - 86rem) / 2)); background: #f0ece3; color: #171b31; }
+.kc-mcp-hero__eyebrow { margin: 0 0 1.5rem; color: #945448; font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .15em; }
+.kc-mcp-hero h1 { margin: 0; max-width: 12ch; font-size: clamp(3.4rem, 6.5vw, 6.5rem); line-height: 1.02; font-weight: 400; letter-spacing: -.055em; white-space: pre-line; text-wrap: balance; }
+.kc-mcp-hero__subtitle { max-width: 32rem; margin: 2rem 0; color: #62646c; font-size: clamp(1.1rem, 1.65vw, 1.5rem); line-height: 1.6; }
+.kc-mcp-hero__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 1.75rem; }
+.kc-mcp-hero :deep(.kc-mcp-hero__start) { background: #171b31; color: #fff; border-radius: 999px; padding: 1rem 1.75rem; }
+.kc-mcp-hero__link { display: inline-flex; align-items: center; gap: .75rem; padding: .4rem 0; border-bottom: 1px solid currentColor; color: #944537; font-size: .95rem; font-weight: 500; text-decoration: none; }
+.kc-mcp-hero__link:hover { opacity: .75; }
+.kc-mcp-hero__art { min-width: 0; margin: 0; }
+.kc-mcp-hero__art img { display: block; width: 100%; height: auto; }
+@media (max-width: 767px) {
+  .kc-mcp-hero { grid-template-columns: 1fr; gap: 3rem; padding-top: 4rem; }
+  .kc-mcp-hero h1 { font-size: clamp(3.2rem, 11vw, 5rem); }
+}
 </style>
