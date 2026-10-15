@@ -1,5 +1,5 @@
 import { dashboardFetch, type DashboardRequestScope } from '~/composables/dashboardFetch'
-import type { OrganizationVertical } from '~/utils/vertical-copy'
+import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
 
 /**
  * The tenant, as the dashboard reads it.
@@ -67,7 +67,7 @@ const isDashboardOrganization = (value: unknown): value is DashboardOrganization
   && typeof value.slug === 'string'
   && typeof value.role === 'string'
   && typeof value.theme_id === 'string'
-  && (value.vertical === null || typeof value.vertical === 'string')
+  && (value.vertical === null || ALL_VERTICALS.some(vertical => vertical === value.vertical))
   && (value.subdomain === null || typeof value.subdomain === 'string')
   && (value.public_url === null || typeof value.public_url === 'string')
   && typeof value.status === 'string'

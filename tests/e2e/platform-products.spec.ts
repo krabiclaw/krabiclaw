@@ -10,7 +10,7 @@ test('Products retains its authored content, media and canonical identity after 
   expect(response?.status()).toBe(200)
   await waitForNuxtHydration(page)
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Your website is\njust the beginning.')
-  await expect(page.getByRole('heading', { name: 'Keep the conversation going.', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /^Customer messages,\s+in one place\.$/ })).toBeVisible()
   await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', `${testBaseUrl()}/products`)
   const graph = await page.locator('script[type="application/ld+json"]').allTextContents()
   expect(graph.join('')).toContain(`${testBaseUrl()}/products#webpage`)
@@ -24,10 +24,10 @@ test('Products retains its authored content, media and canonical identity after 
     await expect.poll(() => image.evaluate((element: HTMLImageElement) => element.complete && element.naturalWidth > 0)).toBe(true)
   }
   for (const anchor of [
-    { label: 'Build', id: 'products-website-builder', heading: 'Make it yours.' },
-    { label: 'Manage', id: 'products-management', heading: 'Say it. Change it.' },
-    { label: 'Connect', id: 'products-inbox', heading: 'Keep the conversation going.' },
-    { label: 'Grow', id: 'products-content-social', heading: 'Show what’s happening.' },
+    { label: 'Build', id: 'products-website-builder', heading: /^Build your\s+business website\.$/ },
+    { label: 'Manage', id: 'products-management', heading: /^AI website\s+management\.$/ },
+    { label: 'Connect', id: 'products-inbox', heading: /^Customer messages,\s+in one place\.$/ },
+    { label: 'Grow', id: 'products-content-social', heading: /^Publishing and\s+social posts\.$/ },
   ]) {
     await page.getByRole('navigation', { name: 'Products', exact: true }).getByRole('link', { name: anchor.label, exact: true }).click()
     await expect(page).toHaveURL(new RegExp(`#${anchor.id}$`))
@@ -42,14 +42,14 @@ test('Products remains readable on a narrow mobile viewport', async ({ page }) =
   await expect(page.getByRole('heading', { level: 1 })).toBeVisible()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
   await page.getByRole('navigation', { name: 'Products', exact: true }).getByRole('link', { name: 'Grow', exact: true }).click()
-  await expect(page.getByRole('heading', { name: 'Show what’s happening.', exact: true })).toBeInViewport()
+  await expect(page.getByRole('heading', { name: /^Publishing and\s+social posts\.$/ })).toBeInViewport()
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)
 })
 
 test('Products section links reach their relevant published destinations', async ({ page }) => {
   const destinations = [
     { label: 'Explore website builder', path: '/templates', heading: /Your business\.\s*Its own kind of beautiful\./ },
-    { label: 'Explore AI management', path: '/docs/mcp-setup', heading: /Connect KrabiClaw to ChatGPT/ },
+    { label: 'Explore AI management', path: '/plugin', heading: /^Your website\.\s*Your assistant\.$/ },
     { label: 'Read the inbox guide', path: '/docs/handle-inquiries-and-reservation-requests', heading: /Handle inquiries and reservation requests/ },
     { label: 'Explore Calendar and bookings', path: '/docs/category/calendar-and-bookings', heading: /Calendar and bookings/ },
     { label: 'Read the publishing guide', path: '/docs/publish-a-post', heading: /Publish a post/ },

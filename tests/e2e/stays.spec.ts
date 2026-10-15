@@ -162,7 +162,7 @@ test('a cleaner sees only assigned-home arrivals and departures on Today and Upc
       base_price_minor: null, idempotency_key: crypto.randomUUID() } })
     expect(madeHome.status(), await madeHome.text()).toBe(201)
     const assignedHome = (await madeHome.json() as { home: { product_id: string; location_id: string } }).home
-    const otherHome = await call<{ product: { id: string } }>('create_product', { kind: 'stay', name: 'Other Cabin', stay: {
+    const otherHome = await call<{ product: { id: string } }>('create_product', { kind: 'stay', name: 'Other Cabin', idempotency_key: crypto.randomUUID(), stay: {
       location_id: locations.data!.locations[0]!.id, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1,
       assigned_member_id: null, assigned_team_id: null,
     } })
