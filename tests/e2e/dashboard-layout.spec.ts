@@ -8,17 +8,23 @@ import type { DashboardArticleCategory } from '../../composables/useArticleCateg
 import type { NotificationPreferenceMap } from '../../composables/useNotificationPreferences'
 import type { SessionAvailability } from '../../server/utils/availability'
 import type { OrganizationMembersData } from '../../utils/organization-members'
-import { localNow } from '../../utils/timezone'
+import { localNow, timezoneLabel } from '../../utils/timezone'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
+import type { Collection, Product } from '../../server/types/products'
+import type { DashboardLocation } from '../../composables/useDashboardOrganization'
+import { mediaStillUrl } from '../../shared/media-placement-contract'
+import type { TodayFeedPayload } from '../../shared/dashboard-today'
 
 // The dashboard's pane topology is the nested route tree (DESIGN.md, Route
 // hierarchy). On a wide screen a level renders beside the parent its Back goes
 // to, an index of deterministic settings opens its first one, and a list of
-// records opens nothing. Below `lg` every level is one screen.
+// records opens nothing. Below `lg` an index is one screen and a leaf is a
+// modal drawer over its own index.
 
 const ORG = '/dashboard/ember-slice-demo'
 const WIDE = { width: 1440, height: 900 }
 const NARROW = { width: 900, height: 900 }
+const PHONE = { width: 390, height: 844 }
 
 /** The panes on screen, left to right, by the id each DashboardIndexPanel/LeafPanel is given. */
 async function visiblePanes(page: Page): Promise<string[]> {
@@ -179,9 +185,11 @@ test.describe('dashboard pane hierarchy', () => {
     const name = `E2E Booking Team ${Date.now().toString(36)}`
     let teamId: string | null = null
     try {
-      await page.setViewportSize(NARROW)
+      await page.setViewportSize(PHONE)
       await open(page, `${ORG}/team/groups/new/name`)
       const leaf = page.locator('#dashboard-panel-booking-team-setting')
+      await expect(page.getByRole('dialog', { name: 'Team name', exact: true })).toBeVisible()
+      await expect(page.locator('#dashboard-panel-booking-team')).toBeVisible()
       await expect(leaf.getByRole('button', { name: 'Create team', exact: true })).toBeDisabled()
       await leaf.getByRole('textbox', { name: 'Team name', exact: true }).fill(name)
       const created = page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/organization/create-team' && response.request().method() === 'POST')
@@ -190,18 +198,29 @@ test.describe('dashboard pane hierarchy', () => {
       expect(createdResponse.status(), await createdResponse.text()).toBe(200)
       teamId = (await createdResponse.json() as { id: string }).id
       await expect(page).toHaveURL(`${ORG}/team/groups/${teamId}`)
+      await expect(page.getByRole('dialog')).toHaveCount(0)
+      await expect(page.locator('#dashboard-panel-booking-team')).toContainText(name)
       const original = (await readTeams()).find(row => row.id === teamId)
       expect(original).toMatchObject({ id: teamId, name, organizationId })
       expect(original!.members.map(row => row.userId)).not.toContain(member!.userId)
 
       await open(page, `${ORG}/team/groups/${teamId}/name`)
+      await expect(page.getByRole('dialog', { name: 'Team name', exact: true })).toBeVisible()
+      await expect(page.locator('#dashboard-panel-booking-team')).toContainText(name)
       const save = leaf.getByRole('button', { name: 'Save', exact: true })
       await expect(save).toBeDisabled()
       const renamed = `${name} renamed`
       await leaf.getByRole('textbox', { name: 'Team name', exact: true }).fill(renamed)
       await expect(save).toBeEnabled()
+      for (const viewport of [WIDE, PHONE]) {
+        await page.setViewportSize(viewport)
+        await expect(leaf.getByRole('textbox', { name: 'Team name', exact: true })).toHaveValue(renamed)
+        await expect(save).toBeEnabled()
+      }
       await save.click()
       await expect(page).toHaveURL(`${ORG}/team/groups/${teamId}`)
+      await expect(page.getByRole('dialog')).toHaveCount(0)
+      await expect(page.locator('#dashboard-panel-booking-team')).toContainText(renamed)
       expect((await readTeams()).find(row => row.id === teamId)?.name).toBe(renamed)
 
       await open(page, `${ORG}/team/groups/${teamId}/members`)
@@ -482,6 +501,325 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page.locator('#dashboard-panel-catalog [data-testid="dashboard-navbar-back"]')).toHaveCount(0)
   })
 
+  test('Catalog shows real sections and offerings as desktop tiles and mobile rows with their locations', async ({ page }, testInfo) => {
+    const [productResponse, collectionResponse, locationResponse] = await Promise.all([
+      page.request.get('/api/editor/organizations/org-demo/products'),
+      page.request.get('/api/editor/organizations/org-demo/collections'),
+      page.request.get('/api/dashboard/locations', { params: { org: 'ember-slice-demo', organization: 'true', status: 'all' } }),
+    ])
+    for (const response of [productResponse, collectionResponse, locationResponse]) expect(response.status(), await response.text()).toBe(200)
+    const { products } = await productResponse.json() as { products: Product[] }
+    const { collections } = await collectionResponse.json() as { collections: Collection[] }
+    const { locations } = await locationResponse.json() as { locations: DashboardLocation[] }
+    const section = collections.find(collection => products.some(product => product.kind === 'dish' && product.collections.some(membership => membership.collection_id === collection.id)))
+    expect(section, 'The demo has a real menu section containing dishes').toBeDefined()
+
+    await page.setViewportSize(WIDE)
+    await open(page, `${ORG}/products`)
+    const catalog = page.locator('#dashboard-panel-catalog')
+    await expect(catalog.getByRole('heading', { level: 2 })).toHaveText(['Menu', 'Experiences', 'Products', 'Services'])
+    await expect(catalog.getByRole('link', { name: /^All items/ })).toHaveCount(0)
+    const menu = page.getByTestId('catalog-section-menu')
+    const sectionCard = menu.getByTestId(`selector-item-${section!.id}`)
+    const sectionPath = `${ORG}/products/menu/${section!.id}${section!.location_id ? `?location_id=${encodeURIComponent(section!.location_id)}` : ''}`
+    await expect(sectionCard).toHaveAttribute('href', sectionPath)
+    await expect(sectionCard.getByRole('heading', { level: 3 })).toHaveText(section!.name)
+    const sectionLocation = section!.location_id ? locations.find(location => location.id === section!.location_id) : null
+    if (section!.location_id) expect(sectionLocation, 'A section’s location must exist in its tenant').toBeDefined()
+    await expect(sectionCard).toContainText(sectionLocation?.title ?? 'Shared by every location')
+
+    for (const kind of ['experience', 'item', 'service'] as const) {
+      const group = page.getByTestId(`catalog-section-${kind}`)
+      const expected = products.filter(product => product.kind === kind)
+      await expect(group.locator('a[data-testid^="selector-item-"]')).toHaveCount(expected.length)
+      for (const product of expected) {
+        const card = group.getByTestId(`selector-item-${product.id}`)
+        await expect(card).toHaveAttribute('href', `${ORG}/products/${product.id}`)
+        await expect(card.getByRole('heading', { level: 3 })).toHaveText(product.name)
+        for (const binding of product.locations) {
+          const location = locations.find(row => row.id === binding.location_id)
+          expect(location, 'An offering’s location must exist in its tenant').toBeDefined()
+          await expect(card).toContainText(location!.title)
+        }
+        if (product.booking?.held_online) await expect(card).toContainText('Online')
+        else if (!product.locations.length) await expect(card).toContainText('No locations set')
+        for (const membership of product.collections) {
+          const category = collections.find(row => row.id === membership.collection_id)
+          expect(category, 'An offering’s category must exist in its tenant').toBeDefined()
+          await expect(card).toContainText(category!.name)
+        }
+        if (product.variants.every(variant => !variant.prices.length)) await expect(card).toContainText('No price set')
+      }
+    }
+    const desktopImage = await sectionCard.locator('[data-selector-image]').boundingBox()
+    expect(desktopImage).not.toBeNull()
+    expect(desktopImage!.width / desktopImage!.height).toBeCloseTo(20 / 19, 2)
+    const sectionPhotos = products
+      .filter(product => product.collections.some(membership => membership.collection_id === section!.id))
+      .map(product => mediaStillUrl(product.image))
+      .filter((url): url is string => Boolean(url))
+    if (sectionPhotos.length) {
+      const photo = sectionCard.locator('img')
+      await expect(photo).toHaveCount(1)
+      expect(sectionPhotos, 'The menu section displays one of its own items’ real photos').toContain(await photo.getAttribute('src'))
+      await expect.poll(() => photo.evaluate(image => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0), {
+        message: 'The fixture’s menu photo must finish rendering before the Catalog screenshot',
+      }).toBe(true)
+    }
+    await page.screenshot({ path: testInfo.outputPath('catalog-desktop.png'), fullPage: true })
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    const mobileImage = await sectionCard.locator('[data-selector-image]').boundingBox()
+    const mobileRow = await sectionCard.boundingBox()
+    const mobileSection = await menu.boundingBox()
+    expect(mobileImage).not.toBeNull()
+    expect(mobileRow).not.toBeNull()
+    expect(mobileSection).not.toBeNull()
+    expect(mobileImage!.width).toBeCloseTo(60, 1)
+    expect(mobileImage!.height).toBeCloseTo(60, 1)
+    expect(mobileRow!.width).toBeCloseTo(mobileSection!.width, 1)
+    await page.screenshot({ path: testInfo.outputPath('catalog-mobile.png'), fullPage: true })
+
+    const location = locations.find(row => row.id === 'loc-demo')
+    expect(location, 'The demo fixture carries its Brooklyn location').toBeDefined()
+    await catalog.getByRole('combobox', { name: 'Location', exact: true }).click()
+    await page.getByRole('option', { name: `${location!.title}${location!.status === 'active' ? '' : ` (${location!.status})`}`, exact: true }).click()
+    await expect(page).toHaveURL(`${ORG}/products?location_id=loc-demo`)
+    await page.reload()
+    await waitForNuxtHydration(page)
+    await expect(page).toHaveURL(`${ORG}/products?location_id=loc-demo`)
+    for (const kind of ['experience', 'item', 'service'] as const) {
+      const group = page.getByTestId(`catalog-section-${kind}`)
+      const expected = products.filter(product => product.kind === kind && product.locations.some(binding => binding.location_id === 'loc-demo'))
+      await expect(group.locator('a[data-testid^="selector-item-"]')).toHaveCount(expected.length)
+      for (const product of expected) await expect(group.getByTestId(`selector-item-${product.id}`)).toHaveAttribute('href', `${ORG}/products/${product.id}?location_id=loc-demo`)
+    }
+    const shared = collections.find(collection => collection.location_id === null && products.some(product => product.kind === 'dish' && product.collections.some(membership => membership.collection_id === collection.id)))
+    if (shared) await expect(menu.getByTestId(`selector-item-${shared.id}`)).toHaveAttribute('href', `${ORG}/products/menu/${shared.id}`)
+    await open(page, sectionPath)
+    const member = products.find(product => product.kind === 'dish' && product.collections.some(membership => membership.collection_id === section!.id))!
+    await expect(page.getByTestId(`product-${member.id}`)).toContainText(member.name)
+  })
+
+  test('mobile scroll keeps real Catalog and menu rows reachable inside their panel', async ({ page }) => {
+    const [productsRead, sectionsRead] = await Promise.all([
+      page.request.get('/api/editor/organizations/org-demo/products'),
+      page.request.get('/api/editor/organizations/org-demo/collections'),
+    ])
+    expect(productsRead.status(), await productsRead.text()).toBe(200)
+    expect(sectionsRead.status(), await sectionsRead.text()).toBe(200)
+    const { products } = await productsRead.json() as { products: Product[] }
+    const { collections } = await sectionsRead.json() as { collections: Collection[] }
+    const sections = collections.map(collection => ({
+      collection,
+      members: products.filter(product => product.collections.some(row => row.collection_id === collection.id))
+        .sort((a, b) => a.collections.find(row => row.collection_id === collection.id)!.sort_order - b.collections.find(row => row.collection_id === collection.id)!.sort_order),
+    })).sort((a, b) => b.members.length - a.members.length)
+    const section = sections[0]
+    expect(section, 'The demo has an existing menu section').toBeDefined()
+    expect(section!.members.length).toBeGreaterThan(0)
+    await page.setViewportSize(PHONE)
+
+    for (const entry of [
+      { path: `${ORG}/products`, id: 'catalog' },
+      { path: `${ORG}/products/menu/${section!.collection.id}${section!.collection.location_id ? `?location_id=${encodeURIComponent(section!.collection.location_id)}` : ''}`, id: 'menu-section' },
+    ]) {
+      await open(page, entry.path)
+      const panel = page.locator(`#dashboard-panel-${entry.id}`)
+      const body = panel.locator(':scope > [data-slot="body"]')
+      const header = panel.locator(':scope > [data-slot="root"]')
+      const nav = page.getByTestId('dashboard-mobile-nav')
+      const rows = entry.id === 'catalog' ? panel.locator('a[data-testid^="selector-item-"]') : panel.locator('span[data-testid^="product-"]')
+      expect(await rows.count()).toBeGreaterThan(0)
+      if (entry.id === 'menu-section') {
+        await expect(rows).toHaveCount(section!.members.length)
+        await expect(rows.last()).toHaveAttribute('data-testid', `product-${section!.members.at(-1)!.id}`)
+      } else {
+        const href = await rows.last().getAttribute('href')
+        const id = new URL(href!, page.url()).pathname.split('/').at(-1)
+        const record = products.find(product => product.id === id) ?? collections.find(collection => collection.id === id)
+        expect(record, 'The final Catalog row names a real organization record').toBeDefined()
+        await expect(rows.last()).toContainText(record!.name)
+      }
+      await expect(nav).toBeVisible()
+      const headerBefore = await header.boundingBox()
+      const navBefore = await nav.boundingBox()
+      const bodyBox = await body.boundingBox()
+      expect(headerBefore).not.toBeNull()
+      expect(navBefore).not.toBeNull()
+      expect(bodyBox).not.toBeNull()
+      expect(bodyBox!.y + bodyBox!.height).toBeLessThanOrEqual(navBefore!.y + 1)
+      const documentBefore = await page.evaluate(() => ({ top: document.scrollingElement!.scrollTop, left: scrollX, width: document.documentElement.scrollWidth, height: document.scrollingElement!.scrollHeight }))
+      expect(documentBefore.top).toBe(0)
+      expect(documentBefore.left).toBe(0)
+      expect(documentBefore.width).toBeLessThanOrEqual(PHONE.width)
+      expect(documentBefore.height).toBeLessThanOrEqual(PHONE.height)
+      const maximum = await body.evaluate(element => element.scrollHeight - element.clientHeight)
+      await expect.poll(() => body.evaluate(element => element.scrollTop)).toBe(0)
+      if (entry.id === 'catalog') expect(maximum, 'The actual Catalog has more rows than fit on a phone').toBeGreaterThan(0)
+      await page.mouse.move(bodyBox!.x + 4, bodyBox!.y + bodyBox!.height / 2)
+      await page.mouse.wheel(0, maximum + bodyBox!.height)
+      await expect.poll(() => body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
+      if (maximum > 0) expect(await body.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+      else expect(await body.evaluate(element => element.scrollTop)).toBe(0)
+      await expect(rows.last()).toBeInViewport({ ratio: 1 })
+      await page.mouse.wheel(0, bodyBox!.height)
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+      expect(await header.boundingBox()).toEqual(headerBefore)
+      expect(await nav.boundingBox()).toEqual(navBefore)
+      expect(await page.evaluate(() => ({ top: document.scrollingElement!.scrollTop, left: scrollX, width: document.documentElement.scrollWidth, height: document.scrollingElement!.scrollHeight }))).toEqual(documentBefore)
+      expect(await body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
+    }
+  })
+
+  test('mobile scroll confines a short Description drawer to its body and pins its controls', async ({ page }) => {
+    const productsRead = await page.request.get('/api/editor/organizations/org-demo/products')
+    expect(productsRead.status(), await productsRead.text()).toBe(200)
+    const product = (await productsRead.json() as { products: Product[] }).products.find(row => row.kind === 'dish')
+    expect(product, 'The demo has an existing dish to describe').toBeDefined()
+    await page.setViewportSize({ width: 390, height: 568 })
+    await open(page, `${ORG}/products/${product!.id}/description`)
+    const dialog = page.getByRole('dialog', { name: 'Description', exact: true })
+    const panel = page.locator('#dashboard-panel-product-description')
+    const body = panel.locator(':scope > [data-slot="body"]')
+    const parentBody = page.locator('#dashboard-panel-product > [data-slot="body"]')
+    const header = panel.locator(':scope > [data-slot="root"]')
+    const save = panel.getByRole('button', { name: 'Save', exact: true })
+    await expect(dialog).toBeVisible()
+    await expect(panel.getByRole('textbox', { name: 'Description', exact: true })).toHaveValue(product!.description ?? '')
+    await panel.getByTestId('dashboard-navbar-close').hover()
+    const bodyBox = await body.boundingBox()
+    expect(bodyBox).not.toBeNull()
+    const maximum = await body.evaluate(element => element.scrollHeight - element.clientHeight)
+    expect(maximum, 'The real ten-row Description control needs body scrolling in a short window').toBeGreaterThan(0)
+    // The body padding receives the wheel; a textarea can own its own scroll.
+    await page.mouse.move(bodyBox!.x + 4, bodyBox!.y + bodyBox!.height / 2)
+    await page.mouse.wheel(0, -maximum - bodyBox!.height)
+    await expect.poll(() => body.evaluate(element => element.scrollTop)).toBe(0)
+    const headerBefore = await header.boundingBox()
+    const saveBefore = await save.boundingBox()
+    expect(headerBefore).not.toBeNull()
+    expect(saveBefore).not.toBeNull()
+    expect(saveBefore!.y).toBeGreaterThanOrEqual(0)
+    expect(saveBefore!.y + saveBefore!.height).toBeLessThanOrEqual(568)
+    expect(bodyBox!.y + bodyBox!.height).toBeLessThanOrEqual(saveBefore!.y)
+    const parentBefore = await parentBody.evaluate(element => element.scrollTop)
+    const documentBefore = await page.evaluate(() => ({ top: document.scrollingElement!.scrollTop, left: scrollX, width: document.documentElement.scrollWidth, height: document.scrollingElement!.scrollHeight }))
+    expect(documentBefore.top).toBe(0)
+    expect(documentBefore.width).toBeLessThanOrEqual(390)
+    expect(documentBefore.height).toBeLessThanOrEqual(568)
+    await page.mouse.wheel(0, maximum + bodyBox!.height)
+    await expect.poll(() => body.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+    await expect.poll(() => body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
+    await page.mouse.wheel(0, bodyBox!.height)
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+    expect(await header.boundingBox()).toEqual(headerBefore)
+    expect(await save.boundingBox()).toEqual(saveBefore)
+    expect(await parentBody.evaluate(element => element.scrollTop)).toBe(parentBefore)
+    expect(await page.evaluate(() => ({ top: document.scrollingElement!.scrollTop, left: scrollX, width: document.documentElement.scrollWidth, height: document.scrollingElement!.scrollHeight }))).toEqual(documentBefore)
+    expect(await body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
+    await panel.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(page).toHaveURL(`${ORG}/products/${product!.id}`)
+  })
+
+  test('mobile scroll ends Today after its real final card and one panel padding', async ({ page }, testInfo) => {
+    const feedRead = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo', locationId: 'loc-demo' } })
+    expect(feedRead.status(), await feedRead.text()).toBe(200)
+    const feed = await feedRead.json() as TodayFeedPayload
+    expect(feed.cards.length, 'The demo owner has real Today cards').toBeGreaterThan(0)
+    await page.setViewportSize(PHONE)
+    await open(page, `${ORG}?locationId=loc-demo`)
+    const panel = page.locator('#dashboard-panel-org-today')
+    const body = panel.locator(':scope > [data-slot="body"]')
+    const cards = panel.getByTestId('today-card')
+    await expect(cards.first()).toBeVisible()
+    await expect(page.getByTestId('dashboard-mobile-nav')).toBeVisible()
+    const bodyBox = await body.boundingBox()
+    expect(bodyBox).not.toBeNull()
+    await page.mouse.move(bodyBox!.x + 4, bodyBox!.y + bodyBox!.height / 2)
+    while (await cards.count() < feed.cards.length) {
+      const count = await cards.count()
+      await page.mouse.wheel(0, await body.evaluate(element => element.scrollHeight))
+      await expect.poll(() => cards.count()).toBeGreaterThan(count)
+    }
+    expect(await cards.evaluateAll(elements => elements.map(element => element.getAttribute('data-card-id')))).toEqual(feed.cards.map(card => card.id))
+    await page.mouse.wheel(0, await body.evaluate(element => element.scrollHeight))
+    await expect.poll(() => body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
+    const last = cards.last()
+    await expect(last).toContainText(feed.cards.at(-1)!.headline)
+    await expect(last).toBeInViewport({ ratio: 1 })
+    const finalBody = (await body.boundingBox())!
+    const finalCard = (await last.boundingBox())!
+    expect(finalBody.y + finalBody.height - finalCard.y - finalCard.height, 'Today has the canonical 16px panel padding after its last card').toBeCloseTo(16, 0)
+    const nav = (await page.getByTestId('dashboard-mobile-nav').boundingBox())!
+    expect(finalBody.y + finalBody.height).toBeCloseTo(nav.y, 0)
+    expect(await page.evaluate(() => document.scrollingElement!.scrollTop)).toBe(0)
+    await page.screenshot({ path: testInfo.outputPath('today-mobile-scroll-bottom.png'), fullPage: true })
+  })
+
+  test('mobile scroll ends Calendar and earnings content at their panel boundary', async ({ page }) => {
+    test.setTimeout(60_000)
+    for (const entry of [
+      { path: `${ORG}/calendar?view=year`, id: 'org-calendar', height: 568, gap: 32 },
+      { path: `${ORG}/earnings/payouts`, id: 'earnings-payouts', height: 568, gap: 16 },
+      { path: `${ORG}/earnings/transactions`, id: 'earnings-transactions', height: 300, gap: 16 },
+    ]) {
+      await page.setViewportSize({ width: 390, height: entry.height })
+      await open(page, entry.path)
+      const panel = page.locator(`#dashboard-panel-${entry.id}`)
+      const body = panel.locator(':scope > [data-slot="body"]')
+      const header = panel.locator(':scope > [data-slot="root"]')
+      const nav = page.getByTestId('dashboard-mobile-nav')
+      const last = entry.id === 'org-calendar' ? panel.locator('[data-month]').last()
+        : entry.id === 'earnings-payouts' ? panel.getByRole('region', { name: 'Payments help', exact: true })
+          : panel.getByText('No transactions in this period.', { exact: true })
+      if (entry.id === 'org-calendar') {
+        await expect(panel.locator('[data-month]')).toHaveCount(12)
+        await expect(last).toHaveAttribute('data-month', /^\d{4}-12$/)
+        await expect(last.getByRole('button', { name: 'December', exact: true })).toBeVisible()
+        const month = await last.getAttribute('data-month')
+        await expect(last.locator(`time[datetime="${month}-31"]`)).toHaveText('31')
+      } else if (entry.id === 'earnings-payouts') {
+        await expect(panel.getByText('Payouts start once your business is connected to Stripe.', { exact: true })).toBeVisible()
+        await expect(last.getByRole('link', { name: 'Go to your transactions', exact: true })).toBeVisible()
+      } else {
+        await expect(last).toBeVisible()
+      }
+      await expect(nav).toBeVisible()
+      const headerBefore = await header.boundingBox()
+      const navBefore = await nav.boundingBox()
+      const bodyBox = await body.boundingBox()
+      expect(headerBefore).not.toBeNull()
+      expect(navBefore).not.toBeNull()
+      expect(bodyBox).not.toBeNull()
+      expect(bodyBox!.y + bodyBox!.height).toBeCloseTo(navBefore!.y, 0)
+      const documentBefore = await page.evaluate(() => ({ top: document.scrollingElement!.scrollTop, left: scrollX, width: document.documentElement.scrollWidth, height: document.scrollingElement!.scrollHeight }))
+      expect(documentBefore.top).toBe(0)
+      expect(documentBefore.left).toBe(0)
+      expect(documentBefore.width).toBeLessThanOrEqual(390)
+      expect(documentBefore.height).toBeLessThanOrEqual(entry.height)
+      const maximum = await body.evaluate(element => element.scrollHeight - element.clientHeight)
+      await page.mouse.move(bodyBox!.x + 4, bodyBox!.y + bodyBox!.height / 2)
+      await page.mouse.wheel(0, maximum + bodyBox!.height)
+      await expect.poll(() => body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
+      const finalAction = entry.id === 'earnings-payouts' ? last.getByRole('link', { name: 'Go to your transactions', exact: true }) : last
+      await expect(finalAction).toBeInViewport({ ratio: 1 })
+      if (maximum > 0) {
+        const end = (await last.boundingBox())!
+        // The calendar's month grid keeps its own 16px below December.
+        expect(bodyBox!.y + bodyBox!.height - end.y - end.height, `${entry.id} ends at its content padding and the 16px panel padding`).toBeCloseTo(entry.gap, 0)
+      } else {
+        expect(await body.evaluate(element => element.scrollTop)).toBe(0)
+      }
+      await page.mouse.wheel(0, bodyBox!.height)
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+      expect(await header.boundingBox()).toEqual(headerBefore)
+      expect(await nav.boundingBox()).toEqual(navBefore)
+      expect(await page.evaluate(() => ({ top: document.scrollingElement!.scrollTop, left: scrollX, width: document.documentElement.scrollWidth, height: document.scrollingElement!.scrollHeight }))).toEqual(documentBefore)
+      expect(await body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
+    }
+  })
+
   test('the deepest two levels of the page editor own the frame', async ({ page }) => {
     await page.setViewportSize(WIDE)
     await open(page, `${ORG}/website/pages`)
@@ -527,7 +865,7 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page).toHaveURL(`${ORG}/payments?tab=plan`)
   })
 
-  test('five destinations keep tenant management in Menu and personal activity in its own context', async ({ page, baseURL }) => {
+  test('five organization destinations keep tenant management in Menu', async ({ page }) => {
     await page.setViewportSize(WIDE)
     await open(page, `${ORG}/menu`)
     await expect(page.getByTestId('dashboard-top-nav').getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages'])
@@ -564,7 +902,11 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page).toHaveURL(`${services}/products`)
     await expect(mobileNav.getByRole('link', { name: 'Catalog', exact: true })).toHaveAttribute('aria-current', 'page')
     await expect(page.locator('#dashboard-panel-catalog [data-testid="dashboard-navbar-back"]')).toHaveCount(0)
+  })
 
+  test('Cedar billing tabs show its actual payment methods and Basic plan', async ({ page, baseURL }) => {
+    await page.setViewportSize(PHONE)
+    const mobileNav = page.getByTestId('dashboard-mobile-nav')
     // Cedar is an existing fictional Basic business with no billing customer.
     // The copied Ember subscription belongs to LIVE Stripe, not this TEST key.
     expect(['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Cedar owner impersonation is confined to isolated local D1').toBe(true)
@@ -599,6 +941,27 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(payments.locator('section [data-slot="description"]')).toHaveCount(0)
       await expect(payments.getByTestId('dashboard-navbar-back')).toHaveAttribute('href', `${cedar}/earnings`)
       await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'])
+
+      const planBilling = page.waitForResponse(response => {
+        const url = new URL(response.url())
+        return url.pathname === '/api/billing/status' && url.searchParams.get('includePrice') === 'true'
+      })
+      const usageBilling = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/payments/billing')
+      await payments.getByRole('tab', { name: 'Plan', exact: true }).click()
+      await expect(page).toHaveURL(`${cedar}/payments?tab=plan`)
+      const planResponse = await planBilling
+      expect(planResponse.status(), await planResponse.text()).toBe(200)
+      const plan = await planResponse.json()
+      expect(plan).toMatchObject({ success: true, billing: { plan: 'free', organizationId: cedarId }, userRole: 'owner' })
+      expect(plan.billing.stripeSubscriptionId).toBeUndefined()
+      expect(plan.billing.subscriptionPrice).toBeUndefined()
+      const usageResponse = await usageBilling
+      expect(usageResponse.status(), await usageResponse.text()).toBe(200)
+      // Basic has no Stripe subscription price: its actual charge is Free.
+      await expect(payments.getByText('Basic', { exact: true })).toBeVisible()
+      await expect(payments.getByText('Free', { exact: true })).toBeVisible()
+      await expect(payments.getByText('Choose a plan', { exact: true })).toBeVisible()
+      await expect(payments.locator('[data-slot="description"]')).toHaveCount(0)
     } finally {
       try {
         if (impersonated) {
@@ -616,85 +979,96 @@ test.describe('dashboard pane hierarchy', () => {
         expect(session.session.impersonatedBy ?? null).toBeNull()
       }
     }
-    await open(page, `${ORG}/payments?tab=plan`)
-    await expect(page.getByText(/^(Manage|Choose a plan)$/)).toBeVisible()
-    // Personal is a switch in Better Auth, not a URL: with no active organization
-    // the account is its own context, with its own tabs.
-    const personal = await page.request.post('/api/auth/organization/set-active', { headers: authRequestHeaders(baseURL!), data: { organizationId: null } })
-    expect(personal.status(), await personal.text()).toBe(200)
-    await open(page, '/account')
-    await expect(page).toHaveURL('/dashboard/account')
-    await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages', 'Menu'])
-    // Past activity is a card in the account's Menu, as Past trips is on Airbnb's profile; Today owns what is ahead.
-    const account = page.waitForResponse(response => new URL(response.url()).pathname === '/api/account' && response.request().method() === 'GET')
-    await mobileNav.getByRole('link', { name: 'Menu', exact: true }).click()
-    await page.getByTestId('dashboard-menu-past-activity').click()
-    await expect(page).toHaveURL('/dashboard/account/activity')
-    const response = await account
-    expect(response.status(), await response.text()).toBe(200)
-    const activity = await response.json()
-    expect(isAccountActivityResponse(activity), 'the account API returns actual owned activity').toBe(true)
-    if (!isAccountActivityResponse(activity)) throw new Error('Invalid account activity response')
-    await expect(page.getByRole('heading', { name: 'Past activity', exact: true })).toBeVisible()
-    const past = activity.activities.filter(item => item.kind === 'order' || item.kind === 'payment' || (item.status !== 'cancelled' && item.endsAt !== null && Date.parse(item.endsAt) < Date.now()))
-    const cancelled = activity.activities.filter(item => (item.kind === 'booking' || item.kind === 'reservation') && item.status === 'cancelled')
-    await expect(page.getByTestId('account-activity-cancelled')).toHaveCount(cancelled.length ? 1 : 0)
-    await expect(page.locator('[data-testid^="account-activity-"]:not([data-testid="account-activity-cancelled"])')).toHaveCount(past.length)
-    for (const item of past) {
-      await expect(page.getByTestId(`account-activity-${item.kind}-${item.id}`)).toContainText(item.title)
-    }
-    // The copied actor's own history may be empty; never create a purchase to
-    // make the dashboard assert its fabricated premise.
-    if (past.length) {
-      const item = past[0]!
-      // A visit and a purchase open the same record screen, on the account's own read.
-      const read = await page.request.get(`/api/account/bookings/${item.kind}/${item.id}`)
-      expect(read.status(), await read.text()).toBe(200)
-      const detail = await read.json()
-      expect(isBookingDetailsResponse(detail), 'the account detail API returns the canonical record').toBe(true)
-      if (!isBookingDetailsResponse(detail)) throw new Error('Invalid account booking details response')
-      const paymentCount = (detail.booking.payments ?? []).length
-      await page.getByTestId(`account-activity-${item.kind}-${item.id}`).click()
-      await expect(page).toHaveURL(`/dashboard/account/activity/${item.kind}/${item.id}`)
-      await expect(page.getByRole('heading', { name: item.title, exact: true })).toBeVisible()
-      await expect(page.getByRole('heading', { name: 'Payment info', exact: true })).toHaveCount(paymentCount)
-      // The record opens beside Past activity; its own Back returns to that list.
-      await page.locator('#dashboard-panel-account-booking-details [data-testid="dashboard-navbar-back"]').click()
+  })
+
+  test('personal navigation keeps owned activity and Updates in its own context', async ({ page, baseURL }) => {
+    await page.setViewportSize(PHONE)
+    const mobileNav = page.getByTestId('dashboard-mobile-nav')
+    try {
+      // Personal is a switch in Better Auth, not a URL: with no active organization
+      // the account is its own context, with its own tabs.
+      const personal = await page.request.post('/api/auth/organization/set-active', { headers: authRequestHeaders(baseURL!), data: { organizationId: null } })
+      expect(personal.status(), await personal.text()).toBe(200)
+      await open(page, '/account')
+      await expect(page).toHaveURL('/dashboard/account')
+      await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages', 'Menu'])
+      // Past activity is a card in the account's Menu, as Past trips is on Airbnb's profile; Today owns what is ahead.
+      const account = page.waitForResponse(response => new URL(response.url()).pathname === '/api/account' && response.request().method() === 'GET')
+      await mobileNav.getByRole('link', { name: 'Menu', exact: true }).click()
+      await page.getByTestId('dashboard-menu-past-activity').click()
       await expect(page).toHaveURL('/dashboard/account/activity')
-    } else if (!cancelled.length) {
-      await expect(page.getByText('No past activity yet', { exact: true })).toBeVisible()
-    }
-    await mobileNav.getByRole('link', { name: 'Today', exact: true }).click()
-    await expect(page).toHaveURL('/dashboard/account')
-    await expect(page.getByRole('heading', { name: 'Today', exact: true })).toBeVisible()
-    await mobileNav.getByRole('link', { name: 'Calendar', exact: true }).click()
-    await expect(page).toHaveURL('/dashboard/account/calendar')
-    await expect(page.getByRole('heading', { name: 'Calendar', exact: true })).toBeVisible()
-    await mobileNav.getByRole('link', { name: 'Messages', exact: true }).click()
-    await expect(page).toHaveURL('/dashboard/account/messages')
-    const personalUpdates = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/notifications'
-      && new URL(response.url()).searchParams.get('scope') === 'personal')
-    await page.getByRole('button', { name: 'All, filter by message type' }).click()
-    await page.getByRole('menuitemcheckbox', { name: 'Updates', exact: true }).click()
-    const updatesResponse = await personalUpdates
-    expect(updatesResponse.status(), await updatesResponse.text()).toBe(200)
-    const updates = await updatesResponse.json() as { notifications: Array<{ id: string; scope: string; title: string | null; target_user_id: string | null }> }
-    const viewer = await (await page.request.get('/api/auth/get-session')).json() as { user: { id: string } }
-    // Personal Updates are platform notifications addressed to this account, or to everyone; never a business's.
-    expect(updates.notifications.every(item => item.scope === 'global' && (item.target_user_id === viewer.user.id || item.target_user_id === null)), 'personal Updates carry only this account\'s notifications').toBe(true)
-    await expect(page).toHaveURL('/dashboard/account/messages?view=updates')
-    if (updates.notifications.length) {
-      for (const item of updates.notifications) {
-        const row = page.getByTestId(`notification-${item.id}`)
-        await expect(row).toBeVisible()
-        if (item.title) await expect(row).toContainText(item.title)
+      const response = await account
+      expect(response.status(), await response.text()).toBe(200)
+      const activity = await response.json()
+      expect(isAccountActivityResponse(activity), 'the account API returns actual owned activity').toBe(true)
+      if (!isAccountActivityResponse(activity)) throw new Error('Invalid account activity response')
+      await expect(page.getByRole('heading', { name: 'Past activity', exact: true })).toBeVisible()
+      const past = activity.activities.filter(item => item.kind === 'order' || item.kind === 'payment' || (item.status !== 'cancelled' && item.endsAt !== null && Date.parse(item.endsAt) < Date.now()))
+      const cancelled = activity.activities.filter(item => (item.kind === 'booking' || item.kind === 'reservation') && item.status === 'cancelled')
+      await expect(page.getByTestId('account-activity-cancelled')).toHaveCount(cancelled.length ? 1 : 0)
+      await expect(page.locator('[data-testid^="account-activity-"]:not([data-testid="account-activity-cancelled"])')).toHaveCount(past.length)
+      for (const item of past) {
+        await expect(page.getByTestId(`account-activity-${item.kind}-${item.id}`)).toContainText(item.title)
       }
-    } else {
-      await expect(page.getByText('No updates yet.', { exact: true })).toBeVisible()
+      // The copied actor's own history may be empty; never create a purchase to
+      // make the dashboard assert its fabricated premise.
+      if (past.length) {
+        const item = past[0]!
+        // A visit and a purchase open the same record screen, on the account's own read.
+        const read = await page.request.get(`/api/account/bookings/${item.kind}/${item.id}`)
+        expect(read.status(), await read.text()).toBe(200)
+        const detail = await read.json()
+        expect(isBookingDetailsResponse(detail), 'the account detail API returns the canonical record').toBe(true)
+        if (!isBookingDetailsResponse(detail)) throw new Error('Invalid account booking details response')
+        const paymentCount = (detail.booking.payments ?? []).length
+        await page.getByTestId(`account-activity-${item.kind}-${item.id}`).click()
+        await expect(page).toHaveURL(`/dashboard/account/activity/${item.kind}/${item.id}`)
+        await expect(page.getByRole('heading', { name: item.title, exact: true })).toBeVisible()
+        await expect(page.getByRole('heading', { name: 'Payment info', exact: true })).toHaveCount(paymentCount)
+        // The record opens beside Past activity; its own Back returns to that list.
+        await page.locator('#dashboard-panel-account-booking-details [data-testid="dashboard-navbar-back"]').click()
+        await expect(page).toHaveURL('/dashboard/account/activity')
+      } else if (!cancelled.length) {
+        await expect(page.getByText('No past activity yet', { exact: true })).toBeVisible()
+      }
+      await mobileNav.getByRole('link', { name: 'Today', exact: true }).click()
+      await expect(page).toHaveURL('/dashboard/account')
+      await expect(page.getByRole('heading', { name: 'Today', exact: true })).toBeVisible()
+      await mobileNav.getByRole('link', { name: 'Calendar', exact: true }).click()
+      await expect(page).toHaveURL('/dashboard/account/calendar')
+      await expect(page.getByRole('heading', { name: 'Calendar', exact: true })).toBeVisible()
+      await mobileNav.getByRole('link', { name: 'Messages', exact: true }).click()
+      await expect(page).toHaveURL('/dashboard/account/messages')
+      const personalUpdates = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/notifications'
+        && new URL(response.url()).searchParams.get('scope') === 'personal')
+      await page.getByRole('button', { name: 'All, filter by message type' }).click()
+      await page.getByRole('menuitemcheckbox', { name: 'Updates', exact: true }).click()
+      const updatesResponse = await personalUpdates
+      expect(updatesResponse.status(), await updatesResponse.text()).toBe(200)
+      const updates = await updatesResponse.json() as { notifications: Array<{ id: string; scope: string; title: string | null; target_user_id: string | null }> }
+      const viewer = await (await page.request.get('/api/auth/get-session')).json() as { user: { id: string } }
+      // Personal Updates are platform notifications addressed to this account, or to everyone; never a business's.
+      expect(updates.notifications.every(item => item.scope === 'global' && (item.target_user_id === viewer.user.id || item.target_user_id === null)), 'personal Updates carry only this account\'s notifications').toBe(true)
+      await expect(page).toHaveURL('/dashboard/account/messages?view=updates')
+      if (updates.notifications.length) {
+        for (const item of updates.notifications) {
+          const row = page.getByTestId(`notification-${item.id}`)
+          await expect(row).toBeVisible()
+          if (item.title) await expect(row).toContainText(item.title)
+        }
+      } else {
+        await expect(page.getByText('No updates yet.', { exact: true })).toBeVisible()
+      }
+      await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages', 'Menu'])
+      await page.setViewportSize(WIDE)
+      await expect(page.getByTestId('dashboard-top-nav').getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages'])
+    } finally {
+      const restored = await page.request.post('/api/auth/organization/set-active', { headers: authRequestHeaders(baseURL!), data: { organizationId: 'org-demo' } })
+      expect(restored.status(), await restored.text()).toBe(200)
+      const restoredSession = await page.request.get('/api/auth/get-session')
+      expect(restoredSession.status(), await restoredSession.text()).toBe(200)
+      expect((await restoredSession.json()).session.activeOrganizationId).toBe('org-demo')
     }
-    await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages', 'Menu'])
-    await page.setViewportSize(WIDE)
-    await expect(page.getByTestId('dashboard-top-nav').getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages'])
   })
 
   test('booking Change opens its first field on desktop and not below lg', async ({ page }) => {
@@ -769,25 +1143,286 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(filter).toContainText('All assigned people')
   })
 
-  test('below lg every level is one screen and nothing opens itself', async ({ page }) => {
+  test('below lg indexes show one screen and choose no child', async ({ page }) => {
     await page.setViewportSize(NARROW)
     for (const [path, pane] of [['website', 'organization-website'], ['website/pages', 'organization-pages'], ['website/brand', 'organization-brand'], ['products', 'catalog'], ['integrations', 'organization-integrations']] as const) {
       await open(page, `${ORG}/${path}`)
       await expectPanes(page, [pane])
       await expect(page).toHaveURL(`${ORG}/${path}`)
     }
-
-    // A leaf is a sheet whose Close goes to the level that contains it.
-    await open(page, `${ORG}/website/pages/links/title`)
-    await expectPanes(page, ['organization-links-title'])
-    await expect(page.getByTestId('dashboard-navbar-close')).toHaveAttribute('href', `${ORG}/website/pages/links`)
-    await page.getByTestId('dashboard-navbar-close').click()
-    await expect(page).toHaveURL(`${ORG}/website/pages/links`)
-    await expectPanes(page, ['organization-links'])
   })
 
-  // A service is a Product and the page that shows it: Catalog's labelled Add
-  // starts at Name, and Create writes both, bound, through one request.
+  test('mobile leaf drawers retain their parent and discard drafts on every dismissal', async ({ page }, testInfo) => {
+    test.setTimeout(90_000)
+    const links = `${ORG}/website/pages/links`
+    const endpoint = '/api/editor/organizations/org-demo/links-page'
+    const beforeResponse = await page.request.get(endpoint)
+    expect(beforeResponse.status(), await beforeResponse.text()).toBe(200)
+    const before = await beforeResponse.json() as { page: { title: string }; items: unknown[] }
+    expect(before.page.title).not.toBe('')
+    const writes: string[] = []
+    page.on('request', request => {
+      if (new URL(request.url()).pathname === endpoint && request.method() !== 'GET') writes.push(request.method())
+    })
+    const parent = page.locator('#dashboard-panel-organization-links')
+    const leaf = page.locator('#dashboard-panel-organization-links-title')
+    const dialog = page.getByRole('dialog', { name: 'Title', exact: true })
+    const input = leaf.getByRole('textbox', { name: 'Links page title', exact: true })
+
+    for (const viewport of [PHONE, NARROW]) {
+      await page.setViewportSize(viewport)
+      await open(page, links)
+      for (const dismissal of ['Close', 'Cancel', 'Escape', 'backdrop', 'swipe'] as const) {
+        const parentBefore = await parent.boundingBox()
+        expect(parentBefore).not.toBeNull()
+        await parent.getByRole('link', { name: /^Title/ }).click()
+        await expect(page).toHaveURL(`${links}/title`)
+        await expect(dialog).toBeVisible()
+        await expect(parent).toBeVisible()
+        expect((await parent.boundingBox())!.height).toBeCloseTo(parentBefore!.height, 1)
+        await expect(leaf).toHaveCount(1)
+        await expect(input).toHaveValue(before.page.title)
+        await expect.poll(async () => {
+          const parentBox = await parent.boundingBox()
+          const drawerBox = await dialog.boundingBox()
+          return parentBox !== null && drawerBox !== null
+            && drawerBox.y > parentBox.y
+            && drawerBox.y + drawerBox.height <= viewport.height + 1
+        }, { message: 'A strip of the real parent remains visible above the bottom drawer' }).toBe(true)
+        const save = leaf.getByRole('button', { name: 'Save', exact: true })
+        await expect(save).toBeInViewport()
+        await input.fill(`Discarded ${dismissal} draft`)
+        if (dismissal === 'Close') {
+          await input.focus()
+          for (let at = 0; at < 5; at += 1) {
+            await page.keyboard.press('Tab')
+            await expect.poll(() => dialog.evaluate(element => element.contains(document.activeElement)), {
+              message: 'Keyboard focus stays in the modal drawer',
+            }).toBe(true)
+          }
+        }
+        if (dismissal === 'Close') {
+          await page.screenshot({ path: testInfo.outputPath(`leaf-drawer-${viewport.width}.png`), fullPage: true })
+          await leaf.getByTestId('dashboard-navbar-close').click()
+        } else if (dismissal === 'Cancel') {
+          await leaf.getByRole('button', { name: 'Cancel', exact: true }).click()
+        } else if (dismissal === 'Escape') {
+          await page.keyboard.press('Escape')
+        } else if (dismissal === 'backdrop') {
+          const overlay = page.locator('[data-slot="overlay"][data-state="open"]')
+          await expect(overlay).toHaveCount(1)
+          const parentBox = (await parent.boundingBox())!
+          await overlay.click({ position: { x: 8, y: parentBox.y + 4 } })
+        } else {
+          const handleLocator = dialog.locator('[data-slot="handle"]')
+          await handleLocator.hover()
+          const handle = await handleLocator.boundingBox()
+          expect(handle, 'The native drawer has a drag handle').not.toBeNull()
+          const receivesPointer = await handleLocator.evaluate(element => {
+            const rect = element.getBoundingClientRect()
+            return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
+          })
+          expect(receivesPointer, 'The drag handle receives pointer input').toBe(true)
+          const beforeDrag = await dialog.boundingBox()
+          await page.mouse.move(handle!.x + handle!.width / 2, handle!.y + handle!.height / 2)
+          await page.mouse.down()
+          try {
+            await page.mouse.move(handle!.x + handle!.width / 2, Math.min(viewport.height - 4, handle!.y + handle!.height / 2 + 32), { steps: 3 })
+            await expect.poll(async () => (await dialog.boundingBox())?.y, { message: 'The drawer follows the drag' }).toBeGreaterThan(beforeDrag!.y + 1)
+            await page.mouse.move(viewport.width / 2, viewport.height - 4, { steps: 8 })
+          } finally {
+            await page.mouse.up()
+          }
+        }
+        await expect(page).toHaveURL(links)
+        await expect(leaf).toHaveCount(0)
+        await expect(page.getByRole('dialog')).toHaveCount(0)
+        await expectPanes(page, ['organization-links'])
+        await expect(parent.getByRole('link', { name: /^Title/ })).toContainText(before.page.title)
+        if (viewport.width < 768) await expect(page.getByTestId('dashboard-mobile-nav')).toBeVisible()
+      }
+    }
+    expect(writes).toEqual([])
+    const afterResponse = await page.request.get(endpoint)
+    expect(afterResponse.status(), await afterResponse.text()).toBe(200)
+    const after = await afterResponse.json() as typeof before
+    expect(after.page.title).toBe(before.page.title)
+    expect(after.items).toEqual(before.items)
+  })
+
+  test('a photo library dialog stays above its leaf drawer and Escape dismisses only the top level', async ({ page }, testInfo) => {
+    const endpoint = '/api/editor/organizations/org-demo/products'
+    const productsRead = await page.request.get(endpoint)
+    expect(productsRead.status(), await productsRead.text()).toBe(200)
+    const product = (await productsRead.json() as { products: Product[] }).products.find(row => row.kind === 'dish' && row.image)
+    expect(product, 'The demo contains a dish with an existing photo').toBeDefined()
+    const parentPath = `${ORG}/products/${product!.id}`
+    const leafPath = `${parentPath}/photo`
+    const writes: string[] = []
+    page.on('request', request => {
+      if (new URL(request.url()).pathname.startsWith('/api/editor/organizations/org-demo/') && request.method() !== 'GET') writes.push(`${request.method()} ${new URL(request.url()).pathname}`)
+    })
+    await page.setViewportSize(PHONE)
+    await open(page, leafPath)
+    const outer = page.getByRole('dialog', { name: 'Photo', exact: true })
+    const leaf = page.locator('#dashboard-panel-product-photo')
+    await expect(outer).toBeVisible()
+    await expect(leaf.getByTestId('product-photo').locator('img')).toHaveAttribute('src', product!.image!.public_url)
+    const libraryRead = page.waitForResponse(response => {
+      const url = new URL(response.url())
+      return url.pathname === '/api/editor/organizations/org-demo/media' && url.searchParams.get('limit') === '100'
+    })
+    await leaf.getByTestId('product-photo').click()
+    const library = await libraryRead
+    expect(library.status(), await library.text()).toBe(200)
+    expect((await library.json() as { media: unknown[] }).media.length).toBeGreaterThan(0)
+    const picker = page.getByRole('dialog', { name: 'Dish photo', exact: true })
+    await expect(picker).toBeVisible()
+    await expect(page.getByRole('dialog', { includeHidden: true })).toHaveCount(2)
+    await expect(page.getByRole('dialog')).toHaveCount(1)
+    await expect(picker.getByRole('button', { name: 'Done', exact: true })).toBeDisabled()
+    const cancel = picker.getByRole('button', { name: 'Cancel', exact: true })
+    await expect.poll(() => cancel.evaluate(element => {
+      const rect = element.getBoundingClientRect()
+      return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
+    }), { message: 'The inner media dialog is above the drawer and receives pointer input' }).toBe(true)
+    await cancel.focus()
+    for (let at = 0; at < 5; at += 1) {
+      await page.keyboard.press('Tab')
+      await expect.poll(() => picker.evaluate(element => element.contains(document.activeElement))).toBe(true)
+    }
+    await page.screenshot({ path: testInfo.outputPath('nested-photo-picker-mobile.png'), fullPage: true })
+    await page.keyboard.press('Escape')
+    await expect(picker).toHaveCount(0)
+    await expect(outer).toBeVisible()
+    await expect(page).toHaveURL(leafPath)
+    await page.keyboard.press('Escape')
+    await expect(page).toHaveURL(parentPath)
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    const parent = page.locator('#dashboard-panel-product')
+    await expect(parent.getByRole('heading', { level: 1, name: product!.name, exact: true })).toBeFocused()
+    expect(writes).toEqual([])
+    const afterRead = await page.request.get(`${endpoint}/${product!.id}`)
+    expect(afterRead.status(), await afterRead.text()).toBe(200)
+    expect((await afterRead.json() as { product: Product }).product.image?.asset_id).toBe(product!.image!.asset_id)
+  })
+
+  test('a timezone menu scrolls above its leaf and preserves its draft until the drawer is dismissed', async ({ page }, testInfo) => {
+    const locationsRead = await page.request.get('/api/dashboard/locations', { params: { org: 'ember-slice-demo', organization: 'true' } })
+    expect(locationsRead.status(), await locationsRead.text()).toBe(200)
+    const location = (await locationsRead.json() as { locations: DashboardLocation[] }).locations.find(row => row.id === 'loc-demo')
+    expect(location, 'The demo carries its existing location and timezone').toBeDefined()
+    const parentPath = `${ORG}/locations/${location!.slug}/hours`
+    const leafPath = `${parentPath}/timezone`
+    const endpoint = `/api/dashboard/locations/${location!.id}`
+    const writes: string[] = []
+    page.on('request', request => {
+      if (new URL(request.url()).pathname === endpoint && request.method() !== 'GET') writes.push(request.method())
+    })
+    await page.setViewportSize(PHONE)
+    await open(page, leafPath)
+    const outer = page.getByRole('dialog', { name: 'Timezone', exact: true })
+    const control = outer.getByRole('button', { name: 'Time zone', exact: true })
+    await expect(control).toContainText(timezoneLabel(location!.timezone))
+    await control.click()
+    const menu = page.getByRole('listbox')
+    await expect(menu).toBeVisible()
+    const viewport = menu.locator('[data-slot="viewport"]')
+    await expect.poll(() => viewport.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true)
+    const initialScroll = await viewport.evaluate(element => element.scrollTop)
+    const documentScroll = await page.evaluate(() => document.scrollingElement?.scrollTop)
+    await viewport.hover()
+    await page.mouse.wheel(0, initialScroll > 0 ? -240 : 240)
+    await expect.poll(() => viewport.evaluate(element => element.scrollTop)).not.toBe(initialScroll)
+    expect(await page.evaluate(() => document.scrollingElement?.scrollTop)).toBe(documentScroll)
+    const search = page.getByPlaceholder('Search by city, e.g. Bangkok')
+    await expect.poll(() => search.evaluate(element => {
+      const rect = element.getBoundingClientRect()
+      return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
+    }), { message: 'The nested timezone search receives pointer input above the drawer' }).toBe(true)
+    const target = location!.timezone === 'Asia/Bangkok' ? 'Europe/London' : 'Asia/Bangkok'
+    await search.fill(target === 'Asia/Bangkok' ? 'Bangkok' : 'London')
+    await page.getByRole('option', { name: timezoneLabel(target), exact: true }).click()
+    await expect(menu).toHaveCount(0)
+    await expect(control).toContainText(timezoneLabel(target))
+    await expect(outer.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
+    await control.click()
+    await expect(menu).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath('nested-timezone-picker-mobile.png'), fullPage: true })
+    await page.keyboard.press('Escape')
+    await expect(menu).toHaveCount(0)
+    await expect(outer).toBeVisible()
+    await expect(control).toContainText(timezoneLabel(target))
+    await expect(page).toHaveURL(leafPath)
+    await page.keyboard.press('Escape')
+    await expect(page).toHaveURL(parentPath)
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    expect(writes).toEqual([])
+    const persisted = await page.request.get(endpoint, { params: { org: 'ember-slice-demo' } })
+    expect(persisted.status(), await persisted.text()).toBe(200)
+    expect((await persisted.json() as { location: { timezone: string } }).location.timezone).toBe(location!.timezone)
+  })
+
+  test('a leaf URL reloads its drawer and resizing keeps one editor with its draft', async ({ page }) => {
+    const links = `${ORG}/website/pages/links`
+    const query = '?location_id=loc-demo'
+    const leafUrl = `${links}/title${query}`
+    const parent = page.locator('#dashboard-panel-organization-links')
+    const leaf = page.locator('#dashboard-panel-organization-links-title')
+    const dialog = page.getByRole('dialog', { name: 'Title', exact: true })
+    const input = page.getByRole('textbox', { name: 'Links page title', exact: true })
+    await page.setViewportSize(PHONE)
+    await open(page, leafUrl)
+    await expect(dialog).toBeVisible()
+    await expect(parent).toBeVisible()
+    await expect(input).toHaveCount(1)
+    const savedTitle = await input.inputValue()
+    await page.reload()
+    await waitForNuxtHydration(page)
+    await expect(page).toHaveURL(leafUrl)
+    await expect(dialog).toBeVisible()
+    await expect(parent).toBeVisible()
+    await expect(input).toHaveValue(savedTitle)
+    const draft = `${savedTitle} unsaved resize`
+    await input.fill(draft)
+
+    await page.setViewportSize(WIDE)
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expectPanes(page, ['organization-links', 'organization-links-title'])
+    await expect(input).toHaveCount(1)
+    await expect(input).toHaveValue(draft)
+    await expect(leaf).toHaveCount(1)
+    await expect(leaf.getByTestId('dashboard-navbar-close')).not.toBeVisible()
+    await expect(leaf.getByRole('button', { name: 'Cancel', exact: true })).not.toBeVisible()
+    await expect(leaf.getByRole('button', { name: 'Save', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Save', exact: true })).toHaveCount(1)
+    const parentBox = await parent.boundingBox()
+    const leafBox = await leaf.boundingBox()
+    expect(parentBox).not.toBeNull()
+    expect(leafBox).not.toBeNull()
+    expect(leafBox!.x).toBeGreaterThanOrEqual(parentBox!.x + parentBox!.width - 1)
+
+    for (const viewport of [NARROW, PHONE]) {
+      await page.setViewportSize(viewport)
+      await expect(dialog).toBeVisible()
+      await expect(parent).toBeVisible()
+      await expect(leaf).toHaveCount(1)
+      await expect(input).toHaveCount(1)
+      await expect(input).toHaveValue(draft)
+      await expect(leaf.getByRole('button', { name: 'Save', exact: true })).toBeInViewport()
+      await expect(page.getByRole('button', { name: 'Save', exact: true })).toHaveCount(1)
+      await expect(page).toHaveURL(leafUrl)
+    }
+    await expect(leaf.getByTestId('dashboard-navbar-close')).toHaveAttribute('href', `${links}${query}`)
+    await leaf.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(page).toHaveURL(`${links}${query}`)
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expectPanes(page, ['organization-links'])
+    await expect(parent.getByRole('link', { name: /^Title/ })).toContainText(savedTitle)
+  })
+
+  // A service is a Product and the page that shows it: Catalog's Add opens the
+  // shared create walk, and Create writes both, bound, through one request.
   test('Catalog adds a service with its page through the one Product editor', async ({ page, baseURL }) => {
     const services = '/dashboard/north-carolina-legal-services'
     const editor = '/api/editor/organizations/org-ncls-blawby'
@@ -796,11 +1431,12 @@ test.describe('dashboard pane hierarchy', () => {
     await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
     await open(page, `${services}/products`)
     await expectPanes(page, ['catalog'])
-    await page.getByTestId('catalog-entry-services').click()
-    await expect(page).toHaveURL(`${services}/products/services`)
-    await expectPanes(page, ['catalog', 'catalog-services'])
-    await page.locator('#dashboard-panel-catalog-services').getByTestId('catalog-add').click()
-    await expect(page).toHaveURL(`${services}/products/new/name?kind=service`)
+    await page.locator('#dashboard-panel-catalog').getByTestId('catalog-add').click()
+    await expect(page).toHaveURL(`${services}/products/new/kind`)
+    const kind = page.locator('#dashboard-panel-product-kind')
+    await kind.getByRole('radio', { name: 'Service or appointment', exact: true }).check()
+    await kind.getByRole('button', { name: 'Next: Name', exact: true }).click()
+    await expect(page).toHaveURL(`${services}/products/new/name`)
     const name = `E2E Service ${Date.now().toString(36)}`
     await page.getByRole('textbox', { name: 'Name' }).fill(name)
     const created = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/products` && response.request().method() === 'POST')
@@ -813,7 +1449,8 @@ test.describe('dashboard pane hierarchy', () => {
     const productId = (await response.json() as { product: { id: string } }).product.id
     let pageId: string | null = null
     try {
-      await expect(page).toHaveURL(new RegExp(`${services}/products/${productId}(/photo)?$`))
+      await expect(page).toHaveURL(`${services}/products/${productId}/price`)
+      await expectPanes(page, ['product', 'product-price'])
       // Read back through other paths than the one that wrote it.
       const product = (await (await page.request.get(`${editor}/products/${productId}`)).json() as { product: { kind: string; active: boolean; name: string; variants: unknown[]; publications: Array<{ published: boolean }>; booking: unknown; page: { id: string; path: string; title: string } | null } }).product
       expect(product).toMatchObject({ kind: 'service', active: false, name, publications: [{ published: false }], booking: null })
@@ -823,6 +1460,15 @@ test.describe('dashboard pane hierarchy', () => {
       pageId = product.page!.id
       const bound = (await (await page.request.get(`${editor}/pages/${pageId}`)).json() as { page: { product_id: string | null } }).page
       expect(bound.product_id).toBe(productId)
+      await page.locator('#dashboard-panel-product').getByTestId('dashboard-navbar-back').click()
+      await expect(page).toHaveURL(`${services}/products`)
+      await expectPanes(page, ['catalog'])
+      const catalogService = page.getByTestId('catalog-section-service').getByTestId(`selector-item-${productId}`)
+      await expect(catalogService).toHaveAttribute('href', `${services}/products/${productId}`)
+      await expect(catalogService).toContainText(name)
+      await expect(catalogService).toContainText('No photo')
+      await expect(catalogService).toContainText('No price set')
+      await expect(catalogService).toContainText('No locations set')
       // MCP reads the same pair, and the editor URL it hands an agent opens this record.
       const viaMcp = mcpData<{ product: { page: { id: string; path: string } | null; admin_edit_url: string | null } }>(await (await mcpRequest(page.request, baseURL!, {
         method: 'tools/call', toolName: 'get_product', args: { organization_id: 'org-ncls-blawby', product_id: productId },

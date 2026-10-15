@@ -11,7 +11,7 @@
       add-label="Write a post"
       :removing-id="removingId"
       :reorderable="orderedCollection !== null"
-      @add="openNew"
+      :add-to="blogCreatePath(orgSlug)"
       @remove="removePost"
       @move="moveArticle"
     >
@@ -46,47 +46,15 @@
     </div>
     <UAlert v-if="orderError" color="error" variant="soft" icon="i-lucide-circle-alert" :description="orderError" />
 
-    <!--
-      Creating asks for the headline and nothing else. A blog post's category,
-      excerpt, share card, URL and publishing time are all sections of the post
-      once it exists and has an id to hang a document and media on.
-    -->
-    <DashboardListItemDialog
-      v-model:open="newDialogOpen"
-      title="New post"
-      :removable="false"
-      :saving="creating"
-      :save-disabled="!newTitle.trim()"
-      save-label="Create"
-      @save="createPost"
-    >
-      <UFormField label="Headline" required>
-        <UInput
-          v-model="newTitle"
-          autofocus
-          placeholder="What is this post about?"
-          class="w-full"
-          @keydown.enter.prevent="newTitle.trim() && createPost()"
-        />
-      </UFormField>
-
-      <UAlert v-if="createFailure" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="createFailure" />
-
-      <p class="text-sm text-muted">
-        You'll land in the article editor, where the body is written directly on the page and
-        everything else is a section of the post's own settings.
-      </p>
-    </DashboardListItemDialog>
   </div>
 </template>
 
 <script setup lang="ts">
 import DashboardListEditor from '~/components/dashboard/DashboardListEditor.vue'
 import { ARTICLE_COLLECTIONS, ARTICLE_COLLECTION_SLUGS, isArticleCollection, type ArticleCollection } from '~/utils/article-collections'
-import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import { tenantBlogRepository } from '~/lib/components/workspace/blog/tenantBlogRepository'
 import type { BlogPost } from '~/lib/components/workspace/blog/types'
-import { initialBlogEditorBlocks } from '~/utils/blog-editor'
+import { blogCreatePath } from '~/server/utils/dashboard-links'
 import { getErrorMessage } from '~/utils/errors'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 
@@ -215,38 +183,6 @@ function formatDate(iso: string) {
   if (!iso) return ''
   return new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
 }
-
-// ── Creating ────────────────────────────────────────────
-const newDialogOpen = ref(false)
-const newTitle = ref('')
-const creating = ref(false)
-const createFailure = ref<string | null>(null)
-
-// One key per dialog: a retried create after a lost answer returns the same article.
-let createKey = ''
-function openNew() {
-  createKey = crypto.randomUUID()
-  newTitle.value = ''
-  createFailure.value = null
-  newDialogOpen.value = true
-}
-
-async function createPost() {
-  const title = newTitle.value.trim()
-  if (!title || creating.value) return
-  creating.value = true
-  createFailure.value = null
-  try {
-    const post = await repository.create({ title, content_blocks: initialBlogEditorBlocks(), idempotency_key: createKey })
-    newDialogOpen.value = false
-    await navigateTo(`${level.path.value}/${post.id}`)
-  } catch (cause) {
-    createFailure.value = getErrorMessage(cause, 'Failed to create the post.')
-  } finally {
-    creating.value = false
-  }
-}
-
 
 // ── Collection order ────────────────────────────────────
 // Moves are held on the list while it is in its edit state and written, whole,

@@ -123,7 +123,7 @@ export async function refreshMemberBusy(db: DbClient, env: CloudflareEnv, member
  const row=await queryFirst<MemberScheduling>(db,'SELECT * FROM member_scheduling WHERE member_id=?',[memberId])
  if(!row?.calendar_account_id || !JSON.parse(row.calendar_ids_json).length)return
  if(!force && row.busy_checked_at && Date.now()-Date.parse(row.busy_checked_at)<BUSY_FRESHNESS_MS/2)return row.busy_error?{error:row.busy_error}:undefined
- const now=new Date().toISOString(), until=new Date(Date.now()+94*86400000).toISOString()
+ const now=new Date().toISOString(), until=new Date(Date.parse(now)+94*86400000).toISOString()
  try {
   const member=await queryFirst<{userId:string}>(db,'SELECT userId FROM member WHERE id=? AND organizationId=?',[memberId,row.organization_id])
   if(!member) throw new Error('Member is no longer connected')

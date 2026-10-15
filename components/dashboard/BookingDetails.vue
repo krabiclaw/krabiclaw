@@ -179,7 +179,7 @@
                 block
                 class="h-12 justify-start rounded-xl text-base font-medium"
                 :loading="pendingAction === action.value"
-                @click="action.value === 'cancel' ? openCancel() : runAction(action.value)"
+                @click="action.value === 'cancel' && !booking.guestCanRetryCancellation ? openCancel() : runAction(action.value)"
               />
             </div>
           </div>
@@ -222,7 +222,10 @@
         <UTextarea v-model="cancelNote" :rows="4" maxlength="500" class="w-full" placeholder="Let them know why, and what happens next." />
       </UFormField>
       <p v-if="personalScope" class="text-sm text-muted">
-        {{ booking.organizationName }} is told the {{ noun }} was cancelled. Cancelling doesn’t refund a payment by itself. This cannot be undone.
+        {{ booking.organizationName }} is told the {{ noun }} was cancelled.
+        <template v-if="booking.type === 'reservation' && refundable">Your deposit is automatically refunded unless the cancellation deadline has passed.</template>
+        <template v-else-if="refundable">Cancelling doesn’t automatically refund your payment. Contact {{ booking.organizationName }} about a refund.</template>
+        This cannot be undone.
       </p>
       <p v-else class="text-sm text-muted">
         {{ firstName(booking.guestName ?? '') }} is told the {{ noun }} was cancelled{{ cancelNote.trim() ? ', with your note' : '' }}.
@@ -487,6 +490,9 @@ function beginChange() {
 // and changing it is the link above.
 const availableActions = computed<Array<{ value: string; label: string; icon: string; color: ActionColor }>>(() => {
   if (!booking.value || !presentation.value || !booking.value.threadId) return []
+  if (props.personalScope && booking.value.guestCanRetryCancellation) return [
+    { value: 'cancel', label: 'Retry deposit refund', icon: 'i-lucide-refresh-cw', color: 'neutral' as const },
+  ]
   // The account's one decision is its own cancellation, on the public cancel rule the server already answered.
   if (props.personalScope) return booking.value.guestCanCancel
     ? [{ value: 'cancel', label: `Cancel ${presentation.value.noun}`, icon: 'i-lucide-calendar-x', color: 'error' as const }]

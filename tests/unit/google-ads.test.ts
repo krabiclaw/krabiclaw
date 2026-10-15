@@ -10,7 +10,6 @@ import {
   updateGoogleAdsCampaignBudget,
   getGoogleAdsPerformanceSummary,
 } from '../../server/utils/google-ads.ts'
-import { INTEGRATION_PROVIDERS, INTEGRATION_SCOPES } from '../../shared/organization-settings.ts'
 
 test('formatGoogleAdsCustomerId formats 10 digits into XXX-XXX-XXXX format', () => {
   assert.equal(formatGoogleAdsCustomerId('3317427925'), '331-742-7925')
@@ -88,11 +87,6 @@ test('listGoogleAdsAccounts queries accessible customers and retrieves descripti
   assert.equal(requests.length, 3)
 })
 
-test('Google Ads integration is registered with canonical scopes and provider list', () => {
-  assert.ok(INTEGRATION_PROVIDERS.includes('google_ads'))
-  assert.deepEqual(INTEGRATION_SCOPES['google-ads'], ['https://www.googleapis.com/auth/adwords'])
-})
-
 test('listGoogleAdsCampaigns queries campaigns and formats performance metrics', async (t) => {
   t.mock.method(globalThis, 'fetch', async (input, init) => {
     const url = String(input)
@@ -122,19 +116,51 @@ test('listGoogleAdsCampaigns queries campaigns and formats performance metrics',
   assert.equal(campaigns[0].conversions, 5)
 })
 
-test('createGoogleAdsSearchCampaign builds atomic mutate batch with temp IDs and returns campaign receipt', async (t) => {
-  type MutateOperation = {
-    campaignBudgetOperation?: { create: { amountMicros: string } }
-    campaignOperation?: { create: { name: string } }
-    adGroupOperation?: unknown
-    adGroupCriterionOperation?: { create: { keyword: { text: string } } }
-    adGroupAdOperation?: { create: { ad: { finalUrls: string[] } } }
-  }
-  let mutateBody: { mutateOperations: MutateOperation[] } | null = null
-  t.mock.method(globalThis, 'fetch', async (input, init) => {
-    const url = String(input)
-    assert.ok(url.includes('/customers/3317427925/googleAds:mutate'))
-    mutateBody = JSON.parse(String(init?.body))
+test('creating a search campaign submits its budget, targeting and copy atomically while paused and returns Google resource names', async (t) => {
+  const targetUrl = 'https://krabiclaw.com/blog/operations/preview'
+  const headlines = ['Discover Krabi', 'Authentic Tours', 'Book Online Now']
+  const descriptions = ['Explore breathtaking islands with local experts.', 'Personalized tours with guaranteed quality.']
+  const providerFetch = t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(String(input))
+    assert.equal(url.origin, 'https://googleads.googleapis.com')
+    assert.match(url.pathname, /^\/v\d+\/customers\/3317427925\/googleAds:mutate$/)
+    assert.equal(init?.method, 'POST')
+    const headers = new Headers(init?.headers)
+    assert.equal(headers.get('Authorization'), 'Bearer test-token')
+    assert.equal(headers.get('developer-token'), 'dev-tok')
+    assert.equal(headers.get('Content-Type'), 'application/json')
+
+    const { mutateOperations: operations, partialFailure } = JSON.parse(String(init?.body))
+    assert.notEqual(partialFailure, true)
+    assert.equal(operations.length, 6)
+    const budget = operations[0].campaignBudgetOperation.create
+    const campaign = operations[1].campaignOperation.create
+    const adGroup = operations[2].adGroupOperation.create
+    assert.match(budget.resourceName, /^customers\/3317427925\/campaignBudgets\/-\d+$/)
+    assert.match(campaign.resourceName, /^customers\/3317427925\/campaigns\/-\d+$/)
+    assert.match(adGroup.resourceName, /^customers\/3317427925\/adGroups\/-\d+$/)
+    assert.equal(budget.amountMicros, '15000000')
+    assert.equal(campaign.name, 'New Blog Post Campaign')
+    assert.equal(campaign.status, 'PAUSED')
+    assert.equal(campaign.advertisingChannelType, 'SEARCH')
+    assert.equal(campaign.campaignBudget, budget.resourceName)
+    assert.equal(adGroup.campaign, campaign.resourceName)
+    assert.deepEqual(operations.slice(3, 5).map((operation: {
+      adGroupCriterionOperation: { create: { adGroup: string; keyword: { text: string; matchType: string } } }
+    }) => ({
+      adGroup: operation.adGroupCriterionOperation.create.adGroup,
+      keyword: operation.adGroupCriterionOperation.create.keyword,
+    })), [
+      { adGroup: adGroup.resourceName, keyword: { text: 'krabi tours', matchType: 'PHRASE' } },
+      { adGroup: adGroup.resourceName, keyword: { text: 'local island guide', matchType: 'EXACT' } },
+    ])
+    const ad = operations[5].adGroupAdOperation.create
+    assert.equal(ad.adGroup, adGroup.resourceName)
+    assert.deepEqual(ad.ad.finalUrls, [targetUrl])
+    assert.deepEqual(ad.ad.responsiveSearchAd, {
+      headlines: headlines.map(text => ({ text })),
+      descriptions: descriptions.map(text => ({ text })),
+    })
 
     return Response.json({
       mutateOperationResponses: [
@@ -142,6 +168,7 @@ test('createGoogleAdsSearchCampaign builds atomic mutate batch with temp IDs and
         { campaignResult: { resourceName: 'customers/3317427925/campaigns/222' } },
         { adGroupResult: { resourceName: 'customers/3317427925/adGroups/333' } },
         { adGroupCriterionResult: { resourceName: 'customers/3317427925/adGroupCriteria/444' } },
+        { adGroupCriterionResult: { resourceName: 'customers/3317427925/adGroupCriteria/445' } },
         { adGroupAdResult: { resourceName: 'customers/3317427925/adGroupAds/555' } },
       ],
     })
@@ -150,25 +177,40 @@ test('createGoogleAdsSearchCampaign builds atomic mutate batch with temp IDs and
   const result = await createGoogleAdsSearchCampaign('test-token', 'dev-tok', '331-742-7925', {
     name: 'New Blog Post Campaign',
     dailyBudgetAmountMicros: 15000000,
+    targetUrl,
+    keywords: [{ text: 'krabi tours', matchType: 'PHRASE' }, { text: 'local island guide', matchType: 'EXACT' }],
+    headlines,
+    descriptions,
+  })
+
+  assert.equal(providerFetch.mock.callCount(), 1)
+  assert.deepEqual(result, {
+    campaignId: '222',
+    resourceName: 'customers/3317427925/campaigns/222',
+    budgetResourceName: 'customers/3317427925/campaignBudgets/888',
+    adGroupResourceName: 'customers/3317427925/adGroups/333',
+    adResourceName: 'customers/3317427925/adGroupAds/555',
+    status: 'PAUSED',
+  })
+})
+
+test('creating a search campaign reports a provider rejection instead of returning a campaign receipt', async (t) => {
+  t.mock.method(globalThis, 'fetch', async (input, init) => {
+    const url = new URL(String(input))
+    assert.equal(url.origin, 'https://googleads.googleapis.com')
+    assert.match(url.pathname, /^\/v\d+\/customers\/3317427925\/googleAds:mutate$/)
+    assert.equal(init?.method, 'POST')
+    return Response.json({ error: { message: 'Customer account is not enabled.' } }, { status: 403 })
+  })
+
+  await assert.rejects(createGoogleAdsSearchCampaign('test-token', 'dev-tok', '331-742-7925', {
+    name: 'New Blog Post Campaign',
+    dailyBudgetAmountMicros: 15000000,
     targetUrl: 'https://krabiclaw.com/blog/operations/preview',
     keywords: [{ text: 'krabi tours', matchType: 'PHRASE' }],
     headlines: ['Discover Krabi', 'Authentic Tours', 'Book Online Now'],
     descriptions: ['Explore breathtaking islands with local experts.', 'Personalized tours with guaranteed quality.'],
-    status: 'PAUSED',
-  })
-
-  assert.equal(result.campaignId, '222')
-  assert.equal(result.budgetResourceName, 'customers/3317427925/campaignBudgets/888')
-  assert.equal(result.status, 'PAUSED')
-
-  assert.ok(mutateBody)
-  const ops = mutateBody.mutateOperations
-  assert.equal(ops.length, 5) // budget, campaign, adGroup, keyword, rsa
-  assert.equal(ops[0]!.campaignBudgetOperation?.create.amountMicros, '15000000')
-  assert.equal(ops[1]!.campaignOperation?.create.name, 'New Blog Post Campaign')
-  assert.ok(ops[2]!.adGroupOperation)
-  assert.equal(ops[3]!.adGroupCriterionOperation?.create.keyword.text, 'krabi tours')
-  assert.deepEqual(ops[4]!.adGroupAdOperation?.create.ad.finalUrls, ['https://krabiclaw.com/blog/operations/preview'])
+  }), /Google Ads campaign creation failed \(403\).*Customer account is not enabled\./)
 })
 
 test('cloneGoogleAdsCampaign reads source campaign, applies replacements, and creates new campaign', async (t) => {

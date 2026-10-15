@@ -1,4 +1,4 @@
-import type { ComputedRef, InjectionKey } from 'vue'
+import type { ComputedRef, InjectionKey, Ref } from 'vue'
 
 /**
  * The widths a level's content may take instead of the frame. A page names
@@ -21,3 +21,6 @@ export type DashboardColumn = keyof typeof dashboardColumnWidths
  * controls here; one mounted anywhere else keeps them inline.
  */
 export const dashboardPanelActionsKey: InjectionKey<ComputedRef<string>> = Symbol('dashboard-panel-actions')
+
+/** The nearest index stays behind a leaf drawer and receives focus on return. */
+export const dashboardLeafParentKey: InjectionKey<{ leaves: Ref<number>; focus: () => void }> = Symbol('dashboard-leaf-parent')

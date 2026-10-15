@@ -1,5 +1,13 @@
 # Buyer management implementation and verification — 2026-10-02
 
+**Historical verification record.** The no-automatic-refund behavior recorded
+below describes the October 2 implementation and its local proof. It is
+superseded by the owner's October 16 decision: guest cancellation of a paid table
+reservation automatically refunds the remaining deposit unless its saved
+cancellation deadline has passed; a saved null cutoff means no deadline. See the
+current contract in [payments.md](./payments.md). The observations below do not
+verify that later behavior.
+
 Implementation continues `feat/1169-payments` / PR #1213 from d5b90a3347ce416a5b0c937bfcc90f19fb90b761. Parent authorized authenticated cancellation and merchant change-request contact handoff. Final commit is provided in the task handoff.
 
 ## Canonical implementation

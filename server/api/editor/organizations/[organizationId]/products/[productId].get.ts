@@ -1,6 +1,5 @@
 import { jsonResponse, rethrowHttpError } from '~/server/utils/api-response'
-import { requireProductAccess } from '~/server/utils/location-access'
-import { getProduct } from '~/server/utils/product-management'
+import { loadDashboardProduct } from '~/server/utils/dashboard-editor-resources'
 import { defineHandler } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
 export default defineHandler(async (event) => {
@@ -8,8 +7,7 @@ export default defineHandler(async (event) => {
   const productId = getRouterParam(event, 'productId')
   if (!organizationId || !productId) return jsonResponse({ error: 'Organization and Product IDs are required' }, { status: 400 })
   try {
-    const { db, organization } = await requireProductAccess(event, organizationId, productId)
-    return jsonResponse({ success: true, product: await getProduct(db, organization.id, productId) })
+    return jsonResponse(await loadDashboardProduct(event, organizationId, null, productId))
   } catch (error) {
     rethrowHttpError(error)
     return jsonResponse({ error: 'Failed to load Product' }, { status: 500 })

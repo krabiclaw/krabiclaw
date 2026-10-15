@@ -154,8 +154,12 @@ The replacement is prepared while the old Worker stays live. Use the existing
 delta, specifying the old database with `--source`. The script refuses
 unexpected source tables or columns, validates copied rows, checks foreign keys
 and target schema, and previews rows changed or deleted since the initial
-export. The delta inserts newly created rows only. Inspect changed and deleted
-keys before retiring the old database; carry important edits explicitly,
+export. The delta inserts newly created rows only. Remote `--delta-from` sends
+the whole payload to D1's normal query API as one atomic batch, retaining
+foreign-key deferral and keeping SQL out of process arguments. Bulk imports
+make D1 unavailable while they run. During replacement, use bulk import only
+for the initial load before the new database is bound. Inspect changed and
+deleted keys before retiring the old database; carry important edits explicitly,
 without overwriting new-database writes. There is no write freeze or
 maintenance response in the application.
 
@@ -389,6 +393,57 @@ node --experimental-strip-types scripts/pull-production-snapshot.ts --production
 node --experimental-strip-types scripts/pull-production-snapshot.ts --staging --source krabiclaw-staging-v15 --out staging-v16-final.sqlite --delta-from staging-v16-initial.sqlite
 node --experimental-strip-types scripts/pull-production-snapshot.ts --production --source krabiclaw-production-v15 --out production-v16-final.sqlite --delta-from production-v16-initial.sqlite
 ```
+
+The v17-to-v18 epoch lets a guest conversation be held by phone alone (#1381
+step 4). It changes one constraint, which is why it needs a replacement
+database:
+
+- For stay conversations, `requests_guest_payload_check` requires the guest's
+  name and an email or phone, where v17 required an email. Other conversation
+  kinds still require email. Airbnb guests and host-entered stays often have
+  no email. The constraint is on `requests`, which `activity_entries`,
+  `bookings`, `reservations`, `stays` and the review and payment-hold tables
+  reference, so in place it is a table rebuild that would cascade-delete every
+  thread's timeline.
+- Nothing else changes. The v18 baseline also absorbs v17's forward chain
+  (Channex connections, channel mappings, the sync log, night pushes and
+  `stays.request_id`). Its only other difference from the applied v17 chain is
+  where `stays.request_id` sits among the columns, which the transfer copies by
+  name.
+- Existing rows transfer unchanged. A conversation with neither an email nor a
+  phone is still refused.
+
+Channel revisions and cancellations still apply when optional guest details
+are cleared. The conversation retains its recorded participant as history;
+email replies use the stay's current email and refuse when it is absent. A host
+edit cannot remove the last contact from an existing stay conversation.
+
+The complete applied v17 chain (`0000_baseline` through `0005_stay_threads`)
+and its Drizzle metadata remain unchanged in `migrations-history/v17/`. An older
+export passes through v17's forward migrations before the copy, after the stage
+gains the v17 baseline's tables it never had.
+
+Both v18 replacement databases were created with `--location wnam` on
+2026-10-16 (Asia/Bangkok), and Cloudflare reported WNAM before configuration
+or data loading:
+
+- `krabiclaw-staging-v18`: `872459c4-70e4-4d2a-907c-d5a2951efd9b`
+- `krabiclaw-production-v18`: `8d953c89-a6cd-4ade-b7c4-1eb6d372adbd`
+
+Build each with native `wrangler d1 migrations apply`, then load it from that
+environment's own v17 database using
+`scripts/pull-production-snapshot.ts --source krabiclaw-<environment>-v17`.
+Preparation and loading must finish before the deployment-triggering binding
+change merges: the old database has already recorded `0000_baseline.sql`, so
+D1 will skip the replacement baseline and the live schema-drift gate will
+refuse it. Phone-only conversations cannot run against v17's email CHECK.
+All four `DB` bindings, including `env.dev` and `env.e2e`, move to v18.
+
+Deploy staging first and qualify its customer journeys before promoting to
+production. Immediately after each binding moves, take the canonical final
+delta, inspect changed and deleted keys, and reconcile important edits without
+overwriting writes made to v18. Keep v17 intact until that review and the schema,
+foreign-key and customer-journey checks pass.
 
 Before dropping or retiring a legacy table or writer:
 

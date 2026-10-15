@@ -17,22 +17,22 @@
             :items="ranges"
             :content="false"
             size="xl"
-            aria-label="Booking range"
+            aria-label="Today and Upcoming"
           />
   
           <!-- An account has one agenda and nothing to narrow it by. -->
-          <AgendaFilters v-if="!personalScope" :locations="todayData?.locations ?? []" :kinds="todayData?.availableKinds ?? []" :organization-id="organizationId" />
+          <AgendaFilters v-if="!personalScope" :locations="todayData?.locations ?? []" :kinds="todayData?.availableKinds ?? []" :organization-id="schedulingOrganizationId" />
         </div>
     </template>
 
-    <div class="pb-24">
+    <div>
       <UAlert
         v-if="realtime.status.value === 'failed'"
         class="mb-6"
         color="warning"
         variant="soft"
         icon="i-lucide-wifi-off"
-        title="Today's schedule may be out of date"
+        title="Today may be out of date"
         description="The live dashboard connection is unavailable."
       >
         <template #actions>
@@ -46,7 +46,11 @@
         variant="soft"
         :title="`${activeLabel} could not be loaded`"
         :description="getErrorMessage(activeError, `${activeLabel} request failed`)"
-      />
+      >
+        <template #actions>
+          <UButton color="error" variant="soft" size="xs" @click="refreshAgenda">Retry</UButton>
+        </template>
+      </UAlert>
 
       <h1 class="text-center text-2xl font-semibold text-highlighted">
         {{ heading }}
@@ -57,12 +61,10 @@
           v-for="item in visibleItems"
           :key="item.id"
           :item="item"
-          :reference-day="referenceDay(item)"
-          :personal="personalScope"
         />
       </div>
 
-      <div v-else-if="!activeLoading && !activeError" class="py-24 text-center">
+      <div v-else-if="!activeLoading && !activeError && !hasMore" class="py-24 text-center">
         <img
           src="https://imagedelivery.net/Frxyb2_d_vGyiaXhS5xqCg/0b7e08d0-6b7d-471b-2957-9845392cc200/w=224"
           alt=""
@@ -83,15 +85,9 @@
         aria-live="polite"
       >
         <UIcon v-if="activeLoading" name="i-lucide-loader-circle" class="size-6 animate-spin text-muted" />
-        <span v-else class="sr-only">Scroll to load more</span>
+        <UButton v-else color="neutral" variant="soft" label="Load more" @click="loadMore" />
       </div>
 
-      <!--
-        Triage is a band, not a badge on every row. Marking each card with its
-        status makes the operator read all of them to find the one waiting on
-        a reply; naming the count once, pinned, does not. It stays out of the
-        list so the cards keep the single shape they were redesigned for.
-      -->
     </div>
   </DashboardIndexPanel>
 </template>
@@ -100,266 +96,205 @@
 import { localDateAt } from '~/utils/timezone'
 import AgendaFilters from './AgendaFilters.vue'
 import TodayAgendaCard from './TodayAgendaCard.vue'
-import { bookingCountLabel, resolveAggregateBookingPresentation, type BookingKind } from '~/utils/booking-presentation'
+import { bookingCountLabel, resolveAggregateBookingPresentation } from '~/utils/booking-presentation'
 import { getErrorMessage } from '~/utils/errors'
-import type { AgendaItem, AgendaKind, AgendaLocation, AgendaPayload, TodayAgendaPayload } from '~/server/utils/dashboard-agenda'
+import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayFeedPayload } from '~/shared/dashboard-today'
+import type { AgendaItem, AgendaPayload } from '~/server/utils/dashboard-agenda'
 
 useSeoMeta({ title: 'Today | Krabiclaw', robots: 'noindex, nofollow' })
 
-// One screen for both readers: the business sees who is arriving, the account
-// sees where it is going. Personal scope reads the account agenda and nothing
-// else changes.
 const props = defineProps<{ personalScope?: boolean }>()
-
 type TodayRange = 'today' | 'upcoming'
-
 const PAGE_SIZE = 12
 const UPCOMING_WINDOW_DAYS = 30
 const UPCOMING_HORIZON_DAYS = 365
-const BOOKING_KINDS: AgendaKind[] = ['reservation', 'booking']
-// Today lists who is coming: bookings and reservations, and guests arriving at or leaving a place to stay.
-const TODAY_KINDS: AgendaKind[] = [...BOOKING_KINDS, 'stay']
-
 const ranges: Array<{ label: string; value: TodayRange }> = [
   { label: 'Today', value: 'today' },
   { label: 'Upcoming', value: 'upcoming' },
 ]
 
 const route = useRoute()
+const router = useRouter()
 const dashboardApi = props.personalScope ? applicationFetch : useDashboardApi()
 const apiBase = props.personalScope ? '/api/account' : '/api/dashboard'
-const dashboardOrganization = useDashboardOrganization()
 const realtime = useDashboardInvalidations()
 const orgSlug = computed(() => props.personalScope ? 'account' : String(route.params.orgSlug ?? ''))
-const todayKey = computed(() => `dashboard-today-${orgSlug.value}`)
-const { filters, signature: filterSignature, active: hasActiveFilters } = useAgendaFilters()
+const { signature: filterSignature, active: hasActiveFilters, query: filterQuery, range: activeRange, failure: navigationError } = useAgendaFilters()
 const organizationId = props.personalScope ? null : await useDashboardOrganizationId()
-
-const isNullableString = (value: unknown): value is string | null => value === null || typeof value === 'string'
-const isAgendaItem = (value: unknown): value is AgendaItem =>
-  isRecord(value)
-  && typeof value.id === 'string'
-  && TODAY_KINDS.includes(value.kind as AgendaKind)
-  && typeof value.startsAt === 'string'
-  && typeof value.dayKey === 'string'
-  && typeof value.timeZone === 'string'
-  && typeof value.title === 'string'
-  && typeof value.status === 'string'
-  && isNullableString(value.guestImageUrl)
-  && isNullableString(value.resourceImageUrl)
-  && isNullableString(value.resourceTitle)
-  && (value.partySize === null || typeof value.partySize === 'number')
-  && typeof value.to === 'string'
-
-const isLocation = (value: unknown): value is AgendaLocation =>
-  isRecord(value)
-  && typeof value.id === 'string'
-  && typeof value.title === 'string'
-
-const isTodayResponse = (value: unknown): value is TodayAgendaPayload =>
-  isRecord(value)
-  && Array.isArray(value.items)
-  && value.items.every(isAgendaItem)
-  && Array.isArray(value.availableKinds)
-  && Array.isArray(value.locations)
-  && value.locations.every(isLocation)
-  && typeof value.resolvedAt === 'string'
-
-const isAgendaPayload = (value: unknown): value is AgendaPayload =>
-  isRecord(value)
-  && Array.isArray(value.items)
-  && value.items.every(isAgendaItem)
-  && Array.isArray(value.availableKinds)
-  && Array.isArray(value.locations)
-  && value.locations.every(isLocation)
-
-const { data: todayData, pending, error: todayError, refresh: refreshToday } = await useAsyncData<TodayAgendaPayload>(
+const { organization } = useDashboardOrganization()
+const schedulingOrganizationId = computed(() => organization.value?.vertical === 'lodging' ? null : organizationId)
+const todayKey = computed(() => `dashboard-today-${orgSlug.value}-${props.personalScope ? '' : filterSignature.value}`)
+const isTodayFeed = (value: unknown): value is TodayFeedPayload => todayFeedSchema.safeParse(value).success
+const { data: todayData, pending, error: todayError, refresh: refreshToday } = await useAsyncData<TodayFeedPayload>(
   todayKey,
-  () => dashboardApi<TodayAgendaPayload>(`${apiBase}/today`, { validate: isTodayResponse }),
+  () => dashboardApi<TodayFeedPayload>(`${apiBase}/today`, {
+    query: props.personalScope ? undefined : filterQuery.value,
+    validate: isTodayFeed,
+  }),
 )
 
-const activeRange = ref<TodayRange>('today')
-// UTabs models `string | number`; the setter is where Upcoming is loaded on
-// first selection, so switching range stays one code path.
 const rangeModel = computed<string | number>({
   get: () => activeRange.value,
-  set: value => void selectRange(value === 'upcoming' ? 'upcoming' : 'today'),
+  set: value => { activeRange.value = value === 'upcoming' ? 'upcoming' : 'today' },
 })
 const todayVisibleCount = ref(PAGE_SIZE)
-const upcomingItems = ref<AgendaItem[]>([])
+const upcomingItems = ref<TodayCard[]>([])
 const upcomingLoading = ref(false)
 const upcomingError = ref<unknown>(null)
-const resolvedAt = computed(() => todayData.value?.resolvedAt ?? new Date().toISOString())
-const resolvedUtcDay = computed(() => resolvedAt.value.slice(0, 10))
-// One organization can span time zones. Query one day on either side of the
-// UTC range, then classify each item against its own location's local day.
-const upcomingCursor = ref(addDays(resolvedUtcDay.value, -1))
-const upcomingHorizon = computed(() => addDays(resolvedUtcDay.value, UPCOMING_HORIZON_DAYS + 1))
-
-const filteredTodayItems = computed(() => (todayData.value?.items ?? []).filter(item =>
-  (filters.locationId === AGENDA_FILTER_ALL || item.locationId === filters.locationId)
-  && (filters.kind === AGENDA_FILTER_ALL || item.kind === filters.kind)
-  && (filters.assignedMemberId === AGENDA_FILTER_ALL || item.assignedMemberId === filters.assignedMemberId)))
-const allRangeItems = computed(() => activeRange.value === 'today' ? filteredTodayItems.value : upcomingItems.value)
-const rangeItems = computed(() => activeRange.value === 'today'
-  ? filteredTodayItems.value.slice(0, todayVisibleCount.value)
-  : upcomingItems.value)
-const visibleItems = computed(() => rangeItems.value)
+const upcomingCursor = ref<string | null>(null)
+let upcomingEpoch = 0
+const resolvedAt = computed(() => todayData.value?.resolvedAt ?? null)
+const upcomingHorizon = computed(() => resolvedAt.value ? addDays(resolvedAt.value.slice(0, 10), UPCOMING_HORIZON_DAYS + 1) : null)
+const todayCards = computed(() => todayData.value?.cards ?? [])
+const allRangeItems = computed(() => activeRange.value === 'today' ? todayCards.value : upcomingItems.value)
+const visibleItems = computed(() => (activeRange.value === 'today' ? todayCards.value.slice(0, todayVisibleCount.value) : upcomingItems.value).map(cardWithContext))
 const hasMore = computed(() => activeRange.value === 'today'
-  ? todayVisibleCount.value < filteredTodayItems.value.length
-  : upcomingCursor.value <= upcomingHorizon.value)
+  ? todayVisibleCount.value < todayCards.value.length
+  : upcomingCursor.value !== null && upcomingHorizon.value !== null && upcomingCursor.value <= upcomingHorizon.value)
 const activeLoading = computed(() => activeRange.value === 'today' ? pending.value : upcomingLoading.value)
-const activeError = computed(() => activeRange.value === 'today' ? todayError.value : upcomingError.value)
+const activeError = computed(() => navigationError.value ?? todayError.value ?? (activeRange.value === 'upcoming' ? upcomingError.value : null))
 const activeLabel = computed(() => activeRange.value === 'today' ? 'Today' : 'Upcoming')
-// Derived from the organization and kinds in scope rather than from the loaded items,
-// so the heading reads the same before anything has arrived and does not change
-// noun as a page of Upcoming loads. The vertical is the organization's own,
-// which the layout has loaded before this page renders.
-// An account's visits span sites, so their one shared word is "booking".
-const presentation = computed(() => {
-  const vertical = dashboardOrganization.organization.value?.vertical
-  const scoped: AgendaKind[] = filters.kind === AGENDA_FILTER_ALL
-    ? todayData.value?.availableKinds ?? BOOKING_KINDS
-    : [filters.kind as AgendaKind]
-  const kinds = scoped.filter(isBookingKind)
-  return resolveAggregateBookingPresentation(
-    props.personalScope ? [] : kinds.map(kind => ({ kind, vertical })),
-  )
-})
+const attentionCount = computed(() => todayCards.value.filter(card => card.priority === 'attention').length)
+const personalPresentation = resolveAggregateBookingPresentation([])
 const heading = computed(() => {
-  // A stay is one commitment however many of its moments are listed.
-  const count = new Set(allRangeItems.value.map(item => item.stayId ?? item.id)).size
-  return `You have ${bookingCountLabel(presentation.value, count)}`
+  if (props.personalScope) return `You have ${bookingCountLabel(personalPresentation, new Set(allRangeItems.value.map(item => item.stayId ?? item.id)).size)}`
+  if (activeRange.value === 'upcoming') return 'Your upcoming schedule'
+  return attentionCount.value ? `You have ${attentionCount.value} ${attentionCount.value === 1 ? 'thing' : 'things'} to do` : 'Your day at a glance'
 })
 const emptyTitle = computed(() => activeRange.value === 'today'
-  ? `No ${presentation.value.nounPlural} today`
-  : `No upcoming ${presentation.value.nounPlural}`)
-const emptyDescription = computed(() => hasActiveFilters.value
+  ? props.personalScope ? 'No bookings today' : 'Nothing needs your attention today'
+  : props.personalScope ? 'No upcoming bookings' : 'Nothing upcoming')
+const emptyDescription = computed(() => hasActiveFilters.value && !props.personalScope
   ? 'Try adjusting the filters.'
-  : activeRange.value === 'today'
-    ? 'There are no arrivals scheduled for today.'
-    : 'New arrivals will appear here as they are booked.')
+  : activeRange.value === 'today' ? 'Your scheduled activity and outstanding work will appear here.' : 'Future scheduled activity will appear here.')
 
+function resetUpcoming() {
+  upcomingEpoch += 1
+  upcomingItems.value = []
+  upcomingLoading.value = false
+  upcomingError.value = null
+  upcomingCursor.value = resolvedAt.value ? addDays(resolvedAt.value.slice(0, 10), -1) : null
+}
 
-async function selectRange(range: TodayRange) {
-  activeRange.value = range
-  if (range === 'upcoming' && upcomingItems.value.length === 0 && !upcomingLoading.value) {
-    await loadUpcoming()
+function cardWithContext(card: TodayCard): TodayCard {
+  if (card.priority !== 'schedule' && card.bookingKind === null) return card
+  const target = router.resolve(card.to)
+  const query = {
+    range: activeRange.value === 'upcoming' ? 'upcoming' : undefined,
+    locationId: route.query.locationId,
+    kinds: route.query.kinds,
+    assigned_member_id: route.query.assigned_member_id,
+    ...target.query,
+  }
+  return { ...card, to: router.resolve({ path: target.path, query, hash: target.hash }).fullPath }
+}
+
+function isPersonalAgenda(value: unknown): value is AgendaPayload {
+  const nullableString = (field: unknown) => field === null || typeof field === 'string'
+  return isRecord(value) && Array.isArray(value.items) && value.items.every((item): item is AgendaItem =>
+    isRecord(item) && typeof item.id === 'string' && (item.kind === 'reservation' || item.kind === 'booking' || item.kind === 'stay')
+    && typeof item.startsAt === 'string' && typeof item.dayKey === 'string' && typeof item.timeZone === 'string'
+    && typeof item.title === 'string' && typeof item.to === 'string'
+    && nullableString(item.subtitle) && nullableString(item.locationTitle)
+    && nullableString(item.guestImageUrl) && nullableString(item.resourceImageUrl) && nullableString(item.resourceTitle)
+    && nullableString(item.locationId) && nullableString(item.assignedMemberId)
+    && (item.partySize === null || typeof item.partySize === 'number'))
+}
+
+async function loadUpcoming() {
+  if (upcomingLoading.value || !hasMore.value || !resolvedAt.value || !upcomingHorizon.value) return
+  const epoch = upcomingEpoch
+  const reference = resolvedAt.value
+  const horizon = upcomingHorizon.value
+  upcomingLoading.value = true
+  upcomingError.value = null
+  try {
+    while (upcomingCursor.value && upcomingCursor.value <= horizon && epoch === upcomingEpoch) {
+      const from = upcomingCursor.value
+      const to = minDate(addDays(from, UPCOMING_WINDOW_DAYS - 1), horizon)
+      let cards: TodayCard[]
+      if (props.personalScope) {
+        const payload = await dashboardApi<AgendaPayload>(`${apiBase}/agenda`, { query: { from, to, kinds: 'reservation,booking,stay' }, validate: isPersonalAgenda })
+        cards = payload.items.filter(item => item.dayKey > localDateAt(new Date(reference), item.timeZone))
+          .map(item => agendaToTodayCard(item, { resolvedAt: reference, personal: true }))
+      } else {
+        const payload = await dashboardApi<TodayFeedPayload>(`${apiBase}/today`, {
+          query: { ...filterQuery.value, range: 'upcoming', from, to }, validate: isTodayFeed,
+        })
+        cards = payload.cards
+      }
+      if (epoch !== upcomingEpoch) return
+      const existing = new Set(upcomingItems.value.map(item => item.id))
+      const additions = cards.filter(item => !existing.has(item.id))
+      upcomingItems.value.push(...additions)
+      upcomingItems.value.sort((left, right) => (left.occurrenceAt ?? '').localeCompare(right.occurrenceAt ?? '') || left.id.localeCompare(right.id))
+      upcomingCursor.value = addDays(to, 1)
+      if (additions.length) break
+    }
+  } catch (cause) {
+    if (epoch === upcomingEpoch) upcomingError.value = cause
+  } finally {
+    if (epoch === upcomingEpoch) upcomingLoading.value = false
   }
 }
 
 async function loadMore() {
-  if (activeLoading.value || !hasMore.value) return
-  if (activeRange.value === 'today') {
-    todayVisibleCount.value += PAGE_SIZE
-    return
-  }
-  await loadUpcoming()
-}
-
-async function loadUpcoming() {
-  if (upcomingLoading.value || upcomingCursor.value > upcomingHorizon.value) return
-  upcomingLoading.value = true
-  upcomingError.value = null
-  const requestSignature = filterSignature.value
-  try {
-    while (upcomingCursor.value <= upcomingHorizon.value && requestSignature === filterSignature.value) {
-      const from = upcomingCursor.value
-      const to = minDate(addDays(from, UPCOMING_WINDOW_DAYS - 1), upcomingHorizon.value)
-      const payload = await dashboardApi<AgendaPayload>(`${apiBase}/agenda`, {
-        query: {
-          from,
-          to,
-          locationId: filters.locationId !== AGENDA_FILTER_ALL ? filters.locationId : undefined,
-          assigned_member_id: filters.assignedMemberId !== AGENDA_FILTER_ALL ? filters.assignedMemberId : undefined,
-          kinds: filters.kind !== AGENDA_FILTER_ALL ? filters.kind : TODAY_KINDS.join(','),
-        },
-        validate: isAgendaPayload,
-      })
-      if (requestSignature !== filterSignature.value) return
-      const existing = new Set(upcomingItems.value.map(item => item.id))
-      const additions = payload.items.filter(item => isUpcoming(item) && !existing.has(item.id))
-      upcomingItems.value.push(...additions)
-      upcomingItems.value.sort((left, right) => left.startsAt.localeCompare(right.startsAt) || left.id.localeCompare(right.id))
-      upcomingCursor.value = addDays(to, 1)
-      if (additions.length) break
-    }
-  } catch (error) {
-    if (requestSignature === filterSignature.value) upcomingError.value = error
-  } finally {
-    if (requestSignature === filterSignature.value) upcomingLoading.value = false
-  }
+  if (activeLoading.value || !hasMore.value || activeError.value) return
+  if (activeRange.value === 'today') todayVisibleCount.value += PAGE_SIZE
+  else await loadUpcoming()
 }
 
 async function refreshAgenda() {
-  upcomingItems.value = []
-  upcomingError.value = null
-  upcomingCursor.value = addDays(resolvedUtcDay.value, -1)
   await refreshToday()
-  if (activeRange.value === 'upcoming') await loadUpcoming()
 }
-
 function retryRealtime() {
   realtime.connect()
   void refreshAgenda()
 }
-
-// `AgendaKind` still admits 'post' and 'stay'; Today's heading counts the two booking kinds
-// (`isAgendaItem` rejects the rest), so this narrows the type rather than
-// standing in for missing data.
-function isBookingKind(kind: AgendaKind): kind is BookingKind {
-  return kind === 'reservation' || kind === 'booking'
-}
-
-function referenceDay(item: AgendaItem): string {
-  return localDateAt(new Date(resolvedAt.value), item.timeZone)
-}
-
-function isUpcoming(item: AgendaItem): boolean {
-  return item.dayKey > referenceDay(item)
-}
-
 function addDays(dateKey: string, days: number): string {
   const date = new Date(`${dateKey}T00:00:00Z`)
   date.setUTCDate(date.getUTCDate() + days)
   return date.toISOString().slice(0, 10)
 }
+function minDate(left: string, right: string): string { return left < right ? left : right }
 
-function minDate(left: string, right: string): string {
-  return left < right ? left : right
-}
-
-watch(filterSignature, async () => {
+resetUpcoming()
+// Nuxt carries the previous async-data value into a new reactive key while
+// fetching. A card for the previous scope must never remain actionable.
+watch(todayKey, () => { todayData.value = undefined }, { flush: 'sync' })
+watch(activeRange, async range => {
+  if (range === 'upcoming' && !upcomingItems.value.length) await loadUpcoming()
+})
+watch(filterSignature, () => {
   todayVisibleCount.value = PAGE_SIZE
-  upcomingItems.value = []
-  upcomingLoading.value = false
-  upcomingError.value = null
-  upcomingCursor.value = addDays(resolvedUtcDay.value, -1)
+  resetUpcoming()
+  upcomingCursor.value = null
+}, { flush: 'sync' })
+watch(todayData, async () => {
+  resetUpcoming()
   if (activeRange.value === 'upcoming') await loadUpcoming()
 }, { flush: 'post' })
-
-watch(realtime.event, (event) => {
-  if (event?.type === 'thread.created' || event?.type === 'thread.changed') void refreshAgenda()
+watch(realtime.event, event => {
+  if (event?.type === 'thread.created' || event?.type === 'thread.changed' || event?.type === 'notification.created') void refreshAgenda()
 })
-watch(realtime.connectionEpoch, (epoch) => {
-  if (epoch > 0) void refreshAgenda()
-})
+watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refreshAgenda() })
 
 const loadMoreSentinel = ref<HTMLElement | null>(null)
 let loadMoreObserver: IntersectionObserver | null = null
-
 onMounted(() => {
+  if (activeRange.value === 'upcoming') void loadUpcoming()
   if (!('IntersectionObserver' in window)) return
-  loadMoreObserver = new IntersectionObserver((entries) => {
+  loadMoreObserver = new IntersectionObserver(entries => {
     if (entries.some(entry => entry.isIntersecting)) void loadMore()
   }, { rootMargin: '320px 0px' })
   if (loadMoreSentinel.value) loadMoreObserver.observe(loadMoreSentinel.value)
 })
-
 watch(loadMoreSentinel, (element, previous) => {
   if (previous) loadMoreObserver?.unobserve(previous)
   if (element) loadMoreObserver?.observe(element)
 }, { flush: 'post' })
-
-onBeforeUnmount(() => loadMoreObserver?.disconnect())
+onBeforeUnmount(() => {
+  upcomingEpoch += 1
+  loadMoreObserver?.disconnect()
+})
 </script>

@@ -16,7 +16,10 @@
         class="w-full"
       />
 
-      <div v-if="tab === 'views' || tab === 'instagram'" class="flex justify-end">
+      <div v-if="tab === 'views' || tab === 'instagram'" class="flex flex-wrap items-center justify-end gap-4">
+        <p v-if="tab === 'views' && analytics" class="mr-auto text-sm text-muted" data-testid="insights-period">
+          <time :datetime="analytics.period.startDate">{{ formatDate(analytics.period.startDate) }}</time> – <time :datetime="analytics.period.endDate">{{ formatDate(analytics.period.endDate) }}</time>
+        </p>
         <div class="inline-flex gap-0.5 rounded-lg bg-elevated p-0.5" role="group" aria-label="Date range">
           <button v-for="days in [7, 30]" :key="days" type="button"
             :aria-pressed="activeDays === days" :disabled="loading || !analytics"
@@ -431,8 +434,12 @@ const tabItems = [
   { label: 'Activity', value: 'activity' as const },
 ]
 
-const activeDays = ref(30)
-const requestedRange = ref<{ startDate?: string; endDate?: string }>({})
+// The report's dates are URL state: a Today card, reload and Back all reopen
+// the same period. Range validation remains the analytics API's operation.
+const requestedRange = computed(() => ({
+  startDate: route.query.startDate === undefined ? undefined : String(route.query.startDate ?? ''),
+  endDate: route.query.endDate === undefined ? undefined : String(route.query.endDate ?? ''),
+}))
 const isNumberField = (row: unknown, ...fields: string[]): boolean =>
   isRecord(row) && fields.every(field => typeof row[field] === 'number')
 
@@ -453,6 +460,11 @@ const { data: insightsResource, pending: loading, error: resourceError, refresh 
   }),
 )
 const analytics = computed<AnalyticsReport | null>(() => insightsResource.value?.report ?? null)
+const activeDays = computed(() => {
+  const period = analytics.value?.period
+  if (!period || period.endDate !== localDateAt(new Date(), period.timezone)) return null
+  return Math.round((Date.parse(`${period.endDate}T00:00:00Z`) - Date.parse(`${period.startDate}T00:00:00Z`)) / 86_400_000) + 1
+})
 
 // Instagram's own numbers, read live for the same range when its tab is open; never added to website traffic.
 const { data: instagram, pending: instagramLoading, error: instagramError, refresh: refreshInstagram, execute: loadInstagram } = await useAsyncData(
@@ -542,11 +554,10 @@ const metricCards = computed(() => {
   ]
 })
 
-function applyPreset(days: number) {
+async function applyPreset(days: number) {
   if (!analytics.value || activeDays.value === days) return
-  activeDays.value = days
   const endDate = localDateAt(new Date(), analytics.value.period.timezone)
-  requestedRange.value = { startDate: addLocalDays(endDate, 1 - days), endDate }
+  await navigateTo({ query: { ...route.query, startDate: addLocalDays(endDate, 1 - days), endDate } })
 }
 
 function formatMoney(minor: number, currency: string): string {

@@ -160,6 +160,7 @@ export async function resolveRequestedOrganization(
       throw new HTTPError({
         statusCode: 400,
         message: 'Organization context conflict: the requested organization does not match the current dashboard context.',
+        data: { code: 'ORGANIZATION_CONTEXT_CONFLICT', field: 'org' },
       })
     }
     if (headerOrg) return headerOrg
@@ -206,12 +207,12 @@ export async function getDashboardMemberContext(event: H3Event, options: Dashboa
   const db = env.DB
 
   if (!db) {
-    throw new HTTPError({ statusCode: 503, message: 'Database not available' })
+    throw new HTTPError({ statusCode: 503, message: 'Database not available', data: { code: 'DATABASE_UNAVAILABLE', field: 'DB' } })
   }
 
   const session = await getAuthSession(event, env)
   if (!session?.user?.id) {
-    throw new HTTPError({ statusCode: 401, message: 'Authentication required' })
+    throw new HTTPError({ statusCode: 401, message: 'Authentication required', data: { code: 'UNAUTHORIZED', field: 'session' } })
   }
 
   // Session-wide activeOrganizationId is only ever considered when this specific
@@ -248,6 +249,7 @@ export async function getDashboardMemberContext(event: H3Event, options: Dashboa
       message: hasQueryParam
         ? 'Organization not found'
         : 'Organization context is required. Use /dashboard/{orgSlug} routes.',
+      data: { code: hasQueryParam ? 'ORGANIZATION_NOT_FOUND' : 'ORGANIZATION_REQUIRED', field: 'org' },
     })
   }
 
@@ -258,7 +260,7 @@ export async function getDashboardMemberContext(event: H3Event, options: Dashboa
     ? configBySlug
     : await queryFirst<DashboardOrganizationConfig & { id: string }>(db, ORGANIZATION_CONFIG_BY_ID_SQL, [membership.id])
   if (!configRow) {
-    throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
+    throw new HTTPError({ statusCode: 404, message: 'Organization not found', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
   }
   const { id: _configId, ...config } = configRow
   const organization: DashboardOrganizationRow = Object.assign(membership, config)
@@ -351,12 +353,13 @@ export async function listDashboardLocations(
   db: DbClient,
   organizationId: string,
   assignedUserId?: string,
+  includeInactive = false,
 ) {
 
   const locations = await queryAll<Omit<DashboardLocationRow, 'media' | 'social_image' | 'address'> & { address: string | null }>(db, `
     SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address
     FROM business_locations l
-    WHERE l.organization_id = ? AND l.status = 'active'
+    WHERE l.organization_id = ? ${includeInactive ? '' : "AND l.status = 'active'"}
       ${assignedUserId ? `AND EXISTS (SELECT 1 FROM product_locations pl JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id
         WHERE pl.organization_id = l.organization_id AND pl.location_id = l.id AND (${ASSIGNED_SERVICE_SQL}))` : ''}
     ORDER BY l.title ASC

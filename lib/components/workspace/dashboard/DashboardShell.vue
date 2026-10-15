@@ -1,6 +1,8 @@
 <template>
-  <UApp>
+  <UApp portal="#dashboard-overlays">
     <div class="platform-theme" data-surface="dashboard">
+    <!-- Outside the fixed panel group, with the same theme and stack for drawers and their pickers. -->
+    <div id="dashboard-overlays" class="relative z-50" />
     <div v-if="impersonatedBy" class="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center px-4 sm:left-1/2 sm:right-auto sm:w-1/3 sm:-translate-x-1/2 sm:px-0">
       <div class="pointer-events-auto flex w-full max-w-full flex-wrap items-center justify-center gap-3 rounded-t-2xl border border-warning/40 border-b-0 bg-default px-6 py-4 shadow-[0_-4px_24px_rgba(0,0,0,0.15)]">
         <span class="relative flex size-2 shrink-0">
@@ -43,12 +45,8 @@
     />
 
     <!--
-      The group sits above the nav chrome, not below it. UDashboardGroup is
-      `position: fixed`, which makes it a stacking context, so anything inside it
-      composites at the group's level no matter how high its own z-index is. With
-      the navs at z-40 a leaf sheet at z-50 still painted underneath them. The
-      group's box is inset away from both navs, so nothing overlaps in the normal
-      case; only an element that deliberately spans the viewport reaches them.
+      The fixed group is inset away from navigation. Its routed panels sit
+      below the shared overlay target, where drawers and nested pickers render.
     -->
     <UDashboardGroup
       :ui="{ base: ['z-40', showNavChrome ? 'md:top-(--kc-dashboard-top-nav)' : 'top-(--kc-dashboard-top-nav)', showBottomNav ? 'max-md:bottom-(--kc-dashboard-bottom-nav)' : ''].join(' ') }"
@@ -409,10 +407,9 @@ const primaryNavItems = computed(() => navTargets.value.map(item => ({ ...item, 
 // exist until there is one. Gating both together is what left an owner who
 // abandoned onboarding with no way to reach account settings or log out.
 const showNavChrome = computed(() => primaryNavItems.value.length > 0)
-// A leaf with Cancel/Save is a sheet on a phone: the tab bar is not there
-// under it, the way Airbnb's editor leaves cover theirs.
-const leafFooters = useDashboardLeafFooters()
-const showBottomNav = computed(() => showNavChrome.value && leafFooters.value === 0)
+// Inline commit bars replace phone navigation. Drawers cover the intact shell.
+const inlineFooters = useDashboardInlineFooters()
+const showBottomNav = computed(() => showNavChrome.value && inlineFooters.value === 0)
 const topNavHomeTo = computed(() => {
   if (personal.value) return '/dashboard/account'
   return scopeOrganization.value ? `/dashboard/${encodeURIComponent(scopeOrganization.value.slug)}` : '/dashboard'

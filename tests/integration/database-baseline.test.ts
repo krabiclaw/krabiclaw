@@ -456,3 +456,53 @@ test('a v16 export transfers into the v17 baseline unchanged, which admits place
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('a v17 export transfers into the v18 baseline, which admits a stay conversation held by phone alone', async () => {
+  const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
+  const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-v17-transfer-'))
+  const v17 = JSON.parse(readFileSync('migrations-history/v17/meta/_journal.json', 'utf8')).entries.map((entry: { tag: string }) => `${entry.tag}.sql`) as string[]
+  try {
+    const sourcePath = join(directory, 'v17.sqlite')
+    const source = new Database(sourcePath)
+    for (const file of v17) source.exec(readFileSync(`migrations-history/v17/${file}`, 'utf8'))
+    source.exec(`CREATE TABLE "d1_migrations"(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);
+      ${v17.map(file => `INSERT INTO d1_migrations (name) VALUES ('${file}');`).join('\n')}`)
+    source.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES ('org', 'Org', 'org', 'org', 'USD', 'America/Denver')").run()
+    source.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', 'org', 'en', 1, 'published')").run()
+    source.prepare("INSERT INTO business_locations (id, organization_id, slug, title, timezone) VALUES ('site', 'org', 'site', 'Cabin', 'America/Denver')").run()
+    source.prepare("INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES ('home', 'org', 'stay', 'Cabin', 'cabin', 'user-1', 'user-1')").run()
+    source.prepare("INSERT INTO product_variants (id, organization_id, product_id, name, created_by, updated_by) VALUES ('home-default', 'org', 'home', 'Cabin', 'user-1', 'user-1')").run()
+    source.prepare("INSERT INTO product_locations (organization_id, product_id, location_id, created_by, updated_by) VALUES ('org', 'home', 'site', 'user-1', 'user-1')").run()
+    source.prepare("INSERT INTO product_stay_configs (organization_id, product_id, location_id, check_in_time, check_out_time, max_guests, created_by, updated_by) VALUES ('org', 'home', 'site', '16:00', '10:00', 4, 'user-1', 'user-1')").run()
+    source.prepare(`INSERT INTO requests (id, kind, organization_id, location_id, conversation_state, payload_json)
+      VALUES ('thread', 'stay', 'org', 'site', 'waiting_on_guest', '{"guest":{"name":"Ana Silva","email":"ana@example.test","phone":null}}')`).run()
+    source.prepare(`INSERT INTO stays (id, organization_id, product_id, channel, owner, status, check_in_date, check_out_date, adults, guest_name, guest_email, total_minor, currency, request_id)
+      VALUES ('stay', 'org', 'home', 'direct', 'app', 'confirmed', '2027-01-10', '2027-01-12', 2, 'Ana', 'ana@example.test', 30000, 'USD', 'thread')`).run()
+    // v17 holds a conversation only with an address to write to.
+    assert.throws(() => source.prepare("INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json) VALUES ('phone-only', 'stay', 'org', 'needs_attention', '{\"guest\":{\"name\":\"Kai\",\"email\":null,\"phone\":\"+15550000000\"}}')").run(), /requests_guest_payload_check/)
+    source.close()
+    const targetPath = join(directory, 'v18.sqlite')
+    await transferDatabaseExport(sourcePath, targetPath, { payloadPath: join(directory, 'payload.sql') })
+    const target = new Database(targetPath)
+    try {
+      assert.deepEqual(target.pragma('foreign_key_check'), [])
+      assert.deepEqual(target.prepare("SELECT id, request_id, guest_email FROM stays").all(), [{ id: 'stay', request_id: 'thread', guest_email: 'ana@example.test' }])
+      assert.deepEqual(target.prepare("SELECT id, kind, json_extract(payload_json, '$.guest.email') AS email FROM requests").all(), [{ id: 'thread', kind: 'stay', email: 'ana@example.test' }])
+      // v18 holds one by phone alone, and still refuses a guest with neither.
+      target.prepare("INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json) VALUES ('phone-only', 'stay', 'org', 'needs_attention', '{\"guest\":{\"name\":\"Kai\",\"email\":null,\"phone\":\"+15550000000\"}}')").run()
+      assert.deepEqual(JSON.parse((target.prepare("SELECT payload_json FROM requests WHERE id = 'phone-only'").get() as { payload_json: string }).payload_json).guest, { name: 'Kai', email: null, phone: '+15550000000' })
+      // Other inbox kinds still require email at the persistence boundary.
+      for (const kind of ['contact', 'reservation', 'booking']) {
+        assert.throws(() => target.prepare('INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json) VALUES (?, ?, ?, ?, ?)')
+          .run(`phone-only-${kind}`, kind, 'org', 'needs_attention', JSON.stringify({ guest: { name: 'Kai', email: null, phone: '+15550000000' }, message: 'Hello' })), /requests_guest_payload_check/)
+      }
+      // A payload that leaves the email key out is refused, not read as no email.
+      assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json) VALUES ('no-key', 'stay', 'org', 'needs_attention', '{\"guest\":{\"name\":\"Lu\",\"phone\":\"+15550000001\"}}')").run(), /requests_guest_payload_check/)
+      assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json) VALUES ('nobody', 'stay', 'org', 'needs_attention', '{\"guest\":{\"name\":\"Bo\",\"email\":null,\"phone\":null}}')").run(), /requests_guest_payload_check/)
+    } finally {
+      target.close()
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true })
+  }
+})

@@ -109,5 +109,8 @@ export default defineConfig({
     stdout: captureServerLogs ? 'pipe' : 'ignore',
     stderr: captureServerLogs ? 'pipe' : 'ignore'
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }]
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'webkit-mobile-layout', use: { ...devices['Desktop Safari'], viewport: { width: 390, height: 844 } }, testMatch: '**/dashboard-layout.spec.ts', grep: /mobile scroll/ },
+  ]
 })
