@@ -174,26 +174,45 @@ function requireManager(access: StayAccess): asserts access is StayAccess & { ma
   if (!access.manage) fail(403, 'STAY_ROLE_REQUIRED', 'Only organization owners and admins can change stays')
 }
 
-export async function readStayHome(db: DbClient, access: StayAccess, productId: string): Promise<StayHome> {
+/** The homes this caller may see, or one of them; one query for the homes and one for their prices. */
+async function stayHomes(db: DbClient, access: StayAccess, productId: string | null): Promise<StayHome[]> {
   const scope = visibleHomes(access)
-  const row = await queryFirst<Record<string, unknown>>(db, `
+  const rows = await queryAll<Record<string, unknown>>(db, `
     SELECT p.id AS product_id, p.name, c.location_id, l.timezone, o.default_currency, c.check_in_time, c.check_out_time, c.max_guests, c.min_nights
       FROM product_stay_configs c
       JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
       JOIN organization o ON o.id = c.organization_id
-     WHERE c.organization_id = ? AND c.product_id = ? AND ${scope.sql}`, [access.organizationId, productId, ...scope.params])
-  if (!row) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
-  if (!isCurrencyCode(row.default_currency)) throw new Error(`Organization ${access.organizationId} has an unsupported default currency`)
-  const prices = await queryAll<Price>(db, `
-    SELECT pr.* FROM prices pr JOIN product_variants v ON v.organization_id = pr.organization_id AND v.id = pr.product_variant_id
-     WHERE pr.organization_id = ? AND v.product_id = ? AND v.active = 1 ORDER BY v.sort_order, v.id LIMIT 50`, [access.organizationId, productId])
-  const base = selectPrice(prices.map(price => ({ ...price, active: Number(price.active) === 1 })), { currency: row.default_currency, location_id: String(row.location_id) })
-  return {
-    product_id: String(row.product_id), name: String(row.name), location_id: String(row.location_id), timezone: String(row.timezone),
-    currency: row.default_currency, base_price_minor: base ? base.unit_amount : null,
-    check_in_time: String(row.check_in_time), check_out_time: String(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
-  }
+     WHERE c.organization_id = ? ${productId ? 'AND c.product_id = ?' : ''} AND ${scope.sql}
+     ORDER BY p.name, p.id`, [access.organizationId, ...(productId ? [productId] : []), ...scope.params])
+  if (!rows.length) return []
+  const prices = await queryAll<Price & { product_id: string }>(db, `
+    SELECT pr.*, v.product_id FROM prices pr
+      JOIN product_variants v ON v.organization_id = pr.organization_id AND v.id = pr.product_variant_id
+      JOIN product_stay_configs c ON c.organization_id = v.organization_id AND c.product_id = v.product_id
+     WHERE pr.organization_id = ? ${productId ? 'AND v.product_id = ?' : ''} AND v.active = 1
+     ORDER BY v.sort_order, v.id`, [access.organizationId, ...(productId ? [productId] : [])])
+  return rows.map((row) => {
+    if (!isCurrencyCode(row.default_currency)) throw new Error(`Organization ${access.organizationId} has an unsupported default currency`)
+    const own = prices.filter(price => price.product_id === row.product_id).map(price => ({ ...price, active: Number(price.active) === 1 }))
+    const base = selectPrice(own, { currency: row.default_currency, location_id: String(row.location_id) })
+    return {
+      product_id: String(row.product_id), name: String(row.name), location_id: String(row.location_id), timezone: String(row.timezone),
+      currency: row.default_currency, base_price_minor: base ? base.unit_amount : null,
+      check_in_time: String(row.check_in_time), check_out_time: String(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
+    }
+  })
+}
+
+/** Every place to stay this caller may see: all of them for managers, their assigned homes for members. */
+export async function listStayHomes(db: DbClient, access: StayAccess): Promise<StayHome[]> {
+  return await stayHomes(db, access, null)
+}
+
+export async function readStayHome(db: DbClient, access: StayAccess, productId: string): Promise<StayHome> {
+  const [home] = await stayHomes(db, access, productId)
+  if (!home) fail(404, 'HOME_NOT_FOUND', 'That place to stay is not in this organization')
+  return home
 }
 
 /** Stays overlapping [from, to), newest check-in last. Cancelled stays are included only when asked for. */

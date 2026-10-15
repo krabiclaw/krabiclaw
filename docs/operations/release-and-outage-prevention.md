@@ -216,6 +216,10 @@ Prepare the load before the binding repoint. Inspect changes and deletions since
 the initial load immediately before deployment; carry important edits explicitly
 and preserve writes to the new database. After each deployment, verify schema,
 foreign keys and customer journeys on the new binding before promoting further.
+The repoint changes every `DB` binding in `wrangler.toml`, including `env.dev`
+and `env.e2e`: local D1 state is keyed by database id, so an environment left on
+the old id opens an empty database and the E2E suite fails on the next pull
+request rather than on the repoint commit, whose push to staging skips E2E.
 
 The v11-to-v12 replacement drops `organization.feature_overrides` and
 `business_locations.feature_overrides` and their CHECK constraints (#1267):
