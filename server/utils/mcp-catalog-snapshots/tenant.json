@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:ccbd1ba47cebee780d618436d22f1b5ad61743f0ffd8a4bb0d09b9ec131c9ac9",
-  "documentationFingerprint": "sha256:e921878b7a4d422b819dbabae14adb4baa4b5f2b0a99046bbef0e55044074745",
+  "fingerprint": "sha256:fce578993825461cb47a2af9192a8ffbcca0af243fecdff99af71c29671f2450",
+  "documentationFingerprint": "sha256:73495f39594faab627ce4cb00dec8e283cc8688feb64415cb0ad64b5495688ee",
   "tools": [
     {
       "name": "append_content_block",
@@ -52907,6 +52907,20 @@
           },
           "home": {
             "properties": {
+              "assigned_member_id": {
+                "description": "The member (member id) who looks after this home.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "assigned_team_id": {
+                "description": "The team that looks after this home.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "base_price_minor": {
                 "type": [
                   "integer",
@@ -52986,6 +53000,8 @@
               "check_out_time",
               "max_guests",
               "min_nights",
+              "assigned_member_id",
+              "assigned_team_id",
               "channel"
             ],
             "type": "object"
@@ -87979,6 +87995,20 @@
           },
           "home": {
             "properties": {
+              "assigned_member_id": {
+                "description": "The member (member id) who looks after this home.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "assigned_team_id": {
+                "description": "The team that looks after this home.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "base_price_minor": {
                 "type": [
                   "integer",
@@ -88058,6 +88088,8 @@
               "check_out_time",
               "max_guests",
               "min_nights",
+              "assigned_member_id",
+              "assigned_team_id",
               "channel"
             ],
             "type": "object"

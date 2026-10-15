@@ -130,6 +130,10 @@ test('editing and cancelling a stay move and free exactly its nights, under its 
     assert.equal(moved.version, 2)
     assert.equal(moved.guest_phone, '+15551234567')
     const calendar = await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-09' })
+    // The calendar reads its full 500 nights, with the stays in them.
+    const year = await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2028-03-15' })
+    assert.equal(year.nights.length, 500)
+    assert.ok(year.stays.some(row => row.id === stay.id))
     assert.deepEqual(calendar.nights.map(night => night.available), [true, true, true, true, false, false, false, true])
     assert.equal(calendar.nights[0]!.price_minor, 15_000)
     // Two edits from the same version race; whichever wins, the nights held are the winner's.
