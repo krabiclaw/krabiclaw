@@ -31,6 +31,7 @@ class FakeChannex {
     const method = (init.method ?? 'GET').toUpperCase()
     const path = url.pathname.replace('/api/v1', '')
     const json = (data: unknown) => new Response(JSON.stringify(data), { status: 200 })
+    if (method === 'POST' && (path === '/restrictions' || path === '/availability')) return json({ data: [], meta: { message: 'Success', warnings: [] } })
     let match = path.match(/^\/booking_revisions\/([^/]+)\/ack$/)
     if (method === 'POST' && match) { this.acked.push(match[1]!); return json({ meta: { message: 'Success' } }) }
     if (method === 'GET' && path === '/booking_revisions/feed') {
@@ -130,7 +131,8 @@ test('a channel booking lands, repeats and stale deliveries change nothing, an o
     assert.deepEqual(await nights(db, stayId), ['2027-01-10', '2027-01-11', '2027-01-12', '2027-01-13'])
 
     // A host stay holds 2027-02-01..03; a channel booking over it still lands, flagged and holding nothing.
-    await createStay(db, { organizationId: ORG, actorId: OWNER, manage: true }, { product_id: productId, idempotency_key: 'host-1', check_in_date: '2027-02-01', check_out_date: '2027-02-03', adults: 1, guest_name: 'Host guest', total_minor: 10_000 })
+    const host = await createStay(db, env, { organizationId: ORG, actorId: OWNER, manage: true }, { product_id: productId, idempotency_key: 'host-1', check_in_date: '2027-02-01', check_out_date: '2027-02-03', adults: 1, guest_name: 'Host guest', total_minor: 10_000 })
+    assert.deepEqual(host.channel_push, { state: 'pushed', detail: null })
     channex.revise('rev-2', { ...booking, id: 'bk-2', arrival: '2027-02-02', departure: '2027-02-04' }, '2026-10-15T02:00:00Z')
     const overlap = await applyBookingRevision(db, env, 'rev-2')
     assert.deepEqual([overlap.status, (overlap as { overbooked: boolean }).overbooked], ['acknowledged', true])

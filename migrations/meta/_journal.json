@@ -29,6 +29,13 @@
       "when": 1792045717209,
       "tag": "0003_channel_sync_log",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1792050155928,
+      "tag": "0004_channel_night_pushes",
+      "breakpoints": true
     }
   ]
 }

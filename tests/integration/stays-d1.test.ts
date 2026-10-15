@@ -92,21 +92,21 @@ test('a stay holds its nights, and a held night refuses another stay even when t
   const { runtime, db } = await boot()
   try {
     const cabin = await home(db, { name: 'Cabin', location: 'cabin-site' })
-    const first = await createStay(db, manager, { product_id: cabin.id, idempotency_key: 'k1', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest })
+    const first = await createStay(db, {}, manager, { product_id: cabin.id, idempotency_key: 'k1', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest })
     assert.equal(first.status, 'confirmed')
     assert.equal(first.owner, 'app')
     assert.equal(first.currency, 'USD')
     assert.equal(first.payment_status, 'unpaid')
     // The same key replays the same stay; a different stay under it is refused.
-    assert.equal((await createStay(db, manager, { product_id: cabin.id, idempotency_key: 'k1', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest })).id, first.id)
-    await assert.rejects(createStay(db, manager, { product_id: cabin.id, idempotency_key: 'k1', check_in_date: '2026-11-02', check_out_date: '2026-11-04', ...guest }), code('IDEMPOTENCY_CONFLICT'))
-    await assert.rejects(createStay(db, manager, { product_id: cabin.id, idempotency_key: 'k2', check_in_date: '2026-11-03', check_out_date: '2026-11-06', ...guest }), code('STAY_OVERLAP'))
+    assert.equal((await createStay(db, {}, manager, { product_id: cabin.id, idempotency_key: 'k1', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest })).id, first.id)
+    await assert.rejects(createStay(db, {}, manager, { product_id: cabin.id, idempotency_key: 'k1', check_in_date: '2026-11-02', check_out_date: '2026-11-04', ...guest }), code('IDEMPOTENCY_CONFLICT'))
+    await assert.rejects(createStay(db, {}, manager, { product_id: cabin.id, idempotency_key: 'k2', check_in_date: '2026-11-03', check_out_date: '2026-11-06', ...guest }), code('STAY_OVERLAP'))
     // Checkout morning is the next guest's check-in.
-    const next = await createStay(db, manager, { product_id: cabin.id, idempotency_key: 'k3', check_in_date: '2026-11-04', check_out_date: '2026-11-06', ...guest })
+    const next = await createStay(db, {}, manager, { product_id: cabin.id, idempotency_key: 'k3', check_in_date: '2026-11-04', check_out_date: '2026-11-06', ...guest })
     assert.equal(next.check_in_date, '2026-11-04')
-    await assert.rejects(createStay(db, manager, { product_id: cabin.id, idempotency_key: 'k4', check_in_date: '2026-11-10', check_out_date: '2026-11-12', ...guest, adults: 5 }), code('INVALID_STAY_FIELD'))
+    await assert.rejects(createStay(db, {}, manager, { product_id: cabin.id, idempotency_key: 'k4', check_in_date: '2026-11-10', check_out_date: '2026-11-12', ...guest, adults: 5 }), code('INVALID_STAY_FIELD'))
 
-    const racers = await Promise.allSettled(['r1', 'r2', 'r3'].map(key => createStay(db, manager, { product_id: cabin.id, idempotency_key: key, check_in_date: '2026-12-01', check_out_date: '2026-12-05', ...guest })))
+    const racers = await Promise.allSettled(['r1', 'r2', 'r3'].map(key => createStay(db, {}, manager, { product_id: cabin.id, idempotency_key: key, check_in_date: '2026-12-01', check_out_date: '2026-12-05', ...guest })))
     assert.equal(racers.filter(result => result.status === 'fulfilled').length, 1)
     for (const result of racers.filter(result => result.status === 'rejected')) assert(code('STAY_OVERLAP')((result as PromiseRejectedResult).reason))
     const claims = await db.prepare("SELECT count(*) AS n FROM stay_nights WHERE product_id = ? AND date >= '2026-12-01' AND date < '2026-12-05'").bind(cabin.id).first<{ n: number }>()
@@ -120,13 +120,13 @@ test('editing and cancelling a stay move and free exactly its nights, under its 
   const { runtime, db } = await boot()
   try {
     const cabin = await home(db, { name: 'Cabin', location: 'cabin-site' })
-    const stay = await createStay(db, manager, { product_id: cabin.id, idempotency_key: 'a', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
-    await createStay(db, manager, { product_id: cabin.id, idempotency_key: 'b', check_in_date: '2026-11-10', check_out_date: '2026-11-12', ...guest })
-    await assert.rejects(updateStay(db, manager, stay.id, { expected_version: 99, check_out_date: '2026-11-04' }), code('STAY_VERSION_CONFLICT'))
-    await assert.rejects(updateStay(db, manager, stay.id, { expected_version: 1, check_in_date: '2026-11-09', check_out_date: '2026-11-11' }), code('STAY_OVERLAP'))
+    const stay = await createStay(db, {}, manager, { product_id: cabin.id, idempotency_key: 'a', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
+    await createStay(db, {}, manager, { product_id: cabin.id, idempotency_key: 'b', check_in_date: '2026-11-10', check_out_date: '2026-11-12', ...guest })
+    await assert.rejects(updateStay(db, {}, manager, stay.id, { expected_version: 99, check_out_date: '2026-11-04' }), code('STAY_VERSION_CONFLICT'))
+    await assert.rejects(updateStay(db, {}, manager, stay.id, { expected_version: 1, check_in_date: '2026-11-09', check_out_date: '2026-11-11' }), code('STAY_OVERLAP'))
     // A refused move leaves the stay and its nights where they were.
     assert.deepEqual((await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-03' })).nights.map(night => night.stay_id), [stay.id, stay.id])
-    const moved = await updateStay(db, manager, stay.id, { expected_version: 1, check_in_date: '2026-11-05', check_out_date: '2026-11-08', guest_phone: '+15551234567' })
+    const moved = await updateStay(db, {}, manager, stay.id, { expected_version: 1, check_in_date: '2026-11-05', check_out_date: '2026-11-08', guest_phone: '+15551234567' })
     assert.equal(moved.version, 2)
     assert.equal(moved.guest_phone, '+15551234567')
     const calendar = await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-01', to: '2026-11-09' })
@@ -134,8 +134,8 @@ test('editing and cancelling a stay move and free exactly its nights, under its 
     assert.equal(calendar.nights[0]!.price_minor, 15_000)
     // Two edits from the same version race; whichever wins, the nights held are the winner's.
     const racers = await Promise.allSettled([
-      updateStay(db, manager, stay.id, { expected_version: 2, check_in_date: '2026-11-20', check_out_date: '2026-11-22' }),
-      updateStay(db, manager, stay.id, { expected_version: 2, check_in_date: '2026-11-25', check_out_date: '2026-11-28' }),
+      updateStay(db, {}, manager, stay.id, { expected_version: 2, check_in_date: '2026-11-20', check_out_date: '2026-11-22' }),
+      updateStay(db, {}, manager, stay.id, { expected_version: 2, check_in_date: '2026-11-25', check_out_date: '2026-11-28' }),
     ])
     assert.equal(racers.filter(result => result.status === 'fulfilled').length, 1)
     const winner = await getStay(db, manager, stay.id)
@@ -143,11 +143,11 @@ test('editing and cancelling a stay move and free exactly its nights, under its 
     const expected: string[] = []
     for (let day = Date.parse(`${winner.check_in_date}T00:00:00Z`); day < Date.parse(`${winner.check_out_date}T00:00:00Z`); day += 86_400_000) expected.push(new Date(day).toISOString().slice(0, 10))
     assert.deepEqual(held.results.map(row => row.date), expected)
-    const cancelled = await cancelStay(db, manager, stay.id, { expected_version: 3, reason: 'Guest changed plans' })
+    const cancelled = await cancelStay(db, {}, manager, stay.id, { expected_version: 3, reason: 'Guest changed plans' })
     assert.equal(cancelled.status, 'cancelled')
     assert.ok(cancelled.cancelled_at)
     assert(((await readStayCalendar(db, manager, { productId: cabin.id, from: '2026-11-05', to: '2026-11-30' })).nights).every(night => night.stay_id !== stay.id))
-    await assert.rejects(updateStay(db, manager, stay.id, { expected_version: 4, adults: 1 }), code('STAY_NOT_EDITABLE'))
+    await assert.rejects(updateStay(db, {}, manager, stay.id, { expected_version: 4, adults: 1 }), code('STAY_NOT_EDITABLE'))
     assert.deepEqual((await listStays(db, manager, { from: '2026-11-01', to: '2026-12-01' })).map(row => row.id).includes(stay.id), false)
     assert.equal((await listStays(db, manager, { from: '2026-11-01', to: '2026-12-01', includeCancelled: true })).some(row => row.id === stay.id), true)
     const audit = await db.prepare("SELECT event_name FROM activity_entries WHERE organization_id = ? AND event_name LIKE 'stay.%' ORDER BY occurred_at, event_name").bind(ORG).all<{ event_name: string }>()
@@ -163,12 +163,12 @@ test('a channel stay is read-only here and is paid through its channel; an app s
     const cabin = await home(db, { name: 'Cabin', location: 'cabin-site' })
     await db.prepare(`INSERT INTO stays (id, organization_id, product_id, channel, owner, status, check_in_date, check_out_date, adults, guest_name, total_minor, currency, provider, external_booking_id, created_at, updated_at)
       VALUES ('airbnb-1', ?, ?, 'airbnb', 'channel', 'confirmed', '2026-11-20', '2026-11-22', 2, 'Bo', 30000, 'USD', 'channex', 'chx-1', ?, ?)`).bind(ORG, cabin.id, NOW, NOW).run()
-    await assert.rejects(updateStay(db, manager, 'airbnb-1', { expected_version: 1, adults: 1 }), code('STAY_NOT_EDITABLE'))
-    await assert.rejects(cancelStay(db, manager, 'airbnb-1', { expected_version: 1 }), code('STAY_NOT_EDITABLE'))
+    await assert.rejects(updateStay(db, {}, manager, 'airbnb-1', { expected_version: 1, adults: 1 }), code('STAY_NOT_EDITABLE'))
+    await assert.rejects(cancelStay(db, {}, manager, 'airbnb-1', { expected_version: 1 }), code('STAY_NOT_EDITABLE'))
     await assert.rejects(recordStayPayment(db, manager, 'airbnb-1', { amount_minor: 100, method: 'cash', paid_on: '2026-11-20', idempotency_key: 'pay-1' }), code('STAY_NOT_EDITABLE'))
     assert.equal((await getStay(db, manager, 'airbnb-1')).payment_status, null)
 
-    const stay = await createStay(db, manager, { product_id: cabin.id, idempotency_key: 'p', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest })
+    const stay = await createStay(db, {}, manager, { product_id: cabin.id, idempotency_key: 'p', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest })
     await assert.rejects(recordStayPayment(db, manager, stay.id, { amount_minor: 0, method: 'cash', paid_on: '2026-11-01', idempotency_key: 'pay-2' }), code('INVALID_AMOUNT'))
     await assert.rejects(recordStayPayment(db, manager, stay.id, { amount_minor: 100, method: 'crypto', paid_on: '2026-11-01', idempotency_key: 'pay-3' }), code('INVALID_STAY_FIELD'))
     const partial = await recordStayPayment(db, manager, stay.id, { amount_minor: 20_000, method: 'cash', paid_on: '2026-11-01', reference: 'deposit', idempotency_key: 'pay-4' })
@@ -193,18 +193,18 @@ test('the host sets nights apart from the defaults and resets them', { timeout: 
   const { runtime, db } = await boot()
   try {
     const cabin = await home(db, { name: 'Cabin', location: 'cabin-site' })
-    await assert.rejects(setStayNights(db, manager, { product_id: cabin.id, from: '2026-11-01', to: '2026-11-04' }), /at least one night setting/)
-    const closed = await setStayNights(db, manager, { product_id: cabin.id, from: '2026-11-01', to: '2026-11-03', closed: true })
+    await assert.rejects(setStayNights(db, {}, manager, { product_id: cabin.id, from: '2026-11-01', to: '2026-11-04' }), /at least one night setting/)
+    const closed = await setStayNights(db, {}, manager, { product_id: cabin.id, from: '2026-11-01', to: '2026-11-03', closed: true })
     assert.deepEqual(closed.nights.map(night => [night.available, night.source]), [[false, 'host'], [false, 'host']])
-    const priced = await setStayNights(db, manager, { product_id: cabin.id, from: '2026-11-02', to: '2026-11-04', price_minor: 20_000, min_stay_arrival: 3 })
+    const priced = await setStayNights(db, {}, manager, { product_id: cabin.id, from: '2026-11-02', to: '2026-11-04', price_minor: 20_000, min_stay_arrival: 3 })
     assert.deepEqual(priced.nights.map(night => [night.date, night.closed, night.price_minor, night.min_stay_arrival]), [['2026-11-02', true, 20_000, 3], ['2026-11-03', false, 20_000, 3]])
-    const based = await setStayNights(db, manager, { product_id: cabin.id, from: '2026-11-03', to: '2026-11-04', price_minor: null })
+    const based = await setStayNights(db, {}, manager, { product_id: cabin.id, from: '2026-11-03', to: '2026-11-04', price_minor: null })
     assert.equal(based.nights[0]!.price_minor, 15_000)
-    const reset = await setStayNights(db, manager, { product_id: cabin.id, from: '2026-11-01', to: '2026-11-04', reset: true })
+    const reset = await setStayNights(db, {}, manager, { product_id: cabin.id, from: '2026-11-01', to: '2026-11-04', reset: true })
     assert(reset.nights.every(night => night.available && night.source === null && night.price_minor === 15_000))
     // A closed night is the host's choice for guests; it does not hold a stay the host takes themselves.
-    await setStayNights(db, manager, { product_id: cabin.id, from: '2026-11-10', to: '2026-11-11', closed: true })
-    await createStay(db, manager, { product_id: cabin.id, idempotency_key: 'closed', check_in_date: '2026-11-10', check_out_date: '2026-11-11', ...guest })
+    await setStayNights(db, {}, manager, { product_id: cabin.id, from: '2026-11-10', to: '2026-11-11', closed: true })
+    await createStay(db, {}, manager, { product_id: cabin.id, idempotency_key: 'closed', check_in_date: '2026-11-10', check_out_date: '2026-11-11', ...guest })
   } finally {
     await runtime.dispose()
   }
@@ -215,15 +215,15 @@ test('members see only the homes they look after and change nothing; a home with
   try {
     const cabin = await home(db, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
     const lake = await home(db, { name: 'Lake house', location: 'lake-site' })
-    const cabinStay = await createStay(db, manager, { product_id: cabin.id, idempotency_key: 'c', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
-    const lakeStay = await createStay(db, manager, { product_id: lake.id, idempotency_key: 'l', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
+    const cabinStay = await createStay(db, {}, manager, { product_id: cabin.id, idempotency_key: 'c', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
+    const lakeStay = await createStay(db, {}, manager, { product_id: lake.id, idempotency_key: 'l', check_in_date: '2026-11-01', check_out_date: '2026-11-03', ...guest })
     assert.deepEqual((await listStays(db, cleaner, { from: '2026-11-01', to: '2026-11-30' })).map(stay => stay.id), [cabinStay.id])
     assert.deepEqual(await listStays(db, outsider, { from: '2026-11-01', to: '2026-11-30' }), [])
     assert.equal((await getStay(db, cleaner, cabinStay.id)).id, cabinStay.id)
     await assert.rejects(getStay(db, cleaner, lakeStay.id), code('STAY_NOT_FOUND'))
     await assert.rejects(readStayCalendar(db, cleaner, { productId: lake.id, from: '2026-11-01', to: '2026-11-03' }), code('HOME_NOT_FOUND'))
-    await assert.rejects(createStay(db, cleaner, { product_id: cabin.id, idempotency_key: 'x', check_in_date: '2026-11-10', check_out_date: '2026-11-12', ...guest }), code('STAY_ROLE_REQUIRED'))
-    await assert.rejects(cancelStay(db, cleaner, cabinStay.id, { expected_version: 1 }), code('STAY_ROLE_REQUIRED'))
+    await assert.rejects(createStay(db, {}, cleaner, { product_id: cabin.id, idempotency_key: 'x', check_in_date: '2026-11-10', check_out_date: '2026-11-12', ...guest }), code('STAY_ROLE_REQUIRED'))
+    await assert.rejects(cancelStay(db, {}, cleaner, cabinStay.id, { expected_version: 1 }), code('STAY_ROLE_REQUIRED'))
     await assert.rejects(deleteProduct(db, { organizationId: ORG, productId: cabin.id }), /has bookings or stays/)
     assert.equal((await getProduct(db, ORG, cabin.id)).id, cabin.id)
   } finally {
