@@ -73,7 +73,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.deepEqual(refusal(await call(await cookieFor('helper'), 'POST', cabin)), { status: 403, code: 'STAY_ROLE_REQUIRED' })
 
     const home = {
-      name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2,
+      name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, channel: null,
     }
     const created = await call(owner, 'POST', cabin)
     assert.equal(created.status, 201)

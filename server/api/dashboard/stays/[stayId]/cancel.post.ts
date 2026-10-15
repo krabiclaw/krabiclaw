@@ -9,5 +9,5 @@ export default defineHandler(async (event) => {
   const { env, db, organization } = await getDashboardMemberContext(event, {})
   const access = await stayAccessFor(memberAccessPrincipal(organization, { env, event }))
   const body = await readRequiredBody<{ expected_version?: unknown; reason?: unknown }>(event)
-  return jsonResponse({ stay: await cancelStay(db, access, getRouterParam(event, 'stayId') ?? '', { expected_version: body.expected_version, reason: body.reason }) })
+  return jsonResponse({ stay: await cancelStay(db, env, access, getRouterParam(event, 'stayId') ?? '', { expected_version: body.expected_version, reason: body.reason }) })
 })
