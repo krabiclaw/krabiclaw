@@ -201,8 +201,9 @@ async function listAll(list, params) {
     const page = await list({ ...params, ...(startingAfter ? { starting_after: startingAfter } : {}) })
     rows.push(...(page.data ?? []))
     if (!page.has_more || page.data?.length === 0) break
-    startingAfter = page.data[page.data.length - 1]?.id
-    if (!startingAfter) throw new Error('Stripe list response reported more rows without a final id.')
+    const nextCursor = page.data[page.data.length - 1]?.id
+    if (!nextCursor || nextCursor === startingAfter) throw new Error('Stripe list response reported more rows without an advancing cursor.')
+    startingAfter = nextCursor
   }
   return rows
 }
@@ -811,6 +812,7 @@ function sanitizeError(error) {
   return sanitizeEvidence({
     name: error?.name ?? 'Error',
     message: error?.message ?? String(error),
+    detail: error?.detail?.message,
     code: error?.code,
     status: error?.status,
   })
@@ -1184,7 +1186,6 @@ export class CatalogApplyIncompleteError extends Error {
 export async function applyCatalogPlan({
   plan,
   confirmedSha256,
-  key,
   readAdapter,
   mutationAdapter,
   filesAdapter,
@@ -1195,7 +1196,8 @@ export async function applyCatalogPlan({
     throw new Error('Stripe catalog apply requires an explicit journal path.')
   }
   assertCatalogPlanSchema(plan)
-  assertCatalogModeKey(key, requiredMode)
+  if (typeof readAdapter?.assertMode !== 'function') throw new Error('Stripe catalog apply requires an authenticated provider mode guard.')
+  await readAdapter.assertMode(requiredMode)
   const hash = assertPlanIntegrity(plan, confirmedSha256)
   if (plan.accountMode !== requiredMode) throw new Error(`Stripe catalog apply requires a ${requiredMode}-mode plan.`)
   if (!Array.isArray(plan.operations)) throw new Error('Stripe catalog plan operations must be an array.')

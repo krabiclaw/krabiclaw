@@ -229,6 +229,43 @@ node scripts/seed-stripe.mjs --apply --require-live-mode \
 The two mode guards are mutually exclusive and are checked before constructing
 the Stripe client. Omitting the live guard cannot apply a live key or plan.
 
+## Existing Stripe CLI authentication
+
+For an account already authorized through the current Stripe CLI, select its
+private configuration explicitly instead of supplying an API key:
+
+```sh
+node scripts/seed-stripe.mjs --dry-run --require-test-mode \
+  --stripe-cli-config .tmp/stripe-cli.toml --offers-only \
+  --plan-file .tmp/stripe-cli-catalog-plan.json
+node scripts/seed-stripe.mjs --apply --require-test-mode \
+  --stripe-cli-config .tmp/stripe-cli.toml \
+  --plan-file .tmp/stripe-cli-catalog-plan.json --confirm-sha256 <planSha256> \
+  --journal-file .tmp/stripe-cli-catalog-apply.json
+```
+
+The explicit test/live guard is mandatory. The operator verifies `stripe whoami
+--format json` account and mode, pins that exact account context on each API
+request, and checks the account API response. Apply retains the same signed
+account, snapshot, SHA, contract-preservation and journal guards. The configured
+profile must already target the intended authorized account; the script does
+not switch accounts or authenticate a new session.
+
+Stripe's SDK still owns serialization and provider errors. Its custom HTTP
+transport delegates requests to native `stripe get` and `stripe post`, retaining
+actual HTTP status, response headers, API version and idempotency keys. The CLI
+owns its credentials and automatic refresh; the operator never extracts or
+persists keychain tokens. An inherited `STRIPE_API_KEY` is removed from the CLI
+subprocess so it cannot override the explicitly selected configuration.
+
+CLI transport currently rejects product-image upload operations during apply
+preflight, before any mutation. Use the configured account API key for a plan
+requiring an image upload. Catalog-only plans without such operations use the
+same canonical planner and apply implementation. Ownership cutover remains an
+API-key operation.
+[Stripe CLI authentication](https://docs.stripe.com/cli/login),
+[CLI HTTP requests](https://docs.stripe.com/cli/post).
+
 ## Organization metadata and webhook cutover
 
 The same operator script has an explicit `--ownership-file` mode for the Epoch 5

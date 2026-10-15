@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { assertCatalogModeKey, buildCatalogPlan, sha256Json } from '../../scripts/lib/stripe-catalog-plan.mjs'
-import { main, parseCli } from '../../scripts/seed-stripe.mjs'
+import { assertStripeCliIdentity, main, parseCli, parseStripeCliResponse } from '../../scripts/seed-stripe.mjs'
 
 // Catalog mutation must require an explicit live target, before provider access.
 test('catalog mode rejects live keys by default and mismatched explicit targets', () => {
@@ -19,6 +19,26 @@ test('catalog CLI rejects conflicting account targets and planning scopes', () =
   assert.throws(() => parseCli(['--offers-only', '--retirement-only']), /not both/)
   assert.equal(parseCli(['--offers-only']).scope, 'offers-only')
   assert.equal(parseCli(['--retirement-only']).scope, 'retirement-only')
+  assert.throws(() => parseCli(['--stripe-cli-config', 'private.toml']), /explicit --require-test-mode or --require-live-mode/)
+  assert.throws(() => parseCli(['--stripe-cli-config', 'private.toml', '--require-test-mode', '--ownership-file', 'ownership.json']), /catalog operations only/)
+})
+
+test('CLI authentication proves account and mode without accepting missing or changed context', () => {
+  assert.equal(assertStripeCliIdentity({ account_id: 'acct_sandbox', mode: 'test' }, 'test'), 'acct_sandbox')
+  assert.throws(() => assertStripeCliIdentity({ account_id: 'acct_sandbox', mode: 'live' }, 'test'), /require test mode/)
+  assert.throws(() => assertStripeCliIdentity({ account_id: 'acct_sandbox' }, 'test'), /require test mode/)
+  assert.throws(() => assertStripeCliIdentity({ mode: 'test' }, 'test'), /exact account ID/)
+  assert.throws(() => assertStripeCliIdentity({ account_id: 'acct_other', mode: 'test' }, 'test', 'acct_sandbox'), /account changed/)
+})
+
+test('CLI response parsing retains the actual status, response headers and provider error', () => {
+  const response = parseStripeCliResponse('> GET https://api.stripe.com/v1/products\n< HTTP 400\n< Content-Type: application/json\n< Request-Id: req_badprice\n\n{"error":{"message":"No such price","code":"resource_missing"}}\n')
+  assert.deepEqual(response, {
+    statusCode: 400, headers: { 'content-type': 'application/json', 'request-id': 'req_badprice' },
+    body: { error: { message: 'No such price', code: 'resource_missing' } },
+  })
+  assert.throws(() => parseStripeCliResponse('{"id":"prod_without_status"}'), /actual HTTP response status/)
+  assert.throws(() => parseStripeCliResponse('< HTTP 200\n< Content-Type: application/json\n'), /JSON response body/)
 })
 
 test('catalog apply cannot reach Stripe with an unapproved live target', async () => {

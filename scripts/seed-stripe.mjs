@@ -17,9 +17,10 @@
 //     --journal-file .tmp/stripe-catalog-apply.json
 
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { execFile } from 'node:child_process'
 import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { parseArgs } from 'node:util'
+import { parseArgs, promisify } from 'node:util'
 import Stripe from 'stripe'
 import {
   OFFERED_PLAN_IDS,
@@ -35,6 +36,7 @@ import {
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(SCRIPT_DIR, '..')
+const execFileAsync = promisify(execFile)
 
 function loadEnv() {
   try {
@@ -60,8 +62,9 @@ function secretKeyFromEnv() {
   return process.env.STRIPE_SECRET_KEY || env.STRIPE_SECRET_KEY || ''
 }
 
-function stripeReadAdapter(stripe) {
+function stripeReadAdapter(stripe, assertMode) {
   return {
+    assertMode,
     account: { retrieve: () => stripe.accounts.retrieve(null) },
     products: stripe.products,
     prices: stripe.prices,
@@ -98,6 +101,7 @@ function localImagePath(path) {
 function stripeFilesAdapter(secretKey) {
   return {
     async verifyProductImage(operation) {
+      if (!secretKey) throw new Error('Stripe CLI catalog transport does not support product image uploads; apply this image operation with the configured account API key.')
       const path = localImagePath(operation.path)
       if (!existsSync(path)) throw new Error(`Stripe catalog image is missing: ${operation.path}`)
       const bytes = readFileSync(path)
@@ -187,6 +191,7 @@ export function parseCli(argv) {
       'require-live-mode': { type: 'boolean' },
       'retirement-only': { type: 'boolean' },
       'offers-only': { type: 'boolean' },
+      'stripe-cli-config': { type: 'string' },
       'plan-file': { type: 'string' },
       'journal-file': { type: 'string' },
       'journal-path': { type: 'string' },
@@ -203,6 +208,11 @@ export function parseCli(argv) {
   if (values['require-test-mode'] && values['require-live-mode']) throw new Error('Choose either --require-test-mode or --require-live-mode, not both.')
   const apply = Boolean(values.apply)
   const ownershipFile = values['ownership-file'] ? resolve(values['ownership-file']) : null
+  const stripeCliConfig = values['stripe-cli-config'] ? resolve(values['stripe-cli-config']) : null
+  if (stripeCliConfig && !values['require-test-mode'] && !values['require-live-mode']) {
+    throw new Error('--stripe-cli-config requires an explicit --require-test-mode or --require-live-mode.')
+  }
+  if (stripeCliConfig && ownershipFile) throw new Error('--stripe-cli-config supports catalog operations only.')
   const verifyOwnership = Boolean(values['verify-ownership'])
   const rollbackOwnership = Boolean(values['rollback-ownership'])
   if (verifyOwnership && (!ownershipFile || apply)) throw new Error('--verify-ownership requires --ownership-file without --apply.')
@@ -230,6 +240,7 @@ export function parseCli(argv) {
   if (!apply && journalFile) throw new Error('--journal-file is only valid with --apply.')
   return {
     apply,
+    stripeCliConfig,
     ownershipFile,
     verifyOwnership,
     rollbackOwnership,
@@ -249,6 +260,82 @@ export function createStripeClient(secretKey, StripeConstructor = Stripe) {
     maxNetworkRetries: 0,
     timeout: STRIPE_CATALOG_REQUEST_TIMEOUT_MS,
   })
+}
+
+export function assertStripeCliIdentity(identity, requiredMode, expectedAccountId) {
+  if (!['test', 'live'].includes(requiredMode)) throw new Error('Stripe CLI catalog mode must be test or live.')
+  if (identity?.mode !== requiredMode) throw new Error(`Stripe CLI catalog operations require ${requiredMode} mode; the authenticated context is ${String(identity?.mode)}.`)
+  if (!/^acct_[A-Za-z0-9]+$/.test(identity?.account_id ?? '')) throw new Error('Stripe CLI could not prove an exact account ID.')
+  if (expectedAccountId && identity.account_id !== expectedAccountId) throw new Error(`Stripe CLI account changed from ${expectedAccountId} to ${identity.account_id}.`)
+  return identity.account_id
+}
+
+export function parseStripeCliResponse(stdout) {
+  const status = [...stdout.matchAll(/^< HTTP(?:\/\S+)? (\d{3})\b/gm)].at(-1)
+  if (!status) throw new Error('Stripe CLI did not return an actual HTTP response status.')
+  const response = stdout.slice(status.index + status[0].length)
+  const bodyStart = response.search(/^[\[{]/m)
+  if (bodyStart < 0) throw new Error('Stripe CLI did not return a JSON response body.')
+  const headers = Object.fromEntries([...response.slice(0, bodyStart).matchAll(/^< ([^:\r\n]+):\s*(.*)$/gm)]
+    .map(([, name, value]) => [name.toLowerCase(), value.trim()]))
+  return { statusCode: Number(status[1]), headers, body: JSON.parse(response.slice(bodyStart)) }
+}
+
+async function createStripeCliClient(configPath, requiredMode) {
+  if (!existsSync(configPath)) throw new Error(`Stripe CLI configuration is missing: ${configPath}`)
+  const runCli = async args => {
+    try {
+      return await execFileAsync('stripe', ['--config', configPath, '--color', 'off', ...args], {
+        encoding: 'utf8', timeout: STRIPE_CATALOG_REQUEST_TIMEOUT_MS, maxBuffer: 20 * 1024 * 1024,
+        env: { ...process.env, STRIPE_API_KEY: '' },
+      })
+    } catch (error) {
+      const reason = String(error.stderr || error.code || 'command failed')
+        .replace(/\b(?:oak_|(?:sk|rk)_(?:test|live)_)[A-Za-z0-9_.-]+\b/g, '[redacted-stripe-credential]')
+      throw new Error(`Stripe CLI catalog request failed: ${reason}`, { cause: error })
+    }
+  }
+  const identity = JSON.parse((await runCli(['whoami', '--format', 'json'])).stdout)
+  const accountId = assertStripeCliIdentity(identity, requiredMode)
+  const assertMode = async mode => {
+    const current = JSON.parse((await runCli(['whoami', '--format', 'json'])).stdout)
+    assertStripeCliIdentity(current, mode, accountId)
+  }
+  const stripe = new Stripe(undefined, {
+    authenticator: async () => {},
+    maxNetworkRetries: 0,
+    timeout: STRIPE_CATALOG_REQUEST_TIMEOUT_MS,
+    httpClient: {
+      getClientName: () => 'StripeCLI',
+      async makeRequest(host, _port, path, method, headers, requestData, protocol) {
+        if (host !== 'api.stripe.com' || protocol !== 'https' || !['GET', 'POST'].includes(method)) {
+          throw new Error('Stripe CLI catalog transport supports only HTTPS GET/POST requests to api.stripe.com.')
+        }
+        const url = new URL(path, 'https://api.stripe.com')
+        const args = [method.toLowerCase(), url.pathname, '--show-headers',
+          '--request-header', `Stripe-Context: ${accountId}`,
+          '--request-header', `Stripe-Livemode: ${requiredMode === 'live'}`]
+        if (requiredMode === 'live') args.push('--live')
+        for (const [name, value] of Object.entries(headers)) {
+          if (['stripe-version', 'idempotency-key'].includes(name.toLowerCase())) args.push('--request-header', `${name}: ${value}`)
+        }
+        for (const [name, value] of [...url.searchParams, ...new URLSearchParams(requestData)]) args.push('-d', `${name}=${value}`)
+        const { stdout, stderr } = await runCli(args)
+        const response = parseStripeCliResponse(`${stderr}\n${stdout}`)
+        if (response.statusCode === 200 && path.split('?')[0] === '/v1/account' && response.body.id !== accountId) {
+          throw new Error(`Stripe CLI account API returned ${String(response.body.id)} instead of ${accountId}.`)
+        }
+        return {
+          getStatusCode: () => response.statusCode,
+          getHeaders: () => response.headers,
+          getRawResponse: () => response.body,
+          toJSON: async () => response.body,
+          toStream: () => { throw new Error('Stripe CLI catalog transport does not support streaming responses.') },
+        }
+      },
+    },
+  })
+  return { stripe, assertMode, mode: requiredMode }
 }
 
 function writePlan(path, plan) {
@@ -399,19 +486,23 @@ export async function runOwnershipCutover(cli, stripe, mode) {
 
 export async function main(argv = process.argv.slice(2), dependencies = {}) {
   const cli = parseCli(argv)
-  const secretKey = dependencies.secretKey ?? secretKeyFromEnv()
-  if (!secretKey) throw new Error('STRIPE_SECRET_KEY not found in environment or .env')
-
-  const mode = keyMode(secretKey)
   const requiredMode = cli.requireLiveMode ? 'live' : 'test'
-  if ((cli.apply && !cli.ownershipFile) || cli.requireTestMode || cli.requireLiveMode) assertCatalogModeKey(secretKey, requiredMode)
-
-  const stripeFactory = dependencies.stripeFactory ?? createStripeClient
-  const stripe = stripeFactory(secretKey)
+  let secretKey, stripe, mode, assertMode
+  if (cli.stripeCliConfig) {
+    ({ stripe, mode, assertMode } = await createStripeCliClient(cli.stripeCliConfig, requiredMode))
+  } else {
+    secretKey = dependencies.secretKey ?? secretKeyFromEnv()
+    if (!secretKey) throw new Error('STRIPE_SECRET_KEY not found in environment or .env')
+    mode = keyMode(secretKey)
+    assertMode = mode => assertCatalogModeKey(secretKey, mode)
+    if ((cli.apply && !cli.ownershipFile) || cli.requireTestMode || cli.requireLiveMode) assertMode(requiredMode)
+    const stripeFactory = dependencies.stripeFactory ?? createStripeClient
+    stripe = stripeFactory(secretKey)
+  }
   if (cli.ownershipFile) return runOwnershipCutover(cli, stripe, mode)
   if (!cli.apply) {
     const plan = await createCatalogPlan({
-      readAdapter: stripeReadAdapter(stripe),
+      readAdapter: stripeReadAdapter(stripe, assertMode),
       accountMode: mode,
       imageFiles: describeImageFiles(),
       canonicalProductIds: cli.canonicalProductIds,
@@ -431,8 +522,7 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
   const result = await applyCatalogPlan({
     plan,
     confirmedSha256: cli.confirmSha256,
-    key: secretKey,
-    readAdapter: stripeReadAdapter(stripe),
+    readAdapter: stripeReadAdapter(stripe, assertMode),
     mutationAdapter: stripeMutationAdapter(stripe),
     filesAdapter: stripeFilesAdapter(secretKey),
     journalPath: cli.journalFile,
@@ -446,7 +536,7 @@ export async function main(argv = process.argv.slice(2), dependencies = {}) {
 const isDirectRun = process.argv[1] && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url))
 if (isDirectRun) {
   main().catch(error => {
-    const message = error instanceof Error ? error.message : String(error)
+    const message = error instanceof Error ? error.detail?.message ?? error.message : String(error)
     console.error(message)
     if (error?.status === 'incomplete') {
       console.error(`Stripe catalog apply status=incomplete; journal=${error.journalPath ?? 'unknown'}`)
