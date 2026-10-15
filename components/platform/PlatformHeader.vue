@@ -172,12 +172,10 @@ const props = withDefaults(defineProps<{ section?: 'platform' | 'docs' | 'blog' 
   section: 'platform',
 })
 
-// Route migration to /services and /mcp belongs to #939; the approved labels
-// point at the destinations that work today.
 const SOLUTION_ITEMS = [
   { label: 'Restaurants', to: '/restaurants' },
   { label: 'Experiences', to: '/experiences' },
-  { label: 'Professional Services', to: '/legal' },
+  { label: 'Law firms', to: '/legal' },
 ] as const
 
 const PRIMARY_ITEMS = [
