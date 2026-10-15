@@ -540,3 +540,44 @@ export async function setStayNights(db: DbClient, access: StayAccess, input: Rec
   ], { operation: 'Set stay nights' })
   return readStayCalendar(db, access, { productId: home.product_id, from, to })
 }
+
+/** One night of a channel's calendar as an import reads it. */
+export interface ImportedNight {
+  date: string
+  available: boolean
+  price_minor: number
+  min_stay_arrival: number
+  max_stay: number | null
+  closed_to_arrival: boolean
+  closed_to_departure: boolean
+}
+
+/**
+ * A channel calendar copied onto a home: each night becomes an `import` row,
+ * replacing any earlier import and never a night the host set themselves.
+ * One statement, so the calendar lands whole or not at all.
+ */
+export async function importStayNights(db: DbClient, access: StayAccess, productId: string, nights: readonly ImportedNight[]): Promise<void> {
+  requireManager(access)
+  const home = await readStayHome(db, access, productId)
+  if (!nights.length) return
+  for (const night of nights) date(night.date, 'date')
+  const now = new Date().toISOString()
+  await executeBatch(db, [
+    {
+      query: `INSERT INTO product_nights (organization_id, product_id, date, closed, price_minor, min_stay_arrival, max_stay, closed_to_arrival, closed_to_departure, source, updated_at, updated_by)
+              SELECT ?, ?, json_extract(value, '$.date'), json_extract(value, '$.closed'), json_extract(value, '$.price_minor'), json_extract(value, '$.min_stay_arrival'),
+                     json_extract(value, '$.max_stay'), json_extract(value, '$.closed_to_arrival'), json_extract(value, '$.closed_to_departure'), 'import', ?, ?
+                FROM json_each(?) WHERE true
+              ON CONFLICT (product_id, date) DO UPDATE SET closed = excluded.closed, price_minor = excluded.price_minor, min_stay_arrival = excluded.min_stay_arrival,
+                max_stay = excluded.max_stay, closed_to_arrival = excluded.closed_to_arrival, closed_to_departure = excluded.closed_to_departure,
+                updated_at = excluded.updated_at, updated_by = excluded.updated_by
+              WHERE product_nights.source = 'import'`,
+      params: [access.organizationId, home.product_id, now, access.actorId, JSON.stringify(nights.map(night => ({
+        date: night.date, closed: night.available ? 0 : 1, price_minor: night.price_minor, min_stay_arrival: night.min_stay_arrival,
+        max_stay: night.max_stay, closed_to_arrival: night.closed_to_arrival ? 1 : 0, closed_to_departure: night.closed_to_departure ? 1 : 0,
+      })))],
+    },
+    organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.nights_imported', entityType: 'product', entityId: home.product_id, metadata: { from: nights[0]!.date, to: nights.at(-1)!.date, nights: nights.length } }),
+  ], { operation: 'Import stay nights' })
+}
