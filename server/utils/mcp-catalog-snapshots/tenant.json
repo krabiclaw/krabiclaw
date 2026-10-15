@@ -107298,14 +107298,16 @@
   "publicDocumentation": [
     {
       "slug": "what-you-can-edit-through-chatgpt",
-      "contentHash": "sha256:7a565f4a22374eabd30bd127559d7e9c638768d21b4df33c386204453f12ca18",
+      "contentHash": "sha256:86ccd737270c959c7a732d03ca0e955124aa7c90e6b75d4757148974847ea241",
       "toolContracts": {
         "create_location": "sha256:b25656237d93d456c98da74d8281ec6d1d05435e6a7657a18c14b82654b79b9b",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_guest_conversation": "sha256:6a0cc3fef767411569af75a68be2abcb91cefbcd3f8feba7835500b32b3c589b",
+        "get_stay": "sha256:e8132e2d19ebf3420caeb34d71377c2c30961be38f91ccc8500581483b169bc7",
         "invite_organization_member": "sha256:f520b4ade47c9c5a5faef9859564f32d1c9dddfd285efdcc27fa099fa60e8a24",
         "list_guest_conversations": "sha256:153f745faeac94cd2caaec6ec20d496592da104ce72fc9615fd39184c5502166",
         "list_organization_members": "sha256:f47eb37ec4cfa1df500db883fdd207db7e2228a3839d64e08f4e52351f85b10e",
+        "list_stays": "sha256:fb9f51613819364e72a9f76d3d4178dd3ade4d80f8ea2a51a647cf1362cd4dac",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "reply_to_guest": "sha256:32b18d18a182751c3fb2fb6eb156f34359d42d7b4aaa2ae7c435345fe80438d2",
         "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
@@ -107380,15 +107382,17 @@
     },
     {
       "slug": "handle-inquiries-and-reservation-requests",
-      "contentHash": "sha256:27751690ab146ffab5ac13e86599c4174da482da631772f3935269e00273de77",
+      "contentHash": "sha256:ef918a59f51075aabf427c0d67ecce375c65deb59579f716f759a2368dd3a988",
       "toolContracts": {
         "cancel_table_reservation": "sha256:671384fbe0abd846ad44296506d6acbb68fab9adeaecd53802aa98d9619a74c3",
         "create_table_reservation": "sha256:412c62d5987f89d7d7c7bf57ac2038c65f4101181bb4762341e0a937766c948b",
         "get_guest_conversation": "sha256:6a0cc3fef767411569af75a68be2abcb91cefbcd3f8feba7835500b32b3c589b",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
+        "get_stay": "sha256:e8132e2d19ebf3420caeb34d71377c2c30961be38f91ccc8500581483b169bc7",
         "list_guest_conversations": "sha256:153f745faeac94cd2caaec6ec20d496592da104ce72fc9615fd39184c5502166",
         "list_product_bookings": "sha256:ea80e0cc56ffb5b12058725b9644f50e50af6191c4a44493fb0be538224d7373",
         "list_reservation_inquiries": "sha256:85cb564470d0026c00b8727287edb2a6c2d403fec987c2ac13f4aaaa28e5d171",
+        "list_stays": "sha256:fb9f51613819364e72a9f76d3d4178dd3ade4d80f8ea2a51a647cf1362cd4dac",
         "reply_to_guest": "sha256:32b18d18a182751c3fb2fb6eb156f34359d42d7b4aaa2ae7c435345fe80438d2",
         "request_table_reservation_change": "sha256:f94a16f948498d413eb39b8542a85707c2dec4f2a369f73aaebdd83b305030a4",
         "update_reservation_policy": "sha256:f1e5e7eda32993dc7be3ffc459ceb97517ed309bb144d2a5f29a0f0b082f784f"
