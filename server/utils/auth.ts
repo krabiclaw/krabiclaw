@@ -430,7 +430,10 @@ function buildAuth(env: CloudflareEnv) {
           ])
           const plan = plans.find(row => row.name === requestedPlan)
           const priceId = body.annual === true ? plan?.annualDiscountPriceId : plan?.priceId
-          if (!priceId || native.items.data.filter(item => item.price.id === priceId).length !== 1) {
+          const customerId = typeof native.customer === 'string' ? native.customer : native.customer.id
+          if (!['active', 'trialing'].includes(native.status) || native.cancel_at_period_end || native.schedule
+            || (subscription.stripeCustomerId && customerId !== subscription.stripeCustomerId)
+            || !priceId || native.items.data.filter(item => item.price.id === priceId).length !== 1) {
             throw new APIError('BAD_REQUEST', { message: 'This subscription’s existing price cannot be changed through a location update.' })
           }
         }
@@ -731,6 +734,12 @@ function buildAuth(env: CloudflareEnv) {
           enabled: true,
           plans: () => loadStripePlans(),
           requireEmailVerification: true,
+          getCheckoutSessionParams: ({ plan }) => {
+            if (!isNewSalePlan(plan.name)) {
+              throw new APIError('BAD_REQUEST', { message: 'This plan is no longer available for new subscriptions. Choose Growth or Business.' })
+            }
+            return {}
+          },
           authorizeReference: async ({ user, referenceId }, ctx) => {
             const member = await getOrgAdapter(ctx.context, configuredOrganizationOptions).findMemberByOrgId({
               userId: user.id,
