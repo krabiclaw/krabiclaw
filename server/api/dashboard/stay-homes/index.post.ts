@@ -9,6 +9,7 @@ export default defineHandler(async (event) => {
   const { env, db, organization } = await getDashboardMemberContext(event, {})
   const access = await stayAccessFor(memberAccessPrincipal(organization, { env, event }))
   const body = await readRequiredBody<Record<string, unknown>>(event)
-  if (typeof body.idempotency_key !== 'string' || !body.idempotency_key) return jsonResponse({ error: 'idempotency_key is required', code: 'VALIDATION_ERROR', field: 'idempotency_key' }, { status: 400 })
-  return jsonResponse({ home: await createStayHome(env, db, access, stayHomeInput(body), `stay-home:${body.idempotency_key}`) }, { status: 201 })
+  const key = typeof body.idempotency_key === 'string' ? body.idempotency_key.trim() : null
+  if (!key || key.length > 200) return jsonResponse({ error: 'idempotency_key must be 1 to 200 characters', code: 'VALIDATION_ERROR', field: 'idempotency_key' }, { status: 400 })
+  return jsonResponse({ home: await createStayHome(env, db, access, stayHomeInput(body), key) }, { status: 201 })
 })

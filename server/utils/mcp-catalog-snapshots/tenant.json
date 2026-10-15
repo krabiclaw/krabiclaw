@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:5ac50d24383bd01a629e8fc91c7aba27fd7c348a846830e031bed6fcd840d016",
-  "documentationFingerprint": "sha256:ff87a350d4062bfd237ba88cd82551a6de5ce5da954bce82d72190d698ae9276",
+  "fingerprint": "sha256:fc153680fee799747cb3375cf139eaaac4506e3c1fe01c4bdea8795c0492af28",
+  "documentationFingerprint": "sha256:7ebb5d86791d825e0621233b70d78f8f35b021d5fab8553ca21407081fe51d14",
   "tools": [
     {
       "name": "append_content_block",
@@ -8307,7 +8307,7 @@
                 ]
               },
               "request_id": {
-                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest; null when the guest has no email.",
+                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest. Null until a named guest with email or phone opens one; an existing conversation is retained.",
                 "type": [
                   "string",
                   "null"
@@ -28867,7 +28867,7 @@
                 ]
               },
               "request_id": {
-                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest; null when the guest has no email.",
+                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest. Null until a named guest with email or phone opens one; an existing conversation is retained.",
                 "type": [
                   "string",
                   "null"
@@ -33867,7 +33867,7 @@
                 ]
               },
               "request_id": {
-                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest; null when the guest has no email.",
+                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest. Null until a named guest with email or phone opens one; an existing conversation is retained.",
                 "type": [
                   "string",
                   "null"
@@ -52793,7 +52793,7 @@
                 ]
               },
               "request_id": {
-                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest; null when the guest has no email.",
+                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest. Null until a named guest with email or phone opens one; an existing conversation is retained.",
                 "type": [
                   "string",
                   "null"
@@ -53286,7 +53286,7 @@
                   ]
                 },
                 "request_id": {
-                  "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest; null when the guest has no email.",
+                  "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest. Null until a named guest with email or phone opens one; an existing conversation is retained.",
                   "type": [
                     "string",
                     "null"
@@ -58458,7 +58458,7 @@
                   ]
                 },
                 "request_id": {
-                  "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest; null when the guest has no email.",
+                  "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest. Null until a named guest with email or phone opens one; an existing conversation is retained.",
                   "type": [
                     "string",
                     "null"
@@ -73448,7 +73448,7 @@
                 ]
               },
               "request_id": {
-                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest; null when the guest has no email.",
+                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest. Null until a named guest with email or phone opens one; an existing conversation is retained.",
                 "type": [
                   "string",
                   "null"
@@ -88433,7 +88433,7 @@
                   ]
                 },
                 "request_id": {
-                  "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest; null when the guest has no email.",
+                  "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest. Null until a named guest with email or phone opens one; an existing conversation is retained.",
                   "type": [
                     "string",
                     "null"
@@ -106852,7 +106852,7 @@
                 ]
               },
               "request_id": {
-                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest; null when the guest has no email.",
+                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest. Null until a named guest with email or phone opens one; an existing conversation is retained.",
                 "type": [
                   "string",
                   "null"
