@@ -4,7 +4,8 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
-import { cancelStay, createStay, readStayCalendar, setStayNights, type StayAccess } from '../../server/domain/stays.ts'
+import { cancelStay, createStay, readStayCalendar, setStayNights, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
+import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
 // A connected home's night changes reach Channex: closed nights, prices and
 // stay rules as restrictions, held nights as availability. What Channex took
@@ -127,6 +128,18 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.deepEqual((await states(connected, day(30), day(31)))[0], unknown.channel_push)
     assert.deepEqual(channex.take().map(request => request.path), ['/restrictions', '/availability'])
     assert.deepEqual((await log()).slice(-3).map(row => [(row as { kind: string }).kind, (row as { status: string }).status]), [['restrictions', 'needs_review'], ['restrictions', 'pushed'], ['availability', 'needs_review']])
+
+    // A new base price on a connected home reaches every night ahead that has no price of its own.
+    channex.answer['/availability'] = undefined
+    const repriced = await updateStayHome(env as unknown as CloudflareEnv, db, manager, connected, { base_price_minor: 160_00 })
+    assert.deepEqual([repriced.home.base_price_minor, repriced.channel_push], [160_00, { state: 'pushed', detail: null }])
+    const ahead = channex.take()
+    assert.deepEqual(ahead.map(request => [request.path, request.values.length]), [['/restrictions', 500], ['/availability', 500]])
+    const rates = new Map(ahead[0]!.values.map(value => [value.date, value.rate]))
+    assert.deepEqual([rates.get(day(0)), rates.get(day(10)), rates.get(day(499))], ['175.50', '160.00', '160.00'])
+    // A rename changes nothing the channel is told.
+    assert.equal((await updateStayHome(env as unknown as CloudflareEnv, db, manager, connected, { name: 'Cabin by the cliff' })).channel_push, null)
+    assert.deepEqual(channex.take(), [])
 
     // A connected home with no nightly price is held for review before anything is sent.
     channex.answer['/availability'] = undefined

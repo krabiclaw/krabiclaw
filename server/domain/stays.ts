@@ -2,8 +2,10 @@ import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedHomeSql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery } from '~/server/utils/organization-events'
-import { createLocation } from '~/server/utils/location-management'
-import { createProduct } from '~/server/utils/product-management'
+import { createLocation, updateLocation } from '~/server/utils/location-management'
+import { createProduct, getProduct, updateProduct } from '~/server/utils/product-management'
+import type { UpdateProductInput } from '~/server/types/products'
+import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
@@ -101,6 +103,9 @@ export interface StayHome {
   check_out_time: string
   max_guests: number
   min_nights: number
+  /** The member (member.id) and the team who look after the home; assigned members see its stays. */
+  assigned_member_id: string | null
+  assigned_team_id: string | null
   /**
    * The channel this home is connected to, if any. null is a home kept only in
    * Krabiclaw: its night changes go nowhere else. A connected home pushes its
@@ -192,7 +197,7 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
   const scope = visibleHomes(access)
   const rows = await queryAll<Record<string, unknown>>(db, `
     SELECT p.id AS product_id, p.name, c.location_id, l.timezone, o.default_currency, c.check_in_time, c.check_out_time, c.max_guests, c.min_nights,
-           m.enabled AS channel_enabled, m.import_stage AS channel_stage
+           c.assigned_member_id, c.assigned_team_id, m.enabled AS channel_enabled, m.import_stage AS channel_stage
       FROM product_stay_configs c
       JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
@@ -215,6 +220,8 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
       product_id: String(row.product_id), name: String(row.name), location_id: String(row.location_id), timezone: String(row.timezone),
       currency: row.default_currency, base_price_minor: base ? base.unit_amount : null,
       check_in_time: String(row.check_in_time), check_out_time: String(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
+      assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
+      assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
       channel: row.channel_stage === null ? null : {
         provider: 'channex',
         status: Number(row.channel_enabled) === 1 ? 'connected' : row.channel_stage === 'reservations' || row.channel_stage === 'complete' ? 'disconnected' : 'importing',
@@ -253,8 +260,8 @@ export interface NewStayHome {
   base_price_minor: number | null
 }
 
-/** Read a new home's details from a request body; each problem names its field. */
-export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
+/** A home's details read from a request body; each problem names its field. */
+function homeDetails(body: Record<string, unknown>) {
   const text = (key: string, max: number, required: boolean): string | null => {
     const value = body[key]
     if (value === undefined || value === null || (typeof value === 'string' && !value.trim())) {
@@ -273,22 +280,113 @@ export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
     if (typeof value !== 'number' || !Number.isInteger(value) || value < min || value > max) fail(422, 'INVALID_DETAIL', `${key} must be a whole number from ${min} to ${max}`, key)
     return value
   }
+  const timezone = (required: boolean) => {
+    const value = text('timezone', 64, required)
+    if (value !== null && !isValidTimezone(value)) fail(422, 'INVALID_DETAIL', 'Choose a valid time zone', 'timezone')
+    return value
+  }
+  const time = (key: 'check_in_time' | 'check_out_time', required: boolean) => {
+    const value = text(key, 5, required)
+    if (value !== null && !TIME.test(value)) fail(422, 'INVALID_DETAIL', `${key} must be a 24-hour HH:MM time`, key)
+    return value
+  }
+  return {
+    text, timezone, time,
+    name: (required: boolean) => text('name', 200, required),
+    maxGuests: (required: boolean) => whole('max_guests', 1, 99, required),
+    minNights: (required: boolean) => whole('min_nights', 1, 365, required),
+    basePrice: () => whole('base_price_minor', 0, Number.MAX_SAFE_INTEGER, false),
+  }
+}
+
+/** Read a new home's details from a request body; each problem names its field. */
+export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
+  const { text, timezone, time, name, maxGuests, minNights, basePrice } = homeDetails(body)
   const home: NewStayHome = {
-    name: text('name', 200, true)!, timezone: text('timezone', 64, true)!,
+    name: name(true)!, timezone: timezone(true)!,
     address: text('address', 200, true)!, city: text('city', 100, true)!, state: text('state', 100, false),
     country: text('country', 2, true)!, zip_code: text('zip_code', 32, false),
     phone: text('phone', 32, false), email: text('email', 254, false),
-    check_in_time: text('check_in_time', 5, true)!, check_out_time: text('check_out_time', 5, true)!,
-    max_guests: whole('max_guests', 1, 99, true)!, min_nights: whole('min_nights', 1, 365, true)!,
-    base_price_minor: whole('base_price_minor', 0, Number.MAX_SAFE_INTEGER, false),
+    check_in_time: time('check_in_time', true)!, check_out_time: time('check_out_time', true)!,
+    max_guests: maxGuests(true)!, min_nights: minNights(true)!,
+    base_price_minor: basePrice(),
   }
   if (!/^[A-Z]{2}$/.test(home.country)) fail(422, 'INVALID_DETAIL', 'country must be a two-letter ISO country code', 'country')
-  if (!isValidTimezone(home.timezone)) fail(422, 'INVALID_DETAIL', 'Choose a valid time zone', 'timezone')
   if (home.email !== null && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(home.email)) fail(422, 'INVALID_DETAIL', 'Enter a valid contact email', 'email')
-  for (const key of ['check_in_time', 'check_out_time'] as const) {
-    if (!TIME.test(home[key])) fail(422, 'INVALID_DETAIL', `${key} must be a 24-hour HH:MM time`, key)
-  }
   return home
+}
+
+const EDITABLE_HOME_FIELDS = ['name', 'timezone', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'base_price_minor', 'assigned_member_id', 'assigned_team_id'] as const
+const NIGHTS_AHEAD = MAX_CALENDAR_DAYS
+
+/**
+ * Change a home's details. Fields left out keep their value. Its time zone is
+ * its location's, so it moves every home at that location. Who looks after it
+ * is a member (member.id) or a team of this organization, or null. On a
+ * connected home, a new base price or minimum stay is pushed for the nights
+ * ahead, because nights without their own value use them.
+ */
+export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: StayAccess, productId: string, body: Record<string, unknown>): Promise<{ home: StayHome; channel_push: ChannelPush | null }> {
+  requireManager(access)
+  const home = await readStayHome(db, access, productId)
+  const unknown = Object.keys(body).find(key => !(EDITABLE_HOME_FIELDS as readonly string[]).includes(key))
+  if (unknown) fail(422, 'INVALID_DETAIL', `${unknown} cannot be changed here`, unknown)
+  if (!Object.keys(body).length) fail(422, 'INVALID_DETAIL', 'Name at least one detail to change')
+  for (const key of ['name', 'timezone', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights'] as const) {
+    const value = body[key]
+    if (key in body && (value === null || (typeof value === 'string' && !value.trim()))) fail(422, 'INVALID_DETAIL', `${key} cannot be empty`, key)
+  }
+  const { timezone, time, name, maxGuests, minNights, basePrice } = homeDetails(body)
+  // Every field is checked before anything is written.
+  const zone = timezone(false)
+  const stay: NonNullable<UpdateProductInput['stay']> = {}
+  const checkIn = time('check_in_time', false)
+  if (checkIn !== null) stay.check_in_time = checkIn
+  const checkOut = time('check_out_time', false)
+  if (checkOut !== null) stay.check_out_time = checkOut
+  const guests = maxGuests(false)
+  if (guests !== null) stay.max_guests = guests
+  const nights = minNights(false)
+  if (nights !== null) stay.min_nights = nights
+  for (const [key, table, column] of [['assigned_member_id', 'member', 'organizationId'], ['assigned_team_id', 'team', 'organizationId']] as const) {
+    if (!(key in body)) continue
+    const value = body[key]
+    if (value !== null && (typeof value !== 'string' || !await queryFirst(db, `SELECT 1 FROM ${table} WHERE ${column} = ? AND id = ?`, [access.organizationId, value]))) {
+      fail(422, 'INVALID_DETAIL', `${key} must be a ${table} of this organization, or null`, key)
+    }
+    stay[key] = value as string | null
+  }
+  const patch: UpdateProductInput = {}
+  const renamed = name(false)
+  if (renamed !== null) patch.name = renamed
+  if (Object.keys(stay).length) patch.stay = stay
+  const pricing = 'base_price_minor' in body
+  if (pricing) {
+    const price = basePrice()
+    const product = await getProduct(db, access.organizationId, productId)
+    if (product.variants.length !== 1) fail(409, 'HOME_HAS_OPTIONS', 'This home has several options; change their prices in the product editor', 'base_price_minor')
+    const variant = product.variants[0]!
+    const base = selectPrice(variant.prices, { currency: home.currency, location_id: home.location_id })
+    if (price !== null) patch.variants = [{ id: variant.id, prices: [base ? { id: base.id, unit_amount: price } : { unit_amount: price }] }]
+    else if (base) patch.variants = [{ id: variant.id, prices_mode: 'replace', prices: variant.prices.filter(other => other.id !== base.id).map(other => ({ id: other.id })) }]
+  }
+  const pushes = pricing || nights !== null
+  if (pushes) await requireChannelPush(db, env, access.organizationId, productId)
+
+  if (Object.keys(patch).length) await updateProduct(db, { organizationId: access.organizationId, productId, patch, actor: { actorId: access.actorId }, env })
+  // The product's checks are the ones a valid request can still fail, so it is written first.
+  if (zone !== null && zone !== home.timezone) {
+    const moved = await updateLocation(db as D1Database, access.organizationId, home.location_id, { timezone: zone }, access.actorId, env)
+    if (moved.status !== 200) {
+      const data = moved.data as { error?: string; code?: string }
+      throw new HTTPError({ statusCode: moved.status, statusMessage: data.error ?? 'The time zone could not be changed', data: { code: data.code ?? 'LOCATION_NOT_UPDATED', field: 'timezone' } })
+    }
+  }
+  const updated = await readStayHome(db, access, productId)
+  if (!pushes || updated.channel?.status !== 'connected') return { home: updated, channel_push: null }
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: updated.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+  const until = new Date(Date.parse(`${today}T00:00:00Z`) + NIGHTS_AHEAD * 86_400_000).toISOString().slice(0, 10)
+  return { home: updated, channel_push: await pushNights(db, env, access, productId, [[today, until]]) }
 }
 
 /**
@@ -322,6 +420,12 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
 /** Stays overlapping [from, to), newest check-in last. Cancelled stays are included only when asked for. */
 export async function listStays(db: DbClient, access: StayAccess, input: { from: unknown; to: unknown; productId?: string; includeCancelled?: boolean }): Promise<Stay[]> {
   const { from, to } = range(input, MAX_LIST_DAYS)
+  return staysOverlapping(db, access, { from, to, productId: input.productId, includeCancelled: input.includeCancelled })
+}
+
+/** Stays overlapping a range its caller has already checked. */
+async function staysOverlapping(db: DbClient, access: StayAccess, input: { from: string; to: string; productId?: string; includeCancelled?: boolean }): Promise<Stay[]> {
+  const { from, to } = input
   const scope = visibleHomes(access)
   const rows = await queryAll<Record<string, unknown>>(db, `
     SELECT ${STAY_COLUMNS} FROM stays s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
@@ -357,7 +461,7 @@ export async function readStayCalendar(db: DbClient, access: StayAccess, input: 
     queryAll<Record<string, unknown>>(db, 'SELECT * FROM product_nights WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ?', [access.organizationId, input.productId, from, to]),
     queryAll<{ date: string; stay_id: string }>(db, 'SELECT date, stay_id FROM stay_nights WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ?', [access.organizationId, input.productId, from, to]),
     queryAll<{ date: string; state: 'pending' | 'pushed' | 'needs_review'; detail: string | null }>(db, 'SELECT date, state, detail FROM channel_night_pushes WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ?', [access.organizationId, input.productId, from, to]),
-    listStays(db, access, { from, to, productId: input.productId }),
+    staysOverlapping(db, access, { from, to, productId: input.productId }),
   ])
   const overrideByDate = new Map(overrides.map(row => [String(row.date), row]))
   const claimByDate = new Map(claims.map(row => [row.date, row.stay_id]))

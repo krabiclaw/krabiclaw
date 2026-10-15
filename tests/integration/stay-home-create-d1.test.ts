@@ -8,11 +8,13 @@ import * as schema from '../../server/db/schema.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import createHomeRoute from '../../server/api/dashboard/stay-homes/index.post.ts'
 import listHomesRoute from '../../server/api/dashboard/stay-homes/index.get.ts'
+import editHomeRoute from '../../server/api/dashboard/stay-homes/[productId].patch.ts'
 import { getLocation } from '../../server/utils/location-management.ts'
 
 // A home added by hand through the native app's route: its details are
 // checked field by field, it becomes a new location and an unpublished stay,
 // its key replays it, plan location billing applies, and only managers add one.
+// Its details, time zone and who looks after it are then changed the same way.
 
 const ORG = 'org'
 const BASE = 'https://proof.example'
@@ -52,8 +54,9 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     const app = new H3()
     app.post('/api/dashboard/stay-homes', createHomeRoute)
     app.get('/api/dashboard/stay-homes', listHomesRoute)
-    const call = async (cookie: string, method: 'GET' | 'POST', body?: Record<string, unknown>) => {
-      const response = await app.request(Object.assign(new Request(`${BASE}/api/dashboard/stay-homes?org=org`, {
+    app.patch('/api/dashboard/stay-homes/:productId', editHomeRoute)
+    const call = async (cookie: string, method: 'GET' | 'POST' | 'PATCH', body?: Record<string, unknown>, productId?: string) => {
+      const response = await app.request(Object.assign(new Request(`${BASE}/api/dashboard/stay-homes${productId ? `/${productId}` : ''}?org=org`, {
         method, headers: { cookie, 'content-type': 'application/json', origin: BASE }, ...(body ? { body: JSON.stringify(body) } : {}),
       }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
       return { status: response.status, body: await response.json() as Record<string, unknown> }
@@ -73,7 +76,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.deepEqual(refusal(await call(await cookieFor('helper'), 'POST', cabin)), { status: 403, code: 'STAY_ROLE_REQUIRED' })
 
     const home = {
-      name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, channel: null,
+      name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: null, channel: null,
     }
     const created = await call(owner, 'POST', cabin)
     assert.equal(created.status, 201)
@@ -98,6 +101,35 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.equal((second.body.home as { base_price_minor: number | null }).base_price_minor, null)
     assert.deepEqual(refusal(await call(owner, 'POST', { ...cabin, idempotency_key: 'barn', name: 'Barn' })), { status: 402, code: 'LOCATION_LIMIT' })
     assert.deepEqual([await count('business_locations'), await count('products')], [2, 2])
+
+    // Editing: each problem names its field and changes nothing.
+    const edit = (cookie: string, body: Record<string, unknown>) => call(cookie, 'PATCH', body, made.product_id)
+    assert.deepEqual(refusal(await edit(owner, { address: '2 Other Rd' })), { status: 422, code: 'INVALID_DETAIL', field: 'address' })
+    assert.deepEqual(refusal(await edit(owner, { name: null })), { status: 422, code: 'INVALID_DETAIL', field: 'name' })
+    assert.deepEqual(refusal(await edit(owner, { name: 'Renamed', timezone: 'Mars/Olympus' })), { status: 422, code: 'INVALID_DETAIL', field: 'timezone' })
+    assert.deepEqual(refusal(await edit(owner, { name: '  ' })), { status: 422, code: 'INVALID_DETAIL', field: 'name' })
+    assert.deepEqual(refusal(await edit(owner, { assigned_member_id: 'nobody' })), { status: 422, code: 'INVALID_DETAIL', field: 'assigned_member_id' })
+    assert.deepEqual(refusal(await edit(await cookieFor('helper'), { name: 'Mine' })), { status: 403, code: 'STAY_ROLE_REQUIRED' })
+    assert.deepEqual((await call(owner, 'GET')).body.homes, [created.body.home, second.body.home])
+
+    const edited = await edit(owner, {
+      name: 'Cliff Cabin North', timezone: 'America/Los_Angeles', check_in_time: '16:00', check_out_time: '10:00',
+      max_guests: 6, min_nights: 3, base_price_minor: 210_00, assigned_member_id: 'm-helper',
+    })
+    assert.equal(edited.status, 200)
+    const changed = {
+      product_id: made.product_id, location_id: made.location_id, name: 'Cliff Cabin North', timezone: 'America/Los_Angeles', currency: 'USD', base_price_minor: 210_00,
+      check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 3, assigned_member_id: 'm-helper', assigned_team_id: null, channel: null,
+    }
+    assert.deepEqual(edited.body, { home: changed, channel_push: null })
+    // Read back through other paths: the homes list, the location, and the member now assigned seeing it.
+    assert.deepEqual(((await call(owner, 'GET')).body.homes as Array<{ product_id: string }>).find(home => home.product_id === made.product_id), changed)
+    assert.equal((await getLocation(db, ORG, made.location_id))!.timezone, 'America/Los_Angeles')
+    assert.deepEqual(((await call(await cookieFor('helper'), 'GET')).body.homes as Array<{ product_id: string }>).map(home => home.product_id), [made.product_id])
+    // The price is the one it had, changed in place; null removes it. Fields left out keep their value.
+    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM prices WHERE organization_id = ?').bind(ORG).first('n'), 1)
+    const unpriced = await edit(owner, { base_price_minor: null, assigned_member_id: null })
+    assert.deepEqual(unpriced.body, { home: { ...changed, base_price_minor: null, assigned_member_id: null }, channel_push: null })
   } finally {
     await runtime.dispose()
   }
