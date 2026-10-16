@@ -109,7 +109,7 @@ export function presentationForProduct(vertical: string | null | undefined, prod
 /** The words one surface owns: experiences read the same on every vertical. */
 export function presentationForSurface(vertical: string | null | undefined, surface: ProductSurface): ProductPresentation {
   if (surface === 'stays') return STAY_PRESENTATION
-  return surface === 'experiences' ? EXPERIENCE_PRESENTATION : surface === 'menu' ? requireProductPresentation('restaurant') : requireProductPresentation(normalizeVertical(vertical) === 'service' ? 'service' : 'experience')
+  return surface === 'experiences' ? EXPERIENCE_PRESENTATION : surface === 'menu' ? requireProductPresentation('restaurant') : requireProductPresentation(vertical && normalizeVertical(vertical) === 'service' ? 'service' : 'experience')
 }
 
 export function resolveProductPresentation(vertical: string | null | undefined, themeId?: string): ProductPresentation | null {
@@ -209,7 +209,7 @@ export function photoCategories(
   vertical: string | null | undefined,
   stored: Iterable<string | null | undefined> = [],
 ): Array<{ id: MediaCategory, label: string }> {
-  const forVertical = PHOTO_CATEGORIES_BY_VERTICAL[normalizeVertical(vertical)] ?? PHOTO_CATEGORIES_BY_VERTICAL.service!
+  const forVertical = PHOTO_CATEGORIES_BY_VERTICAL[vertical ? normalizeVertical(vertical) : 'service'] ?? PHOTO_CATEGORIES_BY_VERTICAL.service!
   const ids = [...forVertical]
   // A subject already on an asset is always offered, whatever the vertical: a
   // site that changed vertical, or media added over MCP, must not have pictures

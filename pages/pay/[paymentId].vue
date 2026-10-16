@@ -5,68 +5,198 @@
     the card will cost — with any surcharge Stripe permits for it — before the
     buyer confirms. Nothing is charged until Pay.
   -->
-  <main class="platform-theme min-h-screen bg-default px-5 py-12 text-default">
-    <div class="mx-auto max-w-xl space-y-6">
-      <h1 class="text-2xl font-semibold text-highlighted">{{ t('payment.title') }}</h1>
-      <USkeleton v-if="status === 'idle' || status === 'pending'" class="h-64 w-full" />
-      <UAlert v-else-if="loadError" color="error" :title="t('payment.unavailable')" :description="loadError" />
-      <template v-else-if="handoff">
-        <UCard variant="subtle">
-          <dl class="space-y-4">
-            <div class="flex items-start justify-between gap-4">
-              <dt class="font-semibold text-highlighted">{{ handoff.title }} <span v-if="handoff.quantity > 1" class="text-muted">× {{ handoff.quantity }}</span></dt>
-              <dd class="shrink-0 text-muted">{{ paymentMoney(handoff.subtotal, handoff.currency) }}</dd>
-            </div>
-            <!-- A stay is paid for by its nights: the dates and the party it holds. -->
-            <div v-if="handoff.stay" class="grid grid-cols-2 gap-4 text-sm" data-payment-stay>
-              <div>
-                <dt class="text-muted">{{ t('stay.check_in') }}</dt>
-                <dd class="text-highlighted">{{ formatCalendarDate(handoff.stay.check_in_date, locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) }}</dd>
-              </div>
-              <div>
-                <dt class="text-muted">{{ t('stay.check_out') }}</dt>
-                <dd class="text-highlighted">{{ formatCalendarDate(handoff.stay.check_out_date, locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) }}</dd>
-              </div>
-              <div>
-                <dt class="text-muted">{{ t('stay.nights') }}</dt>
-                <dd class="text-highlighted">{{ handoff.stay.nights }}</dd>
-              </div>
-              <div>
-                <dt class="text-muted">{{ t('stay.guests') }}</dt>
-                <dd class="text-highlighted">{{ handoff.stay.adults + handoff.stay.children }}</dd>
-              </div>
-            </div>
-            <template v-if="review">
-              <div v-if="review.surcharge > 0" class="flex items-start justify-between gap-4" data-payment-surcharge>
-                <dt class="text-highlighted">{{ t('payment.surcharge') }}</dt>
-                <dd class="shrink-0 text-muted">{{ paymentMoney(review.surcharge, review.currency) }}</dd>
-              </div>
-              <div class="flex items-start justify-between gap-4 border-t border-default pt-4">
-                <dt class="font-semibold text-highlighted">{{ t('payment.total') }}</dt>
-                <dd class="shrink-0 font-semibold text-highlighted" data-payment-total>{{ paymentMoney(review.total, review.currency) }}</dd>
-              </div>
-            </template>
-          </dl>
-        </UCard>
+  <main class="platform-theme min-h-screen bg-default px-5 py-10 lg:py-14 text-default">
+    <div class="mx-auto max-w-6xl">
+      <!-- Back button and Page Title -->
+      <div class="mb-8 flex items-center gap-4">
+        <button
+          type="button"
+          class="flex size-10 items-center justify-center rounded-full border border-default hover:bg-muted transition text-default"
+          :aria-label="t('payment.cancel')"
+          @click="leave"
+        >
+          <PlatformIcon name="arrow-left" class="size-4" />
+        </button>
+        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-highlighted">{{ t('payment.title') }}</h1>
+      </div>
 
-        <UAlert v-if="handoff.state === 'paid'" color="success" :title="t('payment.already_paid')" />
-        <UAlert v-else-if="handoff.state !== 'open'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
-        <template v-else>
-          <!-- Stripe's form stays mounted; a reviewed method is shown read-only until the buyer changes it. -->
-          <div v-show="!review" ref="mount" class="min-h-40" />
-          <p v-if="review" class="text-sm text-muted" data-payment-method>
-            {{ methodLabel }} ·
-            <UButton variant="link" size="sm" :label="t('payment.change_method')" :disabled="working" @click="changeMethod" />
-          </p>
-          <p v-if="review && handoff.surcharge_basis_points !== null" class="text-sm text-muted">{{ review.surcharge > 0 ? t('payment.surcharge_applies') : t('payment.no_surcharge') }}</p>
-          <UAlert v-if="actionError" color="error" :description="actionError" />
-          <div class="flex justify-between gap-4">
-            <UButton :label="t('payment.cancel')" color="neutral" variant="outline" :disabled="working" @click="leave" />
-            <UButton v-if="!review" :label="t('payment.review')" :loading="working" :disabled="!ready" @click="reviewMethod" />
-            <UButton v-else :label="t('payment.pay', { amount: paymentMoney(review.total, review.currency) })" :loading="working" @click="pay" />
+      <USkeleton v-if="status === 'idle' || status === 'pending'" class="h-64 w-full rounded-2xl" />
+      <UAlert v-else-if="loadError" color="error" :title="t('payment.unavailable')" :description="loadError" />
+      <div v-else-if="handoff" class="grid gap-10 lg:grid-cols-[1fr_400px] xl:grid-cols-[1fr_440px] items-start">
+        <!-- Left Column: Reservation / Appointment Details, Payment, and Agreement -->
+        <div class="space-y-8 min-w-0">
+          <!-- Reservation / Appointment details -->
+          <section class="space-y-4">
+            <h2 class="text-xl font-semibold text-highlighted">
+              {{ handoff.stay ? 'Your trip' : 'Your appointment' }}
+            </h2>
+
+            <div v-if="handoff.stay" class="space-y-4" data-payment-stay>
+              <div class="flex justify-between items-baseline">
+                <div>
+                  <h3 class="font-medium text-sm text-highlighted">Dates</h3>
+                  <p class="text-sm text-muted mt-0.5">
+                    {{ formatCalendarDate(handoff.stay.check_in_date, locale, { month: 'short', day: 'numeric' }) }} – {{ formatCalendarDate(handoff.stay.check_out_date, locale, { month: 'short', day: 'numeric', year: 'numeric' }) }}
+                  </p>
+                </div>
+              </div>
+              <div class="flex justify-between items-baseline">
+                <div>
+                  <h3 class="font-medium text-sm text-highlighted">Guests</h3>
+                  <p class="text-sm text-muted mt-0.5">
+                    {{ handoff.stay.adults + handoff.stay.children }} {{ (handoff.stay.adults + handoff.stay.children) === 1 ? 'guest' : 'guests' }}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div v-else class="space-y-4">
+              <div class="flex justify-between items-baseline">
+                <div>
+                  <h3 class="font-medium text-sm text-highlighted">{{ handoff.title }}</h3>
+                  <p class="text-sm text-muted mt-0.5">
+                    {{ handoff.quantity > 1 ? `Quantity: ${handoff.quantity}` : 'Confirmed booking' }}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <hr class="border-default" />
+
+          <!-- Payment Section -->
+          <section class="space-y-4">
+            <div class="flex items-center justify-between">
+              <h2 class="text-xl font-semibold text-highlighted">Pay with</h2>
+              <span class="inline-flex items-center gap-1.5 text-xs text-muted">
+                <PlatformIcon name="shield-check" class="size-4 text-emerald-500" />
+                Guaranteed secure
+              </span>
+            </div>
+
+            <UAlert v-if="handoff.state === 'paid'" color="success" :title="t('payment.already_paid')" />
+            <UAlert v-else-if="handoff.state !== 'open'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
+            <div v-else class="space-y-4">
+              <!-- Stripe's form stays mounted; a reviewed method is shown read-only until the buyer changes it. -->
+              <div v-show="!review" ref="mount" class="min-h-40 rounded-xl border border-default p-4 bg-elevated" />
+
+              <div v-if="review" class="rounded-xl border border-default bg-elevated p-4 flex items-center justify-between">
+                <div class="space-y-1" data-payment-method>
+                  <p class="font-medium text-sm text-highlighted">{{ methodLabel }}</p>
+                  <p v-if="handoff.surcharge_basis_points !== null" class="text-xs text-muted">
+                    {{ review.surcharge > 0 ? t('payment.surcharge_applies') : t('payment.no_surcharge') }}
+                  </p>
+                </div>
+                <UButton variant="outline" size="sm" :label="t('payment.change_method')" :disabled="working" @click="changeMethod" />
+              </div>
+
+              <UAlert v-if="actionError" color="error" :description="actionError" />
+            </div>
+          </section>
+
+          <hr class="border-default" />
+
+          <!-- Ground rules / Notes -->
+          <section class="space-y-3">
+            <h2 class="text-xl font-semibold text-highlighted">
+              {{ handoff.stay ? 'Ground rules' : 'Before your session' }}
+            </h2>
+            <p v-if="handoff.stay" class="text-sm text-muted leading-relaxed">
+              We ask every guest to remember a few simple things about what makes a great guest:
+              Follow the house rules, treat your Host's home like your own, and communicate with your host if issues arise.
+            </p>
+            <p v-else class="text-sm text-muted leading-relaxed">
+              Please ensure your contact information is accurate and prepare any questions or documents for your appointment.
+            </p>
+          </section>
+
+          <hr class="border-default" />
+
+          <!-- Policies and Primary Confirm CTA -->
+          <section class="space-y-4 pt-2">
+            <p class="text-xs text-muted leading-relaxed">
+              By selecting the button below, I agree to the Host's House Rules, Ground Rules for guests, and that KrabiClaw can charge my payment method for the amount stated.
+            </p>
+
+            <div v-if="handoff.state === 'open'" class="pt-2">
+              <UButton
+                v-if="!review"
+                size="xl"
+                block
+                :label="t('payment.review')"
+                :loading="working"
+                :disabled="!ready"
+                class="font-semibold py-3.5 text-base"
+                @click="reviewMethod"
+              />
+              <UButton
+                v-else
+                size="xl"
+                block
+                :label="t('payment.pay', { amount: paymentMoney(review.total, review.currency) })"
+                :loading="working"
+                class="font-semibold py-3.5 text-base"
+                @click="pay"
+              />
+            </div>
+            <div class="text-center">
+              <button type="button" class="text-xs text-muted hover:text-highlighted underline" :disabled="working" @click="leave">
+                {{ t('payment.cancel') }}
+              </button>
+            </div>
+          </section>
+        </div>
+
+        <!-- Right Column: Sticky Reservation Summary Card -->
+        <div class="lg:sticky lg:top-8 min-w-0">
+          <div class="rounded-2xl border border-default bg-elevated p-6 shadow-sm space-y-5">
+            <!-- Property / Service Header -->
+            <div class="flex gap-4 items-center">
+              <div class="size-20 shrink-0 rounded-xl bg-muted border border-default flex items-center justify-center overflow-hidden">
+                <SayaIcon v-if="handoff.stay" name="home" class="size-8 text-dimmed" />
+                <PlatformIcon v-else name="calendar" class="size-8 text-dimmed" />
+              </div>
+              <div class="min-w-0 flex-1">
+                <p class="text-xs text-muted font-medium uppercase tracking-wider">{{ handoff.stay ? 'Place to stay' : 'Appointment' }}</p>
+                <h3 class="font-semibold text-highlighted text-base truncate mt-0.5">{{ handoff.title }}</h3>
+                <p v-if="handoff.quantity > 1" class="text-xs text-muted mt-0.5">Quantity: {{ handoff.quantity }}</p>
+              </div>
+            </div>
+
+            <hr class="border-default" />
+
+            <!-- Price Details -->
+            <div class="space-y-3">
+              <h4 class="font-semibold text-sm text-highlighted">Price details</h4>
+              <dl class="space-y-2 text-sm">
+                <div class="flex justify-between items-baseline">
+                  <dt class="text-muted">
+                    {{ handoff.stay ? `${handoff.stay.nights} nights` : handoff.title }}
+                  </dt>
+                  <dd class="tabular-nums text-highlighted font-medium">
+                    {{ paymentMoney(handoff.subtotal, handoff.currency) }}
+                  </dd>
+                </div>
+                <div v-if="review && review.surcharge > 0" class="flex justify-between items-baseline" data-payment-surcharge>
+                  <dt class="text-muted">{{ t('payment.surcharge') }}</dt>
+                  <dd class="tabular-nums text-highlighted font-medium">{{ paymentMoney(review.surcharge, review.currency) }}</dd>
+                </div>
+              </dl>
+            </div>
+
+            <hr class="border-default" />
+
+            <!-- Total -->
+            <div class="flex justify-between items-baseline">
+              <span class="font-semibold text-base text-highlighted">{{ t('payment.total') }} ({{ handoff.currency }})</span>
+              <span class="font-bold text-lg text-highlighted tabular-nums" data-payment-total>
+                {{ paymentMoney(review ? review.total : handoff.subtotal, handoff.currency) }}
+              </span>
+            </div>
+            <p class="text-xs text-muted">Charged in full at confirmation.</p>
           </div>
-        </template>
-      </template>
+        </div>
+      </div>
     </div>
   </main>
 </template>

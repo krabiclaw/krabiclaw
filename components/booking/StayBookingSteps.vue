@@ -1,6 +1,6 @@
 <template>
   <StayDatesStep v-if="bookingStep === 1" :controller="controller" @next="bookingStep = 2" />
-  <div v-else class="flex-1 overflow-y-auto">
+  <div v-else class="flex-1 min-h-0">
     <BookingRecap
       :main-line="rangeLabel"
       :meta-line="quote ? `${nightsLabel(quote.nights)} · ${guestsLabel} · ${money(quote.total_minor)}` : ''"

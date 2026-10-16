@@ -3,6 +3,7 @@ import { test } from 'node:test'
 import type { Product } from '../../server/types/products.ts'
 import {
   catalogLabel,
+  catalogNavigation,
   catalogSummary,
   catalogSurfaces,
   collectionsOnSurface,
@@ -10,6 +11,7 @@ import {
   isCatalogSurface,
   locationSurfacePath,
   parseSiteProductPath,
+  presentationForSurface,
   productCtaKey,
   publicLocationPath,
 } from '../../utils/product-presentation.ts'
@@ -141,4 +143,20 @@ test('a card names what it opens by the product kind', () => {
   assert.equal(productCtaKey('dish'), 'saya.common.view_dish')
   assert.equal(productCtaKey('experience'), 'saya.common.view_experience')
   assert.equal(productCtaKey('item'), 'saya.common.view_item')
+})
+
+test('presentationForSurface and catalogNavigation resolve without error when vertical is omitted or null', () => {
+  assert.equal(presentationForSurface(null, 'products').collectionPath, '/products')
+  assert.equal(presentationForSurface(undefined, 'products').collectionPath, '/products')
+  assert.equal(presentationForSurface(null, 'stays').collectionPath, '/stays')
+  assert.equal(presentationForSurface(null, 'experiences').collectionPath, '/experiences')
+  assert.equal(presentationForSurface(null, 'menu').collectionPath, '/menu')
+
+  const nav = catalogNavigation({ products: true, menu: true, stays: true, experiences: true })
+  assert.deepEqual(nav, [
+    { surface: 'menu', path: '/menu', labelKey: 'saya.footer.menu' },
+    { surface: 'products', path: '/products', labelKey: 'saya.footer.products' },
+    { surface: 'stays', path: '/stays', labelKey: 'saya.footer.stays' },
+    { surface: 'experiences', path: '/experiences', labelKey: 'saya.footer.experiences' },
+  ])
 })
