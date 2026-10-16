@@ -21,7 +21,7 @@ export function anonymousLinkQueries(from: string, to: string, now: string): Bat
     { query: 'DELETE FROM user_notification_preferences WHERE user_id = ?', params: [from] },
     // Re-pointing who a record belongs to is not activity on it, so
     // updated_at — the version booking changes compare against — stays.
-    ...['requests', 'reservations', 'bookings', 'review_requests', 'reviews'].map(table => ({
+    ...['requests', 'reservations', 'bookings', 'stays', 'review_requests', 'reviews'].map(table => ({
       query: `UPDATE ${table} SET user_id = ? WHERE user_id = ?`,
       params: [to, from],
     })),

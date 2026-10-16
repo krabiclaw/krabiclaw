@@ -44,10 +44,16 @@ export type OperationOutcome =
   | SuccessfulOperationOutcome
   | { ok: false; status: 404; reason: 'thread_not_found' | 'source_not_found' }
   | { ok: false; status: 409; reason: 'invalid_transition'; message: string }
-  | { ok: false; status: 400; reason: 'no_guest_email' | 'empty_body' }
+  | { ok: false; status: 400; reason: 'no_guest_email' }
+  | { ok: false; status: 400; reason: 'empty_body' }
+  | { ok: false; status: 409; reason: 'guest_invite_required'; code: 'GUEST_INVITE_REQUIRED'; field: 'request_id'; message: string }
   | { ok: false; status: 400; reason: 'missing_idempotency_key' }
   | { ok: false; status: 400; reason: 'invalid_photo'; message: string }
   | { ok: false; status: 409 | 502; reason: 'delivery_failed'; code: string; field: string; message: string; mutation_applied?: true; operation_completed?: false; request_id?: string; record?: ThreadOperationalRecord; retry_with_same_idempotency_key?: boolean; provider_error?: ChannexError['data'] }
+
+/** A reply never asks for a guest email; a stay without one asks for an invite. */
+export type ReplyOutcome = Exclude<OperationOutcome, { reason: 'no_guest_email' }>
+type NotFoundOutcome = Extract<OperationOutcome, { status: 404 }>
 
 export type ExecuteOperationInput = {
   threadId: string
@@ -86,7 +92,7 @@ async function loadThreadContext(
   db: DbClient,
   threadId: string,
   organizationId: string,
-): Promise<ThreadContext | OperationOutcome> {
+): Promise<ThreadContext | NotFoundOutcome> {
   const thread = await getGuestRequest(db, threadId, organizationId)
   if (!thread) return { ok: false, status: 404, reason: 'thread_not_found' }
   return { thread, record: await getThreadOperationalRecord(db, thread.id) }
@@ -110,14 +116,14 @@ function entryMatchesRequest(entry: GuestThreadEntryRow, eventName: string, body
   return entry.event_name === eventName && (body === undefined || (entry.body ?? '') === body)
 }
 
-function conflict(message = 'Idempotency key was reused with a different request'): OperationOutcome {
+function conflict(message = 'Idempotency key was reused with a different request'): Extract<OperationOutcome, { reason: 'invalid_transition' }> {
   return { ok: false, status: 409, reason: 'invalid_transition', message }
 }
 
 async function successfulOutcome(
   db: DbClient,
   context: ThreadContext,
-): Promise<OperationOutcome> {
+): Promise<SuccessfulOperationOutcome | NotFoundOutcome> {
   const current = await loadThreadContext(db, context.thread.id, context.thread.organization_id)
   if ('ok' in current) return current
   if (context.record && !current.record) return { ok: false, status: 404, reason: 'source_not_found' }
@@ -489,7 +495,7 @@ async function executeReply(
   db: DbClient,
   context: ThreadContext,
   input: ReplyInput,
-): Promise<OperationOutcome> {
+): Promise<ReplyOutcome> {
   const body = (input.body ?? '').trim()
   const photoInput = input.photos ?? []
   const photoCount = Array.isArray(photoInput) ? photoInput.length : photoInput.sourceIds.length
@@ -524,6 +530,11 @@ async function executeReply(
   if (entry && !matchesReply(entry)) return conflict()
   if (entry) {
     const earlier = await getDeliveryById(db, deliveryKey)
+    // A reply that reached only the guest's account inbox has no delivery to look for.
+    if (!earlier && entry.channel === 'web') {
+      await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id, { conversationState: 'waiting_on_guest' })
+      return successfulOutcome(db, context)
+    }
     if (!earlier || earlier.entry_id !== entry.id) throw new Error('Reply delivery receipt does not match its ledger entry')
     if (isDeliverySent(earlier)) {
       await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id, { conversationState: 'waiting_on_guest' })
@@ -531,14 +542,9 @@ async function executeReply(
     }
   }
 
-  // A direct stay uses its current contact for delivery.
-  let guestEmail = context.thread.payload.guest.email
-  if (context.thread.kind === 'stay') {
-    const stay = await queryFirst<{ guest_email: string | null }>(db, 'SELECT guest_email FROM stays WHERE organization_id = ? AND request_id = ?', [context.thread.organization_id, context.thread.id])
-    if (!stay) return { ok: false, status: 404, reason: 'source_not_found' }
-    guestEmail = stay.guest_email?.trim() || null
-  }
-  if (!guestEmail) return { ok: false, status: 400, reason: 'no_guest_email' }
+  const recipient = await replyRecipient(db, context)
+  if (typeof recipient === 'object' && recipient !== null) return recipient
+  const guestEmail = recipient
 
   if (!entry) {
     const entryId = crypto.randomUUID()
@@ -561,16 +567,16 @@ async function executeReply(
           query: `
             INSERT INTO activity_entries
               (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, body, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
-            SELECT ?, id, 'message', 'request', ?, ?, 'email', ?, ?, ?, ?,
+            SELECT ?, id, 'message', 'request', ?, ?, ?, ?, ?, ?, ?,
                    COALESCE((SELECT MAX(sequence) FROM activity_entries WHERE request_id = requests.id), 0) + 1,
                    ?, ?
             FROM requests
             WHERE id = ? AND organization_id = ?
             ON CONFLICT(dedupe_key) DO NOTHING
           `,
-          params: [entryId, actorUserId === null ? 'system' : 'member', actorUserId, body || null, eventName, JSON.stringify({ request_hash: requestHash }), dedupeKey, now, now, context.thread.id, context.thread.organization_id],
+          params: [entryId, actorUserId === null ? 'system' : 'member', actorUserId, guestEmail ? 'email' : 'web', body || null, eventName, JSON.stringify({ request_hash: requestHash }), dedupeKey, now, now, context.thread.id, context.thread.organization_id],
         },
-        {
+        ...guestEmail ? [{
           query: `
             INSERT INTO guest_thread_deliveries
               (id, entry_id, channel, provider, purpose, status, created_at, updated_at)
@@ -580,7 +586,7 @@ async function executeReply(
             ON CONFLICT(id) DO NOTHING
           `,
           params: [deliveryId, emailProvider(input.env), purpose, now, now, entryId, context.thread.id],
-        },
+        }] : [],
         ...messagePhotoPlacements(organizationId, entryId, assetIds, now),
       ], { operation: 'guest thread reply receipt' })
     } catch (error) {
@@ -598,6 +604,12 @@ async function executeReply(
 
   if (!entry) return { ok: false, status: 404, reason: 'thread_not_found' }
   if (!matchesReply(entry)) return conflict()
+  if (entry.channel === 'web') {
+    await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id, { conversationState: 'waiting_on_guest' })
+    return await successfulOutcome(db, context)
+  }
+  // A reply saved for email whose address has since been removed is not sent anywhere else.
+  if (!guestEmail) return { ok: false, status: 409, reason: 'delivery_failed', code: 'GUEST_EMAIL_REQUIRED', field: 'guest.email', message: 'This reply was saved to be emailed, but the guest no longer has an email address.' }
   const delivery = await getDeliveryById(db, deliveryKey)
   if (!delivery || delivery.entry_id !== entry.id) throw new Error('Reply delivery receipt does not match its ledger entry')
   if (isDeliverySent(delivery)) {
@@ -625,6 +637,28 @@ async function executeReply(
     throw new HTTPError({ statusCode: 502, statusMessage: 'Failed email delivery did not provide its error', data: { code: 'INVALID_DELIVERY_RESPONSE', field: 'error' } })
   }
   return { ok: false, status: 502, reason: 'delivery_failed', code: 'DELIVERY_FAILED', field: 'delivery', message: outcome.error }
+}
+
+/**
+ * Where a reply goes besides the thread. A conversation with a guest email is
+ * emailed there, a direct stay using its current contact. One without reaches
+ * the guest's account inbox once the guest has joined it through an invite,
+ * and is emailed too when that account has a verified email; null means the
+ * account inbox alone. Without either there is nowhere to reply to.
+ */
+async function replyRecipient(db: DbClient, context: ThreadContext): Promise<string | null | NotFoundOutcome | Extract<OperationOutcome, { reason: 'guest_invite_required' }>> {
+  let guestEmail = context.thread.payload.guest.email
+  if (context.thread.kind === 'stay') {
+    const stay = await queryFirst<{ guest_email: string | null }>(db, 'SELECT guest_email FROM stays WHERE organization_id = ? AND request_id = ?', [context.thread.organization_id, context.thread.id])
+    if (!stay) return { ok: false, status: 404, reason: 'source_not_found' }
+    guestEmail = stay.guest_email?.trim() || null
+  }
+  if (guestEmail) return guestEmail
+  if (context.thread.user_id === null) {
+    return { ok: false, status: 409, reason: 'guest_invite_required', code: 'GUEST_INVITE_REQUIRED', field: 'request_id', message: 'This guest has no email on file. Invite them to the conversation first.' }
+  }
+  const account = await queryFirst<{ email: string }>(db, 'SELECT email FROM user WHERE id = ? AND "emailVerified" = 1 AND COALESCE("isAnonymous", 0) = 0', [context.thread.user_id])
+  return account?.email ?? null
 }
 
 const ENDED_OCCURRENCE_MESSAGE = 'This conversation is past because its booking has ended'
@@ -703,7 +737,7 @@ export async function executeGuestThreadOperation(db: DbClient, input: ExecuteOp
  * address, with the same ledger entry and delivery receipt as a reply. It has
  * no member actor; the key makes a repeated run find its first attempt.
  */
-export async function sendScheduledGuestReply(db: DbClient, input: { threadId: string; organizationId: string; body: string; idempotencyKey: string; env: ExecuteOperationInput['env'] }): Promise<{ outcome: OperationOutcome; entryId: string | null }> {
+export async function sendScheduledGuestReply(db: DbClient, input: { threadId: string; organizationId: string; body: string; idempotencyKey: string; env: ExecuteOperationInput['env'] }): Promise<{ outcome: ReplyOutcome; entryId: string | null }> {
   const context = await loadThreadContext(db, input.threadId, input.organizationId)
   if ('ok' in context) return { outcome: context, entryId: null }
   const outcome = await executeReply(db, context, { ...input, action: 'reply', actorUserId: null })
