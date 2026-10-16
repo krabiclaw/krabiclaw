@@ -45,6 +45,13 @@ interface DemoHome {
   weekend_price_minor: number
   holiday_price_minor: number
   description: string
+  property_type: 'house' | 'apartment' | 'secondary_unit'
+  bedrooms: number
+  beds: number
+  bathrooms: number
+  amenities: string[]
+  cancellation_policy: 'flexible' | 'moderate' | 'firm'
+  check_in_method: 'in_person' | 'lockbox' | 'keypad'
   check_in_instructions: string
   /** Nights closed for owner use, as days from today. */
   blocked: Array<[number, number]>
@@ -68,6 +75,13 @@ const HOMES: DemoHome[] = [
     weekend_price_minor: 22_000,
     holiday_price_minor: 26_500,
     description: 'Three bedrooms around a private saltwater pool, ten minutes on foot from Ao Nang beach. Fictional demo listing.',
+    property_type: 'house',
+    bedrooms: 3,
+    beds: 4,
+    bathrooms: 3,
+    amenities: ['wifi', 'air_conditioning', 'pool', 'kitchen', 'washer', 'free_parking', 'patio', 'bbq_grill', 'hot_water', 'essentials', 'smoke_alarm', 'first_aid_kit'],
+    cancellation_policy: 'moderate',
+    check_in_method: 'in_person',
     check_in_instructions: 'Collect your keys from the Saltleaf guest desk on Ao Nang Beach Road between 15:00 and 21:00. The villa gate code is sent the morning you arrive.',
     blocked: [[20, 23], [61, 64]],
   },
@@ -88,6 +102,13 @@ const HOMES: DemoHome[] = [
     weekend_price_minor: 11_500,
     holiday_price_minor: 14_000,
     description: 'A one-bedroom loft with a desk, fast Wi-Fi and a balcony over the rice fields, a short ride from Batu Bolong beach. Fictional demo listing.',
+    property_type: 'apartment',
+    bedrooms: 1,
+    beds: 1,
+    bathrooms: 1,
+    amenities: ['wifi', 'dedicated_workspace', 'air_conditioning', 'kitchen', 'coffee_maker', 'self_check_in', 'long_term_stays', 'hot_water', 'essentials', 'smoke_alarm'],
+    cancellation_policy: 'flexible',
+    check_in_method: 'lockbox',
     check_in_instructions: 'Self check-in: the lockbox is beside the blue door at the top of the stairs. Its code arrives by message on your arrival day.',
     blocked: [[30, 34]],
   },
@@ -108,7 +129,14 @@ const HOMES: DemoHome[] = [
     weekend_price_minor: 16_500,
     holiday_price_minor: 21_000,
     description: 'Two bedrooms and a plunge pool under the palms, with bikes for the ride to the beach. Fictional demo listing.',
-    check_in_instructions: 'Meet our host at the casita at your check-in time; send your arrival time through your booking messages a day ahead.',
+    property_type: 'secondary_unit',
+    bedrooms: 2,
+    beds: 2,
+    bathrooms: 2,
+    amenities: ['wifi', 'air_conditioning', 'pool', 'kitchen', 'outdoor_shower', 'outdoor_dining', 'beach_access', 'hot_water', 'essentials', 'smoke_alarm', 'fire_extinguisher'],
+    cancellation_policy: 'firm',
+    check_in_method: 'keypad',
+    check_in_instructions: 'The casita door has a keypad. Its code arrives by message on your arrival day; send your arrival time through your booking messages a day ahead.',
     blocked: [[45, 49]],
   },
 ]
@@ -205,14 +233,13 @@ async function main() {
   for (const spec of HOMES) {
     const home = homes.get(spec.name)!
     await call('PATCH', `/api/dashboard/stay-homes/${home.product_id}?${q}`, {
-      timezone: spec.timezone, check_in_time: spec.check_in_time, check_out_time: spec.check_out_time,
+      description: spec.description, timezone: spec.timezone, check_in_time: spec.check_in_time, check_out_time: spec.check_out_time,
       max_guests: spec.max_guests, min_nights: spec.min_nights, base_price_minor: spec.base_price_minor,
-      check_in_instructions: spec.check_in_instructions,
+      address: { address: spec.address, city: spec.city, state: spec.state, country: spec.country, zip_code: spec.zip_code },
+      property_type: spec.property_type, bedrooms: spec.bedrooms, beds: spec.beds, bathrooms: spec.bathrooms, amenities: spec.amenities,
+      cancellation_policy: spec.cancellation_policy, check_in_method: spec.check_in_method, check_in_instructions: spec.check_in_instructions,
+      checkout_instructions: [{ task: 'gather_towels', details: null }, { task: 'turn_off', details: 'Air conditioning and lights' }, { task: 'lock_up', details: null }],
     })
-    await call('PATCH', `/api/dashboard/locations/${home.location_id}?${q}`, {
-      address: { regionCode: spec.country, addressLines: [spec.address], locality: spec.city, administrativeArea: spec.state ?? undefined, postalCode: spec.zip_code ?? undefined },
-    })
-    await call('PATCH', `/api/editor/organizations/${org.id}/products/${home.product_id}`, { description: spec.description })
 
     const start = today(spec.timezone)
     const end = addDays(start, CALENDAR_DAYS)
@@ -251,7 +278,7 @@ async function main() {
   const unpublished: Array<{ name: string; missing: unknown }> = []
   for (const spec of HOMES) {
     const home = homes.get(spec.name)!
-    const published = await call<{ data?: { missing?: unknown } }>('PUT', `/api/editor/organizations/${org.id}/products/${home.product_id}/publication`, { published: true }, [200, 409])
+    const published = await call<{ data?: { missing?: unknown } }>('PATCH', `/api/dashboard/stay-homes/${home.product_id}?${q}`, { published: true }, [200, 409])
     if (published.status === 409) unpublished.push({ name: spec.name, missing: published.data })
   }
   if (unpublished.length) {
