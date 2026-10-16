@@ -65,7 +65,8 @@ export async function connectCalendar(db: DbClient, organizationId: string, acco
     await storeCalendarSelection(db, organizationId, current)
     return
   }
-  const marker = `KrabiClaw bookings for organization ${organizationId}`
+  // Google holds this text as the calendar's identity; its spelling cannot change.
+  const marker = `Krabiclaw bookings for organization ${organizationId}`
   const calendars = (await listWritableCalendars(token)).filter(item => item.description === marker)
   if (calendars.length > 1) throw new CalendarSelectionConflict('More than one booking calendar was found. Contact support.')
   let calendar = calendars[0]

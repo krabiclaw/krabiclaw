@@ -286,7 +286,7 @@ test('automatic Calendar connection recovers a hidden calendar after ambiguous c
    if(init?.method==='POST') {
     assert.equal(url.pathname,'/calendar/v3/calendars')
     const payload=JSON.parse(String(init.body))
-    assert.deepEqual(payload,{summary:'KrabiClaw',description:'KrabiClaw bookings for organization org'})
+    assert.deepEqual(payload,{summary:'KrabiClaw',description:'Krabiclaw bookings for organization org'})
     inserts++
     calendars.push({...payload,id:'created-calendar',accessRole:'owner',hidden:true})
     throw new Error('Timeout after Google committed the calendar')
