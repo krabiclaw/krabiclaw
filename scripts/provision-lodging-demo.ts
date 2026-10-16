@@ -228,17 +228,22 @@ async function main() {
 
     const nights = (body: Record<string, unknown>) => call('PUT', `/api/dashboard/stay-homes/${home.product_id}/nights?${q}`, body)
     await nights({ from: start, to: end, reset: true })
-    // Friday and Saturday nights cost more for the next six months.
-    const friday = addDays(start, (5 - new Date(`${start}T00:00:00Z`).getUTCDay() + 7) % 7)
+    // Friday and Saturday nights cost more for the next six months, starting
+    // with this weekend's Saturday when the reset runs on one.
+    const friday = addDays(start, -((new Date(`${start}T00:00:00Z`).getUTCDay() + 2) % 7))
     for (let week = 0; week < WEEKEND_WEEKS; week++) {
-      const from = addDays(friday, week * 7)
-      await nights({ from, to: addDays(from, 2), price_minor: spec.weekend_price_minor })
+      const weekend = addDays(friday, week * 7)
+      const from = weekend < start ? start : weekend
+      const to = addDays(weekend, 2)
+      if (from < to) await nights({ from, to, price_minor: spec.weekend_price_minor })
     }
-    // The year-end holidays: a higher price and a five-night minimum on arrival.
-    const year = Number(start.slice(0, 4)) + (start.slice(5) > '12-20' ? 1 : 0)
-    const holidayFrom = `${year}-12-20`
-    const holidayTo = `${year + 1}-01-03`
-    await nights({ from: holidayFrom, to: holidayTo, price_minor: spec.holiday_price_minor, min_stay_arrival: 5 })
+    // Every year-end holiday in the window, the current one included: a higher
+    // price and a five-night minimum on arrival.
+    for (let year = Number(start.slice(0, 4)) - 1; year <= Number(end.slice(0, 4)); year++) {
+      const from = `${year}-12-20` < start ? start : `${year}-12-20`
+      const to = `${year + 1}-01-03` > end ? end : `${year + 1}-01-03`
+      if (from < to) await nights({ from, to, price_minor: spec.holiday_price_minor, min_stay_arrival: 5 })
+    }
     for (const [from, to] of spec.blocked) await nights({ from: addDays(start, from), to: addDays(start, to), closed: true })
     console.log(`Reset ${spec.name}: ${start} to ${end}, weekends ${spec.weekend_price_minor / 100}, holidays ${spec.holiday_price_minor / 100}, ${spec.blocked.length} blocked run(s)`)
   }
