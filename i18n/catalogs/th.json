@@ -484,6 +484,8 @@
   "stay.reserve": "จอง",
   "stay.confirm_and_pay": "ยืนยันและชำระเงิน",
   "stay.charged_in_full": "คุณจะชำระเงินเต็มจำนวนเมื่อทำการจอง",
+  "stay.send_enquiry": "ส่งคำถาม",
+  "stay.enquiry_note": "ส่งวันที่ของคุณ แล้วเจ้าของที่พักจะตอบกลับเพื่อยืนยัน",
   "stay.adults": "ผู้ใหญ่",
   "stay.adults_hint": "อายุ 13 ปีขึ้นไป",
   "stay.children": "เด็ก",

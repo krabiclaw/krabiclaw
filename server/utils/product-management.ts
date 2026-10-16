@@ -84,28 +84,26 @@ function stayOrderUrl(kind: ProductKind, orderUrl: string | null): string | null
   return orderUrl
 }
 
-/** A published place to stay is one a guest can book and pay for now. */
-async function assertStayBookable(db: DbClient, organizationId: string, product: Pick<Product, 'kind' | 'active' | 'stay'> & Pick<PlannedProduct, 'variants'>, env: CloudflareEnv | undefined): Promise<void> {
+/**
+ * A published place to stay is one a guest can find and price: its home and a
+ * base nightly price. Paying for it on the site is a separate fact, the
+ * business's Payments setup; without it the listing takes enquiries instead,
+ * and checkout refuses the stay itself.
+ */
+async function assertStayBookable(db: DbClient, organizationId: string, product: Pick<Product, 'kind' | 'active' | 'stay'> & Pick<PlannedProduct, 'variants'>): Promise<void> {
   if (product.kind !== 'stay') return
-  const readiness = await stayBookingReadiness(db, organizationId, product, { env })
-  if (!readiness.ready) throw new HTTPError({ statusCode: 409, statusMessage: 'This place to stay needs a nightly price and online payments before guests can book it', data: { code: 'STAY_BOOKING_INCOMPLETE', field: readiness.missing[0], missing: readiness.missing } })
+  const readiness = await stayBookingReadiness(db, organizationId, product, {})
+  if (!readiness.ready) throw new HTTPError({ statusCode: 409, statusMessage: 'This place to stay needs a nightly price before guests can see it', data: { code: 'STAY_BOOKING_INCOMPLETE', field: readiness.missing[0], missing: readiness.missing } })
 }
 
-/** What a place to stay still needs before a guest can book it on the site: its home, a base nightly price and online payments. */
-async function stayBookingReadiness(db: DbClient, organizationId: string, product: Pick<Product, 'active' | 'stay'> & Pick<PlannedProduct, 'variants'>, options: { requireActive?: boolean; env?: CloudflareEnv; paymentSetup?: () => ReturnType<typeof readStripeCheckoutSetup>; currency?: CurrencyCode }): Promise<{ ready: boolean; missing: string[] }> {
+/** What a place to stay still needs before guests can see it on the site: its home and a base nightly price. */
+async function stayBookingReadiness(db: DbClient, organizationId: string, product: Pick<Product, 'active' | 'stay'> & Pick<PlannedProduct, 'variants'>, options: { requireActive?: boolean; currency?: CurrencyCode }): Promise<{ ready: boolean; missing: string[] }> {
   const missing: string[] = []
   if (options.requireActive && !product.active) missing.push('active')
   if (!product.stay) missing.push('stay')
   const currency = options.currency ?? await organizationDefaultCurrency(db, organizationId)
   const base = currency && product.stay ? product.variants.filter(variant => variant.active).map(variant => selectPrice(variant.prices, { currency, location_id: product.stay!.location_id })).find(Boolean) : undefined
   if (!base) missing.push('variants.prices')
-  let setup: Awaited<ReturnType<typeof readStripeCheckoutSetup>>
-  if (options.paymentSetup) setup = await options.paymentSetup()
-  else {
-    if (!options.env) throw new Error('The organization environment is required to assess paid booking readiness')
-    setup = await readStripeCheckoutSetup(db, organizationId, options.env)
-  }
-  missing.push(...setup.missing)
   return { ready: missing.length === 0, missing }
 }
 
@@ -1232,7 +1230,7 @@ export async function createProduct(db: DbClient, input: {
     writes.push(...await prepareProductBookingSetup(db, { organizationId: input.organizationId, productId: planned.id, actorId: input.actor.actorId, env: input.booking.env, now, booking: input.booking.data, productInSameBatch: true }))
   }
   if (input.publication?.published && planned.kind === 'experience' && !input.booking && !planned.order_url) invalid('Provide booking details or an external booking destination before publishing an experience')
-  if (input.publication?.published) await assertStayBookable(db, input.organizationId, planned, env)
+  if (input.publication?.published) await assertStayBookable(db, input.organizationId, planned)
   const page = await prepareProductPageCreate(db, { organizationId: input.organizationId, product: planned, actor: input.actor, page: pageInput, env })
   if (page) writes.push(...page.queries)
   if (input.publication && input.organizationId) {
@@ -1505,7 +1503,7 @@ async function planProductUpdate(db: DbClient, input: {
   planned.source = current.source
   assertVariantPricesConsistent(planned)
 
-  if (current.publications.some(publication => publication.organization_id === organizationId && publication.published)) await assertStayBookable(db, organizationId, { ...current, ...planned }, input.env)
+  if (current.publications.some(publication => publication.organization_id === organizationId && publication.published)) await assertStayBookable(db, organizationId, { ...current, ...planned })
   const guardPublication = !input.booking && planned.kind === 'experience' && !planned.order_url
   let readiness: Awaited<ReturnType<typeof productBookingReadiness>> | undefined
   if (guardPublication && current.publications.some(publication => publication.organization_id === organizationId && publication.published)) {
@@ -1808,7 +1806,7 @@ export async function productBookingReadiness(db: DbClient, organizationId: stri
   const missing: string[] = []
   const requireActive = options.requireAllocation || options.requireActive
   const locations = product.locations.filter(location => (options.locationId === undefined || location.location_id === options.locationId) && (!options.activeLocationIds || options.activeLocationIds.has(location.location_id)))
-  if (product.kind === 'stay') return stayBookingReadiness(db, organizationId, product, { requireActive, env: options.env, paymentSetup: options.paymentSetup, currency: options.currency })
+  if (product.kind === 'stay') return stayBookingReadiness(db, organizationId, product, { requireActive, currency: options.currency })
   if (requireActive && !product.active) missing.push('active')
   if (product.order_url) return { ready: missing.length === 0, missing }
   if (!product.booking) missing.push('booking')
@@ -1863,7 +1861,7 @@ export async function setProductPublication(db: DbClient, input: {
   organizationId: string; productId: string; published: boolean; actor: Actor; env?: CloudflareEnv
 }): Promise<void> {
   const product = await requireOrganizationProduct(db, input)
-  if (input.published) await assertStayBookable(db, input.organizationId, product, input.env)
+  if (input.published) await assertStayBookable(db, input.organizationId, product)
   let readiness: Awaited<ReturnType<typeof productBookingReadiness>> | undefined
   let alreadyPublished = false
   if (input.published && (product.kind === 'experience' || product.booking)) {

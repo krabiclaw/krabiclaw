@@ -221,7 +221,7 @@
                 {{ fact.label }}
               </span>
             </div>
-            <p v-if="isStay && canBook" class="text-sm text-muted">{{ t('stay.charged_in_full') }}</p>
+            <p v-if="isStay && canBook" class="text-sm text-muted">{{ stayCheckoutAvailable ? t('stay.charged_in_full') : t('stay.enquiry_note') }}</p>
             <p v-if="vertical === 'service' && !isStay && !product.order_url" class="text-sm text-muted">{{ booking?.confirmation_mode === 'review' ? t('booking.review_notice') : t('booking.instant_notice') }}</p>
             <p v-if="nextSession" class="inline-flex items-center gap-2 text-sm text-muted">
               <SayaIcon name="calendar-days" class="size-4" />
@@ -414,14 +414,16 @@ const props = defineProps<{
   scopeRequired?: boolean
   locations?: PublicProductLocation[]
   onlineAvailable?: boolean
+  /** A place to stay is paid for on the site once the business's Payments setup is complete; until then it takes enquiries. */
+  stayCheckoutAvailable: boolean
 }>()
 
 const displayTitle = computed(() => props.product.name)
 /** A place to stay is booked by its nights, paid in full; its booking is not a session's. */
 const isStay = computed(() => props.product.kind === 'stay')
-const stayBooking = useStayBooking(() => ({ product: props.product }))
+const stayBooking = useStayBooking(() => ({ product: props.product, checkout: props.stayCheckoutAvailable }))
 const bookingLabel = computed(() => isStay.value
-  ? stayBooking.quote.value ? t('stay.reserve') : t('stay.check_availability')
+  ? stayBooking.quote.value ? props.stayCheckoutAvailable ? t('stay.reserve') : t('stay.send_enquiry') : t('stay.check_availability')
   : props.vertical === 'service'
     ? props.booking?.confirmation_mode === 'review' ? t('booking.request_appointment') : t('booking.book_appointment')
     : t('saya.experience_detail.book_now'))

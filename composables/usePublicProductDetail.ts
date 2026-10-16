@@ -55,6 +55,7 @@ export function isPublicProductDetailPayload(value: unknown): value is PublicPro
       && typeof sibling.id === 'string'
       && typeof sibling.name === 'string'
       && typeof sibling.slug === 'string')
+    && typeof value.stayCheckoutAvailable === 'boolean'
     && Array.isArray(value.localeRepresentations)
     && value.localeRepresentations.every(item => isRecord(item)
       && typeof item.locale === 'string'

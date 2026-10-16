@@ -85,9 +85,10 @@
     <div class="flex shrink-0 items-center justify-between gap-4 border-t border-default px-1 py-4">
       <div class="min-w-0">
         <div v-if="quote" class="saya-display saya-italic truncate text-lg">{{ rangeLabel }}</div>
-        <div class="mt-0.5 text-xs text-muted">{{ quote ? `${nightsLabel(quote.nights)} · ${guestsLabel}` : t('stay.charged_in_full') }}</div>
+        <div class="mt-0.5 text-xs text-muted">{{ quote ? `${nightsLabel(quote.nights)} · ${guestsLabel}` : checkout ? t('stay.charged_in_full') : t('stay.enquiry_note') }}</div>
       </div>
-      <SayaButton size="lg" class="shrink-0" :disabled="!quote || quotePending" @click="$emit('next')">{{ t('stay.reserve') }}</SayaButton>
+      <SayaButton v-if="checkout" size="lg" class="shrink-0" :disabled="!quote || quotePending" @click="$emit('next')">{{ t('stay.reserve') }}</SayaButton>
+      <SayaButton v-else size="lg" class="shrink-0" :to="enquiryPath">{{ t('stay.send_enquiry') }}</SayaButton>
     </div>
   </div>
 </template>
@@ -99,7 +100,7 @@ import { addLocalDays, formatCalendarDate } from '~/utils/timezone'
 const props = defineProps<{ controller: StayBookingController }>()
 defineEmits<{ next: [] }>()
 const { calendar, calendarPending, calendarError, checkIn, checkOut, adults, children, infants, maxGuests, quote, quotePending, bookingError,
-  nightCount, breakdown, rangeLabel, guestsLabel, canCheckIn, canCheckOut, selectDay, clearDates, money, nightsLabel, dateLabel } = props.controller
+  nightCount, breakdown, rangeLabel, guestsLabel, canCheckIn, canCheckOut, selectDay, clearDates, money, nightsLabel, dateLabel, checkout, enquiryPath } = props.controller
 const { t, locale } = useI18n()
 
 const monthOffset = ref(0)
