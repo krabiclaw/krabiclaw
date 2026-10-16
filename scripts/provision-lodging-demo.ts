@@ -209,12 +209,19 @@ async function main() {
       max_guests: spec.max_guests, min_nights: spec.min_nights, base_price_minor: spec.base_price_minor,
       check_in_instructions: spec.check_in_instructions,
     })
+    await call('PATCH', `/api/dashboard/locations/${home.location_id}?${q}`, {
+      address: { regionCode: spec.country, addressLines: [spec.address], locality: spec.city, administrativeArea: spec.state ?? undefined, postalCode: spec.zip_code ?? undefined },
+    })
     await call('PATCH', `/api/editor/organizations/${org.id}/products/${home.product_id}`, { description: spec.description })
 
     const start = today(spec.timezone)
     const end = addDays(start, CALENDAR_DAYS)
-    const stays = (await call<{ stays: Stay[] }>('GET', `/api/dashboard/stays?${q}&from=${start}&to=${addDays(start, 400)}&product_id=${home.product_id}`)).data.stays
-    for (const stay of stays.filter(row => row.status !== 'cancelled')) {
+    // A stay list spans at most 400 days, and stays can be booked up to 500 ahead.
+    const stays = new Map<string, Stay>()
+    for (const [from, to] of [[start, addDays(start, 400)], [addDays(start, 400), end]]) {
+      for (const stay of (await call<{ stays: Stay[] }>('GET', `/api/dashboard/stays?${q}&from=${from}&to=${to}&product_id=${home.product_id}`)).data.stays) stays.set(stay.id, stay)
+    }
+    for (const stay of [...stays.values()].filter(row => row.status !== 'cancelled')) {
       await call('POST', `/api/dashboard/stays/${stay.id}/cancel?${q}`, { expected_version: stay.version, reason: 'Lodging demo reset' })
       console.log(`Cancelled stay ${stay.id} (${stay.check_in_date} to ${stay.check_out_date}) at ${spec.name}`)
     }
