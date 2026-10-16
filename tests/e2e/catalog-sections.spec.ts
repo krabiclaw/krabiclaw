@@ -149,7 +149,7 @@ test('a section photo introduces its section on the public menu', async ({ page,
     const collections = (await listed.json() as { collections: Collection[] }).collections
     let section: Collection | undefined
     for (const candidate of collections) {
-      if (await page.getByRole('heading', { name: candidate.name, exact: true }).count()) { section = candidate; break }
+      if (await page.getByRole('heading', { level: 2, name: candidate.name, exact: true }).count()) { section = candidate; break }
     }
     expect(section, 'The public menu shows one of the demo sections').toBeDefined()
     restore = { id: section!.id, assetId: section!.image?.asset_id ?? null }
@@ -164,13 +164,21 @@ test('a section photo introduces its section on the public menu', async ({ page,
     expect(image?.public_url).toBeTruthy()
 
     await openTenantPage(page, `${tenantBaseURL}/menu`, tenantExtraHeaders)
-    const intro = page.locator(`img[src="${image!.public_url}"]`).first()
+    // The picture that introduces the section is the one set above its own heading, not a dish's.
+    const intro = page.getByRole('heading', { level: 2, name: section!.name, exact: true }).locator('xpath=preceding-sibling::img')
+    await expect(intro).toHaveCount(1)
     await intro.scrollIntoViewIfNeeded()
     await expect(intro).toBeVisible()
-    const menuSections = (await page.locator('script[type="application/ld+json"]').allTextContents())
-      .flatMap(text => JSON.stringify(JSON.parse(text)).includes('MenuSection') ? [JSON.parse(text)] : [])
-    expect(JSON.stringify(menuSections)).toContain(`"name":${JSON.stringify(section!.name)}`)
-    expect(JSON.stringify(menuSections)).toContain(image!.public_url)
+    await expect(intro).toHaveAttribute('src', image!.public_url)
+    const menuSections: unknown[] = []
+    const collect = (value: unknown): void => {
+      if (Array.isArray(value)) return value.forEach(collect)
+      if (!value || typeof value !== 'object') return
+      if ((value as { '@type'?: unknown })['@type'] === 'MenuSection') menuSections.push(value)
+      Object.values(value).forEach(collect)
+    }
+    for (const text of await page.locator('script[type="application/ld+json"]').allTextContents()) collect(JSON.parse(text))
+    expect(menuSections).toContainEqual(expect.objectContaining({ name: section!.name, image: image!.public_url }))
   } finally {
     try {
       if (restore) await setPhoto(restore.id, restore.assetId)
