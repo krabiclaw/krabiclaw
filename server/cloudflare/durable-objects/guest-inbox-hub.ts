@@ -45,6 +45,11 @@ async function socketMembership(env: GuestInboxHubEnv, attachment: InboxSocketAt
 
 async function canReceive(env: GuestInboxHubEnv, attachment: InboxSocketAttachment, membership: ResolvedMembership, event: DashboardInvalidation): Promise<boolean> {
   if (attachment.organizationId !== event.organizationId) return false
+  // A team conversation is its members' alone, whatever their role.
+  if (event.type === 'team_thread.changed') {
+    return Boolean(await queryFirst(env.DB, `SELECT 1 FROM team_thread_members s JOIN member m ON m.id = s.member_id AND m.organizationId = s.organization_id
+      WHERE s.organization_id = ? AND s.thread_id = ? AND m.userId = ?`, [attachment.organizationId, event.teamThreadId, attachment.userId]))
+  }
   if ('targetUserId' in event && event.targetUserId && event.targetUserId !== attachment.userId) return false
   if (await roleAllows({ ...membership, permissions: { operations: ['read'] } })) return true
   if ('targetUserId' in event) return event.targetUserId === attachment.userId

@@ -693,10 +693,7 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
         stage.exec(readFileSync(resolve('migrations-history/v17', name), 'utf8'))
       }
     }
-    if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
-      withBaselineTables(baseSql)
-      for (const name of files.slice(1)) stage.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8'))
-    }
+    if (sourceDirectory !== MIGRATIONS_DIRECTORY) withBaselineTables(baseSql)
     // v19 adds facts no older row has: no copied stay was received as a new
     // reservation and no home has private instructions yet. A saved category
     // preference predates push, so its push switch is that category's
@@ -715,6 +712,10 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
       const unmapped = stage.prepare('SELECT count(*) AS n FROM user_notification_preferences WHERE push_enabled IS NULL').get().n
       assert(unmapped === 0, `${unmapped} notification preferences name a category with no push default; no rows were copied`)
       if (changes) manifest.transforms.push({ name: 'notification_preferences_push_default', changes })
+    }
+    // The current chain's forward migrations run on the v19 shape the facts above complete.
+    if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
+      for (const name of files.slice(1)) stage.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8'))
     }
     const names = tableNames(stage)
     const count = (db, table) => db.prepare(`SELECT count(*) AS n FROM ${qi(table)}`).get().n

@@ -29,6 +29,8 @@ const ORGANIZATION_EVENT_LABELS: Record<string, string> = {
   'member.role_changed': "Updated a member's role",
   'member.removed': 'Removed a member',
   'member.access_scope_revoked': 'Revoked WhatsApp notification access',
+  'stay.homes_assigned': "Changed the homes a member looks after",
+  'team.message_sent': 'Sent a team message',
 }
 
 export const ORGANIZATION_EVENT_TYPES = Object.keys(ORGANIZATION_EVENT_LABELS)

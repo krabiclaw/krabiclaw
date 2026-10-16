@@ -37,6 +37,8 @@ export type DashboardOrganizationRow = ResolvedMembership & {
   id: string
   name: string
   slug: string
+  /** The caller's Better Auth member row in this organization. */
+  memberId: string
 } & DashboardOrganizationConfig
 
 const ORGANIZATION_CONFIG_SELECT = `

@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro'
-import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { assertRoleAllows, assignedHomeSql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { assertRoleAllows, assignedHomeSql, isOrganizationWideRole, organizationAdapter, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { createLocation, updateLocation } from '~/server/utils/location-management'
 import { createProduct, getProduct, updateProduct } from '~/server/utils/product-management'
@@ -423,6 +423,46 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
     await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId, locationId: updated.location_id, stayId: null }, { updated_at: instructionsAt })
   }
   return { home: updated, channel_push: channelPush }
+}
+
+/**
+ * The homes one member looks after, set at once. Each named home is assigned
+ * to that member — a home has one assigned member, so another member's
+ * assignment there is replaced — and the member's other homes are cleared.
+ * Owners and admins already see every home and are never assigned one.
+ */
+export async function setMemberHomes(env: CloudflareEnv & GuestInboxPublicationEnv, db: DbClient, access: StayAccess, memberId: string, productIds: unknown): Promise<{ memberId: string; productIds: string[] }> {
+  requireManager(access)
+  const member = await (await organizationAdapter(env)).findMemberById(memberId)
+  if (!member || member.organizationId !== access.organizationId) fail(404, 'MEMBER_NOT_FOUND', 'That person is not a member of this organization', 'memberId')
+  if (isOrganizationWideRole(member.role)) fail(409, 'MEMBER_SEES_ALL_HOMES', 'Owners and admins already see every home', 'memberId')
+  if (!Array.isArray(productIds) || productIds.some(id => typeof id !== 'string' || !id)) fail(422, 'INVALID_HOME_IDS', 'productIds must list homes of this organization', 'productIds')
+  const selected = [...new Set(productIds as string[])]
+  const homes = await queryAll<{ product_id: string; location_id: string; assigned_member_id: string | null }>(db, `
+    SELECT product_id, location_id, assigned_member_id FROM product_stay_configs
+     WHERE organization_id = ? AND (product_id IN (SELECT value FROM json_each(?)) OR assigned_member_id = ?)`, [access.organizationId, d1JsonStringSet(selected), memberId])
+  const chosen = new Set(selected)
+  if (homes.filter(home => chosen.has(home.product_id)).length !== selected.length) fail(422, 'INVALID_HOME_IDS', 'productIds must list homes of this organization', 'productIds')
+  const changed = homes.filter(home => chosen.has(home.product_id) ? home.assigned_member_id !== memberId : home.assigned_member_id === memberId)
+  const now = new Date().toISOString()
+  if (changed.length) {
+    await executeBatch(db, [{
+      query: `UPDATE product_stay_configs SET assigned_member_id = ?, updated_at = ?, updated_by = ?
+               WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) AND assigned_member_id IS NOT ?`,
+      params: [memberId, now, access.actorId, access.organizationId, d1JsonStringSet(selected), memberId],
+    }, {
+      query: `UPDATE product_stay_configs SET assigned_member_id = NULL, updated_at = ?, updated_by = ?
+               WHERE organization_id = ? AND assigned_member_id = ? AND product_id NOT IN (SELECT value FROM json_each(?))`,
+      params: [now, access.actorId, access.organizationId, memberId, d1JsonStringSet(selected)],
+    }, organizationEventQuery({ organizationId: access.organizationId, actorId: access.actorId, eventType: 'stay.homes_assigned', entityType: 'member', entityId: memberId,
+      metadata: { product_ids: selected.sort(), changed_product_ids: changed.map(home => home.product_id).sort() } })], { operation: 'Assign homes to a member' })
+  }
+  const assigned = await queryAll<{ product_id: string }>(db, 'SELECT product_id FROM product_stay_configs WHERE organization_id = ? AND assigned_member_id = ? ORDER BY product_id', [access.organizationId, memberId])
+  // The member's Today and Calendar, and everyone else's open views of these homes, reload.
+  for (const home of changed) {
+    await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId: home.product_id, locationId: home.location_id, stayId: null }, { updated_at: now })
+  }
+  return { memberId, productIds: assigned.map(row => row.product_id) }
 }
 
 /**
