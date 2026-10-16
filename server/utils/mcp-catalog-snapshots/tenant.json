@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:51714e0b301279b50ec1d163d6ee86a5915685dddc7def59fa8f93885bdf0fcd",
-  "documentationFingerprint": "sha256:50ea94b8dc124d9e72c1006b4be32842a0800962ede75a16974fe13b7ae8fde6",
+  "fingerprint": "sha256:9e483f7f3ad8e4c28423ed9cd38b2213d4fe0cdcfbe7341c4984ff4209e72fc3",
+  "documentationFingerprint": "sha256:47053a4975fbb4df451aaacd9d44a98649bab9bb961ae1f9d50f706b66a6cb7f",
   "tools": [
     {
       "name": "append_content_block",
@@ -39392,6 +39392,62 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "photos": {
+                "description": "The home's photos in order, the cover first: its product's image, then its gallery. id is the media asset id; set_media, attach_media, reorder_media, remove_media and update_media_asset change them.",
+                "items": {
+                  "properties": {
+                    "alt_text": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "height": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "image",
+                        "video"
+                      ],
+                      "type": "string"
+                    },
+                    "position": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "url": {
+                      "description": "The picture to show; a video shows its poster frame.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "width": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "kind",
+                    "url",
+                    "width",
+                    "height",
+                    "alt_text",
+                    "position"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "product_id": {
                 "minLength": 1,
                 "type": "string"
@@ -39415,7 +39471,8 @@
               "check_in_instructions",
               "assigned_member_id",
               "assigned_team_id",
-              "channel"
+              "channel",
+              "photos"
             ],
             "type": [
               "object",
@@ -54132,6 +54189,62 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "photos": {
+                "description": "The home's photos in order, the cover first: its product's image, then its gallery. id is the media asset id; set_media, attach_media, reorder_media, remove_media and update_media_asset change them.",
+                "items": {
+                  "properties": {
+                    "alt_text": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "height": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "image",
+                        "video"
+                      ],
+                      "type": "string"
+                    },
+                    "position": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "url": {
+                      "description": "The picture to show; a video shows its poster frame.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "width": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "kind",
+                    "url",
+                    "width",
+                    "height",
+                    "alt_text",
+                    "position"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "product_id": {
                 "minLength": 1,
                 "type": "string"
@@ -54155,7 +54268,8 @@
               "check_in_instructions",
               "assigned_member_id",
               "assigned_team_id",
-              "channel"
+              "channel",
+              "photos"
             ],
             "type": "object"
           },
@@ -89750,6 +89864,62 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "photos": {
+                "description": "The home's photos in order, the cover first: its product's image, then its gallery. id is the media asset id; set_media, attach_media, reorder_media, remove_media and update_media_asset change them.",
+                "items": {
+                  "properties": {
+                    "alt_text": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "height": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "image",
+                        "video"
+                      ],
+                      "type": "string"
+                    },
+                    "position": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "url": {
+                      "description": "The picture to show; a video shows its poster frame.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "width": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "kind",
+                    "url",
+                    "width",
+                    "height",
+                    "alt_text",
+                    "position"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "product_id": {
                 "minLength": 1,
                 "type": "string"
@@ -89773,7 +89943,8 @@
               "check_in_instructions",
               "assigned_member_id",
               "assigned_team_id",
-              "channel"
+              "channel",
+              "photos"
             ],
             "type": "object"
           }
@@ -90002,6 +90173,62 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "photos": {
+                "description": "The home's photos in order, the cover first: its product's image, then its gallery. id is the media asset id; set_media, attach_media, reorder_media, remove_media and update_media_asset change them.",
+                "items": {
+                  "properties": {
+                    "alt_text": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "height": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "image",
+                        "video"
+                      ],
+                      "type": "string"
+                    },
+                    "position": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "url": {
+                      "description": "The picture to show; a video shows its poster frame.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "width": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "kind",
+                    "url",
+                    "width",
+                    "height",
+                    "alt_text",
+                    "position"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "product_id": {
                 "minLength": 1,
                 "type": "string"
@@ -90025,7 +90252,8 @@
               "check_in_instructions",
               "assigned_member_id",
               "assigned_team_id",
-              "channel"
+              "channel",
+              "photos"
             ],
             "type": "object"
           },

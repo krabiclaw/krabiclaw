@@ -35,6 +35,7 @@
 import type { ComputedRef, InjectionKey, Ref } from 'vue'
 import type { Collection, Product } from '~/server/types/products'
 import type { DashboardLocation } from '~/composables/useDashboardOrganization'
+import type { GalleryMediaItem } from '~/components/dashboard/DashboardMediaGalleryField.vue'
 
 export const SECTION_KEYS = ['photo', 'kind', 'name', 'price', 'description', 'page', 'options', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections', 'stay'] as const
 export type SectionKey = typeof SECTION_KEYS[number]
@@ -135,6 +136,12 @@ export interface ProductEditor {
   saveLabel: Ref<string>
   saveDisabled: Ref<boolean>
   setPrimaryImage: (assetId: string | null) => Promise<void>
+  /** The photos after the cover, in order, and an empty row while one is being chosen. */
+  galleryRows: ComputedRef<GalleryMediaItem[]>
+  addGalleryRow: () => void
+  setGalleryAsset: (index: number, asset: { asset_id: string } | null) => Promise<void>
+  removeGalleryPhoto: (index: number) => Promise<void>
+  moveGalleryPhoto: (from: number, to: number) => Promise<void>
   /** Make the page this product owns, when it has none; opening Page content never does. */
   createPage: () => Promise<void>
   addOption: () => void
@@ -219,7 +226,7 @@ const currency = rawCurrency
 
 const sectionLabels: Record<SectionKey, string> = {
   'kind': 'Type',
-  'photo': 'Photo',
+  'photo': 'Photos',
   'name': 'Name',
   'price': 'Price',
   'description': 'Description',
@@ -639,7 +646,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
   return [{
     id: 'item',
     items: [
-      { id: 'photo', label: 'Photo', summary: image ? '' : 'No photo yet', placeholder: !image, to: sectionPath('photo') },
+      { id: 'photo', label: 'Photos', summary: image ? (product.value.gallery.length ? `${product.value.gallery.length + 1} photos` : '') : 'No photo yet', placeholder: !image, to: sectionPath('photo') },
       { id: 'name', label: 'Name', summary: form.name || 'Not named yet', placeholder: !form.name, to: sectionPath('name') },
       { id: 'description', label: 'Description', summary: form.description || 'Nothing written yet', placeholder: !form.description, to: sectionPath('description') },
       // A service is shown by a page of its own. The page has one editor, in
@@ -1038,6 +1045,77 @@ async function setPrimaryImage(assetId: string | null) {
   }
 }
 
+/**
+ * The photos after the cover are the product's ordered `gallery`. Each change
+ * is saved as it is made, through the same placement operations every other
+ * gallery uses, and the product is read again so the list is the server's.
+ */
+const choosingGalleryPhoto = ref(false)
+const galleryRows = computed<GalleryMediaItem[]>(() => [
+  ...(product.value?.gallery ?? []).map(asset => ({ _key: asset.asset_id, asset_id: asset.asset_id, url: asset.public_url, thumbnail_url: asset.thumbnail_url, kind: asset.kind })),
+  ...(choosingGalleryPhoto.value ? [{ _key: 'new', asset_id: null }] : []),
+])
+const galleryPlacement = () => ({ owner_type: 'product', owner_id: productId.value, slot: 'gallery' })
+const isPlacementResponse = (value: unknown): value is { asset_ids: string[] } => isRecord(value) && Array.isArray(value.asset_ids)
+
+async function changeGallery(change: () => Promise<void>) {
+  photoError.value = null
+  try {
+    await change()
+  } catch (error) {
+    photoError.value = getErrorMessage(error, 'Failed to update the photos')
+  }
+  choosingGalleryPhoto.value = false
+  // Whatever the outcome: a failed change may have made part of its writes.
+  try {
+    await reload()
+  } catch (error) {
+    photoError.value ??= getErrorMessage(error, 'Failed to read the photos again')
+  }
+}
+
+function galleryCall(action: 'attach' | 'remove' | 'reorder', body: Record<string, unknown>) {
+  return dashboardApi(`/api/editor/organizations/${organizationId}/media/placements/${action}`, {
+    method: 'POST', body: { placement: galleryPlacement(), ...body }, validate: isPlacementResponse,
+  })
+}
+
+function addGalleryRow() {
+  choosingGalleryPhoto.value = true
+}
+
+async function setGalleryAsset(index: number, asset: { asset_id: string } | null) {
+  const rows = galleryRows.value
+  const replaced = rows[index]?.asset_id ?? null
+  const next = rows[index + 1]?.asset_id ?? null
+  await changeGallery(async () => {
+    if (replaced) await galleryCall('remove', { asset_id: replaced })
+    if (!asset) return
+    await galleryCall('attach', { asset_id: asset.asset_id })
+    // Attaching appends; a replaced photo keeps its place.
+    if (replaced && next) await galleryCall('reorder', { moves: [{ asset_id: asset.asset_id, before_asset_id: next }] })
+  })
+}
+
+async function removeGalleryPhoto(index: number) {
+  const assetId = galleryRows.value[index]?.asset_id ?? null
+  if (!assetId) {
+    choosingGalleryPhoto.value = false
+    return
+  }
+  await changeGallery(async () => { await galleryCall('remove', { asset_id: assetId }) })
+}
+
+async function moveGalleryPhoto(from: number, to: number) {
+  const ids = (product.value?.gallery ?? []).map(asset => asset.asset_id)
+  const moved = ids[from]
+  const anchor = ids[to]
+  if (!moved || !anchor || from === to) return
+  await changeGallery(async () => {
+    await galleryCall('reorder', { moves: [to < from ? { asset_id: moved, before_asset_id: anchor } : { asset_id: moved, after_asset_id: anchor }] })
+  })
+}
+
 // ── Localization ────────────────────────────────────────
 /**
  * Which fields can be translated comes from the tenant's own definitions, so
@@ -1130,6 +1208,11 @@ provide(productEditorKey, {
   saveLabel,
   saveDisabled,
   setPrimaryImage,
+  galleryRows,
+  addGalleryRow,
+  setGalleryAsset,
+  removeGalleryPhoto,
+  moveGalleryPhoto,
   createPage,
   addOption,
   removeOption,

@@ -2,24 +2,12 @@ import { defineHandler } from 'nitro';
 import { getQuery, getRouterParam } from 'nitro/h3';
 import { jsonResponse, rethrowHttpError } from '~/server/utils/api-response'
 import { requireOrganizationAccess } from '~/server/utils/location-access'
-import { uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
+import { sanitizeFilename, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
 import { sniffMediaMimeType, VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, POSTER_IMAGE_MIME_TYPES, MAX_POSTER_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
 
 const VALID_CATEGORIES = new Set(['exterior', 'interior', 'food', 'menu', 'team', 'other'])
 const MULTIPART_OVERHEAD_BYTES = 64 * 1024
 type MediaCategory = 'exterior' | 'interior' | 'food' | 'menu' | 'team' | 'other'
-
-function sanitizeFilename(raw: string | undefined): string {
-  const sanitized = (raw ?? '')
-    .replace(/[\\/]+/g, '-')
-    .replace(/[^\x20-\x7E]+/g, '')
-    .replace(/\s+/g, '-')
-    .replace(/[^A-Za-z0-9._-]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^[-.]+|[-.]+$/g, '')
-    .slice(0, 120)
-  return sanitized || 'upload'
-}
 
 function queryValue(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null

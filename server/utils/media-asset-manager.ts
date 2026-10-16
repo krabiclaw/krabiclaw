@@ -186,16 +186,17 @@ export function buildMediaPlacementInsertQuery(input: MediaPlacementInsertInput)
   }
 }
 
-// Not exported: a bare "delete everything, insert the given array" is only
-// ever safe for a single-value slot (cardinality <= 1, so there is nothing
+// A bare "delete everything, insert the given array" is only ever safe for a single-value slot (cardinality <= 1, so there is nothing
 // to resurrect) or for seeding an ordered collection at true creation time
 // (nothing existed before, so nothing can be stale). Any update path on an
 // existing ordered collection must go through attachMediaPlacement /
 // removeMediaPlacement / reorderMediaPlacements in media-placement.ts
 // instead — a client holding a stale read of the list otherwise silently
 // resurrects assets someone else already removed. See setSingleMediaPlacement
-// and insertInitialMediaPlacements below for the two sanctioned callers.
-function buildMediaPlacementReplacementQueries(input: {
+// and insertInitialMediaPlacements below, and arrangeProductPhotos in
+// media-placement.ts, which guards the membership it read in the same batch,
+// for the sanctioned callers.
+export function buildMediaPlacementReplacementQueries(input: {
   organizationId: string
   placement: { owner_type: string; owner_id: string; slot: string }
   media: Array<{ asset_id: string; presentation?: LogoPresentation | null }>
@@ -570,7 +571,7 @@ function publicationPinGuardQuery(organizationId: string, assetId: string): Batc
 
 async function assertNotPinnedByPublication(db: DbClient, organizationId: string, assetId: string) {
   const pinned = await queryFirst<{ id: string; channel: string }>(db, `${PINNING_PUBLICATION} LIMIT 1`, [organizationId, assetId])
-  if (pinned) throw new HTTPError({ statusCode: 409, statusMessage: `Media asset ${assetId} is part of the unresolved ${pinned.channel} publication ${pinned.id}; resolve it first` })
+  if (pinned) throw new HTTPError({ statusCode: 409, statusMessage: `Media asset ${assetId} is part of the unresolved ${pinned.channel} publication ${pinned.id}; resolve it first`, data: { code: 'MEDIA_PINNED_BY_PUBLICATION', field: 'asset_id' } })
 }
 
 export async function updateMediaAssetMetadata(
