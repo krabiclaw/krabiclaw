@@ -482,7 +482,7 @@ for (const tenant of tenants) {
 // A listed place to stay on staging, Stripe test mode ready: the booking card
 // opens the dialog and walks a guest to the contact step. Nothing is submitted.
 // Its pressed "Check availability" once flipped the dialog's checkbox shut.
-const STAGING_STAY = { tenant: 'payments-sandbox-staging', path: '/stays/test-booking-beach-studio', slug: 'test-booking-beach-studio' }
+const STAGING_STAY = { tenant: 'saltleaf-stays-demo', path: '/stays/saltleaf-ocean-avenue-studio', slug: 'saltleaf-ocean-avenue-studio' }
 
 test('a guest opens a stay\'s booking dialog, picks nights the calendar allows and reaches the contact step', async ({ page }) => {
   const platform = new URL(testBaseUrl())
