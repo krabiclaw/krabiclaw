@@ -2,7 +2,7 @@ diff --git a/dist/_chunks/node-worker-runner.mjs b/dist/_chunks/node-worker-runn
 index c17bd9701247fcc31f89cf270446e819792817d6..ed73fa9d3fd529c70c45fa89132d07cf90b510cc 100644
 --- a/dist/_chunks/node-worker-runner.mjs
 +++ b/dist/_chunks/node-worker-runner.mjs
-@@ -25,9 +25,14 @@ var NodeWorkerEnvRunner = class extends BaseEnvRunner {
+@@ -25,9 +25,19 @@ var NodeWorkerEnvRunner = class extends BaseEnvRunner {
  	}
  	async _closeRuntime() {
  		if (!this.#worker) return;
@@ -11,6 +11,11 @@ index c17bd9701247fcc31f89cf270446e819792817d6..ed73fa9d3fd529c70c45fa89132d07cf
 -			console.error(error);
 +		const worker = this.#worker;
 +		worker.removeAllListeners();
++		// A worker that already exited has no exit left to wait for.
++		if (worker.threadId === -1) {
++			this.#worker = void 0;
++			return;
++		}
 +		// Let the worker close its entry (the app's close hooks) and exit on its
 +		// own. Terminating straight away left whatever the app had started — a
 +		// database proxy and its child process — running with no one to stop it.

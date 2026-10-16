@@ -711,6 +711,7 @@ const DELIVERY_PURPOSE_LABELS = {
   member_reply: 'reply',
   status_update: 'status update',
   scheduled_message: 'scheduled message',
+  team_message: 'team message',
 } satisfies Record<GuestThreadDeliveryFailureViewModel['purpose'], string>
 
 function deliveryFailureTitle(failure: GuestThreadDeliveryFailureViewModel) {

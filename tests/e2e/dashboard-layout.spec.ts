@@ -1266,7 +1266,7 @@ test.describe('dashboard pane hierarchy', () => {
     })
     await page.setViewportSize(PHONE)
     await open(page, leafPath)
-    const outer = page.getByRole('dialog', { name: 'Photo', exact: true })
+    const outer = page.getByRole('dialog', { name: 'Photos', exact: true })
     const leaf = page.locator('#dashboard-panel-product-photo')
     await expect(outer).toBeVisible()
     await expect(leaf.getByTestId('product-photo').locator('img')).toHaveAttribute('src', product!.image!.public_url)

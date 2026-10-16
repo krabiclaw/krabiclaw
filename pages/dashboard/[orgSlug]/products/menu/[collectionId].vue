@@ -89,9 +89,10 @@ function seed(row: Collection | null) {
   form.name = row?.name ?? ''
   form.description = row?.description ?? ''
 }
-watch(collection, (row) => { if (row) seed(row) }, { immediate: true })
-// Nuxt reuses this page across collections; a record that has not arrived leaves nothing behind.
-watch(collectionId, () => seed(collection.value))
+// Seeded when the page moves to another collection or its record first arrives;
+// a refreshed row never overwrites what is being typed. Nuxt reuses this page
+// across collections, and a record that has not arrived leaves nothing behind.
+watch([collectionId, () => collection.value !== null], () => seed(collection.value), { immediate: true })
 
 const saving = ref(false)
 const errorMessage = ref('')
@@ -134,13 +135,13 @@ async function commit() {
   try {
     // A collection created in a location's catalog is scoped to that location;
     // one created in the whole organization's catalog is site-wide. Renaming
-    // one needs no location at all.
+    // one needs no location at all, and a leaf's save sends only its own field.
     const endpoint = `/api/editor/organizations/${organizationId}/collections`
     if (isNew.value) {
       const created = await dashboardApi(endpoint, { method: 'POST', body: { name: form.name.trim(), location_id: locationId.value }, validate: isCollectionCreated })
       createdId = created.collection.id
     } else {
-      await dashboardApi(`${endpoint}/${collectionId.value}`, { method: 'PATCH', body: { name: form.name.trim(), description: form.description.trim() || null }, validate: isRecord })
+      await dashboardApi(`${endpoint}/${collectionId.value}`, { method: 'PATCH', body: level.child.value === 'description' ? { description: form.description.trim() || null } : { name: form.name.trim() }, validate: isRecord })
     }
   } catch (error) {
     errorMessage.value = getErrorMessage(error, 'Failed to save section')

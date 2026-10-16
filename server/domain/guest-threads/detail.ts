@@ -45,7 +45,7 @@ export async function getGuestThreadDetail(
     throw new HTTPError({ statusCode: 500, message: 'A successful channel reply has no provider message ID', data: { code: 'CHANNEL_RECEIPT_INVALID', field: 'delivery.provider_message_id' } })
   }
 
-  const photos = await listMessagePhotos(db, entryRows.filter(entry => entry.kind === 'message').map(entry => entry.id))
+  const photos = await listMessagePhotos(db, 'activity_entry', entryRows.filter(entry => entry.kind === 'message').map(entry => entry.id))
 
   // Who on the team said or did each thing, by the name their account carries.
   const actorUserIds = entryRows.flatMap(entry => entry.actor_user_id ? [entry.actor_user_id] : [])

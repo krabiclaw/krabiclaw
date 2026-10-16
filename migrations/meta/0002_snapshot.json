@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "5ea696c7-36f3-4ab9-bd93-3974a8711176",
+  "id": "1ca3a22b-28fe-4976-9fc8-3d505b40cc1f",
   "prevId": "9a55056a-8c04-40b1-9832-d42071ebc92f",
   "tables": {
     "account": {
@@ -1402,7 +1402,7 @@
       "checkConstraints": {
         "broadcasts_category_check": {
           "name": "broadcasts_category_check",
-          "value": "category IN ('account_security', 'reservations_bookings', 'guest_messages', 'reviews', 'review_requests', 'organization_and_billing', 'product_news')"
+          "value": "category IN ('account_security', 'reservations_bookings', 'guest_messages', 'team_messages', 'reviews', 'review_requests', 'organization_and_billing', 'product_news')"
         },
         "broadcasts_created_at_check": {
           "name": "broadcasts_created_at_check",
@@ -5325,7 +5325,7 @@
         },
         "media_placements_owner_type_check": {
           "name": "media_placements_owner_type_check",
-          "value": "owner_type IN ('organization', 'business_location', 'product', 'collection', 'content_document', 'content_block', 'review', 'review_request', 'activity_entry')"
+          "value": "owner_type IN ('organization', 'business_location', 'product', 'content_document', 'content_block', 'review', 'review_request', 'activity_entry', 'team_message')"
         },
         "media_placements_sort_order_check": {
           "name": "media_placements_sort_order_check",
@@ -16034,6 +16034,379 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
+    "team_messages": {
+      "name": "team_messages",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "sender_user_id": {
+          "name": "sender_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "request_hash": {
+          "name": "request_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        }
+      },
+      "indexes": {
+        "team_messages_thread_idempotency_unique": {
+          "name": "team_messages_thread_idempotency_unique",
+          "columns": [
+            "thread_id",
+            "idempotency_key"
+          ],
+          "isUnique": true
+        },
+        "team_messages_thread_created_idx": {
+          "name": "team_messages_thread_created_idx",
+          "columns": [
+            "thread_id",
+            "created_at",
+            "id"
+          ],
+          "isUnique": false
+        },
+        "team_messages_org_id_unique": {
+          "name": "team_messages_org_id_unique",
+          "columns": [
+            "organization_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "team_messages_sender_user_id_user_id_fk": {
+          "name": "team_messages_sender_user_id_user_id_fk",
+          "tableFrom": "team_messages",
+          "tableTo": "user",
+          "columnsFrom": [
+            "sender_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "team_messages_thread_scope_fk": {
+          "name": "team_messages_thread_scope_fk",
+          "tableFrom": "team_messages",
+          "tableTo": "team_threads",
+          "columnsFrom": [
+            "organization_id",
+            "thread_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "team_messages_body_check": {
+          "name": "team_messages_body_check",
+          "value": "length(body) <= 5000 AND body = trim(body)"
+        },
+        "team_messages_idempotency_check": {
+          "name": "team_messages_idempotency_check",
+          "value": "length(idempotency_key) BETWEEN 1 AND 200"
+        },
+        "team_messages_created_at_check": {
+          "name": "team_messages_created_at_check",
+          "value": "strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at"
+        }
+      }
+    },
+    "team_thread_members": {
+      "name": "team_thread_members",
+      "columns": {
+        "thread_id": {
+          "name": "thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "member_id": {
+          "name": "member_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_read_at": {
+          "name": "last_read_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        }
+      },
+      "indexes": {
+        "team_thread_members_member_idx": {
+          "name": "team_thread_members_member_idx",
+          "columns": [
+            "member_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "team_thread_members_thread_scope_fk": {
+          "name": "team_thread_members_thread_scope_fk",
+          "tableFrom": "team_thread_members",
+          "tableTo": "team_threads",
+          "columnsFrom": [
+            "organization_id",
+            "thread_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "team_thread_members_member_scope_fk": {
+          "name": "team_thread_members_member_scope_fk",
+          "tableFrom": "team_thread_members",
+          "tableTo": "member",
+          "columnsFrom": [
+            "member_id",
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id",
+            "organizationId"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "team_thread_members_thread_id_member_id_pk": {
+          "columns": [
+            "thread_id",
+            "member_id"
+          ],
+          "name": "team_thread_members_thread_id_member_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "team_thread_members_instants_check": {
+          "name": "team_thread_members_instants_check",
+          "value": "(last_read_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', last_read_at, '+0 days') IS last_read_at) AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at"
+        }
+      }
+    },
+    "team_threads": {
+      "name": "team_threads",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "stay_id": {
+          "name": "stay_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_by_user_id": {
+          "name": "created_by_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "participants_key": {
+          "name": "participants_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "last_message_at": {
+          "name": "last_message_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        }
+      },
+      "indexes": {
+        "team_threads_participants_unique": {
+          "name": "team_threads_participants_unique",
+          "columns": [
+            "organization_id",
+            "participants_key"
+          ],
+          "isUnique": true
+        },
+        "team_threads_org_activity_idx": {
+          "name": "team_threads_org_activity_idx",
+          "columns": [
+            "organization_id",
+            "last_message_at"
+          ],
+          "isUnique": false
+        },
+        "team_threads_org_stay_idx": {
+          "name": "team_threads_org_stay_idx",
+          "columns": [
+            "organization_id",
+            "stay_id"
+          ],
+          "isUnique": false
+        },
+        "team_threads_org_id_unique": {
+          "name": "team_threads_org_id_unique",
+          "columns": [
+            "organization_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "team_threads_organization_id_organization_id_fk": {
+          "name": "team_threads_organization_id_organization_id_fk",
+          "tableFrom": "team_threads",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "team_threads_created_by_user_id_user_id_fk": {
+          "name": "team_threads_created_by_user_id_user_id_fk",
+          "tableFrom": "team_threads",
+          "tableTo": "user",
+          "columnsFrom": [
+            "created_by_user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "set null",
+          "onUpdate": "no action"
+        },
+        "team_threads_stay_scope_fk": {
+          "name": "team_threads_stay_scope_fk",
+          "tableFrom": "team_threads",
+          "tableTo": "stays",
+          "columnsFrom": [
+            "organization_id",
+            "stay_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "team_threads_instants_check": {
+          "name": "team_threads_instants_check",
+          "value": "strftime('%Y-%m-%dT%H:%M:%fZ', last_message_at, '+0 days') IS last_message_at AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at"
+        }
+      }
+    },
     "usage_events": {
       "name": "usage_events",
       "columns": {
@@ -16390,7 +16763,7 @@
       "checkConstraints": {
         "user_notification_preferences_category_check": {
           "name": "user_notification_preferences_category_check",
-          "value": "category IN ('account_security', 'reservations_bookings', 'guest_messages', 'reviews', 'review_requests', 'organization_and_billing', 'product_news')"
+          "value": "category IN ('account_security', 'reservations_bookings', 'guest_messages', 'team_messages', 'reviews', 'review_requests', 'organization_and_billing', 'product_news')"
         },
         "user_notification_preferences_updated_at_check": {
           "name": "user_notification_preferences_updated_at_check",
@@ -16399,6 +16772,10 @@
         "user_notification_preferences_account_security_check": {
           "name": "user_notification_preferences_account_security_check",
           "value": "category != 'account_security' OR email_enabled = 1"
+        },
+        "user_notification_preferences_push_only_check": {
+          "name": "user_notification_preferences_push_only_check",
+          "value": "category NOT IN ('team_messages') OR (email_enabled = 0 AND whatsapp_enabled = 0)"
         }
       }
     },
