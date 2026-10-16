@@ -1,4 +1,6 @@
-import { isRecord } from '~/utils/type-guards'
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
 
 export interface PublicAnnouncement {
   headline: string
