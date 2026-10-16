@@ -1,5 +1,3 @@
-import type { ProductKind } from '~/shared/product-details'
-
 // Shared registry for dashboard deep-links, used by both the client/tenant
 // MCP (server/utils/mcp-tools) and ChowBot's own tool executor
 // (server/utils/chowbot-agent.ts) — two otherwise-separate tool-calling
@@ -78,23 +76,6 @@ export function productEditorPath(orgSlug: string, productId: string, locationId
   return scopedTo(`${organizationBase(orgSlug)}/products/${encodeURIComponent(productId)}`, locationId)
 }
 
-export function productCreatePath(orgSlug: string, kind: ProductKind, locationId?: string | null): string {
-  const query = new URLSearchParams({ kind })
-  if (locationId) query.set('location_id', locationId)
-  return `${organizationBase(orgSlug)}/products/new/name?${query}`
-}
-
-export function catalogAvailabilityPath(orgSlug: string, locationId?: string | null): string {
-  const query = new URLSearchParams({ action: 'availability' })
-  if (locationId) query.set('location_id', locationId)
-  return `${organizationBase(orgSlug)}/products/all?${query}`
-}
-
-export function productAvailabilityPath(orgSlug: string, productId: string, locationId?: string | null): string {
-  const concern = locationId ? `locations/${encodeURIComponent(locationId)}` : 'publication/availability'
-  return scopedTo(`${organizationBase(orgSlug)}/products/${encodeURIComponent(productId)}/${concern}`, locationId)
-}
-
 export function collectionEditorPath(orgSlug: string, collectionId: string, locationId?: string | null): string {
   return scopedTo(`${organizationBase(orgSlug)}/products/menu/${encodeURIComponent(collectionId)}`, locationId)
 }
@@ -148,10 +129,6 @@ export function postEditorPath(orgSlug: string, postId: string, locationId?: str
   return scopedTo(`${organizationBase(orgSlug)}/website/posts/${encodeURIComponent(postId)}`, locationId)
 }
 
-export function postCreatePath(orgSlug: string, locationId?: string | null): string {
-  return scopedTo(`${organizationBase(orgSlug)}/website/posts/new/body`, locationId)
-}
-
 export function qaEditorPath(orgSlug: string, qaId: string, locationId?: string | null): string {
   return scopedTo(`${organizationBase(orgSlug)}/website/qa/${encodeURIComponent(qaId)}`, locationId)
 }
@@ -163,8 +140,4 @@ export function reviewEditorPath(orgSlug: string, reviewId: string, locationId?:
 
 export function locationEditorPath(orgSlug: string, locationSlug: string): string {
   return `${organizationBase(orgSlug)}/locations/${encodeURIComponent(locationSlug)}`
-}
-
-export function locationHoursPath(orgSlug: string, locationSlug?: string | null): string {
-  return locationSlug ? `${locationEditorPath(orgSlug, locationSlug)}/hours/exceptions/new-hours` : `${organizationBase(orgSlug)}/locations?action=hours`
 }
