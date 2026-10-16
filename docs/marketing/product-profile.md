@@ -17,7 +17,7 @@ Current MCP and template claim reconciliation: 2026-10-15 against the released [
 | Business model | Free Basic, Growth and Business subscriptions | PRODUCT.md; paid display name and prices belong to Stripe |
 | Primary audience | Restaurants, experience operators, and law firms | Owner direction, 2026-10-15; `utils/template-registry.ts` |
 | MCP endpoint | https://krabiclaw.com/api/mcp | `docs/mcp.md` |
-| MCP registry identity | io.github.paulchrisluke/krabiclaw | Historical listing; re-verify live status before reuse (#941) |
+| MCP registry identity | io.github.krabiclaw/krabiclaw | Published 2026-10-16 under the krabiclaw GitHub org; the former io.github.paulchrisluke/krabiclaw entry was deleted to release the endpoint URL |
 
 Owner-approved company facts ([#941](https://github.com/paulchrisluke/krabiclaw/issues/941), reviewed 2026-10-04): bootstrapped/self-funded; no outside investment to date; open to investment; Salt Lake City, Utah, USA; global from day one. Do not publish a street address for general marketing.
 
