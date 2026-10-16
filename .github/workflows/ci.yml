@@ -131,7 +131,7 @@ jobs:
       NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
       NUXT_PUBLIC_PLATFORM_DOMAIN: https://staging.krabiclaw.com
       NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: https://krabiclaw.com
-      NUXT_PUBLIC_APP_NAME: Krabiclaw Staging
+      NUXT_PUBLIC_APP_NAME: KrabiClaw Staging
       NUXT_PUBLIC_SITE_URL: https://staging.krabiclaw.com
       NUXT_PUBLIC_HELP_URL: https://staging.krabiclaw.com/help
       NUXT_PUBLIC_WHATSAPP_NUMBER: "16197200000"
@@ -236,7 +236,7 @@ jobs:
       NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
       NUXT_PUBLIC_PLATFORM_DOMAIN: https://krabiclaw.com
       NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: https://krabiclaw.com
-      NUXT_PUBLIC_APP_NAME: Krabiclaw
+      NUXT_PUBLIC_APP_NAME: KrabiClaw
       NUXT_PUBLIC_SITE_URL: https://krabiclaw.com
       NUXT_PUBLIC_HELP_URL: https://krabiclaw.com/help
       NUXT_PUBLIC_WHATSAPP_NUMBER: "16197200000"
@@ -293,7 +293,7 @@ jobs:
       NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
       NUXT_PUBLIC_PLATFORM_DOMAIN: https://krabiclaw.com
       NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: https://krabiclaw.com
-      NUXT_PUBLIC_APP_NAME: Krabiclaw
+      NUXT_PUBLIC_APP_NAME: KrabiClaw
       NUXT_PUBLIC_SITE_URL: https://krabiclaw.com
       NUXT_PUBLIC_HELP_URL: https://krabiclaw.com/help
       NUXT_PUBLIC_WHATSAPP_NUMBER: "16197200000"

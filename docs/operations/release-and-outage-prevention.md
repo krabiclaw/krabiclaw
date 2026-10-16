@@ -6,7 +6,7 @@ customer behavior, rather than release bookkeeping, the approval signal.
 
 ## Release rule
 
-Krabiclaw uses a branch-driven flow: a
+KrabiClaw uses a branch-driven flow: a
 pull request deploys nothing, a push to `staging` deploys the staging Worker,
 and a push to `main` deploys production. Each environment receives one normal
 Cloudflare Worker deployment. Do not add candidate manifests, version-override
@@ -117,7 +117,7 @@ The representative client order is:
    reservations.
 2. Kikuzuki: home, menu and items, locations, and reservations.
 3. NCLS: home, services and details, pricing, articles, contact, and schedule.
-4. Krabiclaw's own site: home, documentation, blog, and the help form. It is an
+4. KrabiClaw's own site: home, documentation, blog, and the help form. It is an
    ordinary site on the platform template, so it is qualified like a tenant.
 
 For a shared renderer, routing, theme, content-model, or destructive

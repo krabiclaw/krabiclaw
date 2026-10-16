@@ -59,8 +59,8 @@ export interface PlatformKnowledgePageEntry {
 export const PLATFORM_KNOWLEDGE_FAQ_ENTRIES: PlatformKnowledgeFaqEntry[] = [
   {
     id: 'getting-started-no-tech-skills',
-    title: 'Do I need technical skills to use Krabiclaw?',
-    answer: 'No. Krabiclaw is designed for business owners, not developers. You can launch and update your site through guided flows and conversation.',
+    title: 'Do I need technical skills to use KrabiClaw?',
+    answer: 'No. KrabiClaw is designed for business owners, not developers. You can launch and update your site through guided flows and conversation.',
     keywords: ['technical skills', 'developer', 'beginner', 'easy', 'setup'],
   },
   {
@@ -71,7 +71,7 @@ export const PLATFORM_KNOWLEDGE_FAQ_ENTRIES: PlatformKnowledgeFaqEntry[] = [
   },
   {
     id: 'google-places-optional',
-    title: 'Can I use Krabiclaw without Google Places?',
+    title: 'Can I use KrabiClaw without Google Places?',
     answer: 'Yes. Google Places is optional. You can add your hours, offerings, photos, and content manually, then import public location details from Google Maps later.',
     keywords: ['google places', 'google maps', 'optional', 'manual setup', 'without google'],
   },
@@ -90,13 +90,13 @@ export const PLATFORM_KNOWLEDGE_FAQ_ENTRIES: PlatformKnowledgeFaqEntry[] = [
   {
     id: 'custom-domain',
     title: 'How do I connect my own domain?',
-    answer: 'Upgrade to a plan that includes custom domains, open the site Domains page, and then add the DNS records Krabiclaw provides.',
+    answer: 'Upgrade to a plan that includes custom domains, open the site Domains page, and then add the DNS records KrabiClaw provides.',
     keywords: ['custom domain', 'dns', 'domain setup', 'connect domain'],
   },
   {
     id: 'ssl',
     title: 'Is SSL included?',
-    answer: 'Yes. Krabiclaw sites are served over HTTPS with managed SSL.',
+    answer: 'Yes. KrabiClaw sites are served over HTTPS with managed SSL.',
     keywords: ['ssl', 'https', 'security certificate'],
   },
   {
@@ -179,10 +179,10 @@ export const PLATFORM_KNOWLEDGE_ROUTE_ENTRIES: PlatformKnowledgeRouteEntry[] = [
 export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
   {
     id: 'home',
-    title: 'Krabiclaw Home',
+    title: 'KrabiClaw Home',
     path: '/',
     snippet: 'Overview of the AI website platform for restaurants, experiences, and local businesses.',
-    body: 'Krabiclaw helps local businesses launch fast websites, manage content through ChatGPT and the dashboard, and convert organic traffic directly on their own site.',
+    body: 'KrabiClaw helps local businesses launch fast websites, manage content through ChatGPT and the dashboard, and convert organic traffic directly on their own site.',
     icon: 'sparkles',
     section: 'Platform',
     keywords: ['home', 'overview', 'krabiclaw', 'platform', 'what is krabiclaw'],
@@ -203,7 +203,7 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     id: 'features-page',
     title: 'Products',
     path: '/products',
-    snippet: 'Learn how Krabiclaw handles content, analytics, SEO, speed, and AI-assisted workflows.',
+    snippet: 'Learn how KrabiClaw handles content, analytics, SEO, speed, and AI-assisted workflows.',
     body: 'Products cover website building, ChatGPT and Claude management through MCP, inbox and messaging, bookings, content, reviews, local presence and analytics.',
     icon: 'star',
     section: 'Platform',
@@ -215,7 +215,7 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     title: 'Templates',
     path: '/templates',
     snippet: 'Explore available presentation styles and platform templates for new sites.',
-    body: 'Templates show the design system options and layout directions available when launching a Krabiclaw site.',
+    body: 'Templates show the design system options and layout directions available when launching a KrabiClaw site.',
     icon: 'layout-template',
     section: 'Platform',
     keywords: ['templates', 'themes', 'design', 'saya', 'blawby', 'layouts'],
@@ -226,7 +226,7 @@ export const PLATFORM_KNOWLEDGE_PAGE_ENTRIES: PlatformKnowledgePageEntry[] = [
     title: 'Saya Template',
     path: '/templates/saya',
     snippet: 'Editorial restaurant and experience websites with Google Places imports.',
-    body: 'The Saya template is the flagship Krabiclaw theme for restaurants and experiences — editorial typography, location-centric navigation, and Google Places imports. Free on all plans.',
+    body: 'The Saya template is the flagship KrabiClaw theme for restaurants and experiences — editorial typography, location-centric navigation, and Google Places imports. Free on all plans.',
     icon: 'layout-template',
     section: 'Platform',
     keywords: ['saya', 'template', 'theme', 'restaurant', 'experience', 'free'],

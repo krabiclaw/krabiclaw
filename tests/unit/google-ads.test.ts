@@ -37,7 +37,7 @@ test('listGoogleAdsAccounts queries accessible customers and retrieves descripti
           {
             customer: {
               id: '3317427925',
-              descriptiveName: 'Krabiclaw',
+              descriptiveName: 'KrabiClaw',
               currencyCode: 'USD',
               timeZone: 'America/New_York',
               manager: false,
@@ -71,7 +71,7 @@ test('listGoogleAdsAccounts queries accessible customers and retrieves descripti
   assert.deepEqual(accounts[0], {
     customerId: '3317427925',
     formattedCustomerId: '331-742-7925',
-    descriptiveName: 'Krabiclaw',
+    descriptiveName: 'KrabiClaw',
     currencyCode: 'USD',
     timeZone: 'America/New_York',
     isManager: false,

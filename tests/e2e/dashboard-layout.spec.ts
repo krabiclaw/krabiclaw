@@ -1493,9 +1493,9 @@ test.describe('dashboard pane hierarchy', () => {
     }
   })
 
-  // Krabiclaw runs on Krabiclaw: the row and its page exist only inside
-  // Krabiclaw's own organization, and only for a Better Auth admin.
-  test('Platform accounts opens only inside Krabiclaw, and only for a Better Auth admin', async ({ page, baseURL, playwright }) => {
+  // KrabiClaw runs on KrabiClaw: the row and its page exist only inside
+  // KrabiClaw's own organization, and only for a Better Auth admin.
+  test('Platform accounts opens only inside KrabiClaw, and only for a Better Auth admin', async ({ page, baseURL, playwright }) => {
     const services = '/dashboard/north-carolina-legal-services'
     const krabiclaw = '/dashboard/platform'
     const menu = page.locator('#dashboard-panel-organization-settings')
@@ -1528,7 +1528,7 @@ test.describe('dashboard pane hierarchy', () => {
       await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
       await expectNoPlatformAccounts()
 
-      // Krabiclaw's own organization, opened by its owner, who is a Better Auth admin.
+      // KrabiClaw's own organization, opened by its owner, who is a Better Auth admin.
       await page.context().clearCookies()
       await loginAs(page.request, baseURL!)
       const signedIn = await (await page.request.get('/api/auth/get-session')).json() as { user: { role?: string | null } }

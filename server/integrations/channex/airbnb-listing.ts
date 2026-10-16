@@ -73,7 +73,7 @@ export async function listingDetails(env: ChannexEnv, channelId: string, listing
     }
     if (listing.property_type_category !== undefined && listing.property_type_category !== null) {
       const category = string(listing.property_type_category, 'Airbnb property type')
-      if (!(PROPERTY_TYPES as readonly string[]).includes(category)) fail(422, 'UNSUPPORTED_PROPERTY_TYPE', `Airbnb property type "${category}" has no verified Krabiclaw mapping. Import stopped for review.`)
+      if (!(PROPERTY_TYPES as readonly string[]).includes(category)) fail(422, 'UNSUPPORTED_PROPERTY_TYPE', `Airbnb property type "${category}" has no verified KrabiClaw mapping. Import stopped for review.`)
       fields.propertyType = category
     }
     // Airbnb's guest capacity does not split out children and infants, so

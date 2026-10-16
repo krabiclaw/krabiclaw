@@ -101,7 +101,7 @@ import { getErrorMessage } from '~/utils/errors'
 import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayFeedPayload } from '~/shared/dashboard-today'
 import type { AgendaItem, AgendaPayload } from '~/server/utils/dashboard-agenda'
 
-useSeoMeta({ title: 'Today | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Today | KrabiClaw', robots: 'noindex, nofollow' })
 
 const props = defineProps<{ personalScope?: boolean }>()
 type TodayRange = 'today' | 'upcoming'

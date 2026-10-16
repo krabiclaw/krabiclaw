@@ -153,7 +153,7 @@ test('renderPlansMarkdown generates accurate, machine-readable markdown specific
   ]
 
   const md = renderPlansMarkdown(dummyPlans)
-  assert.ok(md.includes('# Krabiclaw Pricing & Plans'))
+  assert.ok(md.includes('# KrabiClaw Pricing & Plans'))
   assert.ok(md.includes('## Free'))
   assert.ok(md.includes('Free ($0/month)'))
   assert.ok(md.includes('## Growth'))

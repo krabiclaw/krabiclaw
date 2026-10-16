@@ -126,7 +126,7 @@ export async function advanceDeliveryStatus(
 }
 
 /**
- * The Krabiclaw delivery status a Resend email event means, or null for an
+ * The KrabiClaw delivery status a Resend email event means, or null for an
  * event that says nothing about whether the message arrived. A complaint is
  * a delivered message; the complaint itself is Resend's to keep.
  */

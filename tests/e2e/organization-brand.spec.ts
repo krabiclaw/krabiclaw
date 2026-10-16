@@ -204,7 +204,7 @@ test('every catalog preset saves through MCP and renders on Blawby and the platf
       expect(rendered.loaded.some(face => face.family === body), `${option.value} body face`).toBe(true)
     }
 
-    // Krabiclaw's own site renders the same setting.
+    // KrabiClaw's own site renders the same setting.
     const platformSettings = `/api/organizations/${PLATFORM_ORGANIZATION_ID}/settings`
     const platformOriginal = await owner.get(platformSettings)
     await expectStatus(platformOriginal, 200)

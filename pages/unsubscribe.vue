@@ -79,7 +79,7 @@ async function submit() {
 
 useSocialMetadata({
   path: '/unsubscribe',
-  title: 'Unsubscribe | Krabiclaw',
+  title: 'Unsubscribe | KrabiClaw',
   description: 'Manage your email subscription preferences.',
   socialImage: null,
   discoverability: 'private',

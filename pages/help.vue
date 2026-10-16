@@ -36,7 +36,7 @@ useSocialMetadata({
   path: '/help',
   socialImage: organizationSocialImage,
   title: 'Support',
-  description: 'Get help with Krabiclaw, browse docs and product updates, or open a support request through ChowBot support.',
+  description: 'Get help with KrabiClaw, browse docs and product updates, or open a support request through ChowBot support.',
   breadcrumbs: [
     { name: 'Home', url: '/' },
     { name: 'Support', url: '/help' },

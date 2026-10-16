@@ -7,7 +7,7 @@
           <SiteLogo :alt="restaurantName" size="sm" loading="eager">
             <!-- No logo asset: a monogram of the tenant's own name, in the
                  tenant's own action color. It used to be --kc-navy, which put
-                 Krabiclaw's platform navy on every tenant site that had not
+                 KrabiClaw's platform navy on every tenant site that had not
                  uploaded a logo. -->
             <div class="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-base font-bold text-on-primary">
               {{ restaurantName.charAt(0).toUpperCase() }}

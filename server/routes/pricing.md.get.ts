@@ -8,9 +8,9 @@ import { additionalLocationPrice, INCLUDED_LOCATIONS } from '~/shared/billing-mo
 
 export function renderPlansMarkdown(plans: Plan[]): string {
   const lines: string[] = [
-    '# Krabiclaw Pricing & Plans',
+    '# KrabiClaw Pricing & Plans',
     '',
-    '> Transparent pricing for the Krabiclaw conversational AI website builder.',
+    '> Transparent pricing for the KrabiClaw conversational AI website builder.',
     '',
   ]
 

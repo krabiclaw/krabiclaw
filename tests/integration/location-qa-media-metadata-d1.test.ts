@@ -93,10 +93,10 @@ test('a Q&A can be edited and deleted through the scoped writers', async () => {
     assert.equal(created.status, 201)
     const qaId = (created.data as { id: string }).id
 
-    const updated = await updateQa(db, scope, qaId, { answer: 'Yes, on a Krabiclaw subdomain.' })
+    const updated = await updateQa(db, scope, qaId, { answer: 'Yes, on a KrabiClaw subdomain.' })
     assert.deepEqual(updated, { updated: true, qa_id: qaId })
     const [row] = await listQa(db, ORG, null, false, '/pricing')
-    assert.equal(row?.answer, 'Yes, on a Krabiclaw subdomain.')
+    assert.equal(row?.answer, 'Yes, on a KrabiClaw subdomain.')
     const purges = async () => Number((await db.prepare("SELECT count(*) AS n FROM public_resource_cache_invalidations WHERE organization_id = ? AND reason IN ('qa-update', 'qa-reorder')").bind(ORG).first('n')) ?? 0)
     assert.equal(await purges(), 1, 'an edited answer queues a purge of the cached pages')
 
@@ -130,8 +130,8 @@ test('media metadata is updated only within its organization', async () => {
       .bind(ORG, NOW, NOW).run()
 
     assert.equal(await updateMediaAssetMetadata(db, 'asset-1', OTHER_ORG, { alt_text: 'stolen' }), false)
-    assert.equal(await updateMediaAssetMetadata(db, 'asset-1', ORG, { alt_text: 'Krabiclaw crab' }), true)
-    assert.equal((await getMediaAsset(db, 'asset-1', ORG))?.alt_text, 'Krabiclaw crab')
+    assert.equal(await updateMediaAssetMetadata(db, 'asset-1', ORG, { alt_text: 'KrabiClaw crab' }), true)
+    assert.equal((await getMediaAsset(db, 'asset-1', ORG))?.alt_text, 'KrabiClaw crab')
   } finally {
     await runtime.dispose()
   }

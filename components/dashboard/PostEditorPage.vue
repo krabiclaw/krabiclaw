@@ -275,6 +275,6 @@ function localizedPostPath(locale: string): string {
   return `/${locale}/posts/${slug}`
 }
 
-useSeoMeta({ title: () => `${isNew.value ? 'New post' : editor.form.title || 'Post'} | Krabiclaw Dashboard`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${isNew.value ? 'New post' : editor.form.title || 'Post'} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
 provide(postEditorKey, { editor, organizationLocations, organizationId, postId, isNew, post, loadError, sectionLabels, saveLabel, saveDisabled, revert, save: saveCurrentEditor })
 </script>

@@ -1,6 +1,6 @@
 # SEO indexing architecture
 
-Krabiclaw serves the platform application and many tenant websites from one Nuxt deployment. The file-based route tree is therefore not an SEO inventory. A route existing under `pages/` does not make it eligible for crawling or indexing.
+KrabiClaw serves the platform application and many tenant websites from one Nuxt deployment. The file-based route tree is therefore not an SEO inventory. A route existing under `pages/` does not make it eligible for crawling or indexing.
 
 This document defines the permanent indexing contract.
 
@@ -8,15 +8,15 @@ This document defines the permanent indexing contract.
 
 ### Production platform
 
-`https://krabiclaw.com` and its canonical `www` redirect expose Krabiclaw marketing content, platform documentation, and platform blog content.
+`https://krabiclaw.com` and its canonical `www` redirect expose KrabiClaw marketing content, platform documentation, and platform blog content.
 
 The platform sitemap is an explicit allowlist plus published platform docs and blog records. Admin, dashboard, authentication, OAuth, billing workflow, setup, preview, developer, and tenant-only routes are excluded.
 
 ### Production tenant
 
-A tenant is served from its configured canonical custom domain or canonical Krabiclaw subdomain. Alternate active domains are redirected to the canonical domain before rendering.
+A tenant is served from its configured canonical custom domain or canonical KrabiClaw subdomain. Alternate active domains are redirected to the canonical domain before rendering.
 
-The tenant sitemap contains only that site's public static routes and its published locations, menu items, blog posts, listed social posts, and experiences. Aggregate routes such as `/menu`, `/blog`, `/posts`, `/experiences`, `/locations`, `/reservations`, and `/order` are included only when the tenant has corresponding substantive content. It never contains Krabiclaw platform docs, pricing, templates, or application routes.
+The tenant sitemap contains only that site's public static routes and its published locations, menu items, blog posts, listed social posts, and experiences. Aggregate routes such as `/menu`, `/blog`, `/posts`, `/experiences`, `/locations`, `/reservations`, and `/order` are included only when the tenant has corresponding substantive content. It never contains KrabiClaw platform docs, pricing, templates, or application routes.
 
 `server/middleware/zy-site-config.ts` updates Nuxt Site Config only for `/sitemap.xml` and `/robots.txt`, after tenant resolution. This gives the Nuxt SEO modules the active tenant origin and brand without touching page or API request state.
 
@@ -63,7 +63,7 @@ Runtime Site Config supplies the canonical platform or tenant origin used to tur
 
 Runtime sitemap caching is disabled because every hostname uses the same `/sitemap.xml` path. This prevents any server-side or shared-cache key from reusing one tenant's URL inventory for another host.
 
-Documentation is Krabiclaw's `docs` article collection. A category's landing article (slug equal to the category segment) is published at `/docs/{category}` rather than the duplicate `/docs/{category}/{category}` form.
+Documentation is KrabiClaw's `docs` article collection. A category's landing article (slug equal to the category segment) is published at `/docs/{category}` rather than the duplicate `/docs/{category}/{category}` form.
 
 Non-production requests clear the complete URL list. New routes cannot enter a sitemap merely by adding a Vue file.
 

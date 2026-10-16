@@ -1,7 +1,7 @@
 # Outbound Google Calendar
 
-Krabiclaw owns scheduling and capacity. Connect Google Calendar to create or reuse
-one **Krabiclaw** calendar for the business. All upcoming pending and confirmed
+KrabiClaw owns scheduling and capacity. Connect Google Calendar to create or reuse
+one **KrabiClaw** calendar for the business. All upcoming pending and confirmed
 Bookings and Reservations are included automatically. Calendar-group allocation
 rules govern booking availability, not which bookings appear in Google.
 Cancelled records and payment holds are excluded. Changes to Google events do
@@ -182,7 +182,7 @@ test hours cleared. The Google linked account and existing grants were retained.
 
 The redesigned CMS was then exercised through real Better Auth consent on the
 built local Worker. Calendar → Settings → Availability → Google Calendar created
-the business's **Krabiclaw** calendar automatically. Its identity was read back
+the business's **KrabiClaw** calendar automatically. Its identity was read back
 from D1 and its presence verified independently in Google Calendar. Personal
 checking selected the primary calendar automatically; switching off and back on
 retained the linked account, required no further consent, and refreshed complete

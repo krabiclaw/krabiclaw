@@ -59,7 +59,7 @@ const { data, refresh, error: loadError } = await useAsyncData(
 )
 const selected = ref<string | undefined>()
 
-// This website's own URL is offered even before the account owns it: Krabiclaw verifies it by serving the tag.
+// This website's own URL is offered even before the account owns it: KrabiClaw verifies it by serving the tag.
 const options = computed(() => {
   const owned = (data.value?.properties ?? []).map(property => ({ label: property.siteUrl, value: property.siteUrl }))
   const own = data.value?.siteUrl

@@ -334,13 +334,13 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
         { value: 'manual', label: 'Items I write' },
         { value: 'organization_posts', label: 'Published articles' },
         { value: 'calculator', label: 'Pricing calculator' },
-        { value: 'billing_plans', label: 'Krabiclaw plans', platformOnly: true },
-        { value: 'billing_features', label: 'Krabiclaw plan capabilities', platformOnly: true },
+        { value: 'billing_plans', label: 'KrabiClaw plans', platformOnly: true },
+        { value: 'billing_features', label: 'KrabiClaw plan capabilities', platformOnly: true },
       ],
     },
     items: { kind: 'list', label: 'Items', section: 'items', of: GRID_ITEM_FIELDS, availableWhen: { field: 'source', equals: ['manual'] } },
     limit: { kind: 'number', label: 'Article count', translatable: false, section: 'settings', min: 1, availableWhen: { field: 'source', equals: ['organization_posts'] } },
-    // How Krabiclaw's own pages draw written items: as icon cards, or as
+    // How KrabiClaw's own pages draw written items: as icon cards, or as
     // pictures with their words beneath.
     layout: {
       kind: 'enum', label: 'Layout', translatable: false, section: 'settings', default: 'cards',

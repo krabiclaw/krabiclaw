@@ -99,8 +99,8 @@ export default {
   },
   "guest_account": {
     "title": "Keep track of your bookings",
-    "body": "Create a free Krabiclaw account to see your bookings, messages and receipts from every business you use, in one place.",
-    "body_email": "Create a free Krabiclaw account with {email} to see this booking, your messages and receipts from every business you use, in one place.",
+    "body": "Create a free KrabiClaw account to see your bookings, messages and receipts from every business you use, in one place.",
+    "body_email": "Create a free KrabiClaw account with {email} to see this booking, your messages and receipts from every business you use, in one place.",
     "create": "Create an account",
     "sign_in": "Already have an account? Sign in"
   },

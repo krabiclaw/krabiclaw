@@ -46,5 +46,5 @@ watch([() => route.params.reviewId, () => route.params.qaId, level.mode], ([revi
   else if (mode === 'index' && reviewsTab.value && route.query.tab === undefined) void router.replace({ query: { ...route.query, tab: 'reviews' } })
 }, { immediate: true })
 
-useSeoMeta({ title: 'Reviews and Q&A | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Reviews and Q&A | KrabiClaw', robots: 'noindex, nofollow' })
 </script>

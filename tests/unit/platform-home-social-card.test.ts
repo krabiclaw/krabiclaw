@@ -3,7 +3,7 @@ import test from 'node:test'
 import { platformHomeSocialCardCopy } from '../../server/utils/platform-home-social-card.ts'
 
 test('homepage share card states every rotating accent and preserves the description', () => {
-  const description = 'Get online in minutes with Krabiclaw. The AI-first, MCP-native platform for building, managing, and growing your business online.'
+  const description = 'Get online in minutes with KrabiClaw. The AI-first, MCP-native platform for building, managing, and growing your business online.'
   assert.deepEqual(platformHomeSocialCardCopy({ title: 'Automate your website using', rotating_accents: ['ChatGPT', 'Claude', 'MCP'], subtitle: description }), {
     title: 'Automate your website using ChatGPT, Claude, MCP',
     description,

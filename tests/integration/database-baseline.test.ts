@@ -58,7 +58,7 @@ test('a v7 export transfers into the current baseline, its connections into orga
   try {
     const sourcePath = export7('v7.sqlite', {
       facebook: { revision: 'fb-r', account_id: 'fb-account', page_id: 'page-1', page_name: 'Krabi Claw', status: 'active', created_at: at, updated_at: at },
-      google_analytics: { revision: 'ga-r', account_id: 'google-account', property_id: '542527926', property_name: 'Krabiclaw', measurement_id: 'G-TEST', status: 'active', created_at: at, updated_at: at },
+      google_analytics: { revision: 'ga-r', account_id: 'google-account', property_id: '542527926', property_name: 'KrabiClaw', measurement_id: 'G-TEST', status: 'active', created_at: at, updated_at: at },
       google_search_console: { revision: 'gsc-r', account_id: 'google-account', site_url: 'sc-domain:krabiclaw.com', verified: true, status: 'active', created_at: at, updated_at: at },
     })
     const targetPath = join(directory, 'v8.sqlite')
@@ -69,7 +69,7 @@ test('a v7 export transfers into the current baseline, its connections into orga
       assert.deepEqual(target.pragma('foreign_key_check'), [])
       assert.deepEqual(target.prepare('SELECT provider, account_id, target_id, target_name, measurement_id, verified, revision FROM organization_integrations ORDER BY provider').all(), [
         { provider: 'facebook', account_id: 'fb-account', target_id: 'page-1', target_name: 'Krabi Claw', measurement_id: null, verified: null, revision: 'fb-r' },
-        { provider: 'google_analytics', account_id: 'google-account', target_id: '542527926', target_name: 'Krabiclaw', measurement_id: 'G-TEST', verified: null, revision: 'ga-r' },
+        { provider: 'google_analytics', account_id: 'google-account', target_id: '542527926', target_name: 'KrabiClaw', measurement_id: 'G-TEST', verified: null, revision: 'ga-r' },
         { provider: 'google_search_console', account_id: 'google-account', target_id: 'sc-domain:krabiclaw.com', target_name: 'sc-domain:krabiclaw.com', measurement_id: null, verified: 1, revision: 'gsc-r' },
       ])
       const organizationColumns = (target.prepare('PRAGMA table_info(organization)').all() as Array<{ name: string }>).map(column => column.name)

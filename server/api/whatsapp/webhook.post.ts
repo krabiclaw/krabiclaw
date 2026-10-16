@@ -548,7 +548,7 @@ async function handleMessage(db: D1Database, env: ApiRecord, message: WhatsAppMe
       }
       return
     }
-    await reply(env, toPhone, `To continue, open Krabiclaw: ${platformLoginUrl(env)}`)
+    await reply(env, toPhone, `To continue, open KrabiClaw: ${platformLoginUrl(env)}`)
     return
   }
 

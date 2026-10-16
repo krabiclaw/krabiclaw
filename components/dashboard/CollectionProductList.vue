@@ -110,7 +110,7 @@ const listItems = computed(() => products.value.map(row => ({ id: row.id, title:
 // Another collection in the same scope: the site-wide ones, or this one's location's.
 const moveTargets = computed(() => collections.value.filter(row => row.id !== collectionId.value && row.location_id === collection.value?.location_id))
 
-useSeoMeta({ title: () => `${collection.value?.name ?? 'Section'} | Krabiclaw Dashboard`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${collection.value?.name ?? 'Section'} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
 
 const { locations } = await useOrganizationLocations()
 const { priceLabel } = useCatalogPrice(locationId, locations)

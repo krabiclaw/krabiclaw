@@ -501,5 +501,5 @@ const dashboardLocation = useDashboardLocation()
 const organizationId = await useDashboardOrganizationId()
 const editor = await useLocationEditor(organizationId, dashboardLocation.currentLocationId, null, level.path)
 
-useSeoMeta({ title: 'Settings | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Settings | KrabiClaw', robots: 'noindex, nofollow' })
 </script>

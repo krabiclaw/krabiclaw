@@ -24,7 +24,7 @@ export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly P
   { title: 'Your website', rows: [
     { id: 'site.management', label: 'Business website', detail: 'Restaurant, experience or law firm website.', included: 'Included' },
     { id: 'themes.public', label: 'Saya and Blawby themes', detail: 'The theme follows your business type.', included: 'Included' },
-    { id: 'site.management', label: 'Krabiclaw subdomain', detail: 'A hosted address for your site.', included: 'Included' },
+    { id: 'site.management', label: 'KrabiClaw subdomain', detail: 'A hosted address for your site.', included: 'Included' },
     { id: 'site.seo', label: 'Structured search metadata', detail: 'Business-type metadata supports search discovery; search ranking or indexing is not guaranteed.', included: 'Included' },
     { id: 'domains.custom', label: 'Your own domain', detail: 'Connect an owned domain after completing DNS setup.', entitlement: 'custom_domains' },
     { id: 'content.custom-pages', label: 'Custom pages', detail: 'Create and edit additional page documents.', entitlement: 'custom_pages' },

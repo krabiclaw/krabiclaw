@@ -5,7 +5,7 @@ import { deleteIntegration, storeIntegration } from './organization-integrations
  * Search Console as a product of its own, over a Better Auth linked Google
  * account the organization names by `account_id`.
  *
- * The tenant never pastes a verification token. Krabiclaw controls the site's
+ * The tenant never pastes a verification token. KrabiClaw controls the site's
  * public HTML, so it can do what a verification token is for: Google issues
  * the token, the site serves it as `<meta name="google-site-verification">`,
  * Google fetches the page and confirms, and the property is added. The token
@@ -110,7 +110,7 @@ export async function verifyAndAddProperty(
     await publish()
     throw error
   }
-  // A property Krabiclaw verified keeps its token: Google re-checks the tag and
+  // A property KrabiClaw verified keeps its token: Google re-checks the tag and
   // drops ownership if it stops being served.
   await storeIntegration(env.DB, organizationId, 'google_search_console', { ...selection, verified: true }, { revision })
 }

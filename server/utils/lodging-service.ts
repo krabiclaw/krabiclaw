@@ -4,8 +4,8 @@ import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { LODGING_INTERNAL_CALLER } from '~/server/utils/internal-secret'
 import type { CloudflareEnv } from '~/server/utils/auth'
 
-// The lodging Worker keeps homes, stays and team data keyed by Krabiclaw user
-// and organization ids, with no foreign keys of its own. When Krabiclaw deletes
+// The lodging Worker keeps homes, stays and team data keyed by KrabiClaw user
+// and organization ids, with no foreign keys of its own. When KrabiClaw deletes
 // or changes one of those, it tells the lodging Worker before reporting success
 // (docs/shared-auth-contract.md §4.5). Only lodging organizations have anything
 // there; no other tenant depends on the lodging Worker.

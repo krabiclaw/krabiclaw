@@ -582,7 +582,7 @@ const stream = computed<StreamItem[]>(() => {
   }
 
   const message = (key: string, occurredAt: string, body: string | null, speaker: Speaker, label: string | null, extra: Partial<MessageItem> = {}) => {
-    const who = extra.own ? 'You' : speaker === 'platform' ? 'Krabiclaw' : speaker === 'guest' ? current.guestName : label || 'Team member'
+    const who = extra.own ? 'You' : speaker === 'platform' ? 'KrabiClaw' : speaker === 'guest' ? current.guestName : label || 'Team member'
     const avatar: AvatarProps = speaker === 'platform'
       ? { src: '/platform/krabiclaw-symbol.svg', alt: who }
       : { alt: who }

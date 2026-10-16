@@ -1,7 +1,7 @@
 import { ChannexDataError, object, resource, type JsonRecord, type Resource } from './data'
 
 /**
- * The Channex API, as Krabiclaw calls it: one platform key, JSON:API bodies,
+ * The Channex API, as KrabiClaw calls it: one platform key, JSON:API bodies,
  * and no wildcard passthrough. A failed write that Channex may still have
  * applied is `uncertain`; callers persist where they were and never retry it
  * blindly.

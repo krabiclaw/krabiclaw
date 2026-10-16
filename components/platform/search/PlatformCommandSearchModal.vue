@@ -212,13 +212,13 @@ const resultTypeMeta: Partial<Record<PublicSearchResult['type'], { badge: string
 
 const surfaceLabel = computed(() => {
   if (props.surface === 'tenant_blog') return t('saya.footer.blog')
-  if (props.surface === 'public') return 'Krabiclaw'
+  if (props.surface === 'public') return 'KrabiClaw'
   if (props.surface === 'docs') return 'Documentation'
   if (props.surface === 'blog') return 'Blog'
   return 'Dashboard'
 })
 
-// Krabiclaw is a proper noun; the other surfaces read as ordinary nouns mid-sentence.
+// KrabiClaw is a proper noun; the other surfaces read as ordinary nouns mid-sentence.
 const surfacePhrase = computed(() => props.surface === 'public'
   ? surfaceLabel.value
   : surfaceLabel.value.toLowerCase())

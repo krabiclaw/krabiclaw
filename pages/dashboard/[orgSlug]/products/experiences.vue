@@ -47,5 +47,5 @@ const loadError = computed(() => {
   return cause ? getErrorMessage(cause, 'The catalog could not be loaded') : null
 })
 
-useSeoMeta({ title: 'Experiences | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Experiences | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>

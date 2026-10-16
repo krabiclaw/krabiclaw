@@ -99,7 +99,7 @@
       <UButton v-if="editor.paletteSource.value === 'custom'" color="neutral" variant="outline" label="Use the template's colors" :loading="editor.saving.value" @click="editor.resetPalette" />
     </div>
     <!-- No palette on loaded settings is the platform template; unloaded settings say nothing. -->
-    <p v-else-if="editor.theme.value" class="text-base text-muted">Krabiclaw's own site keeps its colors.</p>
+    <p v-else-if="editor.theme.value" class="text-base text-muted">KrabiClaw's own site keeps its colors.</p>
     <UAlert v-if="editor.validationMessage.value" class="mt-6" color="error" variant="soft" :description="editor.validationMessage.value" />
   </DashboardLeafPanel>
 </template>

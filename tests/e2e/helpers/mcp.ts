@@ -93,7 +93,7 @@ export async function mcpRequest(
         // response formats they accept; @modelcontextprotocol/server answers
         // 406 without this (the old hand-rolled route never checked Accept).
         accept: 'application/json, text/event-stream',
-        // organization_id is a Krabiclaw extension for tenant-scoped
+        // organization_id is a KrabiClaw extension for tenant-scoped
         // tools/list discovery, not part of the MCP spec's
         // ListToolsRequestParams — the SDK validates that against the spec's
         // schema (only cursor/_meta) and silently drops anything else, so it

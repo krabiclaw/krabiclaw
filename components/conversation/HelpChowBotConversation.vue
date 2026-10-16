@@ -196,7 +196,7 @@ type HelpChatMessage = {
   metadata: HelpChatMetadata
 }
 
-const supportIntro = 'Hello, I\'m ChowBot from Krabiclaw. I can search docs, product guidance, pricing, and support answers, and if you are still blocked I\'ll help send it to support.'
+const supportIntro = 'Hello, I\'m ChowBot from KrabiClaw. I can search docs, product guidance, pricing, and support answers, and if you are still blocked I\'ll help send it to support.'
 
 const input = ref('')
 const nextMessageId = ref(1)

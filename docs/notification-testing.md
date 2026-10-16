@@ -1,6 +1,6 @@
 # Notification testing
 
-Krabiclaw has two distinct records:
+KrabiClaw has two distinct records:
 
 - `notifications` is the dashboard acknowledgement feed. A notification is unread for a user until the corresponding `notification_reads` row exists.
 - `guest_thread_deliveries` records external email or WhatsApp outcomes for guest-thread entries. It is not a dashboard feed.

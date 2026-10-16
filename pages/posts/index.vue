@@ -36,7 +36,7 @@ const organizationName = organization.name
 
 useSocialMetadata(() => ({
   path: '/posts',
-  // Krabiclaw's own pages carry the product name through their template.
+  // KrabiClaw's own pages carry the product name through their template.
   title: isPlatform ? t('social_posts.title') : `${t('social_posts.title')} | ${organizationName}`,
   description: t('social_posts.meta_description', { organization: organizationName }),
   socialImage: organization.social_image,

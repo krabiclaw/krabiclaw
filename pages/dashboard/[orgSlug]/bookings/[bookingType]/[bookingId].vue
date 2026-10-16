@@ -9,7 +9,7 @@ import StayDetails from '~/components/dashboard/StayDetails.vue'
 
 // Back is the mount's, not the page's: Today from here, the day from the calendar (build/booking-routes.ts).
 definePageMeta({ layout: 'dashboard', key: route => `${route.params.orgSlug}:${route.params.bookingType}:${route.params.bookingId}` })
-useSeoMeta({ title: 'Booking details | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Booking details | KrabiClaw', robots: 'noindex, nofollow' })
 
 const route = useRoute()
 const level = useRouteLevel()

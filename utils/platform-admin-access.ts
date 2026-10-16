@@ -89,7 +89,7 @@ export function hasPlatformAdminPermission(
 
 /**
  * Platform accounts — every account there is, and impersonation — open only
- * inside Krabiclaw's own organization, and only to a Better Auth admin who may
+ * inside KrabiClaw's own organization, and only to a Better Auth admin who may
  * list and impersonate users, which Better Auth enforces again on every call.
  */
 export function canOpenPlatformAccounts(organization: { theme_id: string }, role: string | null | undefined): boolean {

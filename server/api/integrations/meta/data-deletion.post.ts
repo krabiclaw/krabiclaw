@@ -8,12 +8,12 @@ import { configuredMetaApps, META_DELETION_PURPOSE, META_DELETION_STATUS_SECONDS
 /**
  * Meta's data-deletion callback.
  *
- * It erases what Krabiclaw holds about one verified Meta person in one Meta
+ * It erases what KrabiClaw holds about one verified Meta person in one Meta
  * app: the publication receipts naming them and their linked account, even
  * after the connection is gone. The tenant's own posts, including ones
  * published to that Page, stay; only their link to it goes.
  *
- * It deletes Meta's data, not the customer. A Krabiclaw workspace is deleted
+ * It deletes Meta's data, not the customer. A KrabiClaw workspace is deleted
  * by its owner through Better Auth's organization deletion; a request from
  * Meta about one person's Instagram account is not that, and must never
  * become that.

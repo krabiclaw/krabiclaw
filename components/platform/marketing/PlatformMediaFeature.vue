@@ -2,7 +2,7 @@
   <!--
     One idea at feature scale: words on the left, the picture or video that
     shows them on the right, in one dark card. The badges name the assistants
-    a Krabiclaw site is edited from.
+    a KrabiClaw site is edited from.
   -->
   <PlatformProductStory v-if="page.recipe === 'products'" :block="block" :page="page" />
   <section v-else-if="page.path === '/pricing'" class="kc-pricing-benefit" :class="{ 'kc-pricing-benefit--reverse': benefitIndex % 2 === 1 }" data-parity-section="media-feature">

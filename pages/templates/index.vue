@@ -69,7 +69,7 @@ useSocialMetadata({
     {
       '@type': 'ItemList',
       '@id': `${organizationUrl}/templates#themes`,
-      name: 'Krabiclaw Templates',
+      name: 'KrabiClaw Templates',
       itemListElement: templates.map((template, index) => ({
         '@type': 'ListItem',
         position: index + 1,

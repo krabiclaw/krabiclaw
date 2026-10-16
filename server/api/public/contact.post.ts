@@ -31,7 +31,7 @@ export default defineHandler(async (event) => {
   const email   = cleanString(body.email, 200)
   const message = cleanString(body.message, 2000)
   const subject = cleanString(body.subject, 30)
-  // Free-text context the Krabiclaw help form and ChowBot escalations attach.
+  // Free-text context the KrabiClaw help form and ChowBot escalations attach.
   const topic = cleanString(body.topic, 200)
   const source = cleanString(body.source, 100)
   const routeContext = cleanString(body.route_context, 500)

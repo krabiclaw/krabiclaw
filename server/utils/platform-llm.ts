@@ -295,7 +295,7 @@ export async function listPublishedDocsForLlm(db: DbClient, organizationId: stri
   return rows.map(withDocPath)
 }
 
-/** Krabiclaw's blog collection only; documentation has its own readers above. */
+/** KrabiClaw's blog collection only; documentation has its own readers above. */
 export async function listPublishedPlatformBlogPostsForLlm(db: DbClient, env: CloudflareEnv) {
   return listPublishedTenantBlogPostsForLlm(db, (await getPlatformOrganization(db)).id, env, 'blog')
 }
@@ -351,7 +351,7 @@ export function buildPlatformDocLinkEntries(docs: PlatformLlmDocSummary[], origi
       path: doc.path,
       markdownPath: docMarkdownPath(doc.path),
       canonicalUrl: absoluteUrl(origin, doc.path),
-      summary: safeSummary(doc.excerpt, 'Krabiclaw documentation.'),
+      summary: safeSummary(doc.excerpt, 'KrabiClaw documentation.'),
       category: doc.category,
       updatedAt: doc.updated_at,
     }))
@@ -371,7 +371,7 @@ export function buildPlatformBlogLinkEntries(posts: PlatformLlmBlogSummary[], or
       path,
       markdownPath: `/blog-md/${post.slug}.md`,
       canonicalUrl: absoluteUrl(origin, path),
-      summary: safeSummary(post.excerpt, 'Krabiclaw platform blog article.'),
+      summary: safeSummary(post.excerpt, 'KrabiClaw platform blog article.'),
       category: post.category,
       publishedAt: post.published_at,
       updatedAt: post.updated_at,
@@ -424,9 +424,9 @@ export function buildLlmsTxt(
 ) {
   const includeDocsSection = docs.length > 0
   const lines = [
-    `# ${options.title || 'Krabiclaw'}`,
+    `# ${options.title || 'KrabiClaw'}`,
     '',
-    `> ${options.intro || 'Krabiclaw is an AI website builder for restaurants and local businesses, with public docs and a platform blog available as HTML and Markdown mirrors.'}`,
+    `> ${options.intro || 'KrabiClaw is an AI website builder for restaurants and local businesses, with public docs and a platform blog available as HTML and Markdown mirrors.'}`,
     '',
     'Prefer the Markdown URLs below when you need compact machine-readable context. Canonical HTML URLs remain the source for public citation and browsing.',
     '',
@@ -486,9 +486,9 @@ export function buildLlmsFullTxt(
 ) {
   const includeDocs = options.includeDocs !== false
   const lines: string[] = [
-    `# ${options.title || 'Krabiclaw Full LLM Context'}`,
+    `# ${options.title || 'KrabiClaw Full LLM Context'}`,
     '',
-    `> ${options.intro || 'Full machine-readable export of Krabiclaw\'s published platform docs and platform blog.'}`,
+    `> ${options.intro || 'Full machine-readable export of KrabiClaw\'s published platform docs and platform blog.'}`,
     '',
     `Source organization: ${origin}`,
   ]
@@ -549,8 +549,8 @@ function escapeXml(value: string) {
 }
 
 export function buildBlogRss(origin: string, posts: PlatformLlmLinkEntry[]) {
-  const title = 'Krabiclaw Blog'
-  const description = 'Krabiclaw platform blog feed.'
+  const title = 'KrabiClaw Blog'
+  const description = 'KrabiClaw platform blog feed.'
   return buildNamedBlogRss(origin, posts, { title, description })
 }
 
@@ -583,9 +583,9 @@ export function buildNamedBlogRss(origin: string, posts: PlatformLlmLinkEntry[],
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<rss version="2.0">',
     '<channel>',
-    `<title>${escapeXml(options.title || 'Krabiclaw Blog')}</title>`,
+    `<title>${escapeXml(options.title || 'KrabiClaw Blog')}</title>`,
     `<link>${escapeXml(absoluteUrl(origin, '/blog'))}</link>`,
-    `<description>${escapeXml(options.description || 'Krabiclaw platform blog feed.')}</description>`,
+    `<description>${escapeXml(options.description || 'KrabiClaw platform blog feed.')}</description>`,
     latestPostDate ? `<lastBuildDate>${escapeXml(new Date(latestPostDate).toUTCString())}</lastBuildDate>` : '',
     items,
     '</channel>',
@@ -600,10 +600,10 @@ export function buildBlogJsonFeed(origin: string, posts: PlatformLlmLinkEntry[])
 export function buildNamedBlogJsonFeed(origin: string, posts: PlatformLlmLinkEntry[], options: BlogFeedOptions = {}) {
   return {
     version: 'https://jsonfeed.org/version/1.1',
-    title: options.title || 'Krabiclaw Blog',
+    title: options.title || 'KrabiClaw Blog',
     home_page_url: absoluteUrl(origin, '/blog'),
     feed_url: absoluteUrl(origin, '/blog/feed.json'),
-    description: options.description || 'Krabiclaw platform blog feed.',
+    description: options.description || 'KrabiClaw platform blog feed.',
     items: posts.map(post => ({
       id: post.canonicalUrl,
       url: post.canonicalUrl,

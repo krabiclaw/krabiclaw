@@ -67,5 +67,5 @@ async function commit() {
 }
 
 provide(blogPostCreateKey, { draft, saving, error, saveLabel, saveDisabled, save, revert: () => { draft.value = blankDraft() } })
-useSeoMeta({ title: 'New post | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'New post | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>

@@ -1,7 +1,7 @@
 <template>
   <div>
     <h1 class="text-2xl font-semibold tracking-tight text-highlighted">Reset your password</h1>
-    <p class="mt-2 text-sm text-muted">Enter the email you use for Krabiclaw and we'll send you a secure reset link.</p>
+    <p class="mt-2 text-sm text-muted">Enter the email you use for KrabiClaw and we'll send you a secure reset link.</p>
 
     <UAlert v-if="notice" color="success" variant="soft" :description="notice" class="mt-4" />
     <UAlert v-if="error" color="error" variant="soft" :description="error" class="mt-4" />
@@ -29,7 +29,7 @@ useSocialMetadata({
   schema: false,
   path: '/forgot-password',
   title: 'Reset your password',
-  description: 'Request a password reset link for your Krabiclaw account.',
+  description: 'Request a password reset link for your KrabiClaw account.',
   discoverability: 'private',
 })
 

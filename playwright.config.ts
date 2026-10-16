@@ -51,7 +51,7 @@ const localWorkerEnvironment = [
   `BETTER_AUTH_URL=http://localhost:${port}`,
   `NUXT_PUBLIC_PLATFORM_DOMAIN=http://localhost:${port}`,
   `NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN=http://localhost:${port}`,
-  'NUXT_PUBLIC_APP_NAME=Krabiclaw',
+  'NUXT_PUBLIC_APP_NAME=KrabiClaw',
   `NUXT_PUBLIC_SITE_URL=http://localhost:${port}`,
   `NUXT_PUBLIC_HELP_URL=http://localhost:${port}/help`,
 ].join(' ')

@@ -28,7 +28,7 @@ const redirects: Record<string, string> = {
 }
 
 /**
- * Krabiclaw's own articles used to carry their category between the prefix and
+ * KrabiClaw's own articles used to carry their category between the prefix and
  * the slug — /blog/{category}/{slug}, /docs/{category}/{slug}, and the same
  * shape for both markdown mirrors. They are addressed by slug now, so any URL
  * published under the old shape keeps working by dropping the segment that
@@ -46,7 +46,7 @@ function articlePathWithoutCategory(pathname: string): string | null {
 // Platform-domain-only (krabiclaw.com bare host) paths Google Search Console
 // keeps recrawling with no current or planned replacement (see issue #317).
 // A plain 404 lets Google keep retrying indefinitely; 410 Gone is a stronger,
-// faster de-index signal. `/posts` is not one of them: Krabiclaw's own site
+// faster de-index signal. `/posts` is not one of them: KrabiClaw's own site
 // has a post feed like every other template.
 const PLATFORM_GONE_PATHS = new Set(['/changelog'])
 

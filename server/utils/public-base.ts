@@ -32,7 +32,7 @@ export interface PublicBase {
  * reached by id answers the same way as one reached by hostname.
  *
  * Live and provisioned is public. Draft, and still-provisioning, belong to the
- * holder of the tenant's preview token. `suspended` is Krabiclaw's own hold and
+ * holder of the tenant's preview token. `suspended` is KrabiClaw's own hold and
  * is nobody's to look past.
  */
 export function publicTenantVisibilitySql(alias: string, previewAuthorized: boolean | undefined): string {

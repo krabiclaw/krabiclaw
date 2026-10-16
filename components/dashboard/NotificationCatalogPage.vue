@@ -31,5 +31,5 @@ const groups = computed<EditorNavigationGroup[]>(() => {
   ].filter(group => group.items.length)
 })
 
-useSeoMeta({ title: 'Messages | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Messages | KrabiClaw', robots: 'noindex, nofollow' })
 </script>

@@ -1,6 +1,6 @@
 # AI Search
 
-Krabiclaw uses Cloudflare AI Search as the single retrieval backend for platform knowledge.
+KrabiClaw uses Cloudflare AI Search as the single retrieval backend for platform knowledge.
 
 ## Instance layout
 
@@ -26,7 +26,7 @@ match the code that queries them. It writes the configuration only when a value 
 AI Search restarts a full resync on every configuration update, so an unconditional write
 on each pass of a rebuild kept the indexing queue from ever draining.
 
-Krabiclaw uses the native production `AI_SEARCH` Workers namespace binding for
+KrabiClaw uses the native production `AI_SEARCH` Workers namespace binding for
 instance management, indexing, and search queries in the built-in `default` namespace.
 
 ## Indexed corpus

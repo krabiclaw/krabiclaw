@@ -12,7 +12,7 @@ export default defineHandler((event) => {
 
   return {
     client_id: requestUrl.toString(),
-    client_name: 'Krabiclaw private-key CIMD regression client',
+    client_name: 'KrabiClaw private-key CIMD regression client',
     redirect_uris: [`${origin}/oauth/test-callback`],
     grant_types: ['authorization_code', 'refresh_token'],
     response_types: ['code'],

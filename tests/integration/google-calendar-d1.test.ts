@@ -286,7 +286,7 @@ test('automatic Calendar connection recovers a hidden calendar after ambiguous c
    if(init?.method==='POST') {
     assert.equal(url.pathname,'/calendar/v3/calendars')
     const payload=JSON.parse(String(init.body))
-    assert.deepEqual(payload,{summary:'Krabiclaw',description:'Krabiclaw bookings for organization org'})
+    assert.deepEqual(payload,{summary:'KrabiClaw',description:'KrabiClaw bookings for organization org'})
     inserts++
     calendars.push({...payload,id:'created-calendar',accessRole:'owner',hidden:true})
     throw new Error('Timeout after Google committed the calendar')
@@ -302,7 +302,7 @@ test('automatic Calendar connection recovers a hidden calendar after ambiguous c
   await connectCalendar(db,'org','linked','token')
   const connection=await readCalendarIntegration(db,'org')
   assert.equal(connection?.calendar_id,'created-calendar')
-  assert.equal(connection?.calendar_name,'Krabiclaw')
+  assert.equal(connection?.calendar_name,'KrabiClaw')
   assert.equal(await db.prepare('SELECT * FROM google_calendar_setup').first(),null)
   await disconnectCalendar(db,'org')
   await connectCalendar(db,'org','linked','token')

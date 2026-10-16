@@ -1,6 +1,6 @@
 <template>
   <!--
-    A grid whose rows are Krabiclaw's plans is the plans section. `source` is a
+    A grid whose rows are KrabiClaw's plans is the plans section. `source` is a
     declared field on this block and the component reads it, the same way a
     Saya grid reads its own: the map keys presentation on the template and the
     block type, and what the block says about its own rows stays the block's.
@@ -161,7 +161,7 @@ export interface PlatformFeatureCard {
 }
 
 /**
- * A grid of features, in the three shapes Krabiclaw's pages draw it: the
+ * A grid of features, in the three shapes KrabiClaw's pages draw it: the
  * homepage band, the Features page's detailed cards, and the vertical pages'
  * plain grid.
  */
@@ -170,7 +170,7 @@ const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 import PlatformPlansSection from '~/components/platform/marketing/PlatformPlansSection.vue'
 import PlatformPricingComparison from '~/components/platform/marketing/PlatformPricingComparison.vue'
 
-/** Krabiclaw's own plans, read from billing rather than written into a page. */
+/** KrabiClaw's own plans, read from billing rather than written into a page. */
 const isComparison = computed(() => blockText(props.block.data.source) === 'billing_features')
 const isPlans = computed(() => blockText(props.block.data.source) === 'billing_plans')
 const eyebrow = computed(() => blockTextOrNull(props.block.data.eyebrow))

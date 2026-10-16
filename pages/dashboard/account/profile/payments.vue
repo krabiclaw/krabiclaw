@@ -10,5 +10,5 @@
 <script setup lang="ts">
 import PaymentsAccountSettings from '~/components/dashboard/settings/PaymentsAccountSettings.vue'
 definePageMeta({ layout: 'dashboard' })
-useSeoMeta({ title: 'Payments | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Payments | KrabiClaw', robots: 'noindex, nofollow' })
 </script>

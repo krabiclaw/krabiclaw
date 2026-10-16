@@ -483,5 +483,5 @@ const { data: domainGroups, error: domainsError, refresh: loadDomains } = await 
 )
 const loadError = computed(() => domainsError.value ? getErrorMessage(domainsError.value, 'Failed to load domains') : null)
 
-useSeoMeta({ title: 'Domains | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Domains | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>

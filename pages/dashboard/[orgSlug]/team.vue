@@ -16,5 +16,5 @@ definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
 
 const level = useRouteLevel()
 
-useSeoMeta({ title: 'Team | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Team | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>

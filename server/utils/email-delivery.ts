@@ -83,11 +83,11 @@ export function isReservedTestDomain(email: string): boolean {
 }
 
 /**
- * The From header for mail Krabiclaw sends: the configured sender, with its
+ * The From header for mail KrabiClaw sends: the configured sender, with its
  * display name replaced when the message is sent on a business's behalf.
  */
 export function emailSender(env: Pick<EmailDeliveryEnv, 'EMAIL_FROM'>, fromName?: string): string {
-  const configuredFrom = env.EMAIL_FROM || 'Krabiclaw <hello@krabiclaw.com>'
+  const configuredFrom = env.EMAIL_FROM || 'KrabiClaw <hello@krabiclaw.com>'
   if (!fromName) return configuredFrom
   return configuredFrom.includes('<')
     ? configuredFrom.replace(/^[^<]*(?=<)/, `${fromName} `)

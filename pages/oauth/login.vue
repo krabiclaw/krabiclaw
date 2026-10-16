@@ -9,7 +9,7 @@
       </div>
       <SayaIcon name="arrow-right-left" class="w-4 h-4 text-dimmed" />
       <div class="w-9 h-9 rounded-xl overflow-hidden bg-elevated border border-default flex items-center justify-center shrink-0">
-        <img src="/platform/apple-touch-icon.png" alt="Krabiclaw" class="w-full h-full object-cover" />
+        <img src="/platform/apple-touch-icon.png" alt="KrabiClaw" class="w-full h-full object-cover" />
       </div>
     </div>
 
@@ -21,7 +21,7 @@
           </h1>
           <p class="text-sm text-muted mt-1">
             <span v-if="clientName">
-              <span class="font-semibold text-default">{{ clientName }}</span> is requesting access to Krabiclaw
+              <span class="font-semibold text-default">{{ clientName }}</span> is requesting access to KrabiClaw
             </span>
             <span v-else>Sign in to grant access to an external application.</span>
           </p>

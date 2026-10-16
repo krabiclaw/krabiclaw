@@ -9,7 +9,7 @@
 import { isAccountActivityPath } from '~/shared/account-activity'
 definePageMeta({ layout: 'standalone' })
 useResponseHeader('cache-control').value = 'private, no-store'
-useSeoMeta({ title: 'Activity | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Activity | KrabiClaw', robots: 'noindex, nofollow' })
 const route = useRoute()
 const checkoutReturn = typeof route.query.payment_id === 'string' && typeof route.query.purchase_claim === 'string'
 const error = ref('')

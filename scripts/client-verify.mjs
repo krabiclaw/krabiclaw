@@ -2,7 +2,7 @@
 import { parseOpeningHours } from '../shared/reservation-hours.ts';
 import { formatOpeningHours } from '../utils/formatters.ts';
 /**
- * Post-deploy smoke test for a Krabiclaw tenant site.
+ * Post-deploy smoke test for a KrabiClaw tenant site.
  *
  * Usage:
  *   node scripts/client-verify.mjs --url https://www.potteryhousekrabi.com --vertical experience
@@ -680,7 +680,7 @@ if (OUT_DIR) {
 
   // Write human-readable txt
   const txtLines = [
-    "Krabiclaw Site Verification Report",
+    "KrabiClaw Site Verification Report",
     `URL:      ${BASE}`,
     `Vertical: ${VERTICAL}`,
     `Date:     ${reportJson.verified_at}`,

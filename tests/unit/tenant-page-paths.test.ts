@@ -104,7 +104,7 @@ test('a constrained param claims only what it matches', () => {
 })
 
 test('the platform owns its marketing pages and excludes private auth routes from pageviews', () => {
-  // Krabiclaw's own site renders page documents through the same loader and the
+  // KrabiClaw's own site renders page documents through the same loader and the
   // same catch-all every customer site uses (#903).
   assert.equal(allows('platform', '/about'), true)
   assert.equal(allows('platform', '/features'), true)

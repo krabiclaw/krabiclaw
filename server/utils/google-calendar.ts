@@ -65,7 +65,7 @@ export async function connectCalendar(db: DbClient, organizationId: string, acco
     await storeCalendarSelection(db, organizationId, current)
     return
   }
-  const marker = `Krabiclaw bookings for organization ${organizationId}`
+  const marker = `KrabiClaw bookings for organization ${organizationId}`
   const calendars = (await listWritableCalendars(token)).filter(item => item.description === marker)
   if (calendars.length > 1) throw new CalendarSelectionConflict('More than one booking calendar was found. Contact support.')
   let calendar = calendars[0]
@@ -73,7 +73,7 @@ export async function connectCalendar(db: DbClient, organizationId: string, acco
     const claim = await execute(db, 'INSERT INTO google_calendar_setup(organization_id,account_id,started_at) VALUES(?,?,?) ON CONFLICT(organization_id) DO NOTHING', [organizationId, accountId, new Date().toISOString()])
     if (claim.meta?.changes !== 1) throw new CalendarSelectionConflict('Calendar setup has not finished. Retry to check its progress.')
     try {
-      calendar = await google<CalendarChoice>(token, '/calendars', { method: 'POST', body: JSON.stringify({ summary: 'Krabiclaw', description: marker }) })
+      calendar = await google<CalendarChoice>(token, '/calendars', { method: 'POST', body: JSON.stringify({ summary: 'KrabiClaw', description: marker }) })
       if (!calendar?.id || !calendar.summary) throw new Error('Google did not return the new booking calendar.')
     } catch (error) {
       // A rejected request cannot have created a resource. A timeout or 5xx

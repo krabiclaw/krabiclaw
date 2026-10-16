@@ -1,7 +1,7 @@
 <template>
   <!--
     One article, on every template and in every collection: a blog post on
-    Saya, an article on Blawby, a post or a doc on Krabiclaw's own site. The
+    Saya, an article on Blawby, a post or a doc on KrabiClaw's own site. The
     template's layout is the chrome around it and its design tokens are the
     only other difference.
   -->

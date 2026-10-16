@@ -114,7 +114,7 @@ first run — a card is rendered and uploaded per product, post and page. Reques
 process five owners at a time. Each generated or reused PNG is fetched and its
 1200×630 dimensions checked; every skipped or failed owner is reported. Re-running
 reuses matching cards. Use `--organization-id` to limit it to one organization;
-Krabiclaw's own site is an ordinary organization here.
+KrabiClaw's own site is an ordinary organization here.
 
 Approved `client:import --apply` runs this same generator for the imported site
 and then `client:verify`; failed generation or verification prevents handoff.
@@ -168,7 +168,7 @@ corepack yarn local:actors
 
 ### Native app development accounts on staging
 
-Debug builds of the native app sign in to Krabiclaw **staging** with email and
+Debug builds of the native app sign in to KrabiClaw **staging** with email and
 password (`docs/shared-auth-contract.md` D9). `local:actors` only reaches a
 local Worker, so a platform admin creates these accounts once on staging
 through Better Auth's admin API, verified so they can sign in immediately. Use

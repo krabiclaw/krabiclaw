@@ -87,7 +87,7 @@
 @theme inline {
   --color-on-primary: var(--primary-foreground);
   /* The fill a shared component's call to action wears: the owner's action
-     colour on a site, monochrome on Krabiclaw's own pages. */
+     colour on a site, monochrome on KrabiClaw's own pages. */
   --color-action: var(--action);
   --color-on-action: var(--action-foreground);
   --color-primary: var(--ui-primary);
@@ -124,7 +124,7 @@
   --divide-color-inverted: var(--ui-border-inverted);
 }
 
-/* ── Krabiclaw brand palette ──────────────────────────────── */
+/* ── KrabiClaw brand palette ──────────────────────────────── */
 :root {
   /* Script fallbacks every font stack ends with. A site's chosen family draws
      the characters it has; Thai and Vietnamese fall through to these, and
