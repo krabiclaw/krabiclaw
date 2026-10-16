@@ -485,9 +485,19 @@ their schema, copy invariants, foreign keys and local source gates pass. Before
 and after cutover, inspect canonical delta changes/deletions and reconcile only
 reviewed source edits with guards that preserve replacement writes. Do not run
 the new Worker against a v18 binding: its migration ledger already contains the
-same baseline filename. No v19 database has been provisioned by this source
-change, and real Airbnb message/webhook/reply qualification remains required
-before retiring the lodging Worker.
+same baseline filename. Real Airbnb message/webhook/reply qualification remains
+required before retiring the lodging Worker.
+
+Both v19 replacement databases were created with `--location wnam` on
+2026-10-16 (Asia/Bangkok), and Cloudflare reported WNAM before the baseline was
+applied:
+
+- `krabiclaw-staging-v19`: `036d7910-66a9-4343-9ae4-47398dd3c653`
+- `krabiclaw-production-v19`: `3baf9b09-2c05-4ed8-8944-cafe9e84c9e3`
+
+Staging v19 was loaded from `krabiclaw-staging-v18` before the binding change
+merged: 100 tables, 81,340 rows, `foreign_key_check` empty, one transform
+(`notification_preferences_push_default`, 2 rows).
 
 Before dropping or retiring a legacy table or writer:
 
