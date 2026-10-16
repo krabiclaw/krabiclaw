@@ -7427,7 +7427,7 @@ __metadata:
 
 "env-runner@patch:env-runner@npm%3A0.1.16#~/patches/env-runner-npm-0.1.16.patch":
   version: 0.1.16
-  resolution: "env-runner@patch:env-runner@npm%3A0.1.16#~/patches/env-runner-npm-0.1.16.patch::version=0.1.16&hash=0d760a"
+  resolution: "env-runner@patch:env-runner@npm%3A0.1.16#~/patches/env-runner-npm-0.1.16.patch::version=0.1.16&hash=6aa39c"
   dependencies:
     crossws: "npm:^0.4.8"
     exsolve: "npm:^1.1.0"
@@ -7449,7 +7449,7 @@ __metadata:
       optional: true
   bin:
     env-runner: dist/cli.mjs
-  checksum: 10c0/2afda6cf5b1962ca2a72783eae384c187810d626d6ad64278bbeae96e3259b4ac63ed7cafad49cf39b4f35c462dda787e0b63aa7017f856f508e2d04c645ee4e
+  checksum: 10c0/4651c75922a2c5dfbf8ac22d3195cfb11606cf53f869c77426680dd63360fdccbc643c4e41c7f865ffc445536063014bcfa67f2fbfe30739e3fb592285fe71da
   languageName: node
   linkType: hard
 

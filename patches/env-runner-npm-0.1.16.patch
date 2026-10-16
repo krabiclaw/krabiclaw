@@ -14,8 +14,8 @@ index c17bd9701247fcc31f89cf270446e819792817d6..ed73fa9d3fd529c70c45fa89132d07cf
 +		// Let the worker close its entry (the app's close hooks) and exit on its
 +		// own. Terminating straight away left whatever the app had started — a
 +		// database proxy and its child process — running with no one to stop it.
-+		await new Promise((resolve) => {
-+			worker.once("exit", resolve);
++		await new Promise((resolve, reject) => {
++			worker.once("exit", (code) => code === 0 ? resolve() : reject(new Error(`The worker exited with code ${code} while closing its entry`)));
 +			worker.postMessage({ event: "shutdown" });
  		});
  		this.#worker = void 0;
