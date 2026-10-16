@@ -1482,8 +1482,8 @@ export async function pushStayHoldNights(db: DbClient, env: StayMutationEnv, org
 }
 
 /**
- * Lapsed checkout holds still claiming nights: their claims are deleted and
- * the nights reopened on each home's channel. A night another write already
+ * Lapsed checkout holds still claiming nights: the nights are reopened on each
+ * home's channel, then their claims are deleted. A night another write already
  * reclaimed was cleared by that write and is not here.
  */
 export async function releaseLapsedStayHolds(db: DbClient, env: StayMutationEnv): Promise<{ released: number; channel_push: ChannelPush[] }> {
@@ -1493,9 +1493,11 @@ export async function releaseLapsedStayHolds(db: DbClient, env: StayMutationEnv)
      GROUP BY stay_nights.hold_id, stay_nights.organization_id, stay_nights.product_id LIMIT 100`)
   const pushes: ChannelPush[] = []
   for (const hold of lapsed) {
-    await executeBatch(db, [{ query: `DELETE FROM stay_nights WHERE hold_id = ? AND ${LAPSED_HOLD_CLAIM_SQL}`, params: [hold.hold_id] }], { operation: 'Release lapsed stay hold' })
+    // The calendar already reads a lapsed claim as free, so the channel is told first; the claims
+    // go only once it has been, and a push that throws leaves them for the next run to retry.
     const pushed = await pushStayHoldNights(db, env, hold.organization_id, hold.product_id, hold.check_in, hold.check_out)
     if (pushed) pushes.push(pushed)
+    await executeBatch(db, [{ query: `DELETE FROM stay_nights WHERE hold_id = ? AND ${LAPSED_HOLD_CLAIM_SQL}`, params: [hold.hold_id] }], { operation: 'Release lapsed stay hold' })
   }
   return { released: lapsed.length, channel_push: pushes }
 }
