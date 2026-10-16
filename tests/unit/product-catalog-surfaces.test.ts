@@ -145,14 +145,16 @@ test('a card names what it opens by the product kind', () => {
   assert.equal(productCtaKey('item'), 'saya.common.view_item')
 })
 
-test('presentationForSurface and catalogNavigation resolve without error when vertical is omitted or null', () => {
-  assert.equal(presentationForSurface(null, 'products').collectionPath, '/products')
-  assert.equal(presentationForSurface(undefined, 'products').collectionPath, '/products')
+test('catalog navigation links each section where the site\'s vertical lists it, and a site without a vertical is refused', () => {
+  assert.equal(presentationForSurface('service', 'products').collectionPath, '/products')
+  assert.equal(presentationForSurface('experience', 'products').collectionPath, '/products')
   assert.equal(presentationForSurface(null, 'stays').collectionPath, '/stays')
   assert.equal(presentationForSurface(null, 'experiences').collectionPath, '/experiences')
   assert.equal(presentationForSurface(null, 'menu').collectionPath, '/menu')
+  // The products surface reads the site's vertical; its absence is a site that did not load.
+  assert.throws(() => presentationForSurface(null, 'products'), /missing vertical/)
 
-  const nav = catalogNavigation({ products: true, menu: true, stays: true, experiences: true })
+  const nav = catalogNavigation('restaurant', { products: true, menu: true, stays: true, experiences: true })
   assert.deepEqual(nav, [
     { surface: 'menu', path: '/menu', labelKey: 'saya.footer.menu' },
     { surface: 'products', path: '/products', labelKey: 'saya.footer.products' },

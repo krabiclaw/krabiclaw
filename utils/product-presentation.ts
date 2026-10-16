@@ -55,9 +55,9 @@ export const STAY_PRESENTATION: ProductPresentation = {
 
 /**
  * The catalog sections a site's navigation offers, in order, each only when
- * the site has something on it. Header, footer and sitemap read this one list.
+ * the site has something on it, linked where the site's vertical lists them.
+ * Header, footer and sitemap read this one list.
  */
-/** The site's catalog surfaces with content, linked where the site's vertical lists them. */
 export function catalogNavigation(vertical: string | null | undefined, sections: Partial<Record<ProductSurface, boolean>> | null): Array<{ surface: ProductSurface, path: string, labelKey: string }> {
   const order: ProductSurface[] = ['menu', 'products', 'stays', 'experiences']
   return order.filter(surface => sections?.[surface] === true)
@@ -110,7 +110,7 @@ export function presentationForProduct(vertical: string | null | undefined, prod
 /** The words one surface owns: experiences read the same on every vertical. */
 export function presentationForSurface(vertical: string | null | undefined, surface: ProductSurface): ProductPresentation {
   if (surface === 'stays') return STAY_PRESENTATION
-  return surface === 'experiences' ? EXPERIENCE_PRESENTATION : surface === 'menu' ? requireProductPresentation('restaurant') : requireProductPresentation(vertical && normalizeVertical(vertical) === 'service' ? 'service' : 'experience')
+  return surface === 'experiences' ? EXPERIENCE_PRESENTATION : surface === 'menu' ? requireProductPresentation('restaurant') : requireProductPresentation(normalizeVertical(vertical) === 'service' ? 'service' : 'experience')
 }
 
 export function resolveProductPresentation(vertical: string | null | undefined, themeId?: string): ProductPresentation | null {
