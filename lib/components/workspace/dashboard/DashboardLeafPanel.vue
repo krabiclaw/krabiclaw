@@ -23,66 +23,68 @@
   <Teleport :to="drawerTarget ?? 'body'" :disabled="pane || !drawerTarget">
   <UDashboardPanel :id="id" :class="!pane && !drawerTarget ? 'invisible' : undefined" :ui="{ root: 'min-h-0 lg:min-h-full pb-[env(safe-area-inset-bottom)] lg:pb-0' }">
     <template #header>
-      <!-- The bar carries only the way out; the title is the leaf's own, in the body. -->
-      <UDashboardNavbar :toggle="false">
-        <template #left>
-          <UButton
-            ref="closeButton"
-            icon="i-lucide-x"
-            aria-label="Close"
-            color="neutral"
-            variant="ghost"
-            size="sm"
-            square
-            class="min-w-0 shrink-0 lg:hidden"
-            data-testid="dashboard-navbar-close"
-            :to="level.to.value ?? undefined"
-            :disabled="saving"
-            @click.prevent="cancel"
-          />
-        </template>
-        <!-- An action that belongs to the whole leaf — adding a domain — sits in the bar. -->
-        <template v-if="$slots.right" #right>
+      <!--
+        Below lg the leaf is a sheet, as Airbnb's field sheets are: ✕, its title
+        small and centred, an action on the right. Beside its index it is a pane:
+        the title large, as every level's, and nothing to close.
+      -->
+      <div class="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-3 pb-2 pt-4 sm:pt-6 lg:flex" :class="dashboardGutterClass">
+        <UButton
+          ref="closeButton"
+          icon="i-lucide-x"
+          aria-label="Close"
+          color="neutral"
+          variant="soft"
+          square
+          class="size-10 justify-center justify-self-start rounded-full lg:hidden"
+          data-testid="dashboard-navbar-close"
+          :to="level.to.value ?? undefined"
+          :disabled="saving"
+          @click.prevent="cancel"
+        />
+        <!-- The sheet's title is small and centred; the pane's is every level's (dashboardTitleClass at lg). -->
+        <h1 class="flex min-w-0 items-center justify-center gap-3 truncate text-base font-semibold text-highlighted lg:flex-1 lg:justify-start lg:text-[32px] lg:leading-tight">
+          <UIcon v-if="icon" :name="icon" class="size-5 shrink-0 lg:size-8" />
+          {{ title }}
+        </h1>
+        <!-- An action that belongs to the whole leaf — adding a domain — is a round button beside the title. -->
+        <div class="flex items-center justify-self-end gap-2 [&_[data-slot=base]]:h-10 [&_[data-slot=base]]:min-w-10 [&_[data-slot=base]]:justify-center [&_[data-slot=base]]:rounded-full">
           <slot name="right" />
-        </template>
-      </UDashboardNavbar>
+        </div>
+      </div>
     </template>
 
     <template #body>
       <!-- One column width for every leaf: fields do not stretch to the pane. -->
-      <div class="mx-auto w-full" :class="dashboardColumnWidths.leaf">
-        <h1 class="flex items-center gap-3 text-2xl font-semibold text-highlighted lg:text-[32px] lg:leading-tight">
-          <UIcon v-if="icon" :name="icon" class="size-8 shrink-0" />
-          {{ title }}
-        </h1>
+      <div class="w-full" :class="dashboardColumnWidths.leaf">
         <!-- The one place a leaf explains itself. A field never carries a sentence. -->
-        <p v-if="lead" class="mt-2 text-base text-muted">{{ lead }}</p>
+        <p v-if="lead" class="mb-8 text-base text-muted">{{ lead }}</p>
 
         <UAlert
           v-if="error || dismissError"
-          class="mt-6"
+          class="mb-6"
           color="error"
           variant="soft"
           icon="i-lucide-triangle-alert"
           :description="dismissError || error"
         />
 
-        <div class="mt-8">
-          <slot />
-        </div>
+        <slot />
       </div>
     </template>
 
     <!-- A leaf whose controls act at once — connect, schedule, publish — has nothing to Save. -->
     <template v-if="footer" #footer>
-      <DashboardPanelFooter
-        :save-label="saveLabel"
-        :loading="saving"
-        :disabled="disabled"
-        leaf
-        @cancel="cancel"
-        @save="$emit('save')"
-      />
+      <div class="shrink-0 border-t border-default py-3" :class="dashboardGutterClass">
+        <DashboardPanelFooter
+          :save-label="saveLabel"
+          :loading="saving"
+          :disabled="disabled"
+          leaf
+          @cancel="cancel"
+          @save="$emit('save')"
+        />
+      </div>
     </template>
   </UDashboardPanel>
   </Teleport>
@@ -90,7 +92,7 @@
 
 <script setup lang="ts">
 import { isNavigationFailure } from 'vue-router'
-import { dashboardColumnWidths, dashboardLeafParentKey } from './dashboardPanelContext'
+import { dashboardColumnWidths, dashboardGutterClass, dashboardLeafParentKey } from './dashboardPanelContext'
 import { getErrorMessage } from '~/utils/errors'
 
 /*
@@ -137,8 +139,6 @@ let dismissal: { from: string; to: string } | null = null
 // Only the nearest index is the backdrop; other route ancestors keep yielding.
 const parent = inject(dashboardLeafParentKey, null)
 const invoker = import.meta.client && document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null
-onMounted(() => { if (parent) parent.leaves.value += 1 })
-onUnmounted(() => { if (parent) parent.leaves.value -= 1 })
 
 watch(drawerTarget, async (target) => {
   if (!target) return

@@ -16,7 +16,6 @@
             :label="editing ? 'Done' : 'Edit'"
             color="neutral"
             :variant="editing ? 'solid' : 'soft'"
-            size="sm"
             data-testid="list-editor-toggle"
             @click="editing = !editing"
           />
@@ -27,7 +26,6 @@
             :to="addTo"
             color="neutral"
             variant="soft"
-            size="sm"
             square
             data-testid="list-editor-add"
             @click="!addTo && $emit('add')"
@@ -60,14 +58,7 @@
       :description="error"
     />
 
-    <div
-      v-else-if="!items.length"
-      class="rounded-xl border border-dashed border-default px-6 py-12 text-center"
-      data-testid="list-editor-empty"
-    >
-      <UIcon :name="emptyIcon" class="mx-auto size-9 text-muted" />
-      <p class="mt-3 text-sm font-medium text-highlighted">{{ emptyTitle }}</p>
-    </div>
+    <UEmpty v-else-if="!items.length" :icon="emptyIcon" :title="emptyTitle" data-testid="list-editor-empty" />
 
     <ul v-else class="divide-y divide-default border-y border-default">
       <li v-for="(item, index) in items" :key="item.id" class="flex items-center gap-3 py-4">

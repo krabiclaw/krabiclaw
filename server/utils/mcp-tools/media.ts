@@ -69,7 +69,7 @@ const mediaMutationOutputSchema = {
 export const MEDIA_TOOLS: McpToolDefinition[] = [
   organizationTool({
       name: 'set_media',
-      description: 'Assign an asset to one cover, hero or logo; null clears it. Use attach_media for galleries and presentation for logo cropping.',
+      description: 'Assign an asset to one cover, hero, logo or menu section photo; null clears it. Use attach_media for galleries and presentation for logo cropping.',
       domain: 'media',
       minimumRole: 'admin',
       inputSchema: {

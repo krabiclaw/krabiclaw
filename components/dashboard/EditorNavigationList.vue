@@ -1,13 +1,14 @@
 <template>
   <div class="space-y-8">
     <section v-for="group in groups" :key="group.id" class="space-y-3">
-      <h2 v-if="group.label" class="px-1 text-sm font-semibold text-muted">
+      <h2 v-if="group.label" class="text-sm font-semibold text-muted">
         {{ group.label }}
       </h2>
 
       <!-- Rows: settings, where the chevron marks a push into a deeper screen. -->
-      <!-- The rows sit on the pane itself: a card around them is a second surface saying nothing. -->
-      <div>
+      <!-- The rows sit on the pane itself: a card around them is a second surface saying nothing.
+           Their highlight reaches into the gutter so their text keeps the gutter's edge. -->
+      <div class="-mx-4">
         <component
           :is="item.to ? NuxtLink : item.action ? 'button' : 'div'"
           v-for="(item, index) in group.items"

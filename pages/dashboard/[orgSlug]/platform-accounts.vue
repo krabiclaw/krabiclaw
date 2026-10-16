@@ -13,7 +13,7 @@
              it opens. Showing it never impersonates; the button does. -->
         <template v-if="target">
           <UAlert v-if="targetError" color="error" variant="soft" title="Could not open this customer" :description="getErrorMessage(targetError, 'Failed to load this account.')" />
-          <div v-else-if="targetUser && targetUser.id === target.userId" class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-default bg-elevated p-4" data-testid="focused-account">
+          <UCard v-else-if="targetUser && targetUser.id === target.userId" variant="subtle" :ui="{ body: 'flex flex-wrap items-center justify-between gap-3' }" data-testid="focused-account">
             <div class="min-w-0">
               <p class="truncate text-base text-highlighted">{{ targetUser.name || targetUser.email }}</p>
               <p class="truncate text-sm text-muted">{{ targetUser.email }}</p>
@@ -27,7 +27,7 @@
             >
               Impersonate and open their business
             </UButton>
-          </div>
+          </UCard>
         </template>
 
         <UAlert v-if="loadError" color="error" variant="soft" title="Could not load accounts" :description="getErrorMessage(loadError, 'Failed to load accounts.')" />

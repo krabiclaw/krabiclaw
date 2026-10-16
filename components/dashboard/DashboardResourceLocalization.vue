@@ -51,10 +51,11 @@
             <USkeleton v-for="field in fields" :key="field.key" class="h-24 rounded-lg" />
           </div>
           <template v-else>
-            <div
+            <UCard
               v-for="field in fields"
               :key="field.key"
-              class="grid gap-3 rounded-lg border border-default p-4 md:grid-cols-2"
+              variant="subtle"
+              :ui="{ body: 'grid gap-3 sm:grid-cols-2' }"
             >
               <div>
                 <p class="text-xs font-semibold uppercase tracking-wide text-muted">Source · {{ sourceLocale }}</p>
@@ -78,7 +79,7 @@
                   :data-testid="`localize-field-${field.key}`"
                 />
               </UFormField>
-            </div>
+            </UCard>
             <UAlert v-if="editorError" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="editorError" />
           </template>
         </template>

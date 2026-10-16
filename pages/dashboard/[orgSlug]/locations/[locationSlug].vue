@@ -10,7 +10,7 @@
         :to="`${level.path.value}/settings`"
         icon="i-lucide-settings"
         color="neutral"
-        variant="ghost"
+        variant="soft"
         square
         aria-label="Location settings"
       />
@@ -26,7 +26,7 @@
         <h2 class="text-xl font-bold leading-snug text-highlighted">
           {{ onPaidPlan ? 'Add a location to your plan' : 'Choose a plan for more locations' }}
         </h2>
-        <p class="text-[15px] leading-relaxed text-toned">
+        <p class="text-base text-muted">
           <template v-if="onPaidPlan">
             Your site has {{ planLocations.used }} locations, and your plan covers {{ planLocations.covered }}.
             Plans include {{ INCLUDED_LOCATIONS }}, then {{ locationPrice }}.

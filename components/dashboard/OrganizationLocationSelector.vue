@@ -68,7 +68,7 @@
               :name="item.fallbackIcon ?? 'i-lucide-image-off'"
               :class="[rowsOnMobile ? 'size-4 lg:size-6' : 'size-6', item.fallbackIcon || rowsOnMobile ? 'text-muted' : 'text-error']"
             />
-            <p v-if="!item.fallbackIcon" :class="rowsOnMobile ? 'text-[10px] text-muted lg:text-sm lg:font-medium lg:text-highlighted' : 'text-sm font-medium text-highlighted'">
+            <p v-if="!item.fallbackIcon" :class="rowsOnMobile ? 'text-xs text-muted lg:text-sm lg:font-medium lg:text-highlighted' : 'text-sm font-medium text-highlighted'">
               {{ item.missingImageLabel ?? missingImageLabel }}<span :class="rowsOnMobile ? 'hidden lg:inline' : undefined"> for {{ item.label }}</span>
             </p>
             <p v-if="!item.fallbackIcon" class="text-xs text-muted" :class="rowsOnMobile ? 'hidden lg:block' : undefined">{{ missingImageHint }}</p>
@@ -103,7 +103,7 @@
         :color="item.status.color"
         variant="solid"
         class="pointer-events-none absolute"
-        :class="rowsOnMobile ? 'left-0 top-4 max-w-15 text-[10px] lg:left-3 lg:top-3 lg:max-w-none lg:text-xs' : 'left-3 top-3'"
+        :class="rowsOnMobile ? 'left-0 top-4 max-w-15 text-xs lg:left-3 lg:top-3 lg:max-w-none lg:text-xs' : 'left-3 top-3'"
         data-testid="selector-status-badge"
       />
 

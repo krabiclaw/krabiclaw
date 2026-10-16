@@ -83,7 +83,7 @@ does.
 - Do not bypass the ChatGPT file-argument rewrite by fabricating `download_url` objects or inventing attachment transport.
 - Prefer business-level image workflows over generic file handoff when the user intent is domain-specific:
   - Generate into KrabiClaw first, persist to Cloudflare Images immediately, then assign by `assetId`
-  - Assignment happens through the canonical placement tools with a `{ owner_type, owner_id, slot }` placement: `set_media` for a single-valued slot (at most one asset — a cover, hero, or logo), or `attach_media`/`remove_media`/`reorder_media` for an ordered collection (a gallery or a compliance document list). Never resubmit a placement's full asset list to change one item — targeted attach/remove/reorder is required so a stale read can never resurrect an asset someone else removed.
+  - Assignment happens through the canonical placement tools with a `{ owner_type, owner_id, slot }` placement: `set_media` for a single-valued slot (at most one asset — a cover, hero, logo, or a menu section's `collection`/`image` photo), or `attach_media`/`remove_media`/`reorder_media` for an ordered collection (a gallery or a compliance document list). Never resubmit a placement's full asset list to change one item — targeted attach/remove/reorder is required so a stale read can never resurrect an asset someone else removed.
   - Tenant-page media belongs to content-block placements. Block JSON never stores asset IDs or delivery URLs.
 - MCP tools should be coarse-grained and business-level:
   - `get_organization_media_assets`

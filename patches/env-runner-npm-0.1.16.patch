@@ -1,0 +1,44 @@
+diff --git a/dist/_chunks/node-worker-runner.mjs b/dist/_chunks/node-worker-runner.mjs
+index c17bd9701247fcc31f89cf270446e819792817d6..ed73fa9d3fd529c70c45fa89132d07cf90b510cc 100644
+--- a/dist/_chunks/node-worker-runner.mjs
++++ b/dist/_chunks/node-worker-runner.mjs
+@@ -25,9 +25,14 @@ var NodeWorkerEnvRunner = class extends BaseEnvRunner {
+ 	}
+ 	async _closeRuntime() {
+ 		if (!this.#worker) return;
+-		this.#worker.removeAllListeners();
+-		await this.#worker.terminate().catch((error) => {
+-			console.error(error);
++		const worker = this.#worker;
++		worker.removeAllListeners();
++		// Let the worker close its entry (the app's close hooks) and exit on its
++		// own. Terminating straight away left whatever the app had started — a
++		// database proxy and its child process — running with no one to stop it.
++		await new Promise((resolve) => {
++			worker.once("exit", resolve);
++			worker.postMessage({ event: "shutdown" });
+ 		});
+ 		this.#worker = void 0;
+ 	}
+diff --git a/dist/runners/node-worker/worker.mjs b/dist/runners/node-worker/worker.mjs
+index e607b11866cc6fc100ea856e5907d3cde5a48b98..b8324a99e214c1b51a267abab987f3b2e71aeef3 100644
+--- a/dist/runners/node-worker/worker.mjs
++++ b/dist/runners/node-worker/worker.mjs
+@@ -40,9 +40,15 @@ if (entry.ipc) await entry.ipc.onOpen?.({ sendMessage });
+ parentPort?.postMessage({ address: parseServerAddress(server) });
+ parentPort?.on("message", async (message) => {
+ 	if (message?.event === "shutdown") {
+-		Promise.resolve(entry.ipc?.onClose?.()).then(() => server.close()).then(() => {
++		// The entry's close hooks are what must finish before the thread ends.
++		// Waiting for the server to drain first never finished: the dev server
++		// keeps its connections to this worker open while it waits for it to go.
++		Promise.resolve(entry.ipc?.onClose?.()).then(() => 0, (error) => {
++			console.error(error);
++			return 1;
++		}).then((code) => {
+ 			unregisterVirtualModules();
+-			parentPort?.postMessage({ event: "exit" });
++			process.exit(code);
+ 		});
+ 		return;
+ 	}

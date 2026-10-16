@@ -1,6 +1,6 @@
 <template>
   <UApp portal="#dashboard-overlays">
-    <div class="platform-theme" data-surface="dashboard">
+    <div class="platform-theme" data-surface="dashboard" :data-banner="banner ? '' : undefined">
     <!-- Outside the fixed panel group, with the same theme and stack for drawers and their pickers. -->
     <div id="dashboard-overlays" class="relative z-50" />
     <div v-if="impersonatedBy" class="pointer-events-none fixed inset-x-0 bottom-0 z-50 flex justify-center px-4 sm:left-1/2 sm:right-auto sm:w-1/3 sm:-translate-x-1/2 sm:px-0">
@@ -37,6 +37,20 @@
     </div>
 
     <div v-else>
+    <!--
+      Status that belongs to the whole dashboard — the live connection, a
+      background refresh — is one banner above the navigation, never a box
+      repeated inside each screen. The shell insets everything below by its height.
+    -->
+    <UBanner
+      v-if="banner"
+      :color="banner.color"
+      :icon="banner.icon"
+      :title="banner.title"
+      :actions="[{ label: 'Try again', color: 'neutral', variant: 'outline', onClick: banner.retry }]"
+      class="fixed inset-x-0 top-0 z-30 h-(--kc-dashboard-banner)"
+      data-testid="dashboard-status-banner"
+    />
     <DashboardTopNav
       :items="showNavChrome ? primaryNavItems : []"
       :home-to="topNavHomeTo"
@@ -49,7 +63,7 @@
       below the shared overlay target, where drawers and nested pickers render.
     -->
     <UDashboardGroup
-      :ui="{ base: ['z-40', showNavChrome ? 'md:top-(--kc-dashboard-top-nav)' : 'top-(--kc-dashboard-top-nav)', showBottomNav ? 'max-md:bottom-(--kc-dashboard-bottom-nav)' : ''].join(' ') }"
+      :ui="{ base: ['z-40', showNavChrome ? 'top-(--kc-dashboard-banner) md:top-(--kc-dashboard-chrome-top)' : 'top-(--kc-dashboard-chrome-top)', showBottomNav ? 'max-md:bottom-(--kc-dashboard-bottom-nav)' : ''].join(' ') }"
     >
       <UDashboardSearch
         v-model:open="dashboardSearchOpen"
@@ -58,7 +72,7 @@
         description="Search this organization"
         placeholder="Search…"
         size="lg"
-        :fullscreen="isPhoneWidth"
+        :fullscreen="!navigationWidth"
         :groups="dashboardSearchGroups"
         :loading="dashboardSearchLoading"
         :color-mode="false"
@@ -86,7 +100,7 @@
         :aria-current="item.active ? 'page' : undefined"
       >
         <UIcon :name="item.icon" class="size-6 shrink-0" />
-        <span class="text-[10px] leading-tight font-medium">{{ item.label }}</span>
+        <span class="text-xs leading-tight font-medium">{{ item.label }}</span>
       </NuxtLink>
       <NuxtLink
         :to="menuPageTo"
@@ -96,22 +110,10 @@
         data-testid="dashboard-mobile-nav-menu-link"
       >
         <UIcon name="i-lucide-menu" class="size-6 shrink-0" />
-        <span class="text-[10px] leading-tight font-medium">Menu</span>
+        <span class="text-xs leading-tight font-medium">Menu</span>
       </NuxtLink>
     </nav>
     </div>
-
-    <!-- A failed background refetch leaves the shell on what it had and says so. -->
-    <UAlert
-      v-if="shellRefetchError"
-      color="error"
-      variant="soft"
-      icon="i-lucide-circle-alert"
-      class="fixed inset-x-4 top-4 z-50 mx-auto max-w-md"
-      :description="shellRefetchError"
-      :actions="[{ label: 'Try again', onClick: () => void retryDashboardContext() }]"
-      data-testid="dashboard-refetch-error"
-    />
 
     <!-- A refused organization switch stays on screen: the session did not move. -->
     <UAlert
@@ -139,7 +141,6 @@ import { reconcileAnalyticsConsent } from '~/composables/useAnalyticsConsentReco
 import { useAnalytics } from '~/composables/useAnalytics'
 import '~/assets/css/dashboard.css'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
-import { useMediaQuery } from '@vueuse/core'
 
 // ─────────────────────────────────────────────────────────────────────────
 // Dashboard shell architecture.
@@ -182,8 +183,8 @@ const { searchTerm: dashboardSearchTerm, loading: dashboardSearchLoading, error:
 // Registered for this layout's lifetime only: a hook left behind by an earlier
 // mount toggled the palette a second time and cancelled the first.
 const dashboardSearchOpen = ref(false)
-// On a phone the palette is the screen, like every other sheet here; on a wide screen it is a card.
-const isPhoneWidth = useMediaQuery('(max-width: 767px)')
+// Below the top nav the palette is the screen, like every other sheet here; with it, a card.
+const navigationWidth = useDashboardBreakpoint('md')
 const nuxtApp = useNuxtApp()
 let unhookSearchToggle: (() => void) | null = null
 onMounted(() => {
@@ -270,7 +271,16 @@ const realtimeOrganizationSlug = computed(() => {
   const slug = router.currentRoute.value.params.orgSlug
   return !stoppingImpersonation.value && typeof slug === 'string' ? slug : null
 })
-provideDashboardInvalidations(realtimeOrganizationSlug)
+const realtime = provideDashboardInvalidations(realtimeOrganizationSlug)
+
+// A failed background refetch leaves the shell on what it had and says so;
+// a dropped live connection leaves every screen on its last read. Either is
+// the dashboard's state, not one screen's, so it is the one banner.
+const banner = computed((): { color: 'error' | 'warning'; icon: string; title: string; retry: () => void } | null => {
+  if (shellRefetchError.value) return { color: 'error', icon: 'i-lucide-circle-alert', title: shellRefetchError.value, retry: () => void retryDashboardContext() }
+  if (realtime.status.value === 'failed') return { color: 'warning', icon: 'i-lucide-wifi-off', title: 'Live updates are unavailable. What you see may be out of date.', retry: realtime.connect }
+  return null
+})
 
 // Read straight off the route for navigation and routing purposes
 const routeLocationSlug = computed(() => typeof route.params.locationSlug === 'string' ? route.params.locationSlug : null)

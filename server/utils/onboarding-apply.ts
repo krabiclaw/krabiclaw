@@ -507,6 +507,7 @@ export async function applyOnboardingDraft(
     const retiredIds = JSON.stringify(retired)
     batchQueries.push(
       ...resourceLocalizationDeletionQueries('collection', { query: 'SELECT value FROM json_each(?)', params: [retiredIds] }),
+      { query: "DELETE FROM media_placements WHERE organization_id = ? AND owner_type = 'collection' AND owner_id IN (SELECT value FROM json_each(?))", params: [organizationId, retiredIds] },
       { query: 'DELETE FROM collections WHERE organization_id = ? AND location_id IS NULL AND id IN (SELECT value FROM json_each(?))', params: [organizationId, retiredIds] },
     )
   }

@@ -7397,7 +7397,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"env-runner@npm:^0.1.12":
+"env-runner@npm:0.1.16":
   version: 0.1.16
   resolution: "env-runner@npm:0.1.16"
   dependencies:
@@ -7422,6 +7422,34 @@ __metadata:
   bin:
     env-runner: dist/cli.mjs
   checksum: 10c0/67561779929f3cb0d6a7a0594f43248ef2b33433b814fba26da4ea2f393417e09d57a025275af83cf0a07962f53f885edfddde1244338c20f3db476cd63c2e0d
+  languageName: node
+  linkType: hard
+
+"env-runner@patch:env-runner@npm%3A0.1.16#~/patches/env-runner-npm-0.1.16.patch":
+  version: 0.1.16
+  resolution: "env-runner@patch:env-runner@npm%3A0.1.16#~/patches/env-runner-npm-0.1.16.patch::version=0.1.16&hash=0d760a"
+  dependencies:
+    crossws: "npm:^0.4.8"
+    exsolve: "npm:^1.1.0"
+    httpxy: "npm:^0.5.4"
+    srvx: "npm:^0.11.19"
+  peerDependencies:
+    "@netlify/runtime": ^4.1.23
+    "@vercel/queue": ">=0.2.0"
+    miniflare: ^4.20260515.0
+    wrangler: ^4.0.0
+  peerDependenciesMeta:
+    "@netlify/runtime":
+      optional: true
+    "@vercel/queue":
+      optional: true
+    miniflare:
+      optional: true
+    wrangler:
+      optional: true
+  bin:
+    env-runner: dist/cli.mjs
+  checksum: 10c0/2afda6cf5b1962ca2a72783eae384c187810d626d6ad64278bbeae96e3259b4ac63ed7cafad49cf39b4f35c462dda787e0b63aa7017f856f508e2d04c645ee4e
   languageName: node
   linkType: hard
 

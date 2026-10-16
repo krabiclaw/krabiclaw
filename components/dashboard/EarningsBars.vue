@@ -18,7 +18,7 @@
         :class="row.month === selected ? 'bg-primary' : 'bg-elevated ring-1 ring-inset ring-default group-hover:bg-accented'"
         :style="{ height: `${heightFor(row)}%` }"
       />
-      <span class="text-[11px]" :class="row.month === selected ? 'rounded-full bg-highlighted px-2 py-0.5 font-semibold text-inverted' : 'text-muted'">{{ monthLabel(row.month) }}</span>
+      <span class="text-xs" :class="row.month === selected ? 'rounded-full bg-highlighted px-2 py-0.5 font-semibold text-inverted' : 'text-muted'">{{ monthLabel(row.month) }}</span>
     </button>
   </div>
 </template>

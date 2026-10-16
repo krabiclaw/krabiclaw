@@ -1,6 +1,6 @@
 <template>
   <!-- One row of a day: the Today card's shape, smaller — who, with the place as a badge, what, and when. -->
-  <NuxtLink :to="to ?? item.to" class="group flex min-h-[var(--ws-row-min-height,66px)] items-center gap-4 py-3" :class="cancelled ? 'text-muted' : 'text-highlighted'">
+  <NuxtLink :to="to ?? item.to" class="group flex items-center gap-4 py-3" :class="cancelled ? 'text-muted' : 'text-highlighted'">
     <div class="relative size-12 shrink-0" aria-hidden="true">
       <UAvatar
         :src="item.guestImageUrl || undefined"
@@ -20,7 +20,7 @@
     </div>
     <div class="shrink-0 text-right text-sm tabular-nums" :class="cancelled ? 'line-through' : ''">
       {{ formattedTime }}
-      <span v-if="item.showTimeZone" class="block text-[11px] font-normal text-muted">{{ item.timeZone }}</span>
+      <span v-if="item.showTimeZone" class="block text-xs font-normal text-muted">{{ item.timeZone }}</span>
     </div>
     <UIcon name="i-lucide-chevron-right" class="size-4 shrink-0 text-dimmed group-hover:text-highlighted" />
   </NuxtLink>

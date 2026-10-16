@@ -156,30 +156,28 @@ controls its stays.
 
 ### Catalog
 
-**Catalog is one page with Menu, Experiences, Products and Services.** Each
-type heads its own offering list, with menu sections opening their existing
-membership editor. The records are full-width thumbnail rows on mobile and
-square photo tiles on desktop, using the same selector presentation as
-Locations. There is no All items launcher. Dishes without a section remain
-directly reachable under Menu; an empty type states that it has no items.
-Organizations with stay offerings also show Places to stay in this same list,
-opening the existing Product editor.
+**Catalog is where everything the business offers is found, as Airbnb's Your
+listings.** It navigates rather than edits: kind pills — All, Menu,
+Experiences, Products, Services, Places to stay, each only when the business
+has one — over one grid of photo cards, full width on a phone. A menu belongs
+to a location, so the Menu is one card per location, opening that location's
+menu; every other offering is its own card, opening the one Product editor.
+Because the menus are already per location, Catalog has no location filter.
+Dishes without a section are listed on the Menu page under its sections.
 
 Every offering, from anywhere, opens the one Product editor at
-`O/products/:productId`. Each row names its actual sections, price and location
+`O/products/:productId`. Each card names its actual sections, price and location
 relationships. Missing photos and prices say No photo and No price set.
 Online is read from the booking configuration; absent location assignments do
 not imply every location. Inactive locations and withheld or unavailable
-offerings retain their names and state. The root location filter is explicit
-in `?location_id=` and narrows the authorized catalog without changing it.
+offerings retain their names and state. The Menu page's location is explicit
+in `?location_id=` and narrows the authorized menu without changing it.
 
 | View | URL | First working screen |
 | --- | --- | --- |
-| Catalog | `O/products?location_id=` | Menu, Experiences, Products and Services, in that order |
+| Catalog | `O/products?kind=` | one card per location's menu, then every other offering; `kind` is the pill |
 | Edit menu | `O/products/menu?location_id=` | the chosen location's sections, in the order guests see them |
 | A section | `O/products/menu/:collectionId?location_id=` | its items, in order |
-| Experiences | `O/products/experiences` | a focused view of experiences, using the same offering list |
-| Services | `O/products/services` | a focused view of services, using the same offering list |
 
 **A menu belongs to a location.** With one location the Menu opens on it and
 names it. With several, a location must be chosen before its sections can be
@@ -249,7 +247,7 @@ editor or writer, and it never grants or hides an authorization.
 
 | Airbnb | KrabiClaw |
 | --- | --- |
-| Listings holds homes, experiences and services | Catalog groups Menu, Experiences, Products and Services on one page; each is a view of the same Products |
+| Listings holds homes, experiences and services behind kind pills | Catalog's pills are Menu, Experiences, Products, Services and Places to stay; each is a view of the same Products |
 | Homes and experiences have different editors | One Product editor at `O/products/:productId` for every kind: kind changes wording and rows, not the route or the editor |
 | Listing editor rows preview their values and open one concern | Product, location, page, post and member records do the same |
 | Pricing and availability link to the calendar; Earnings links to payouts | Catalog links to Calendar and member availability; Earnings links to the organization's Payments |
@@ -381,15 +379,44 @@ above or below it. A row carries one line of sub-label. A counter
 (`44/50 available`) sits above the field in `text-sm`. `hint` exists only for
 `Optional`.
 
-**Leaf width is fixed.** The shell's content column is `max-w-xl`, and a
-field does not stretch to the pane. A leaf that needs more width is a grid
-editor and says so. An index that is a column rather than the frame names
-which column in `DashboardIndexPanel column`: `leaf` (Menu, Catalog, a
-booking's notes), `reading` (Earnings, Payments, Past activity) or `wide`
-(Insights, Today, Calendar). The widths live in `dashboardColumnWidths`; a page
-never states one. A column's title heads it, as a leaf's does, unless the
-navbar names what the level shows — Today's range — and the footer keeps the
-column's edges.
+**Everything starts at the gutter.** Nuxt UI's panel gutter (`px-4 sm:px-6`,
+`dashboardGutterClass`) is the one horizontal edge, the same as the top nav's:
+Back or ✕, the title, the rows, the fields and Cancel all start on it, and
+nothing is centred. A component inside a panel adds no outer padding, scroll
+container or column of its own; a row whose highlight reaches the pane's edge
+pulls itself into the gutter (`-mx-4`) so its text keeps the edge. A level that
+scrolls itself (`fill`) pads its own rows with the gutter. Every footer is
+framed by the panel — gutter, hairline, `py-3` — and holds only its row.
+
+**One header row, decided by the shell.** As Airbnb's: a tab root opens on its
+large title with its actions on the same row and no bar above it; a pushed
+level puts a round Back first — on its own row above the title on a phone,
+inline before it from `lg` — with the actions at the right of that row; a
+leaf's sheet has ✕ and its title small and centred, and the leaf's pane its
+title large. Back, ✕ and every action are the same round button. A control
+that names what the whole level shows (Today's range, the calendar's location)
+takes the title's place. Pages supply `title`, `lead` and `#right`; they never
+place a title or an action themselves.
+
+**One card, one empty state, one status banner.** A card is `UCard
+variant="subtle"`; its padding and corner come from `app.config.ts`, and a
+card that links is the same card rendered `as` the link. An empty list or
+record is `UEmpty`. Status that belongs to the whole dashboard — the live
+connection, a failed background refresh — is the shell's one banner above the
+navigation, never a box repeated inside each screen; a screen shows only its
+own failures.
+
+**Leaf width is fixed from `lg`.** Below `lg` a level is the whole screen or a
+drawer and uses all of it. From `lg` the content column is `max-w-xl`, so a
+field does not stretch across a wide pane; it caps the right edge, never the
+left. A leaf that needs more width is a grid editor and says so. An index that
+is a column rather than the frame names which column in `DashboardIndexPanel
+column`: `leaf` (Menu, Catalog, a booking's notes), `reading` (Earnings,
+Payments, Past activity) or `wide` (Insights, Today, Calendar); beside a child
+every index is `leaf`. The widths live in `dashboardColumnWidths`; a page never
+states one. A column's title heads it, as a leaf's does, unless the navbar
+names what the level shows — Today's range. Every level title is
+`dashboardTitleClass`.
 
 **Short text is bare.** A name, title, headline, slug or link renders as a
 borderless 22–26px field with a counter, the way Airbnb's title and custom
@@ -435,7 +462,7 @@ is a canvas. Describing it is a field, and fields decompose.
 
 | Width | Chrome | Detail |
 | --- | --- | --- |
-| `< md` (768) | Bottom nav | Modal leaf drawer over its visible parent: ✕ top-left, title in the body, commit bar pinned at the base |
+| `< md` (768) | Bottom nav | Modal leaf drawer over its visible parent: ✕ top-left, its title small and centred beside it, commit bar pinned at the base |
 | `md` to `< lg` | Top nav | The same modal leaf drawer |
 | `≥ lg` (1024) | Top nav | Pane beside the index |
 
@@ -448,7 +475,10 @@ The index columns otherwise follow the route hierarchy through CSS.
 Below `lg`, `DashboardLeafPanel` uses the native `UDrawer` with a backdrop,
 modal focus and swipe dismissal. Its nearest parent index remains visible
 underneath; deeper ancestors still yield. Index-to-index navigation remains one
-screen at a time. One persistent editor instance is teleported between the
+screen at a time: a parent index is hidden by CSS only while a child index is
+rendered beside it, so it never disappears while its child is still loading
+and a leaf's drawer always rises over it. The drawer is the only motion; a
+level does not animate its own arrival. One persistent editor instance is teleported between the
 drawer and desktop pane, so resizing preserves its draft and form state.
 The drawer does not create another route, editor or draft owner.
 

@@ -59,7 +59,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(`/dashboard/${slug}/products`)
-  const stayTile = page.getByTestId('catalog-section-stay').getByTestId(`selector-item-${productId}`)
+  const stayTile = page.getByTestId('catalog-grid').getByTestId(`selector-item-${productId}`)
   await expect(stayTile).toHaveAttribute('href', `/dashboard/${slug}/products/${productId}`)
   await expect(stayTile).toHaveAccessibleName('Cliff Cabin')
   await stayTile.click()

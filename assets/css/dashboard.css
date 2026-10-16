@@ -38,8 +38,27 @@
  * height here keeps the panel viewport in step automatically.
  */
 .platform-theme {
+  --kc-dashboard-banner: 0rem;
   --kc-dashboard-top-nav: 4.5rem;
+  --kc-dashboard-chrome-top: calc(var(--kc-dashboard-banner) + var(--kc-dashboard-top-nav));
   --kc-dashboard-bottom-nav: calc(4.5rem + env(safe-area-inset-bottom));
+}
+
+/* The shell's status banner, when one is showing, sits above everything else. */
+.platform-theme[data-banner] {
+  --kc-dashboard-banner: 3rem;
+}
+
+/*
+ * Below lg a pair is one screen at a time. A parent index steps aside for a
+ * child index rendered beside it. A leaf is never beside it — it is a drawer
+ * over it — so the parent stays as that drawer's backdrop, and it stays while
+ * any child is still loading rather than vanishing until the child mounts.
+ */
+.platform-theme [data-dashboard-index]:has(~ [data-dashboard-index]:not([data-yield])) {
+  @variant max-lg {
+    display: none;
+  }
 }
 
 /*
@@ -49,8 +68,8 @@
  * the right column is the whole screen and keeps it. A level that yields stays
  * mounted but hidden (`data-yield`), and is not a column.
  */
-@media (width >= 64rem) {
-  .platform-theme [id^="dashboard-panel-"]:not([data-yield]) ~ [id^="dashboard-panel-"] [data-testid="dashboard-navbar-back"] {
+.platform-theme [id^="dashboard-panel-"]:not([data-yield]) ~ [id^="dashboard-panel-"] [data-testid="dashboard-navbar-back"] {
+  @variant lg {
     display: none;
   }
 }

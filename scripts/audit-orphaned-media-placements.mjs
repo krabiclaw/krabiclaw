@@ -9,7 +9,7 @@ export const CONTENT_DOCUMENT_SCOPE_QUERY = `
 `
 
 const OWNER_TABLES = {
-  organization: 'organization', business_location: 'business_locations',
+  organization: 'organization', business_location: 'business_locations', collection: 'collections',
   content_document: 'content_documents', review: 'reviews', review_request: 'review_requests',
 }
 

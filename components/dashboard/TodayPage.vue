@@ -3,7 +3,6 @@
     :id="personalScope ? 'account-today' : 'org-today'"
     title="Today"
     column="wide"
-    :navbar-ui="{ title: 'sr-only', center: 'flex flex-1 items-center justify-center' }"
   >
     <!--
       The title is announced but not drawn: the pills say which range is on
@@ -11,7 +10,7 @@
       different controls.
     -->
     <template #center>
-        <div class="flex items-center gap-2">
+        <div class="mx-auto flex items-center gap-2">
           <UTabs
             v-model="rangeModel"
             :items="ranges"
@@ -27,19 +26,6 @@
 
     <div>
       <UAlert
-        v-if="realtime.status.value === 'failed'"
-        class="mb-6"
-        color="warning"
-        variant="soft"
-        icon="i-lucide-wifi-off"
-        title="Today may be out of date"
-        description="The live dashboard connection is unavailable."
-      >
-        <template #actions>
-          <UButton color="warning" variant="soft" size="xs" @click="retryRealtime">Refresh</UButton>
-        </template>
-      </UAlert>
-      <UAlert
         v-if="activeError"
         class="mb-6"
         color="error"
@@ -52,7 +38,7 @@
         </template>
       </UAlert>
 
-      <h1 class="text-center text-2xl font-semibold text-highlighted">
+      <h1 class="text-center" :class="dashboardTitleClass">
         {{ heading }}
       </h1>
 
@@ -94,6 +80,7 @@
 
 <script setup lang="ts">
 import { localDateAt } from '~/utils/timezone'
+import { dashboardTitleClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import AgendaFilters from './AgendaFilters.vue'
 import TodayAgendaCard from './TodayAgendaCard.vue'
 import { bookingCountLabel, resolveAggregateBookingPresentation } from '~/utils/booking-presentation'
@@ -246,10 +233,6 @@ async function loadMore() {
 
 async function refreshAgenda() {
   await refreshToday()
-}
-function retryRealtime() {
-  realtime.connect()
-  void refreshAgenda()
 }
 function addDays(dateKey: string, days: number): string {
   const date = new Date(`${dateKey}T00:00:00Z`)

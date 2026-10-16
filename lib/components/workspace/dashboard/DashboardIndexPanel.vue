@@ -1,46 +1,50 @@
 <template>
   <UDashboardPanel
     :id="id"
-    :class="level.mode.value === 'yield' ? 'hidden' : pair && !childLeaves ? 'hidden lg:flex' : undefined"
+    data-dashboard-index
+    :class="level.mode.value === 'yield' ? 'hidden' : undefined"
     :data-yield="level.mode.value === 'yield' ? '' : undefined"
     :default-size="pair ? 50 : undefined"
-    :ui="ui"
+    :ui="panelUi"
   >
     <template #header>
-      <UDashboardNavbar :title="heading ? undefined : title" :toggle="false" :ui="navbarUi">
-        <template #leading>
-          <DashboardNavbarLeading />
-        </template>
-        <!-- A control that names what the whole level is showing — Today's range — belongs beside the title, not in the body. -->
-        <template v-if="$slots.center" #default>
+      <!--
+        One row heads every level, as Airbnb's do: Back when there is somewhere
+        to go back to, the title, and what you can do to the level on the right.
+        On a phone a pushed level's title starts the next line, under Back; from
+        lg Back sits beside it. A control that names what the whole level shows —
+        Today's range — takes the title's place, and the title is announced only.
+      -->
+      <div class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-4 pb-2 pt-4 sm:pt-6" :class="dashboardGutterClass">
+        <DashboardNavbarLeading />
+        <div v-if="$slots.center" class="flex min-w-0 flex-1 items-center">
+          <h1 class="sr-only">{{ title }}</h1>
           <slot name="center" />
-        </template>
-        <!-- The list's controls land here (dashboardPanelActionsKey), after whatever the page itself puts on the right. -->
-        <template #right>
+        </div>
+        <div v-else class="min-w-0 flex-1" :class="level.to.value ? 'max-lg:order-last max-lg:basis-full' : undefined">
+          <h1 :class="dashboardTitleClass">{{ title }}</h1>
+          <p v-if="lead" class="mt-2 text-base text-muted">{{ lead }}</p>
+        </div>
+        <!-- Every action is the same round 40px button, whatever size a page asked for. A list editor's controls land in the span (dashboardPanelActionsKey). -->
+        <div class="ms-auto flex shrink-0 items-center gap-2 [&_[data-slot=base]]:h-10 [&_[data-slot=base]]:min-w-10 [&_[data-slot=base]]:justify-center [&_[data-slot=base]]:rounded-full">
           <slot name="right" />
-          <span :id="actionsId" class="flex items-center gap-1.5 empty:hidden" />
-        </template>
-      </UDashboardNavbar>
+          <span :id="actionsId" class="flex items-center gap-2 empty:hidden" />
+        </div>
+      </div>
     </template>
 
     <template #body>
       <!-- Alone it uses the frame, as Airbnb's listing grid does; beside a child it is a column. -->
-      <div class="mx-auto w-full" :class="[width, fill ? 'flex min-h-0 flex-1 flex-col' : undefined]">
-        <!-- A column's title heads the column, as a leaf's does, so the two start on one line. -->
-        <template v-if="heading">
-          <h1 class="text-2xl font-semibold text-highlighted lg:text-[32px] lg:leading-tight">{{ title }}</h1>
-          <p v-if="lead" class="mt-2 text-base text-muted">{{ lead }}</p>
-          <div class="mt-8">
-            <slot />
-          </div>
-        </template>
-        <slot v-else />
+      <div class="w-full" :class="[width, fill ? 'flex min-h-0 flex-1 flex-col' : undefined]">
+        <slot />
       </div>
     </template>
 
     <!-- A list whose order is itself a draft — sections, links — commits from here. -->
     <template v-if="$slots.footer" #footer>
-      <slot name="footer" />
+      <div class="shrink-0 border-t border-default py-3" :class="dashboardGutterClass">
+        <slot name="footer" />
+      </div>
     </template>
   </UDashboardPanel>
 
@@ -65,41 +69,36 @@
   choosing a child would leave the mode; it opens one when the mode closes.
 */
 import type { RouteLocationRaw } from 'vue-router'
-import { dashboardColumnWidths, dashboardPanelActionsKey, dashboardLeafParentKey, type DashboardColumn } from './dashboardPanelContext'
+import { dashboardColumnWidths, dashboardPanelActionsKey, dashboardLeafParentKey, dashboardGutterClass, dashboardTitleClass, type DashboardColumn } from './dashboardPanelContext'
 
 const props = defineProps<{
   id: string
   title: string
   autoOpen?: RouteLocationRaw | null
-  ui?: { root?: string; body?: string }
-  /** For a level whose navbar carries its own control, such as Today's range. */
-  navbarUi?: Record<string, string>
-  /** The level is exactly the panel's height and scrolls inside itself: a conversation with its composer at the foot. */
+  /** The level is exactly the panel's height and scrolls inside itself, padding its own rows with the gutter: a conversation with its composer at the foot. */
   fill?: boolean
   /** The level is a column at every width rather than the frame: a menu, a statement, a calendar. */
   column?: DashboardColumn
-  /** A column's one muted sentence under its title, as a leaf's `lead`. */
+  /** The level's one muted sentence under its title, as a leaf's `lead`. */
   lead?: string
 }>()
 
 const level = useRouteLevel()
+// A level that scrolls itself pads its own rows, so the body gives up its padding.
+const panelUi = computed((): { body?: string } => {
+  const fill: boolean = props.fill
+  return { body: fill ? 'p-0 sm:p-0 gap-0' : undefined }
+})
 const pair = computed(() => level.mode.value === 'pair')
-const childLeaves = ref(0)
-// Beside a child, a column wider than a leaf narrows to the pair's index column.
+// Beside a child every index is a leaf-wide column; alone it is its own column, or the frame.
 const width = computed((): string | undefined => {
   const column: DashboardColumn | undefined = props.column
-  if (column && (column === 'leaf' || !pair.value)) return dashboardColumnWidths[column]
-  return pair.value ? 'max-w-2xl' : undefined
-})
-// A navbar that names what the level shows — Today's range — keeps the title, announced beside it.
-const slots = useSlots()
-const heading = computed((): boolean => {
-  const column: DashboardColumn | undefined = props.column
-  return Boolean(column) && !slots.center
+  if (pair.value) return dashboardColumnWidths.leaf
+  return column ? dashboardColumnWidths[column] : undefined
 })
 // Read through the instance: vue-tsc cannot type `props.id` here (TS2590), and the id is a plain string.
 const instance = getCurrentInstance()
-provide(dashboardLeafParentKey, { leaves: childLeaves, focus: () => {
+provide(dashboardLeafParentKey, { focus: () => {
   const heading = document.getElementById(`dashboard-panel-${String(instance?.props.id ?? '')}`)?.querySelector<HTMLElement>('h1')
   if (heading) {
     heading.tabIndex = -1

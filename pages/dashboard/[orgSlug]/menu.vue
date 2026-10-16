@@ -19,7 +19,7 @@
         icon="i-lucide-search"
         aria-label="Search"
         color="neutral"
-        variant="ghost"
+        variant="soft"
         square
         data-testid="dashboard-search"
         @click="openSearch"

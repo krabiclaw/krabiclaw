@@ -3,6 +3,8 @@ export const MEDIA_PLACEMENT_SLOTS = {
   organization: ['logo', 'logo_dark', 'favicon', 'social_share', 'social_card', 'compliance_document', 'announcement'],
   business_location: ['hero', 'gallery', 'social_card'],
   product: ['image', 'gallery', 'social_card'],
+  // A menu section's own picture: the intro over its dishes on the site and its tile in Catalog.
+  collection: ['image'],
   content_document: ['cover', 'gallery', 'social_card'],
   content_block: [
     'media', 'gallery', 'background', 'featured', 'decoration',
@@ -22,7 +24,7 @@ export const MEDIA_PLACEMENT_SLOTS = {
 export type MediaPlacementOwnerType = keyof typeof MEDIA_PLACEMENT_SLOTS
 
 export const EDITABLE_MEDIA_PLACEMENT_OWNERS = [
-  'organization', 'business_location', 'product', 'content_document',
+  'organization', 'business_location', 'product', 'collection', 'content_document',
   'content_block', 'review_request',
 ] as const satisfies readonly MediaPlacementOwnerType[]
 

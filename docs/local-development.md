@@ -29,6 +29,20 @@ Durable Object whose class lives in the proxied Worker, so under `nuxt dev` the
 through Wrangler's dev registry instead. The built Worker (`yarn dev:worker`,
 staging, production) exports the class itself and never uses it.
 
+`build/guest-inbox-hub-dev.ts` starts that Worker once for the life of the
+`nuxt dev` process and stops it when Nuxt closes; a Nitro rebuild does not
+restart it. Wrangler's registry will not hand a name to a new instance while
+another instance touched it in the last 90 seconds, so a hub restarted per
+rebuild left every call going to the dead one for that long. After a server
+that was killed rather than stopped, the same 90 seconds apply once.
+
+Nitro's dev server runs the app in a worker thread and replaces that thread on
+every rebuild. `patches/env-runner-npm-*.patch` makes it shut the old thread
+down through its own close hooks rather than terminating it, so the Wrangler
+platform proxy that `server/plugins/00.cloudflare-dev-bindings.ts` starts in
+each thread is disposed with it. Without that, each rebuild left another
+Miniflare holding the local D1 file until queries failed with `SQLITE_BUSY`.
+
 The auxiliary Worker loads the same root `.env`, derives its database binding
 from the root Wrangler `dev` environment, and shares the root local persistence
 directory. Its broadcasts authorize connected members through Better Auth
@@ -36,9 +50,10 @@ against the same local database as the application.
 
 That covers every server-side call to the hub, so opening a conversation with
 unread notifications works under `yarn dev`. The dashboard's live inbox socket
-does not: Nitro's dev server answers the WebSocket upgrade with a plain 200,
-so the browser client keeps reconnecting and the inbox refreshes on
-navigation only. Use `yarn dev:worker` to work on the realtime inbox.
+does not: Nitro's dev server answers the WebSocket upgrade with a plain 200.
+Under `nuxt dev` the dashboard therefore does not open the socket at all, shows
+no live-connection banner, and refreshes on navigation only. Use
+`yarn dev:worker` to work on the realtime inbox.
 
 If an older checkout has `.dev.vars` or `.dev.vars.<environment>`, merge its
 needed values into `.env`, resolve conflicting values explicitly, then remove
