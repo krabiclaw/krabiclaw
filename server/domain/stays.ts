@@ -520,6 +520,14 @@ export async function setMemberHomes(env: CloudflareEnv & GuestInboxPublicationE
     }, organizationEventQuery({ organizationId: access.organizationId, actorId: access.actorId, eventType: 'stay.homes_assigned', entityType: 'member', entityId: memberId,
       metadata: { product_ids: selected.sort(), changed_product_ids: changed.map(home => home.product_id).sort() } })], { operation: 'Assign homes to a member' })
   }
+  // The member may have left or become a manager after the check above; the
+  // release scan that change ran may have finished before this write, so the
+  // write is undone here and the caller told.
+  const current = await (await organizationAdapter(env)).findMemberById(memberId)
+  if (changed.length && (!current || current.organizationId !== access.organizationId || current.role.split(',').some(isOrganizationWideRole))) {
+    await releaseUnassignableHomes(env, db, { organizationId: access.organizationId })
+    fail(409, 'MEMBER_CHANGED', 'That person left the organization or now sees every home', 'memberId')
+  }
   const assigned = await queryAll<{ product_id: string }>(db, 'SELECT product_id FROM product_stay_configs WHERE organization_id = ? AND assigned_member_id = ? ORDER BY product_id', [access.organizationId, memberId])
   // The member's Today and Calendar, and everyone else's open views of these homes, reload.
   for (const home of changed) {
