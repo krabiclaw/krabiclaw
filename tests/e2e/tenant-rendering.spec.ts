@@ -479,19 +479,24 @@ for (const tenant of tenants) {
   })
 }
 
-// A listed place to stay on staging, Stripe test mode ready: the booking card
-// opens the dialog and walks a guest to the contact step. Nothing is submitted.
-// Its pressed "Check availability" once flipped the dialog's checkbox shut.
-const STAGING_STAY = { tenant: 'saltleaf-stays-demo', path: '/stays/saltleaf-ocean-avenue-studio', slug: 'saltleaf-ocean-avenue-studio' }
-
+// The staging lodging demo (docs/operations/lodging-demo.md), Stripe test mode
+// ready: the first stay its home page offers opens the booking dialog from the
+// card and walks a guest to the contact step. Nothing is submitted. A pressed
+// "Check availability" once flipped the dialog's checkbox shut.
 test('a guest opens a stay\'s booking dialog, picks nights the calendar allows and reaches the contact step', async ({ page }) => {
   const platform = new URL(testBaseUrl())
-  test.skip(platform.hostname !== 'staging.krabiclaw.com', 'The listed stay with online payments exists on staging only')
-  const baseURL = `https://${environmentTenantAliasHostname(platform.hostname, STAGING_STAY.tenant)}`
+  test.skip(platform.hostname !== 'staging.krabiclaw.com', 'The lodging demo with online payments exists on staging only')
+  const baseURL = `https://${environmentTenantAliasHostname(platform.hostname, 'saltleaf-stays-demo')}`
+  const homePage = await page.request.get(`${baseURL}/`)
+  expect(homePage.status()).toBe(200)
+  const path = (await homePage.text()).match(/\/stays\/([a-z0-9-]+)/)
+  expect(path, 'the lodging demo home page offers no stay').not.toBeNull()
+  const stayPath = path![0]
+  const slug = path![1]!
   type Night = { date: string; available: boolean; price_minor: number | null; min_stay_arrival: number; min_stay_through: number | null; max_stay: number | null; closed_to_arrival: boolean; closed_to_departure: boolean }
   const from = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
   const to = new Date(Date.now() + 120 * 86_400_000).toISOString().slice(0, 10)
-  const read = await page.request.get(`${baseURL}/api/public/products/${STAGING_STAY.slug}/nights?from=${from}&to=${to}`)
+  const read = await page.request.get(`${baseURL}/api/public/products/${slug}/nights?from=${from}&to=${to}`)
   expect(read.status(), await read.text()).toBe(200)
   const { home, nights } = await read.json() as { home: { today: string; currency: string }; nights: Night[] }
   // The first stay the home's own nights allow, check-in and checkout in one month.
@@ -511,12 +516,12 @@ test('a guest opens a stay\'s booking dialog, picks nights the calendar allows a
       }
     }
   }
-  expect(chosen, 'the staging stay has no bookable nights in the next 120 days').not.toBeNull()
+  expect(chosen, 'the demo stay has no bookable nights in the next 120 days').not.toBeNull()
   const dayLabel = (date: string) => new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${date}T00:00:00Z`))
   const money = (minor: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: home.currency }).format(minor / 100)
 
   await page.setViewportSize({ width: 1440, height: 900 })
-  expect((await openTenantPage(page, `${baseURL}${STAGING_STAY.path}`, {}))?.status()).toBe(200)
+  expect((await openTenantPage(page, `${baseURL}${stayPath}`, {}))?.status()).toBe(200)
   await waitForNuxtHydration(page)
   const card = page.locator('article')
   // A stay is a reservation: none of an appointment's words.
