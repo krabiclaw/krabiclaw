@@ -78,6 +78,9 @@ export interface ProductStayConfig {
   assigned_team_id: string | null
 }
 
+/** Who looks after a product: workspace state the public site never carries. */
+export type StaffAssignment = 'assigned_member_id' | 'assigned_team_id'
+
 /** Membership of one product in one collection, carrying its position there. */
 export interface CollectionMembership {
   collection_id: string
@@ -265,4 +268,10 @@ export interface ProductPresentation {
    * place to stay is an Accommodation.
    */
   structuredDataType: 'MenuItem' | 'Product' | 'Event' | 'Accommodation'
+}
+
+/** A product as the public site serves it: everything but who on the team looks after it. */
+export type PublicProduct<T extends Product = Product> = Omit<T, 'booking' | 'stay'> & {
+  booking: Omit<ProductBookingConfig, StaffAssignment> | null
+  stay: Omit<ProductStayConfig, StaffAssignment> | null
 }

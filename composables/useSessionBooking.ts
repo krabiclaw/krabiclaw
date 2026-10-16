@@ -1,5 +1,5 @@
 import type { MaybeRefOrGetter } from 'vue'
-import type { Product } from '~/server/types/products'
+import type { PublicProduct } from '~/server/types/products'
 import type { PublicProductLocation, PublicProductSession } from '~/server/utils/public-products'
 import type { CurrencyCode } from '~/shared/currencies'
 import { selectPrice } from '~/shared/prices'
@@ -16,7 +16,7 @@ import type { RawDateAvailability, TimeSlotSelection } from '~/components/bookin
 export interface SessionBookingContext {
   organizationId: string
   organizationName: string
-  product: Product
+  product: PublicProduct
   currency: CurrencyCode
   location: PublicProductLocation | null
   sessions: PublicProductSession[]
@@ -39,7 +39,7 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
   })
   /** The options a customer can actually choose — what is priced, and what is booked. */
   const selectedVariantId = ref<string | null>(sellableVariants.value.length === 1 ? sellableVariants.value[0]!.id : null)
-  function variantPriceLabel(variant: Product['variants'][number]) {
+  function variantPriceLabel(variant: PublicProduct['variants'][number]) {
     const price = selectPrice(variant.prices, { currency: context.value.currency, location_id: context.value.location?.id ?? null, at: new Date().toISOString() })
     return !showPartySize.value && price?.unit_amount === 0 ? t('booking.free') : formatProductMoney(price)
   }

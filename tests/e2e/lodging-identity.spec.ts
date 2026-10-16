@@ -193,7 +193,9 @@ test.describe('lodging identity boundary', () => {
     expect(location.status).toBe(200)
     const locationHtml = await location.text()
     expect(locationHtml).toContain('"LodgingBusiness"')
-    expect(locationHtml).not.toContain('Check availability')
+    // The rendered page has no such control; the platform message catalog the shell
+    // payload carries also holds the words, as data, so only element text is checked.
+    expect(locationHtml).not.toMatch(/>\s*Check availability\s*</)
     // Its location takes no table reservations, so the site has no reservations page.
     expect((await api.get('/reservations', { headers: { 'x-preview-tenant': slug } })).status).toBe(404)
 

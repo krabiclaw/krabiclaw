@@ -3,9 +3,9 @@ import { getSourceLocale } from '~/server/utils/organization-locales'
 import { parseGoogleReviewMetadata, type GoogleReviewMetadata } from '~/shared/google-review'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { bookingWindow, listSessions } from '~/server/utils/availability'
-import { getProductBySlug, hydrateProductMedia, listCollections, listLocationProducts, listOrganizationProducts } from '~/server/utils/product-management'
+import { getProductBySlug, hydrateProductMedia, listCollections, listLocationProducts, listOrganizationProducts, publicProduct } from '~/server/utils/product-management'
 import { assertProductKind } from '~/shared/product-details'
-import type { Collection, Product, ProductBookingConfig, ProductPresentation, ProductSurface } from '~/server/types/products'
+import type { Collection, ProductBookingConfig, ProductPresentation, ProductSurface, PublicProduct, StaffAssignment } from '~/server/types/products'
 import { isExperience, productSurfaceOf, resolveProductPresentation, presentationForSurface } from '~/utils/product-presentation'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import {
@@ -64,7 +64,7 @@ export interface PublicProductCollection {
   currency: CurrencyCode
   presentation: ProductPresentation
   locations: PublicProductLocation[]
-  products: Product[]
+  products: PublicProduct[]
   /**
    * Site and location collections, in merchandising order. These replace the
    * old per-location category, so a template groups by explicit membership
@@ -74,7 +74,7 @@ export interface PublicProductCollection {
 }
 
 /** What the page needs to know about this product's booking capability. */
-export type PublicProductBooking = ProductBookingConfig
+export type PublicProductBooking = Omit<ProductBookingConfig, StaffAssignment>
 
 /** One occurrence, as the product page and its structured data read it. */
 export interface PublicProductSession {
@@ -92,7 +92,7 @@ export interface PublicProductDetail extends PublicProductCollection {
   location: PublicProductLocation | null
   scopeRequired?: boolean
   onlineAvailable?: boolean
-  product: Product
+  product: PublicProduct
   /**
    * Present exactly when the Product takes bookings.
    *
@@ -106,7 +106,7 @@ export interface PublicProductDetail extends PublicProductCollection {
 }
 
 export interface PublicProductDetailPayload {
-  product: Product
+  product: PublicProduct
   location: PublicProductLocation | null
   locations?: PublicProductLocation[]
   scopeRequired?: boolean
@@ -198,11 +198,11 @@ export async function loadPublicProductCollection(
   const onlineProducts = locationSlug ? [] : catalogProducts.filter(product => Boolean(product.booking?.held_online || product.order_url))
   const seen = new Set<string>()
   // Collections and detail routes use the same explicit product kind.
-  const products = await hydrateProductMedia(db, organizationId, [...perLocation.flat(), ...onlineProducts].filter((product) => {
+  const products = (await hydrateProductMedia(db, organizationId, [...perLocation.flat(), ...onlineProducts].filter((product) => {
     if (seen.has(product.id)) return false
     seen.add(product.id)
     return productSurfaceOf(resolved.organization.vertical, product) === routeKind
-  }))
+  }))).map(publicProduct)
   const collections = [
     ...allCollections.filter(collection => collection.location_id === null),
     ...locations.flatMap(location => allCollections.filter(collection => collection.location_id === location.id)),
@@ -359,7 +359,7 @@ async function projectPublicOffering(
   env: CloudflareEnv,
   db: DbClient,
   collection: PublicProductCollection,
-  found: Product,
+  found: PublicProduct,
   locale: string,
   requestedScope: string | null | undefined,
   sourcePath: string,

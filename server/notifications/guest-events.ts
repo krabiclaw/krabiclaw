@@ -163,6 +163,52 @@ export function guestBookingReceivedMessage(input: GuestBookingInput & { product
   }
 }
 
+export interface GuestStayInput {
+  locale?: string
+  guestName: string
+  organizationName: string
+  organizationLogoUrl: string | null
+  homeName: string
+  checkIn: string
+  checkOut: string
+  nights: string
+  guests: string
+  total: string
+  checkInInstructions: string | null
+  contactPhone: string | null
+  contactEmail: string | null
+  heroImageUrl: string | null
+  accountUrl: string | null
+}
+
+/** The guest's confirmation of a stay they booked and paid for on the site. */
+export function guestStayConfirmedMessage(input: GuestStayInput): NotificationMessage {
+  const locale = guestLocale(input)
+  const labels = locale.messages
+  return {
+    locale: locale.locale,
+    title: labels['stay.confirmed_title']!,
+    preheader: `${input.homeName} · ${input.checkIn} – ${input.checkOut}`,
+    hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.homeName } : null,
+    facts: facts(
+      fact('what', labels['stay.your_stay']!, input.homeName),
+      fact('checkIn', labels['stay.check_in']!, input.checkIn),
+      fact('checkOut', labels['stay.check_out']!, input.checkOut),
+      fact('nights', labels['stay.nights']!, input.nights),
+      fact('partySize', labels['stay.guests']!, input.guests),
+      fact('total', labels['stay.paid_total']!, input.total),
+    ),
+    secondaryAction: accountAction(input.accountUrl, locale.locale),
+    sections: [
+      ...(input.checkInInstructions ? [{ title: labels['stay.check_in_instructions']!, body: input.checkInInstructions }] : []),
+      ...contactSection({ ...input, date: input.checkIn, time: '', partySize: input.guests }),
+    ],
+    category: 'account_security',
+    organizationName: input.organizationName,
+    organizationLogoUrl: input.organizationLogoUrl,
+  }
+}
+
 export function guestBookingCancelledMessage(input: GuestBookingInput & { productTitle: string; wasConfirmed: boolean }): NotificationMessage {
   const locale = guestLocale(input)
   return {

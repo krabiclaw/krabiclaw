@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "b87d8007-e263-4096-a423-08806e62ba8b",
+  "id": "c1e0696b-a676-43ec-b40f-3fd36c007546",
   "prevId": "1ca3a22b-28fe-4976-9fc8-3d505b40cc1f",
   "tables": {
     "account": {
@@ -5325,7 +5325,7 @@
         },
         "media_placements_owner_type_check": {
           "name": "media_placements_owner_type_check",
-          "value": "owner_type IN ('organization', 'business_location', 'product', 'collection', 'content_document', 'content_block', 'review', 'review_request', 'activity_entry', 'team_message')"
+          "value": "owner_type IN ('organization', 'business_location', 'product', 'content_document', 'content_block', 'review', 'review_request', 'activity_entry', 'team_message')"
         },
         "media_placements_sort_order_check": {
           "name": "media_placements_sort_order_check",
@@ -8521,6 +8521,13 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "converted_stay_id": {
+          "name": "converted_stay_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -8589,7 +8596,7 @@
         },
         "payment_holds_subject_check": {
           "name": "payment_holds_subject_check",
-          "value": "(product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL AND converted_reservation_id IS NULL) OR (product_id IS NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL)"
+          "value": "(product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL AND converted_reservation_id IS NULL AND converted_stay_id IS NULL) OR (product_id IS NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL AND converted_stay_id IS NULL) OR (product_id IS NOT NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL AND converted_reservation_id IS NULL AND date(starts_at, '+0 days') IS starts_at AND date(ends_at, '+0 days') IS ends_at AND ends_at > starts_at)"
         }
       }
     },
@@ -14475,7 +14482,14 @@
           "name": "stay_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": true,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "hold_id": {
+          "name": "hold_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
           "autoincrement": false
         }
       },
@@ -14484,6 +14498,13 @@
           "name": "stay_nights_stay_idx",
           "columns": [
             "stay_id"
+          ],
+          "isUnique": false
+        },
+        "stay_nights_hold_idx": {
+          "name": "stay_nights_hold_idx",
+          "columns": [
+            "hold_id"
           ],
           "isUnique": false
         }
@@ -14495,6 +14516,19 @@
           "tableTo": "organization",
           "columnsFrom": [
             "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "stay_nights_hold_id_payment_checkout_holds_id_fk": {
+          "name": "stay_nights_hold_id_payment_checkout_holds_id_fk",
+          "tableFrom": "stay_nights",
+          "tableTo": "payment_checkout_holds",
+          "columnsFrom": [
+            "hold_id"
           ],
           "columnsTo": [
             "id"
@@ -14534,6 +14568,10 @@
         "stay_nights_date_check": {
           "name": "stay_nights_date_check",
           "value": "date(date, '+0 days') IS date"
+        },
+        "stay_nights_claimant_check": {
+          "name": "stay_nights_claimant_check",
+          "value": "(stay_id IS NULL) <> (hold_id IS NULL)"
         }
       }
     },

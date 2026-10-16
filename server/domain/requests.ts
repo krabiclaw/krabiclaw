@@ -138,7 +138,8 @@ export function participantLabel(request: GuestRequest): string {
 /** Resource ownership belongs to the current request and every actual linked operational record. */
 export const REQUEST_CURRENT_BUYER_SQL = `r.user_id IS NOT NULL
  AND NOT EXISTS(SELECT 1 FROM bookings b WHERE b.request_id=r.id AND (b.user_id IS NULL OR b.user_id<>r.user_id OR b.organization_id<>r.organization_id OR r.kind<>'booking'))
- AND NOT EXISTS(SELECT 1 FROM reservations v WHERE v.request_id=r.id AND (v.user_id IS NULL OR v.user_id<>r.user_id OR v.organization_id<>r.organization_id OR r.kind<>'reservation'))`
+ AND NOT EXISTS(SELECT 1 FROM reservations v WHERE v.request_id=r.id AND (v.user_id IS NULL OR v.user_id<>r.user_id OR v.organization_id<>r.organization_id OR r.kind<>'reservation'))
+ AND NOT EXISTS(SELECT 1 FROM stays st WHERE st.request_id=r.id AND (st.user_id IS NULL OR st.user_id<>r.user_id OR st.organization_id<>r.organization_id OR r.kind<>'stay'))`
 
 export async function getGuestRequest(db: DbClient, id: string, organizationId?: string, kind?: GuestRequestKind, buyerUserId?:string): Promise<GuestRequest | null> {
   const row = await queryFirst<Record<string, unknown>>(db, `SELECT r.* FROM requests r WHERE r.id = ? AND r.kind IN ('contact', 'reservation', 'booking', 'stay')${organizationId ? ' AND r.organization_id = ?' : ''}${kind ? ' AND r.kind = ?' : ''}${buyerUserId?` AND r.user_id=? AND ${REQUEST_CURRENT_BUYER_SQL}`:''}`, [id, ...(organizationId ? [organizationId] : []), ...(kind ? [kind] : []),...(buyerUserId?[buyerUserId]:[])])
@@ -253,9 +254,10 @@ export function requestInsertQueries(request: Omit<GuestRequest, 'archived_at' |
  * retains its recorded participant as history. Reply routing reads the stay's
  * current contact, never that historical participant.
  */
-export function stayThreadQueries(input: { organizationId: string; stayId: string; now: string; openedBy: { userId: string } | 'channel' }): BatchQuery[] {
+/** A stay's conversation, opened by the host who entered it, the channel that sent it, or the guest who booked it on the site. */
+export function stayThreadQueries(input: { organizationId: string; stayId: string; now: string; openedBy: { userId: string } | 'channel' | 'guest' }): BatchQuery[] {
   const id = crypto.randomUUID()
-  const host = input.openedBy !== 'channel' ? input.openedBy.userId : null
+  const host = typeof input.openedBy === 'object' ? input.openedBy.userId : null
   const stay = `stays st JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
     WHERE st.id = ? AND st.organization_id = ?`
   const name = "trim(coalesce(st.guest_name, '') || ' ' || coalesce(st.guest_surname, ''))"
@@ -277,16 +279,17 @@ export function stayThreadQueries(input: { organizationId: string; stayId: strin
         AND EXISTS (SELECT 1 FROM channel_threads t WHERE t.request_id = requests.id AND t.organization_id = st.organization_id AND t.product_id = st.product_id)`,
     params: [input.stayId, input.organizationId],
   }, {
-    // A booking the channel brought is new to the host; one the host took waits on its guest.
+    // A booking the channel or the guest brought is new to the host; one the host took waits on its guest.
+    // The conversation belongs to the stay's guest account when the guest booked it.
     query: `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, conversation_state, resolved_at, payload_json, created_at, updated_at)
-      SELECT ?, 'stay', st.organization_id, c.location_id, NULL, NULL, ?, NULL,
+      SELECT ?, 'stay', st.organization_id, c.location_id, st.user_id, NULL, ?, NULL,
         json_object('guest', json_object('name', ${name}, 'email', ${email}, 'phone', ${phone})), ?, ?
       FROM ${stay} AND st.request_id IS NULL AND st.owner = 'app' AND (${email} IS NOT NULL OR ${phone} IS NOT NULL) AND ${name} <> ''`,
     params: [id, host ? 'waiting_on_guest' : 'needs_attention', input.now, input.now, input.stayId, input.organizationId],
   }, {
     query: `INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, payload_json, dedupe_key, sequence, occurred_at, created_at)
       SELECT ?, id, 'submission', 'request', ?, ?, 'system', json_object('kind', kind, 'stay_id', ?), ?, 1, created_at, created_at FROM requests WHERE id = ? AND changes() = 1`,
-    params: [crypto.randomUUID(), host ? 'member' : 'system', host, input.stayId, `request:${id}:submission`, id],
+    params: [crypto.randomUUID(), host ? 'member' : input.openedBy === 'guest' ? 'guest' : 'system', host, input.stayId, `request:${id}:submission`, id],
   }, {
     query: 'UPDATE stays SET request_id = ? WHERE id = ? AND organization_id = ? AND request_id IS NULL AND EXISTS (SELECT 1 FROM requests WHERE id = ?)',
     params: [id, input.stayId, input.organizationId, id],

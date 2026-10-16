@@ -298,8 +298,13 @@ guests arrive and the day they leave, and open at the booking route as
 `bookings/stay/:stayId`. A stay taken by the host records offline payments and
 is cancelled there, and is not refused by closed nights or minimum stays —
 those are what guests and channels are offered; a stay from Airbnb or another channel is read-only and
-changes on that channel. A place to stay is shown on the website only with its
-booking link until direct stays exist.
+changes on that channel. A published place to stay is booked on the website:
+it has no external link, and it can be published only once it has a nightly
+price and online payments are set up. Guests choose nights on its page and pay
+the full amount on the site's pay page; while they pay, a checkout hold claims
+those nights (and closes them on a connected channel), and the captured payment
+becomes a confirmed direct stay with its guest conversation. A lapsed hold gives
+its nights back.
 
 ### Organizations
 

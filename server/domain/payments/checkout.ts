@@ -17,11 +17,13 @@ import { assertMinorAmount, requirePayment } from './index'
 import { recordCheckoutStarted } from '~/server/domain/booking-analytics'
 import { isCurrencyCode } from '~/shared/currencies'
 import { quotePaymentsBillingFx, requireBillingFxQuote } from './fx'
+import { isStayNightConflict, stayHoldClaimQueries, stayHoldPredicate, type CheckoutStay, type StayQuote } from '~/server/domain/stays'
 
 interface CheckoutInputBase {
   organizationId: string
   buyerUserId: string | null
-  requestId: string
+  /** The guest conversation the hold waits in; a stay's conversation opens when its payment is captured. */
+  requestId: string | null
   requestFingerprint: string
   quantity: number
   idempotencyKey: string
@@ -31,7 +33,26 @@ interface CheckoutInputBase {
 export type CheckoutInput = CheckoutInputBase & (
   | { subjectType: 'booking'; productId: string; variantId: string; sessionId: string }
   | { subjectType: 'reservation'; locationId: string; startsAt: string; endsAt: string; timezone: string }
+  /** `quote` is read only for a new checkout; a retry is held to the stay it froze, whose nights it already holds. */
+  | { subjectType: 'stay'; stay: StayRequest; guest: CheckoutStay['guest']; quote: () => Promise<StayQuote> }
 )
+
+/** Which stay a guest asked for: the home, the nights and the party. */
+export type StayRequest = Pick<StayQuote, 'product_id' | 'check_in_date' | 'check_out_date' | 'adults' | 'children' | 'infants'>
+
+/** The stay a checkout froze: the quote's nights and money, and the guest who is paying. */
+export type StayPurchase = CheckoutStay['quote'] & Pick<StayQuote, 'location_id' | 'timezone' | 'nightly'> & { guest: CheckoutStay['guest'] }
+
+export function isStayPurchase(value: unknown): value is StayPurchase {
+  if (!isRecord(value) || !isRecord(value.guest) || !Array.isArray(value.nightly)) return false
+  const guest = value.guest
+  return typeof value.product_id === 'string' && typeof value.location_id === 'string' && typeof value.timezone === 'string'
+    && typeof value.check_in_date === 'string' && typeof value.check_out_date === 'string' && value.check_out_date > value.check_in_date
+    && [value.adults, value.children, value.infants, value.total_minor].every(Number.isSafeInteger) && isCurrencyCode(value.currency)
+    && value.nightly.every(night => isRecord(night) && typeof night.date === 'string' && Number.isSafeInteger(night.price_minor))
+    && typeof guest.name === 'string' && !!guest.name.trim() && typeof guest.email === 'string'
+    && (guest.phone === null || typeof guest.phone === 'string') && (guest.notes === null || typeof guest.notes === 'string')
+}
 /** The amount the buyer was shown and confirmed on the site, kept on the attempt until Stripe answers. */
 export interface PaymentReview { payment_method_id: string; subtotal: number; surcharge: number; total: number; reviewed_at: string }
 export interface PaymentHandoff { payment_id: string; pay_path: string; purchase_claim: string; expires_at: string }
@@ -47,6 +68,7 @@ export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: C
   let price: Pick<Price, 'unit_amount' | 'currency' | 'tax_behavior'> | undefined
   let catalogPriceId: string | null = null
   let reservation: Record<string, unknown> | null = null
+  let stay: StayPurchase | null = null
   const purchaseQuantity = input.subjectType === 'booking' ? input.quantity : 1
   let connected: Pick<StripeConnectedAccount, 'stripeAccountId' | 'livemode'> | undefined
   let projectionTitle: string
@@ -74,6 +96,12 @@ export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: C
         || typeof snapshot.price.id !== 'string' || !snapshot.price.id.trim() || snapshot.price.organization_id !== input.organizationId
         || snapshot.price.product_variant_id !== input.variantId || snapshot.price.type !== 'one_time') throw new HTTPError({ statusCode: 409, statusMessage: 'Stored booking purchase is invalid' })
       assertPriceShape(snapshot.price as unknown as Price)
+    } else if (input.subjectType === 'stay') {
+      const frozenStay = snapshot.stay
+      if (!isStayPurchase(frozenStay) || frozenStay.product_id !== input.stay.product_id || frozenStay.check_in_date !== input.stay.check_in_date
+        || frozenStay.check_out_date !== input.stay.check_out_date || frozenStay.adults !== input.stay.adults || frozenStay.children !== input.stay.children
+        || frozenStay.infants !== input.stay.infants || frozenStay.total_minor !== frozen.amount) throw new HTTPError({ statusCode: 409, statusMessage: 'Stored stay purchase is invalid', data: { code: 'idempotency_conflict', field: 'idempotency_key' } })
+      stay = frozenStay
     } else {
       if (!isRecord(snapshot.reservation) || snapshot.reservation.location_id !== input.locationId
         || snapshot.reservation.starts_at !== input.startsAt || snapshot.reservation.ends_at !== input.endsAt
@@ -100,6 +128,19 @@ export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: C
     catalogPriceId = (price as Price).id
     projectionTitle = product.name
     projectionTaxCode = product.tax_code
+  } else if (input.subjectType === 'stay') {
+    const guest = input.guest
+    const quote = await input.quote()
+    if (quote.product_id !== input.stay.product_id || quote.check_in_date !== input.stay.check_in_date || quote.check_out_date !== input.stay.check_out_date) throw new Error('The stay quote does not match the stay requested')
+    const product = await queryFirst<{ tax_code: string | null }>(db, 'SELECT tax_code FROM products WHERE organization_id = ? AND id = ?', [input.organizationId, quote.product_id])
+    if (!product) throw new HTTPError({ statusCode: 404, statusMessage: 'That place to stay is not open for booking', data: { code: 'STAY_NOT_FOUND', field: 'slug' } })
+    price = { unit_amount: quote.total_minor, currency: quote.currency, tax_behavior: quote.tax_behavior }
+    projectionTitle = quote.name
+    projectionTaxCode = product.tax_code
+    stay = {
+      product_id: quote.product_id, location_id: quote.location_id, timezone: quote.timezone, check_in_date: quote.check_in_date, check_out_date: quote.check_out_date,
+      adults: quote.adults, children: quote.children, infants: quote.infants, nightly: quote.nightly, total_minor: quote.total_minor, currency: quote.currency, guest,
+    }
   } else {
     const [policy, location, locale] = await Promise.all([
       requireLocationReservationConfig(db, { organizationId: input.organizationId, locationId: input.locationId }),
@@ -140,6 +181,7 @@ export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: C
   if (!previous) {
     const billingFx = await quotePaymentsBillingFx(stripe, price.currency)
     let hold: BatchQuery
+    const preceding: BatchQuery[] = []
     const following: BatchQuery[] = []
     if (input.subjectType === 'booking') {
       if (!session || !catalogPriceId) throw new Error('The selected session or price is missing')
@@ -149,6 +191,17 @@ export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: C
         SELECT ?,?,?,?,?,?,?,?,?,?,?,?,s.starts_at,s.ends_at,'active',?,?,${sessionMemberSql('s')},s.location_id,s.timezone FROM product_sessions s JOIN product_booking_configs c ON c.product_id=s.product_id AND c.organization_id=s.organization_id WHERE s.id=? AND s.organization_id=? AND s.product_id=? AND ${allocation.query}`,
         params: [holdId,input.organizationId,input.productId,input.variantId,catalogPriceId,session.id,input.buyerUserId,input.requestId,id,input.quantity,amount,price.currency,expiresAt,now,session.id,input.organizationId,input.productId,...allocation.params!] }
       following.push({ query: "UPDATE product_sessions SET assigned_member_id=(SELECT assigned_member_id FROM payment_checkout_holds WHERE payment_id=?) WHERE id=? AND EXISTS(SELECT 1 FROM payment_checkout_holds WHERE payment_id=? AND status='active')", params:[id,session.id,id] })
+    } else if (input.subjectType === 'stay') {
+      if (!stay) throw new Error('The selected stay is missing')
+      const scope = { organizationId: input.organizationId, productId: stay.product_id, checkIn: stay.check_in_date, checkOut: stay.check_out_date }
+      const bookable = stayHoldPredicate(scope)
+      // A lapsed hold on these nights is cleared before this one claims them; the hold's nights are claimed after it.
+      const [clearLapsed, claim] = stayHoldClaimQueries({ ...scope, holdId })
+      preceding.push(clearLapsed!)
+      hold = { query: `INSERT INTO payment_checkout_holds(id,organization_id,product_id,location_id,timezone,buyer_user_id,request_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at)
+        SELECT ?,?,?,?,?,?,NULL,?,?,?,?,?,?,'active',?,? WHERE ${bookable.query}`,
+        params: [holdId,input.organizationId,stay.product_id,stay.location_id,stay.timezone,input.buyerUserId,id,stay.adults+stay.children,amount,price.currency,stay.check_in_date,stay.check_out_date,expiresAt,now,...bookable.params] }
+      following.push(claim!)
     } else {
       if (!reservation || typeof reservation.policy_updated_at !== 'string') throw new Error('The selected reservation policy is missing')
       const allocation = await reservationAllocationPredicate(db, { organizationId: input.organizationId, locationId: input.locationId, startsAt: input.startsAt, endsAt: input.endsAt, timezone: input.timezone, partySize: input.quantity, policyUpdatedAt: reservation.policy_updated_at })
@@ -156,10 +209,10 @@ export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: C
         SELECT ?,?,?,?,?,?,?,?,?,?,?,?,'active',?,? WHERE ${allocation.query}`, params: [holdId,input.organizationId,input.locationId,input.timezone,input.buyerUserId,input.requestId,id,input.quantity,amount,price.currency,input.startsAt,input.endsAt,expiresAt,now,...allocation.params!] }
     }
     const purchase = { title: projectionTitle, tax_code: projectionTaxCode, price, quantity: purchaseQuantity, automatic_tax: automaticTax, method_configuration_id: methodConfigurationId, request_fingerprint: input.requestFingerprint, billing_fx: billingFx,
-      ...(input.subjectType === 'booking' ? { product_id: input.productId, variant_id: input.variantId, session_id: input.sessionId } : { reservation }) }
+      ...(input.subjectType === 'booking' ? { product_id: input.productId, variant_id: input.variantId, session_id: input.sessionId } : input.subjectType === 'stay' ? { stay } : { reservation }) }
     try { await executeBatch(db,[
-      { query: `INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,price_snapshot_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, params:[id,input.organizationId,input.buyerUserId,connected.stripeAccountId,Number(connected.livemode),input.subjectType,null,input.subjectType === 'booking' ? session!.location_id : input.locationId,price.currency,amount,JSON.stringify(purchase),now,now] },
-      hold, ...following,
+      { query: `INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,price_snapshot_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, params:[id,input.organizationId,input.buyerUserId,connected.stripeAccountId,Number(connected.livemode),input.subjectType,null,input.subjectType === 'booking' ? session!.location_id : input.subjectType === 'stay' ? stay!.location_id : input.locationId,price.currency,amount,JSON.stringify(purchase),now,now] },
+      ...preceding, hold, ...following,
       {query:`INSERT INTO payment_attempts(id,payment_id,idempotency_key,return_token,status,expires_at,created_at,updated_at) SELECT ?,?,?,?,'creating',?,?,? WHERE EXISTS(SELECT 1 FROM payment_checkout_holds WHERE payment_id=? AND status='active')`,params:[attemptId,id,key,returnToken,expiresAt,now,now,id]},
       ...input.following(id),
       {query:'INSERT INTO payment_claims(token_hash,payment_id,expires_at) SELECT ?,?,? WHERE EXISTS(SELECT 1 FROM payment_attempts WHERE id=?)',params:[returnHash,id,new Date(Date.now()+86400000).toISOString(),attemptId]},
@@ -167,11 +220,13 @@ export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: C
     } catch(error) {
       const raced=await queryFirst(db,'SELECT id FROM payment_attempts WHERE idempotency_key=?',[key])
       if(raced && !retry) return await createPaymentCheckout(db,stripe,env,input,true)
+      if (input.subjectType === 'stay' && isStayNightConflict(error)) throw new HTTPError({ statusCode: 409, statusMessage: 'Some of these nights are no longer available', data: { code: 'STAY_NIGHTS_UNAVAILABLE', field: 'check_in_date' }, cause: error })
       throw error
     }
     const attempt = await queryFirst(db,'SELECT id FROM payment_attempts WHERE id=?',[attemptId])
     if (!attempt) {
       await execute(db,"UPDATE payments SET state='failed',updated_at=? WHERE id=?",[now,id])
+      if (input.subjectType === 'stay') throw new HTTPError({ statusCode: 409, statusMessage: 'This place to stay is no longer open for these nights', data: { code: 'STAY_NIGHTS_UNAVAILABLE', field: 'check_in_date' } })
       throw new HTTPError({statusCode:409,statusMessage:'This time no longer has capacity for your party'})
     }
   }

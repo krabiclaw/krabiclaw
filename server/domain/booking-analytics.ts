@@ -12,11 +12,11 @@ import { AUTHORIZATION_WINDOW_SECONDS, type Payment } from '~/server/domain/paym
 interface PaymentSubject { productId: string | null; variantId: string | null; memberId: string | null }
 
 async function paymentSubject(db: DbClient, payment: Payment): Promise<PaymentSubject> {
-  const snapshot = JSON.parse(payment.price_snapshot_json) as { product_id?: unknown; variant_id?: unknown }
+  const snapshot = JSON.parse(payment.price_snapshot_json) as { product_id?: unknown; variant_id?: unknown; stay?: { product_id?: unknown } }
   const held = await queryFirst<{ member_id: string | null }>(db, `SELECT COALESCE(b.assigned_member_id, h.assigned_member_id) member_id
     FROM payment_checkout_holds h LEFT JOIN bookings b ON b.id=h.converted_booking_id WHERE h.payment_id=?`, [payment.id])
   return {
-    productId: typeof snapshot.product_id === 'string' ? snapshot.product_id : null,
+    productId: typeof snapshot.product_id === 'string' ? snapshot.product_id : typeof snapshot.stay?.product_id === 'string' ? snapshot.stay.product_id : null,
     variantId: typeof snapshot.variant_id === 'string' ? snapshot.variant_id : null,
     memberId: held?.member_id ?? null,
   }

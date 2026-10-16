@@ -677,11 +677,21 @@ export async function transferDatabaseExport(sourcePath, targetPath, { payloadPa
     }
     // A baseline can introduce tables an older chain never had (v17's places to
     // stay), and a later forward migration may change one of them, so the stage
-    // gets each such table, empty, before that chain's forward migrations run.
+    // gets each such table, empty, with its indexes (a composite foreign key
+    // needs its parent's unique index), before that chain's forward migrations run.
     const withBaselineTables = baseline => {
-      for (const statement of baseline.split('--> statement-breakpoint')) {
+      const statements = baseline.split('--> statement-breakpoint')
+      const added = new Set()
+      for (const statement of statements) {
         const table = statement.match(/CREATE TABLE `([^`]+)`/u)?.[1]
-        if (table && !tableNames(stage).includes(table)) stage.exec(statement)
+        if (table && !tableNames(stage).includes(table)) {
+          stage.exec(statement)
+          added.add(table)
+        }
+      }
+      for (const statement of statements) {
+        const table = statement.match(/CREATE (?:UNIQUE )?INDEX `[^`]+` ON `([^`]+)`/u)?.[1]
+        if (table && added.has(table)) stage.exec(statement)
       }
     }
     // v18 absorbs v17's deployed forward chain (Channex connections, channel

@@ -16,14 +16,14 @@ import {
   normalizePublicReviewAggregateRows,
 } from "~/server/utils/public-review-aggregate";
 import { getPublicTenantPageForPath, type PublicTenantPage } from "~/server/utils/public-tenant-pages";
-import { listCollections, listOrganizationProducts } from '~/server/utils/product-management'
+import { listCollections, listOrganizationProducts, publicProduct } from '~/server/utils/product-management'
 import { previewSecretOf, resolvePreviewAuthorization } from "~/server/utils/preview-token";
 import {
   toResolvedMediaAsset,
   type MediaAsset,
 } from "~/server/utils/media-asset-manager";
 import { getMediaPlacements } from '~/server/utils/media-placement'
-import type { Collection, Product } from '~/server/types/products'
+import type { Collection, PublicProduct } from '~/server/types/products'
 import { COVER_SELECT, attachCoverMedia, coverJoinSql } from "~/server/utils/content/cover";
 import { ARTICLE_CATEGORY_SELECT, articleCategoryJoinSql, attachArticleCategory, localizeArticleCategories } from '~/server/utils/content/article-categories'
 import { getContentBlocksForDocument } from '~/server/utils/content/documents'
@@ -559,7 +559,7 @@ async function loadPublicPageSource(
     tenantPagePromise,
     buildPublicShellPayload(db, organization, batchResults, shellIndexes, env),
     includeProducts
-      ? listOrganizationProducts(db, { organizationId: orgId, kind: page === 'experiences' ? 'experience' : page === 'menu' ? 'dish' : undefined, publishedOnly: true, env })
+      ? listOrganizationProducts(db, { organizationId: orgId, kind: page === 'experiences' ? 'experience' : page === 'menu' ? 'dish' : undefined, publishedOnly: true, env }).then(products => products.map(publicProduct))
       : [],
     includeProducts
       ? locationId
@@ -623,7 +623,7 @@ async function loadPublicPageSource(
     }
   })()
 
-  let products: Product[] = []
+  let products: PublicProduct[] = []
   let collections: Collection[] = sourceCollections
   if (includeProducts) {
     const locationCapabilityRows = (batchResults[shellIndexes.locations] as { results: Record<string, unknown>[] })?.results ?? []
