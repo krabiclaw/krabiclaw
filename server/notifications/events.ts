@@ -84,6 +84,46 @@ export function reservationCancelledMessage(input: ReservationEventInput & { was
   }
 }
 
+/** A stay a guest booked and paid for on the site. */
+export interface StayEventInput {
+  guestName: string
+  guestEmail: string
+  guestPhone: string | null
+  homeName: string
+  checkIn: string
+  checkOut: string
+  nights: string
+  guests: string
+  total: string
+  notes: string | null
+  organizationName: string
+  heroImageUrl: string | null
+  replyUrl: string | null
+}
+
+export function stayBookedMessage(input: StayEventInput): NotificationMessage {
+  return {
+    title: `New stay booked by ${input.guestName}`,
+    preheader: `${input.homeName} · ${input.checkIn} – ${input.checkOut}`,
+    hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.homeName } : null,
+    facts: facts(
+      fact('context', 'Place to stay', input.homeName, true),
+      fact('guestName', 'Guest', input.guestName, true),
+      fact('checkIn', 'Check-in', input.checkIn, true),
+      fact('checkOut', 'Check-out', input.checkOut, true),
+      fact('nights', 'Nights', input.nights, true),
+      fact('partySize', 'Guests', input.guests, true),
+      fact('total', 'Paid', input.total, true),
+      fact('guestPhone', 'Phone', input.guestPhone),
+      fact('guestEmail', 'Email', input.guestEmail, true),
+      fact('notes', 'Message from the guest', input.notes),
+    ),
+    primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Reply in dashboard' } : undefined,
+    category: 'reservations_bookings',
+    organizationName: input.organizationName,
+  }
+}
+
 export interface BookingEventInput extends ReservationEventInput {
   productTitle: string
 }

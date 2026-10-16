@@ -37,6 +37,8 @@ import type {
   ProductOption,
   ProductSource,
   ProductStayConfig,
+  PublicProduct,
+  StaffAssignment,
   ProductVariant,
   ProductVariantInput,
   ProductVariantPatchInput,
@@ -71,15 +73,50 @@ const MAX_SLUG_SUFFIX_ATTEMPTS = 100
 
 /** Coarse publication gate; public catalogue readers also require booking readiness. */
 export const PUBLIC_PRODUCT_SQL = `pub.published = 1 AND (p.kind <> 'experience' OR NULLIF(trim(p.order_url), '') IS NOT NULL
-  OR EXISTS (SELECT 1 FROM product_booking_configs cfg WHERE cfg.product_id = p.id AND cfg.organization_id = p.organization_id AND cfg.duration_minutes > 0))
-  AND (p.kind <> 'stay' OR NULLIF(trim(p.order_url), '') IS NOT NULL)`
+  OR EXISTS (SELECT 1 FROM product_booking_configs cfg WHERE cfg.product_id = p.id AND cfg.organization_id = p.organization_id AND cfg.duration_minutes > 0))`
 
-/** Guests book a place to stay through its external booking link until KrabiClaw takes direct stays. */
-function assertStayPublishable(product: { kind: ProductKind; order_url: string | null }): void {
-  if (product.kind === 'stay' && !product.order_url?.trim()) conflict('Add the link where guests book this place to stay before publishing it')
+/** Guests book a place to stay on this site and pay in full; it has no external booking link. */
+function stayOrderUrl(kind: ProductKind, orderUrl: string | null): string | null {
+  if (kind === 'stay' && orderUrl !== null) invalid('A place to stay is booked on this site; it takes no external booking link')
+  return orderUrl
+}
+
+/** A published place to stay is one a guest can book and pay for now. */
+async function assertStayBookable(db: DbClient, organizationId: string, product: Pick<Product, 'kind' | 'active' | 'stay'> & Pick<PlannedProduct, 'variants'>, env: CloudflareEnv | undefined): Promise<void> {
+  if (product.kind !== 'stay') return
+  const readiness = await stayBookingReadiness(db, organizationId, product, { env })
+  if (!readiness.ready) throw new HTTPError({ statusCode: 409, statusMessage: 'This place to stay needs a nightly price and online payments before guests can book it', data: { code: 'STAY_BOOKING_INCOMPLETE', field: readiness.missing[0], missing: readiness.missing } })
+}
+
+/** What a place to stay still needs before a guest can book it on the site: its home, a base nightly price and online payments. */
+async function stayBookingReadiness(db: DbClient, organizationId: string, product: Pick<Product, 'active' | 'stay'> & Pick<PlannedProduct, 'variants'>, options: { requireActive?: boolean; env?: CloudflareEnv; paymentSetup?: () => ReturnType<typeof readStripeCheckoutSetup>; currency?: CurrencyCode }): Promise<{ ready: boolean; missing: string[] }> {
+  const missing: string[] = []
+  if (options.requireActive && !product.active) missing.push('active')
+  if (!product.stay) missing.push('stay')
+  const currency = options.currency ?? await organizationDefaultCurrency(db, organizationId)
+  const base = currency && product.stay ? product.variants.filter(variant => variant.active).map(variant => selectPrice(variant.prices, { currency, location_id: product.stay!.location_id })).find(Boolean) : undefined
+  if (!base) missing.push('variants.prices')
+  let setup: Awaited<ReturnType<typeof readStripeCheckoutSetup>>
+  if (options.paymentSetup) setup = await options.paymentSetup()
+  else {
+    if (!options.env) throw new Error('The organization environment is required to assess paid booking readiness')
+    setup = await readStripeCheckoutSetup(db, organizationId, options.env)
+  }
+  missing.push(...setup.missing)
+  return { ready: missing.length === 0, missing }
 }
 
 type Row = Record<string, unknown>
+
+/** The product as the public site serves it; its booking and stay settings lose who on the team looks after them. */
+export function publicProduct<T extends Product>(product: T): PublicProduct<T> {
+  const { booking, stay, ...rest } = product
+  const strip = <C extends Record<StaffAssignment, string | null>>(config: C): Omit<C, StaffAssignment> => {
+    const { assigned_member_id: _member, assigned_team_id: _team, ...shown } = config
+    return shown
+  }
+  return { ...rest, booking: booking ? strip(booking) : null, stay: stay ? strip(stay) : null }
+}
 
 function notFound(message = 'Product not found'): never {
   throw new HTTPError({ statusCode: 404, statusMessage: message })
@@ -360,7 +397,7 @@ async function publicProductWindow(db: DbClient, organizationId: string, product
   })
   // Readiness needs the currency and the scheduled sessions; a catalog of N
   // products read both N times. They are read once here and handed down.
-  const needsReadiness = products.filter(product => bookableOnly ? Boolean(product.booking || product.order_url) : product.kind === 'experience' || Boolean(product.booking))
+  const needsReadiness = products.filter(product => bookableOnly ? Boolean(product.booking || product.order_url) || product.kind === 'stay' : product.kind === 'experience' || product.kind === 'stay' || Boolean(product.booking))
   const { listSessions } = await import('~/server/utils/availability')
   const [activeLocationIds, currency, allSessions] = await Promise.all([
     bookableOnly ? queryAll<{ id: string }>(db, "SELECT id FROM business_locations WHERE organization_id = ? AND status = 'active'", [organizationId]).then(rows => new Set(rows.map(location => location.id))) : undefined,
@@ -376,8 +413,8 @@ async function publicProductWindow(db: DbClient, organizationId: string, product
   const readiness = (product: Product, extra: { requireActive?: boolean; activeLocationIds?: ReadonlySet<string> } = {}) =>
     productBookingReadiness(db, organizationId, product, { env, paymentSetup, currency, sessions: sessionsByProduct.get(product.id) ?? [], ...extra })
   const visible = await Promise.all(products.map(async product => bookableOnly
-    ? Boolean(product.booking || product.order_url) && (await readiness(product, { requireActive: true, activeLocationIds })).ready
-    : (product.kind !== 'experience' && !product.booking) || (await readiness(product)).ready))
+    ? (Boolean(product.booking || product.order_url) || product.kind === 'stay') && (await readiness(product, { requireActive: true, activeLocationIds })).ready
+    : (product.kind !== 'experience' && product.kind !== 'stay' && !product.booking) || (await readiness(product)).ready))
   const published = products.filter((_, index) => visible[index])
   return window ? published.slice(window.offset, window.offset + window.limit + 1) : published
 }
@@ -401,7 +438,7 @@ function productListCounts(rows: readonly { kind: ProductKind; count?: number }[
 export function listOrganizationProducts(db: DbClient, input: ProductListInput & { withCounts: true }): Promise<ProductListResult>
 export function listOrganizationProducts(db: DbClient, input: ProductListInput & { withCounts?: false }): Promise<Product[]>
 export async function listOrganizationProducts(db: DbClient, input: ProductListInput & { withCounts?: boolean }): Promise<Product[] | ProductListResult> {
-  const requireReadiness = input.publishedOnly === true && (input.bookableOnly || !input.kind || input.kind === 'experience' || input.kind === 'service')
+  const requireReadiness = input.publishedOnly === true && (input.bookableOnly || !input.kind || input.kind === 'experience' || input.kind === 'service' || input.kind === 'stay')
   const window = requireReadiness ? undefined : input.window
   const selection = `FROM products p
     JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
@@ -432,7 +469,7 @@ export function listLocationProducts(db: DbClient, input: ProductListInput & { l
 export function listLocationProducts(db: DbClient, input: ProductListInput & { locationId: string; withCounts?: false }): Promise<Product[]>
 export async function listLocationProducts(db: DbClient, input: ProductListInput & { locationId: string; withCounts?: boolean }): Promise<Product[] | ProductListResult> {
   const published = input.publishedOnly === true
-  const requireReadiness = published && (input.bookableOnly || !input.kind || input.kind === 'experience' || input.kind === 'service')
+  const requireReadiness = published && (input.bookableOnly || !input.kind || input.kind === 'experience' || input.kind === 'service' || input.kind === 'stay')
   const window = requireReadiness ? undefined : input.window
   const selection = `FROM products p
     JOIN product_locations pl ON pl.product_id = p.id AND pl.organization_id = p.organization_id
@@ -886,7 +923,7 @@ async function planProduct(
     // length is constrained.
     description: normalizeOptionalProductString(input.description, 'description', PRODUCT_LIMITS.description) ?? '',
     active: input.active ?? true,
-    order_url: validateProductOrderUrl(input.order_url),
+    order_url: stayOrderUrl(kind, validateProductOrderUrl(input.order_url)),
     unit_label: stayUnitLabel(kind, validateProductUnitLabel(input.unit_label)),
     marketing_features: validateProductMarketingFeatures(input.marketing_features),
     metadata: validateProductMetadata(input.metadata),
@@ -1134,7 +1171,7 @@ export async function createProduct(db: DbClient, input: {
     writes.push(...await prepareProductBookingSetup(db, { organizationId: input.organizationId, productId: planned.id, actorId: input.actor.actorId, env: input.booking.env, now, booking: input.booking.data, productInSameBatch: true }))
   }
   if (input.publication?.published && planned.kind === 'experience' && !input.booking && !planned.order_url) invalid('Provide booking details or an external booking destination before publishing an experience')
-  if (input.publication?.published) assertStayPublishable(planned)
+  if (input.publication?.published) await assertStayBookable(db, input.organizationId, planned, env)
   const page = await prepareProductPageCreate(db, { organizationId: input.organizationId, product: planned, actor: input.actor, page: pageInput, env })
   if (page) writes.push(...page.queries)
   if (input.publication && input.organizationId) {
@@ -1407,7 +1444,7 @@ async function planProductUpdate(db: DbClient, input: {
   planned.source = current.source
   assertVariantPricesConsistent(planned)
 
-  if (current.publications.some(publication => publication.organization_id === organizationId && publication.published)) assertStayPublishable(planned)
+  if (current.publications.some(publication => publication.organization_id === organizationId && publication.published)) await assertStayBookable(db, organizationId, { ...current, ...planned }, input.env)
   const guardPublication = !input.booking && planned.kind === 'experience' && !planned.order_url
   let readiness: Awaited<ReturnType<typeof productBookingReadiness>> | undefined
   if (guardPublication && current.publications.some(publication => publication.organization_id === organizationId && publication.published)) {
@@ -1706,10 +1743,11 @@ async function productCacheInvalidations(db: DbClient, organizationId: string, p
  * is per-location visibility. A withheld product is not sold out and a
  * disabled product is not unpublished.
  */
-export async function productBookingReadiness(db: DbClient, organizationId: string, product: Pick<Product, 'id' | 'active' | 'order_url' | 'booking' | 'locations'> & Pick<PlannedProduct, 'variants'>, options: { requireAllocation?: boolean; prepareAllocation?: boolean; requireActive?: boolean; locationId?: string; activeLocationIds?: ReadonlySet<string>; env?: CloudflareEnv; paymentSetup?: () => ReturnType<typeof readStripeCheckoutSetup>; /** The organization's currency and the product's scheduled sessions, when the caller already read them for a whole catalog. */ currency?: CurrencyCode; sessions?: SessionAvailability[] } = {}): Promise<{ ready: boolean; missing: string[]; allocation?: BatchQuery }> {
+export async function productBookingReadiness(db: DbClient, organizationId: string, product: Pick<Product, 'id' | 'active' | 'order_url' | 'booking' | 'locations' | 'kind' | 'stay'> & Pick<PlannedProduct, 'variants'>, options: { requireAllocation?: boolean; prepareAllocation?: boolean; requireActive?: boolean; locationId?: string; activeLocationIds?: ReadonlySet<string>; env?: CloudflareEnv; paymentSetup?: () => ReturnType<typeof readStripeCheckoutSetup>; /** The organization's currency and the product's scheduled sessions, when the caller already read them for a whole catalog. */ currency?: CurrencyCode; sessions?: SessionAvailability[] } = {}): Promise<{ ready: boolean; missing: string[]; allocation?: BatchQuery }> {
   const missing: string[] = []
   const requireActive = options.requireAllocation || options.requireActive
   const locations = product.locations.filter(location => (options.locationId === undefined || location.location_id === options.locationId) && (!options.activeLocationIds || options.activeLocationIds.has(location.location_id)))
+  if (product.kind === 'stay') return stayBookingReadiness(db, organizationId, product, { requireActive, env: options.env, paymentSetup: options.paymentSetup, currency: options.currency })
   if (requireActive && !product.active) missing.push('active')
   if (product.order_url) return { ready: missing.length === 0, missing }
   if (!product.booking) missing.push('booking')
@@ -1764,7 +1802,7 @@ export async function setProductPublication(db: DbClient, input: {
   organizationId: string; productId: string; published: boolean; actor: Actor; env?: CloudflareEnv
 }): Promise<void> {
   const product = await requireOrganizationProduct(db, input)
-  if (input.published) assertStayPublishable(product)
+  if (input.published) await assertStayBookable(db, input.organizationId, product, input.env)
   let readiness: Awaited<ReturnType<typeof productBookingReadiness>> | undefined
   let alreadyPublished = false
   if (input.published && (product.kind === 'experience' || product.booking)) {

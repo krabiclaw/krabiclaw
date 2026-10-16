@@ -27,6 +27,7 @@ import {
   guestContactReceivedMessage,
   guestReservationCancelledMessage,
   guestReservationReceivedMessage,
+  guestStayConfirmedMessage,
   organizationInviteMessage,
   reviewRequestMessage,
 } from '~/server/notifications/guest-events'
@@ -41,6 +42,7 @@ import {
   reservationCancelledMessage,
   reservationCreatedMessage,
   reviewReceivedMessage,
+  stayBookedMessage,
 } from '~/server/notifications/events'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { createCanonicalNotification, type NotificationSeverity } from '~/server/utils/notification-center'
@@ -53,6 +55,9 @@ import type { GuestThreadDeliveryPurpose } from '~/server/domain/guest-threads/t
 import { getPersistedSourceLocale } from '~/server/utils/localization'
 import { indexStoredPublicLocalizations, type StoredPublicLocalizationRow } from '~/server/utils/public-localization'
 import { platformLocale } from '~/shared/platform-locales'
+import { resolveLocationContact } from '~/server/utils/contact-resolution'
+import { formatMinorAmount } from '~/shared/prices'
+import { isCurrencyCode } from '~/shared/currencies'
 
 const SUBJECT_LABELS: Record<string, string> = {
   general: 'General',
@@ -528,7 +533,7 @@ function ownerPushSends(
 
 async function getOpeningThreadContext(
   db: DbClient,
-  submissionType: 'contact' | 'reservation' | 'booking',
+  submissionType: 'contact' | 'reservation' | 'booking' | 'stay',
   submissionId: string,
 ): Promise<{ guestThreadId: string; sourceEntryId: string }> {
   const thread = await getGuestRequest(db, submissionId, undefined, submissionType)
@@ -1290,6 +1295,68 @@ export async function notifyBookingCreated(
   ])
 
   raiseSettledFailures('notifyBookingCreated', `bookingId ${opts.bookingId}`, results)
+}
+
+/**
+ * A stay a guest booked and paid for on the site: the host (owners, admins and
+ * the member who looks after the home) by email, WhatsApp-free alert and push;
+ * the guest by a confirmation email in the site's language with the dates,
+ * times, guests, what they paid and the home's check-in instructions.
+ */
+export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organizationId: string, stayId: string) {
+  // Loaded when used: the stays domain reaches notifications through the guest inbox.
+  const { readCheckoutStay } = await import('~/server/domain/stays')
+  const stay = await readCheckoutStay(db, organizationId, stayId)
+  const organization = await queryFirst<{ name: string | null }>(db, 'SELECT name FROM organization WHERE id = ?', [organizationId])
+  if (!organization || !stay.request_id || !stay.guest_email || !stay.guest_name) throw new Error('A stay booked on the site needs its organization, guest conversation, guest name and email')
+  if (!isCurrencyCode(stay.currency)) throw new Error('The stay has an unsupported currency')
+  const home = stay.home
+  const studio = organizationName({ organizationId, organizationName: organization.name })
+  const threadContext = await getOpeningThreadContext(db, 'stay', stay.request_id)
+  const [replyTo, inboxUrl, hero, logoUrl, guest, contact] = await Promise.all([
+    buildReplyToAddress(env, 'stay', stay.request_id),
+    buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: home.location_id, threadId: stay.request_id }),
+    messageHero(db, organizationId, { type: 'product', id: home.product_id }),
+    organizationLogo(db, organizationId),
+    guestPresentation(db, { organizationId, organizationName: studio, productId: home.product_id, productTitle: home.name, locationId: home.location_id }),
+    resolveLocationContact(db, organizationId, home.location_id),
+  ])
+  const nights = Math.round((Date.parse(`${stay.check_out_date}T00:00:00Z`) - Date.parse(`${stay.check_in_date}T00:00:00Z`)) / 86_400_000)
+  const when = (date: string, time: string, locale: string) => `${formatCalendarDate(date, locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })} · ${formatTime(time, locale)}`
+  const party = [`${stay.adults} adult${stay.adults === 1 ? '' : 's'}`, ...(stay.children ? [`${stay.children} child${stay.children === 1 ? '' : 'ren'}`] : []), ...(stay.infants ? [`${stay.infants} infant${stay.infants === 1 ? '' : 's'}`] : [])].join(', ')
+  const ownerMessage = stayBookedMessage({
+    guestName: stay.guest_name, guestEmail: stay.guest_email, guestPhone: stay.guest_phone, homeName: home.name,
+    checkIn: when(stay.check_in_date, home.check_in_time, 'en-US'), checkOut: when(stay.check_out_date, home.check_out_time, 'en-US'),
+    nights: String(nights), guests: party, total: formatMinorAmount(stay.total_minor, stay.currency, 'en-US'), notes: stay.notes,
+    organizationName: studio, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
+  })
+  const guestMessage = guestStayConfirmedMessage({
+    locale: guest.locale, guestName: stay.guest_name, organizationName: guest.organizationName, organizationLogoUrl: logoUrl, homeName: guest.productTitle ?? home.name,
+    checkIn: when(stay.check_in_date, home.check_in_time, guest.locale), checkOut: when(stay.check_out_date, home.check_out_time, guest.locale),
+    nights: String(nights), guests: String(stay.adults + stay.children), total: formatMinorAmount(stay.total_minor, stay.currency, guest.locale),
+    checkInInstructions: home.check_in_instructions, contactPhone: contact.contactPhone ?? null, contactEmail: contact.contactEmail ?? null,
+    heroImageUrl: hero?.imageUrl ?? null, accountUrl: guestAccountUrl(env.NUXT_PUBLIC_PLATFORM_DOMAIN!, '/signup', stay.guest_email),
+  })
+  const payload = {
+    stay_id: stay.id, guest_name: stay.guest_name, email: stay.guest_email, home: home.name, check_in_date: stay.check_in_date, check_out_date: stay.check_out_date,
+    party_size: String(stay.adults + stay.children), organization_name: studio, deep_link: inboxUrl ?? '',
+  }
+  const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain: getPlatformDomain(env) })
+  const guestTitle = `${guestMessage.title} — ${guestMessage.facts.find(fact => fact.key === 'what')?.value ?? home.name}`
+  const results = await Promise.allSettled([
+    notifyOwner(env, db, {
+      organizationId, organizationName: studio, locationId: home.location_id, template: 'new_stay', title: ownerMessage.title, payload, message: ownerMessage,
+      notificationSource: { threadId: threadContext.guestThreadId, entryId: threadContext.sourceEntryId },
+      memberIds: home.assigned_member_id ? [home.assigned_member_id] : [],
+    }),
+    sendEmailNotification(env, db, {
+      organizationId, organizationName: studio, locationId: home.location_id, to: stay.guest_email, replyTo,
+      template: 'stay_customer_confirmed', title: guestTitle, payload,
+      email: { subject: guestTitle, html: guestEmail.html, text: guestEmail.text },
+      delivery: threadDelivery(threadContext, 'guest_acknowledgement', 'email', 'stay_customer_confirmed', stay.guest_email),
+    }),
+  ])
+  raiseSettledFailures('notifyStayBooked', `stayId ${stayId}`, results)
 }
 
 export async function notifyBookingCancelled(

@@ -3,7 +3,8 @@ import type { BatchQuery, DbClient } from '~/server/db'
 import type { PublicBase } from '~/server/utils/public-base'
 import { calculateMapEmbedUrl } from '~/server/utils/google-places'
 import type { PublicShellPayload } from '~/utils/public-resource-contracts'
-import { listOrganizationProducts } from '~/server/utils/product-management'
+import { listOrganizationProducts, publicProduct } from '~/server/utils/product-management'
+import type { PublicProduct } from '~/server/types/products'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode } from '~/shared/currencies'
 import { parsePostalAddress } from '~/utils/postal-address'
@@ -81,7 +82,7 @@ export async function buildPublicShellPayload(
   indexes: PublicShellQueryIndexes,
   env?: CloudflareEnv,
   /** The bookable experiences, when the caller read them beside the shell rows. */
-  experiences?: Product[],
+  experiences?: PublicProduct[],
 ): Promise<PublicShellPayload> {
   const rawLocations = (results[indexes.locations]?.results ?? []) as Record<string, unknown>[]
   const placements = (results[indexes.media]?.results ?? []) as Array<PublicMediaPlacement & { owner_type: string; owner_id: string }>
@@ -144,7 +145,7 @@ export async function buildPublicShellPayload(
 
   const activeLocationIds = new Set(rawLocations.map(location => String(location.id)))
   const productLocationRows = (results[indexes.productLocations]?.results ?? []) as Array<{ location_id: string }>
-  experiences ??= await listOrganizationProducts(db, { organizationId: organization.id, kind: 'experience', publishedOnly: true, bookableOnly: true, env })
+  experiences ??= (await listOrganizationProducts(db, { organizationId: organization.id, kind: 'experience', publishedOnly: true, bookableOnly: true, env })).map(publicProduct)
 
   return {
     platformMessages: null,

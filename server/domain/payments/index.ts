@@ -15,7 +15,7 @@ export interface Payment {
   buyer_user_id: string | null
   stripe_account_id: string
   livemode: number
-  subject_type: 'booking' | 'order' | 'reservation' | 'invoice'
+  subject_type: 'booking' | 'order' | 'reservation' | 'invoice' | 'stay'
   subject_id: string | null
   location_id: string | null
   currency: string

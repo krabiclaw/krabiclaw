@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:9e483f7f3ad8e4c28423ed9cd38b2213d4fe0cdcfbe7341c4984ff4209e72fc3",
-  "documentationFingerprint": "sha256:47053a4975fbb4df451aaacd9d44a98649bab9bb961ae1f9d50f706b66a6cb7f",
+  "fingerprint": "sha256:d4b6626e1cae609ef8deb8889db86d8937cb9e8c41683863f6ef8931a77ab74e",
+  "documentationFingerprint": "sha256:5da2cc8361a276c68c94f29aebbb5b6366e691bcbe299195942b2d42e52521e1",
   "tools": [
     {
       "name": "append_content_block",
@@ -8401,6 +8401,62 @@
                   "null"
                 ]
               },
+              "online_payment": {
+                "description": "The Stripe payment the guest made when booking this stay on the site; null for a stay booked any other way. paid_minor counts it net of refunds.",
+                "properties": {
+                  "amount_minor": {
+                    "type": "integer"
+                  },
+                  "captured_minor": {
+                    "type": "integer"
+                  },
+                  "created_at": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "currency": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "payment_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "receipt_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "refunded_minor": {
+                    "type": "integer"
+                  },
+                  "state": {
+                    "enum": [
+                      "pending",
+                      "captured",
+                      "failed",
+                      "recovery",
+                      "refunded"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "payment_id",
+                  "state",
+                  "currency",
+                  "amount_minor",
+                  "captured_minor",
+                  "refunded_minor",
+                  "receipt_url",
+                  "created_at"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "overbooked": {
                 "type": "boolean"
               },
@@ -8574,6 +8630,7 @@
               "created_at",
               "updated_at",
               "payments",
+              "online_payment",
               "paid_minor",
               "payment_status"
             ],
@@ -16055,7 +16112,7 @@
     {
       "name": "create_product",
       "title": "Create product",
-      "description": "Add a catalog item, experience, service or place to stay. Experiences need booking duration, capacity, location and actual times, or an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and stay settings), takes its guest-facing rules in details.house_rules, and is priced per night by its variant price. Repeat the same idempotency key on retry.",
+      "description": "Add a catalog item, experience, service or place to stay. Experiences need booking duration, capacity, location and actual times, or an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and stay settings), takes its guest-facing rules in details.house_rules, and is priced per night by its variant price; guests book it on the site and pay in full, so it takes no order_url and publishes only once it has a nightly price and online payments are set up. Repeat the same idempotency key on retry.",
       "inputSchema": {
         "$defs": {
           "content_ai_assistance": {
@@ -29226,6 +29283,62 @@
                   "null"
                 ]
               },
+              "online_payment": {
+                "description": "The Stripe payment the guest made when booking this stay on the site; null for a stay booked any other way. paid_minor counts it net of refunds.",
+                "properties": {
+                  "amount_minor": {
+                    "type": "integer"
+                  },
+                  "captured_minor": {
+                    "type": "integer"
+                  },
+                  "created_at": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "currency": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "payment_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "receipt_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "refunded_minor": {
+                    "type": "integer"
+                  },
+                  "state": {
+                    "enum": [
+                      "pending",
+                      "captured",
+                      "failed",
+                      "recovery",
+                      "refunded"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "payment_id",
+                  "state",
+                  "currency",
+                  "amount_minor",
+                  "captured_minor",
+                  "refunded_minor",
+                  "receipt_url",
+                  "created_at"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "overbooked": {
                 "type": "boolean"
               },
@@ -29399,6 +29512,7 @@
               "created_at",
               "updated_at",
               "payments",
+              "online_payment",
               "paid_minor",
               "payment_status"
             ],
@@ -34300,6 +34414,62 @@
                   "null"
                 ]
               },
+              "online_payment": {
+                "description": "The Stripe payment the guest made when booking this stay on the site; null for a stay booked any other way. paid_minor counts it net of refunds.",
+                "properties": {
+                  "amount_minor": {
+                    "type": "integer"
+                  },
+                  "captured_minor": {
+                    "type": "integer"
+                  },
+                  "created_at": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "currency": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "payment_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "receipt_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "refunded_minor": {
+                    "type": "integer"
+                  },
+                  "state": {
+                    "enum": [
+                      "pending",
+                      "captured",
+                      "failed",
+                      "recovery",
+                      "refunded"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "payment_id",
+                  "state",
+                  "currency",
+                  "amount_minor",
+                  "captured_minor",
+                  "refunded_minor",
+                  "receipt_url",
+                  "created_at"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "overbooked": {
                 "type": "boolean"
               },
@@ -34473,6 +34643,7 @@
               "created_at",
               "updated_at",
               "payments",
+              "online_payment",
               "paid_minor",
               "payment_status"
             ],
@@ -39333,6 +39504,18 @@
                   "null"
                 ]
               },
+              "base_price_tax_behavior": {
+                "enum": [
+                  "unspecified",
+                  "inclusive",
+                  "exclusive",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "channel": {
                 "description": "The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.",
                 "properties": {
@@ -39464,6 +39647,7 @@
               "timezone",
               "currency",
               "base_price_minor",
+              "base_price_tax_behavior",
               "check_in_time",
               "check_out_time",
               "max_guests",
@@ -39627,6 +39811,62 @@
               "notes": {
                 "type": [
                   "string",
+                  "null"
+                ]
+              },
+              "online_payment": {
+                "description": "The Stripe payment the guest made when booking this stay on the site; null for a stay booked any other way. paid_minor counts it net of refunds.",
+                "properties": {
+                  "amount_minor": {
+                    "type": "integer"
+                  },
+                  "captured_minor": {
+                    "type": "integer"
+                  },
+                  "created_at": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "currency": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "payment_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "receipt_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "refunded_minor": {
+                    "type": "integer"
+                  },
+                  "state": {
+                    "enum": [
+                      "pending",
+                      "captured",
+                      "failed",
+                      "recovery",
+                      "refunded"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "payment_id",
+                  "state",
+                  "currency",
+                  "amount_minor",
+                  "captured_minor",
+                  "refunded_minor",
+                  "receipt_url",
+                  "created_at"
+                ],
+                "type": [
+                  "object",
                   "null"
                 ]
               },
@@ -39803,6 +40043,7 @@
               "created_at",
               "updated_at",
               "payments",
+              "online_payment",
               "paid_minor",
               "payment_status"
             ],
@@ -53825,6 +54066,62 @@
                   "null"
                 ]
               },
+              "online_payment": {
+                "description": "The Stripe payment the guest made when booking this stay on the site; null for a stay booked any other way. paid_minor counts it net of refunds.",
+                "properties": {
+                  "amount_minor": {
+                    "type": "integer"
+                  },
+                  "captured_minor": {
+                    "type": "integer"
+                  },
+                  "created_at": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "currency": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "payment_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "receipt_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "refunded_minor": {
+                    "type": "integer"
+                  },
+                  "state": {
+                    "enum": [
+                      "pending",
+                      "captured",
+                      "failed",
+                      "recovery",
+                      "refunded"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "payment_id",
+                  "state",
+                  "currency",
+                  "amount_minor",
+                  "captured_minor",
+                  "refunded_minor",
+                  "receipt_url",
+                  "created_at"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "overbooked": {
                 "type": "boolean"
               },
@@ -53998,6 +54295,7 @@
               "created_at",
               "updated_at",
               "payments",
+              "online_payment",
               "paid_minor",
               "payment_status"
             ],
@@ -54127,6 +54425,18 @@
               "base_price_minor": {
                 "type": [
                   "integer",
+                  "null"
+                ]
+              },
+              "base_price_tax_behavior": {
+                "enum": [
+                  "unspecified",
+                  "inclusive",
+                  "exclusive",
+                  null
+                ],
+                "type": [
+                  "string",
                   "null"
                 ]
               },
@@ -54261,6 +54571,7 @@
               "timezone",
               "currency",
               "base_price_minor",
+              "base_price_tax_behavior",
               "check_in_time",
               "check_out_time",
               "max_guests",
@@ -54318,6 +54629,13 @@
                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
                   "type": "string"
                 },
+                "held_until": {
+                  "description": "When a guest checkout hold on this night lapses; null when no guest is paying for it. A held night is not available.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "max_stay": {
                   "type": [
                     "integer",
@@ -54372,6 +54690,7 @@
                 "closed_to_arrival",
                 "closed_to_departure",
                 "source",
+                "held_until",
                 "channel"
               ],
               "type": "object"
@@ -75050,6 +75369,62 @@
                   "null"
                 ]
               },
+              "online_payment": {
+                "description": "The Stripe payment the guest made when booking this stay on the site; null for a stay booked any other way. paid_minor counts it net of refunds.",
+                "properties": {
+                  "amount_minor": {
+                    "type": "integer"
+                  },
+                  "captured_minor": {
+                    "type": "integer"
+                  },
+                  "created_at": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "currency": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "payment_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "receipt_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "refunded_minor": {
+                    "type": "integer"
+                  },
+                  "state": {
+                    "enum": [
+                      "pending",
+                      "captured",
+                      "failed",
+                      "recovery",
+                      "refunded"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "payment_id",
+                  "state",
+                  "currency",
+                  "amount_minor",
+                  "captured_minor",
+                  "refunded_minor",
+                  "receipt_url",
+                  "created_at"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "overbooked": {
                 "type": "boolean"
               },
@@ -75223,6 +75598,7 @@
               "created_at",
               "updated_at",
               "payments",
+              "online_payment",
               "paid_minor",
               "payment_status"
             ],
@@ -89805,6 +90181,18 @@
                   "null"
                 ]
               },
+              "base_price_tax_behavior": {
+                "enum": [
+                  "unspecified",
+                  "inclusive",
+                  "exclusive",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "channel": {
                 "description": "The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.",
                 "properties": {
@@ -89936,6 +90324,7 @@
               "timezone",
               "currency",
               "base_price_minor",
+              "base_price_tax_behavior",
               "check_in_time",
               "check_out_time",
               "max_guests",
@@ -90114,6 +90503,18 @@
                   "null"
                 ]
               },
+              "base_price_tax_behavior": {
+                "enum": [
+                  "unspecified",
+                  "inclusive",
+                  "exclusive",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "channel": {
                 "description": "The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.",
                 "properties": {
@@ -90245,6 +90646,7 @@
               "timezone",
               "currency",
               "base_price_minor",
+              "base_price_tax_behavior",
               "check_in_time",
               "check_out_time",
               "max_guests",
@@ -90302,6 +90704,13 @@
                   "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
                   "type": "string"
                 },
+                "held_until": {
+                  "description": "When a guest checkout hold on this night lapses; null when no guest is paying for it. A held night is not available.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "max_stay": {
                   "type": [
                     "integer",
@@ -90356,6 +90765,7 @@
                 "closed_to_arrival",
                 "closed_to_departure",
                 "source",
+                "held_until",
                 "channel"
               ],
               "type": "object"
@@ -109128,6 +109538,62 @@
                   "null"
                 ]
               },
+              "online_payment": {
+                "description": "The Stripe payment the guest made when booking this stay on the site; null for a stay booked any other way. paid_minor counts it net of refunds.",
+                "properties": {
+                  "amount_minor": {
+                    "type": "integer"
+                  },
+                  "captured_minor": {
+                    "type": "integer"
+                  },
+                  "created_at": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "currency": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "payment_id": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "receipt_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "refunded_minor": {
+                    "type": "integer"
+                  },
+                  "state": {
+                    "enum": [
+                      "pending",
+                      "captured",
+                      "failed",
+                      "recovery",
+                      "refunded"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "payment_id",
+                  "state",
+                  "currency",
+                  "amount_minor",
+                  "captured_minor",
+                  "refunded_minor",
+                  "receipt_url",
+                  "created_at"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "overbooked": {
                 "type": "boolean"
               },
@@ -109301,6 +109767,7 @@
               "created_at",
               "updated_at",
               "payments",
+              "online_payment",
               "paid_minor",
               "payment_status"
             ],
@@ -109458,7 +109925,7 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:20770f4756d0705e57229d17eab08bed78fb7d924eddf2cb52b9ebe43ffdf975",
+        "create_product": "sha256:74f3f4aee0166a4dac1ec7ee4c57695a6ef3a7981c0f59b05bbc52c466d43698",
         "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:ed2b8d9ead80fe1abb797f39ae69c813956fc9750e7a2636416e7abe6236801e",
@@ -109514,7 +109981,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:010b4cb1cd55f355ae72e255d70c3f17cecb18a68daf4345dee1774638635a7b",
-        "create_product": "sha256:20770f4756d0705e57229d17eab08bed78fb7d924eddf2cb52b9ebe43ffdf975",
+        "create_product": "sha256:74f3f4aee0166a4dac1ec7ee4c57695a6ef3a7981c0f59b05bbc52c466d43698",
         "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -109595,7 +110062,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:20770f4756d0705e57229d17eab08bed78fb7d924eddf2cb52b9ebe43ffdf975",
+        "create_product": "sha256:74f3f4aee0166a4dac1ec7ee4c57695a6ef3a7981c0f59b05bbc52c466d43698",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_website_draft": "sha256:fccf7d7281ba30d1e79163929e61abec1893c2e910460c4068364a65784a7bac",
@@ -109684,7 +110151,7 @@
         "create_location": "sha256:b25656237d93d456c98da74d8281ec6d1d05435e6a7657a18c14b82654b79b9b",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
-        "get_stay": "sha256:a93507d7f3e6e2c901387ea4a6ac276512558f3f2bb482349829e7d83209fa12",
+        "get_stay": "sha256:2905f9b1db4d2b65a1f4a48bc97a7335d9ea788a51e6e6d3cd0deecb10eb23d3",
         "invite_organization_member": "sha256:f520b4ade47c9c5a5faef9859564f32d1c9dddfd285efdcc27fa099fa60e8a24",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_organization_members": "sha256:f47eb37ec4cfa1df500db883fdd207db7e2228a3839d64e08f4e52351f85b10e",
@@ -109769,7 +110236,7 @@
         "create_table_reservation": "sha256:412c62d5987f89d7d7c7bf57ac2038c65f4101181bb4762341e0a937766c948b",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
-        "get_stay": "sha256:a93507d7f3e6e2c901387ea4a6ac276512558f3f2bb482349829e7d83209fa12",
+        "get_stay": "sha256:2905f9b1db4d2b65a1f4a48bc97a7335d9ea788a51e6e6d3cd0deecb10eb23d3",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_product_bookings": "sha256:ea80e0cc56ffb5b12058725b9644f50e50af6191c4a44493fb0be538224d7373",
         "list_reservation_inquiries": "sha256:85cb564470d0026c00b8727287edb2a6c2d403fec987c2ac13f4aaaa28e5d171",

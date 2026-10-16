@@ -8,7 +8,7 @@ import { executeBatch, queryAll, type BatchQuery } from '~/server/db'
 import { buildPublicResourceCacheKey, getPublicResourceCache, putPublicResourceCache } from '~/server/utils/public-resource-cache'
 import { loadPublicBase } from '~/server/utils/public-base'
 import { appendPublicShellQueries, buildPublicShellPayload } from '~/server/utils/public-shell-query'
-import { listOrganizationProducts } from '~/server/utils/product-management'
+import { listOrganizationProducts, publicProduct } from '~/server/utils/product-management'
 import { previewSecretOf, resolvePreviewAuthorization } from '~/server/utils/preview-token'
 import { isNonProductionHost } from '~/server/utils/tenant-hosts'
 import { recordRequestPhase } from '~/server/utils/request-metrics'
@@ -90,7 +90,7 @@ export async function loadPublicShellSource(
   const [entitlement, shellResults, experiences] = await Promise.all([
     assertPublicOrganizationLanguageEntitlement(env, db, organization.id, locale ?? sourceLocale),
     executeBatch(db, shellQueries),
-    listOrganizationProducts(db, { organizationId: organization.id, kind: 'experience', publishedOnly: true, bookableOnly: true, env }),
+    listOrganizationProducts(db, { organizationId: organization.id, kind: 'experience', publishedOnly: true, bookableOnly: true, env }).then(products => products.map(publicProduct)),
   ])
   options.signal?.throwIfAborted()
   const payload = {

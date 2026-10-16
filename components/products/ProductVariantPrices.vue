@@ -14,11 +14,11 @@
 </template>
 
 <script setup lang="ts">
-import type { Product } from '~/server/types/products'
+import type { PublicProduct } from '~/server/types/products'
 import type { CurrencyCode } from '~/shared/currencies'
 import { formatProductMoney, formatProductPriceRange, summarizeProductPrices } from '~/utils/product-money'
 
-const props = defineProps<{ product: Product; locationIds: (string | null)[]; currency: CurrencyCode }>()
+const props = defineProps<{ product: PublicProduct; locationIds: (string | null)[]; currency: CurrencyCode }>()
 const { t, locale } = useI18n()
 const offers = computed(() => {
   const at = new Date().toISOString()

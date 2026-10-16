@@ -25,6 +25,8 @@ import { createPaymentCheckout } from '~/server/domain/payments/checkout'
 import { createStripeClient } from '~/server/utils/stripe-client'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { isRecord } from '~/server/utils/type-guards'
+import { pushStayHoldNights, quoteStay, readPublicStayHome, type StayQuote } from '~/server/domain/stays'
+import { requireChannelPush } from '~/server/integrations/channex/ari'
 
 export interface BookingCreationContext {
   organizationId: string
@@ -377,4 +379,73 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     message: record.status === 'cancelled' ? 'This booking was cancelled.' : record.status === 'pending' ? `Your request for ${record.product_name} on ${whenLabel} is awaiting review.` : `Your ${presentation.noun} for ${record.product_name} on ${whenLabel} is confirmed.`,
     policy_summary: renderBookingPolicySummary(productPolicySummarySource(full.details), locale, full.kind),
   }, { status: 201 })
+}
+
+function stayBookingError(statusCode: number, code: string, message: string, field: string): never {
+  throw new HTTPError({ statusCode, statusMessage: message, data: { code, field } })
+}
+
+/**
+ * Book a place to stay on the site. The guest names the nights and the party;
+ * the server quotes them against every rule the home offers and the guest pays
+ * the full amount: the checkout holds the nights while they pay, the home's
+ * channel closes them at once, and capture confirms the stay. A retry with the
+ * same key returns the same checkout without quoting the nights it holds.
+ */
+export async function createStayBooking(event: H3Event, context: { organizationId: string; slug: string; body: Record<string, unknown> }) {
+  const { organizationId, slug, body } = context
+  const env = cloudflareEnv(event)
+  const db = env.DB
+  if (!db) throw new HTTPError({ statusCode: 500, statusMessage: 'Database not available' })
+  const organization = await queryFirst<{ id: string }>(db, "SELECT id FROM organization WHERE id = ? AND status = 'active'", [organizationId])
+  if (!organization) stayBookingError(404, 'ORGANIZATION_NOT_FOUND', 'Organization not found', 'organization_id')
+  if (body.locale !== undefined) assertExactCanonicalLocale(body.locale)
+
+  const guestName = cleanString(body.guest_name, 100)
+  const guestEmail = cleanString(body.guest_email, 254)
+  const guestPhone = cleanString(body.guest_phone, 30)
+  const notes = cleanString(body.notes, 1000)
+  if (!guestName) stayBookingError(422, 'GUEST_NAME_REQUIRED', 'Name is required', 'guest_name')
+  if (!guestEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(guestEmail)) stayBookingError(422, 'GUEST_EMAIL_INVALID', 'A valid email address is required', 'guest_email')
+  if (shouldSendRealEmail(env) && isReservedTestDomain(guestEmail)) stayBookingError(422, 'GUEST_EMAIL_INVALID', 'Please enter a real email address.', 'guest_email')
+  let phone: string | null = null
+  if (guestPhone) {
+    const parsed = parsePhone(guestPhone)
+    if (!parsed.valid || !parsed.e164) stayBookingError(422, 'GUEST_PHONE_INVALID', 'A valid phone number is required.', 'guest_phone')
+    phone = parsed.e164
+  }
+  const idempotencyKey = typeof body.idempotency_key === 'string' ? body.idempotency_key.trim() : ''
+  if (!idempotencyKey || idempotencyKey.length > 200) stayBookingError(422, 'IDEMPOTENCY_KEY_REQUIRED', 'A stable booking request key is required', 'idempotency_key')
+
+  const home = await readPublicStayHome(db, organizationId, slug)
+  const request = { product_id: home.product_id, check_in_date: body.check_in_date, check_out_date: body.check_out_date, adults: body.adults, children: body.children ?? 0, infants: body.infants ?? 0 }
+  const guest = { name: guestName, email: guestEmail, phone, notes }
+  const fingerprint = await hashIdentifier(JSON.stringify({ slug, ...request, guest }))
+
+  if (!env.STRIPE_SECRET_KEY || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) stayBookingError(503, 'payments_unavailable', 'Payments provider configuration is incomplete', 'payments')
+  const retrying = await queryFirst(db, 'SELECT 1 FROM payment_attempts a JOIN payments p ON p.id = a.payment_id WHERE a.idempotency_key = ? AND p.organization_id = ?', [`checkout:${organizationId}:${idempotencyKey}`, organizationId])
+  // The quote's refusals name the rule a guest's choice breaks; they come before rate limits and payment setup.
+  const quoted: StayQuote | null = retrying ? null : await quoteStay(db, organizationId, home, request)
+  const quote = async () => quoted ?? await quoteStay(db, organizationId, home, request)
+  if (!retrying) {
+    const e2eOverride = env.E2E_ALLOW_DEV_ROUTES === 'true'
+    if (!import.meta.dev && !e2eOverride) {
+      const hourWindow = Math.floor(Date.now() / 3_600_000)
+      const today = new Date().toISOString().split('T')[0]
+      if (!await incrementHourlyRateLimit(db, `rate:book:ip:${await hashClientIp(getClientIp(event))}:${hourWindow}`, IP_HOURLY_LIMIT, 3_600_000)) stayBookingError(429, 'RATE_LIMITED', 'Too many requests. Please try again later.', 'guest_email')
+      if (!await incrementHourlyRateLimit(db, `rate:book:email:${await hashIdentifier(guestEmail)}:${today}`, EMAIL_DAILY_LIMIT, 86_400_000)) stayBookingError(429, 'RATE_LIMITED', 'Too many booking requests from this email. Please try again tomorrow.', 'guest_email')
+    }
+  }
+  await requireChannelPush(db, env, organizationId, home.product_id)
+  const stay = quoted
+    ? { product_id: quoted.product_id, check_in_date: quoted.check_in_date, check_out_date: quoted.check_out_date, adults: quoted.adults, children: quoted.children, infants: quoted.infants }
+    : { product_id: home.product_id, check_in_date: String(request.check_in_date), check_out_date: String(request.check_out_date), adults: Number(request.adults), children: Number(request.children), infants: Number(request.infants) }
+  const checkout = await createPaymentCheckout(db, createStripeClient(env.STRIPE_SECRET_KEY, 'payments'), env, {
+    subjectType: 'stay', organizationId, buyerUserId: await ensureInteractionUser(event, env), requestId: null, requestFingerprint: fingerprint,
+    quantity: stay.adults + stay.children, idempotencyKey, returnOrigin: env.NUXT_PUBLIC_PLATFORM_DOMAIN, following: () => [],
+    stay, guest, quote,
+  })
+  // The held nights close on the home's channel now, not when the payment lands.
+  await pushStayHoldNights(db, env, organizationId, home.product_id, stay.check_in_date, stay.check_out_date)
+  return { body: { success: true, status: 'checkout', replayed: Boolean(retrying), ...checkout }, status: retrying ? 200 : 201 }
 }

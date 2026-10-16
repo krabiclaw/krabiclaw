@@ -22,6 +22,13 @@
       "when": 1792137077903,
       "tag": "0002_team_messages",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792138999594,
+      "tag": "0003_direct_stay_holds",
+      "breakpoints": true
     }
   ]
 }

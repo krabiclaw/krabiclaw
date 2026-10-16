@@ -24,7 +24,7 @@ import { resolvePublicTemplate } from '~/utils/template-registry'
 import { EXPERIENCE_PRESENTATION, presentationForProduct } from '~/utils/product-presentation'
 import { formatMinorAmount } from '~/shared/prices'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
-import { listCollections, listOrganizationProducts } from '~/server/utils/product-management'
+import { listCollections, listOrganizationProducts, publicProduct } from '~/server/utils/product-management'
 import { PRICING_NOTE_HANDLE } from '~/shared/product-details'
 import { summarizeProductPrices } from '~/utils/product-money'
 import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
@@ -129,7 +129,7 @@ export async function listPublicTenantPageReferenceRows(
 async function loadTenantPageProductCatalog(db: DbClient, organizationId: string, locale?: string, localizations: readonly ExactPublicLocalization[] | null = null, env?: CloudflareEnv) {
   locale ??= await getSourceLocale(db, organizationId)
   const [products, collections, locations, pageRepresentations] = await Promise.all([
-    listOrganizationProducts(db, { organizationId, publishedOnly: true, env }),
+    listOrganizationProducts(db, { organizationId, publishedOnly: true, env }).then(products => products.map(publicProduct)),
     listCollections(db, { organizationId }),
     queryAll<{ id: string; slug: string }>(db, "SELECT id,slug FROM business_locations WHERE organization_id=? AND status='active'", [organizationId]),
     localizations ? queryAll<{ product_id: string; path: string }>(db, `SELECT root.product_id, rep.path
@@ -268,7 +268,7 @@ async function hydrateBlocks(
   // The default services list, the catalog and the branches all follow from the
   // template alone; one round trip reads the three.
   const [services, productCatalog, sourceLocations] = await Promise.all([
-    defaultServices ? listOrganizationProducts(db, { organizationId, kind: 'service', publishedOnly: true, env }) : [],
+    defaultServices ? listOrganizationProducts(db, { organizationId, kind: 'service', publishedOnly: true, env }).then(products => products.map(publicProduct)) : [],
     collectionIds.size || productIds.size || homepage || defaultServices ? loadTenantPageProductCatalog(db, organizationId, locale, localizations, env) : undefined,
     locationIds.size || defaultLocationGrid
       ? queryAll<{ id: string; title: string; slug: string; address: string | null; description: string | null; short_description: string | null; asset_id: string | null; public_url: string | null; thumbnail_url: string | null; kind: string | null; alt_text: string | null }>(db, `
