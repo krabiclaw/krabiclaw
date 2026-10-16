@@ -38,7 +38,7 @@ export function parseGuestMessageSchedule(value: unknown, stored = false): Guest
   if (new Set(productIds).size !== productIds.length) invalid('Select each home only once', 'schedule.productIds')
   if (schedule.trigger === 'booking_received') {
     if (schedule.delayMinutes !== 5 || Object.keys(schedule).some(key => !['trigger', 'delayMinutes', 'productIds'].includes(key))) {
-      invalid('New-reservation messages send 5 minutes after Krabiclaw receives an eligible new reservation', 'schedule.delayMinutes')
+      invalid('New-reservation messages send 5 minutes after KrabiClaw receives an eligible new reservation', 'schedule.delayMinutes')
     }
     return { trigger: 'booking_received', delayMinutes: 5, productIds }
   }

@@ -16,7 +16,7 @@ const TOPIC = 'topic-product-news'
 const PROVIDER_ENV = {
   EMAIL_DELIVERY_MODE: 'provider',
   RESEND_API_KEY: 're_controlled_fake_resend',
-  EMAIL_FROM: 'Krabiclaw <hello@krabiclaw.com>',
+  EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>',
   RESEND_PRODUCT_NEWS_SEGMENT_ID: SEGMENT,
   RESEND_PRODUCT_NEWS_TOPIC_ID: TOPIC,
   NUXT_PUBLIC_PLATFORM_DOMAIN: 'proof.example',

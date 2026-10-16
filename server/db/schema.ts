@@ -2673,7 +2673,7 @@ export const analytics_summaries = sqliteTable("analytics_summaries", {
 // number may receive the message at all.
 //
 // `push_enabled` reaches every APNs device token the person registered from a
-// signed-in Krabiclaw app session (device_tokens).
+// signed-in KrabiClaw app session (device_tokens).
 //
 // account_security email is not stored here as a switchable value: the API
 // refuses to disable it, because losing a password reset locks a person out of

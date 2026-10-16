@@ -50,7 +50,7 @@ A workspace can save guest replies. A saved reply can also be
 scheduled for named homes: five minutes after a new direct reservation is
 received, or at a local time a number of days before or after check-in or
 check-out in the home's own timezone. Airbnb stays receive check-in and
-check-out messages only, because Krabiclaw cannot tell an imported historical
+check-out messages only, because KrabiClaw cannot tell an imported historical
 reservation from a new one. A scheduled message goes through the
 conversation's own address and records the same delivery receipt as a reply;
 one that fails or whose outcome is unknown stays visible with its reason and is
@@ -58,7 +58,7 @@ never resent automatically. Each home can hold private check-in instructions
 the host chooses when to share.
 
 Workspace members can receive owner notifications as push notifications on the
-Krabiclaw iPhone app, per notification category, alongside email and WhatsApp.
+KrabiClaw iPhone app, per notification category, alongside email and WhatsApp.
 A push that Apple refuses is recorded as failed.
 
 ## Plans

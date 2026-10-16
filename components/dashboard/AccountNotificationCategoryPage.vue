@@ -10,7 +10,7 @@
       <UFormField name="whatsapp" class="border-b border-default">
         <SettingRow v-model="draft.whatsapp" label="WhatsApp" :disabled="!phoneVerified || saving" />
       </UFormField>
-      <!-- Reaches every phone signed in to the Krabiclaw app. -->
+      <!-- Reaches every phone signed in to the KrabiClaw app. -->
       <UFormField name="push">
         <SettingRow v-model="draft.push" label="Push notifications" :disabled="saving" />
       </UFormField>

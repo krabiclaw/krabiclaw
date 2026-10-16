@@ -60,7 +60,7 @@ AI_SEARCH_INSTANCE_ID = "krabiclaw-platform-knowledge"
 # (EMAIL_DELIVERY_MODE_REQUIRED / INVALID_EMAIL_DELIVERY_MODE), and WHATSAPP_DELIVERY_MODE
 # likewise. EMAIL_FROM is the required sender; there is no default From address.
 EMAIL_DELIVERY_MODE = "provider"
-EMAIL_FROM = "Krabiclaw <hello@krabiclaw.com>"
+EMAIL_FROM = "KrabiClaw <hello@krabiclaw.com>"
 WHATSAPP_DELIVERY_MODE = "provider"
 # Startup workflow debugging: detailed MCP inputs/results expire after seven days.
 MCP_DIAGNOSTICS_ENABLED = "true"
@@ -167,7 +167,7 @@ NUXT_PUBLIC_HELP_URL = "https://krabiclaw.com/help"
 NUXT_PUBLIC_WHATSAPP_NUMBER = "16197200000"
 MEDIA_BASE_URL = "https://media.krabiclaw.com"
 EMAIL_DELIVERY_MODE = "provider"
-EMAIL_FROM = "Krabiclaw <hello@krabiclaw.com>"
+EMAIL_FROM = "KrabiClaw <hello@krabiclaw.com>"
 WHATSAPP_DELIVERY_MODE = "provider"
 
 [[env.dev.d1_databases]]
@@ -237,7 +237,7 @@ NUXT_PUBLIC_WHATSAPP_NUMBER = "16197200000"
 # reconciling would rewrite production's tags. Production leaves this unset.
 ZARAZ_ANALYTICS = "absent"
 EMAIL_DELIVERY_MODE = "log_only"
-EMAIL_FROM = "Krabiclaw <hello@krabiclaw.com>"
+EMAIL_FROM = "KrabiClaw <hello@krabiclaw.com>"
 WHATSAPP_DELIVERY_MODE = "log_only"
 E2E_ALLOW_DEV_ROUTES = "true"
 # E2E_DEV_ROUTE_SECRET is pushed via `wrangler secret put` in ci.yml, not a plaintext var here.
@@ -311,7 +311,7 @@ NUXT_PUBLIC_WHATSAPP_NUMBER = "16197200000"
 MEDIA_BASE_URL = "http://localhost:3000/__media"
 ZARAZ_ANALYTICS = "absent"
 EMAIL_DELIVERY_MODE = "log_only"
-EMAIL_FROM = "Krabiclaw <hello@krabiclaw.com>"
+EMAIL_FROM = "KrabiClaw <hello@krabiclaw.com>"
 WHATSAPP_DELIVERY_MODE = "log_only"
 
 [[env.e2e.d1_databases]]
