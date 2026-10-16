@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:51714e0b301279b50ec1d163d6ee86a5915685dddc7def59fa8f93885bdf0fcd",
-  "documentationFingerprint": "sha256:50ea94b8dc124d9e72c1006b4be32842a0800962ede75a16974fe13b7ae8fde6",
+  "fingerprint": "sha256:e748c31ebf15e1b6934e20607af9700c91e1b28fc37c68aaae0a4e763fbc81cc",
+  "documentationFingerprint": "sha256:5904b161d13f37d4e208092f70f8a6373db14956e43ae4eeaac59d2cf9e4a2b7",
   "tools": [
     {
       "name": "append_content_block",
@@ -5810,6 +5810,32 @@
                     "enum": [
                       "image",
                       "gallery"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "owner_type",
+                  "owner_id",
+                  "slot"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "owner_id": {
+                    "type": "string"
+                  },
+                  "owner_type": {
+                    "enum": [
+                      "collection"
+                    ],
+                    "type": "string"
+                  },
+                  "slot": {
+                    "enum": [
+                      "image"
                     ],
                     "type": "string"
                   }
@@ -14368,6 +14394,80 @@
               "id": {
                 "type": "string"
               },
+              "image": {
+                "description": "The section's own photo; set it with set_media owner_type collection, slot image.",
+                "properties": {
+                  "alt_text": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "asset_id": {
+                    "type": "string"
+                  },
+                  "duration": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "height": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "enum": [
+                      "image",
+                      "video",
+                      "file"
+                    ],
+                    "type": "string"
+                  },
+                  "mime_type": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "public_url": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "active"
+                    ],
+                    "type": "string"
+                  },
+                  "thumbnail_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "width": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "asset_id",
+                  "kind",
+                  "public_url",
+                  "status"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "location_id": {
                 "type": [
                   "string",
@@ -14394,6 +14494,7 @@
               "name",
               "slug",
               "description",
+              "image",
               "sort_order"
             ],
             "type": "object"
@@ -55885,6 +55986,80 @@
                 "id": {
                   "type": "string"
                 },
+                "image": {
+                  "description": "The section's own photo; set it with set_media owner_type collection, slot image.",
+                  "properties": {
+                    "alt_text": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "asset_id": {
+                      "type": "string"
+                    },
+                    "duration": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "height": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "kind": {
+                      "enum": [
+                        "image",
+                        "video",
+                        "file"
+                      ],
+                      "type": "string"
+                    },
+                    "mime_type": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "public_url": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "active"
+                      ],
+                      "type": "string"
+                    },
+                    "thumbnail_url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "width": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "asset_id",
+                    "kind",
+                    "public_url",
+                    "status"
+                  ],
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
                 "location_id": {
                   "type": [
                     "string",
@@ -55911,6 +56086,7 @@
                 "name",
                 "slug",
                 "description",
+                "image",
                 "sort_order"
               ],
               "type": "object"
@@ -75696,6 +75872,32 @@
                   },
                   "owner_type": {
                     "enum": [
+                      "collection"
+                    ],
+                    "type": "string"
+                  },
+                  "slot": {
+                    "enum": [
+                      "image"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "owner_type",
+                  "owner_id",
+                  "slot"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "owner_id": {
+                    "type": "string"
+                  },
+                  "owner_type": {
+                    "enum": [
                       "content_document"
                     ],
                     "type": "string"
@@ -77328,6 +77530,80 @@
                 "id": {
                   "type": "string"
                 },
+                "image": {
+                  "description": "The section's own photo; set it with set_media owner_type collection, slot image.",
+                  "properties": {
+                    "alt_text": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "asset_id": {
+                      "type": "string"
+                    },
+                    "duration": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "height": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "kind": {
+                      "enum": [
+                        "image",
+                        "video",
+                        "file"
+                      ],
+                      "type": "string"
+                    },
+                    "mime_type": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "provider": {
+                      "type": "string"
+                    },
+                    "public_url": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "enum": [
+                        "active"
+                      ],
+                      "type": "string"
+                    },
+                    "thumbnail_url": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "width": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "asset_id",
+                    "kind",
+                    "public_url",
+                    "status"
+                  ],
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
                 "location_id": {
                   "type": [
                     "string",
@@ -77354,6 +77630,7 @@
                 "name",
                 "slug",
                 "description",
+                "image",
                 "sort_order"
               ],
               "type": "object"
@@ -77759,6 +78036,32 @@
                     "enum": [
                       "image",
                       "gallery"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "owner_type",
+                  "owner_id",
+                  "slot"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "owner_id": {
+                    "type": "string"
+                  },
+                  "owner_type": {
+                    "enum": [
+                      "collection"
+                    ],
+                    "type": "string"
+                  },
+                  "slot": {
+                    "enum": [
+                      "image"
                     ],
                     "type": "string"
                   }
@@ -84808,6 +85111,32 @@
                   },
                   "owner_type": {
                     "enum": [
+                      "collection"
+                    ],
+                    "type": "string"
+                  },
+                  "slot": {
+                    "enum": [
+                      "image"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "owner_type",
+                  "owner_id",
+                  "slot"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "owner_id": {
+                    "type": "string"
+                  },
+                  "owner_type": {
+                    "enum": [
                       "content_document"
                     ],
                     "type": "string"
@@ -85096,6 +85425,32 @@
                         "enum": [
                           "image",
                           "gallery"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "owner_type",
+                      "owner_id",
+                      "slot"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "owner_id": {
+                        "type": "string"
+                      },
+                      "owner_type": {
+                        "enum": [
+                          "collection"
+                        ],
+                        "type": "string"
+                      },
+                      "slot": {
+                        "enum": [
+                          "image"
                         ],
                         "type": "string"
                       }
@@ -86284,7 +86639,7 @@
     {
       "name": "set_media",
       "title": "Set media",
-      "description": "Assign an asset to one cover, hero or logo; null clears it. Use attach_media for galleries and presentation for logo cropping.",
+      "description": "Assign an asset to one cover, hero, logo or menu section photo; null clears it. Use attach_media for galleries and presentation for logo cropping.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -86365,6 +86720,32 @@
                   "owner_type": {
                     "enum": [
                       "product"
+                    ],
+                    "type": "string"
+                  },
+                  "slot": {
+                    "enum": [
+                      "image"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "owner_type",
+                  "owner_id",
+                  "slot"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "owner_id": {
+                    "type": "string"
+                  },
+                  "owner_type": {
+                    "enum": [
+                      "collection"
                     ],
                     "type": "string"
                   },
@@ -86748,6 +87129,32 @@
                     "enum": [
                       "image",
                       "gallery"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "owner_type",
+                  "owner_id",
+                  "slot"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "owner_id": {
+                    "type": "string"
+                  },
+                  "owner_type": {
+                    "enum": [
+                      "collection"
+                    ],
+                    "type": "string"
+                  },
+                  "slot": {
+                    "enum": [
+                      "image"
                     ],
                     "type": "string"
                   }
@@ -95952,6 +96359,80 @@
               "id": {
                 "type": "string"
               },
+              "image": {
+                "description": "The section's own photo; set it with set_media owner_type collection, slot image.",
+                "properties": {
+                  "alt_text": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "asset_id": {
+                    "type": "string"
+                  },
+                  "duration": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "height": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "kind": {
+                    "enum": [
+                      "image",
+                      "video",
+                      "file"
+                    ],
+                    "type": "string"
+                  },
+                  "mime_type": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "public_url": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "active"
+                    ],
+                    "type": "string"
+                  },
+                  "thumbnail_url": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "width": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  }
+                },
+                "required": [
+                  "asset_id",
+                  "kind",
+                  "public_url",
+                  "status"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "location_id": {
                 "type": [
                   "string",
@@ -95978,6 +96459,7 @@
               "name",
               "slug",
               "description",
+              "image",
               "sort_order"
             ],
             "type": "object"
@@ -97156,6 +97638,80 @@
                     "id": {
                       "type": "string"
                     },
+                    "image": {
+                      "description": "The section's own photo; set it with set_media owner_type collection, slot image.",
+                      "properties": {
+                        "alt_text": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "asset_id": {
+                          "type": "string"
+                        },
+                        "duration": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "height": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "kind": {
+                          "enum": [
+                            "image",
+                            "video",
+                            "file"
+                          ],
+                          "type": "string"
+                        },
+                        "mime_type": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "provider": {
+                          "type": "string"
+                        },
+                        "public_url": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "enum": [
+                            "active"
+                          ],
+                          "type": "string"
+                        },
+                        "thumbnail_url": {
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "width": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "asset_id",
+                        "kind",
+                        "public_url",
+                        "status"
+                      ],
+                      "type": [
+                        "object",
+                        "null"
+                      ]
+                    },
                     "location_id": {
                       "type": [
                         "string",
@@ -97182,6 +97738,7 @@
                     "name",
                     "slug",
                     "description",
+                    "image",
                     "sort_order"
                   ],
                   "type": "object"
@@ -109233,14 +109790,14 @@
         "create_product": "sha256:20770f4756d0705e57229d17eab08bed78fb7d924eddf2cb52b9ebe43ffdf975",
         "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
-        "list_collections": "sha256:ed2b8d9ead80fe1abb797f39ae69c813956fc9750e7a2636416e7abe6236801e",
+        "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
         "reconcile_products": "sha256:ca6f8f1bdb95081538ddc8cb43a040e3c093f045fb3d600a10e85af049cc10e9",
-        "reorder_collections": "sha256:7337b52f13f1caddb073c69300d67ecac75a9b62869dd7afc0a54d8b0741217f",
+        "reorder_collections": "sha256:1ca15d17627f9313cf613371e44816f2ae36a2f215b343ad8f4f1d1c6fe7c171",
         "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
-        "update_menu": "sha256:63cbd21c021e0b61799765308bf3f7fba7caac5bc647ab6d9698b215038949d4",
+        "update_menu": "sha256:d6309caf4e86820a192fcd4fee7b3c4752d2bd8c18b396858eacf29b7f901da8",
         "update_product": "sha256:e7a8c9a40063a41c48109e14b984d285490a1097579496d280d571d5f9cfd387"
       }
     },
@@ -109285,14 +109842,14 @@
         "text": "Create a bookable offering from: <description> Use get_workspace_context, list_locations and list_products to resolve the business, existing offerings and explicit location or online scope. Ask for missing price, duration, capacity, actual start times, confirmation and payment choices. Use create_product with booking setup and one idempotency key. Preserve the supplied facts and attach supplied media to the returned product ID. Use get_product to read booking_readiness and list_product_booking_sessions with a concrete date range to verify actual availability. Use save_media_attachment for supplied files or attach_media for existing assets. Open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "attach_media": "sha256:010b4cb1cd55f355ae72e255d70c3f17cecb18a68daf4345dee1774638635a7b",
+        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
         "create_product": "sha256:20770f4756d0705e57229d17eab08bed78fb7d924eddf2cb52b9ebe43ffdf975",
         "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
-        "save_media_attachment": "sha256:69bd4bf687fca2e9c3a05e5526c9b6e3a955245bdd06713e08942d433ad677dc"
+        "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871"
       }
     },
     {
@@ -109328,14 +109885,14 @@
         "text": "Use get_workspace_context, list_site_pages and get_site_page to read the selected business's homepage, and get_organization_media_assets for its media. Open its public preview and recommend the most useful improvements in plain language. Apply requested copy changes with update_site_page; use set_media for one image or attach_media, remove_media and reorder_media for a gallery. Read back the page and public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:010b4cb1cd55f355ae72e255d70c3f17cecb18a68daf4345dee1774638635a7b",
+        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
-        "remove_media": "sha256:10dd93919469351b90cfa73d0fdc83dcf29d82c20a0d1b956c8def7600d708e9",
-        "reorder_media": "sha256:a5bb761987df12ba7c4515cb334e9a79d10b811537ae0a845f8e68a7bb8235a3",
-        "set_media": "sha256:4bf16ab96284e37a96cfd24355a24eff1426d3afcf1c45d0395365fe45a3e709",
+        "remove_media": "sha256:a59343b7aaf1b361ba9e70d9bcfff4a454baa3d618af3fc93f92188f9cb3893c",
+        "reorder_media": "sha256:0b9419a7d891bcf9f75032994fcf329651d3c888a0409356ad4ae7b94a199e25",
+        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
     },
@@ -109348,14 +109905,14 @@
         "text": "Inspect the supplied photos and use get_workspace_context plus the relevant get_site_page, get_location, get_product or get_post read to resolve the intended owner and placement. Ask only about an ambiguous destination. Use save_media_attachment with a stable idempotency_key and the intended placement for each attachment; retries reuse that key. For an existing asset use set_media or attach_media. Read back the owner and open the public result before reporting placement."
       },
       "toolContracts": {
-        "attach_media": "sha256:010b4cb1cd55f355ae72e255d70c3f17cecb18a68daf4345dee1774638635a7b",
+        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
         "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
-        "save_media_attachment": "sha256:69bd4bf687fca2e9c3a05e5526c9b6e3a955245bdd06713e08942d433ad677dc",
-        "set_media": "sha256:4bf16ab96284e37a96cfd24355a24eff1426d3afcf1c45d0395365fe45a3e709"
+        "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871",
+        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0"
       }
     },
     {
@@ -109378,7 +109935,7 @@
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
-        "update_menu": "sha256:63cbd21c021e0b61799765308bf3f7fba7caac5bc647ab6d9698b215038949d4",
+        "update_menu": "sha256:d6309caf4e86820a192fcd4fee7b3c4752d2bd8c18b396858eacf29b7f901da8",
         "update_organization_settings": "sha256:3454f63997eec1f0379204170954ab64862914c016110f93d2e05e89c9134ea7",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
@@ -109414,13 +109971,13 @@
         "text": "Use get_workspace_context, list_site_pages, get_site_page, get_organization_media_assets and list_products to read the actual public pages, media and catalog. Recommend specific improvements in plain language. Apply the requested copy with update_site_page or update_product, and media with set_media or attach_media. Read back the changed record and verify the public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:010b4cb1cd55f355ae72e255d70c3f17cecb18a68daf4345dee1774638635a7b",
+        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
-        "set_media": "sha256:4bf16ab96284e37a96cfd24355a24eff1426d3afcf1c45d0395365fe45a3e709",
+        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0",
         "update_product": "sha256:e7a8c9a40063a41c48109e14b984d285490a1097579496d280d571d5f9cfd387",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
@@ -109474,13 +110031,13 @@
       "toolContracts": {
         "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
-        "list_collections": "sha256:ed2b8d9ead80fe1abb797f39ae69c813956fc9750e7a2636416e7abe6236801e",
+        "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
-        "reorder_collections": "sha256:7337b52f13f1caddb073c69300d67ecac75a9b62869dd7afc0a54d8b0741217f",
+        "reorder_collections": "sha256:1ca15d17627f9313cf613371e44816f2ae36a2f215b343ad8f4f1d1c6fe7c171",
         "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
-        "update_menu": "sha256:63cbd21c021e0b61799765308bf3f7fba7caac5bc647ab6d9698b215038949d4"
+        "update_menu": "sha256:d6309caf4e86820a192fcd4fee7b3c4752d2bd8c18b396858eacf29b7f901da8"
       }
     },
     {
@@ -109508,13 +110065,13 @@
       "slug": "add-photos-and-video",
       "contentHash": "sha256:12d4c163d18a26ef149addaaf3ee345df1a5db52168d3c611513a27dfcbded2c",
       "toolContracts": {
-        "attach_media": "sha256:010b4cb1cd55f355ae72e255d70c3f17cecb18a68daf4345dee1774638635a7b",
+        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
         "delete_media_asset": "sha256:7cd7618939616504dc9e0ec08771cc009b09671c40b69c23485dfb172b18ec2e",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "remove_media": "sha256:10dd93919469351b90cfa73d0fdc83dcf29d82c20a0d1b956c8def7600d708e9",
-        "reorder_media": "sha256:a5bb761987df12ba7c4515cb334e9a79d10b811537ae0a845f8e68a7bb8235a3",
-        "save_media_attachment": "sha256:69bd4bf687fca2e9c3a05e5526c9b6e3a955245bdd06713e08942d433ad677dc",
-        "set_media": "sha256:4bf16ab96284e37a96cfd24355a24eff1426d3afcf1c45d0395365fe45a3e709",
+        "remove_media": "sha256:a59343b7aaf1b361ba9e70d9bcfff4a454baa3d618af3fc93f92188f9cb3893c",
+        "reorder_media": "sha256:0b9419a7d891bcf9f75032994fcf329651d3c888a0409356ad4ae7b94a199e25",
+        "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871",
+        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0",
         "update_media_asset": "sha256:25902033f7e73a819b6c9660c6a2e70b4ab3dfb972a49b594f1c3a34d8a1a8f7"
       }
     },

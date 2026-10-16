@@ -47,7 +47,7 @@
       :color="banner.color"
       :icon="banner.icon"
       :title="banner.title"
-      :actions="[{ label: 'Try again', color: 'neutral', variant: 'outline', onClick: banner.retry }]"
+      :actions="[{ label: 'Try again', color: 'neutral', variant: 'outline', onClick: banner.action }]"
       class="fixed inset-x-0 top-0 z-30 h-(--kc-dashboard-banner)"
       data-testid="dashboard-status-banner"
     />
@@ -276,9 +276,9 @@ const realtime = provideDashboardInvalidations(realtimeOrganizationSlug)
 // A failed background refetch leaves the shell on what it had and says so;
 // a dropped live connection leaves every screen on its last read. Either is
 // the dashboard's state, not one screen's, so it is the one banner.
-const banner = computed((): { color: 'error' | 'warning'; icon: string; title: string; retry: () => void } | null => {
-  if (shellRefetchError.value) return { color: 'error', icon: 'i-lucide-circle-alert', title: shellRefetchError.value, retry: () => void retryDashboardContext() }
-  if (realtime.status.value === 'failed') return { color: 'warning', icon: 'i-lucide-wifi-off', title: 'Live updates are unavailable. What you see may be out of date.', retry: realtime.connect }
+const banner = computed((): { color: 'error' | 'warning'; icon: string; title: string; action: () => void } | null => {
+  if (shellRefetchError.value) return { color: 'error', icon: 'i-lucide-circle-alert', title: shellRefetchError.value, action: () => void retryDashboardContext() }
+  if (realtime.status.value === 'failed') return { color: 'warning', icon: 'i-lucide-wifi-off', title: 'Live updates are unavailable. What you see may be out of date.', action: realtime.connect }
   return null
 })
 
