@@ -8,6 +8,7 @@ import { testBaseUrl, tenantTestBaseUrl, tenantTestExtraHeaders } from './test-e
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import mcpCatalog from '../../server/utils/mcp-catalog-snapshots/tenant.json' with { type: 'json' }
+import { environmentTenantAliasHostname } from '../../server/utils/tenant-hosts'
 
 // Two tenants stand in for the two shells this renderer produces: Pottery
 // House on .tenant-layout and NCLS on .blawby-shell. Kikuzuki renders through
@@ -477,6 +478,80 @@ for (const tenant of tenants) {
     for (const text of tenant.forbidden) await expect(page.locator('body')).not.toContainText(text)
   })
 }
+
+// A listed place to stay on staging, Stripe test mode ready: the booking card
+// opens the dialog and walks a guest to the contact step. Nothing is submitted.
+// Its pressed "Check availability" once flipped the dialog's checkbox shut.
+const STAGING_STAY = { tenant: 'payments-sandbox-staging', path: '/locations/test-booking-beach-studio/products/test-booking-beach-studio', slug: 'test-booking-beach-studio' }
+
+test('a guest opens a stay\'s booking dialog, picks nights the calendar allows and reaches the contact step', async ({ page }) => {
+  const platform = new URL(testBaseUrl())
+  test.skip(platform.hostname !== 'staging.krabiclaw.com', 'The listed stay with online payments exists on staging only')
+  const baseURL = `https://${environmentTenantAliasHostname(platform.hostname, STAGING_STAY.tenant)}`
+  type Night = { date: string; available: boolean; price_minor: number | null; min_stay_arrival: number; min_stay_through: number | null; max_stay: number | null; closed_to_arrival: boolean; closed_to_departure: boolean }
+  const from = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
+  const to = new Date(Date.now() + 120 * 86_400_000).toISOString().slice(0, 10)
+  const read = await page.request.get(`${baseURL}/api/public/products/${STAGING_STAY.slug}/nights?from=${from}&to=${to}`)
+  expect(read.status(), await read.text()).toBe(200)
+  const { home, nights } = await read.json() as { home: { today: string; currency: string }; nights: Night[] }
+  // The first stay the home's own nights allow, check-in and checkout in one month.
+  let chosen: { checkIn: Night; checkOut: string; stayed: Night[]; minimum: number } | null = null
+  for (let start = 0; start < nights.length && !chosen; start++) {
+    const arrival = nights[start]!
+    if (arrival.date < home.today || !arrival.available || arrival.closed_to_arrival) continue
+    let minimum = arrival.min_stay_arrival
+    for (let end = start; end < nights.length - 1; end++) {
+      if (!nights[end]!.available) break
+      minimum = Math.max(minimum, nights[end]!.min_stay_through ?? 1)
+      const count = end - start + 1
+      const departure = nights[end + 1]!
+      if (count >= minimum && !departure.closed_to_departure && (arrival.max_stay === null || count <= arrival.max_stay)) {
+        if (departure.date.slice(0, 7) === arrival.date.slice(0, 7)) chosen = { checkIn: arrival, checkOut: departure.date, stayed: nights.slice(start, end + 1), minimum }
+        break
+      }
+    }
+  }
+  expect(chosen, 'the staging stay has no bookable nights in the next 120 days').not.toBeNull()
+  const dayLabel = (date: string) => new Intl.DateTimeFormat('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${date}T00:00:00Z`))
+  const money = (minor: number) => new Intl.NumberFormat('en-US', { style: 'currency', currency: home.currency }).format(minor / 100)
+
+  await page.setViewportSize({ width: 1440, height: 900 })
+  expect((await openTenantPage(page, `${baseURL}${STAGING_STAY.path}`, {}))?.status()).toBe(200)
+  await waitForNuxtHydration(page)
+  const card = page.locator('article')
+  // A stay is a reservation: none of an appointment's words.
+  await expect(card).not.toContainText(/appointment/i)
+  const dialog = page.locator('#product-booking')
+  await expect(dialog).toBeHidden()
+  await card.getByRole('button', { name: 'Check availability', exact: true }).click()
+  await expect(dialog).toBeVisible()
+  await expect(dialog).toContainText('Select check-in date')
+
+  const { checkIn, checkOut, stayed, minimum } = chosen!
+  const [todayYear, todayMonth] = home.today.split('-').map(Number) as [number, number]
+  const [year, month] = checkIn.date.split('-').map(Number) as [number, number]
+  for (let step = 0; step < (year - todayYear) * 12 + month - todayMonth; step++) await dialog.getByRole('button', { name: 'Next month' }).click()
+  await dialog.getByRole('button', { name: dayLabel(checkIn.date), exact: true }).click()
+  await expect(dialog).toContainText('Select checkout date')
+  // A checkout short of the minimum is not offered.
+  if (minimum > 1) await expect(dialog.getByRole('button', { name: dayLabel(stayed[1]!.date), exact: true })).toBeDisabled()
+  await dialog.getByRole('button', { name: new RegExp(`^${dayLabel(checkOut)}`) }).click()
+  const total = money(stayed.reduce((sum, night) => sum + night.price_minor!, 0))
+  const totalRow = dialog.locator('dl > div').last()
+  await expect(totalRow.locator('dt')).toHaveText('Total')
+  await expect(totalRow.locator('dd')).toHaveText(total)
+  await dialog.getByRole('button', { name: 'Reserve', exact: true }).click()
+  await expect(dialog.getByRole('textbox', { name: 'Full name' })).toBeVisible()
+  await expect(dialog.getByRole('button', { name: 'Confirm and pay', exact: true })).toBeEnabled()
+
+  // Closed, the card reads the stay back; its dates reopen the calendar.
+  await page.keyboard.press('Escape')
+  await expect(dialog).toBeHidden()
+  await expect(card.getByText(dayLabel(checkIn.date), { exact: true })).toBeVisible()
+  await card.getByRole('button', { name: new RegExp(`Check-in\\s*${dayLabel(checkIn.date)}`) }).click()
+  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('button', { name: dayLabel(checkIn.date), exact: true })).toHaveAttribute('aria-pressed', 'true')
+})
 
 test('Pottery House enforces its published languages and localized catalog', async ({ page }) => {
   const localesResponse = await page.request.get(`${potteryHouseBaseURL}/api/public/locales`, { headers: potteryHouseExtraHeaders })

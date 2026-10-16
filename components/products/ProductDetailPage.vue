@@ -185,7 +185,8 @@
             </div>
             <!-- The stay a guest has chosen so far, read back from the server's quote. -->
             <div v-if="isStay && canBook" class="overflow-hidden rounded-lg border border-default">
-              <button type="button" class="grid w-full grid-cols-2 text-left" @click="openBooking">
+              <!-- Labels for the dialog's checkbox, like every booking control: they open it before hydration too. -->
+              <label for="product-booking-toggle" role="button" tabindex="0" class="grid w-full cursor-pointer grid-cols-2 text-left" @click="stayBooking.openBooking(1)" @keydown.enter.prevent="pressLabel" @keydown.space.prevent="pressLabel">
                 <span class="border-r border-default px-3 py-2">
                   <span class="block text-[10px] font-semibold uppercase tracking-[0.15em] text-default">{{ t('stay.check_in') }}</span>
                   <span class="block text-sm text-muted">{{ stayBooking.checkIn.value ? stayBooking.dateLabel(stayBooking.checkIn.value) : t('stay.add_dates') }}</span>
@@ -194,11 +195,11 @@
                   <span class="block text-[10px] font-semibold uppercase tracking-[0.15em] text-default">{{ t('stay.check_out') }}</span>
                   <span class="block text-sm text-muted">{{ stayBooking.checkOut.value ? stayBooking.dateLabel(stayBooking.checkOut.value) : t('stay.add_dates') }}</span>
                 </span>
-              </button>
-              <button type="button" class="block w-full border-t border-default px-3 py-2 text-left" @click="openBooking">
+              </label>
+              <label for="product-booking-toggle" role="button" tabindex="0" class="block w-full cursor-pointer border-t border-default px-3 py-2 text-left" @click="stayBooking.openBooking(1)" @keydown.enter.prevent="pressLabel" @keydown.space.prevent="pressLabel">
                 <span class="block text-[10px] font-semibold uppercase tracking-[0.15em] text-default">{{ t('stay.guests') }}</span>
                 <span class="block text-sm text-muted">{{ stayBooking.guestsLabel.value }}</span>
-              </button>
+              </label>
             </div>
             <dl v-if="isStay && stayBooking.quote.value" class="space-y-2 text-sm">
               <div v-for="line in stayBooking.breakdown.value" :key="line.label" class="flex justify-between gap-4">
@@ -221,7 +222,7 @@
               </span>
             </div>
             <p v-if="isStay && canBook" class="text-sm text-muted">{{ t('stay.charged_in_full') }}</p>
-            <p v-if="vertical === 'service' && !product.order_url" class="text-sm text-muted">{{ booking?.confirmation_mode === 'review' ? t('booking.review_notice') : t('booking.instant_notice') }}</p>
+            <p v-if="vertical === 'service' && !isStay && !product.order_url" class="text-sm text-muted">{{ booking?.confirmation_mode === 'review' ? t('booking.review_notice') : t('booking.instant_notice') }}</p>
             <p v-if="nextSession" class="inline-flex items-center gap-2 text-sm text-muted">
               <SayaIcon name="calendar-days" class="size-4" />
               {{ sessionDayLabel(nextSession) }} · {{ sessionTimeLabel(nextSession) }}
@@ -617,6 +618,10 @@ const { bookingOpen, bookingStep, submitting, sessions: bookingSessions, session
 function openBooking() {
   if (isStay.value) stayBooking.openBooking()
   else openSessionBooking()
+}
+/** A label pressed from the keyboard activates the checkbox it names, as a click does. */
+function pressLabel(event: KeyboardEvent) {
+  (event.currentTarget as HTMLElement).click()
 }
 
 // The page is served with its sessions; this re-reads them once the browser

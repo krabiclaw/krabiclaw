@@ -99,7 +99,7 @@ import { addLocalDays, formatCalendarDate } from '~/utils/timezone'
 const props = defineProps<{ controller: StayBookingController }>()
 defineEmits<{ next: [] }>()
 const { calendar, calendarPending, calendarError, checkIn, checkOut, adults, children, infants, maxGuests, quote, quotePending, bookingError,
-  breakdown, rangeLabel, guestsLabel, canCheckIn, canCheckOut, selectDay, clearDates, money, nightsLabel, dateLabel } = props.controller
+  nightCount, breakdown, rangeLabel, guestsLabel, canCheckIn, canCheckOut, selectDay, clearDates, money, nightsLabel, dateLabel } = props.controller
 const { t, locale } = useI18n()
 
 const monthOffset = ref(0)
@@ -127,7 +127,8 @@ const monthDays = computed(() => {
   for (let date = firstOfMonth.value; date.startsWith(month); date = addLocalDays(date, 1)) {
     const choosingCheckOut = Boolean(checkIn.value && !checkOut.value)
     const checkout = choosingCheckOut && canCheckOut(date)
-    const selectable = date >= today.value && (checkout || canCheckIn(date))
+    // While checkout is being chosen, a later day is offered only if it can end this stay.
+    const selectable = date >= today.value && (choosingCheckOut && date > checkIn.value! ? checkout : canCheckIn(date))
     const edge = date === checkIn.value || date === checkOut.value
     const inRange = Boolean(checkIn.value && checkOut.value && date > checkIn.value && date < checkOut.value)
     const checkoutOnly = checkout && !canCheckIn(date)
@@ -136,7 +137,7 @@ const monthDays = computed(() => {
   return days
 })
 
-const heading = computed(() => checkIn.value && checkOut.value ? nightsLabel(quote.value?.nights ?? 0) : checkIn.value ? t('stay.select_check_out') : t('stay.select_check_in'))
+const heading = computed(() => checkIn.value && checkOut.value ? nightsLabel(nightCount.value) : checkIn.value ? t('stay.select_check_out') : t('stay.select_check_in'))
 const subheading = computed(() => checkIn.value && checkOut.value ? rangeLabel.value : checkIn.value ? `${t('stay.check_in')}: ${dateLabel(checkIn.value)}` : t('stay.add_dates'))
 
 const guestRows = computed(() => [
