@@ -52,6 +52,24 @@ marked.use({
   },
 });
 
+export interface MarkdownHeading { id: string; text: string; depth: 2 | 3 }
+
+/**
+ * The h2 and h3 headings a markdown block renders, with the ids
+ * renderMarkdownToHtml gives them, read from its tokens without rendering the
+ * block: a table of contents must not render and sanitize the article twice.
+ */
+export function markdownHeadings(markdown: string, blockIndex: number): MarkdownHeading[] {
+  headingSlugCounts = new Map();
+  const headings: MarkdownHeading[] = [];
+  marked.walkTokens(marked.lexer(markdown, { gfm: true, breaks: true }), (token) => {
+    if (token.type !== "heading" || (token.depth !== 2 && token.depth !== 3)) return;
+    const html = marked.parseInline(token.text, { gfm: true, breaks: true }) as string;
+    headings.push({ id: `${slugifyHeading(html)}-${blockIndex}`, text: decodeHtmlEntities(html.replace(/<[^>]+>/g, "")), depth: token.depth });
+  });
+  return headings;
+}
+
 export function renderMarkdownToHtml(markdown: string, blockIndex?: number) {
   headingSlugCounts = new Map();
   const rendered = marked.parse(markdown, { gfm: true, breaks: true }) as string;

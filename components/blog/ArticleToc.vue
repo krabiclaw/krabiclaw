@@ -24,35 +24,14 @@
 </template>
 
 <script setup lang="ts">
-// Parses h2/h3 + their id (added by the shared heading-id slugger in
-// utils/markdown.ts) out of the already-rendered article HTML, so the TOC
-// always matches the live article body instead of duplicating heading logic.
-import { decodeHtmlEntities } from '~/utils/markdown'
+// The article's h2 and h3 headings with the ids its body renders them with
+// (markdownHeadings in utils/markdown.ts reads them from the same slugger).
+import type { MarkdownHeading } from '~/utils/markdown'
 
-const props = withDefaults(defineProps<{ html: string; collapsible?: boolean }>(), { collapsible: false })
+const props = withDefaults(defineProps<{ headings: MarkdownHeading[]; collapsible?: boolean }>(), { collapsible: false })
 const expanded = ref(false)
 const listId = useId()
-
-interface Heading {
-  id: string
-  text: string
-  depth: 2 | 3
-}
-
-const headings = computed<Heading[]>(() => {
-  const matches: Heading[] = []
-  const regex = /<h([23])\b[^>]*\bid="([^"]+)"[^>]*>([\s\S]*?)<\/h\1>/g
-  let match: RegExpExecArray | null
-  while ((match = regex.exec(props.html))) {
-    const [, depth, id, text] = match
-    matches.push({
-      depth: Number(depth) as 2 | 3,
-      id: id!,
-      text: decodeHtmlEntities(text!.replace(/<[^>]+>/g, '')),
-    })
-  }
-  return matches
-})
+const headings = computed(() => props.headings)
 
 const activeId = ref<string | null>(null)
 let observer: IntersectionObserver | null = null
@@ -97,6 +76,6 @@ onMounted(() => {
   }
   nextTick(observeHeadings)
 })
-watch(() => props.html, () => nextTick(observeHeadings))
+watch(() => props.headings, () => nextTick(observeHeadings))
 onUnmounted(() => observer?.disconnect())
 </script>
