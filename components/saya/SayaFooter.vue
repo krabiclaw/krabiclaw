@@ -80,17 +80,7 @@
         </div>
       </div>
 
-      <SiteFooterBar :name="restaurantName" color-mode class="pt-6 text-muted">
-        <a
-          v-if="showBrandingCredit"
-          href="https://krabiclaw.com"
-          target="_blank"
-          rel="noopener noreferrer"
-          class="transition hover:opacity-70"
-        >
-          {{ t('saya.footer.powered_by') }}, {{ copy.poweredByTagline }}
-        </a>
-      </SiteFooterBar>
+      <SiteFooterBar :name="restaurantName" color-mode class="pt-6 text-muted" />
     </div>
   </footer>
 </template>
@@ -98,7 +88,6 @@
 <script setup lang="ts">
 import { getActiveSpecialClosure } from '~/utils/formatters'
 import { getTodayHoursLabel, type OpeningHours, type SpecialHours } from '~/shared/reservation-hours'
-import { getVerticalCopy } from '~/utils/vertical-copy'
 import { EXPERIENCE_PRESENTATION, resolveProductPresentation } from '~/utils/product-presentation'
 import { formatPostalAddress, type PostalAddress } from '~/utils/postal-address'
 
@@ -106,7 +95,6 @@ interface Organization {
   name?: string | null
   brand_description?: string | null
   media?: Array<{ slot?: string; public_url?: string | null }>
-  plan?: string | null
   vertical?: string | null
   config?: { phone?: string | null } | null
 }
@@ -128,7 +116,6 @@ interface PublicLocation {
 // bootstrap/tenant-site fetch — footer is presentation-only, not a fetcher.
 const props = defineProps<{
   organization: Organization | null
-  isPlatform: boolean
   locations: PublicLocation[]
   error: unknown
   hasProducts: boolean
@@ -137,7 +124,6 @@ const props = defineProps<{
 }>()
 
 const { t, locale, localePath } = useI18n()
-const copy = computed(() => getVerticalCopy(props.organization?.vertical, locale.value))
 const isExperienceOrganization = computed(() => props.organization?.vertical === 'experience')
 const locationsError = computed(() => props.error)
 
@@ -150,8 +136,6 @@ const productCollectionLabel = computed(() => productPresentation.value?.locatio
   : t('saya.footer.products'))
 const restaurantName = computed(() => props.organization?.name?.trim() || '')
 const tagline = computed(() => props.organization?.brand_description?.trim() || '')
-const organizationPlan = computed(() => props.organization?.plan)
-const showBrandingCredit = computed(() => !props.isPlatform && organizationPlan.value === 'free')
 
 const locations = computed(() =>
   props.locations.map((loc: PublicLocation) => {

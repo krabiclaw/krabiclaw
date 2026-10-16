@@ -245,7 +245,6 @@
   "saya.footer.locations_error": "Hiện không thể tải danh sách chi nhánh. Vui lòng thử lại sau giây lát.",
   "saya.footer.menu": "Thực đơn",
   "saya.footer.our_story": "Câu chuyện của chúng tôi",
-  "saya.footer.powered_by": "Vận hành bởi krabiclaw.com",
   "saya.footer.products": "Sản phẩm",
   "saya.footer.qa": "Hỏi & Đáp",
   "saya.footer.reviews": "Đánh giá",
@@ -465,5 +464,6 @@
   "booking_policy.cancellation_until_start": "Bạn có thể hủy miễn phí trước giờ bắt đầu.",
   "booking_policy.reschedule_until_start": "Bạn có thể đổi lịch trước giờ bắt đầu.",
   "booking_policy.reschedule_allowed": "Bạn có thể yêu cầu đổi lịch.",
-  "booking_policy.reschedule_disallowed": "Không được đổi lịch."
+  "booking_policy.reschedule_disallowed": "Không được đổi lịch.",
+  "legal.powered_by": "Vận hành bởi KrabiClaw"
 }

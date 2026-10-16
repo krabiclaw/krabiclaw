@@ -109,6 +109,7 @@ export default {
     "reviews": "Guest reviews & ratings."
   },
   "legal": {
+    "powered_by": "Powered by KrabiClaw",
     "accept": "Accept",
     "analytics_notice": "We use cookies to improve your experience. By continuing, you agree to our",
     "analytics_notice_link": "Privacy Policy",
@@ -277,8 +278,7 @@ export default {
       "qa": "Q&A",
       "all_locations": "All Locations",
       "contact_us": "Contact Us",
-      "temporarily_closed": "Temporarily closed",
-      "powered_by": "Powered by krabiclaw.com"
+      "temporarily_closed": "Temporarily closed"
     },
     "posts": {
       "read_guide": "Read guide",

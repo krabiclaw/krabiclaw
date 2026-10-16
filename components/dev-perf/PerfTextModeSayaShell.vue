@@ -13,7 +13,6 @@
         </main>
         <LazySayaFooter
           :organization="null"
-          :is-platform="false"
           :locations="[]"
           :locales="[]"
           :error="null"
