@@ -1,7 +1,7 @@
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { platformLocale } from '~/shared/platform-locales'
 import { loadPublicProductCollection } from '~/server/utils/public-products'
-import { listOrganizationProducts } from '~/server/utils/product-management'
+import { listOrganizationProducts, publicProduct } from '~/server/utils/product-management'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { HTTPError } from 'nitro';
@@ -221,7 +221,7 @@ export async function getPublicBlawbyShellData(
     `, [organizationId]),
     loadPublicProductCollection(db, organizationId, 'experiences', options.previewAuthorized === true, undefined, options.env),
     consultationSettings.then(settings => settings.mode === 'native'
-      ? listOrganizationProducts(db, { organizationId, kind: 'service', publishedOnly: true, bookableOnly: true, env: options.env })
+      ? listOrganizationProducts(db, { organizationId, kind: 'service', publishedOnly: true, bookableOnly: true, env: options.env }).then(products => products.map(publicProduct))
       : []),
   ])
   if (!verification) throw new Error(`Organization ${organizationId} was not found for its Blawby shell`)

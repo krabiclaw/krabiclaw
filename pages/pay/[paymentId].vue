@@ -17,6 +17,25 @@
               <dt class="font-semibold text-highlighted">{{ handoff.title }} <span v-if="handoff.quantity > 1" class="text-muted">× {{ handoff.quantity }}</span></dt>
               <dd class="shrink-0 text-muted">{{ paymentMoney(handoff.subtotal, handoff.currency) }}</dd>
             </div>
+            <!-- A stay is paid for by its nights: the dates and the party it holds. -->
+            <div v-if="handoff.stay" class="grid grid-cols-2 gap-4 text-sm" data-payment-stay>
+              <div>
+                <dt class="text-muted">{{ t('stay.check_in') }}</dt>
+                <dd class="text-highlighted">{{ formatCalendarDate(handoff.stay.check_in_date, locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) }}</dd>
+              </div>
+              <div>
+                <dt class="text-muted">{{ t('stay.check_out') }}</dt>
+                <dd class="text-highlighted">{{ formatCalendarDate(handoff.stay.check_out_date, locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' }) }}</dd>
+              </div>
+              <div>
+                <dt class="text-muted">{{ t('stay.nights') }}</dt>
+                <dd class="text-highlighted">{{ handoff.stay.nights }}</dd>
+              </div>
+              <div>
+                <dt class="text-muted">{{ t('stay.guests') }}</dt>
+                <dd class="text-highlighted">{{ handoff.stay.adults + handoff.stay.children }}</dd>
+              </div>
+            </div>
             <template v-if="review">
               <div v-if="review.surcharge > 0" class="flex items-start justify-between gap-4" data-payment-surcharge>
                 <dt class="text-highlighted">{{ t('payment.surcharge') }}</dt>
@@ -55,13 +74,14 @@
 <script setup lang="ts">
 import { loadStripe, type Stripe, type StripeElements, type StripePaymentElement } from '@stripe/stripe-js'
 import { paymentMoney } from '~/shared/payment-display'
+import { formatCalendarDate } from '~/utils/timezone'
 import { isRecord, publicApiMutation, publicApiRequest } from '~/utils/api-clients'
 import type { paymentHandoff, reviewPayment, confirmPayment } from '~/server/domain/payments/intent'
 
 definePageMeta({ layout: 'standalone' })
 useResponseHeader('cache-control').value = 'private, no-store'
 useHead({ meta: [{ name: 'referrer', content: 'no-referrer' }, { name: 'robots', content: 'noindex, nofollow' }] })
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const route = useRoute()
 const paymentId = String(route.params.paymentId)
 // The claim the checkout handed this browser, in the fragment: no server, log or referrer sees it.

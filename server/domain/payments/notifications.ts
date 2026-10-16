@@ -41,7 +41,9 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   const visitKind = payment.subject_type === 'booking' || payment.subject_type === 'reservation' ? payment.subject_type : null
   const hold = visitKind && organization ? await queryFirst<{ request_id: string | null }>(db, 'SELECT request_id FROM payment_checkout_holds WHERE payment_id=? AND organization_id=?', [payment.id, payment.organization_id]) : null
   if (visitKind && organization && !hold?.request_id) throw new Error('Booking payment notification has no canonical guest request')
-  const threadId = hold?.request_id ?? null
+  // A stay's conversation opens when its payment is captured; it is the stay's, not the hold's.
+  const stayThread = payment.subject_type === 'stay' && payment.subject_id && organization ? await queryFirst<{ request_id: string | null }>(db, 'SELECT request_id FROM stays WHERE organization_id=? AND id=?', [payment.organization_id, payment.subject_id]) : null
+  const threadId = hold?.request_id ?? stayThread?.request_id ?? null
   const booking=visitKind&&payment.subject_id&&organization?await queryFirst<{request_id:string|null}>(db,`SELECT request_id FROM ${visitKind==='booking'?'bookings':'reservations'} WHERE organization_id=? AND id=?`,[payment.organization_id,payment.subject_id]):null
   if(booking&&booking.request_id!==threadId)throw new Error('Booking payment notification request does not match its operational booking')
   const deepLink = organization ? `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}${booking?.request_id?`/bookings/${visitKind}/${encodeURIComponent(booking.request_id)}`:`/earnings/transactions/${encodeURIComponent(payment.id)}`}` : null

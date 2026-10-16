@@ -92,7 +92,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.deepEqual(refusal(await call(await cookieFor('helper'), 'POST', cabin)), { status: 403, code: 'STAY_ROLE_REQUIRED' })
 
     const home = {
-      name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, check_in_instructions: null, assigned_member_id: null, assigned_team_id: null, channel: null, photos: [],
+      name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, base_price_tax_behavior: 'unspecified', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, check_in_instructions: null, assigned_member_id: null, assigned_team_id: null, channel: null, photos: [],
     }
     const keyedCabin = { ...cabin, idempotency_key: 'a'.repeat(200) }
     const created = await call(owner, 'POST', keyedCabin)
@@ -139,7 +139,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     })
     assert.equal(edited.status, 200)
     const changed = {
-      product_id: made.product_id, location_id: made.location_id, name: 'Cliff Cabin North', timezone: 'America/Los_Angeles', currency: 'USD', base_price_minor: 210_00,
+      product_id: made.product_id, location_id: made.location_id, name: 'Cliff Cabin North', timezone: 'America/Los_Angeles', currency: 'USD', base_price_minor: 210_00, base_price_tax_behavior: 'unspecified',
       check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 3, check_in_instructions: null, assigned_member_id: 'm-helper', assigned_team_id: null, channel: null, photos: [],
     }
     assert.deepEqual(edited.body, { home: changed, channel_push: null })
@@ -150,7 +150,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     // The price is the one it had, changed in place; null removes it. Fields left out keep their value.
     assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM prices WHERE organization_id = ?').bind(ORG).first('n'), 1)
     const unpriced = await edit(owner, { base_price_minor: null, assigned_member_id: null })
-    assert.deepEqual(unpriced.body, { home: { ...changed, base_price_minor: null, assigned_member_id: null }, channel_push: null })
+    assert.deepEqual(unpriced.body, { home: { ...changed, base_price_minor: null, base_price_tax_behavior: null, assigned_member_id: null }, channel_push: null })
   } finally {
     await runtime.dispose()
   }

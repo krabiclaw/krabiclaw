@@ -1,4 +1,4 @@
-import type { Product } from '~/server/types/products'
+import type { Product, PublicProduct } from '~/server/types/products'
 import { isExperience } from '~/utils/product-presentation'
 import { formatProductMoney } from '~/utils/product-money'
 import { selectPrice, type PriceSelection } from '~/shared/prices'
@@ -19,7 +19,7 @@ import { DESCRIPTION_MAX_LENGTH, truncateForSeo } from '~/utils/social-metadata'
  * catalogue as it is) but they canonicalise to the collection index instead of
  * competing with it as a standalone result.
  */
-export function isOfferedProduct(product: Product, selection: PriceSelection): boolean {
+export function isOfferedProduct(product: PublicProduct, selection: PriceSelection): boolean {
   return product.variants.some(variant => selectPrice(variant.prices, selection) !== null)
 }
 
@@ -45,8 +45,8 @@ export const COLLECTION_SIBLING_LIMIT = 8
  * a visitor sees here matches the menu they just came from.
  */
 export function selectProductCollectionSiblings(
-  products: readonly Product[],
-  product: Product,
+  products: readonly PublicProduct[],
+  product: PublicProduct,
   collectionId: string,
   selection: PriceSelection,
   limit: number = COLLECTION_SIBLING_LIMIT,
@@ -155,7 +155,7 @@ export const DIETARY_SCHEMA_MAP: Record<string, string> = {
   GF: 'https://schema.org/GlutenFreeDiet',
 }
 
-export function extractDietarySchemaUrls(product: Product): string[] {
+export function extractDietarySchemaUrls(product: PublicProduct): string[] {
   const notes = product.details['dietary_notes']
   if (!Array.isArray(notes)) return []
   return notes
