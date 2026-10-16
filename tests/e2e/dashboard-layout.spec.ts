@@ -1430,7 +1430,8 @@ test.describe('dashboard pane hierarchy', () => {
     await open(page, `${ORG}/products/new`)
     await expect(page).toHaveURL(`${ORG}/products/new/kind`)
     await expect(page.getByRole('dialog', { name: 'Type', exact: true })).toBeVisible()
-    await expect(page.getByRole('heading', { name: 'New product', level: 1, exact: true })).toBeAttached()
+    // The level behind the sheet is hidden from assistive technology while the sheet is open.
+    await expect(page.locator('#dashboard-panel-product h1')).toHaveText('New product')
     await page.locator('#dashboard-panel-product-kind').getByTestId('dashboard-navbar-close').click()
     await expect(page).toHaveURL(`${ORG}/products`)
     await expect(page.getByRole('dialog')).toHaveCount(0)

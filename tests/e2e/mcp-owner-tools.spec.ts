@@ -582,7 +582,7 @@ test.describe('stateless MCP server', () => {
       await expect(page).toHaveURL(url => url.pathname.includes('/qa/new') && url.searchParams.get('page_path') === pagePath)
       // A question being made opens on its one required step; the answer is the record's once it exists.
       await expect(page).toHaveURL(url => url.pathname.endsWith('/qa/new/question') && url.searchParams.get('page_path') === pagePath)
-      await expect(page.getByRole('heading', { name: 'New question', exact: true })).toBeAttached()
+      await expect(page.locator('#dashboard-panel-organization-qa-record h1')).toHaveText('New question')
       await page.getByRole('textbox', { name: /^Question/ }).fill(question)
       const [created] = await Promise.all([
         page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === new URL(qaUrl).pathname),
