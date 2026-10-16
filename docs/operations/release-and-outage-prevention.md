@@ -505,6 +505,13 @@ development and E2E bindings that share its local D1 id, stay on
 still comes from the v19 baseline in `migrations/`. All three move together in
 their own change immediately before promotion.
 
+Production v19 was loaded from `krabiclaw-production-v18` while unbound: 100
+tables, 100,371 rows, `foreign_key_check` empty, the native `0000_baseline.sql`
+ledger, one transform (`notification_preferences_push_default`, 4 rows). The
+top-level production, development and E2E bindings then moved to
+`krabiclaw-production-v19` together, immediately before promotion; take the
+production final delta from v18 right after the deployment.
+
 Before dropping or retiring a legacy table or writer:
 
 - remove every runtime reader and writer;
