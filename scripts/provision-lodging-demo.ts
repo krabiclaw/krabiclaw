@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Creates, or resets, the staging lodging demo: "Saltleaf Stays", a fictional
-// vacation-rental business with three homes booked directly on its Saya site.
+// vacation-rental business with four homes booked directly on its Saya site.
 //
 //   node --env-file=<file with KRABICLAW_DEV_EMAIL and KRABICLAW_DEV_PASSWORD> \
 //     --experimental-strip-types scripts/provision-lodging-demo.ts --staging
@@ -8,12 +8,15 @@
 // It signs in as the staging development owner and uses the same endpoints the
 // dashboard and the native app use, so every write goes through the canonical
 // domain code. Re-running it is the reset: the homes get their details, prices
-// and blocked nights back, and the stays booked on them are cancelled. Lapsed
+// and blocked nights back, and the stays booked on them are cancelled. The
+// site's own location holds no home, so it is set inactive and takes no plan
+// location. Lapsed
 // checkout holds need nothing: the calendar reads them as free and the next
 // hold on those nights clears them.
 //
 // Payments setup is the owner's, in a browser, because financial approvals are
-// same-origin browser actions: the Commerce plan for four locations and the
+// same-origin browser actions: the Commerce plan for four locations (the four
+// homes) and the
 // test-mode Stripe Connect onboarding (docs/operations/lodging-demo.md). Until
 // both are done the script stops before publishing, naming what is missing.
 
@@ -24,7 +27,7 @@ const DEMO = {
   // shared/demo.ts names this subdomain as a demo organization.
   slug: 'saltleaf-stays-demo',
   currency: 'USD',
-  timezone: 'Asia/Bangkok',
+  timezone: 'America/Los_Angeles',
   sourceLocale: 'en',
 } as const
 
@@ -51,13 +54,43 @@ interface DemoHome {
   bathrooms: number
   amenities: string[]
   cancellation_policy: 'flexible' | 'moderate' | 'firm'
-  check_in_method: 'in_person' | 'lockbox' | 'keypad'
+  check_in_method: 'in_person' | 'lockbox' | 'keypad' | 'smart_lock'
   check_in_instructions: string
   /** Nights closed for owner use, as days from today. */
   blocked: Array<[number, number]>
 }
 
 const HOMES: DemoHome[] = [
+  {
+    // The staging post-deploy stay test books through this home's listing,
+    // /stays/saltleaf-ocean-avenue-studio, from the site's homepage: keep its
+    // name, which is its slug, and keep it featured there.
+    key: 'santa-monica',
+    name: 'Saltleaf Ocean Avenue Studio',
+    timezone: 'America/Los_Angeles',
+    address: '100 Ocean Avenue',
+    city: 'Santa Monica',
+    state: 'CA',
+    country: 'US',
+    zip_code: '90401',
+    check_in_time: '15:00',
+    check_out_time: '11:00',
+    max_guests: 2,
+    min_nights: 2,
+    base_price_minor: 12_000,
+    weekend_price_minor: 14_500,
+    holiday_price_minor: 17_500,
+    description: 'A bright studio for two a short walk from the beach, with a queen bed, a kitchenette, fast Wi-Fi and a desk. Fictional demo listing.',
+    property_type: 'apartment',
+    bedrooms: 0,
+    beds: 1,
+    bathrooms: 1,
+    amenities: ['wifi', 'dedicated_workspace', 'air_conditioning', 'kitchen', 'refrigerator', 'microwave', 'coffee_maker', 'cooking_basics', 'dishes_and_silverware', 'tv', 'beach_access', 'self_check_in', 'hot_water', 'essentials', 'bed_linens', 'smoke_alarm', 'carbon_monoxide_alarm', 'fire_extinguisher', 'first_aid_kit'],
+    cancellation_policy: 'moderate',
+    check_in_method: 'smart_lock',
+    check_in_instructions: 'Check-in is from 15:00. Your door code for the smart lock arrives by message on your arrival day; enter it on the keypad and press the lock button.',
+    blocked: [],
+  },
   {
     key: 'ao-nang',
     name: 'Saltleaf Ao Nang Pool Villa',
@@ -188,6 +221,7 @@ function today(timezone: string): string {
 }
 
 interface Home { product_id: string; name: string; location_id: string; base_price_minor: number | null }
+interface Location { id: string; title: string; status: string }
 interface Stay { id: string; product_id: string; status: string; version: number; check_in_date: string; check_out_date: string }
 
 async function organization(): Promise<{ id: string; slug: string }> {
@@ -215,6 +249,15 @@ async function main() {
 
   const homes = new Map<string, Home>()
   for (const home of (await call<{ homes: Home[] }>('GET', `/api/dashboard/stay-homes?${q}`)).data.homes) homes.set(home.name, home)
+  // Only active locations take a plan location. The site's own location, made
+  // with the organization, holds no home, so it goes inactive before the homes
+  // are added; each home's location is titled after its home.
+  const homeLocations = new Set([...homes.values()].map(home => home.location_id))
+  for (const location of (await call<{ locations: Location[] }>('GET', `/api/dashboard/locations?organization=true&status=all&${q}`)).data.locations) {
+    if (homeLocations.has(location.id) || location.status !== 'active') continue
+    await call('PATCH', `/api/dashboard/locations/${location.id}?${q}`, { status: 'inactive' })
+    console.log(`Set ${location.title} inactive: it holds no home`)
+  }
   for (const spec of HOMES) {
     if (homes.has(spec.name)) continue
     const created = await call<{ home: Home }>('POST', `/api/dashboard/stay-homes?${q}`, {
@@ -224,7 +267,7 @@ async function main() {
       max_guests: spec.max_guests, min_nights: spec.min_nights, base_price_minor: spec.base_price_minor,
     }, [201, 402])
     if (created.status === 402) {
-      throw new StepError(`Adding ${spec.name} needs a plan that covers four locations (the site's own location and three homes): ${JSON.stringify(created.data)}. Choose Commerce for 4 locations at ${BASE}/dashboard/${DEMO.slug}/payments?tab=plan, then run this again.`)
+      throw new StepError(`Adding ${spec.name} needs a plan that covers four locations (the four homes): ${JSON.stringify(created.data)}. Choose Commerce for 4 locations at ${BASE}/dashboard/${DEMO.slug}/payments?tab=plan, then run this again.`)
     }
     homes.set(spec.name, created.data.home)
     console.log(`Added ${spec.name}`)
@@ -240,6 +283,11 @@ async function main() {
       cancellation_policy: spec.cancellation_policy, check_in_method: spec.check_in_method, check_in_instructions: spec.check_in_instructions,
       checkout_instructions: [{ task: 'gather_towels', details: null }, { task: 'turn_off', details: 'Air conditioning and lights' }, { task: 'lock_up', details: null }],
     })
+    const location = (await call<{ location: Location }>('GET', `/api/dashboard/locations/${home.location_id}?${q}`)).data.location
+    if (location.title !== spec.name) {
+      await call('PATCH', `/api/dashboard/locations/${home.location_id}?${q}`, { title: spec.name })
+      console.log(`Titled ${location.title} location ${spec.name}`)
+    }
 
     const start = today(spec.timezone)
     const end = addDays(start, CALENDAR_DAYS)
