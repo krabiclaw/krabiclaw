@@ -108,6 +108,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   expect((await homes.json() as { homes: unknown[] }).homes).toEqual([{
     product_id: productId, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null,
     check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: null, channel: null,
+    check_in_instructions: null,
   }])
 
   const later = [localDay(10), localDay(13)] as const
