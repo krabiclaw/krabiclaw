@@ -1,6 +1,6 @@
 <template>
   <!--
-    Google Maps is per location: each Krabiclaw location is matched to at most
+    Google Maps is per location: each KrabiClaw location is matched to at most
     one Google Maps place, so this is a list of locations, each a leaf.
   -->
   <DashboardIndexPanel id="integration-google-maps" title="Google Maps">

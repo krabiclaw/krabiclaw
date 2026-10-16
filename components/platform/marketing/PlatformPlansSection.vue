@@ -29,7 +29,7 @@ import type { Plan } from '~/composables/usePlans'
 import { STARTER_PLAN_ID, NEW_SALE_PAID_PLAN_IDS } from '~/shared/billing-model'
 
 /**
- * Krabiclaw's plans, published on Krabiclaw's own pages.
+ * KrabiClaw's plans, published on KrabiClaw's own pages.
  *
  * The block that places this section stores a heading and `source:
  * billing_plans`, nothing else. Every amount, interval, price id and
@@ -85,7 +85,7 @@ useSchemaOrg(computed(() => {
   return {
     '@type': 'OfferCatalog',
     '@id': `${pageUrl}#offers`,
-    name: 'Krabiclaw Pricing Plans',
+    name: 'KrabiClaw Pricing Plans',
     itemListElement: offers,
   }
 }))

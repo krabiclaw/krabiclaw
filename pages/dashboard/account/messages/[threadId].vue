@@ -9,7 +9,7 @@
 <script setup lang="ts">
 import GuestThreadDetail from '~/lib/components/workspace/messages/GuestThreadDetail.vue'
 definePageMeta({ layout: 'dashboard' })
-useSeoMeta({ title: 'Conversation | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Conversation | KrabiClaw', robots: 'noindex, nofollow' })
 const route = useRoute()
 const threadId = computed(() => {
   if (typeof route.params.threadId !== 'string' || !route.params.threadId) throw createError({ statusCode: 404, statusMessage: 'Conversation not found.', fatal: true })

@@ -54,7 +54,7 @@ useSocialMetadata({
   path: '/signup',
   socialImage: organizationSocialImage,
   title: 'Create your account',
-  description: 'Create a free Krabiclaw account and build your business site through ChatGPT.',
+  description: 'Create a free KrabiClaw account and build your business site through ChatGPT.',
   discoverability: 'private',
 })
 

@@ -1,7 +1,7 @@
 import { getSourceLocale } from '~/server/utils/organization-locales'
 // GET /api/public/blog?collection=blog|docs — the requesting tenant's published articles
 //
-// This was two routes. `/api/public/blog` served Krabiclaw's own articles
+// This was two routes. `/api/public/blog` served KrabiClaw's own articles
 // through `listPublicPlatformBlogPosts`, which was `listBlogPosts` with the
 // platform site looked up and hardcoded; `/api/public/blog`
 // served everyone else's from a near-identical query. The platform is an
@@ -10,7 +10,7 @@ import { getSourceLocale } from '~/server/utils/organization-locales'
 // already identified it.
 //
 // One route now. The tenant comes from `event.context.organizationId`, which
-// tenant-resolution sets from the host, so krabiclaw.com gets Krabiclaw's
+// tenant-resolution sets from the host, so krabiclaw.com gets KrabiClaw's
 // articles and a tenant domain gets that tenant's, by the same code.
 import { cloudflareEnv, jsonResponse, rethrowHttpError } from '~/server/utils/api-response'
 import { getArticleCollectionIndex, listArticleCollectionRepresentations, listPublishedArticles } from '~/server/utils/content/publishing'

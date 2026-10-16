@@ -1,6 +1,6 @@
 <template>
   <section class="pt-10 sm:pt-16">
-    <h1 class="text-4xl font-bold tracking-tight text-default sm:text-5xl">Krabiclaw Support</h1>
+    <h1 class="text-4xl font-bold tracking-tight text-default sm:text-5xl">KrabiClaw Support</h1>
     <p class="mt-3 text-3xl font-semibold tracking-tight text-muted sm:text-4xl">How can we help you today?</p>
 
     <div class="mt-8 grid gap-4 md:grid-cols-2">

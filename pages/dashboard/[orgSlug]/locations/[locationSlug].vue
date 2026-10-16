@@ -293,5 +293,5 @@ const { data: overview, error: overviewError } = await useAsyncData<LocationOver
   )
 })
 
-useSeoMeta({ title: () => `${isNew.value ? 'New location' : location.value?.title || 'Location'} | Krabiclaw`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${isNew.value ? 'New location' : location.value?.title || 'Location'} | KrabiClaw`, robots: 'noindex, nofollow' })
 </script>

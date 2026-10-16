@@ -2,7 +2,7 @@
   <div class="flex min-h-0 flex-col gap-8 py-6" :data-onboarding-hydrated="hydrated ? 'true' : 'false'">
     <div>
       <h1 class="text-3xl font-extrabold leading-tight tracking-tight text-highlighted">
-        It's easy to get started on Krabiclaw
+        It's easy to get started on KrabiClaw
       </h1>
     </div>
 

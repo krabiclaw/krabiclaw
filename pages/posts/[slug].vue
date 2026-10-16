@@ -59,7 +59,7 @@ const seoTitle = computed(() => post.value?.title || post.value?.body?.split('\n
 const seoDescription = computed(() => post.value?.body || post.value?.title || '')
 useSocialMetadata(() => post.value && ({
   path: post.value.path,
-  // A tenant's page names the business, as its other pages do; Krabiclaw's template adds its own name.
+  // A tenant's page names the business, as its other pages do; KrabiClaw's template adds its own name.
   title: isPlatform || seoTitle.value === organizationName ? seoTitle.value : `${seoTitle.value} | ${organizationName}`,
   description: seoDescription.value,
   pageType: 'article',

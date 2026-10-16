@@ -58,7 +58,7 @@
 
     <UModal v-model:open="confirmingReimport" title="Re-import details from Google Maps?">
       <template #body>
-        <p class="text-sm text-default">This replaces {{ location?.title }}'s <strong>address, phone, website, opening hours and timezone</strong> with what Google Maps has now. Anything you edited in Krabiclaw is overwritten.</p>
+        <p class="text-sm text-default">This replaces {{ location?.title }}'s <strong>address, phone, website, opening hours and timezone</strong> with what Google Maps has now. Anything you edited in KrabiClaw is overwritten.</p>
       </template>
       <template #footer>
         <div class="flex w-full justify-end gap-2">

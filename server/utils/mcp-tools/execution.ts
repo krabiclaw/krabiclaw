@@ -117,7 +117,7 @@ export function toolFileReference(value: unknown, key: string): ToolFileReferenc
   if (typeof value === "string" && value.trim()) {
     throw mcpProtocolError(
       MCP_ERROR.invalidParams,
-      `${key} must be sent as a ChatGPT file argument so the host rewrites the local path into an authorized file reference before Krabiclaw receives it.`,
+      `${key} must be sent as a ChatGPT file argument so the host rewrites the local path into an authorized file reference before KrabiClaw receives it.`,
     );
   }
 

@@ -254,7 +254,7 @@ import { formatCalendarDate, formatTimestamp } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
 import type { AgendaItem, AgendaKind, AgendaLocation, AgendaPayload } from '~/server/utils/dashboard-agenda'
 
-useSeoMeta({ title: 'Calendar | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Calendar | KrabiClaw', robots: 'noindex, nofollow' })
 
 // One calendar for both readers. Personal scope reads the account agenda,
 // has no branch to filter, block or configure, and opens a day the same way.

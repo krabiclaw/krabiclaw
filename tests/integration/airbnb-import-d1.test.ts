@@ -49,7 +49,7 @@ class FakeChannex {
     const resource = (type: string, attributes: Record<string, unknown> = {}) => json({ data: { id: `${type}-${++this.ids}`, type, attributes } })
     if (method === 'POST' && path === '/groups') return json({ data: { id: 'grp-1', type: 'group', attributes: {} } })
     if (method === 'POST' && path === '/properties') {
-      if (body!.property.title === 'Krabiclaw connection setup') return json({ data: { id: 'setup-1', type: 'property', attributes: {} } })
+      if (body!.property.title === 'KrabiClaw connection setup') return json({ data: { id: 'setup-1', type: 'property', attributes: {} } })
       const id = `prop-${++this.ids}`
       this.channel.properties.push(id)
       return json({ data: { id, type: 'property', attributes: {} } })
@@ -128,7 +128,7 @@ async function connected(db: D1Database, channex: FakeChannex) {
 
 const form = { missingDetails: { childBeds: '1', infantCots: '0' }, checkInTime: '15:00', checkOutTime: '11:00' }
 
-test('a listing imports through every stage into a home Channex and Krabiclaw agree on', { timeout: 120_000 }, async () => {
+test('a listing imports through every stage into a home Channex and KrabiClaw agree on', { timeout: 120_000 }, async () => {
   const { runtime, db } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch

@@ -1,6 +1,6 @@
 # Products overview
 
-The approved v3 visual is implemented by Krabiclaw's published page document at
+The approved v3 visual is implemented by KrabiClaw's published page document at
 `/products`. Migration `0002_products_overview.sql` retains the former Features
 document identity and replaces its blocks. Platform `/features` links redirect
 permanently to `/products`, preserving query parameters. Customer catalog routes

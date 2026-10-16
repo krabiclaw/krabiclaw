@@ -9,7 +9,7 @@
     <NuxtLink :to="homeTo" class="group flex w-fit shrink-0 items-center gap-2.5 no-underline">
       <img
         src="/platform/krabiclaw-symbol.svg"
-        alt="Krabiclaw"
+        alt="KrabiClaw"
         width="36"
         height="36"
         class="size-8 rounded-[9px] transition-transform duration-200 group-hover:rotate-12"

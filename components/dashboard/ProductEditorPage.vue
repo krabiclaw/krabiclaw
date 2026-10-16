@@ -1073,7 +1073,7 @@ async function saveProductLocalization(locale: string, submitted: Record<string,
   })
 }
 
-useSeoMeta({ title: () => `${form.name || presentation.value.itemLabel} | Krabiclaw Dashboard`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${form.name || presentation.value.itemLabel} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
 provide(productEditorKey, {
   form,
   product,

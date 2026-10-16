@@ -61,7 +61,7 @@ import type { CurrencyCode } from '~/shared/currencies'
 import { formatCalendarDate, formatTimestamp } from '~/utils/timezone'
 
 definePageMeta({ layout: 'dashboard' })
-useSeoMeta({ title: 'Transactions | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Transactions | KrabiClaw', robots: 'noindex, nofollow' })
 
 const route = useRoute()
 const router = useRouter()

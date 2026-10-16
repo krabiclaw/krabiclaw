@@ -246,7 +246,7 @@ export async function runArticleBroadcast(db: DbClient, env: BroadcastEnv, now =
 
     const platformDomain = getPlatformDomain(env)
     // Resend substitutes its Topic-aware unsubscribe page for this placeholder
-    // per recipient; Krabiclaw's signed unsubscribe is for mail it sends itself.
+    // per recipient; KrabiClaw's signed unsubscribe is for mail it sends itself.
     const rendered = await renderNotificationEmail(articleAnnouncementMessage({
       title: article.title,
       summary: article.summary,

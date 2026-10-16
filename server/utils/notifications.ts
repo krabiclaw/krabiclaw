@@ -1510,7 +1510,7 @@ export async function notifyOrganizationInvited(
       deep_link: inviteUrl,
     },
     email: {
-      subject: `You're invited to join ${opts.organizationName} on Krabiclaw`,
+      subject: `You're invited to join ${opts.organizationName} on KrabiClaw`,
       html: rendered.html,
       text: rendered.text,
     },

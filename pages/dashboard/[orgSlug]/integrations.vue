@@ -60,7 +60,7 @@ export const integrationsKey = Symbol('integrations') as InjectionKey<{
 import EditorNavigationList, { type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
-useSeoMeta({ title: 'Integrations | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Integrations | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 
 const route = useRoute()
 const level = useRouteLevel()

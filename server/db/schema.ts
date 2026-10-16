@@ -1102,7 +1102,7 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 //   occupancy is never stored here. These rules are what guests and channels
 //   are offered; a stay the host enters themselves is not refused by them.
 // price_minor NULL means the base nightly price applies.
-// `source`: 'host' (edited in Krabiclaw) or 'import' (read from a channel when
+// `source`: 'host' (edited in KrabiClaw) or 'import' (read from a channel when
 //   the home was connected).
 // Deletion: cascades from the home.
 export const product_nights = sqliteTable("product_nights", {
@@ -1132,7 +1132,7 @@ export const product_nights = sqliteTable("product_nights", {
 
 // Row meaning: a guest stays at this home for the nights
 //   [check_in_date, check_out_date).
-// `owner`: 'app' stays are created and edited in Krabiclaw; 'channel' stays
+// `owner`: 'app' stays are created and edited in KrabiClaw; 'channel' stays
 //   arrive from a connected channel and are read-only here — they change only
 //   through that channel's revision feed.
 // `overbooked`: a channel stay the channel had already confirmed when it
@@ -1143,7 +1143,7 @@ export const product_nights = sqliteTable("product_nights", {
 //   offline receipts are stay_payments, and channel-collected money is the
 //   channel's.
 // Null semantics: guest contact fields are NULL when the channel withholds
-//   them. user_id is the guest's Krabiclaw account when known. provider and
+//   them. user_id is the guest's KrabiClaw account when known. provider and
 //   its references are NULL for app stays.
 // Deletion: a stay is cancelled, not deleted. Deleting the home is refused
 //   while it has stays (NO ACTION); the organization's cascade removes both in
@@ -1230,7 +1230,7 @@ export const stay_nights = sqliteTable("stay_nights", {
 ]);
 
 // Row meaning: the host recorded receiving (or, negative, refunding) this
-//   amount for an app stay outside Stripe. Not Krabiclaw-processed volume.
+//   amount for an app stay outside Stripe. Not KrabiClaw-processed volume.
 // `idempotency_key` makes a retried record the same row, never a second payment.
 // Deletion: cascades from the stay. A mistaken entry is deleted by the host.
 export const stay_payments = sqliteTable("stay_payments", {
@@ -1418,7 +1418,7 @@ export const organization_integrations = sqliteTable("organization_integrations"
 	// Google Analytics only: the property's web stream, which Zaraz serves.
 	measurement_id: text(),
 	// Search Console only: whether Google confirmed ownership, and the meta tag
-	// Krabiclaw serves while Google still requires it.
+	// KrabiClaw serves while Google still requires it.
 	verified: integer({ mode: "boolean" }),
 	verification_token: text(),
 	status: text({ enum: ["active", "disabled", "error"] }),
@@ -1506,7 +1506,7 @@ export const stripe_connected_accounts = sqliteTable("stripe_connected_accounts"
 	/** Pass on credit card fees: the surcharge rate in basis points, bounded by Stripe's maximum per card; NULL is off. */
 	surcharge_basis_points: integer(),
 	// Normalized requirements needed by the dashboard. Stripe remains the
-	// authority; Krabiclaw never collects or stores the requested KYC values.
+	// authority; KrabiClaw never collects or stores the requested KYC values.
 	requirements_json: text().default("[]").notNull(),
 	stripe_refreshed_at: text(),
 	last_error: text(),

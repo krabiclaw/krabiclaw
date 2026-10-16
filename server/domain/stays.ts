@@ -111,7 +111,7 @@ export interface StayHome {
   assigned_team_id: string | null
   /**
    * The channel this home is connected to, if any. null is a home kept only in
-   * Krabiclaw: its night changes go nowhere else. A connected home pushes its
+   * KrabiClaw: its night changes go nowhere else. A connected home pushes its
    * nights; one importing or disconnected does not.
    */
   channel: { provider: 'channex'; status: 'importing' | 'connected' | 'disconnected' } | null

@@ -115,7 +115,7 @@ components own only their links. Absolute platform URLs keep tenant-hosted
 dashboards pointed at the same articles. Go to your transactions remains scoped
 to the selected business.
 
-Stripe's settlement timing and payout schedule are separate. Krabiclaw does not
+Stripe's settlement timing and payout schedule are separate. KrabiClaw does not
 apply Airbnb check-in payout-release rules. Bank changes use Stripe Express;
 sent payouts cannot be redirected. Merchant refunds require authenticated browser
 approval. A paid visit's rejection or cancellation, a guest's own cancellation of
@@ -136,10 +136,10 @@ The 1.4% captured-volume fee remains billable after refunds/disputes; actual Str
 costs and subscription billing remain separate.
 
 The customer articles follow the provider help structure, with the relevant
-steps, timing, status explanations and troubleshooting mapped to Krabiclaw's
+steps, timing, status explanations and troubleshooting mapped to KrabiClaw's
 actual screens. They are complete task guidance rather than external-source
-summaries. Their links point only to related Krabiclaw articles and support.
-The dispute notification opens Krabiclaw payment details, not Stripe; the article
+summaries. Their links point only to related KrabiClaw articles and support.
+The dispute notification opens KrabiClaw payment details, not Stripe; the article
 explains the separate Stripe Express Payments → Disputes response workflow.
 The booking refund guide names Amount, Reason, Review refund and the final
 Approve and send refund action, including the 10-minute approval expiry.
@@ -157,7 +157,7 @@ Provider references for future operator maintenance (reviewed October 7, 2026):
 - [Stripe Express bank-change verification recovery](https://support.stripe.com/express/questions/how-do-i-update-my-payout-account-details-if-i-dont-have-my-previous-bank-or-card-details)
 - [Stripe Express wrong-bank payout troubleshooting](https://support.stripe.com/express/questions/my-payout-was-sent-to-the-wrong-bank-account)
 
-Amounts and Krabiclaw-specific rules come from the native financial and Metronome
+Amounts and KrabiClaw-specific rules come from the native financial and Metronome
 billing contracts below. Recheck both the provider guidance and the actual
 application actions before changing these articles; preserve their stable paths.
 
@@ -276,7 +276,7 @@ No application-liability fallback exists. Refund/dispute principal follows Strip
 native semantics. Captured-volume usage remains billable after refunds/disputes.
 
 The supported path uses Stripe-hosted onboarding, an Express Dashboard login-link
-handoff, Radar and the native full service agreement. Krabiclaw never accepts the
+handoff, Radar and the native full service agreement. KrabiClaw never accepts the
 merchant's agreement or stores KYC answers. Payments/Connect explicitly select the
 central `2026-09-30.preview` pin in the existing Stripe client factory; default
 Better Auth/billing callers retain `2026-08-26.dahlia`. Better Auth's separate inbound

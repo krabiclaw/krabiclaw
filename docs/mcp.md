@@ -1,6 +1,6 @@
 # MCP
 
-Krabiclaw ships one MCP surface. Every site, Krabiclaw's own included, is managed
+KrabiClaw ships one MCP surface. Every site, KrabiClaw's own included, is managed
 through it with the same tools.
 
 ## Surface
@@ -10,7 +10,7 @@ through it with the same tools.
 - Server entrypoint: `server/api/mcp.ts`
 - Scope: `tenant`
 - Exposes: existing-tenant content management, menus, experiences, posts, articles
-  (blog and, on Krabiclaw's own site, documentation), media, reviews,
+  (blog and, on KrabiClaw's own site, documentation), media, reviews,
   customer inquiries, Q&A, analytics, bookings, guest change proposals, member
   availability and financial reads
 - MCP can save and publish website setup and create a location using the supplied
@@ -26,7 +26,7 @@ through it with the same tools.
   `reconcile_post_publication`, never by publishing again. Nothing is scheduled: a client that
   wants a post out later calls `publish_post` then.
 
-Krabiclaw's marketing site is an ordinary organization running the platform
+KrabiClaw's marketing site is an ordinary organization running the platform
 template. Its blog and documentation are article collections on that
 organization and are edited with the same tools as any tenant's articles, using
 its `organization_id`.
@@ -47,7 +47,7 @@ intervals, not personal event titles or descriptions. Failed or stale selected
 calendar reads block new availability rather than treating unknown time as free.
 
 The CMS selects the primary personal calendar and offers **Avoid double bookings**.
-The business connection creates or reuses its **Krabiclaw** calendar automatically.
+The business connection creates or reuses its **KrabiClaw** calendar automatically.
 Neither flow requires a calendar picker. Google event edits do not change bookings.
 See [Google Calendar](integrations/google-calendar.md) for projection and cleanup.
 
@@ -74,7 +74,7 @@ See [Google Calendar](integrations/google-calendar.md) for projection and cleanu
 
 ## Tool catalog
 
-Krabiclaw exposes one canonical tool contract. Every tool name, input schema,
+KrabiClaw exposes one canonical tool contract. Every tool name, input schema,
 output schema, and executor must agree. Unknown tool names return JSON-RPC
 `-32601` over HTTP 200.
 

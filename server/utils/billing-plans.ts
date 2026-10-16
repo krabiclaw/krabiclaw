@@ -75,7 +75,7 @@ const STARTER_PLAN: Plan = {
   highlighted: false,
   prices: [],
   features: [
-    'Free Krabiclaw ChatGPT app — build & edit your site by chatting',
+    'Free KrabiClaw ChatGPT app — build & edit your site by chatting',
     'Bookings, ticketed experiences & consultation requests',
     'Email notifications for reservations & bookings',
     'Structured SEO schema for restaurants, experiences & legal practices',

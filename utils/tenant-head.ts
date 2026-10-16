@@ -8,7 +8,7 @@ export interface TenantHeadLinkOptions {
 }
 
 /**
- * The platform's own pages carry the Krabiclaw mark. A tenant carries its
+ * The platform's own pages carry the KrabiClaw mark. A tenant carries its
  * `favicon` placement, or no icon links at all: serving our mark on a
  * customer's domain presented it as theirs, and made a tenant that was never
  * asked for a favicon look like one that has one.

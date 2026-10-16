@@ -32,5 +32,5 @@ const groups = computed<EditorNavigationGroup[]>(() => [{
   })),
 }])
 
-useSeoMeta({ title: 'Notifications | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Notifications | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>

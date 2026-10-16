@@ -12,5 +12,5 @@ defineProps<{ personalScope?: boolean }>()
 const route = useRoute()
 const pastOnly = computed(() => route.query.archived !== undefined && route.query.view !== 'updates')
 const firstThread = ref<RouteLocationRaw | null>(null)
-useSeoMeta({ title: 'Messages | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Messages | KrabiClaw', robots: 'noindex, nofollow' })
 </script>

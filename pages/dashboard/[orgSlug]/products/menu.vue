@@ -94,5 +94,5 @@ const scopes = computed(() => {
   ]
 })
 
-useSeoMeta({ title: 'Menu | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Menu | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>

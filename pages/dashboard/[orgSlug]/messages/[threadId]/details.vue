@@ -44,5 +44,5 @@ const recordTitle = computed(() => (thread.value
   ? threadRecordTitle(thread.value.submissionType, dashboard.organization.value?.vertical ?? null)
   : 'Details'))
 
-useSeoMeta({ title: 'Reservation details | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Reservation details | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>

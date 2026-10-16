@@ -34,7 +34,7 @@ async function listPublishedTenantSitemapPages(db: DbClient, organizationId: str
 /**
  * A site's listed articles, on every template, the index of each collection
  * that has one (the blog at its template's prefix, the docs at /docs), and
- * each category page that lists at least one of them. Krabiclaw's site and
+ * each category page that lists at least one of them. KrabiClaw's site and
  * every customer's read the same queries.
  */
 async function listSitemapArticleEntries(db: DbClient, organizationId: string, template: Parameters<typeof tenantBlogPostPath>[0]): Promise<SitemapEntry[]> {
@@ -113,7 +113,7 @@ export default definePlugin((nitroApp) => {
       const platformOrganizationId = event.context.organizationId as string
       entries.push(...PLATFORM_SITEMAP_ROUTES.map(loc => ({ loc })))
 
-      // Krabiclaw's marketing pages are page documents on its own organization,
+      // KrabiClaw's marketing pages are page documents on its own organization,
       // listed from the same table as every customer's pages.
       for (const page of await listPublishedTenantSitemapPages(db, platformOrganizationId)) {
         if (!page.path) continue

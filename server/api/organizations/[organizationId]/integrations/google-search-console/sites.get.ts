@@ -11,7 +11,7 @@ import { organizationPublicUrl } from '~/server/utils/domains'
 /**
  * What the Search Console leaf shows: the property chosen, the Better Auth
  * account it was connected through, the properties an account already owns,
- * and this site's own public URL — the one Krabiclaw can verify
+ * and this site's own public URL — the one KrabiClaw can verify
  * automatically, which is offered even when the account does not own it yet.
  *
  * Which account is the caller's to say (`account_id`); without one, the

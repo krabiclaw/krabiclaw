@@ -619,5 +619,5 @@ function percentOfViews(views: number): number {
   return total > 0 ? Math.round((views / total) * 100) : 0
 }
 
-useSeoMeta({ title: 'Insights | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Insights | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>

@@ -81,7 +81,7 @@ theme:
 
 **Menu is a launcher, not a parent.** It lists the Earnings and Insights cards,
 then Website, Locations, Team, Integrations, Platform accounts (Better
-Auth admins, inside Krabiclaw's own organization only), Account settings,
+Auth admins, inside KrabiClaw's own organization only), Account settings,
 Switch to Personal and Log out. Each row opens a destination of its own; none
 is nested under Menu. The desktop slideover and the narrow Menu page render the
 one model in `useOrganizationSettingsNavigation`.

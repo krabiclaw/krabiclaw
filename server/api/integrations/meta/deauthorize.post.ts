@@ -7,7 +7,7 @@ import { configuredMetaApps, verifyMetaSignedRequest } from '~/server/utils/meta
 /**
  * Meta's deauthorize callback: a protocol adapter and nothing else.
  *
- * Meta posts a signed request when someone removes a Krabiclaw app from their
+ * Meta posts a signed request when someone removes a KrabiClaw app from their
  * Facebook or Instagram settings. Verifying the signature is the whole
  * authorization check, and which app's secret verified it says whose account
  * it names. What follows ends that person's connections; the website keeps its

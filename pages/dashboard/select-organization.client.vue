@@ -57,7 +57,7 @@ import { isNewSalePlan } from '~/shared/billing-model'
 
 // No organization scope yet, so no dashboard chrome and no scoped context.
 definePageMeta({ layout: 'standalone' })
-useSeoMeta({ title: 'Choose an organization | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Choose an organization | KrabiClaw', robots: 'noindex, nofollow' })
 
 const route = useRoute()
 if (route.query.plan !== undefined && !isNewSalePlan(route.query.plan)) {

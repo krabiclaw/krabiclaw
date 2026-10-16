@@ -42,7 +42,7 @@ on the existing OAuth client. Live Better Auth consent, callback routing, event
 creation/update/cancellation, disconnect cleanup and member busy-calendar reads across the 94-day horizon
 were exercised on October 4, 2026 against the built local Worker and the separate
 private verification calendar. Those test events and connections were removed.
-The redesigned CMS subsequently created the business's Krabiclaw calendar through
+The redesigned CMS subsequently created the business's KrabiClaw calendar through
 real consent, without calendar or export-policy choices. Desktop/mobile hours,
 time-off sheets, profile edits and the personal Avoid double bookings switch were
 exercised against the built Worker and read back through D1. The empty business

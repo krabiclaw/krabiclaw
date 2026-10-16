@@ -90,7 +90,7 @@ import { isEarningsPerformance, isPayoutsView, type EarningsPerformance, type Pa
 import { formatCalendarDate } from '~/utils/timezone'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
-useSeoMeta({ title: 'Earnings | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Earnings | KrabiClaw', robots: 'noindex, nofollow' })
 
 const route = useRoute()
 const api = useDashboardApi()

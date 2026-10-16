@@ -22,7 +22,7 @@ function facts(...entries: Array<NotificationFact | null>): NotificationFact[] {
 export function verifyEmailMessage(input: { verificationUrl: string }): NotificationMessage {
   return {
     title: 'Verify your email',
-    preheader: 'Confirm your address to finish setting up your Krabiclaw account.',
+    preheader: 'Confirm your address to finish setting up your KrabiClaw account.',
     hero: null,
     intro: 'Confirm your email address to finish setting up your account and keep your sign-in secure.',
     facts: [],
@@ -35,7 +35,7 @@ export function verifyEmailMessage(input: { verificationUrl: string }): Notifica
 export function resetPasswordMessage(input: { resetUrl: string }): NotificationMessage {
   return {
     title: 'Reset your password',
-    preheader: 'Choose a new Krabiclaw password.',
+    preheader: 'Choose a new KrabiClaw password.',
     hero: null,
     intro: 'We received a request to reset your password. The link below is secure and single-use.',
     facts: [],
@@ -53,7 +53,7 @@ export function organizationInviteMessage(input: {
 }): NotificationMessage {
   return {
     title: `You're invited to ${input.organizationName}`,
-    preheader: `${input.inviterName} invited you to join ${input.organizationName} on Krabiclaw.`,
+    preheader: `${input.inviterName} invited you to join ${input.organizationName} on KrabiClaw.`,
     hero: null,
     facts: facts(
       fact('invitedBy', 'Invited by', input.inviterName),

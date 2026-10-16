@@ -6,7 +6,7 @@ import { ChannexDataError, object } from './data'
 
 /**
  * Outbound availability, prices and stay rules for a home connected through
- * Channex. Krabiclaw is the master: after a write changes nights, their current
+ * Channex. KrabiClaw is the master: after a write changes nights, their current
  * values go to Channex, and each night records what Channex took. Ported from
  * the lodging Worker's ari.ts, with restrictions added because nights here
  * also carry their price and stay rules.

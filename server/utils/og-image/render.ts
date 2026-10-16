@@ -6,7 +6,7 @@ import { resolveOgImageRenderer } from './renderers/index.ts'
 import { fetchTransformedImageAsDataUri } from './fetch-image.ts'
 import { ensureResvgInitialized, loadLocalWasmModule } from '~/server/utils/resvg-runtime'
 // The brand mark comes from the site's own logo placement (a media asset URL),
-// Krabiclaw's site included.
+// KrabiClaw's site included.
 function resolveLogoDataUri(images: ImagesBinding, logoUrl: string | null | undefined, publicOrigin: string): Promise<string | null> {
   return fetchTransformedImageAsDataUri(images, logoUrl ? resolveSeoUrl(logoUrl, publicOrigin) : null, { width: 160, height: 160, fit: 'contain' }, { format: 'image/png' })
 }

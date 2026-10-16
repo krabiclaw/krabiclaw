@@ -326,7 +326,7 @@ async function contentReviewUrls(
   env?: CloudflareEnv,
 ) {
   const id = String(record.id ?? '')
-  // Every site's articles, Krabiclaw's included, are edited in the shared dashboard CMS.
+  // Every site's articles, KrabiClaw's included, are edited in the shared dashboard CMS.
   const adminEditUrl = context ? blogEditorPath(context.orgSlug, id) : null
   const isPublished = typeof record.status === 'string' ? record.status === 'published' : Boolean(record.published_at)
 

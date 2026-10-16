@@ -71,7 +71,7 @@ export const PUBLIC_PRODUCT_SQL = `pub.published = 1 AND (p.kind <> 'experience'
   OR EXISTS (SELECT 1 FROM product_booking_configs cfg WHERE cfg.product_id = p.id AND cfg.organization_id = p.organization_id AND cfg.duration_minutes > 0))
   AND (p.kind <> 'stay' OR NULLIF(trim(p.order_url), '') IS NOT NULL)`
 
-/** Guests book a place to stay through its external booking link until Krabiclaw takes direct stays. */
+/** Guests book a place to stay through its external booking link until KrabiClaw takes direct stays. */
 function assertStayPublishable(product: { kind: ProductKind; order_url: string | null }): void {
   if (product.kind === 'stay' && !product.order_url?.trim()) conflict('Add the link where guests book this place to stay before publishing it')
 }

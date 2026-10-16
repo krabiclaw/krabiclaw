@@ -1,6 +1,6 @@
-# Krabiclaw
+# KrabiClaw
 
-Krabiclaw helps local and professional-service businesses build and manage a
+KrabiClaw helps local and professional-service businesses build and manage a
 website through the dashboard and the ChatGPT app. Restaurant, experience and
 service businesses share one tenant backend for locations, products, content,
 media and guest activity. Public sites render on the server and use the template
@@ -19,9 +19,9 @@ assignment until an explicit reassignment. Approved member profiles introduce
 the person guests will meet on the service page.
 
 Google Calendar is optional. Connecting the business creates or reuses its
-Krabiclaw calendar and projects upcoming pending and confirmed bookings and
+KrabiClaw calendar and projects upcoming pending and confirmed bookings and
 reservations. Connecting a member's personal account can exclude busy times from
-new availability. Google event edits do not reschedule Krabiclaw bookings, and
+new availability. Google event edits do not reschedule KrabiClaw bookings, and
 personal event titles and descriptions are not imported.
 
 Google Cloud Console reports branding and data access verified as of 2026-10-04.

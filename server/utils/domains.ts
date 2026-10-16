@@ -154,7 +154,7 @@ export function validateCustomDomain(env: DomainEnv, domain: string): { valid: b
 
   for (const platformDomain of platformDomainCandidates(env)) {
     if (normalized === platformDomain || normalized.endsWith(`.${platformDomain}`)) {
-      return { valid: false, reason: 'This domain is reserved for Krabiclaw platform traffic' }
+      return { valid: false, reason: 'This domain is reserved for KrabiClaw platform traffic' }
     }
   }
 

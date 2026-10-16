@@ -20,7 +20,7 @@ import PlanSettings from '~/components/dashboard/settings/PlanSettings.vue'
 import PaymentsAccountSettings from '~/components/dashboard/settings/PaymentsAccountSettings.vue'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'dashboard-orgSlug-earnings' })
-useSeoMeta({ title: 'Payments | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Payments | KrabiClaw', robots: 'noindex, nofollow' })
 
 const route = useRoute()
 const router = useRouter()

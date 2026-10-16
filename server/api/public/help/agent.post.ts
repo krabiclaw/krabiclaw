@@ -11,7 +11,7 @@ interface HelpMessage {
 }
 
 const DEFAULT_DISCOVERY_PROMPTS = [
-  'How do I connect my own domain?', 'How do I add or update menu items?', 'Do I need technical skills to use Krabiclaw?', ]
+  'How do I connect my own domain?', 'How do I add or update menu items?', 'Do I need technical skills to use KrabiClaw?', ]
 const IP_HOURLY_LIMIT = 30
 
 function logPublicHelpEventDetached(
@@ -99,7 +99,7 @@ export default defineHandler(async (event) => {
         const aiOutput = await runWorkersAiText(env, [
           {
             role: 'system', content: [
-              'You are Krabiclaw Support, a concise public support assistant.', 'Only answer using the provided search results.', 'If the search results are insufficient, the question needs account-specific help, or the user appears blocked, escalate to a support form.', 'Do not escalate for greetings, vague openers, or questions that should first get a clarifying follow-up.', 'Return exactly this format:', 'ESCALATE: yes|no', 'TOPIC: <short topic>', 'SUMMARY: <one sentence support summary or none>', 'ANSWER:', '<markdown answer>', ].join('\n'), }, {
+              'You are KrabiClaw Support, a concise public support assistant.', 'Only answer using the provided search results.', 'If the search results are insufficient, the question needs account-specific help, or the user appears blocked, escalate to a support form.', 'Do not escalate for greetings, vague openers, or questions that should first get a clarifying follow-up.', 'Return exactly this format:', 'ESCALATE: yes|no', 'TOPIC: <short topic>', 'SUMMARY: <one sentence support summary or none>', 'ANSWER:', '<markdown answer>', ].join('\n'), }, {
             role: 'user', content: [
               topic ? `Selected topic: ${topic}` : 'Selected topic: none', history.length ? `Recent conversation:\n${history.map(item => `${item.role}: ${item.content}`).join('\n')}` : 'Recent conversation: none', `User question: ${message}`, `Search results:\n${promptResults || 'No relevant results found.'}`, ].join('\n\n'), }, ], { maxTokens: 700, temperature: 0.2 })
 

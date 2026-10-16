@@ -177,7 +177,7 @@ export async function attachPageQa<T extends { type: string; data: Record<string
  * dashboard says to manage it in Google.
  *
  * Making *every* Q&A read-only instead stranded the 72 records four sites had
- * authored — NCLS's practice-area answers and Krabiclaw's own 50 docs questions
+ * authored — NCLS's practice-area answers and KrabiClaw's own 50 docs questions
  * among them — with no way left to correct a word.
  */
 export async function createQa(db: DbClient, scope: QaScope, input: CreateQaInput) {

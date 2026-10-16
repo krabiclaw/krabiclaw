@@ -48,7 +48,7 @@ async function currentBooking(env: ChannexEnv, bookingId: string, propertyId: st
   const status = string(attributes.status, 'booking status')
   if (status !== 'new' && status !== 'modified' && status !== 'cancelled') throw new ChannexDataError(`booking ${bookingId} has unknown status ${status}`)
   const channel = CHANNELS[string(attributes.ota_name, 'ota_name').toLowerCase()]
-  if (!channel) throw new ChannexDataError(`booking ${bookingId} comes from ${String(attributes.ota_name)}, which Krabiclaw does not take yet`)
+  if (!channel) throw new ChannexDataError(`booking ${bookingId} comes from ${String(attributes.ota_name)}, which KrabiClaw does not take yet`)
   const currentRevision = string(attributes.revision_id, 'revision_id')
   const revisedAt = currentRevision === delivered.id
     ? delivered.insertedAt

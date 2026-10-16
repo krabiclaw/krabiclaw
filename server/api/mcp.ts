@@ -32,6 +32,7 @@ import { logMcpToolCallEvent, mcpTelemetryMethod } from "~/server/utils/mcp-tele
 import { describeErrorForTelemetry } from "~/shared/error-telemetry";
 import { getRequestDataMetrics, recordRequestPhase } from "~/server/utils/request-metrics";
 import { mcpFinancialApprovalErrorResult } from "~/server/utils/mcp-financial-handoff";
+import { KRABICLAW_BUG_REPORT_URL, KRABICLAW_FEATURE_REQUEST_URL } from "~/shared/open-source";
 
 const TENANT_CATALOG_FINGERPRINT = catalogFingerprint(MCP_PUBLIC_TOOLS);
 
@@ -64,7 +65,7 @@ function resolveTenantToolMeta(toolName: string | null): McpToolMeta {
   return { domain: tool?.domain ?? null, isMutating: isMcpMutatingTool(tool) };
 }
 
-const MCP_INSTRUCTIONS = `Manage the selected business. Read current state and preserve unrelated values. Ask for missing business facts; never invent prices or booking details. Finish website changes and verify returned public URLs. Keep menu sections and order; experiences need bookings. Use revision and retry keys, and follow pagination. Publish or message only requested destinations. Payment reports are read-only; financial_action_required means the action remains incomplete. Report tool errors and partial outcomes plainly. If a KrabiClaw capability described in its documentation has no tool in this list, the client's saved tool list is out of date, not the server: tell the user to follow https://krabiclaw.com/docs/refresh-krabiclaw-tools-in-chatgpt in a desktop browser (not the mobile app) and start a new chat.`;
+const MCP_INSTRUCTIONS = `Manage the selected business. Read current state and preserve unrelated values. Ask for missing business facts; never invent prices or booking details. Finish website changes and verify returned public URLs. Keep menu sections and order; experiences need bookings. Use revision and retry keys, and follow pagination. Publish or message only requested destinations. Payment reports are read-only; financial_action_required means the action remains incomplete. Report tool errors and partial outcomes plainly. If a KrabiClaw capability described in its documentation has no tool in this list, the client's saved tool list is out of date, not the server: tell the user to follow https://krabiclaw.com/docs/refresh-krabiclaw-tools-in-chatgpt in a desktop browser (not the mobile app) and start a new chat. To report a KrabiClaw bug or request a feature, do not email KrabiClaw: give the user a prefilled ${KRABICLAW_BUG_REPORT_URL} link (fields title, surface, site, what_happened, expected, tool_error) or ${KRABICLAW_FEATURE_REQUEST_URL} link (title, need, today, site) to open. Issues are public; leave out guest names, contact details and payment data. Account, billing and private matters go to https://krabiclaw.com/help.`;
 
 // H3's request context follows the SDK's original requestInfo into the factory.
 interface McpFactoryContext {

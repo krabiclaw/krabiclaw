@@ -56,7 +56,7 @@ test('unknown sites render an unbranded 404 while resolved tenant errors retain 
   expect(unknown?.status()).toBe(404)
   await expect(page.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
   await expect(page.getByText('Error 404', { exact: true })).toBeVisible()
-  expect(await page.locator('body').innerText()).not.toMatch(/Krabiclaw|Ember & Slice|North Carolina Legal Services/)
+  expect(await page.locator('body').innerText()).not.toMatch(/Krabi[Cc]law|Ember & Slice|North Carolina Legal Services/)
   await page.unrouteAll()
   const missing = await openTenantPage(page, `${blawbyBaseURL}/no-such-page`, blawbyExtraHeaders)
   expect(missing?.status()).toBe(404)
@@ -208,7 +208,7 @@ async function expectTenantDocument(page: Page, tenant: Tenant) {
   ))
 }
 
-test('Krabiclaw pricing retains its billing plans after hydration', async ({ page }) => {
+test('KrabiClaw pricing retains its billing plans after hydration', async ({ page }) => {
   await page.emulateMedia({ colorScheme: 'light' })
   await page.addInitScript(() => localStorage.setItem('krabiclaw-theme', 'light'))
   const baseURL = testBaseUrl()
@@ -227,7 +227,7 @@ test('Krabiclaw pricing retains its billing plans after hydration', async ({ pag
 })
 
 for (const width of [390, 1440]) {
-  test(`Krabiclaw MCP reference has usable anchors and contained tables at ${width}px`, async ({ page, request }, testInfo) => {
+  test(`KrabiClaw MCP reference has usable anchors and contained tables at ${width}px`, async ({ page, request }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
     const baseURL = testBaseUrl()
     let referenceURL = `${baseURL}/docs/mcp-tool-reference`
@@ -319,7 +319,7 @@ for (const width of [390, 1440]) {
   })
 
   for (const { slug } of mcpCatalog.publicDocumentation) {
-    test(`Krabiclaw workflow ${slug} renders its guidance and media at ${width}px`, async ({ page }) => {
+    test(`KrabiClaw workflow ${slug} renders its guidance and media at ${width}px`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
       const source = await page.request.get(`${testBaseUrl()}/api/public/blog/${slug}?collection=docs`)
       expect(source.status()).toBe(200)
@@ -358,7 +358,7 @@ for (const width of [390, 1440]) {
     })
   }
 
-  test(`Krabiclaw policies render their own headers and body at ${width}px`, async ({ page }) => {
+  test(`KrabiClaw policies render their own headers and body at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     const errors: string[] = []
     page.on('pageerror', error => errors.push(error.message))
@@ -377,7 +377,7 @@ for (const width of [390, 1440]) {
   })
 }
 
-test('Krabiclaw social viewer keyboard navigation changes the visible media', async ({ page }) => {
+test('KrabiClaw social viewer keyboard navigation changes the visible media', async ({ page }) => {
   const response = await openTenantPage(page, `${testBaseUrl()}/`, {})
   expect(response?.status()).toBe(200)
   await waitForNuxtHydration(page)

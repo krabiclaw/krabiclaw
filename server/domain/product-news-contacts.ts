@@ -5,7 +5,7 @@ import { isReservedTestDomain, shouldSendRealEmail } from '~/server/utils/email-
 import { getResendClient, resendData, type ResendEnv } from '~/server/utils/resend'
 
 /**
- * Product News is a Resend projection of Krabiclaw state.
+ * Product News is a Resend projection of KrabiClaw state.
  *
  * D1 holds the intent — the Better Auth user and `product_news.email` in
  * user_notification_preferences. Resend holds the email-provider side: one
@@ -16,7 +16,7 @@ import { getResendClient, resendData, type ResendEnv } from '~/server/utils/rese
  *
  * An opt-out wins from either side. A person who turns Product News off here
  * unsubscribes the Topic; a person who unsubscribes through Resend turns the
- * local preference off. Only an explicit opt-in in Krabiclaw's settings turns
+ * local preference off. Only an explicit opt-in in KrabiClaw's settings turns
  * a Contact back on — background reconciliation never re-subscribes anyone.
  */
 
@@ -162,7 +162,7 @@ async function syncUser(
   if (contact.unsubscribed) {
     if (reason === 'user_opt_in') {
       // The one path that may lift a global unsubscribe: the person turned
-      // Product News on in Krabiclaw's settings just now.
+      // Product News on in KrabiClaw's settings just now.
       await resendData('contacts.update', () => resend.contacts.update({ email, unsubscribed: false }))
       counts.resubscribed += 1
     } else if (wants) {

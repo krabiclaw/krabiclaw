@@ -1,6 +1,6 @@
 <template>
   <main class="dev-perf-page">
-    <h1>Krabiclaw local text performance page</h1>
+    <h1>KrabiClaw local text performance page</h1>
     <p>
       This page intentionally renders plain text through Nuxt with no layout,
       no components, no images, and no data fetching.

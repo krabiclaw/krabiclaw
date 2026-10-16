@@ -33,7 +33,7 @@ import { isCurrencyCode } from '~/shared/currencies'
 import { formatCalendarDate } from '~/utils/timezone'
 
 definePageMeta({ layout: 'dashboard' })
-useSeoMeta({ title: 'Your payments | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Your payments | KrabiClaw', robots: 'noindex, nofollow' })
 
 type History = { configured: boolean; invoices: BillingInvoiceRow[] }
 const isHistory = (value: unknown): value is History => isRecord(value) && typeof value.configured === 'boolean'

@@ -2,7 +2,7 @@
 //
 // A page is an ordered list of typed blocks. The block says what the content
 // *is* — a hero, a feature grid, a question set — and the template says how it
-// looks. Saya's hero, Blawby's hero and Krabiclaw's hero are three renderings
+// looks. Saya's hero, Blawby's hero and KrabiClaw's hero are three renderings
 // of one block, and nothing in the document chooses between them: the site's
 // template does, because that is what a template is for.
 //
@@ -77,7 +77,7 @@ type BlockPresentation = Component<{ block: TenantPageBlock, page: PublicTenantP
 const feedOrBlock = (component: unknown) => component as BlockPresentation
 
 const PRESENTATIONS: Readonly<Record<string, BlockPresentation>> = {
-  // Krabiclaw's own marketing template. One component per block type, and the
+  // KrabiClaw's own marketing template. One component per block type, and the
   // component reads its block — no dispatcher, and nothing in the document
   // choosing between them.
   'platform:hero': PlatformMarketingHero,

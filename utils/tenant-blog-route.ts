@@ -4,7 +4,7 @@ import { collectionArticlePath, type ArticleCollection } from '~/utils/article-c
 /**
  * The public path of an article on a site. A blog article lives at the
  * template's own prefix — /blog or /article — and documentation, which only
- * Krabiclaw publishes, at /docs. Nothing stands between the prefix and the
+ * KrabiClaw publishes, at /docs. Nothing stands between the prefix and the
  * slug on either.
  */
 export function tenantBlogPostPath(

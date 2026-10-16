@@ -19,8 +19,8 @@ export function useOrganizationSettingsNavigation(organization: Ref<{ id: string
   const base = computed(() => organization.value ? `/dashboard/${encodeURIComponent(organization.value.slug)}` : null)
 
   /**
-   * Every account on the platform, and impersonation: Krabiclaw runs on
-   * Krabiclaw, so only its own organization's Menu carries this row, and only
+   * Every account on the platform, and impersonation: KrabiClaw runs on
+   * KrabiClaw, so only its own organization's Menu carries this row, and only
    * for a Better Auth admin. The template is read off the route's loaded
    * organization context, the same reading the page itself gates on. Airbnb
    * has no equivalent; internal admin tooling is not in the host's dashboard.
