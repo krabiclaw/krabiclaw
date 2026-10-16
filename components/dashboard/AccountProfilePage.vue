@@ -259,7 +259,7 @@ const notificationSummary = computed(() => {
   const preferences = notificationPreferences.value
   if (!preferences) return ''
   const settings = Object.values(preferences)
-  const on = settings.filter(setting => setting.email || setting.whatsapp).length
+  const on = settings.filter(setting => setting.email || setting.whatsapp || setting.push).length
   return on === settings.length ? 'All on' : `${on} of ${settings.length} on`
 })
 

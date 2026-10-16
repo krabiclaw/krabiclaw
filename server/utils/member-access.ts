@@ -396,17 +396,32 @@ export function assignedBookingSql(alias: string): string {
       AND assigned_product.id = ${alias}.product_id AND assigned_product.kind = 'service')`
 }
 
+/** The same assigned-conversation scope is used by lists, reads, writes and realtime. */
+export function assignedGuestThreadScope(alias: string, userId: string): { sql: string; params: string[] } {
+  return {
+    sql: `(EXISTS (SELECT 1 FROM bookings b WHERE b.request_id = ${alias}.id AND b.organization_id = ${alias}.organization_id AND ${assignedBookingSql('b')})
+      OR EXISTS (SELECT 1 FROM stays st JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
+        WHERE st.request_id = ${alias}.id AND st.organization_id = ${alias}.organization_id AND ${assignedHomeSql('c')})
+      OR EXISTS (SELECT 1 FROM channel_threads ct JOIN product_stay_configs c ON c.organization_id = ct.organization_id AND c.product_id = ct.product_id
+        WHERE ct.request_id = ${alias}.id AND ct.organization_id = ${alias}.organization_id AND ${assignedHomeSql('c')}))`,
+    params: [userId, userId, userId, userId, userId],
+  }
+}
+
 /** Appointments retain their own member even after the service is reassigned. */
 export async function assertAssignedBookingAccess(db: DbClient, input: MemberAccessPrincipal & { bookingId?: string; requestId?: string; sessionId?: string }): Promise<void> {
   if (await roleAllows({ ...input, permissions: { operations: ['update'] } })) return
   await assertRoleAllows({ ...input, permissions: { operations: ['assigned'] } })
-  const assigned = await queryFirst(db, `SELECT b.id FROM bookings b WHERE b.organization_id = ? AND (${assignedBookingSql('b')})
-    AND ${input.bookingId ? 'b.id' : 'b.request_id'} = ?`, [input.organizationId, input.userId, input.bookingId ?? input.requestId])
-  if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Consultation not found or access denied' })
+  const threadScope = assignedGuestThreadScope('r', input.userId)
+  const assigned = input.requestId && !input.bookingId
+    ? await queryFirst(db, `SELECT r.id FROM requests r WHERE r.organization_id = ? AND r.id = ? AND ${threadScope.sql}`, [input.organizationId, input.requestId, ...threadScope.params])
+    : await queryFirst(db, `SELECT b.id FROM bookings b WHERE b.organization_id = ? AND (${assignedBookingSql('b')})
+      AND b.id = ?`, [input.organizationId, input.userId, input.bookingId])
+  if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Conversation not found or access denied', data: { code: 'THREAD_NOT_FOUND', field: input.requestId ? 'threadId' : 'bookingId' } })
   if (input.sessionId) {
     const destination = await queryFirst(db, `SELECT s.id FROM product_sessions s JOIN bookings b ON b.product_id = s.product_id AND b.organization_id = s.organization_id
       WHERE b.organization_id = ? AND ${input.bookingId ? 'b.id' : 'b.request_id'} = ? AND s.id = ? AND ${sessionMemberSql('s')} = b.assigned_member_id`, [input.organizationId, input.bookingId ?? input.requestId, input.sessionId])
-    if (!destination) throw new HTTPError({ statusCode: 403, message: 'Changing the assigned provider requires admin access' })
+    if (!destination) throw new HTTPError({ statusCode: 403, message: 'Changing the assigned provider requires admin access', data: { code: 'PROVIDER_ASSIGNMENT_FORBIDDEN', field: 'sessionId' } })
   }
 }
 

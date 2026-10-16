@@ -5,7 +5,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import * as schema from '../../server/db/schema.ts'
 import { threadPayloadForGuest, requestInsertQueries, getGuestRequest } from '../../server/domain/requests.ts'
 import { upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
-import test from 'node:test'
+import test, { mock } from 'node:test'
 import { Miniflare } from 'miniflare'
 import { createDeliveryReceipt, getDeliveryById, isVisibleDeliveryFailure, listThreadDeliveries, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
@@ -17,6 +17,7 @@ import { createCanonicalNotification } from '../../server/utils/notification-cen
 import { buildNotificationVisibilityFilter, type NotificationVisibilityPrincipal } from '../../server/utils/notification-access.ts'
 import { acknowledgeNotification } from '../../server/utils/notification-acknowledgement.ts'
 import { setNotificationPreference } from '../../server/domain/notification-preferences.ts'
+import { registerDevice } from '../../server/domain/devices.ts'
 import { guestPaymentMessage, ownerPaymentMessage } from '../../server/notifications/payment-events.ts'
 import { getResendClient, resendData } from '../../server/utils/resend.ts'
 import { getReviewBookingContext } from '../../server/utils/review-requests.ts'
@@ -54,6 +55,46 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     assert.equal((await listGuestThreads(db, 'org-proof', { userId: 'user-proof', unreadOnly: true }))[0]?.id, 'contact-proof')
     assert.deepEqual((await db.prepare("SELECT d.purpose,d.status FROM guest_thread_deliveries d JOIN activity_entries e ON e.id=d.entry_id WHERE e.request_id='contact-proof' ORDER BY d.purpose").all()).results,
       [{ purpose: 'guest_acknowledgement', status: 'sent' }, { purpose: 'owner_alert', status: 'sent' }])
+
+    // Push is a channel of the same owner alert: one delivery per signed-in
+    // device, routed to that token's APNs environment, every outcome recorded.
+    await db.prepare("INSERT INTO session (id, expiresAt, token, userId) VALUES ('session-proof', unixepoch() + 3600, 'session-token-proof', 'user-proof')").run()
+    const deviceToken = 'ab'.repeat(32)
+    await registerDevice(db, { token: deviceToken, environment: 'sandbox', userId: 'user-proof', sessionId: 'session-proof' })
+    const notifyPushContact = async (contactEnv: typeof env, id: string) => {
+      const writes = requestInsertQueries({ id, kind: 'contact', organization_id: 'org-proof', location_id: null, user_id: null, review_id: null, conversation_state: 'needs_attention', resolved_at: null, payload: { guest: { name: 'Proof Guest', email: 'guest@proof.example', phone: null }, subject: null, message: 'Hello', consent_at: null, ip_hash: null }, created_at: now, updated_at: now })
+      await db.batch(writes.map(write => db.prepare(write.query).bind(...write.params)))
+      await notifyContactSubmitted(contactEnv, db, { organizationId: 'org-proof', organizationName: 'Proof', locationId: null, contactId: id, guestName: 'Proof Guest', email: 'guest@proof.example', subject: null, message: 'Hello' })
+    }
+    const pushDelivery = (id: string) => db.prepare("SELECT d.provider, d.status, d.error, d.provider_message_id FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id WHERE e.request_id = ? AND d.channel = 'push'").bind(id).all().then(result => result.results)
+    // An owner alert that fails is recorded on its delivery and does not fail the guest's submission.
+    await notifyPushContact(env, 'push-unconfigured')
+    assert.deepEqual(await pushDelivery('push-unconfigured'), [{ provider: 'apns', status: 'failed', error: 'APNS_CONFIG_REQUIRED: APNS_KEY_ID is not configured for APNs delivery', provider_message_id: null }])
+    const signingKey = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+    const pem = `-----BEGIN PRIVATE KEY-----\n${Buffer.from(await crypto.subtle.exportKey('pkcs8', signingKey.privateKey)).toString('base64')}\n-----END PRIVATE KEY-----\n`
+    const apnsEnv = { ...env, APNS_KEY_ID: 'PROOFKEY01', APNS_TEAM_ID: 'PROOFTEAM1', APNS_BUNDLE_ID: 'com.krabiclaw.app', APNS_PRIVATE_KEY: pem }
+    const apnsRequests: Array<{ url: string; apnsId: string | null; topic: string | null }> = []
+    const apnsAnswers = [new Response(null, { status: 200 }), new Response('{"reason":"Unregistered","timestamp":1760000000000}', { status: 410 })]
+    const fetchMock = mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
+      const headers = new Headers(init.headers)
+      apnsRequests.push({ url, apnsId: headers.get('apns-id'), topic: headers.get('apns-topic') })
+      const answer = apnsAnswers.shift()
+      assert(answer, `unexpected request to ${url}`)
+      return answer
+    })
+    try {
+      await notifyPushContact(apnsEnv, 'push-delivered')
+      const [delivered] = await pushDelivery('push-delivered')
+      assert.deepEqual(apnsRequests[0], { url: `https://api.sandbox.push.apple.com/3/device/${deviceToken}`, apnsId: delivered?.provider_message_id, topic: 'com.krabiclaw.app' })
+      assert.deepEqual({ ...delivered, provider_message_id: typeof delivered?.provider_message_id }, { provider: 'apns', status: 'sent', error: null, provider_message_id: 'string' })
+      // Apple's 410 retires the token, and the delivery to that device still records the failure.
+      await notifyPushContact(apnsEnv, 'push-retired')
+      assert.deepEqual(await pushDelivery('push-retired'), [{ provider: 'apns', status: 'failed', error: 'APNs sandbox 410 Unregistered; device token removed', provider_message_id: null }])
+      assert.equal(await db.prepare('SELECT count(*) AS count FROM device_tokens').first('count'), 0)
+      assert.equal(apnsRequests.length, 2)
+    } finally {
+      fetchMock.mock.restore()
+    }
 
     await db.prepare("INSERT INTO business_locations (id,organization_id,slug,title,timezone,max_capacity,opening_hours) VALUES ('booking-location','org-proof','booking','Booking','Asia/Bangkok',10,?)")
       .bind(JSON.stringify({ periods: [{ open: { day: 1, hour: 16, minute: 0 }, close: { day: 1, hour: 22, minute: 0 } }] })).run()
@@ -234,11 +275,11 @@ test('a replayed status email sends its recorded content and refuses a supersede
 
     const input = {
       threadId: 'booking-status', actorUserId: 'user-status',
-      env: { EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', NUXT_PUBLIC_PLATFORM_DOMAIN: 'proof.example' },
+      env: { EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>', NUXT_PUBLIC_PLATFORM_DOMAIN: 'proof.example' },
     }
     const cancel = { ...input, action: 'cancel', idempotencyKey: 'cancel-status' }
     assert.deepEqual(await executeGuestThreadOperation(db, cancel), {
-      ok: false, status: 502, reason: 'delivery_failed',
+      ok: false, status: 502, reason: 'delivery_failed', code: 'DELIVERY_FAILED', field: 'delivery',
       message: 'Booking is cancelled, but the guest email failed. Retry with the same idempotency key.',
       mutation_applied: true, operation_completed: false, request_id: 'booking-status', retry_with_same_idempotency_key: true,
       record: {
@@ -447,8 +488,8 @@ test('financial notification replay preserves per-recipient receipts and isolate
     assert.equal(await db.prepare('SELECT count(*) n FROM user').first('n'), 6)
     assert.deepEqual((await db.prepare("SELECT userId,role FROM member WHERE organizationId='merchant' ORDER BY userId").all()).results,
       [{ userId: 'owner-a', role: 'owner' }, { userId: 'owner-b', role: 'admin' }, { userId: 'owner-off', role: 'owner' }, { userId: 'staff', role: 'member' }])
-    await setNotificationPreference(db, env, 'owner-off', 'organization_and_billing', { email: false, whatsapp: false })
-    assert.deepEqual(await db.prepare("SELECT email_enabled,whatsapp_enabled FROM user_notification_preferences WHERE user_id='owner-off' AND category='organization_and_billing'").first(), { email_enabled: 0, whatsapp_enabled: 0 })
+    await setNotificationPreference(db, env, 'owner-off', 'organization_and_billing', { email: false, whatsapp: false, push: false })
+    assert.deepEqual(await db.prepare("SELECT email_enabled,whatsapp_enabled,push_enabled FROM user_notification_preferences WHERE user_id='owner-off' AND category='organization_and_billing'").first(), { email_enabled: 0, whatsapp_enabled: 0, push_enabled: 0 })
     assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE kind='notification'").first('n'), 0)
 
     const eventKey = 'financial-proof:capture'
@@ -537,6 +578,7 @@ test('native Resend test transport persists one delivered financial email throug
   skip: process.env.PAYMENTS_NATIVE_RESEND_TEST !== '1',
 }, async (t) => {
   assert.ok(process.env.RESEND_API_KEY?.trim(), 'explicit native qualification requires the configured Resend credential')
+  assert.ok(process.env.EMAIL_FROM?.trim(), 'explicit native qualification requires the configured sender')
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'native-financial-email-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
@@ -550,7 +592,7 @@ test('native Resend test transport persists one delivered financial email throug
     assert.equal(await db.prepare('SELECT count(*) n FROM guest_thread_deliveries').first('n'), 0)
     const env = { ...await runtime.getBindings<CloudflareEnv>(), NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example',
       EMAIL_DELIVERY_MODE: 'provider', WHATSAPP_DELIVERY_MODE: 'log_only', RESEND_API_KEY: process.env.RESEND_API_KEY,
-      ...(process.env.EMAIL_FROM ? { EMAIL_FROM: process.env.EMAIL_FROM } : {}) }
+      EMAIL_FROM: process.env.EMAIL_FROM }
     const input = { organizationId: null, eventKey: `native-resend-transport:${crypto.randomUUID()}`,
       guest: { userId: 'native-recipient', email: 'delivered@resend.dev', message: guestPaymentMessage({ kind: 'payment_captured', organizationName: 'Sandbox transport qualification', amount: 10000, currency: 'USD' }) } }
     await notifyFinancialNotification(env, db, input)

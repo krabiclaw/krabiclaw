@@ -16,7 +16,15 @@ export interface NotificationInvalidation extends DashboardInvalidationBase {
   targetUserId: string | null
 }
 
-export type DashboardInvalidation = GuestThreadInvalidation | NotificationInvalidation
+/** Home changes have no stay; calendar edits and imports have no stay either. */
+export interface StayInvalidation extends DashboardInvalidationBase {
+  type: 'stay.changed' | 'nights.changed'
+  locationId: string
+  productId: string
+  stayId: string | null
+}
+
+export type DashboardInvalidation = GuestThreadInvalidation | NotificationInvalidation | StayInvalidation
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -31,6 +39,12 @@ export function isDashboardInvalidation(value: unknown): value is DashboardInval
 
   if (value.type === 'notification.created' || value.type === 'notification.read') {
     return value.targetUserId === null || typeof value.targetUserId === 'string'
+  }
+
+  if (value.type === 'stay.changed' || value.type === 'nights.changed') {
+    return typeof value.locationId === 'string' && Boolean(value.locationId)
+      && typeof value.productId === 'string' && Boolean(value.productId)
+      && (value.stayId === null || (typeof value.stayId === 'string' && Boolean(value.stayId)))
   }
 
   return (value.type === 'thread.created'

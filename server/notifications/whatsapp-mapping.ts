@@ -1,4 +1,4 @@
-import { toDashboardButtonPath, type WhatsAppTemplate } from '~/server/utils/whatsapp'
+import type { WhatsAppTemplate } from '~/server/utils/whatsapp'
 import type { NotificationMessage } from './messages'
 
 /**
@@ -16,12 +16,11 @@ export interface WhatsAppMapping {
   /** vars filled from the message rather than from a fact. */
   derive?: (_message: NotificationMessage) => Record<string, string>
   /**
-   * The vars key that carries the template's URL button. Every approved
-   * template declares the button as a fixed prefix plus one variable, so this
-   * is the message's primary action reduced to the part the prefix does not
-   * already supply — an empty one renders a button that goes nowhere.
+   * The vars key that carries the message's primary action URL for the
+   * template's URL button; the template takes the part its approved prefix
+   * does not already supply, and a message without one cannot use it.
    */
-  button?: { key: string; dashboardPath?: boolean }
+  button?: { key: string }
   /**
    * Fact keys this approved template has no slot for, and why.
    *
@@ -35,7 +34,7 @@ export interface WhatsAppMapping {
 
 export const WHATSAPP_MAPPINGS: Partial<Record<WhatsAppTemplate, WhatsAppMapping>> = {
   new_reservation: {
-    button: { key: 'reply_path', dashboardPath: true },
+    button: { key: 'reply_path' },
     facts: {
       guest_name: 'guestName',
       date: 'date',
@@ -48,7 +47,7 @@ export const WHATSAPP_MAPPINGS: Partial<Record<WhatsAppTemplate, WhatsAppMapping
     },
   },
   reservation_cancelled: {
-    button: { key: 'reply_path', dashboardPath: true },
+    button: { key: 'reply_path' },
     facts: {
       guest_name: 'guestName',
       date: 'date',
@@ -66,7 +65,7 @@ export const WHATSAPP_MAPPINGS: Partial<Record<WhatsAppTemplate, WhatsAppMapping
     },
   },
   new_contact_msg: {
-    button: { key: 'reply_path', dashboardPath: true },
+    button: { key: 'reply_path' },
     facts: {
       guest_name: 'guestName',
       email: 'guestEmail',
@@ -81,7 +80,7 @@ export const WHATSAPP_MAPPINGS: Partial<Record<WhatsAppTemplate, WhatsAppMapping
     },
   },
   guest_thread_reply_whatsapp: {
-    button: { key: 'reply_path', dashboardPath: true },
+    button: { key: 'reply_path' },
     facts: {
       guest_name: 'guestName',
       email: 'guestEmail',
@@ -95,10 +94,10 @@ export const WHATSAPP_MAPPINGS: Partial<Record<WhatsAppTemplate, WhatsAppMapping
       rating: 'rating',
       excerpt: 'review',
     },
-    derive: message => ({ organization_name: message.organizationName ?? '' }),
+    derive: (message): Record<string, string> => (message.organizationName ? { organization_name: message.organizationName } : {}),
   },
   booking_change_update: {
-    button: { key: 'reply_path', dashboardPath: true },
+    button: { key: 'reply_path' },
     facts: {
       booking_type: 'recordKind',
       guest_name: 'guestName',
@@ -108,6 +107,12 @@ export const WHATSAPP_MAPPINGS: Partial<Record<WhatsAppTemplate, WhatsAppMapping
       time: 'time',
       guests: 'partySize',
       message: 'summary',
+    },
+    cannotCarry: {
+      // The combined label is the email's reading of the date and time slots;
+      // the template carries those slots, or for a proposal that has only the
+      // label, the variant without them.
+      when: 'booking_change_update has date and time slots, not a combined label',
     },
   },
   domain_update: {
@@ -147,9 +152,7 @@ export function toWhatsAppVars(
   const vars: Record<string, string> = { ...mapping.derive?.(message), ...extra }
 
   const actionUrl = message.primaryAction?.url
-  if (mapping.button && actionUrl && vars[mapping.button.key] === undefined) {
-    vars[mapping.button.key] = mapping.button.dashboardPath ? toDashboardButtonPath(actionUrl) : actionUrl
-  }
+  if (mapping.button && actionUrl && vars[mapping.button.key] === undefined) vars[mapping.button.key] = actionUrl
 
   for (const [varsKey, factKey] of Object.entries(mapping.facts)) {
     const fact = byKey.get(factKey)

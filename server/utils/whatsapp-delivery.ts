@@ -1,32 +1,32 @@
+import { HTTPError } from 'nitro'
+
 export type WhatsAppDeliveryMode = 'provider' | 'log_only'
 
 type WhatsAppDeliveryEnv = {
   WHATSAPP_DELIVERY_MODE?: string
 }
 
-// Fails closed, same rationale as getEmailDeliveryMode in email-delivery.ts: an
-// unset/blank/invalid WHATSAPP_DELIVERY_MODE must never fall through to real sends.
-export function getWhatsAppDeliveryMode(env: WhatsAppDeliveryEnv | null | undefined | unknown): WhatsAppDeliveryMode {
+/**
+ * The configured WhatsApp delivery mode, stated explicitly by every
+ * environment in wrangler.toml. A missing or unrecognised value is a
+ * configuration failure, never a mode — the same contract as
+ * getEmailDeliveryMode in email-delivery.ts.
+ */
+export function getWhatsAppDeliveryMode(env: WhatsAppDeliveryEnv): WhatsAppDeliveryMode {
   // See getEmailDeliveryMode in email-delivery.ts: local development always
   // remains log-only even though the top-level Wrangler vars are for production.
   if (import.meta.dev) return 'log_only'
-  const mode = typeof env === 'object' && env !== null && 'WHATSAPP_DELIVERY_MODE' in env
-    ? (env as { WHATSAPP_DELIVERY_MODE?: string }).WHATSAPP_DELIVERY_MODE
-    : undefined
-  const raw = String(mode || '').trim().toLowerCase()
-  if (!raw) return 'log_only'
-
-  const normalized = raw.replace(/[-_]/g, '')
-  if (normalized === 'logonly') return 'log_only'
-  if (normalized === 'provider') return 'provider'
-
-  console.warn('[whatsapp-delivery] Invalid WHATSAPP_DELIVERY_MODE value; defaulting to log_only', {
-    WHATSAPP_DELIVERY_MODE: raw,
-  })
-  return 'log_only'
+  const mode = env.WHATSAPP_DELIVERY_MODE
+  if (mode === undefined || mode === '') {
+    throw new HTTPError({ statusCode: 503, message: 'WHATSAPP_DELIVERY_MODE is not configured', data: { code: 'WHATSAPP_DELIVERY_MODE_REQUIRED', field: 'WHATSAPP_DELIVERY_MODE' } })
+  }
+  if (mode !== 'provider' && mode !== 'log_only') {
+    throw new HTTPError({ statusCode: 503, message: 'WHATSAPP_DELIVERY_MODE must be provider or log_only', data: { code: 'INVALID_WHATSAPP_DELIVERY_MODE', field: 'WHATSAPP_DELIVERY_MODE' } })
+  }
+  return mode
 }
 
-export function shouldSendRealWhatsApp(env: WhatsAppDeliveryEnv | null | undefined | unknown): boolean {
+export function shouldSendRealWhatsApp(env: WhatsAppDeliveryEnv): boolean {
   return getWhatsAppDeliveryMode(env) === 'provider'
 }
 

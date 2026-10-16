@@ -10,7 +10,7 @@
 // with a reason.
 
 import { WHATSAPP_MAPPINGS, toWhatsAppVars } from '~/server/notifications/whatsapp-mapping'
-import { buildWhatsAppTemplatePayload, type WhatsAppTemplate } from '~/server/utils/whatsapp'
+import { buildWhatsAppTemplatePayload, WhatsAppTemplateRefusal, type WhatsAppTemplate } from '~/server/utils/whatsapp'
 import { NOTIFICATION_CATALOG } from '~/server/notifications/catalog'
 import type { NotificationMessage } from '~/server/notifications/messages'
 
@@ -56,23 +56,28 @@ for (const entry of dualChannel) {
     }
   }
 
-  // The slots must actually fill: an empty one renders the template's own
-  // placeholder text, which is how "Date" and "Time" shipped to guests.
-  //
-  // Checked twice — once with the sample as written, and once with every
-  // optional fact removed. Real data is full of nulls (a reservation with no
-  // phone, a proposal recorded before the time was stored separately), and a
-  // happy-path sample hides exactly the case that misfired.
+  // The slots must actually fill, with the event's own facts. Checked twice —
+  // once with the sample as written (which may itself lack optional facts, as
+  // the booking sample has no notes), and once with every optional fact
+  // removed. Real data is full of nulls (a reservation with no phone), and no
+  // slot is ever filled with stand-in text for one: an absent optional fact
+  // selects the template variant without that slot. A variant Meta has not
+  // approved yet is refused at send, which is expected here; a slot that cannot
+  // fill because its fact is absent and not declared optional is a failure.
   const stripped: NotificationMessage = { ...message, facts: message.facts.filter(entry => entry.lead) }
   for (const [label, candidate] of [['as sampled', message], ['with optional facts removed', stripped]] as const) {
-    const payload = buildWhatsAppTemplatePayload(template as WhatsAppTemplate, toWhatsAppVars(candidate, template as WhatsAppTemplate).vars)
+    let payload: ReturnType<typeof buildWhatsAppTemplatePayload>
+    try {
+      payload = buildWhatsAppTemplatePayload(template as WhatsAppTemplate, toWhatsAppVars(candidate, template as WhatsAppTemplate).vars)
+    } catch (error) {
+      if (!(error instanceof WhatsAppTemplateRefusal)) throw error
+      if (error.code !== 'WHATSAPP_TEMPLATE_NOT_APPROVED') failures.push(`${template} (${label}): ${error.message}`)
+      continue
+    }
     for (const component of payload.components) {
       component.parameters.forEach((parameter, index) => {
-        const text = parameter.text.trim()
-        if (!text) {
-          failures.push(`${template} (${label}): ${component.type} slot ${index + 1} renders empty`)
-        } else if (FIELD_NAME_PLACEHOLDERS.has(text.toLowerCase())) {
-          failures.push(`${template} (${label}): ${component.type} slot ${index + 1} renders "${text}" — a field name, not a value`)
+        if (FIELD_NAME_PLACEHOLDERS.has(parameter.text.trim().toLowerCase())) {
+          failures.push(`${template} (${label}): ${component.type} slot ${index + 1} renders "${parameter.text}" — a field name, not a value`)
         }
       })
     }

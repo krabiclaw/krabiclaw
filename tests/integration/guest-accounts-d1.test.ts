@@ -28,7 +28,7 @@ test('a verified account gathers the guest identities that used only its email, 
     await request('shared-jane', 'pottery', 'guest-shared', 'jane@example.com')
     await request('shared-alex', 'pottery', 'guest-shared', 'alex@example.com')
     await request('sam-booking', 'kikuzuki', 'guest-sam', 'sam@example.com')
-    await db.prepare("INSERT INTO user_notification_preferences(user_id,category,email_enabled,whatsapp_enabled,updated_at) VALUES('guest-pottery','product_news',0,1,?)").bind(NOW).run()
+    await db.prepare("INSERT INTO user_notification_preferences(user_id,category,email_enabled,whatsapp_enabled,push_enabled,updated_at) VALUES('guest-pottery','product_news',0,1,1,?)").bind(NOW).run()
 
     await linkGuestIdentitiesByVerifiedEmail(db as never, { id: 'unverified', email: 'sam@example.com', emailVerified: false, isAnonymous: false })
     await linkGuestIdentitiesByVerifiedEmail(db as never, { id: 'jane', email: 'Jane@Example.com', emailVerified: true, isAnonymous: false })

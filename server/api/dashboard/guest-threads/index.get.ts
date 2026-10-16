@@ -3,10 +3,7 @@ import { loadOrganizationGuestThreads, parseGuestThreadListQuery } from '~/serve
 import { finalizeRequestMetrics } from '~/server/utils/request-metrics'
 
 export default defineHandler(async (event) => {
-  const query = parseGuestThreadListQuery(getQuery(event))
-  if ('error' in query) return jsonResponse({ error: query.error }, { status: 400 })
-
-  const payload = await loadOrganizationGuestThreads(event, query)
+  const payload = await loadOrganizationGuestThreads(event, parseGuestThreadListQuery(getQuery(event)))
   return jsonResponse(finalizeRequestMetrics(event, 'dashboard-organization-guest-threads', payload))
 })
 import { defineHandler } from 'nitro';

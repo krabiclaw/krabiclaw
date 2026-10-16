@@ -90,7 +90,7 @@ const calendarLocation = inject(calendarLocationKey)!
 const location = computed(() => calendarLocation.location.value ?? null)
 const refreshLocation = calendarLocation.refresh
 
-const { data, error, status } = await useAsyncData(
+const { data, error, status, refresh } = await useAsyncData(
   () => `calendar-day:${organizationId}:${day.value}:${locationId.value ?? ''}:${String(route.query.kinds ?? '')}`,
   async () => {
     const agenda = await dashboardApi<AgendaPayload>(`${apiBase}/agenda`, {
@@ -100,6 +100,13 @@ const { data, error, status } = await useAsyncData(
     return { items: agenda.items }
   },
 )
+if (!props.personalScope) {
+  const realtime = useDashboardInvalidations()
+  watch(realtime.event, event => {
+    if (event?.type === 'stay.changed' || event?.type === 'nights.changed') void refresh()
+  })
+  watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refresh() })
+}
 
 // A booking opens as a leaf of this day; a post keeps its own screen. The
 // item id is `kind:record`, which is how the agenda names a row; a stay's two rows name their stay.

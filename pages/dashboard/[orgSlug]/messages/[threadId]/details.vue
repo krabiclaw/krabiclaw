@@ -31,7 +31,7 @@ const threadId = computed(() => String(route.params.threadId))
 // thread rather than passed through the URL a second time. A contact thread has
 // no record and therefore no level here.
 const { thread } = await useGuestThread(threadId)
-if (thread.value && thread.value.submissionType === 'contact') {
+if (thread.value && !thread.value.operationalRecord) {
   showError(createError({ statusCode: 404, statusMessage: 'This conversation has no reservation' }))
 }
 // A stay is shown by its own record screen, keyed by the stay rather than the thread.

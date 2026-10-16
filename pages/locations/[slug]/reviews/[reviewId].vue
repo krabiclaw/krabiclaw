@@ -131,7 +131,7 @@ async function shareReview() {
 
 useSocialMetadata(() => ({
   path: `/locations/${slug.value}/reviews/${reviewId.value}`,
-  title: review.value ? `${review.value.rating}-star review from ${review.value.author_name || 'Guest'}` : 'Review',
+  title: review.value ? `${review.value.rating}-star review from ${review.value.author_name}` : 'Review',
   description: String(review.value?.content || '').slice(0, 150),
   socialImage: review.value?.social_image ?? null,
   breadcrumbs: [
@@ -147,7 +147,7 @@ useSchemaOrg([
     if (!review.value) return {}
     return {
       '@type': 'Review',
-      author: { '@type': 'Person', name: review.value.author_name || 'Guest' },
+      author: { '@type': 'Person', name: review.value.author_name },
       reviewRating: { '@type': 'Rating', ratingValue: review.value.rating, bestRating: 5 },
       reviewBody: review.value.content,
       itemReviewed: {

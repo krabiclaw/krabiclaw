@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
@@ -13,7 +14,7 @@ import { applyBookingRevision, runRevisionFeed } from '../../server/integrations
 
 const ORG = 'org'
 const OWNER = 'owner-user'
-const env = { CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k' }
+const channexEnv = { CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k' }
 
 // A booking keeps its creation time across modifications and cancellation;
 // only its revisions carry later times.
@@ -68,11 +69,13 @@ class FakeChannex {
 async function boot() {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'channex-revisions-proof', compatibilityDate: '2024-11-01',
-    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
-    env: { DB: { type: 'd1' } },
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
+    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'channex-revisions-proof', exportName: 'Hub' } },
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), ...channexEnv }
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
@@ -81,13 +84,13 @@ async function boot() {
     await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('m-owner', ?, ?, 'owner', 0)").bind(ORG, OWNER).run()
     await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
       VALUES ('cabin-site', ?, 'cabin', 'Cabin', 'active', 'America/Denver', '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z')`).bind(ORG).run()
-    const home = await createProduct(db, { organizationId: ORG, actor: { actorId: OWNER }, product: {
+    const home = await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: {
       kind: 'stay', name: 'Cabin', variants: [{ name: 'Cabin', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
       stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: null, assigned_team_id: null },
     } })
     await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled)
       VALUES (?, ?, 'channex', 'listing-1', 'chan-1', 'prop-1', 'room-1', 'rate-1', 'complete', 1)`).bind(ORG, home.id).run()
-    return { runtime, db, productId: home.id }
+    return { runtime, db, env, productId: home.id }
   } catch (error) {
     await runtime.dispose()
     throw error
@@ -98,7 +101,7 @@ const nights = async (db: D1Database, stayId: string) => (await db.prepare('SELE
 const logged = async (db: D1Database) => (await db.prepare('SELECT external_id, status FROM channel_sync_log ORDER BY created_at, rowid').all<{ external_id: string; status: string }>()).results
 
 test('a channel booking lands, repeats and stale deliveries change nothing, an overlap is overbooked, a cancel frees its nights', { timeout: 120_000 }, async () => {
-  const { runtime, db, productId } = await boot()
+  const { runtime, db, env, productId } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch
@@ -121,7 +124,7 @@ test('a channel booking lands, repeats and stale deliveries change nothing, an o
     assert.deepEqual((await db.prepare('SELECT check_out_date, version FROM stays WHERE id = ?').bind(stayId).first()), { check_out_date: '2027-01-13', version: 1 })
     assert.deepEqual(channex.acked, ['rev-1', 'rev-1', 'rev-0'])
     // A read that finished after a newer one landed is refused by its older revision time.
-    const raced = await applyChannelBooking(db, ORG, productId, { provider: 'channex', external_booking_id: 'bk-1', channel_booking_id: null, channel: 'airbnb', revision_id: 'rev-0', provider_updated_at: '2026-10-15T00:30:00Z', cancelled: false, check_in_date: '2027-01-10', check_out_date: '2027-01-20', adults: 2, children: 0, infants: 0, guest_name: 'Lee', guest_surname: null, guest_email: null, guest_phone: null, total_minor: 1, currency: 'USD' })
+    const raced = await applyChannelBooking(db, env, ORG, productId, { provider: 'channex', external_booking_id: 'bk-1', channel_booking_id: null, channel: 'airbnb', revision_id: 'rev-0', provider_updated_at: '2026-10-15T00:30:00Z', cancelled: false, check_in_date: '2027-01-10', check_out_date: '2027-01-20', adults: 2, children: 0, infants: 0, guest_name: 'Lee', guest_surname: null, guest_email: null, guest_phone: null, total_minor: 1, currency: 'USD' })
     assert.deepEqual([raced.applied, raced.check_out_date], [false, '2027-01-13'])
 
     // A modification keeps the booking's creation time; its revision's later time lands it.
@@ -151,7 +154,7 @@ test('a channel booking lands, repeats and stale deliveries change nothing, an o
 })
 
 test('an unknown home is logged and acknowledged; a failed read is not acknowledged and the feed lands it later', { timeout: 120_000 }, async () => {
-  const { runtime, db } = await boot()
+  const { runtime, db, env } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch

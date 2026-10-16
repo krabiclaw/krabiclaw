@@ -29,8 +29,9 @@ const cabin = {
 test('a home added by hand is a new location and an unpublished stay, checked, replayable and billed', async () => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'stay-home-create-proof', compatibilityDate: '2024-11-01',
-    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
-    env: { DB: { type: 'd1' } },
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
+    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stay-home-create-proof', exportName: 'Hub' } },
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
@@ -44,7 +45,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
       await db.prepare("INSERT INTO account (id, accountId, providerId, userId, password, createdAt, updatedAt) VALUES (?, ?, 'credential', ?, ?, 0, 0)").bind(`a-${id}`, id, id, await hashPassword(PASSWORD)).run()
     }
     const env = {
-      DB: db, BETTER_AUTH_SECRET: 'stay-home-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: BASE, NUXT_PUBLIC_PLATFORM_DOMAIN: BASE,
+      ...await runtime.getBindings<CloudflareEnv>(), DB: db, BETTER_AUTH_SECRET: 'stay-home-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: BASE, NUXT_PUBLIC_PLATFORM_DOMAIN: BASE,
       STRIPE_SECRET_KEY: 'sk_test_stay_home_no_provider_requests', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
     } as CloudflareEnv
     const cookieFor = async (id: string) => {
@@ -91,7 +92,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.deepEqual(refusal(await call(await cookieFor('helper'), 'POST', cabin)), { status: 403, code: 'STAY_ROLE_REQUIRED' })
 
     const home = {
-      name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: null, channel: null,
+      name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, check_in_instructions: null, assigned_member_id: null, assigned_team_id: null, channel: null,
     }
     const keyedCabin = { ...cabin, idempotency_key: 'a'.repeat(200) }
     const created = await call(owner, 'POST', keyedCabin)
@@ -138,7 +139,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.equal(edited.status, 200)
     const changed = {
       product_id: made.product_id, location_id: made.location_id, name: 'Cliff Cabin North', timezone: 'America/Los_Angeles', currency: 'USD', base_price_minor: 210_00,
-      check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 3, assigned_member_id: 'm-helper', assigned_team_id: null, channel: null,
+      check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 3, check_in_instructions: null, assigned_member_id: 'm-helper', assigned_team_id: null, channel: null,
     }
     assert.deepEqual(edited.body, { home: changed, channel_push: null })
     // Read back through other paths: the homes list, the location, and the member now assigned seeing it.

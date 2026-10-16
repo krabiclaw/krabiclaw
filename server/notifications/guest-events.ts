@@ -10,9 +10,10 @@ import { platformLocale } from '~/shared/platform-locales'
  * preference switches off.
  */
 
-function fact(key: string, label: string, value: string | null | undefined): NotificationFact | null {
-  const text = (value ?? '').toString().trim()
-  return text ? { key, label, value: text } : null
+// A fact the message has is stated as it is; one it genuinely lacks is null and
+// left out. Nothing is dropped for being blank or written in for being absent.
+function fact(key: string, label: string, value: string | null): NotificationFact | null {
+  return value === null ? null : { key, label, value: value.trim() }
 }
 
 function facts(...entries: Array<NotificationFact | null>): NotificationFact[] {
@@ -96,12 +97,12 @@ const accountAction = (url: string | null | undefined, locale?: string) => url ?
 function guestVisitFacts(input: GuestBookingInput): NotificationFact[] {
   const labels = guestLocale(input).messages
   return facts(
-    fact('what', labels[input.productTitle ? 'booking.receipt' : 'saya.experience_detail.meeting_point']!, input.productTitle ?? input.locationName),
-    input.productTitle ? fact('location', labels['saya.experience_detail.meeting_point']!, input.locationName) : null,
+    fact('what', labels[input.productTitle ? 'booking.receipt' : 'saya.experience_detail.meeting_point']!, input.productTitle ?? input.locationName ?? null),
+    input.productTitle ? fact('location', labels['saya.experience_detail.meeting_point']!, input.locationName ?? null) : null,
     fact('date', labels['saya.reservation_cancel.date']!, input.date),
     fact('time', labels['saya.reservation_cancel.time']!, input.time),
     fact('partySize', labels['saya.experience_detail.party_size']!, input.partySize),
-    fact('notes', labels['saya.experience_detail.special_requests']!, input.notes),
+    fact('notes', labels['saya.experience_detail.special_requests']!, input.notes ?? null),
   )
 }
 

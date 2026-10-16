@@ -6,10 +6,7 @@ export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organizationId')
   if (!organizationId) return jsonResponse({ error: 'Organization ID required' }, { status: 400 })
 
-  const query = parseGuestThreadListQuery(getQuery(event))
-  if ('error' in query) return jsonResponse({ error: query.error }, { status: 400 })
-
-  const payload = await loadDashboardGuestThreads(event, organizationId, query)
+  const payload = await loadDashboardGuestThreads(event, organizationId, parseGuestThreadListQuery(getQuery(event)))
   return jsonResponse(finalizeRequestMetrics(event, 'dashboard-guest-threads', payload))
 })
 import { defineHandler } from 'nitro';

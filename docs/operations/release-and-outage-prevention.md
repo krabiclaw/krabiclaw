@@ -445,6 +445,66 @@ delta, inspect changed and deleted keys, and reconcile important edits without
 overwriting writes made to v18. Keep v17 intact until that review and the schema,
 foreign-key and customer-journey checks pass.
 
+The v18-to-v19 epoch admits channel-addressable Airbnb inquiries in the one
+guest inbox (#1381 step 4.2). `requests_guest_payload_check` now accepts an
+explicit channel participant with the provider's conversation title and nullable
+actual guest name, email and phone. A contact-backed payload keeps its existing
+requirements; an invalid present participant never becomes a contact payload.
+Because `requests` is referenced by the activity, booking, stay, review and
+payment tables, changing this CHECK requires another replacement database.
+
+The unchanged v18 migration SQL and metadata are archived in
+`migrations-history/v18/`. The v19 baseline adds `channel_threads`, which maps a
+provider conversation and optional booking to one local request and home, and
+admits Channex/Airbnb delivery receipts. No source conversation, activity entry,
+delivery receipt, authentication row or OAuth token is transformed. An inquiry
+adopts an existing stay conversation when one exists; two existing conversations
+produce an explicit association conflict instead of moving or deleting history.
+The `product_channel_mappings_stage_check` and enabled-stage CHECK also admit a
+Messages import stage after reservation loading. A failed message read remains
+visible at that stage and can be retried without repeating the reservation
+write or claiming the conversation history is complete.
+
+The same v19 baseline also carries the rest of #1381 step 4 as additive schema,
+so it needs no forward migration of its own: `device_tokens` (an APNs device of
+one Better Auth session, cascading with the session and user), the per-category
+push preference, private `product_stay_configs.check_in_instructions`,
+`message_templates`, `scheduled_guest_messages` and
+`stays.booking_received_at`. Copied v18 rows get no device, no template, no
+scheduled message, no instructions and a null `booking_received_at`: only a
+direct stay created after cutover is a newly received reservation, so a
+new-reservation schedule never messages a historical or imported stay. A saved
+v18 category preference predates push; the transfer gives it that category's
+product push default, the same value a person who never saved the category
+gets, and records the `notification_preferences_push_default` transform. A
+v18 chain is recognized from `migrations-history/v18/`.
+
+Prepare separate WNAM v19 databases from each environment's own v18 database
+using the canonical snapshot path above. Keep the replacements unbound until
+their schema, copy invariants, foreign keys and local source gates pass. Before
+and after cutover, inspect canonical delta changes/deletions and reconcile only
+reviewed source edits with guards that preserve replacement writes. Do not run
+the new Worker against a v18 binding: its migration ledger already contains the
+same baseline filename. Real Airbnb message/webhook/reply qualification remains
+required before retiring the lodging Worker.
+
+Both v19 replacement databases were created with `--location wnam` on
+2026-10-16 (Asia/Bangkok), and Cloudflare reported WNAM before the baseline was
+applied:
+
+- `krabiclaw-staging-v19`: `036d7910-66a9-4343-9ae4-47398dd3c653`
+- `krabiclaw-production-v19`: `3baf9b09-2c05-4ed8-8944-cafe9e84c9e3`
+
+Staging v19 was loaded from `krabiclaw-staging-v18` before the binding change
+merged: 100 tables, 81,340 rows, `foreign_key_check` empty, one transform
+(`notification_preferences_push_default`, 2 rows).
+
+The staging binding uses v19. The top-level production binding, and the
+development and E2E bindings that share its local D1 id, stay on
+`krabiclaw-production-v18` until production v19 is loaded from it; local schema
+still comes from the v19 baseline in `migrations/`. All three move together in
+their own change immediately before promotion.
+
 Before dropping or retiring a legacy table or writer:
 
 - remove every runtime reader and writer;

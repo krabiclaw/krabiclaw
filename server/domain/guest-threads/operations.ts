@@ -2,7 +2,7 @@ import { HTTPError } from 'nitro'
 import { visitRefundQueries } from '~/server/domain/payments/visit-refund'
 import { recordBookingCancelled, recordBookingDecision } from '~/server/domain/booking-analytics'
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { isReservedTestDomain, shouldSendRealEmail } from '~/server/utils/email-delivery'
+import { shouldSendRealEmail } from '~/server/utils/email-delivery'
 import type { ReplyEmailEnv } from '~/server/utils/submission-messages'
 import { getGuestRequest, getThreadOperationalRecord, partySizeIsMinimum, requestActions, requestSummary, type ThreadOperationalRecord } from '~/server/domain/requests'
 import { deliverGuestThreadEmail, getDeliveryById, isDeliverySent } from './deliveries'
@@ -21,6 +21,8 @@ import { guestPresentation } from '~/server/utils/notifications'
 import { platformLocale } from '~/shared/platform-locales'
 import { formatTimestamp } from '~/utils/timezone'
 import { describeErrorForTelemetry } from '~/shared/error-telemetry'
+import { getChannelThreadMapping, replyThroughChannex } from './channel-messages'
+import type { ChannexEnv, ChannexError } from '~/server/integrations/channex/client'
 import type {
   GuestThreadDeliveryProvider,
   GuestThreadDeliveryRow,
@@ -45,7 +47,7 @@ export type OperationOutcome =
   | { ok: false; status: 400; reason: 'no_guest_email' | 'empty_body' }
   | { ok: false; status: 400; reason: 'missing_idempotency_key' }
   | { ok: false; status: 400; reason: 'invalid_photo'; message: string }
-  | { ok: false; status: 502; reason: 'delivery_failed'; message: string; mutation_applied?: true; operation_completed?: false; request_id?: string; record?: ThreadOperationalRecord; retry_with_same_idempotency_key?: true }
+  | { ok: false; status: 409 | 502; reason: 'delivery_failed'; code: string; field: string; message: string; mutation_applied?: true; operation_completed?: false; request_id?: string; record?: ThreadOperationalRecord; retry_with_same_idempotency_key?: boolean; provider_error?: ChannexError['data'] }
 
 export type ExecuteOperationInput = {
   threadId: string
@@ -54,7 +56,7 @@ export type ExecuteOperationInput = {
   body?: string
   /** The photos a reply carries, in the order they were chosen. */
   photos?: MessagePhoto[] | { sourceIds: string[]; resolve: () => Promise<MessagePhoto[]> }
-  env: ReplyEmailEnv & UploadResolvedMediaInput['env']
+  env: ReplyEmailEnv & UploadResolvedMediaInput['env'] & ChannexEnv
   idempotencyKey?: string
   actorUserId: string
   financialAuthorizationId?: string
@@ -90,16 +92,18 @@ async function loadThreadContext(
   return { thread, record: await getThreadOperationalRecord(db, thread.id) }
 }
 
-function operationDedupeKey(input: ExecuteOperationInput): string {
+function operationDedupeKey(input: Pick<ExecuteOperationInput, 'threadId' | 'idempotencyKey'>): string {
   return `guest-thread-operation:${input.threadId}:${input.idempotencyKey}`
 }
 
-function deliveryDedupeKey(input: ExecuteOperationInput): string {
+function deliveryDedupeKey(input: Pick<ExecuteOperationInput, 'threadId' | 'idempotencyKey'>): string {
   return `guest-thread-email:${input.threadId}:${input.idempotencyKey}`
 }
 
-function emailProvider(env: ReplyEmailEnv, recipient: string): GuestThreadDeliveryProvider {
-  return shouldSendRealEmail(env) && !isReservedTestDomain(recipient) ? 'resend' : 'log_only'
+// Provider mode records the provider it asks; a reserved test address is then
+// refused by sendEmail with RESERVED_TEST_EMAIL_DOMAIN on that resend receipt.
+function emailProvider(env: ReplyEmailEnv): GuestThreadDeliveryProvider {
+  return shouldSendRealEmail(env) ? 'resend' : 'log_only'
 }
 
 function entryMatchesRequest(entry: GuestThreadEntryRow, eventName: string, body?: string): boolean {
@@ -269,7 +273,6 @@ function deliveryReceiptQuery(
   entryId: string,
   deliveryId: string,
   now: string,
-  recipient: string,
 ): BatchQuery {
   return {
     query: `
@@ -282,7 +285,7 @@ function deliveryReceiptQuery(
     `,
     params: [
       deliveryId,
-      emailProvider(input.env, recipient),
+      emailProvider(input.env),
       now,
       now,
       entryId,
@@ -400,7 +403,7 @@ async function sendStatusUpdate(
   const currentRecord = await getThreadOperationalRecord(db, context.thread.id)
   if (!currentRecord) return { ok: false, status: 404, reason: 'source_not_found' }
   return {
-    ok: false, status: 502, reason: 'delivery_failed',
+    ok: false, status: 502, reason: 'delivery_failed', code: 'DELIVERY_FAILED', field: 'delivery',
     message: `Booking is ${currentRecord.status}, but the guest email failed. Retry with the same idempotency key.`,
     mutation_applied: true, operation_completed: false, request_id: context.thread.id, record: currentRecord, retry_with_same_idempotency_key: true,
   }
@@ -458,7 +461,7 @@ async function executeSourceMutation(
   const revokeReview = revokeReviewRequestQuery(context, plan, entryId, now)
   if (revokeReview) queries.push(revokeReview)
   if (plan.requiresNotification && summary.guestEmail) {
-    queries.push(deliveryReceiptQuery(context, input, entryId, deliveryId, now, summary.guestEmail))
+    queries.push(deliveryReceiptQuery(context, input, entryId, deliveryId, now))
   }
 
   await executeBatch(db, queries, { operation: `guest thread ${plan.kind}.${plan.action}` })
@@ -479,21 +482,38 @@ async function executeSourceMutation(
   return outcome
 }
 
+/** A member reply, or a scheduled message the workspace saved (no member actor). */
+type ReplyInput = Omit<ExecuteOperationInput, 'actorUserId'> & { actorUserId: string | null }
+
 async function executeReply(
   db: DbClient,
   context: ThreadContext,
-  input: ExecuteOperationInput,
+  input: ReplyInput,
 ): Promise<OperationOutcome> {
   const body = (input.body ?? '').trim()
   const photoInput = input.photos ?? []
   const photoCount = Array.isArray(photoInput) ? photoInput.length : photoInput.sourceIds.length
   if (!body && !photoCount) return { ok: false, status: 400, reason: 'empty_body' }
+  const actorUserId = input.actorUserId
+  if (actorUserId === null && photoCount) throw new HTTPError({ statusCode: 400, message: 'Scheduled messages carry text only', data: { code: 'SCHEDULED_MESSAGE_PHOTOS_UNSUPPORTED', field: 'photos' } })
+  const eventName = actorUserId === null ? 'thread.scheduled_message' : 'thread.member_reply'
+  const purpose = actorUserId === null ? 'scheduled_message' : 'member_reply'
+  const channel = await getChannelThreadMapping(db, context.thread.id, context.thread.organization_id)
+  if (channel) {
+    if (photoCount) throw new HTTPError({ statusCode: 400, message: 'Airbnb replies currently accept text; send attachments through Airbnb', data: { code: 'CHANNEL_ATTACHMENTS_UNSUPPORTED', field: 'photos' } })
+    const sent = await replyThroughChannex(db, input.env, { mapping: channel, body, actorUserId, idempotencyKey: input.idempotencyKey! })
+    if (!sent.ok) return { ...sent, reason: 'delivery_failed' }
+    return successfulOutcome(db, context)
+  }
+  if (context.thread.kind === 'stay' && await queryFirst(db, "SELECT id FROM stays WHERE organization_id = ? AND request_id = ? AND owner = 'channel'", [context.thread.organization_id, context.thread.id])) {
+    throw new HTTPError({ statusCode: 409, message: 'This channel stay has no addressable provider conversation; import its conversation before replying', data: { code: 'CHANNEL_THREAD_UNADDRESSABLE', field: 'channel_thread' } })
+  }
   const photoIdentity = Array.isArray(photoInput)
     ? await Promise.all(photoInput.map(async photo => ({ filename: photo.filename, hash: [...new Uint8Array(await crypto.subtle.digest('SHA-256', photo.bytes))].map(byte => byte.toString(16).padStart(2, '0')).join('') })))
     : photoInput.sourceIds
   const requestHash = await creationRequestHash({ body, photos: photoIdentity })
   const matchesReply = (entry: GuestThreadEntryRow): boolean => {
-    if (!entryMatchesRequest(entry, 'thread.member_reply', body)) return false
+    if (!entryMatchesRequest(entry, eventName, body)) return false
     const payload = JSON.parse(entry.payload_json ?? '{}') as { request_hash?: string }
     return payload.request_hash === requestHash
   }
@@ -511,8 +531,7 @@ async function executeReply(
     }
   }
 
-  // A channel conversation may retain its recorded participant after a booking
-  // revision clears contact. A new or pending send uses the stay's current email.
+  // A direct stay uses its current contact for delivery.
   let guestEmail = context.thread.payload.guest.email
   if (context.thread.kind === 'stay') {
     const stay = await queryFirst<{ guest_email: string | null }>(db, 'SELECT guest_email FROM stays WHERE organization_id = ? AND request_id = ?', [context.thread.organization_id, context.thread.id])
@@ -530,7 +549,7 @@ async function executeReply(
     if (photos.length !== photoCount) throw new Error('Resolved reply photos do not match their declared sources')
     // The photos are stored first and placed by the same batch that writes the
     // message, so a reply exists with all of its photos or not at all.
-    const assetIds = await uploadMessagePhotos(db, input.env, organizationId, photos, { source: 'uploaded', userId: input.actorUserId })
+    const assetIds = actorUserId === null ? [] : await uploadMessagePhotos(db, input.env, organizationId, photos, { source: 'uploaded', userId: actorUserId })
       .catch((error: unknown) => {
         if (error instanceof MessagePhotoRejection) return error
         throw error
@@ -542,25 +561,25 @@ async function executeReply(
           query: `
             INSERT INTO activity_entries
               (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, body, event_name, payload_json, dedupe_key, sequence, occurred_at, created_at)
-            SELECT ?, id, 'message', 'request', 'member', ?, 'email', ?, 'thread.member_reply', ?, ?,
+            SELECT ?, id, 'message', 'request', ?, ?, 'email', ?, ?, ?, ?,
                    COALESCE((SELECT MAX(sequence) FROM activity_entries WHERE request_id = requests.id), 0) + 1,
                    ?, ?
             FROM requests
             WHERE id = ? AND organization_id = ?
             ON CONFLICT(dedupe_key) DO NOTHING
           `,
-          params: [entryId, input.actorUserId, body || null, JSON.stringify({ request_hash: requestHash }), dedupeKey, now, now, context.thread.id, context.thread.organization_id],
+          params: [entryId, actorUserId === null ? 'system' : 'member', actorUserId, body || null, eventName, JSON.stringify({ request_hash: requestHash }), dedupeKey, now, now, context.thread.id, context.thread.organization_id],
         },
         {
           query: `
             INSERT INTO guest_thread_deliveries
               (id, entry_id, channel, provider, purpose, status, created_at, updated_at)
-            SELECT ?, id, 'email', ?, 'member_reply', 'pending', ?, ?
+            SELECT ?, id, 'email', ?, ?, 'pending', ?, ?
             FROM activity_entries
             WHERE id = ? AND request_id = ?
             ON CONFLICT(id) DO NOTHING
           `,
-          params: [deliveryId, emailProvider(input.env, guestEmail), now, now, entryId, context.thread.id],
+          params: [deliveryId, emailProvider(input.env), purpose, now, now, entryId, context.thread.id],
         },
         ...messagePhotoPlacements(organizationId, entryId, assetIds, now),
       ], { operation: 'guest thread reply receipt' })
@@ -571,7 +590,7 @@ async function executeReply(
       } catch (readError) {
         throw new AggregateError([error, readError], 'The reply commit could not be read; its photos have been retained', { cause: readError })
       }
-      if (concurrent?.id !== entryId) await discardMessagePhotos(db, input.env, organizationId, assetIds, input.actorUserId, error)
+      if (concurrent?.id !== entryId && actorUserId !== null) await discardMessagePhotos(db, input.env, organizationId, assetIds, actorUserId, error)
       if (!concurrent || !matchesReply(concurrent)) throw error
     }
     entry = await findEntryByDedupeKey(db, dedupeKey)
@@ -605,7 +624,7 @@ async function executeReply(
   if (typeof outcome.error !== 'string' || !outcome.error.trim()) {
     throw new HTTPError({ statusCode: 502, statusMessage: 'Failed email delivery did not provide its error', data: { code: 'INVALID_DELIVERY_RESPONSE', field: 'error' } })
   }
-  return { ok: false, status: 502, reason: 'delivery_failed', message: outcome.error }
+  return { ok: false, status: 502, reason: 'delivery_failed', code: 'DELIVERY_FAILED', field: 'delivery', message: outcome.error }
 }
 
 const ENDED_OCCURRENCE_MESSAGE = 'This conversation is past because its booking has ended'
@@ -677,4 +696,17 @@ export async function executeGuestThreadOperation(db: DbClient, input: ExecuteOp
     return await executeMailboxTransition(db, context, input, input.action)
   }
   return await executeSourceMutation(db, context, input)
+}
+
+/**
+ * Send a workspace's saved scheduled message through the conversation's own
+ * address, with the same ledger entry and delivery receipt as a reply. It has
+ * no member actor; the key makes a repeated run find its first attempt.
+ */
+export async function sendScheduledGuestReply(db: DbClient, input: { threadId: string; organizationId: string; body: string; idempotencyKey: string; env: ExecuteOperationInput['env'] }): Promise<{ outcome: OperationOutcome; entryId: string | null }> {
+  const context = await loadThreadContext(db, input.threadId, input.organizationId)
+  if ('ok' in context) return { outcome: context, entryId: null }
+  const outcome = await executeReply(db, context, { ...input, action: 'reply', actorUserId: null })
+  const entry = await findEntryByDedupeKey(db, operationDedupeKey(input))
+  return { outcome, entryId: entry?.id ?? null }
 }
