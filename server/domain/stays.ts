@@ -529,6 +529,27 @@ export async function setMemberHomes(env: CloudflareEnv & GuestInboxPublicationE
 }
 
 /**
+ * A member who leaves or is removed, or who now sees every home as an owner or
+ * admin, looks after none: their homes become unassigned. Better Auth has
+ * already committed the membership change and names no actor to its hooks, so
+ * the system records it; open views of those homes reload.
+ */
+export async function releaseMemberHomes(env: GuestInboxPublicationEnv, db: DbClient, input: { organizationId: string; memberId: string }): Promise<void> {
+  const homes = await queryAll<{ product_id: string; location_id: string }>(db,
+    'SELECT product_id, location_id FROM product_stay_configs WHERE organization_id = ? AND assigned_member_id = ?', [input.organizationId, input.memberId])
+  if (!homes.length) return
+  const now = new Date().toISOString()
+  await executeBatch(db, [{
+    query: 'UPDATE product_stay_configs SET assigned_member_id = NULL, updated_at = ?, updated_by = ? WHERE organization_id = ? AND assigned_member_id = ?',
+    params: [now, 'system', input.organizationId, input.memberId],
+  }, organizationEventQuery({ organizationId: input.organizationId, actorType: 'system', eventType: 'stay.homes_assigned', entityType: 'member', entityId: input.memberId,
+    metadata: { product_ids: [], changed_product_ids: homes.map(home => home.product_id).sort() } })], { operation: 'Release a former member\'s homes' })
+  for (const home of homes) {
+    await publishStayInvalidation(env, { type: 'stay.changed', organizationId: input.organizationId, productId: home.product_id, locationId: home.location_id, stayId: null }, { updated_at: now })
+  }
+}
+
+/**
  * Add a place to stay: a new location of this organization (its plan's
  * location billing applies) and an unpublished stay at it, priced per night in
  * the organization's currency. A home added by hand and one imported from a

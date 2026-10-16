@@ -348,6 +348,11 @@ test('a stay socket in a service organization closes when Better Auth removes it
     expect(changed.status(), await changed.text()).toBe(200)
     await closed
     expect(liveEvents).toHaveLength(beforeRemoval)
+    // A removed member looks after no home, read back through the manager's list.
+    const homes = await page.request.get(api('stay-homes'))
+    expect(homes.status(), await homes.text()).toBe(200)
+    expect((await homes.json() as { homes: Array<{ product_id: string; assigned_member_id: string | null }> }).homes)
+      .toEqual([expect.objectContaining({ product_id: home.product_id, assigned_member_id: null })])
   } finally {
     await cleaner.close()
   }

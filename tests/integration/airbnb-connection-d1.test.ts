@@ -22,6 +22,11 @@ class FakeChannex {
   failNext: { path: string; status: number } | null = null
   token: string | null = null
   channel = { id: 'chan-1', title: '', active: false, ratePlans: [] as Array<{ id: string; rate_plan_id: string }>, group: 'grp-1', properties: ['setup-1'] }
+  // What Channex holds: the group's properties, and whether the channel and group still exist.
+  groupProperties = ['setup-1']
+  channelExists = true
+  groupExists = true
+  keepProperty: string | null = null
 
   fetch = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url)
@@ -44,7 +49,37 @@ class FakeChannex {
       this.channel.title = link.title!
       return json({ data: { type: 'connection_link', attributes: { url: 'https://www.airbnb.com/oauth2/auth?client_id=x' } } })
     }
-    if (method === 'GET' && path === `/channels/${this.channel.id}`) {
+    const removed = () => json({ meta: { message: 'Success' } })
+    const property = path.match(/^\/properties\/([^/]+)$/)?.[1]
+    if (property && method === 'GET') {
+      return this.groupProperties.includes(property) ? json({ data: { id: property, type: 'property', attributes: { title: 'x' } } }) : new Response('not found', { status: 404 })
+    }
+    if (property && method === 'DELETE') {
+      // Channex refuses a property with a channel unless force=true is given.
+      if (this.channelExists && this.channel.properties.includes(property) && url.searchParams.get('force') !== 'true') return new Response('{"errors":{}}', { status: 422 })
+      if (property !== this.keepProperty) this.groupProperties = this.groupProperties.filter(id => id !== property)
+      return removed()
+    }
+    if (path === `/groups/${this.channel.group}` && method === 'GET') {
+      return this.groupExists
+        ? json({ data: { id: this.channel.group, type: 'group', attributes: { title: 'x' }, relationships: { properties: { data: this.groupProperties.map(id => ({ id, type: 'property', attributes: { title: 'x' } })) } } } })
+        : new Response('not found', { status: 404 })
+    }
+    if (path === `/groups/${this.channel.group}` && method === 'DELETE') {
+      if (this.groupProperties.length) return new Response('{"errors":{}}', { status: 400 })
+      this.groupExists = false
+      return removed()
+    }
+    if (method === 'POST' && path === `/channels/${this.channel.id}/deactivate`) {
+      this.channel.active = false
+      return removed()
+    }
+    if (method === 'DELETE' && path === `/channels/${this.channel.id}`) {
+      if (this.channel.active) return new Response('{"errors":{}}', { status: 422 })
+      this.channelExists = false
+      return removed()
+    }
+    if (method === 'GET' && path === `/channels/${this.channel.id}` && this.channelExists) {
       return json({ data: { id: this.channel.id, type: 'channel', attributes: { channel: 'AirBNB', title: this.channel.title, is_active: this.channel.active, properties: this.channel.properties, rate_plans: this.channel.ratePlans }, relationships: { group: { data: { id: this.channel.group } } } } })
     }
     return new Response('not found', { status: 404 })
@@ -151,6 +186,44 @@ test('a lock its request abandoned is released when no write was named, and held
     await db.prepare("UPDATE channex_connections SET operation_id = 'dead-writer', pending_step = 'create_group', updated_at = ? WHERE organization_id = ?").bind(stale, ORG).run()
     await assert.rejects(owner.start(), code('CONNECTION_BUSY'))
     assert.deepEqual(await db.prepare('SELECT status, operation_id, pending_step FROM channex_connections').first(), { status: 'needs_review', operation_id: 'dead-writer', pending_step: 'create_group' })
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+test('deleting the organization releases its Airbnb channel, every property in its group and the group, each verified gone', async () => {
+  const { runtime, db } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    const owner = new AirbnbConnection(db, env, ORG, OWNER)
+    await owner.start()
+    assert.deepEqual(await owner.complete(channex.token!, 'chan-1'), { connected: true })
+    channex.channel.active = true
+    // A property Channex holds in the organization's group that no mapping names.
+    channex.groupProperties.push('prop-2')
+
+    // Channex still holds a property after its delete: the deletion stops, visibly.
+    channex.keepProperty = 'prop-2'
+    await assert.rejects(owner.deleteForOrganization(), code('PROVIDER_DELETION_PENDING'))
+    assert.equal(channex.groupExists, true)
+    assert.deepEqual(await db.prepare('SELECT status, group_id, operation_id FROM channex_connections').first(), { status: 'not_connected', group_id: 'grp-1', operation_id: null })
+
+    channex.keepProperty = null
+    await owner.deleteForOrganization()
+    assert.deepEqual([channex.channelExists, channex.groupExists, channex.groupProperties], [false, false, []])
+    const writes = channex.seen.filter(request => request.method !== 'GET').map(request => `${request.method} ${request.path}`)
+    assert.deepEqual(writes.slice(writes.indexOf('POST /channels/chan-1/deactivate')), [
+      'POST /channels/chan-1/deactivate', 'DELETE /channels/chan-1', 'DELETE /properties/setup-1', 'DELETE /properties/prop-2', 'DELETE /properties/prop-2', 'DELETE /groups/grp-1',
+    ])
+    assert.deepEqual(await db.prepare('SELECT status, channel_id, group_id, setup_property_id, operation_id, pending_step FROM channex_connections').first(),
+      { status: 'not_connected', channel_id: null, group_id: null, setup_property_id: null, operation_id: null, pending_step: null })
+    // Repeating it finds nothing left to release.
+    const before = channex.seen.length
+    await owner.deleteForOrganization()
+    assert.equal(channex.seen.filter((request, index) => index >= before && request.method !== 'GET').length, 0)
   } finally {
     globalThis.fetch = realFetch
     await runtime.dispose()
