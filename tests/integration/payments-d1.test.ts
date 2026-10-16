@@ -22,6 +22,8 @@ import { deliverPaymentsUsage, paymentsUsageStatus, reconcileNativeBillingCredit
 import { getStripe } from '../../server/utils/billing.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { approveRefundAuthorization, executeRefund, requirePayment } from '../../server/domain/payments/index.ts'
+import { reviewPayment, confirmPayment } from '../../server/domain/payments/intent.ts'
+import { reconcilePaymentIntent } from '../../server/domain/payments/events.ts'
 import { canRetryGuestReservationRefund } from '../../server/domain/payments/visit-refund.ts'
 import { mcpFinancialApprovalErrorResult } from '../../server/utils/mcp-financial-handoff.ts'
 import { handlePaymentsTools } from '../../server/utils/mcp-tools/payments.ts'
@@ -690,4 +692,116 @@ test('owner-serviced credits leave the usage batch without hiding credits or sta
   assert.equal(retained[100]?.billing_timestamp,NOW)
   assert.match(String(retained[100]?.error),/Metronome request failed \(503\)/u)
  }finally{await runtime.dispose()}
+})
+
+test('ACH Direct Debit payment review and confirmation handles bank account details, zero surcharge, and processing hold extension', { timeout: 120_000 }, async (t) => {
+  const { db, runtime } = await boot()
+  try {
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-proof-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+    await payable(db, 'ach-payment')
+    const opening = { id: 'ach-request', kind: 'booking' as const, organization_id: ORG, location_id: null, user_id: 'guest', review_id: null, conversation_state: 'needs_attention' as const, resolved_at: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@example.com' }), created_at: NOW, updated_at: NOW }
+    await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
+    await db.prepare("UPDATE payment_checkout_holds SET request_id=? WHERE payment_id='ach-payment'").bind(opening.id).run()
+    const originalFetch = globalThis.fetch
+
+    t.mock.method(globalThis, 'fetch', async (request, init) => {
+      const url = new URL(request instanceof Request ? request.url : String(request))
+      if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
+      assert.equal(new Headers(init?.headers).get('stripe-account'), 'acct_seller')
+      if (url.pathname === '/v1/payment_intents/pi_ach-payment' && init?.method === 'POST') {
+        return Response.json({
+          id: 'pi_ach-payment',
+          object: 'payment_intent',
+          status: 'requires_confirmation',
+          amount: 10000,
+          currency: 'usd',
+          livemode: false,
+          metadata: { krabiclaw_payment_id: 'ach-payment' },
+          amount_details: {
+            surcharge: {
+              status: 'unavailable',
+            },
+          },
+          payment_method: {
+            id: 'pm_achproof123',
+            object: 'payment_method',
+            type: 'us_bank_account',
+            us_bank_account: {
+              bank_name: 'STRIPE TEST BANK',
+              last4: '6789',
+              routing_number: '110000000',
+              account_holder_type: 'individual',
+            },
+          },
+        })
+      }
+      if (url.pathname === '/v1/payment_intents/pi_ach-payment' && init?.method === 'GET') {
+        return Response.json({
+          id: 'pi_ach-payment',
+          object: 'payment_intent',
+          status: 'requires_confirmation',
+          amount: 10000,
+          currency: 'usd',
+          livemode: false,
+          metadata: { krabiclaw_payment_id: 'ach-payment' },
+          payment_method: 'pm_achproof123',
+        })
+      }
+      if (url.pathname === '/v1/payment_intents/pi_ach-payment/confirm' && init?.method === 'POST') {
+        return Response.json({
+          id: 'pi_ach-payment',
+          object: 'payment_intent',
+          status: 'processing',
+          amount: 10000,
+          currency: 'usd',
+          client_secret: 'pi_ach-payment_secret',
+          payment_method: 'pm_achproof123',
+        })
+      }
+      throw new Error(`Unexpected Stripe request: ${init?.method} ${url.pathname}`)
+    })
+
+    const stripe = getStripe(env)
+    const claim = crypto.randomUUID() + crypto.randomUUID()
+    const hash = await tokenHash(claim)
+    await db.prepare("INSERT INTO payment_claims(token_hash, payment_id, expires_at) VALUES (?, 'ach-payment', '2099-01-01T00:00:00.000Z')").bind(hash).run()
+
+    const review = await reviewPayment(db, stripe, ORG, 'ach-payment', claim, 'pm_achproof123')
+    assert.equal(review.surcharge, 0)
+    assert.equal(review.total, 10000)
+    assert.equal(review.method.type, 'us_bank_account')
+    assert.equal(review.method.bank_name, 'STRIPE TEST BANK')
+    assert.equal(review.method.last4, '6789')
+
+    const confirm = await confirmPayment(db, stripe, env, ORG, 'ach-payment', claim, { payment_method_id: 'pm_achproof123', total: 10000 })
+    assert.equal(confirm.status, 'processing')
+    assert.equal(confirm.client_secret, 'pi_ach-payment_secret')
+
+    // Capacity hold should be extended by 14 days rather than expiring immediately
+    const hold = await db.prepare("SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id='ach-payment'").first<{ status: string; expires_at: string }>()
+    assert.equal(hold?.status, 'active')
+    const holdExpires = Date.parse(hold!.expires_at)
+    const expectedMinExpires = Date.now() + 13 * 86400 * 1000
+    assert.ok(holdExpires > expectedMinExpires, `Hold expires_at ${hold!.expires_at} should be at least 13 days in the future`)
+
+    // Verify late payment failure releases the hold and updates payment state to failed
+    const failedIntent = {
+      id: 'pi_ach-payment',
+      livemode: false,
+      currency: 'USD',
+      metadata: { krabiclaw_payment_id: 'ach-payment' },
+      status: 'requires_payment_method',
+      amount: 10000,
+      last_payment_error: { message: 'The payment failed' },
+    } as unknown as Stripe.PaymentIntent
+    const payment = await requirePayment(db, ORG, 'ach-payment')
+    await reconcilePaymentIntent(db, stripe, payment, failedIntent, env)
+
+    const failedPayment = await requirePayment(db, ORG, 'ach-payment')
+    assert.equal(failedPayment.state, 'failed')
+    const releasedHold = await db.prepare("SELECT status FROM payment_checkout_holds WHERE payment_id='ach-payment'").first<{ status: string }>()
+    assert.equal(releasedHold?.status, 'released')
+  } finally {
+    await runtime.dispose()
+  }
 })
