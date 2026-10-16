@@ -79,6 +79,19 @@ function savedUploadResult(asset: MediaAsset | null): UploadResolvedMediaResult 
   return { assetId: asset.id, publicUrl: asset.public_url, thumbnailUrl: asset.thumbnail_url, kind: asset.kind }
 }
 
+/** An uploaded file's name as stored: printable ASCII, no path, at most 120 characters. */
+export function sanitizeFilename(raw: string | undefined): string {
+  const sanitized = (raw ?? '')
+    .replace(/[\\/]+/g, '-')
+    .replace(/[^\x20-\x7E]+/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/[^A-Za-z0-9._-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
+    .slice(0, 120)
+  return sanitized || 'upload'
+}
+
 function uploadFailure(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }

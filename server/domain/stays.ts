@@ -15,6 +15,11 @@ import { isValidTimezone } from '~/utils/timezone'
 import { stayThreadQueries } from '~/server/domain/requests'
 import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planStayMessages } from '~/server/domain/scheduled-guest-messages'
+import { arrangeProductPhotos, readProductPhotos, type MediaPlacementItem } from '~/server/utils/media-placement'
+import { deleteMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
+import { sanitizeFilename, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
+import { MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, sniffMediaMimeType } from '~/server/utils/media-mime'
+import { mediaStillUrl, MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
 
 /**
  * Places to stay: the one implementation of stays, nights and offline
@@ -120,6 +125,23 @@ export interface StayHome {
    * nights; one importing or disconnected does not.
    */
   channel: { provider: 'channex'; status: 'importing' | 'connected' | 'disconnected' } | null
+  /**
+   * The home's photos in order, the cover first: its product's own media
+   * (the product image, then its gallery), the same pictures its pages show.
+   */
+  photos: StayPhoto[]
+}
+
+/** One of a home's photos. Its id is the media asset's id. */
+export interface StayPhoto {
+  id: string
+  /** A video placed from the media library shows its poster frame as its url. */
+  kind: 'image' | 'video'
+  url: string
+  width: number | null
+  height: number | null
+  alt_text: string | null
+  position: number
 }
 
 export interface StayNight {
@@ -230,6 +252,7 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
       JOIN product_stay_configs c ON c.organization_id = v.organization_id AND c.product_id = v.product_id
      WHERE pr.organization_id = ? ${productId ? 'AND v.product_id = ?' : ''} AND v.active = 1
      ORDER BY v.sort_order, v.id`, [access.organizationId, ...(productId ? [productId] : [])])
+  const photos = await readProductPhotos(db, { organizationId: access.organizationId, productIds: rows.map(row => String(row.product_id)) })
   return rows.map((row) => {
     if (!isCurrencyCode(row.default_currency)) throw new Error(`Organization ${access.organizationId} has an unsupported default currency`)
     const own = prices.filter(price => price.product_id === row.product_id).map(price => ({ ...price, active: Number(price.active) === 1 }))
@@ -245,8 +268,15 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
         provider: 'channex',
         status: Number(row.channel_enabled) === 1 ? 'connected' : row.channel_stage === 'reservations' || row.channel_stage === 'messages' || row.channel_stage === 'complete' ? 'disconnected' : 'importing',
       },
+      photos: (photos.get(String(row.product_id)) ?? []).map(stayPhoto),
     }
   })
+}
+
+function stayPhoto(item: MediaPlacementItem, position: number): StayPhoto {
+  const url = mediaStillUrl(item)
+  if ((item.kind !== 'image' && item.kind !== 'video') || !url) throw new Error(`Media asset ${item.asset_id} has no picture to show`)
+  return { id: item.asset_id, kind: item.kind, url, width: item.width ?? null, height: item.height ?? null, alt_text: item.alt_text ?? null, position }
 }
 
 /** Every place to stay this caller may see: all of them for managers, their assigned homes for members. */
@@ -443,6 +473,8 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
   const locationId = location.id
   const product = await createProduct(db, {
     organizationId: access.organizationId, actor: { actorId: access.actorId }, idempotencyKey, env,
+    // On the site unpublished, like a product added in the editor, so it can carry photos and a page.
+    publication: { published: false },
     product: {
       kind: 'stay', name: home.name,
       ...(home.base_price_minor === null ? {} : { variants: [{ name: home.name, prices: [{ unit_amount: home.base_price_minor }] }] }),
@@ -450,6 +482,108 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
     },
   })
   return await readStayHome(db, access, product.id)
+}
+
+/**
+ * A home's photos are its product's media, so its pages and booking site
+ * show the same pictures. Only managers change them; each change is checked
+ * against the photos the caller's change was based on, and returns the home.
+ */
+async function arrangeHomePhotos(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, home: StayHome, to: string[]): Promise<StayHome> {
+  await arrangeProductPhotos(db, { organizationId: access.organizationId, env, principal, productId: home.product_id, from: home.photos.map(photo => photo.id), to })
+  const updated = await readStayHome(db, access, home.product_id)
+  await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId: home.product_id, locationId: home.location_id, stayId: null }, { updated_at: new Date().toISOString() })
+  return updated
+}
+
+async function managedHome(db: DbClient, access: StayAccess, productId: string): Promise<StayHome> {
+  requireManager(access)
+  return await readStayHome(db, access, productId)
+}
+
+function homePhoto(home: StayHome, photoId: string): StayPhoto {
+  const photo = home.photos.find(entry => entry.id === photoId)
+  if (!photo) fail(404, 'PHOTO_NOT_FOUND', 'That photo is not one of this home\'s photos', 'photo_id')
+  return photo
+}
+
+/** Add a photo after the home's others; the first photo a home gets is its cover. The file is kept in the organization's media library. */
+export async function addStayHomePhoto(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, productId: string, file: unknown): Promise<StayHome> {
+  const home = await managedHome(db, access, productId)
+  if (!(file instanceof File)) fail(422, 'PHOTO_REQUIRED', 'Send the photo as the multipart field image', 'image')
+  if (file.size > MAX_IMAGE_BYTES) fail(413, 'PHOTO_TOO_LARGE', `A photo can be at most ${MAX_IMAGE_BYTES / 1024 / 1024} MB`, 'image')
+  if (home.photos.length >= MAX_ORDERED_MEDIA_ASSETS) fail(422, 'PHOTO_LIMIT', `A home holds at most ${MAX_ORDERED_MEDIA_ASSETS} photos`, 'image')
+  const buffer = new Uint8Array(await file.arrayBuffer())
+  if (!buffer.byteLength) fail(422, 'PHOTO_REQUIRED', 'The photo is empty', 'image')
+  const contentType = sniffMediaMimeType(buffer)
+  if (!RESOLVED_MEDIA_IMAGE_TYPES.has(contentType)) fail(415, 'UNSUPPORTED_PHOTO_TYPE', 'A photo must be a JPEG, PNG, WebP, GIF, AVIF or SVG image', 'image')
+  const uploaded = await uploadResolvedMediaToAssetStore({
+    db, env, organizationId: access.organizationId, userId: access.actorId, source: 'uploaded', kind: 'image',
+    buffer, contentType, filename: sanitizeFilename(file.name),
+    fileSize: buffer.byteLength,
+  })
+  try {
+    return await arrangeHomePhotos(db, env, access, principal, home, [...home.photos.map(photo => photo.id), uploaded.assetId])
+  } catch (error) {
+    // Nobody else knows the new asset: unless the arrangement placed it before
+    // failing, it is deleted rather than left in the library unseen.
+    const placed = (await readProductPhotos(db, { organizationId: access.organizationId, productIds: [home.product_id] })).get(home.product_id)?.some(item => item.asset_id === uploaded.assetId)
+    if (!placed) {
+      try {
+        await deleteMediaAsset(db, env, uploaded.assetId, access.organizationId, access.actorId)
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], `The photo was not added and its upload ${uploaded.assetId} could not be deleted`, { cause: cleanupError })
+      }
+    }
+    throw error
+  }
+}
+
+/**
+ * Put the home's photos in this order; the first is the cover. The order is
+ * the whole list, so it must name every photo the home has, once: a photo
+ * added or removed since the caller read them refuses it.
+ */
+export async function reorderStayHomePhotos(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, productId: string, body: Record<string, unknown>): Promise<StayHome> {
+  const home = await managedHome(db, access, productId)
+  const unknown = Object.keys(body).find(key => key !== 'photo_ids')
+  if (unknown) fail(422, 'INVALID_PHOTO_ORDER', `${unknown} cannot be changed here`, unknown)
+  const ids = body.photo_ids
+  if (!Array.isArray(ids) || ids.some(id => typeof id !== 'string' || !id) || new Set(ids).size !== ids.length) {
+    fail(422, 'INVALID_PHOTO_ORDER', 'photo_ids must list photo ids, each once', 'photo_ids')
+  }
+  const order = ids as string[]
+  if (order.length !== home.photos.length || order.some(id => !home.photos.some(photo => photo.id === id))) {
+    fail(409, 'PHOTOS_CHANGED', 'photo_ids must name every photo the home has; reload them and try again', 'photo_ids')
+  }
+  return await arrangeHomePhotos(db, env, access, principal, home, order)
+}
+
+/** Describe a photo for guests and search engines. The text is the media asset's own, so every page showing the photo uses it. */
+export async function updateStayHomePhoto(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, productId: string, photoId: string, body: Record<string, unknown>): Promise<StayHome> {
+  const home = await managedHome(db, access, productId)
+  homePhoto(home, photoId)
+  const unknown = Object.keys(body).find(key => key !== 'alt_text')
+  if (unknown) fail(422, 'INVALID_PHOTO_FIELD', `${unknown} cannot be changed here`, unknown)
+  if (!('alt_text' in body)) fail(422, 'INVALID_PHOTO_FIELD', 'alt_text is required', 'alt_text')
+  const alt = body.alt_text
+  if (alt !== null && (typeof alt !== 'string' || !alt.trim() || alt.trim().length > 500)) {
+    fail(422, 'INVALID_PHOTO_FIELD', 'alt_text must contain 1 to 500 characters, or null', 'alt_text')
+  }
+  const placedOn = { owner_type: 'product', owner_id: productId, slots: ['image', 'gallery'] }
+  if (!await updateMediaAssetMetadata(db, photoId, access.organizationId, { alt_text: alt === null ? null : (alt as string).trim() }, placedOn)) {
+    fail(409, 'PHOTOS_CHANGED', 'The photo was taken off the home before its description was saved; reload the photos', 'photo_id')
+  }
+  const updated = await readStayHome(db, access, productId)
+  await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId, locationId: home.location_id, stayId: null }, { updated_at: new Date().toISOString() })
+  return updated
+}
+
+/** Take a photo off the home. The file stays in the organization's media library; when the cover goes, the next photo becomes the cover. */
+export async function removeStayHomePhoto(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, productId: string, photoId: string): Promise<StayHome> {
+  const home = await managedHome(db, access, productId)
+  homePhoto(home, photoId)
+  return await arrangeHomePhotos(db, env, access, principal, home, home.photos.map(photo => photo.id).filter(id => id !== photoId))
 }
 
 /** Stays overlapping [from, to), newest check-in last. Cancelled stays are included only when asked for. */
