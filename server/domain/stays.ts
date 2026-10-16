@@ -587,6 +587,8 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   const arrival = arrivalPatch(body)
   const location = locationPatch(body)
   if ('published' in body && typeof body.published !== 'boolean') fail(422, 'INVALID_DETAIL', 'published must be true or false', 'published')
+  // Publication is refused until the home can take bookings; on its own, a refusal leaves nothing else half-saved.
+  if ('published' in body && Object.keys(body).length > 1) fail(422, 'INVALID_DETAIL', 'Change published on its own', 'published')
   if ('description' in body && typeof body.description !== 'string') fail(422, 'INVALID_DETAIL', 'description must be text; send an empty one to clear it', 'description')
   for (const key of LISTING_FIELDS) if (key in body) (stay as Record<string, unknown>)[key] = body[key]
   for (const [key, table, column] of [['assigned_member_id', 'member', 'organizationId'], ['assigned_team_id', 'team', 'organizationId']] as const) {

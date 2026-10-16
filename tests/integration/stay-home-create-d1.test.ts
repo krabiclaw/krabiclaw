@@ -194,8 +194,13 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     // Clearing: null removes a value, an empty list offers nothing.
     const cleared = await edit(owner, { wifi_password: null, amenities: [], bedrooms: null, checkout_instructions: [] })
     assert.deepEqual(cleared.body, { home: { ...listed, wifi_password: null, amenities: [], bedrooms: null, checkout_instructions: [] }, channel_push: null })
+    assert.deepEqual(((await call(owner, 'GET')).body.homes as Array<{ product_id: string }>).find(home => home.product_id === made.product_id), cleared.body.home)
+    assert.deepEqual(await db.prepare('SELECT wifi_password, amenities, bedrooms, checkout_instructions FROM product_stay_configs WHERE product_id = ?').bind(made.product_id).first(),
+      { wifi_password: null, amenities: '[]', bedrooms: null, checkout_instructions: '[]' })
     // Listing the home is its product's publication, refused until it can take bookings.
     assert.deepEqual(refusal(await edit(owner, { published: 'yes' })), { status: 422, code: 'INVALID_DETAIL', field: 'published' })
+    assert.deepEqual(refusal(await edit(owner, { published: true, description: 'Half saved?' })), { status: 422, code: 'INVALID_DETAIL', field: 'published' })
+    assert.equal((await getProduct(db, ORG, made.product_id)).description, 'A cabin above the canyon.')
     assert.equal((await edit(owner, { published: true })).status, 409)
     assert.equal(((await call(owner, 'GET')).body.homes as Array<{ product_id: string; published: boolean }>).find(home => home.product_id === made.product_id)!.published, false)
   } finally {
