@@ -120,6 +120,8 @@ export interface PublicProductDetailPayload {
   collectionName: string
   collectionSiblings: ProductCollectionSibling[]
   localeRepresentations: PublicLocaleRepresentation[]
+  /** A place to stay is paid for on the site only once the business's Payments setup is complete; until then it takes enquiries. */
+  stayCheckoutAvailable: boolean
 }
 
 export interface PublicProductReview {
@@ -408,9 +410,10 @@ async function projectPublicOffering(
 export async function publicProductDetailPayload(db: DbClient, env: CloudflareEnv, detail: PublicProductDetail): Promise<PublicProductDetailPayload> {
   const memberships = new Set(detail.product.collections.map(entry => entry.collection_id))
   const collection = detail.collections.find(collection => memberships.has(collection.id))
-  const [reviews, sessions] = await Promise.all([
+  const [reviews, sessions, staySetup] = await Promise.all([
     loadPublicProductReviews(db, detail),
     loadPublicProductSessions(db, detail, env),
+    detail.product.kind === 'stay' ? readStripeCheckoutSetup(db, detail.organization.id, env) : null,
   ])
   return {
     product: detail.product, location: detail.location, locations: detail.locations,
@@ -421,6 +424,7 @@ export async function publicProductDetailPayload(db: DbClient, env: CloudflareEn
     collectionName: collection?.name ?? '',
     collectionSiblings: collection ? selectProductCollectionSiblings(detail.products, detail.product, collection.id, { currency: detail.currency, location_id: detail.location?.id ?? null, at: new Date().toISOString() }) : [],
     localeRepresentations: detail.localeRepresentations,
+    stayCheckoutAvailable: staySetup !== null && staySetup.missing.length === 0,
   }
 }
 

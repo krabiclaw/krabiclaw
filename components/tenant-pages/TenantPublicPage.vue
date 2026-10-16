@@ -7,7 +7,7 @@
     loop they lost every section the marketing site had (#903).
   -->
   <template v-if="page">
-    <ProductDetailPage v-if="linkedOffer" :key="`${linkedOffer.product.id}:${linkedOffer.location?.id ?? 'online'}:${Boolean(linkedOffer.scopeRequired)}`" :organization-id="organizationId" :organization-name="linkedOffer.brandName" :vertical="linkedOffer.product.kind === 'service' ? 'service' : linkedOffer.vertical" :product="linkedOffer.product" :booking="linkedOffer.booking" :location="linkedOffer.location" :locations="linkedOffer.locations" :online-available="linkedOffer.onlineAvailable" :scope-required="linkedOffer.scopeRequired" :currency="linkedOffer.currency" :page-document="page" :collection-name="linkedOffer.collectionName" :presentation="presentationForProduct(linkedOffer.vertical, linkedOffer.product, organization.theme_id)" :reviews="linkedOffer.reviews" :sessions="linkedOffer.sessions" :collection-siblings="linkedOffer.collectionSiblings">
+    <ProductDetailPage v-if="linkedOffer" :key="`${linkedOffer.product.id}:${linkedOffer.location?.id ?? 'online'}:${Boolean(linkedOffer.scopeRequired)}`" :organization-id="organizationId" :organization-name="linkedOffer.brandName" :vertical="linkedOffer.product.kind === 'service' ? 'service' : linkedOffer.vertical" :product="linkedOffer.product" :booking="linkedOffer.booking" :location="linkedOffer.location" :locations="linkedOffer.locations" :online-available="linkedOffer.onlineAvailable" :scope-required="linkedOffer.scopeRequired" :currency="linkedOffer.currency" :page-document="page" :collection-name="linkedOffer.collectionName" :presentation="presentationForProduct(linkedOffer.vertical, linkedOffer.product, organization.theme_id)" :reviews="linkedOffer.reviews" :sessions="linkedOffer.sessions" :collection-siblings="linkedOffer.collectionSiblings" :stay-checkout-available="linkedOffer.stayCheckoutAvailable">
       <template #actions>
         <BlawbyButton v-if="secondaryAction" class="mt-5" variant="outline" :to="secondaryAction.url">{{ secondaryAction.label }}</BlawbyButton>
       </template>
@@ -16,14 +16,11 @@
       </template>
     </ProductDetailPage>
     <TenantPageRenderer v-else :page="page" />
-    <!-- The schedule page's buttons are its hero's and its booking prompt's; only the native booking is drawn here. -->
-    <OnlineConsultationBooking v-if="page.recipe === 'schedule' && blawbyDocument?.shell.canSchedule && blawbyDocument.shell.consultation.mode === 'native'" />
   </template>
 </template>
 
 <script setup lang="ts">
 import ProductDetailPage from '~/components/products/ProductDetailPage.vue'
-import OnlineConsultationBooking from '~/components/booking/OnlineConsultationBooking.vue'
 import { presentationForProduct } from '~/utils/product-presentation'
 import { blockTextOrNull, isInternalRoute } from '~/utils/tenant-page-block-data'
 import { publicApiRequest, isRecord } from '~/utils/api-clients'

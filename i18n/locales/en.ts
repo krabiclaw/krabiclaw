@@ -65,6 +65,8 @@ export default {
     "reserve": "Reserve",
     "confirm_and_pay": "Confirm and pay",
     "charged_in_full": "You pay the full amount when you reserve.",
+    "send_enquiry": "Send enquiry",
+    "enquiry_note": "Send your dates and the host will reply to confirm.",
     "adults": "Adults",
     "adults_hint": "Ages 13 or above",
     "children": "Children",

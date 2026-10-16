@@ -52,6 +52,33 @@
   </section>
 
   <!--
+    The schedule page opens on the firm's dark band with one large button to
+    book, or, when the firm books natively, a compact heading over the booking
+    itself. It was drawn by a schedule-only wrapper; when that was deleted the
+    page fell to the small hero below and lost both.
+  -->
+  <template v-else-if="isSchedule">
+    <section class="relative isolate overflow-hidden bg-[var(--blawby-primary-dark)]" data-parity-section="schedule-hero">
+      <div class="blawby-container relative z-20 text-center" :class="nativeSchedule ? 'py-12 sm:py-16' : 'py-24 sm:py-32 lg:py-40 min-[1920px]:py-48 min-[2560px]:py-64'">
+        <div class="mx-auto max-w-4xl min-[1920px]:max-w-6xl min-[2560px]:max-w-7xl">
+          <p class="font-bold uppercase text-[var(--blawby-accent)]">{{ organizationName }}</p>
+          <h1 v-if="splitTitle.before || splitTitle.accent" class="blawby-display font-medium text-white" :class="nativeSchedule ? 'mt-3 text-4xl sm:text-5xl' : 'text-5xl sm:text-7xl min-[1920px]:text-8xl min-[2560px]:text-9xl'">
+            {{ splitTitle.before }}<span v-if="splitTitle.accent" class="text-[var(--blawby-accent)]">{{ splitTitle.accent }}</span>{{ splitTitle.after }}
+          </h1>
+          <p v-for="(part, index) in descriptionParts" :key="index" class="mt-6 text-lg leading-8 text-gray-300 sm:text-xl min-[1920px]:text-2xl">{{ part }}</p>
+          <p v-if="schedulePriceLine && !nativeSchedule" class="mt-6 text-lg font-bold text-[var(--blawby-accent)] sm:text-xl min-[1920px]:text-2xl">{{ schedulePriceLine }}</p>
+          <BlawbyButton v-if="!nativeSchedule" :to="scheduleDestination" class="mt-10 w-full px-8 py-4 text-lg min-[1920px]:px-4 min-[1920px]:py-4 min-[1920px]:text-base min-[2560px]:px-5 min-[2560px]:py-5 min-[2560px]:text-lg" @click="trackConsultationClick('schedule_hero', page.path, scheduleDestination, page.page_id)">
+            <svg class="-ml-0.5 mr-2 size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 2v4m8-4v4M3 10h18" /><rect x="3" y="4" width="18" height="18" rx="2" /></svg>
+            {{ scheduleLabel }}
+          </BlawbyButton>
+          <p v-if="scheduleNotice" class="mt-6 text-sm leading-6 text-gray-300">{{ scheduleNotice }}</p>
+        </div>
+      </div>
+    </section>
+    <OnlineConsultationBooking v-if="nativeSchedule" />
+  </template>
+
+  <!--
     Any other page that carries its own picture opens with it, beside the title.
     `cover` and `gallery` are the document's own media slots — the same ones the
     social card is drawn from — so the picture is a property of the page, like
@@ -93,7 +120,7 @@
     </div>
   </section>
 
-  <section v-else :data-blawby-dark-hero="isDark ? 'true' : undefined" :style="backgroundStyle" class="relative overflow-hidden" data-parity-section="page-hero">
+  <section v-else :style="backgroundStyle" class="relative overflow-hidden" data-parity-section="page-hero">
     <div class="blawby-container relative">
       <div class="px-6 pb-4 pt-16 lg:px-8">
         <div class="mx-auto max-w-4xl text-center">
@@ -102,7 +129,7 @@
           </p>
           <h1 v-if="titleWords.length" :aria-label="title" class="blawby-display text-3xl font-bold sm:text-4xl">
             <template v-for="(word, index) in titleWords" :key="`${word}-${index}`">
-              <span :class="titleWordClass(index)">{{ word + (index < titleWords.length - 1 ? ' ' : '') }}</span>
+              <span :class="index === 1 || index === 2 ? 'text-[var(--blawby-accent-strong)]' : 'text-[var(--blawby-primary)]'">{{ word + (index < titleWords.length - 1 ? ' ' : '') }}</span>
             </template>
           </h1>
           <div v-if="descriptionParts.length" class="mt-6 text-left text-lg leading-8 text-[var(--blawby-primary)]">
@@ -129,11 +156,12 @@
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import type { BlawbyDocumentPayload } from '~/utils/blawby-document-contract'
+import OnlineConsultationBooking from '~/components/booking/OnlineConsultationBooking.vue'
 import { blockText, blockTextOrNull, blockMedia } from '~/utils/tenant-page-block-data'
 import { blawbyHeroProseBlockId, blawbyShieldVariant, blawbySplitAccent, blawbySurface, type BlawbyShieldVariant } from '~/types/blawby'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
-const { localePath } = useI18n()
+const { localePath, t } = useI18n()
 
 const title = computed(() => blockText(props.block.data.title))
 const description = computed(() => blockTextOrNull(props.block.data.subtitle))
@@ -203,14 +231,22 @@ function trackCtaClick() {
 }
 
 // The page's own colour, which the shield below cuts its shape out of, so the
-// two cannot drift apart. Only the dark one restates its text colours, on the
-// words themselves: a colour on the heading lost to the colour each word sets.
+// two cannot drift apart.
 const backgroundStyle = computed(() => ({ backgroundColor: blawbySurface(variant.value) }))
-const isDark = computed(() => variant.value === 'schedule')
-function titleWordClass(index: number) {
-  if (index === 1 || index === 2) return isDark.value ? 'text-[var(--blawby-accent)]' : 'text-[var(--blawby-accent-strong)]'
-  return isDark.value ? 'text-white' : 'text-[var(--blawby-primary)]'
-}
+
+// The schedule page books through the firm's consultation settings, which say
+// whether it can take requests now and where they go.
+const isSchedule = computed(() => props.page.recipe === 'schedule')
+const shell = computed(() => document.value.shell)
+const nativeSchedule = computed(() => shell.value.canSchedule && shell.value.consultation.mode === 'native')
+const scheduleDestination = computed(() => nativeSchedule.value ? '#consultations' : shell.value.canSchedule && shell.value.consultation.external_url ? shell.value.consultation.external_url : localePath('/contact'))
+const scheduleLabel = computed(() => shell.value.canSchedule ? ctaLabel.value || shell.value.consultation.cta_label : t('site_pages.contact'))
+// What a consultation costs and what a request does not confirm belong to the
+// booking prompt that declares them; the hero repeats them beside its button.
+const bookingPrompt = computed(() => props.page.blocks.find(item => item.type === 'booking_cta')?.data)
+const schedulePriceLine = computed(() => blockTextOrNull(bookingPrompt.value?.price_line))
+const scheduleNotice = computed(() => blockTextOrNull(bookingPrompt.value?.notice))
+const { name: organizationName } = useTenantOrganization().organization
 const titleWords = computed(() => title.value.trim().split(/\s+/).filter(Boolean))
 const descriptionParts = computed(() => (description.value ?? '')
   .split(/\n\s*\n/)
@@ -224,14 +260,6 @@ const descriptionParts = computed(() => (description.value ?? '')
   font-size: 1.125rem !important;
   line-height: 2rem !important;
   margin: 0 0 1rem !important;
-}
-
-[data-blawby-dark-hero] .blawby-page-hero-copy p {
-  color: var(--color-gray-200) !important;
-}
-
-[data-blawby-dark-hero] .blawby-page-hero-copy strong {
-  color: var(--color-white);
 }
 
 .blawby-page-hero-copy strong {

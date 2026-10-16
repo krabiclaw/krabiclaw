@@ -2305,7 +2305,6 @@ export const mcp_tool_call_events = sqliteTable("mcp_tool_call_events", {
 	check("mcp_tool_call_events_duration_check", sql`duration_ms >= 0`),
 	index("idx_mcp_tool_call_events_created_at").on(table.created_at),
 	index("idx_mcp_tool_call_events_tool_status").on(table.tool_name, table.status),
-	index("idx_mcp_tool_call_events_org").on(table.created_at),
 	index("idx_mcp_tool_call_events_org").on(table.organization_id, table.created_at),
 	index("idx_mcp_tool_call_events_method_created").on(table.method, table.created_at),
 	index("idx_mcp_tool_call_events_session").on(table.session_id_hash, table.created_at),

@@ -9,6 +9,8 @@ import type { ContactFormState } from '~/components/booking/BookingContactForm.v
 
 export interface StayBookingContext {
   product: PublicProduct
+  /** Whether the stay is paid for on the site; without it the chosen dates go to the host as an enquiry. */
+  checkout: boolean
 }
 
 /** Months a guest can page through, and how many nights are read at once. */
@@ -23,7 +25,7 @@ const WINDOW_DAYS = 400
  */
 export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
   const context = computed(() => toValue(input))
-  const { locale, t } = useI18n()
+  const { locale, t, localePath } = useI18n()
   const bookingOpen = ref(false)
   const bookingStep = ref(1)
   const calendar = ref<PublicStayCalendar | null>(null)
@@ -188,7 +190,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
    * controls are labels for it, and setting `bookingOpen` here as well raced the
    * label's own activation and flipped the checkbox shut again.
    */
-  function openBooking(step: 1 | 2 = quote.value ? 2 : 1) {
+  function openBooking(step: 1 | 2 = quote.value && checkout.value ? 2 : 1) {
     bookingStep.value = step
   }
 
@@ -238,7 +240,15 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     }
   }
 
+  const checkout = computed(() => context.value.checkout)
+  /** The contact form, told which home, which nights and how many guests the enquiry is about. */
+  const enquiryPath = computed(() => {
+    const about = [context.value.product.name, rangeLabel.value, quote.value ? guestsLabel.value : ''].filter(Boolean).join(' · ')
+    return `${localePath('/contact')}?about=${encodeURIComponent(about)}`
+  })
+
   return {
+    checkout, enquiryPath,
     bookingOpen, bookingStep, calendar, calendarPending, calendarError, checkIn, checkOut, adults, children, infants, maxGuests,
     quote, quotePending, bookingError, submitting, breakdown, rangeLabel, guestsLabel, nightCount,
     loadCalendar, night, canCheckIn, canCheckOut, selectDay, clearDates, openBooking, submitBooking, money, nightsLabel, dateLabel,
