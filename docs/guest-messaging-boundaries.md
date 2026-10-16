@@ -12,6 +12,7 @@ This note exists so future sessions do not collapse three different systems into
 
 - Owner WhatsApp is a **ChowBot control surface**, not a guaranteed guest reply channel.
 - Direct guest replies use email. A mapped Airbnb conversation uses Channex's Messages API, including inquiries whose guest contact is withheld.
+- A direct stay whose guest has no email is reached by invite: the host makes a single-use link (`POST /api/dashboard/organizations/:id/guest-threads/:requestId/invite`, fourteen days, stored as a SHA-256, a newer link revokes an open one) and shares it from their own phone; KrabiClaw sends nothing. Whoever opens it at `/guest-invite/<token>` on the platform and signs in, or continues anonymously, takes the conversation by the link: `requests.user_id` and its stay's `user_id`, never a contact match. A named account's conversation is not handed to anyone else. Replies then land in that account inbox, and are also emailed when the account has a verified email; with no deliverable address nothing is sent and no delivery is recorded. Until then a reply is refused with `GUEST_INVITE_REQUIRED`.
 - Guest replies can be ingested back into the thread ledger from email, and from WhatsApp only when an inbound message can already be matched to an authorized guest thread by phone.
 - The dashboard inbox is the canonical thread UI for guest work. It renders the opening source submission with persisted message, operation, assignment, and resolution entries from one append-only history.
 

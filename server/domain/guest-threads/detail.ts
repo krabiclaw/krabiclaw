@@ -111,6 +111,7 @@ export async function getGuestThreadDetail(
     guestName: summary.guestName,
     participantLabel: summary.participantLabel,
     replyChannel: channelThread ? 'airbnb' : 'email',
+    guestAccountLinked: thread.user_id !== null,
     guestEmail: summary.guestEmail,
     guestPhone: summary.guestPhone,
     submissionType: thread.kind,

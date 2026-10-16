@@ -1467,9 +1467,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Saves a reply and optional photo in the guest conversation, emails the guest or, for a mapped Airbnb conversation, sends the text through Channex, and updates the inbox state using the supplied retry key.",
+        "read_only_justification": "Saves a reply and optional photo in the guest conversation, emails the guest or, for a mapped Airbnb conversation, sends the text through Channex; a guest who joined through an invite also sees it in their KrabiClaw inbox. Updates the inbox state using the supplied retry key.",
         "open_world_justification": "Downloads a supplied host photo when present and emails the reply and attachments to the conversation’s guest, or sends a text reply to a mapped Airbnb conversation through Channex.",
-        "destructive_justification": "Saves a reply and optional photo in the guest conversation, emails the guest or, for a mapped Airbnb conversation, sends the text through Channex, and updates the inbox state using the supplied retry key."
+        "destructive_justification": "Saves a reply and optional photo in the guest conversation, emails the guest or, for a mapped Airbnb conversation, sends the text through Channex; a guest who joined through an invite also sees it in their KrabiClaw inbox. Updates the inbox state using the supplied retry key."
       }
     },
     "request_product_booking_change": {
