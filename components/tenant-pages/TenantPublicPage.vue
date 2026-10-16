@@ -16,13 +16,8 @@
       </template>
     </ProductDetailPage>
     <TenantPageRenderer v-else :page="page" />
-    <template v-if="page.recipe === 'schedule' && blawbyDocument">
-      <OnlineConsultationBooking v-if="blawbyDocument.shell.canSchedule && blawbyDocument.shell.consultation.mode === 'native'" />
-      <div v-else class="blawby-container py-12 text-center">
-        <BlawbyButton v-if="blawbyDocument.shell.canSchedule" :to="blawbyDocument.shell.consultation.external_url!" @click="trackConsultationClick('schedule', page.path, blawbyDocument.shell.consultation.external_url, page.page_id)">{{ blawbyDocument.shell.consultation.cta_label }}</BlawbyButton>
-        <BlawbyButton v-else :to="localePath('/contact')" @click="trackConsultationClick('schedule', page.path, localePath('/contact'), page.page_id)">{{ t('site_pages.contact') }}</BlawbyButton>
-      </div>
-    </template>
+    <!-- The schedule page's buttons are its hero's and its booking prompt's; only the native booking is drawn here. -->
+    <OnlineConsultationBooking v-if="page.recipe === 'schedule' && blawbyDocument?.shell.canSchedule && blawbyDocument.shell.consultation.mode === 'native'" />
   </template>
 </template>
 
@@ -41,7 +36,7 @@ const props = defineProps<{ path: string; locale?: string | null }>()
 const { previewAuthorized, organization } = useTenantOrganization()
 const { id: organizationId, template } = organization
 const isPlatform = template.slug === 'platform'
-const { locale: i18nLocale, localePath, t } = useI18n()
+const { locale: i18nLocale, localePath } = useI18n()
 // Page ownership is a resolved site, not a tenant type. KrabiClaw's own site is
 // a site row with page documents like any other, and requiring `isTenant` here
 // is what forced its marketing pages to be hardcoded components (#903).
@@ -70,7 +65,6 @@ const isPageResponse = (value: unknown): value is { success: true; page: PublicT
 
 const requestEvent = useRequestEvent()
 const blawbyDocument = inject<Ref<BlawbyDocumentPayload> | null>('blawby-document', null)
-const { trackConsultationClick } = useOrganizationConversionTracking(blawbyDocument ? () => blawbyDocument.value.shell.consultation : undefined)
 const { data, error, status, execute } = await useAsyncData(key, async () => {
   if (template.slug === 'blawby') {
     const page = blawbyDocument?.value.route.page
