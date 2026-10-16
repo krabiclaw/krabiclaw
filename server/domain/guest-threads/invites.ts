@@ -129,12 +129,13 @@ function assertOpen(invite: InviteRow, now: string): void {
 /**
  * What an open link offers, for the page that asks the guest to sign in. It
  * answers anyone holding the token, so it names the business and the home and
- * nothing about the guest.
+ * nothing about the guest. The account that already holds the conversation
+ * (an anonymous guest who has since signed in) may still open it.
  */
-export async function describeGuestThreadInvite(db: DbClient, token: string): Promise<{ organization_name: string; location_title: string | null; expires_at: string }> {
+export async function describeGuestThreadInvite(db: DbClient, token: string, viewerUserId?: string): Promise<{ organization_name: string; location_title: string | null; expires_at: string }> {
   const invite = await loadInvite(db, token)
   assertOpen(invite, new Date().toISOString())
-  assertInvitable(invite)
+  assertInvitable(invite, viewerUserId)
   return { organization_name: invite.organization_name, location_title: invite.location_title, expires_at: invite.expires_at }
 }
 

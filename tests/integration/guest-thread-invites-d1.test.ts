@@ -141,6 +141,7 @@ test('a host invites a phone-only guest into their conversation and replies reac
     const again = tokenOf((await createGuestThreadInvite(db, env, { organizationId: ORG, threadId: fayThread, actorUserId: OWNER })).url)
     await db.batch(anonymousLinkQueries('anon-c', 'dana', new Date().toISOString()).map(({ query, params }) => db.prepare(query).bind(...(params ?? []))))
     await assert.rejects(describeGuestThreadInvite(db, again), refused(409, 'GUEST_THREAD_ALREADY_CLAIMED', 'request_id'))
+    assert.equal((await describeGuestThreadInvite(db, again, 'dana')).organization_name, 'Cabin Co')
     await assert.rejects(claimGuestThreadInvite(db, { token: again, userId: 'bob' }), refused(409, 'GUEST_THREAD_ALREADY_CLAIMED', 'request_id'))
     assert.deepEqual(await holders(fayThread), { request_user: 'dana', stay_user: 'dana' })
     assert.deepEqual(await claimGuestThreadInvite(db, { token: again, userId: 'dana' }), { thread_id: fayThread, path: `/dashboard/account/messages/${fayThread}` })

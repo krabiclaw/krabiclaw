@@ -604,10 +604,12 @@ async function executeReply(
 
   if (!entry) return { ok: false, status: 404, reason: 'thread_not_found' }
   if (!matchesReply(entry)) return conflict()
-  if (!guestEmail) {
+  if (entry.channel === 'web') {
     await updateThreadProjectionIfLatestEntry(db, context.thread.id, entry.id, { conversationState: 'waiting_on_guest' })
     return await successfulOutcome(db, context)
   }
+  // A reply saved for email whose address has since been removed is not sent anywhere else.
+  if (!guestEmail) return { ok: false, status: 409, reason: 'delivery_failed', code: 'GUEST_EMAIL_REQUIRED', field: 'guest.email', message: 'This reply was saved to be emailed, but the guest no longer has an email address.' }
   const delivery = await getDeliveryById(db, deliveryKey)
   if (!delivery || delivery.entry_id !== entry.id) throw new Error('Reply delivery receipt does not match its ledger entry')
   if (isDeliverySent(delivery)) {

@@ -27,6 +27,7 @@
       </template>
 
       <UAlert v-if="failure" color="error" variant="soft" :title="failure.title" :description="failure.message" />
+      <UButton v-if="failure && signedIn" block size="lg" @click="claim">Try again</UButton>
       <UButton v-if="failure && signedIn" block size="lg" color="neutral" variant="ghost" @click="switchAccount">Sign in with a different account</UButton>
     </template>
 
