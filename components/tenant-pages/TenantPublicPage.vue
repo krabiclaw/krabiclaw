@@ -16,14 +16,11 @@
       </template>
     </ProductDetailPage>
     <TenantPageRenderer v-else :page="page" />
-    <!-- The schedule page's buttons are its hero's and its booking prompt's; only the native booking is drawn here. -->
-    <OnlineConsultationBooking v-if="page.recipe === 'schedule' && blawbyDocument?.shell.canSchedule && blawbyDocument.shell.consultation.mode === 'native'" />
   </template>
 </template>
 
 <script setup lang="ts">
 import ProductDetailPage from '~/components/products/ProductDetailPage.vue'
-import OnlineConsultationBooking from '~/components/booking/OnlineConsultationBooking.vue'
 import { presentationForProduct } from '~/utils/product-presentation'
 import { blockTextOrNull, isInternalRoute } from '~/utils/tenant-page-block-data'
 import { publicApiRequest, isRecord } from '~/utils/api-clients'
