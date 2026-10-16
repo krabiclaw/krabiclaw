@@ -1,7 +1,7 @@
 import { isValidTimezone, isValidInstant } from '../utils/timezone'
 import { isCurrencyCode } from './currencies'
 
-export type AccountActivityKind = 'booking' | 'reservation' | 'order' | 'payment'
+export type AccountActivityKind = 'booking' | 'reservation' | 'stay' | 'order' | 'payment'
 export interface AccountActivityItem {
   kind: AccountActivityKind
   /** Visits use their request ID, or their actual operational ID when no request survives. */
@@ -27,7 +27,7 @@ export interface AccountActivityResponse { activities: AccountActivityItem[] }
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const nullableString = (value: unknown) => value === null || typeof value === 'string'
 export function isAccountActivityKind(value: unknown): value is AccountActivityKind {
-  return value === 'booking' || value === 'reservation' || value === 'order' || value === 'payment'
+  return value === 'booking' || value === 'reservation' || value === 'stay' || value === 'order' || value === 'payment'
 }
 export function isAccountActivityItem(value: unknown): value is AccountActivityItem {
   return record(value) && isAccountActivityKind(value.kind) && typeof value.id === 'string'
@@ -44,7 +44,7 @@ export function isAccountActivityResponse(value: unknown): value is AccountActiv
 /** One line of Airbnb's "Your payments": money the account paid, or money that came back. */
 
 export function isAccountActivityPath(value: unknown): value is string {
-  return typeof value === 'string' && /^\/dashboard\/account\/activity\/(booking|reservation|order|payment)\/[^/?#]+$/u.test(value)
+  return typeof value === 'string' && /^\/dashboard\/account\/activity\/(booking|reservation|stay|order|payment)\/[^/?#]+$/u.test(value)
 }
 export interface BuyerPaymentEntry {
   id: string

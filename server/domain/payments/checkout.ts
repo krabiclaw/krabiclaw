@@ -1,3 +1,4 @@
+import { STAY_BOOKED_POLICIES } from '~/shared/stay-cancellation'
 import { refreshProductBusy } from '~/server/domain/member-scheduling'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { platformLocale } from '~/shared/platform-locales'
@@ -50,6 +51,7 @@ export function isStayPurchase(value: unknown): value is StayPurchase {
     && typeof value.check_in_date === 'string' && typeof value.check_out_date === 'string' && value.check_out_date > value.check_in_date
     && [value.adults, value.children, value.infants, value.total_minor].every(Number.isSafeInteger) && isCurrencyCode(value.currency)
     && value.nightly.every(night => isRecord(night) && typeof night.date === 'string' && Number.isSafeInteger(night.price_minor))
+    && (STAY_BOOKED_POLICIES as readonly unknown[]).includes(value.cancellation_policy)
     && typeof guest.name === 'string' && !!guest.name.trim() && typeof guest.email === 'string'
     && (guest.phone === null || typeof guest.phone === 'string') && (guest.notes === null || typeof guest.notes === 'string')
 }
@@ -139,7 +141,7 @@ export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: C
     projectionTaxCode = product.tax_code
     stay = {
       product_id: quote.product_id, location_id: quote.location_id, timezone: quote.timezone, check_in_date: quote.check_in_date, check_out_date: quote.check_out_date,
-      adults: quote.adults, children: quote.children, infants: quote.infants, nightly: quote.nightly, total_minor: quote.total_minor, currency: quote.currency, guest,
+      adults: quote.adults, children: quote.children, infants: quote.infants, nightly: quote.nightly, total_minor: quote.total_minor, currency: quote.currency, cancellation_policy: quote.cancellation_policy, guest,
     }
   } else {
     const [policy, location, locale] = await Promise.all([

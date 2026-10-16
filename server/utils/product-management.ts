@@ -1,4 +1,4 @@
-import { isStayAmenity, stayCodes, STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_TYPES, type StayAmenity, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType } from '~/shared/stay-listing'
+import { isStayAmenity, stayCodes, STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, isStayPropertyType, type StayAmenity, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { ASSIGNED_SERVICE_SQL } from '~/server/utils/member-access'
 import type { ProductBookingSetupInput, SessionAvailability } from '~/server/utils/availability'
@@ -234,9 +234,12 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY sort_order, id`, params: [organizationId, ids] },
     { query: `SELECT product_variant_id, product_option_id, product_option_value_id FROM product_variant_option_values
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
-    { query: `SELECT pr.* FROM prices pr
-      JOIN product_variants v ON v.id = pr.product_variant_id AND v.organization_id = pr.organization_id
-      WHERE pr.organization_id = ? AND v.product_id IN (SELECT value FROM json_each(?))
+    // Variants first, then each one's prices by index. Joined the other way
+    // the planner walked every price of the site and re-read the product list
+    // for each: 184,000 rows for one 365-dish menu.
+    { query: `SELECT pr.* FROM product_variants v
+      CROSS JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id
+      WHERE v.organization_id = ? AND v.product_id IN (SELECT value FROM json_each(?))
       ORDER BY pr.product_variant_id, pr.valid_from_at, pr.id`, params: [organizationId, ids] },
     { query: `SELECT product_id, organization_id, published FROM product_publications
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY organization_id`, params: [organizationId, ids] },
@@ -249,7 +252,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
       WHERE organization_id = ? AND row_role = 'root' AND kind = 'page' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
-    { query: `SELECT product_id, location_id, check_in_time, check_out_time, max_guests, min_nights, property_type, bedrooms, beds, bathrooms, amenities,
+    { query: `SELECT product_id, location_id, check_in_time, check_out_time, max_guests, min_nights, property_type_group, property_type, bedrooms, beds, bathrooms, amenities,
         cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id FROM product_stay_configs
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
   ], { operation: 'Hydrate products' })
@@ -755,6 +758,15 @@ function stayCount(stay: Record<string, unknown>, field: string, min: number, ma
   return value as number | null
 }
 
+/** Airbnb's property group and a type it offers, both or neither. */
+function stayPropertyType(stay: Record<string, unknown>): Pick<ProductStayConfig, 'property_type_group' | 'property_type'> {
+  const group = stay.property_type_group ?? null
+  const type = stay.property_type ?? null
+  if (group === null && type === null) return { property_type_group: null, property_type: null }
+  if (!isStayPropertyType(group, type)) invalidStayField('property_type', 'stay.property_type must be a type Airbnb offers in stay.property_type_group, or both null')
+  return { property_type_group: group, property_type: type as StayPropertyType }
+}
+
 /** What a home is and offers, checked against the stay vocabularies. A field left out is unsaid. */
 function planStayListing(stay: Record<string, unknown>): Pick<ProductStayConfig, StayListingField> {
   const amenities = stay.amenities ?? []
@@ -763,7 +775,7 @@ function planStayListing(stay: Record<string, unknown>): Pick<ProductStayConfig,
   }
   const chosen = new Set(amenities as StayAmenity[])
   return {
-    property_type: stayCode(stay, 'property_type', stayCodes(STAY_PROPERTY_TYPES)),
+    ...stayPropertyType(stay),
     bedrooms: stayCount(stay, 'bedrooms', 0, 50, 1),
     beds: stayCount(stay, 'beds', 1, 50, 1),
     bathrooms: stayCount(stay, 'bathrooms', 0, 50, 0.5),
@@ -776,6 +788,7 @@ function planStayListing(stay: Record<string, unknown>): Pick<ProductStayConfig,
 /** A stored home's listing facts; the table's checks guarantee their codes. */
 function storedStayListing(row: Row): Pick<ProductStayConfig, StayListingField> {
   return {
+    property_type_group: row.property_type_group === null ? null : String(row.property_type_group) as StayPropertyTypeGroup,
     property_type: row.property_type === null ? null : String(row.property_type) as StayPropertyType,
     bedrooms: row.bedrooms === null ? null : Number(row.bedrooms),
     beds: row.beds === null ? null : Number(row.beds),
@@ -1042,16 +1055,16 @@ function productWrites(
       params: [organizationId, planned.id, planned.stay.location_id, now, now, actor.actorId, actor.actorId],
     }, {
       query: `INSERT INTO product_stay_configs (product_id, organization_id, location_id, check_in_time, check_out_time, max_guests, min_nights,
-                 property_type, bedrooms, beds, bathrooms, amenities, cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id, created_at, updated_at, created_by, updated_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 property_type_group, property_type, bedrooms, beds, bathrooms, amenities, cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id, created_at, updated_at, created_by, updated_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (product_id) DO UPDATE SET check_in_time = excluded.check_in_time, check_out_time = excluded.check_out_time,
-                 max_guests = excluded.max_guests, min_nights = excluded.min_nights, property_type = excluded.property_type, bedrooms = excluded.bedrooms,
+                 max_guests = excluded.max_guests, min_nights = excluded.min_nights, property_type_group = excluded.property_type_group, property_type = excluded.property_type, bedrooms = excluded.bedrooms,
                  beds = excluded.beds, bathrooms = excluded.bathrooms, amenities = excluded.amenities, cancellation_policy = excluded.cancellation_policy,
                  long_term_cancellation_policy = excluded.long_term_cancellation_policy, assigned_member_id = excluded.assigned_member_id,
                  assigned_team_id = excluded.assigned_team_id, updated_at = excluded.updated_at, updated_by = excluded.updated_by
                WHERE product_stay_configs.organization_id = excluded.organization_id AND product_stay_configs.location_id = excluded.location_id`,
       params: [planned.id, organizationId, planned.stay.location_id, planned.stay.check_in_time, planned.stay.check_out_time,
-        planned.stay.max_guests, planned.stay.min_nights, planned.stay.property_type, planned.stay.bedrooms, planned.stay.beds, planned.stay.bathrooms,
+        planned.stay.max_guests, planned.stay.min_nights, planned.stay.property_type_group, planned.stay.property_type, planned.stay.bedrooms, planned.stay.beds, planned.stay.bathrooms,
         JSON.stringify(planned.stay.amenities), planned.stay.cancellation_policy, planned.stay.long_term_cancellation_policy,
         planned.stay.assigned_member_id, planned.stay.assigned_team_id, now, now, actor.actorId, actor.actorId],
     })

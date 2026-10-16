@@ -1110,8 +1110,10 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	max_guests: integer().notNull(),
 	min_nights: integer().default(1).notNull(),
 	check_in_instructions: text(),
-	// What the home is, as guests and search engines read it. Codes come from
+	// What the home is, as guests and search engines read it: Airbnb's property
+	// group and a type it offers, both or neither. Codes come from
 	// shared/stay-listing.ts; NULL means the host has not said.
+	property_type_group: text(),
 	property_type: text(),
 	bedrooms: integer(),
 	beds: integer(),
@@ -1146,7 +1148,8 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	check("product_stay_configs_guests_check", sql`max_guests >= 1`),
 	check("product_stay_configs_min_nights_check", sql`min_nights >= 1`),
 	check("product_stay_configs_instructions_check", sql`check_in_instructions IS NULL OR (length(trim(check_in_instructions)) BETWEEN 1 AND 5000)`),
-	check("product_stay_configs_property_type_check", sql`property_type IS NULL OR property_type IN ('apartment', 'house', 'secondary_unit', 'unique_space', 'bed_and_breakfast', 'boutique_hotel')`),
+	check("product_stay_configs_property_type_group_check", sql`property_type_group IS NULL OR property_type_group IN ('apartments', 'houses', 'secondary_units', 'unique_homes', 'bnb', 'boutique_hotels_and_more')`),
+	check("product_stay_configs_property_type_check", sql`(property_type IS NULL AND property_type_group IS NULL) OR property_type_group || ':' || property_type IN ('apartments:apartment', 'apartments:condominium', 'apartments:serviced_apartment', 'apartments:loft', 'houses:house', 'houses:townhouse', 'houses:bungalow', 'houses:cabin', 'houses:chalet', 'houses:earthhouse', 'houses:hut', 'houses:lighthouse', 'houses:villa', 'houses:dome', 'houses:cottage', 'houses:farmstay', 'houses:houseboat', 'houses:tiny_house', 'secondary_units:guesthouse', 'secondary_units:private_suite', 'secondary_units:farmstay', 'unique_homes:boat', 'unique_homes:castle', 'unique_homes:cave', 'unique_homes:earthhouse', 'unique_homes:hut', 'unique_homes:igloo', 'unique_homes:island', 'unique_homes:lighthouse', 'unique_homes:plane', 'unique_homes:rv', 'unique_homes:tent', 'unique_homes:tipi', 'unique_homes:train', 'unique_homes:treehouse', 'unique_homes:yurt', 'unique_homes:other', 'unique_homes:dome', 'unique_homes:barn', 'unique_homes:campsite', 'unique_homes:farmstay', 'unique_homes:houseboat', 'unique_homes:tiny_house', 'unique_homes:windmill', 'unique_homes:bus', 'unique_homes:holiday_park', 'unique_homes:ranch', 'unique_homes:religious_building', 'unique_homes:riad', 'unique_homes:shipping_container', 'unique_homes:tower', 'bnb:bnb', 'bnb:nature_eco_lodge', 'bnb:farmstay', 'boutique_hotels_and_more:boutique_hotel', 'boutique_hotels_and_more:nature_eco_lodge', 'boutique_hotels_and_more:hostel', 'boutique_hotels_and_more:serviced_apartment', 'boutique_hotels_and_more:aparthotel', 'boutique_hotels_and_more:hotel', 'boutique_hotels_and_more:resort')`),
 	check("product_stay_configs_bedrooms_check", sql`bedrooms IS NULL OR bedrooms BETWEEN 0 AND 50`),
 	check("product_stay_configs_beds_check", sql`beds IS NULL OR beds BETWEEN 1 AND 50`),
 	check("product_stay_configs_bathrooms_check", sql`bathrooms IS NULL OR (bathrooms BETWEEN 0 AND 50 AND bathrooms * 2 = CAST(bathrooms * 2 AS INTEGER))`),
@@ -1277,6 +1280,10 @@ export const stays = sqliteTable("stays", {
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	created_by: text(),
 	updated_by: text(),
+	// The home's cancellation policy the guest booked under, frozen at checkout
+	// (shared/stay-cancellation.ts): it decides what the guest's own
+	// cancellation refunds. NULL for a stay not paid on the site.
+	cancellation_policy: text(),
 }, (table) => [
 	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "stays_home_scope_fk" }).onDelete("no action"),
 	unique("stays_org_product_id_unique").on(table.organization_id, table.product_id, table.id),
@@ -1297,6 +1304,7 @@ export const stays = sqliteTable("stays", {
 	check("stays_money_check", sql`total_minor >= 0 AND length(currency) = 3 AND currency = upper(currency)`),
 	check("stays_provider_check", sql`provider IS NULL OR provider = 'channex'`),
 	check("stays_version_check", sql`version >= 1`),
+	check("stays_cancellation_policy_check", sql`cancellation_policy IS NULL OR cancellation_policy IN ('flexible', 'moderate', 'limited', 'firm', 'strict', 'long_term_firm', 'long_term_strict')`),
 	check("stays_booking_received_at_check", sql`booking_received_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', booking_received_at, '+0 days') IS booking_received_at`),
 	check("stays_instants_check", sql`(cancelled_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', cancelled_at, '+0 days') IS cancelled_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
 ]);
@@ -2297,7 +2305,6 @@ export const mcp_tool_call_events = sqliteTable("mcp_tool_call_events", {
 	check("mcp_tool_call_events_duration_check", sql`duration_ms >= 0`),
 	index("idx_mcp_tool_call_events_created_at").on(table.created_at),
 	index("idx_mcp_tool_call_events_tool_status").on(table.tool_name, table.status),
-	index("idx_mcp_tool_call_events_org").on(table.created_at),
 	index("idx_mcp_tool_call_events_org").on(table.organization_id, table.created_at),
 	index("idx_mcp_tool_call_events_method_created").on(table.method, table.created_at),
 	index("idx_mcp_tool_call_events_session").on(table.session_id_hash, table.created_at),

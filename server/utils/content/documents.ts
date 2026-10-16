@@ -14,6 +14,16 @@ import {
 } from '~/shared/content-registries'
 
 
+/**
+ * The join condition for a root's own row or one of its representations, as
+ * `document`. Each side of the OR uses its own index: the primary key, and
+ * content_documents_root_locale_unique. COALESCE(root_id, id) could use
+ * neither, so every such join scanned the organization's documents.
+ */
+export function documentOfRootSql(document: string, root: string): string {
+  return `(${document}.id = ${root}.id OR (${document}.row_role = 'representation' AND ${document}.root_id = ${root}.id))`
+}
+
 export {
   CONTENT_BLOCK_TYPES,
   CONTENT_DOCUMENT_KINDS,

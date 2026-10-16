@@ -32,12 +32,26 @@
            bookings has nothing to put in that column, so it keeps the single
            card. -->
       <div v-if="booking || product.order_url || isStay">
+        <!-- Stays Airbnb-style header: title & rating/location above the photo mosaic -->
+        <header v-if="isStay && !compact" class="mb-6">
+          <h1 class="saya-display text-2xl font-semibold text-default sm:text-3xl lg:text-4xl">{{ displayTitle }}</h1>
+          <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
+            <template v-if="averageRating">
+              <span class="inline-flex items-center gap-1 font-semibold text-default">
+                <SayaIcon name="star" solid class="size-4" />{{ averageRating }}
+              </span>
+              <span aria-hidden="true">·</span>
+              <span class="underline">{{ reviewCountLabel }}</span>
+              <span aria-hidden="true">·</span>
+            </template>
+            <span class="underline">{{ location?.title ?? organizationName }}</span>
+          </div>
+        </header>
+
         <MediaGallery v-if="!compact && galleryItems.length" :items="galleryItems" :title="displayTitle" />
 
-        <!-- What it is, in one glance: name, tagline, how guests rate it,
-             where it runs, how long, how many. Centred under the photographs
-             the way the rest of Saya introduces a place. -->
-        <header v-if="!compact" class="mx-auto mt-10 max-w-3xl text-center">
+        <!-- Non-stay header: centred under photographs the way the rest of Saya introduces a place -->
+        <header v-if="!isStay && !compact" class="mx-auto mt-10 max-w-3xl text-center">
           <p class="saya-kicker mb-3">{{ collectionName }}</p>
           <h1 class="saya-display-md text-3xl text-default sm:text-4xl lg:text-5xl">{{ displayTitle }}</h1>
           <p v-if="tagline" class="mx-auto mt-4 max-w-2xl text-base text-muted sm:text-lg">{{ tagline }}</p>
@@ -66,12 +80,66 @@
           <slot name="actions" />
         </header>
 
-        <div class="grid gap-10 lg:grid-cols-[1fr_380px] lg:items-start" :class="compact ? 'mt-8' : 'mt-14'">
+        <div class="grid gap-10 lg:grid-cols-[1fr_380px] lg:items-start" :class="compact ? 'mt-8' : isStay ? 'mt-8' : 'mt-14'">
         <div class="min-w-0">
           <p v-if="!canBook && !canEnquire && !canOrderExternally" role="status" class="rounded-xl border border-default bg-elevated p-5 text-muted lg:hidden">{{ scopeRequired ? t('booking.choose_location') : vertical === 'service' && !offer ? t('booking.price_unavailable_contact') : t('saya.common.temporarily_unavailable') }}</p>
-          <section v-if="!compact && product.description" class="border-t border-default pt-10">
+
+          <!-- Airbnb-style room specs & host summary for Stays -->
+          <div v-if="isStay && !compact" class="pb-6">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <h2 class="text-xl font-semibold text-default sm:text-2xl">
+                  {{ stayPropertyTypeLabel ? `${stayPropertyTypeLabel} in ${location?.title || organizationName}` : displayTitle }}
+                </h2>
+                <p class="mt-1 text-sm text-muted">
+                  {{ staySpecsSummary }}
+                </p>
+              </div>
+              <div class="shrink-0 flex items-center justify-center size-12 rounded-full bg-muted border border-default font-semibold text-base text-default">
+                {{ (location?.title || organizationName || 'S').slice(0, 1).toUpperCase() }}
+              </div>
+            </div>
+          </div>
+
+          <!-- Key highlights for Stays -->
+          <div v-if="isStay && !compact" class="border-t border-default py-6 space-y-4">
+            <div class="flex items-start gap-4">
+              <SayaIcon name="clock" class="size-5 text-default shrink-0 mt-0.5" />
+              <div>
+                <p class="font-medium text-default text-sm">{{ t('stay.check_in_after', { time: formatTime(product.stay!.check_in_time, locale) }) }}</p>
+                <p class="text-xs text-muted">{{ t('stay.check_out_before', { time: formatTime(product.stay!.check_out_time, locale) }) }}</p>
+              </div>
+            </div>
+            <div v-if="stayCancellationPolicyLabel" class="flex items-start gap-4">
+              <SayaIcon name="calendar-days" class="size-5 text-default shrink-0 mt-0.5" />
+              <div>
+                <p class="font-medium text-default text-sm">{{ stayCancellationPolicyLabel }}</p>
+                <p class="text-xs text-muted">{{ stayCheckoutAvailable ? t('stay.charged_in_full') : t('stay.enquiry_note') }}</p>
+              </div>
+            </div>
+          </div>
+
+          <section v-if="!compact && product.description" class="border-t border-default pt-8">
             <h2 v-if="vertical !== 'service'" class="saya-display text-2xl text-default sm:text-3xl">{{ isStay ? t('stay.about_this_place') : t('saya.experience_detail.what_youll_do') }}</h2>
             <p class="mt-4 whitespace-pre-line text-base leading-relaxed text-muted sm:text-lg">{{ product.description }}</p>
+          </section>
+
+          <!-- What this place offers (Amenities) -->
+          <section v-if="isStay && !compact && stayAmenitiesList.length" class="mt-10 border-t border-default pt-8">
+            <h2 class="saya-display text-2xl text-default sm:text-3xl">What this place offers</h2>
+            <div class="mt-5 grid grid-cols-2 gap-4">
+              <div v-for="amenity in stayAmenitiesList" :key="amenity.code" class="flex items-center gap-3">
+                <SayaIcon :name="amenity.icon" class="size-5 shrink-0 text-muted" />
+                <span class="text-sm text-default">{{ amenity.label }}</span>
+              </div>
+            </div>
+          </section>
+
+          <!-- Inline Availability Calendar for stays (Airbnb style) -->
+          <section v-if="isStay && !compact && canBook" class="mt-10 border-t border-default pt-8">
+            <div class="rounded-2xl border border-default bg-elevated p-6 max-w-xl">
+              <StayDatesStep :controller="stayBooking" @next="stayBooking.openBooking(2)" />
+            </div>
           </section>
 
           <!-- The next few sessions, on the page: a guest sees when it runs
@@ -176,42 +244,65 @@
         <!-- The decision, travelling with the reader: what it costs, when it
              next runs, and the one action. -->
         <div class="hidden lg:sticky lg:top-28 lg:block">
-          <div class="space-y-5 rounded-xl border border-default bg-elevated p-6 shadow-sm">
-            <div v-if="priceLabel">
-              <p class="saya-display text-3xl tabular-nums text-default">
-                <span v-if="compareAtLabel" class="mr-2 text-lg text-muted line-through">{{ compareAtLabel }}</span>{{ isStay ? t('stay.price_per_night', { price: priceLabel }) : enquiryOnly || (vertical === 'service' && sellableVariants.length === 1) ? priceLabel : t('saya.experience_detail.from_price', { price: priceLabel }) }}
-              </p>
-              <p v-if="!enquiryOnly && vertical !== 'service' && !isStay" class="mt-1 text-sm text-muted">{{ t('saya.experience_detail.per_person') }}</p>
+          <div class="space-y-5 rounded-2xl border border-default bg-elevated p-6 shadow-xl">
+            <div v-if="priceLabel" class="flex items-baseline justify-between gap-2">
+              <div>
+                <span class="saya-display text-2xl font-bold tabular-nums text-default">
+                  <span v-if="compareAtLabel" class="mr-2 text-base text-muted line-through">{{ compareAtLabel }}</span>{{ isStay ? priceLabel : enquiryOnly || (vertical === 'service' && sellableVariants.length === 1) ? priceLabel : t('saya.experience_detail.from_price', { price: priceLabel }) }}
+                </span>
+                <span v-if="isStay" class="text-sm font-normal text-muted"> / night</span>
+                <p v-if="!enquiryOnly && vertical !== 'service' && !isStay" class="mt-1 text-sm text-muted">{{ t('saya.experience_detail.per_person') }}</p>
+              </div>
+              <div v-if="isStay && averageRating" class="flex items-center gap-1 text-xs font-semibold text-default">
+                <SayaIcon name="star" solid class="size-3.5" />
+                <span>{{ averageRating }}</span>
+                <span class="text-muted font-normal">({{ reviews.length }})</span>
+              </div>
             </div>
+
             <!-- The stay a guest has chosen so far, read back from the server's quote. -->
-            <div v-if="isStay && canBook" class="overflow-hidden rounded-lg border border-default">
+            <div v-if="isStay && canBook" class="overflow-hidden rounded-xl border border-default">
               <!-- Labels for the dialog's checkbox, like every booking control: they open it before hydration too. -->
               <label for="product-booking-toggle" role="button" tabindex="0" class="grid w-full cursor-pointer grid-cols-2 text-left" @click="stayBooking.openBooking(1)" @keydown.enter.prevent="pressLabel" @keydown.space.prevent="pressLabel">
-                <span class="border-r border-default px-3 py-2">
-                  <span class="block text-[10px] font-semibold uppercase tracking-[0.15em] text-default">{{ t('stay.check_in') }}</span>
-                  <span class="block text-sm text-muted">{{ stayBooking.checkIn.value ? stayBooking.dateLabel(stayBooking.checkIn.value) : t('stay.add_dates') }}</span>
+                <span class="border-r border-default px-3 py-2.5">
+                  <span class="block text-[10px] font-bold uppercase tracking-wider text-default">{{ t('stay.check_in') }}</span>
+                  <span class="block text-xs font-medium text-muted mt-0.5">{{ stayBooking.checkIn.value ? stayBooking.dateLabel(stayBooking.checkIn.value) : t('stay.add_dates') }}</span>
                 </span>
-                <span class="px-3 py-2">
-                  <span class="block text-[10px] font-semibold uppercase tracking-[0.15em] text-default">{{ t('stay.check_out') }}</span>
-                  <span class="block text-sm text-muted">{{ stayBooking.checkOut.value ? stayBooking.dateLabel(stayBooking.checkOut.value) : t('stay.add_dates') }}</span>
+                <span class="px-3 py-2.5">
+                  <span class="block text-[10px] font-bold uppercase tracking-wider text-default">{{ t('stay.check_out') }}</span>
+                  <span class="block text-xs font-medium text-muted mt-0.5">{{ stayBooking.checkOut.value ? stayBooking.dateLabel(stayBooking.checkOut.value) : t('stay.add_dates') }}</span>
                 </span>
               </label>
-              <label for="product-booking-toggle" role="button" tabindex="0" class="block w-full cursor-pointer border-t border-default px-3 py-2 text-left" @click="stayBooking.openBooking(1)" @keydown.enter.prevent="pressLabel" @keydown.space.prevent="pressLabel">
-                <span class="block text-[10px] font-semibold uppercase tracking-[0.15em] text-default">{{ t('stay.guests') }}</span>
-                <span class="block text-sm text-muted">{{ stayBooking.guestsLabel.value }}</span>
+              <label for="product-booking-toggle" role="button" tabindex="0" class="block w-full cursor-pointer border-t border-default px-3 py-2.5 text-left" @click="stayBooking.openBooking(1)" @keydown.enter.prevent="pressLabel" @keydown.space.prevent="pressLabel">
+                <span class="block text-[10px] font-bold uppercase tracking-wider text-default">{{ t('stay.guests') }}</span>
+                <span class="block text-xs font-medium text-muted mt-0.5">{{ stayBooking.guestsLabel.value }}</span>
               </label>
             </div>
-            <dl v-if="isStay && stayBooking.quote.value" class="space-y-2 text-sm">
+
+            <div class="pt-1">
+              <SayaButton v-if="canOrderExternally" block :href="product.order_url!" target="_blank" rel="noopener noreferrer" @click="recordExternalOrderClick">{{ externalActionLabel }}</SayaButton>
+              <SayaButton v-else-if="canEnquire" block :to="enquiryPath">
+                {{ t('saya.experience_detail.enquire') }}
+              </SayaButton>
+              <SayaButton v-else block size="lg" control-id="product-booking-toggle" class="w-full font-semibold" @click="openBooking">
+                {{ bookingLabel }}
+              </SayaButton>
+            </div>
+
+            <p v-if="isStay && canBook" class="text-center text-xs text-muted">{{ stayCheckoutAvailable ? 'You won\'t be charged yet' : t('stay.enquiry_note') }}</p>
+
+            <dl v-if="isStay && stayBooking.quote.value" class="space-y-3 border-t border-default pt-4 text-sm">
               <div v-for="line in stayBooking.breakdown.value" :key="line.label" class="flex justify-between gap-4">
-                <dt class="text-muted">{{ line.label }}</dt>
-                <dd class="tabular-nums">{{ line.amount }}</dd>
+                <dt class="text-muted underline decoration-dotted underline-offset-4">{{ line.label }}</dt>
+                <dd class="tabular-nums text-default">{{ line.amount }}</dd>
               </div>
-              <div class="flex justify-between gap-4 border-t border-default pt-3 font-semibold">
+              <div class="flex justify-between gap-4 border-t border-default pt-3 font-semibold text-base text-default">
                 <dt>{{ t('stay.total') }}</dt>
                 <dd class="tabular-nums">{{ stayBooking.money(stayBooking.quote.value.total_minor) }}</dd>
               </div>
             </dl>
-            <div v-if="factChips.length" class="flex flex-wrap gap-2">
+
+            <div v-if="factChips.length && !isStay" class="flex flex-wrap gap-2">
               <span
                 v-for="fact in factChips"
                 :key="fact.label"
@@ -221,7 +312,6 @@
                 {{ fact.label }}
               </span>
             </div>
-            <p v-if="isStay && canBook" class="text-sm text-muted">{{ stayCheckoutAvailable ? t('stay.charged_in_full') : t('stay.enquiry_note') }}</p>
             <p v-if="vertical === 'service' && !isStay && !product.order_url" class="text-sm text-muted">{{ booking?.confirmation_mode === 'review' ? t('booking.review_notice') : t('booking.instant_notice') }}</p>
             <p v-if="nextSession" class="inline-flex items-center gap-2 text-sm text-muted">
               <SayaIcon name="calendar-days" class="size-4" />
@@ -230,15 +320,6 @@
             <p v-if="!canBook && !canEnquire && !canOrderExternally" class="rounded-lg bg-default px-4 py-3 text-center text-sm font-semibold text-muted">
               {{ scopeRequired ? t('booking.choose_location') : vertical === 'service' && !offer ? t('booking.price_unavailable') : t('saya.common.temporarily_unavailable') }}
             </p>
-            <div v-else class="pt-2">
-              <SayaButton v-if="canOrderExternally" block :href="product.order_url!" target="_blank" rel="noopener noreferrer" @click="recordExternalOrderClick">{{ externalActionLabel }}</SayaButton>
-              <SayaButton v-else-if="canEnquire" block :to="enquiryPath">
-                {{ t('saya.experience_detail.enquire') }}
-              </SayaButton>
-              <SayaButton v-else block control-id="product-booking-toggle" @click="openBooking">
-                {{ bookingLabel }}
-              </SayaButton>
-            </div>
           </div>
         </div>
         </div>
@@ -361,6 +442,7 @@
 </template>
 
 <script setup lang="ts">
+import type { SayaIconName } from '~/components/saya/SayaIcon.vue'
 import WhoYouMeet from '~/components/booking/WhoYouMeet.vue'
 import type { ProductPresentation, PublicProduct } from '~/server/types/products'
 import { useSchemaOrg } from '#imports'
@@ -380,6 +462,7 @@ import SayaReviewCard from '~/components/saya/SayaReviewCard.vue'
 import BookingModal from '~/components/booking/BookingModal.vue'
 import ProductBookingSteps from '~/components/booking/ProductBookingSteps.vue'
 import StayBookingSteps from '~/components/booking/StayBookingSteps.vue'
+import StayDatesStep from '~/components/booking/StayDatesStep.vue'
 import { useStayBooking } from '~/composables/useStayBooking'
 import BookingTimezoneSelect from '~/components/booking/BookingTimezoneSelect.vue'
 import BookingScopeSelect from '~/components/booking/BookingScopeSelect.vue'
@@ -427,6 +510,42 @@ const bookingLabel = computed(() => isStay.value
   : props.vertical === 'service'
     ? props.booking?.confirmation_mode === 'review' ? t('booking.request_appointment') : t('booking.book_appointment')
     : t('saya.experience_detail.book_now'))
+
+const staySpecsSummary = computed(() => {
+  const s = props.product.stay
+  if (!s) return ''
+  const parts: string[] = []
+  parts.push(t('stay.sleeps', { count: s.max_guests }))
+  if (s.bedrooms !== null) parts.push(t('stay.bedrooms', { count: s.bedrooms }))
+  if (s.beds !== null) parts.push(t('stay.beds', { count: s.beds }))
+  if (s.bathrooms !== null) parts.push(t('stay.bathrooms', { count: s.bathrooms }))
+  return parts.join(' · ')
+})
+
+const stayPropertyTypeLabel = computed(() => {
+  const type = props.product.stay?.property_type
+  return type ? STAY_PROPERTY_TYPES[type].label : ''
+})
+
+const stayCancellationPolicyLabel = computed(() => {
+  const p = props.product.stay?.cancellation_policy
+  return p ? `${STAY_CANCELLATION_POLICIES[p].label} cancellation policy` : ''
+})
+
+const stayAmenitiesList = computed(() => {
+  const stay = props.product.stay
+  if (!stay) return []
+  return stay.amenities.map(code => {
+    return {
+      code,
+      label: STAY_AMENITIES[code].label,
+      icon: (code.includes('work') ? 'briefcase'
+        : code.includes('sparkles') ? 'sparkles'
+        : code.includes('home') ? 'home'
+        : 'check-circle') as SayaIconName,
+    }
+  })
+})
 
 const { trackProductOrder, trackProductView } = useOrganizationConversionTracking()
 const { localePath, t, locale } = useI18n()
@@ -537,7 +656,7 @@ const factChips = computed(() => {
   const chips: Array<{ icon: 'clock' | 'user-group' | 'video-camera' | 'check-circle' | 'moon' | 'home'; label: string }> = []
   const stay = props.product.stay
   if (stay) {
-    if (stay.property_type) chips.push({ icon: 'home', label: STAY_PROPERTY_TYPES[stay.property_type] })
+    if (stay.property_type) chips.push({ icon: 'home', label: STAY_PROPERTY_TYPES[stay.property_type].label })
     chips.push({ icon: 'user-group', label: t('stay.sleeps', { count: stay.max_guests }) })
     if (stay.bedrooms !== null) chips.push({ icon: 'home', label: t('stay.bedrooms', { count: stay.bedrooms }) })
     if (stay.beds !== null) chips.push({ icon: 'home', label: t('stay.beds', { count: stay.beds }) })
@@ -589,11 +708,10 @@ const visibleDetails = computed(() => productDetailFields(props.product.kind).fl
 function stayDetails(stay: typeof props.product.stay): Array<{ key: string; label: string; values: string[] }> {
   if (!stay) return []
   const policies = [
-    ...(stay.cancellation_policy ? [STAY_CANCELLATION_POLICIES[stay.cancellation_policy]] : []),
-    ...(stay.long_term_cancellation_policy ? [STAY_LONG_TERM_CANCELLATION_POLICIES[stay.long_term_cancellation_policy]] : []),
+    ...(stay.cancellation_policy ? [`${STAY_CANCELLATION_POLICIES[stay.cancellation_policy].label}: ${STAY_CANCELLATION_POLICIES[stay.cancellation_policy].summary}`] : []),
+    ...(stay.long_term_cancellation_policy ? [`${STAY_LONG_TERM_CANCELLATION_POLICIES[stay.long_term_cancellation_policy].label}: ${STAY_LONG_TERM_CANCELLATION_POLICIES[stay.long_term_cancellation_policy].summary}`] : []),
   ]
   return [
-    ...(stay.amenities.length ? [{ key: 'amenities', label: 'Amenities', values: stay.amenities.map(code => STAY_AMENITIES[code].label) }] : []),
     ...(policies.length ? [{ key: 'cancellation_policy', label: 'Cancellation policy', values: policies }] : []),
   ]
 }
@@ -786,7 +904,7 @@ const stayStructuredData = computed(() => {
       ...(props.location.latitude !== null && props.location.longitude !== null ? { geo: { '@type': 'GeoCoordinates', latitude: props.location.latitude, longitude: props.location.longitude } } : {}),
     } : {}),
     occupancy: { '@type': 'QuantitativeValue', minValue: 1, maxValue: stay.max_guests },
-    ...(stay.property_type ? { accommodationCategory: STAY_PROPERTY_TYPES[stay.property_type] } : {}),
+    ...(stay.property_type ? { accommodationCategory: STAY_PROPERTY_TYPES[stay.property_type].label } : {}),
     ...(stay.bedrooms !== null ? { numberOfBedrooms: stay.bedrooms } : {}),
     ...(stay.bathrooms !== null ? { numberOfBathroomsTotal: stay.bathrooms } : {}),
     ...(stay.beds !== null ? { bed: { '@type': 'BedDetails', numberOfBeds: stay.beds } } : {}),

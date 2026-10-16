@@ -7,6 +7,9 @@ import {queryFirst} from '~/server/db'
 import {executeGuestThreadOperation} from '~/server/domain/guest-threads/operations'
 import {createStripeClient} from '~/server/utils/stripe-client'
 import {visitRefundKey,type VisitRefundAction} from '~/server/domain/payments/visit-refund'
+import {cancelStay,stayAccessFor} from '~/server/domain/stays'
+import {memberAccessPrincipal} from '~/server/utils/member-access'
+import {notifyStayCancelled} from '~/server/utils/notifications'
 export default defineHandler(async event=>{
  requireFinancialBrowserOrigin(event)
  const {env,db,organization,userId}=await getDashboardContext(event,{})
@@ -17,6 +20,19 @@ export default defineHandler(async event=>{
  if(!env.STRIPE_SECRET_KEY) throw new HTTPError({statusCode:503,statusMessage:'Stripe is not configured'})
  await approveRefundAuthorization(db,principal,body.authorization_id)
  const authorization=await queryFirst<{action:string;payment_id:string;amount:number|null;note:string|null}>(db,'SELECT action,payment_id,amount,note FROM payment_authorizations WHERE id=? AND organization_id=? AND user_id=?',[body.authorization_id,organization.id,userId])
+ if(authorization?.action==='cancel_stay'){
+  const payment=await requirePayment(db,organization.id,authorization.payment_id)
+  if(payment.subject_type!=='stay'||!payment.subject_id) throw new HTTPError({statusCode:409,statusMessage:'Authorization is not for a stay payment'})
+  // A retry after the stay was cancelled only sends the refund that cancellation queued.
+  const stay=await queryFirst<{status:string;version:number}>(db,'SELECT status,version FROM stays WHERE id=? AND organization_id=?',[payment.subject_id,organization.id])
+  if(!stay) throw new HTTPError({statusCode:409,statusMessage:'Paid stay is unavailable'})
+  if(stay.status!=='cancelled') await cancelStay(db,env,await stayAccessFor(memberAccessPrincipal(organization,{env,event})),payment.subject_id,{expected_version:stay.version,reason:authorization.note,authorization_id:body.authorization_id})
+  const key=visitRefundKey('cancel','stay',payment.subject_id)
+  if(!await queryFirst(db,'SELECT id FROM payment_refunds WHERE payment_id=? AND idempotency_key=?',[payment.id,key])) throw new HTTPError({statusCode:409,statusMessage:'The stay was cancelled without its refund. Send a refund from the stay.'})
+  const submitted=await executeRefund(db,createStripeClient(env.STRIPE_SECRET_KEY,'payments'),payment,null,key,'requested_by_customer',userId,env,authorization.note)
+  await notifyStayCancelled(env,db,organization.id,payment.subject_id,'host',payment.captured_amount-payment.refunded_amount)
+  return jsonResponse(submitted)
+ }
  if(authorization?.action==='reject_booking'||authorization?.action==='cancel_booking'||authorization?.action==='cancel_reservation'){
   const action:VisitRefundAction=authorization.action==='reject_booking'?'reject':'cancel'
   const payment=await requirePayment(db,organization.id,authorization.payment_id)

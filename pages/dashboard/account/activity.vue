@@ -39,7 +39,7 @@ useSeoMeta({ title: 'Past activity | KrabiClaw', robots: 'noindex, nofollow' })
 const level = useRouteLevel()
 const { data, error } = await useAccountActivity()
 const now = Date.now()
-const isVisit = (item: AccountActivityItem) => item.kind === 'booking' || item.kind === 'reservation'
+const isVisit = (item: AccountActivityItem) => item.kind === 'booking' || item.kind === 'reservation' || item.kind === 'stay'
 const cancelled = computed(() => (data.value?.activities ?? []).filter(item => isVisit(item) && item.status === 'cancelled'))
 const sections = computed(() => {
   const items = data.value?.activities ?? []

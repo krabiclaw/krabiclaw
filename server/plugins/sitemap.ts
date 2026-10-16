@@ -282,7 +282,7 @@ export default definePlugin((nitroApp) => {
     entries.push(...template.sitemap.exactPaths
       .filter(loc => !(loc in SECTION_PATHS) || sections.site[SECTION_PATHS[loc]!])
       .map(loc => ({ loc })))
-    for (const item of catalogNavigation(sections.site)) entries.push({ loc: item.path })
+    for (const item of catalogNavigation(organization.vertical, sections.site)) entries.push({ loc: item.path })
     if (sections.site.reservations) entries.push({ loc: '/reservations' })
 
     // A location that is one home is listed as that home's page, below.

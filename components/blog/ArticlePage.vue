@@ -22,7 +22,7 @@
           :template="template.slug"
         >
           <template #before-content>
-            <ArticleToc v-if="hasToc" :html="tocHtml" collapsible class="mb-8 xl:hidden" />
+            <ArticleToc v-if="hasToc" :headings="tocHeadings" collapsible class="mb-8 xl:hidden" />
           </template>
         </BlogArticleRenderer>
       </div>
@@ -47,7 +47,7 @@
     </div>
 
     <aside v-if="hasToc" class="hidden xl:block">
-      <ArticleToc :html="tocHtml" />
+      <ArticleToc :headings="tocHeadings" />
     </aside>
   </div>
 </template>
@@ -57,8 +57,7 @@ import { shallowRef } from 'vue'
 import ArticleBreadcrumb from '~/components/blog/ArticleBreadcrumb.vue'
 import ArticleToc from '~/components/blog/ArticleToc.vue'
 import BlogArticleRenderer from '~/components/blog/BlogArticleRenderer.vue'
-import { headingAnchor, renderMarkdownToHtml, sanitizeHtmlForSsr } from '~/utils/markdown'
-import { loadDomPurify } from '~/utils/dom-purify-loader'
+import { decodeHtmlEntities, headingAnchor, markdownHeadings, type MarkdownHeading } from '~/utils/markdown'
 import { resolveSocialImageUrl } from '~/utils/social-metadata'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { ARTICLE_COLLECTIONS, type ArticleCollection } from '~/utils/article-collections'
@@ -66,7 +65,6 @@ import { categoryTrail } from '~/composables/usePublishedArticles'
 
 const props = defineProps<{ collection: ArticleCollection }>()
 
-const DOMPurify = import.meta.client ? await loadDomPurify() : { sanitize: sanitizeHtmlForSsr }
 const route = useRoute()
 const { t, localePath } = useI18n()
 const { organization } = useTenantOrganization()
@@ -97,17 +95,16 @@ const currentIndex = computed(() => articles.value.findIndex(item => item.id ===
 const previousArticle = computed(() => currentIndex.value > 0 ? articles.value[currentIndex.value - 1] : null)
 const nextArticle = computed(() => currentIndex.value >= 0 && currentIndex.value < articles.value.length - 1 ? articles.value[currentIndex.value + 1] : null)
 
-const tocHtml = computed(() => post.value.content_blocks
-  .map((block, index) => {
-    if (block.type === 'markdown') return DOMPurify.sanitize(renderMarkdownToHtml(String(block.data.markdown || ''), index))
-    if (block.type !== 'heading') return ''
-    const level = Math.max(2, Math.min(6, block.level || 2))
-    const text = String(block.data.text || '')
-    return `<h${level} id="${headingAnchor(text)}-${index}">${DOMPurify.sanitize(text)}</h${level}>`
-  })
-  .join('\n'))
+// The h2 and h3 headings, with the ids the body renders them with: read from the blocks, not by rendering the article a second time.
+const tocHeadings = computed<MarkdownHeading[]>(() => post.value.content_blocks.flatMap((block, index): MarkdownHeading[] => {
+  if (block.type === 'markdown') return markdownHeadings(String(block.data.markdown || ''), index)
+  if (block.type !== 'heading') return []
+  const level = Math.max(2, Math.min(6, block.level || 2))
+  const text = String(block.data.text || '')
+  return level === 2 || level === 3 ? [{ id: `${headingAnchor(text)}-${index}`, text: decodeHtmlEntities(text.replace(/<[^>]+>/g, '')), depth: level }] : []
+}))
 // The column is there only when the article has headings to list; an empty one left a blank strip beside the text.
-const hasToc = computed(() => /<h[23]\b[^>]*\bid="[^"]+"/.test(tocHtml.value))
+const hasToc = computed(() => tocHeadings.value.length > 0)
 const articleBodyRef = shallowRef<Element | null>(null)
 useCopyableCodeBlocks(articleBodyRef, computed(() => post.value.content_blocks))
 

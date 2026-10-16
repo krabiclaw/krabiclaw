@@ -124,6 +124,29 @@ export function stayBookedMessage(input: StayEventInput): NotificationMessage {
   }
 }
 
+/** A guest cancelled their stay on the site; the refund is what their booked policy returned. */
+export function stayCancelledMessage(input: Omit<StayEventInput, 'notes' | 'total'> & { refund: string }): NotificationMessage {
+  return {
+    title: `Stay cancelled by ${input.guestName}`,
+    preheader: `${input.homeName} · ${input.checkIn} – ${input.checkOut}`,
+    hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.homeName } : null,
+    facts: facts(
+      fact('context', 'Place to stay', input.homeName, true),
+      fact('guestName', 'Guest', input.guestName, true),
+      fact('checkIn', 'Check-in', input.checkIn, true),
+      fact('checkOut', 'Check-out', input.checkOut, true),
+      fact('nights', 'Nights', input.nights, true),
+      fact('partySize', 'Guests', input.guests, true),
+      fact('refund', 'Refunded by your cancellation policy', input.refund, true),
+      fact('guestPhone', 'Phone', input.guestPhone),
+      fact('guestEmail', 'Email', input.guestEmail, true),
+    ),
+    primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open in dashboard' } : undefined,
+    category: 'reservations_bookings',
+    organizationName: input.organizationName,
+  }
+}
+
 export interface BookingEventInput extends ReservationEventInput {
   productTitle: string
 }
