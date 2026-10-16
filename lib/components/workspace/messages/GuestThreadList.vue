@@ -84,12 +84,12 @@
       />
 
       <UAlert
-        v-if="threadsError"
+        v-if="threadsError || nextPageError"
         color="error"
         variant="soft"
         class="m-3"
         title="Messages could not be loaded"
-        :description="getErrorMessage(threadsError, 'Guest thread request failed')"
+        :description="getErrorMessage(threadsError || nextPageError, 'Guest thread request failed')"
       />
 
       <!--
@@ -145,11 +145,11 @@
               -->
               <div v-if="occurrenceLine(thread)" class="flex items-baseline justify-between gap-3 text-xs text-muted">
                 <span class="min-w-0 flex-1 truncate">{{ occurrenceLine(thread) }}</span>
-                <span class="shrink-0">{{ formatRelativeTime(thread.lastActivityAt) }}</span>
+                <span class="shrink-0">{{ thread.replyChannel === 'airbnb' ? 'Recorded ' : '' }}{{ formatRelativeTime(thread.lastActivityAt) }}</span>
               </div>
               <div class="flex items-baseline justify-between gap-3">
                 <p class="min-w-0 flex-1 truncate text-sm font-medium text-highlighted">{{ threadName(thread) }}</p>
-                <span v-if="!occurrenceLine(thread)" class="shrink-0 text-xs text-muted">{{ formatRelativeTime(thread.lastActivityAt) }}</span>
+                <span v-if="!occurrenceLine(thread)" class="shrink-0 text-xs text-muted">{{ thread.replyChannel === 'airbnb' ? 'Recorded ' : '' }}{{ formatRelativeTime(thread.lastActivityAt) }}</span>
               </div>
               <p class="mt-0.5 line-clamp-2 text-sm leading-snug text-muted">{{ thread.preview?.text || 'New conversation' }}</p>
             </div>
@@ -190,6 +190,10 @@
           </UDropdownMenu>
         </div>
       </TransitionGroup>
+
+      <div v-if="data?.pagination.hasMore" class="flex justify-center px-4 py-3">
+        <UButton color="neutral" variant="ghost" :loading="loadingMore" :disabled="pending" @click="loadMore">Load more conversations</UButton>
+      </div>
 
       <!--
         Airbnb's own: a 50px full-bleed row at the foot of the list, not a tab
@@ -233,6 +237,7 @@ import {
   threadFilterLabel,
   type SubmissionType,
   type ThreadListItem,
+  type ThreadListPage,
 } from '~/lib/components/workspace/messages/guest-thread-client'
 import { resolveCmsCapabilities, type ProductFeature } from '~/config/cms-registry'
 import { resolvePublicTemplate } from '~/utils/template-registry'
@@ -379,17 +384,66 @@ const listKey = computed(() => [
 
 // One loader for the list: the first render, a filter change and a live
 // update all go through it, and a refresh keeps the rows already on screen.
-const { data, pending, error: threadsError, refresh } = await useAsyncData<{ threads: ThreadListItem[] }>(listKey, async () => {
-  if (props.personalScope) return await applicationFetch<{threads:ThreadListItem[]}>('/api/account/messages',{query:listQuery.value,validate:isThreadListResponse})
-  if (!dashboardScope.value) {
+const nextPageError = ref<unknown>(null)
+const loadingMore = ref(false)
+let pageController: AbortController | null = null
+let loadedScope = listKey.value
+let loadedPages = 1
+async function loadPage(offset: number, signal?: AbortSignal): Promise<ThreadListPage> {
+  const query = { ...listQuery.value, limit: 100, offset }
+  if (!props.personalScope && !dashboardScope.value) {
     throw createError({ statusCode: 400, statusMessage: 'Dashboard route scope is incomplete' })
   }
-  return await dashboardApi<{ threads: ThreadListItem[] }>(
-    `/api/dashboard/organizations/${organizationId.value}/guest-threads`,
-    { query: listQuery.value, validate: isThreadListResponse },
-  )
+  const page = props.personalScope
+    ? await applicationFetch<ThreadListPage>('/api/account/messages', { query, signal, validate: isThreadListResponse })
+    : await dashboardApi<ThreadListPage>(`/api/dashboard/organizations/${organizationId.value}/guest-threads`, { query, signal, validate: isThreadListResponse })
+  if (page.pagination.limit !== query.limit || page.pagination.offset !== offset) throw createError({ statusCode: 502, statusMessage: 'Messages returned a different page than requested' })
+  return page
+}
+function appendLoadedPage(before: ThreadListPage, page: ThreadListPage): ThreadListPage {
+  const ids = new Set(before.threads.map(thread => thread.id))
+  if (page.threads.some(thread => ids.has(thread.id))) throw createError({ statusCode: 409, statusMessage: 'Conversations changed while loading. Reload messages to continue.' })
+  return { threads: [...before.threads, ...page.threads], pagination: page.pagination }
+}
+const { data, pending, error: threadsError, refresh } = await useAsyncData<ThreadListPage>(listKey, async (_app, { signal }) => {
+  pageController?.abort()
+  nextPageError.value = null
+  const scope = listKey.value
+  if (loadedScope !== scope) { loadedScope = scope; loadedPages = 1 }
+  let page = await loadPage(0, signal)
+  let fetched = 1
+  while (fetched < loadedPages && page.pagination.nextOffset !== null) {
+    if (scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
+    page = appendLoadedPage(page, await loadPage(page.pagination.nextOffset, signal))
+    fetched += 1
+  }
+  if (scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
+  loadedPages = fetched
+  return page
 }, { server: !props.personalScope })
 const threads = computed(() => data.value?.threads ?? [])
+
+async function loadMore() {
+  const before = data.value
+  if (!before || before.pagination.nextOffset === null || loadingMore.value || pending.value) return
+  const key = listKey.value
+  const controller = new AbortController()
+  pageController = controller
+  loadingMore.value = true
+  nextPageError.value = null
+  try {
+    const page = await loadPage(before.pagination.nextOffset, controller.signal)
+    if (controller.signal.aborted || key !== listKey.value || data.value !== before) return
+    data.value = appendLoadedPage(before, page)
+    loadedPages = Math.ceil(data.value.threads.length / 100)
+  } catch (error) {
+    if (!controller.signal.aborted) nextPageError.value = error
+  } finally {
+    if (pageController === controller) { pageController = null; loadingMore.value = false }
+  }
+}
+watch(listKey, () => pageController?.abort())
+onScopeDispose(() => pageController?.abort())
 
 const documentVisibility=useDocumentVisibility()
 useIntervalFn(()=>{if(props.personalScope&&documentVisibility.value==='visible')void refresh()},15_000)
@@ -418,7 +472,7 @@ function threadName(thread:ThreadListItem) {
     if (!thread.organizationName) throw createError({statusCode:500,statusMessage:'Conversation has no business name',fatal:true})
     return thread.organizationName
   }
-  return thread.guestName
+  return thread.participantLabel
 }
 function occurrenceLine(thread: ThreadListItem) {
   if (thread.whenLabel) return thread.whenLabel

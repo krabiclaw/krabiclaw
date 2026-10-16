@@ -5,6 +5,7 @@ import type {
   GuestThreadDeliveryFailureViewModel,
   GuestThreadDetailViewModel,
   GuestThreadListItemViewModel,
+  GuestThreadListPage,
   GuestThreadSubmissionType,
 } from '~/server/domain/guest-threads/types'
 
@@ -20,6 +21,7 @@ import type {
 // stopped sending, so there is one declaration and this reads it.
 export type SubmissionType = GuestThreadSubmissionType
 export type ThreadListItem = GuestThreadListItemViewModel
+export type ThreadListPage = GuestThreadListPage
 export type ThreadDetail = GuestThreadDetailViewModel
 
 /*
@@ -47,13 +49,25 @@ export function threadFilterLabel(type: SubmissionType, vertical: string | null 
   return resolveBookingPresentation('reservation', vertical).labelPlural
 }
 
-export function isThreadListResponse(value: unknown): value is { threads: ThreadListItem[] } {
+export function isThreadListResponse(value: unknown): value is ThreadListPage {
   return isRecord(value)
+    && isRecord(value.pagination)
+    && Number.isInteger(value.pagination.limit) && Number(value.pagination.limit) >= 1 && Number(value.pagination.limit) <= 100
+    && Number.isSafeInteger(value.pagination.offset) && Number(value.pagination.offset) >= 0
+    && typeof value.pagination.hasMore === 'boolean'
+    && (value.pagination.hasMore
+      ? value.pagination.nextOffset === Number(value.pagination.offset) + Number(value.pagination.limit)
+      : value.pagination.nextOffset === null)
     && Array.isArray(value.threads)
+    && value.threads.length <= Number(value.pagination.limit)
+    && (!value.pagination.hasMore || value.threads.length === Number(value.pagination.limit))
+    && new Set(value.threads.map(thread => isRecord(thread) ? thread.id : undefined)).size === value.threads.length
     && value.threads.every(thread =>
       isRecord(thread)
       && typeof thread.id === 'string'
-      && typeof thread.guestName === 'string'
+      && (thread.guestName === null || typeof thread.guestName === 'string')
+      && typeof thread.participantLabel === 'string'
+      && (thread.replyChannel === 'email' || thread.replyChannel === 'airbnb')
       && typeof thread.submissionType === 'string'
       && typeof thread.lastActivityAt === 'string'
       && (thread.mailbox === 'current' || thread.mailbox === 'past')
@@ -66,11 +80,13 @@ export function isThreadListResponse(value: unknown): value is { threads: Thread
 function isDeliveryFailure(value: unknown): value is GuestThreadDeliveryFailureViewModel {
   return isRecord(value)
     && typeof value.id === 'string'
-    && (value.channel === 'email' || value.channel === 'whatsapp')
+    && (value.channel === 'email' || value.channel === 'whatsapp' || value.channel === 'airbnb' || value.channel === 'push')
+    && (value.status === 'failed' || value.status === 'uncertain')
     && (
       value.purpose === 'owner_alert'
       || value.purpose === 'guest_acknowledgement'
       || value.purpose === 'member_reply'
+      || value.purpose === 'scheduled_message'
       || value.purpose === 'status_update'
     )
     && (value.error === null || typeof value.error === 'string')
@@ -81,10 +97,13 @@ export function isThreadDetailResponse(value: unknown): value is { thread: Threa
   return isRecord(value)
     && isRecord(value.thread)
     && typeof value.thread.id === 'string'
-    && typeof value.thread.guestName === 'string'
+    && (value.thread.guestName === null || typeof value.thread.guestName === 'string')
+    && typeof value.thread.participantLabel === 'string'
+    && (value.thread.replyChannel === 'email' || value.thread.replyChannel === 'airbnb')
     && (value.thread.organizationName === null || typeof value.thread.organizationName === 'string')
     && (value.thread.organizationVertical === null || typeof value.thread.organizationVertical === 'string')
     && Array.isArray(value.thread.entries)
+    && value.thread.entries.every(entry => isRecord(entry) && (entry.providerTimestamp === null || typeof entry.providerTimestamp === 'string'))
     && Array.isArray(value.thread.availableActions)
     && (value.thread.mailbox === 'current' || value.thread.mailbox === 'past')
     && typeof value.thread.manuallyArchived === 'boolean'

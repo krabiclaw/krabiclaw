@@ -271,6 +271,7 @@ const route = useRoute()
 const router = useRouter()
 const dashboardApi = props.personalScope ? applicationFetch : useDashboardApi()
 const apiBase = props.personalScope ? '/api/account' : '/api/dashboard'
+const realtime = props.personalScope ? null : useDashboardInvalidations()
 const { filters, signature: filterSignature, query: filterQuery } = useAgendaFilters()
 
 const timeZone = getLocalTimeZone()
@@ -572,4 +573,10 @@ watch([view, monthKey, shownYear], () => {
 watch(filterSignature, () => {
   void resetMonths()
 })
+if (realtime) {
+  watch(realtime.event, event => {
+    if (event?.type === 'stay.changed' || event?.type === 'nights.changed') void resetMonths()
+  })
+  watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void resetMonths() })
+}
 </script>

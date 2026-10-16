@@ -13,7 +13,10 @@
         title="Overbooked"
         :description="`${channelName} confirmed this stay on nights another stay holds. Cancel this stay on ${channelName}, or cancel the other stay where it was booked.`"
       />
-      <h1 class="text-[32px] font-semibold leading-tight text-highlighted">{{ guestName }}</h1>
+      <UAlert v-if="guest.state === 'missing'" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" title="Guest name missing" description="This stay was made in KrabiClaw, which requires a guest name, but it has none." />
+      <h1 v-if="guest.state === 'named'" class="text-[32px] font-semibold leading-tight text-highlighted">{{ guest.name }}</h1>
+      <h1 v-else-if="guest.state === 'not-provided'" class="text-[32px] font-semibold leading-tight text-muted">Name not provided by {{ channelName }}</h1>
+      <h1 v-else-if="guest.state === 'missing'" class="text-[32px] font-semibold leading-tight text-error">Guest name missing</h1>
       <p class="mt-1 text-base text-muted">{{ stayDates }} · {{ partyLabel }}</p>
       <UBadge class="mt-3" :color="stay.status === 'cancelled' ? 'neutral' : 'success'" variant="soft" :label="statusLabel" />
 
@@ -74,19 +77,36 @@ import { getErrorMessage } from '~/utils/errors'
 
 const props = defineProps<{ stayId: string }>()
 const dashboardApi = useDashboardApi()
+const realtime = useDashboardInvalidations()
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 
 const isStay = (value: unknown): value is { stay: StayDetail; manage?: boolean } => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string'
 const { data, error, refresh } = await useAsyncData(`dashboard-stay:${props.stayId}`, () => dashboardApi(`/api/dashboard/stays/${encodeURIComponent(props.stayId)}`, { validate: isStay }))
 const stay = computed(() => data.value?.stay ?? null)
 const manage = computed(() => data.value?.manage === true)
+watch(realtime.event, event => {
+  if (event?.type === 'stay.changed' && (event.stayId === props.stayId || (event.stayId === null && event.productId === stay.value?.product_id))) void refresh()
+})
+watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refresh() })
 
 const CHANNELS = { airbnb: 'Airbnb', vrbo: 'Vrbo', direct: 'You' } as const
 const METHODS: Record<StayPaymentMethod, string> = { cash: 'Cash', bank_transfer: 'Bank transfer', card_external: 'Card (outside KrabiClaw)', other: 'Other' }
 const methods = Object.entries(METHODS).map(([value, label]) => ({ value, label }))
 const channelName = computed(() => stay.value ? CHANNELS[stay.value.channel] : '')
-const guestName = computed(() => [stay.value?.guest_name, stay.value?.guest_surname].filter(Boolean).join(' ') || 'Guest')
-const title = computed(() => stay.value ? `${guestName.value}’s stay` : 'Stay')
+/**
+ * Who the stay is for. A stay made here always names its guest, so one without
+ * is missing data; a channel may send a stay without a name, which is said as
+ * such rather than given one.
+ */
+type GuestIdentity = { state: 'loading' } | { state: 'named'; name: string } | { state: 'not-provided' } | { state: 'missing' }
+const guest = computed<GuestIdentity>(() => {
+  const value = stay.value
+  if (!value) return { state: 'loading' }
+  if (value.owner === 'app' && !value.guest_name) return { state: 'missing' }
+  const name = [value.guest_name, value.guest_surname].filter(Boolean).join(' ')
+  return name ? { state: 'named', name } : { state: 'not-provided' }
+})
+const title = computed(() => guest.value.state === 'named' ? `${guest.value.name}’s stay` : 'Stay')
 const nights = computed(() => stay.value ? Math.round((Date.parse(`${stay.value.check_out_date}T00:00:00Z`) - Date.parse(`${stay.value.check_in_date}T00:00:00Z`)) / 86_400_000) : 0)
 const stayDates = computed(() => stay.value
   ? `${formatCalendarDate(stay.value.check_in_date, 'en')} – ${formatCalendarDate(stay.value.check_out_date, 'en')} · ${nights.value === 1 ? '1 night' : `${nights.value} nights`}`
@@ -171,7 +191,7 @@ async function deletePayment(paymentId: string) {
 async function cancel() {
   const value = stay.value
   if (!value) return
-  if (!await confirmDialog.open({ title: `Cancel ${guestName.value}’s stay`, description: 'Its nights become available again. Record any refund as a payment.', confirmLabel: 'Cancel stay', cancelLabel: 'Keep stay' })) return
+  if (!await confirmDialog.open({ title: guest.value.state === 'named' ? `Cancel ${guest.value.name}’s stay` : 'Cancel this stay', description: 'Its nights become available again. Record any refund as a payment.', confirmLabel: 'Cancel stay', cancelLabel: 'Keep stay' })) return
   await run('cancel', () => dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/cancel`, { method: 'POST', validate: isStay, body: { expected_version: value.version } }), 'The stay could not be cancelled')
 }
 </script>

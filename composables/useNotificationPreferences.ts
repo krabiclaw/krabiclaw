@@ -10,7 +10,7 @@ function isPreferenceMap(value: unknown): value is { preferences: NotificationPr
   if (!isRecord(value) || !isRecord(value.preferences)) return false
   return NOTIFICATION_CATEGORIES.every((category) => {
     const setting = (value.preferences as Record<string, unknown>)[category]
-    return isRecord(setting) && typeof setting.email === 'boolean' && typeof setting.whatsapp === 'boolean'
+    return isRecord(setting) && typeof setting.email === 'boolean' && typeof setting.whatsapp === 'boolean' && typeof setting.push === 'boolean'
   })
 }
 

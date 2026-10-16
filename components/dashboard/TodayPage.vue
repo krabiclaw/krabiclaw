@@ -275,7 +275,8 @@ watch(todayData, async () => {
   if (activeRange.value === 'upcoming') await loadUpcoming()
 }, { flush: 'post' })
 watch(realtime.event, event => {
-  if (event?.type === 'thread.created' || event?.type === 'thread.changed' || event?.type === 'notification.created') void refreshAgenda()
+  if (event?.type === 'thread.created' || event?.type === 'thread.changed' || event?.type === 'notification.created'
+    || event?.type === 'stay.changed' || event?.type === 'nights.changed') void refreshAgenda()
 })
 watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void refreshAgenda() })
 

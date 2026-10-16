@@ -1,23 +1,14 @@
 import { inject, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch, type InjectionKey, type Ref } from 'vue'
 import { isDashboardInvalidation, type DashboardInvalidation } from '~/shared/dashboard-invalidations'
 
-/**
- * `unsupported` is the local worker: the guest-inbox Durable Object is not bound
- * there, so the socket can never open. Reporting that as `failed` put a warning
- * banner on every dashboard screen in development, every time, for a condition
- * nobody can act on.
- */
-export type DashboardInvalidationStatus = 'closed' | 'connecting' | 'open' | 'failed' | 'unsupported'
+export type DashboardInvalidationStatus = 'closed' | 'connecting' | 'open' | 'failed'
 
 export interface DashboardInvalidationConnection {
   status: Ref<DashboardInvalidationStatus>
   event: Ref<DashboardInvalidation | null>
   /**
-   * Counts the socket's reopenings after its first open. A consumer refetches
-   * when it changes to catch what was invalidated while the socket was down;
-   * the first open is not such a gap, because every consumer loads its data
-   * at setup, before the socket exists, and refetching on that open sent a
-   * second copy of every boot request.
+   * Counts successful opens. Consumers reconcile both reconnect gaps and the
+   * first gap between their initial read and the completed socket upgrade.
    */
   connectionEpoch: Ref<number>
   connect: () => void
@@ -37,7 +28,6 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
   let healthTimer: ReturnType<typeof setTimeout> | null = null
   let reconnectAttempt = 0
-  let openedOnce = false
   let mounted = false
   let stopped = false
 
@@ -82,10 +72,6 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
 
   function connect() {
     if (!import.meta.client || stopped || !organizationSlug.value) return
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      status.value = 'unsupported'
-      return
-    }
     if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return
 
     clearReconnectTimer()
@@ -101,8 +87,7 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
       if (socket !== nextSocket) return
       reconnectAttempt = 0
       status.value = 'open'
-      if (openedOnce) connectionEpoch.value += 1
-      openedOnce = true
+      connectionEpoch.value += 1
       scheduleHeartbeat(nextSocket)
     })
 

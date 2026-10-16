@@ -100,9 +100,10 @@ export interface ProductForm {
   check_out_time: string
   max_guests: string
   min_nights: string
-  stay_team_id: string
+  /** Null is the home looked after by owners and admins only: no team is assigned. */
+  stay_team_id: string | null
   /** Kept as loaded: this editor assigns a team, and saving never clears a member set elsewhere. */
-  stay_member_id: string
+  stay_member_id: string | null
 }
 
 /** The product's draft and what its leaves show or do beside their one field. */
@@ -167,6 +168,8 @@ import { productDetailFields, PRODUCT_KINDS, PRODUCT_KIND_LABELS, assertProductK
 import { isCurrencyCode } from '~/shared/currencies'
 import { majorAmountToMinor, minorAmountToMajor, selectPrice, type Price } from '~/shared/prices'
 import { formatProductMoney } from '~/utils/product-money'
+import { isChannelPush } from '~/shared/channel-push'
+import type { ProductMutation } from '~/server/utils/product-management'
 import { presentationForProduct, requireProductPresentation } from '~/utils/product-presentation'
 import { MINUTE_TIME_PATTERN } from '~/utils/timezone'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
@@ -252,6 +255,8 @@ const isProductList = (value: unknown): value is { success: true, products: Prod
   isRecord(value) && Array.isArray(value.products)
 const isOne = (value: unknown): value is { success: true, product: Product } =>
   isRecord(value) && isRecord(value.product)
+const isMutation = (value: unknown): value is { success: true; product: ProductMutation } =>
+  isOne(value) && value.success === true && 'channel_push' in value.product && isChannelPush(value.product.channel_push)
 
 
 // The product in this scope, read before the level renders. Keyed by location
@@ -277,9 +282,27 @@ const collections = computed(() => loaded.value?.collections ?? [])
 watchEffect(() => {
   if (loadFailure.value && isNotFoundError(loadFailure.value)) showError(createError({ statusCode: 404, statusMessage: `${presentation.value.itemLabel} not found` }))
 })
+/**
+ * A place to stay always has its stay settings. Missing or malformed ones are a
+ * read that failed, never times and nights to make up.
+ */
+const stayConfigError = computed(() => {
+  const row = product.value
+  if (!row || row.kind !== 'stay') return null
+  const stay = row.stay
+  if (!stay) return 'This place to stay has no stay settings.'
+  const invalid = [
+    !stay.location_id && 'location',
+    !MINUTE_TIME_PATTERN.test(stay.check_in_time) && 'check-in time',
+    !MINUTE_TIME_PATTERN.test(stay.check_out_time) && 'checkout time',
+    !(Number.isInteger(stay.max_guests) && stay.max_guests >= 1 && stay.max_guests <= 99) && 'sleeps',
+    !(Number.isInteger(stay.min_nights) && stay.min_nights >= 1 && stay.min_nights <= 365) && 'minimum nights',
+  ].filter(Boolean)
+  return invalid.length ? `This place to stay has invalid stay settings: ${invalid.join(', ')}.` : null
+})
 const loadError = computed(() => (loadFailure.value && !isNotFoundError(loadFailure.value)
   ? getErrorMessage(loadFailure.value, `Failed to load this ${presentation.value.itemLabel.toLowerCase()}`)
-  : null))
+  : stayConfigError.value))
 
 /**
  * A writer's re-read. A save or a photo change has just made this row different
@@ -343,7 +366,8 @@ const draft = useState<ProductForm>(draftKey, () => ({
   booking_duration: '',
   booking_capacity: '', scheduling_mode: 'legacy', assigned_member_id: '', assigned_team_id: '', confirmation_mode: 'instant', online_payment_required: false, held_online: false,
   image_asset_id: null as string | null,
-  stay_location_id: '', check_in_time: '15:00', check_out_time: '11:00', max_guests: '', min_nights: '1', stay_team_id: '', stay_member_id: '',
+  // A new place to stay starts from these settings; an existing one is loaded from its own.
+  stay_location_id: '', check_in_time: '15:00', check_out_time: '11:00', max_guests: '', min_nights: '1', stay_team_id: null, stay_member_id: null,
 }))
 const form = reactive(draft.value)
 // One key per product being created, kept across the walk's leaves and retries.
@@ -373,7 +397,9 @@ watch(product, (row) => { if (row) loadForm(row) }, { immediate: true })
 
 function loadForm(row: Product) {
   form.kind = row.kind
-  form.stay_location_id = row.stay?.location_id ?? ''
+  // Stay settings belong to a place to stay alone; on any other product they do not apply.
+  const stay = row.stay
+  form.stay_location_id = stay ? stay.location_id : ''
   form.name = row.name
   form.description = row.description
   form.order_url = row.order_url ?? ''
@@ -411,12 +437,12 @@ function loadForm(row: Product) {
   form.online_payment_required = row.booking?.online_payment_required ?? false
   form.held_online = row.booking?.held_online ?? false
   form.booking_capacity = row.booking?.default_capacity === null || row.booking === null ? '' : String(row.booking.default_capacity)
-  form.check_in_time = row.stay?.check_in_time ?? '15:00'
-  form.check_out_time = row.stay?.check_out_time ?? '11:00'
-  form.max_guests = row.stay ? String(row.stay.max_guests) : ''
-  form.min_nights = row.stay ? String(row.stay.min_nights) : '1'
-  form.stay_team_id = row.stay?.assigned_team_id ?? ''
-  form.stay_member_id = row.stay?.assigned_member_id ?? ''
+  form.check_in_time = stay ? stay.check_in_time : ''
+  form.check_out_time = stay ? stay.check_out_time : ''
+  form.max_guests = stay ? String(stay.max_guests) : ''
+  form.min_nights = stay ? String(stay.min_nights) : ''
+  form.stay_team_id = stay ? stay.assigned_team_id : null
+  form.stay_member_id = stay ? stay.assigned_member_id : null
   loadedCatalogShape.value = catalogShapeOf()
 }
 
@@ -774,7 +800,7 @@ function payload() {
       ...(isNew.value ? { location_id: form.stay_location_id } : {}),
       check_in_time: form.check_in_time, check_out_time: form.check_out_time,
       max_guests: Number(form.max_guests), min_nights: Number(form.min_nights),
-      assigned_member_id: form.stay_member_id || null, assigned_team_id: form.stay_team_id || null,
+      assigned_member_id: form.stay_member_id, assigned_team_id: form.stay_team_id,
     } } : {}),
   }
 }
@@ -789,7 +815,7 @@ const { createActionLabel, saveLabel: createSaveLabel, saveDisabled, save: saveC
   noun: () => form.kind ? presentationForProduct(vertical, { kind: assertProductKind(form.kind) }, dashboard.organization.value?.theme_id).itemLabel.toLowerCase() : 'product',
   saving,
   // A product that could not be read has no draft worth writing over it.
-  existingBlocked: () => !product.value || !sectionValid.value,
+  existingBlocked: () => !product.value || Boolean(loadError.value) || !sectionValid.value,
   commit,
 })
 
@@ -841,9 +867,14 @@ async function commit(bookingConcern?: BookingConcern) {
     if (bookingConcern !== undefined) {
       await saveBooking(bookingConcern)
     } else {
-      await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, {
-        method: 'PATCH', body: payload(), validate: isOne,
+      const saved = await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, {
+        method: 'PATCH', body: payload(), validate: isMutation,
       })
+      if (saved.product.channel_push?.state === 'needs_review') {
+        await reload()
+        saveError.value = `The home was saved. Its channel needs review. ${saved.product.channel_push.detail}`
+        return
+      }
       if (editorKey.value === 'publication') await savePublication()
       if (editorKey.value === 'locations') await saveLocation()
       if (editorKey.value === 'collections') await saveCollections()

@@ -7,8 +7,12 @@
       <UFormField name="email" class="border-b border-default">
         <SettingRow v-model="draft.email" label="Email" :disabled="emailLocked || saving" />
       </UFormField>
-      <UFormField name="whatsapp">
+      <UFormField name="whatsapp" class="border-b border-default">
         <SettingRow v-model="draft.whatsapp" label="WhatsApp" :disabled="!phoneVerified || saving" />
+      </UFormField>
+      <!-- Reaches every phone signed in to the Krabiclaw app. -->
+      <UFormField name="push">
+        <SettingRow v-model="draft.push" label="Push notifications" :disabled="saving" />
       </UFormField>
     </div>
 
@@ -37,7 +41,7 @@ const setting = computed(() => preferences.value?.[props.category] ?? null)
 const emailLocked = computed(() => isMandatoryEmailCategory(props.category))
 const phoneVerified = computed(() => Boolean(sessionData.value?.user?.phoneNumberVerified))
 
-const draft = reactive({ email: true, whatsapp: false })
+const draft = reactive({ email: true, whatsapp: false, push: false })
 const saving = ref(false)
 const failure = ref('')
 
@@ -48,6 +52,7 @@ watchEffect(() => {
   if (!current || saving.value) return
   draft.email = current.email
   draft.whatsapp = current.whatsapp
+  draft.push = current.push
 })
 
 const form = useTemplateRef('form')
@@ -58,6 +63,7 @@ function cancel() {
   if (!setting.value) return
   draft.email = setting.value.email
   draft.whatsapp = setting.value.whatsapp
+  draft.push = setting.value.push
   failure.value = ''
   revision.value += 1
 }
@@ -66,7 +72,7 @@ async function save() {
   saving.value = true
   failure.value = ''
   try {
-    await savePreferences(props.category, { email: draft.email, whatsapp: draft.whatsapp })
+    await savePreferences(props.category, { email: draft.email, whatsapp: draft.whatsapp, push: draft.push })
   } catch (cause) {
     failure.value = cause instanceof Error ? cause.message : 'Saving failed. Please try again.'
   } finally {
