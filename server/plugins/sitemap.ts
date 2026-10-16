@@ -1,6 +1,6 @@
 import type { ProductKind } from '~/shared/product-details'
 import { catalogNavigation, locationSurfacePath, productSurfaceOf, presentationForProduct, resolveProductPresentation } from '~/utils/product-presentation'
-import { PUBLIC_CONTENT_SECTIONS_SQL, publicSections, type PublicContentSectionRow } from '~/server/utils/public-shell-query'
+import { PUBLIC_CONTENT_SECTION_QUERIES, PUBLIC_CONTENT_SECTIONS, publicContentSectionRows, publicSections, type PublicContentSectionRow } from '~/server/utils/public-shell-query'
 import { publicLocationHomeSlugSql, publicLocationSql } from '~/server/utils/public-locations'
 import type { PublicSiteSection } from '~/utils/public-resource-contracts'
 import { publicTenantPageSql } from '~/server/utils/content/pages'
@@ -272,7 +272,8 @@ export default definePlugin((nitroApp) => {
       ),
       listSitemapArticleEntries(db, organizationId, template),
       listPublishedTenantSitemapPages(db, organizationId),
-      queryAll<PublicContentSectionRow>(db, PUBLIC_CONTENT_SECTIONS_SQL, Array.from({ length: 9 }, () => organizationId)),
+      Promise.all(PUBLIC_CONTENT_SECTIONS.map(async section => [section, await queryAll<PublicContentSectionRow>(db, PUBLIC_CONTENT_SECTION_QUERIES[section], [organizationId])] as const))
+        .then(entries => new Map(entries)).then(rows => publicContentSectionRows(section => rows.get(section)!)),
     ])
     // The sections the site's navigation offers, from the same flags.
     const sections = publicSections(organization.vertical, publicProducts, contentRows,

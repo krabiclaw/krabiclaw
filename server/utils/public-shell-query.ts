@@ -25,47 +25,57 @@ const requireLocationString = (value: unknown, field: string): string => {
 export interface PublicShellQueryIndexes {
   locations: number
   config: number
-  content: number
+  content: Record<PublicContentSection, number>
   media: number
 }
 
 /**
- * Which content sections have something on them, site-wide (location_id NULL)
- * and per location: the same rows each section's page reads. Binds the
- * organization id nine times.
+ * Which content sections have something on them: one statement per section,
+ * because D1 refuses a compound SELECT of more than five terms. Each binds the
+ * organization id once and answers the rows its section's pages read, by
+ * location; `site` is 1 where a row also counts for the site-wide page.
  */
-export const PUBLIC_CONTENT_SECTIONS_SQL = `SELECT DISTINCT section, location_id FROM (
-                     SELECT 'reviews' AS section, NULL AS location_id FROM reviews WHERE organization_id = ? AND status = 'approved'
-                     UNION ALL SELECT 'reviews', location_id FROM reviews WHERE organization_id = ? AND status = 'approved' AND location_id IS NOT NULL
-                     UNION ALL SELECT 'qa', NULL FROM content_documents WHERE organization_id = ? AND kind = 'qa' AND row_role = 'root' AND status = 'published' AND scope_path IS NULL
-                     UNION ALL SELECT 'qa', location_id FROM content_documents WHERE organization_id = ? AND kind = 'qa' AND row_role = 'root' AND status = 'published' AND location_id IS NOT NULL
-                     UNION ALL SELECT 'posts', NULL FROM content_documents WHERE organization_id = ? AND kind = 'social_post' AND row_role = 'root' AND status = 'published' AND visibility = 'listed'
-                     UNION ALL SELECT 'posts', location_id FROM content_documents WHERE organization_id = ? AND kind = 'social_post' AND row_role = 'root' AND status = 'published' AND visibility = 'listed' AND location_id IS NOT NULL
-                     UNION ALL SELECT 'blog', NULL FROM content_documents WHERE organization_id = ? AND kind = 'article' AND row_role = 'root' AND status = 'published' AND visibility = 'listed' AND (metadata_json ->> '$.collection') = 'blog'
-                     UNION ALL SELECT 'photos', NULL FROM media_placements mp JOIN media_assets ma ON ma.id = mp.asset_id
-                                WHERE mp.organization_id = ? AND mp.owner_type = 'business_location' AND mp.slot = 'gallery' AND mp.status = 'active' AND ma.kind = 'image' AND ma.status = 'active'
-                     UNION ALL SELECT 'photos', mp.owner_id FROM media_placements mp JOIN media_assets ma ON ma.id = mp.asset_id
-                                WHERE mp.organization_id = ? AND mp.owner_type = 'business_location' AND mp.slot = 'gallery' AND mp.status = 'active' AND ma.kind = 'image' AND ma.status = 'active'
-                   )`
+export const PUBLIC_CONTENT_SECTION_QUERIES = {
+  reviews: `SELECT DISTINCT location_id, 1 AS site FROM reviews WHERE organization_id = ? AND status = 'approved'`,
+  qa: `SELECT DISTINCT location_id, scope_path IS NULL AS site FROM content_documents
+        WHERE organization_id = ? AND kind = 'qa' AND row_role = 'root' AND status = 'published'`,
+  posts: `SELECT DISTINCT location_id, 1 AS site FROM content_documents
+           WHERE organization_id = ? AND kind = 'social_post' AND row_role = 'root' AND status = 'published' AND visibility = 'listed'`,
+  blog: `SELECT DISTINCT NULL AS location_id, 1 AS site FROM content_documents
+          WHERE organization_id = ? AND kind = 'article' AND row_role = 'root' AND status = 'published' AND visibility = 'listed'
+            AND (metadata_json ->> '$.collection') = 'blog'`,
+  photos: `SELECT DISTINCT mp.owner_id AS location_id, 1 AS site FROM media_placements mp JOIN media_assets ma ON ma.id = mp.asset_id
+            WHERE mp.organization_id = ? AND mp.owner_type = 'business_location' AND mp.slot = 'gallery' AND mp.status = 'active'
+              AND ma.kind = 'image' AND ma.status = 'active'`,
+} as const
 
-export type PublicContentSectionRow = { section: string; location_id: string | null }
+export type PublicContentSection = keyof typeof PUBLIC_CONTENT_SECTION_QUERIES
+export const PUBLIC_CONTENT_SECTIONS = Object.keys(PUBLIC_CONTENT_SECTION_QUERIES) as PublicContentSection[]
+export type PublicContentSectionRow = { location_id: string | null; site: number }
+export type PublicContentSectionRows = Record<PublicContentSection, ReadonlyArray<PublicContentSectionRow>>
+
+/** Each section's rows, read by `read`. */
+export function publicContentSectionRows(read: (section: PublicContentSection) => ReadonlyArray<PublicContentSectionRow>): PublicContentSectionRows {
+  return { reviews: read('reviews'), qa: read('qa'), posts: read('posts'), blog: read('blog'), photos: read('photos') }
+}
 
 /**
  * The site's sections and each location's, from its published catalog and its
  * content rows. Navigation, sitemap and pages all read these flags.
  */
-export function publicSections(vertical: string | null, products: readonly Product[], contentRows: readonly PublicContentSectionRow[], hasReservations: boolean) {
-  const hasContent = (section: string, locationId: string | null) => contentRows.some(row => row.section === section && row.location_id === locationId)
+export function publicSections(vertical: string | null, products: readonly Product[], contentRows: PublicContentSectionRows, hasReservations: boolean) {
+  const hasContent = (section: PublicContentSection, locationId: string | null) => contentRows[section].some(row =>
+    locationId === null ? Number(row.site) === 1 : row.location_id === locationId)
   const offersSurface = (surface: string, locationId?: string) => products.some(product => productSurfaceOf(vertical, product) === surface
     && (locationId === undefined || product.locations.some(entry => entry.location_id === locationId && entry.published)))
   return {
     site: Object.fromEntries(PUBLIC_SITE_SECTIONS.map(section => [section,
       section === 'reservations' ? hasReservations
         : section === 'menu' || section === 'products' || section === 'experiences' || section === 'stays' ? offersSurface(section)
-          : hasContent(section, null),
+          : hasContent(section as PublicContentSection, null),
     ])) as Record<PublicSiteSection, boolean>,
     location: (locationId: string) => Object.fromEntries(PUBLIC_LOCATION_SECTIONS.map(section => [section,
-      section === 'menu' || section === 'products' || section === 'experiences' ? offersSurface(section, locationId) : hasContent(section, locationId),
+      section === 'menu' || section === 'products' || section === 'experiences' ? offersSurface(section, locationId) : hasContent(section as PublicContentSection, locationId),
     ])) as Record<PublicLocationSection, boolean>,
   }
 }
@@ -99,7 +109,7 @@ export function appendPublicShellQueries(
                WHERE s.id = ?
                  AND setting.key IN ('press_email', 'partnerships_email', 'catering_email', 'careers_email')
               `, [organizationId]),
-    content: push(PUBLIC_CONTENT_SECTIONS_SQL, Array.from({ length: 9 }, () => organizationId)),
+    content: Object.fromEntries(PUBLIC_CONTENT_SECTIONS.map(section => [section, push(PUBLIC_CONTENT_SECTION_QUERIES[section], [organizationId])])) as Record<PublicContentSection, number>,
     // The organization's own placements and its locations' heroes and cards,
     // in one read: the shell's logo and favicon, and each location's og:image.
     media: push(`SELECT mp.owner_type, mp.owner_id, mp.slot, ma.id AS asset_id,
@@ -131,7 +141,7 @@ export async function buildPublicShellPayload(
   // through the same call, so the navigation cannot offer an empty page.
   products ??= await listOrganizationProducts(db, { organizationId: organization.id, publishedOnly: true, env })
   const sections = publicSections(organization.vertical, products,
-    (results[indexes.content]?.results ?? []) as PublicContentSectionRow[],
+    publicContentSectionRows(section => (results[indexes.content[section]]?.results ?? []) as PublicContentSectionRow[]),
     rawLocations.some(location => Number(location.has_reservations) === 1))
   const locations = rawLocations.map(location => {
     const locationMedia = publicSocialMediaFromPlacements('business_location',

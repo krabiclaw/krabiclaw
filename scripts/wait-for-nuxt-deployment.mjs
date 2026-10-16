@@ -11,6 +11,10 @@ if (!Number.isFinite(intervalMs) || intervalMs <= 0) throw new Error('NUXT_DEPLO
 if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0)
   throw new Error('NUXT_DEPLOYMENT_REQUEST_TIMEOUT_MS must be a positive number')
 
+// A server error is the deployed Worker failing, not the edge catching up:
+// waiting cannot fix it, so it ends the wait on the first attempt.
+class ServerError extends Error {}
+
 function cacheBuster() {
   return `deployment-check=${Date.now()}-${Math.random().toString(16).slice(2)}`
 }
@@ -27,6 +31,7 @@ async function request(url, init = {}) {
       ...init.headers,
     },
   })
+  if (response.status >= 500) throw new ServerError(`${response.status} ${url}`)
   if (!response.ok) throw new Error(`${response.status} ${url}`)
   return response
 }
@@ -78,6 +83,9 @@ while (true) {
   const failures = results.flatMap((result, index) =>
     result.status === 'rejected' ? [`${origins[index]}: ${result.reason instanceof Error ? result.reason.message : result.reason}`] : [],
   )
+
+  if (results.some(result => result.status === 'rejected' && result.reason instanceof ServerError))
+    throw new Error(`Deployed Worker answers with a server error:\n${failures.join('\n')}`)
 
   if (failures.length === 0) {
     const assetCount = results.reduce((count, result) => count + (result.status === 'fulfilled' ? result.value : 0), 0)
