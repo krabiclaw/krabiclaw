@@ -164,6 +164,7 @@ const APPROVED_VARIANTS = new Set<string>([
   'new_reservation_no_requests',
   'new_reservation_no_phone_context',
   'new_reservation_no_phone_context_requests',
+  'new_reservation_no_phone_requests',
   'reservation_cancelled_no_phone',
   'reservation_cancelled_no_phone_requests',
   'reservation_cancelled_no_requests',
