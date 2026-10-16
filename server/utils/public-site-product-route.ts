@@ -1,5 +1,5 @@
 import { getSourceLocale } from '~/server/utils/organization-locales'
-import { cloudflareEnv, jsonResponse, rethrowHttpError } from '~/server/utils/api-response'
+import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { previewSecretOf, resolvePreviewAuthorization } from '~/server/utils/preview-token'
 import { loadPublicSiteProductDetail, publicProductDetailPayload } from '~/server/utils/public-products'
 import type { SiteProductSurface } from '~/server/types/products'
@@ -14,20 +14,14 @@ export function defineSiteProductDetailHandler(surface: SiteProductSurface) {
     const organizationId = event.context.organizationId as string | null | undefined
     const slug = getRouterParam(event, 'slug')
     if (!organizationId || !slug) return jsonResponse({ error: `Organization and ${noun} slugs are required` }, { status: 400 })
-    try {
-      const env = cloudflareEnv(event)
-      const db = env.DB
-      if (!db) return jsonResponse({ error: 'Database unavailable' }, { status: 503 })
-      const locale = assertExactCanonicalLocale(getQuery(event).locale ?? await getSourceLocale(db, organizationId))
-      const previewAuthorized = await resolvePreviewAuthorization(event, organizationId, previewSecretOf(cloudflareEnv(event)))
-      const scope = getQuery(event).location_id
-      const result = await loadPublicSiteProductDetail(env, db, organizationId, surface, previewAuthorized, slug, locale, typeof scope === 'string' ? scope : null)
-      if (!result) return jsonResponse({ error: `${noun} not found` }, { status: 404 })
-      return jsonResponse(await publicProductDetailPayload(db, env, result))
-    } catch (error) {
-      rethrowHttpError(error)
-      console.error('public_site_product_detail_failed', { organizationId, surface, slug, error: error instanceof Error ? error.message : String(error) })
-      return jsonResponse({ error: `Failed to load ${noun}` }, { status: 500 })
-    }
+    const env = cloudflareEnv(event)
+    const db = env.DB
+    if (!db) return jsonResponse({ error: 'Database unavailable' }, { status: 503 })
+    const locale = assertExactCanonicalLocale(getQuery(event).locale ?? await getSourceLocale(db, organizationId))
+    const previewAuthorized = await resolvePreviewAuthorization(event, organizationId, previewSecretOf(env))
+    const scope = getQuery(event).location_id
+    const result = await loadPublicSiteProductDetail(env, db, organizationId, surface, previewAuthorized, slug, locale, typeof scope === 'string' ? scope : null)
+    if (!result) return jsonResponse({ error: `${noun} not found` }, { status: 404 })
+    return jsonResponse(await publicProductDetailPayload(db, env, result))
   })
 }
