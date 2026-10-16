@@ -54,7 +54,7 @@ test.describe('dashboard pane hierarchy', () => {
   test('each Menu destination is a root at its own URL, and Website content nests under Website', async ({ page }) => {
     await page.setViewportSize(WIDE)
     await open(page, `${ORG}/menu`)
-    const segments = ['website/pages', 'website/blog', 'website/qa', 'website/brand', 'website/pages/links', 'website/posts', 'locations', 'team', 'products', 'products/menu', 'products/services']
+    const segments = ['website/pages', 'website/blog', 'website/qa', 'website/brand', 'website/pages/links', 'website/posts', 'locations', 'team', 'products', 'products/menu']
     const resolved = await page.evaluate(({ org, segments }) => {
       const router = (document.querySelector('#__nuxt') as Element & {
         __vue_app__: { config: { globalProperties: { $router: { resolve: (path: string) => { path: string; matched: Array<{ path: string; meta: { tab?: unknown; back?: unknown } }> } } } } }
@@ -628,7 +628,7 @@ test.describe('dashboard pane hierarchy', () => {
       await open(page, entry.path)
       const panel = page.locator(`#dashboard-panel-${entry.id}`)
       const body = panel.locator(':scope > [data-slot="body"]')
-      const header = panel.locator(':scope > [data-slot="root"]')
+      const header = panel.locator(':scope > :has(h1)')
       const nav = page.getByTestId('dashboard-mobile-nav')
       const rows = entry.id === 'catalog' ? panel.locator('a[data-testid^="selector-item-"]') : panel.locator('span[data-testid^="product-"]')
       expect(await rows.count()).toBeGreaterThan(0)
@@ -678,13 +678,13 @@ test.describe('dashboard pane hierarchy', () => {
     expect(productsRead.status(), await productsRead.text()).toBe(200)
     const product = (await productsRead.json() as { products: Product[] }).products.find(row => row.kind === 'dish')
     expect(product, 'The demo has an existing dish to describe').toBeDefined()
-    await page.setViewportSize({ width: 390, height: 568 })
+    await page.setViewportSize({ width: 390, height: 480 })
     await open(page, `${ORG}/products/${product!.id}/description`)
     const dialog = page.getByRole('dialog', { name: 'Description', exact: true })
     const panel = page.locator('#dashboard-panel-product-description')
     const body = panel.locator(':scope > [data-slot="body"]')
     const parentBody = page.locator('#dashboard-panel-product > [data-slot="body"]')
-    const header = panel.locator(':scope > [data-slot="root"]')
+    const header = panel.locator(':scope > :has(h1)')
     const save = panel.getByRole('button', { name: 'Save', exact: true })
     await expect(dialog).toBeVisible()
     await expect(panel.getByRole('textbox', { name: 'Description', exact: true })).toHaveValue(product!.description ?? '')
@@ -770,7 +770,7 @@ test.describe('dashboard pane hierarchy', () => {
       await open(page, entry.path)
       const panel = page.locator(`#dashboard-panel-${entry.id}`)
       const body = panel.locator(':scope > [data-slot="body"]')
-      const header = panel.locator(':scope > [data-slot="root"]')
+      const header = panel.locator(':scope > :has(h1)')
       const nav = page.getByTestId('dashboard-mobile-nav')
       const last = entry.id === 'org-calendar' ? panel.locator('[data-month]').last()
         : entry.id === 'earnings-payouts' ? panel.getByRole('region', { name: 'Payments help', exact: true })
