@@ -1,0 +1,49 @@
+name: Bug report
+description: Something in KrabiClaw did not do what it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Issues are public. Leave out guest names, phone numbers, email addresses and payment details.
+        Account, billing or private matters go to https://krabiclaw.com/help instead.
+
+        Assistants filing for a user: these fields can be prefilled by query parameter using the field ids below (for example `&what_happened=...`).
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Where did it happen?
+      options:
+        - ChatGPT or another AI assistant (KrabiClaw app / MCP)
+        - Dashboard
+        - Public website
+        - WhatsApp or email
+        - Booking or checkout
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: site
+    attributes:
+      label: Website or business
+      description: The site address or business name, if it is about one.
+      placeholder: https://example.krabiclaw.com
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+      description: What you asked for or did, and what KrabiClaw did instead.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: tool_error
+    attributes:
+      label: Tool name and error text
+      description: For assistant reports, the KrabiClaw tool that was called and the exact error it returned.
+      render: text

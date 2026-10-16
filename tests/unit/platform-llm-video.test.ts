@@ -47,5 +47,13 @@ test('buildLlmsTxt includes coreLinks when provided for tenant', () => {
   assert.ok(result.includes('## Overview & Services'))
   assert.ok(result.includes('- [Menu](https://restaurant.example.com/menu): Current food and drink menu.'))
   assert.ok(result.includes('- [Reservations](https://restaurant.example.com/reservations): Table bookings.'))
+  assert.ok(!result.includes('## Support'))
+})
+
+test('buildLlmsTxt directs platform support to GitHub issue forms', () => {
+  const result = buildLlmsTxt('https://krabiclaw.com', [], [])
+  assert.ok(result.includes('- [Report a bug](https://github.com/krabiclaw/krabiclaw/issues/new?template=bug.yml): fields `surface`, `site`, `what_happened`, `expected`, `tool_error`.'))
+  assert.ok(result.includes('- [Request a feature](https://github.com/krabiclaw/krabiclaw/issues/new?template=feature.yml): fields `need`, `today`, `site`.'))
+  assert.ok(result.includes('- [Account, billing or private matters](https://krabiclaw.com/help): not public.'))
 })
 

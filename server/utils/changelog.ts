@@ -1,3 +1,5 @@
+import { KRABICLAW_REPOSITORY } from '../../shared/open-source.ts'
+
 export const DEFAULT_CHANGELOG_LIMIT = 50
 export const MAX_CHANGELOG_LIMIT = 100
 
@@ -48,8 +50,6 @@ export class ChangelogFetchError extends Error {
 
 interface GetRecentChangesOptions {
   githubToken: string
-  repoOwner?: string
-  repoName?: string
   limit?: number
   fetchImpl?: typeof fetch
 }
@@ -113,8 +113,6 @@ export async function getRecentChanges(options: GetRecentChangesOptions): Promis
   const githubToken = options.githubToken.trim()
   if (!githubToken) throw new ChangelogFetchError('GITHUB_TOKEN not configured')
 
-  const repoOwner = options.repoOwner?.trim() || 'paulchrisluke'
-  const repoName = options.repoName?.trim() || 'krabiclaw'
   const fetchImpl = options.fetchImpl ?? fetch
   const allMergedPullRequests: GitHubPullRequest[] = []
   const perPage = 100
@@ -122,7 +120,7 @@ export async function getRecentChanges(options: GetRecentChangesOptions): Promis
 
   while (true) {
     const response = await fetchImpl(
-      `https://api.github.com/repos/${encodeURIComponent(repoOwner)}/${encodeURIComponent(repoName)}/pulls?state=closed&sort=updated&direction=desc&per_page=${perPage}&page=${page}`,
+      `https://api.github.com/repos/${KRABICLAW_REPOSITORY}/pulls?state=closed&sort=updated&direction=desc&per_page=${perPage}&page=${page}`,
       {
         headers: {
           Authorization: `Bearer ${githubToken}`,

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Account, billing or private data
+    url: https://krabiclaw.com/help
+    about: Anything involving your account, payments or your guests' details. Not posted publicly.
+  - name: Security vulnerability
+    url: https://github.com/krabiclaw/krabiclaw/security/advisories/new
+    about: Report privately. Do not open a public issue.
