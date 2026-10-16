@@ -2,9 +2,11 @@ import { parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours
 import type { BatchQuery, DbClient } from '~/server/db'
 import type { PublicBase } from '~/server/utils/public-base'
 import { calculateMapEmbedUrl } from '~/server/utils/google-places'
-import type { PublicShellPayload } from '~/utils/public-resource-contracts'
-import { listOrganizationProducts, publicProduct } from '~/server/utils/product-management'
-import type { PublicProduct } from '~/server/types/products'
+import { PUBLIC_LOCATION_SECTIONS, PUBLIC_SITE_SECTIONS, type PublicLocationSection, type PublicShellPayload, type PublicSiteSection } from '~/utils/public-resource-contracts'
+import { listOrganizationProducts } from '~/server/utils/product-management'
+import type { Product } from '~/server/types/products'
+import { productSurfaceOf } from '~/utils/product-presentation'
+import { publicLocationHomeSlugSql, publicLocationSql } from '~/server/utils/public-locations'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode } from '~/shared/currencies'
 import { parsePostalAddress } from '~/utils/postal-address'
@@ -23,8 +25,49 @@ const requireLocationString = (value: unknown, field: string): string => {
 export interface PublicShellQueryIndexes {
   locations: number
   config: number
-  productLocations: number
+  content: number
   media: number
+}
+
+/**
+ * Which content sections have something on them, site-wide (location_id NULL)
+ * and per location: the same rows each section's page reads. Binds the
+ * organization id nine times.
+ */
+export const PUBLIC_CONTENT_SECTIONS_SQL = `SELECT DISTINCT section, location_id FROM (
+                     SELECT 'reviews' AS section, NULL AS location_id FROM reviews WHERE organization_id = ? AND status = 'approved'
+                     UNION ALL SELECT 'reviews', location_id FROM reviews WHERE organization_id = ? AND status = 'approved' AND location_id IS NOT NULL
+                     UNION ALL SELECT 'qa', NULL FROM content_documents WHERE organization_id = ? AND kind = 'qa' AND row_role = 'root' AND status = 'published' AND scope_path IS NULL
+                     UNION ALL SELECT 'qa', location_id FROM content_documents WHERE organization_id = ? AND kind = 'qa' AND row_role = 'root' AND status = 'published' AND location_id IS NOT NULL
+                     UNION ALL SELECT 'posts', NULL FROM content_documents WHERE organization_id = ? AND kind = 'social_post' AND row_role = 'root' AND status = 'published' AND visibility = 'listed'
+                     UNION ALL SELECT 'posts', location_id FROM content_documents WHERE organization_id = ? AND kind = 'social_post' AND row_role = 'root' AND status = 'published' AND visibility = 'listed' AND location_id IS NOT NULL
+                     UNION ALL SELECT 'blog', NULL FROM content_documents WHERE organization_id = ? AND kind = 'article' AND row_role = 'root' AND status = 'published' AND visibility = 'listed' AND (metadata_json ->> '$.collection') = 'blog'
+                     UNION ALL SELECT 'photos', NULL FROM media_placements mp JOIN media_assets ma ON ma.id = mp.asset_id
+                                WHERE mp.organization_id = ? AND mp.owner_type = 'business_location' AND mp.slot = 'gallery' AND mp.status = 'active' AND ma.kind = 'image' AND ma.status = 'active'
+                     UNION ALL SELECT 'photos', mp.owner_id FROM media_placements mp JOIN media_assets ma ON ma.id = mp.asset_id
+                                WHERE mp.organization_id = ? AND mp.owner_type = 'business_location' AND mp.slot = 'gallery' AND mp.status = 'active' AND ma.kind = 'image' AND ma.status = 'active'
+                   )`
+
+export type PublicContentSectionRow = { section: string; location_id: string | null }
+
+/**
+ * The site's sections and each location's, from its published catalog and its
+ * content rows. Navigation, sitemap and pages all read these flags.
+ */
+export function publicSections(vertical: string | null, products: readonly Product[], contentRows: readonly PublicContentSectionRow[], hasReservations: boolean) {
+  const hasContent = (section: string, locationId: string | null) => contentRows.some(row => row.section === section && row.location_id === locationId)
+  const offersSurface = (surface: string, locationId?: string) => products.some(product => productSurfaceOf(vertical, product) === surface
+    && (locationId === undefined || product.locations.some(entry => entry.location_id === locationId && entry.published)))
+  return {
+    site: Object.fromEntries(PUBLIC_SITE_SECTIONS.map(section => [section,
+      section === 'reservations' ? hasReservations
+        : section === 'menu' || section === 'products' || section === 'experiences' || section === 'stays' ? offersSurface(section)
+          : hasContent(section, null),
+    ])) as Record<PublicSiteSection, boolean>,
+    location: (locationId: string) => Object.fromEntries(PUBLIC_LOCATION_SECTIONS.map(section => [section,
+      section === 'menu' || section === 'products' || section === 'experiences' ? offersSurface(section, locationId) : hasContent(section, locationId),
+    ])) as Record<PublicLocationSection, boolean>,
+  }
 }
 
 export function appendPublicShellQueries(
@@ -46,22 +89,17 @@ export function appendPublicShellQueries(
                      bl.last_synced_at, bl.seo_title, bl.seo_description,
                      bl.canonical_url,
                      EXISTS (SELECT 1 FROM location_reservation_configs c
-                              WHERE c.organization_id = bl.organization_id AND c.location_id = bl.id) AS has_reservations
+                              WHERE c.organization_id = bl.organization_id AND c.location_id = bl.id) AS has_reservations,
+                     ${publicLocationHomeSlugSql('bl')} AS home_slug
                 FROM business_locations bl
-               WHERE bl.organization_id = ?  AND bl.status = 'active'
+               WHERE bl.organization_id = ? AND ${publicLocationSql('bl')}
                ORDER BY bl.title ASC`, [organizationId]),
     config: push(`SELECT setting.key, setting.value
                 FROM organization s, json_each(s.settings_json, '$.config') setting
                WHERE s.id = ?
                  AND setting.key IN ('press_email', 'partnerships_email', 'catering_email', 'careers_email')
               `, [organizationId]),
-    productLocations: push(`SELECT DISTINCT pl.location_id
-                              FROM product_locations pl
-                              JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id
-                              JOIN product_publications pp ON pp.product_id = p.id AND pp.organization_id = p.organization_id
-                             WHERE pl.organization_id = ?  AND pp.published = 1
-                               AND pl.published = 1 AND p.kind <> 'experience'
-                             ORDER BY pl.location_id`, [organizationId]),
+    content: push(PUBLIC_CONTENT_SECTIONS_SQL, Array.from({ length: 9 }, () => organizationId)),
     // The organization's own placements and its locations' heroes and cards,
     // in one read: the shell's logo and favicon, and each location's og:image.
     media: push(`SELECT mp.owner_type, mp.owner_id, mp.slot, ma.id AS asset_id,
@@ -81,14 +119,20 @@ export async function buildPublicShellPayload(
   results: BatchResult[],
   indexes: PublicShellQueryIndexes,
   env?: CloudflareEnv,
-  /** The bookable experiences, when the caller read them beside the shell rows. */
-  experiences?: PublicProduct[],
+  /** The site's published products, when the caller read them beside the shell rows. */
+  products?: Product[],
 ): Promise<PublicShellPayload> {
   const rawLocations = (results[indexes.locations]?.results ?? []) as Record<string, unknown>[]
   const placements = (results[indexes.media]?.results ?? []) as Array<PublicMediaPlacement & { owner_type: string; owner_id: string }>
   const organizationMedia = placements.filter(item => item.owner_type === 'organization')
     .map(({ owner_type: _ownerType, owner_id: _ownerId, ...item }) => item)
   const organizationSocialMedia = publicSocialMediaFromPlacements('organization', organizationMedia, organizationMedia)
+  // The catalog sections follow the published catalog the section pages list,
+  // through the same call, so the navigation cannot offer an empty page.
+  products ??= await listOrganizationProducts(db, { organizationId: organization.id, publishedOnly: true, env })
+  const sections = publicSections(organization.vertical, products,
+    (results[indexes.content]?.results ?? []) as PublicContentSectionRow[],
+    rawLocations.some(location => Number(location.has_reservations) === 1))
   const locations = rawLocations.map(location => {
     const locationMedia = publicSocialMediaFromPlacements('business_location',
       placements.filter(item => item.owner_type === 'business_location' && item.owner_id === location.id)
@@ -126,6 +170,8 @@ export async function buildPublicShellPayload(
       seo_title: location.seo_title ?? null,
       seo_description: location.seo_description ?? null,
       canonical_url: location.canonical_url ?? null,
+      home_slug: typeof location.home_slug === 'string' ? location.home_slug : null,
+      sections: sections.location(String(location.id)),
     }
   })
   const configRows = (results[indexes.config]?.results ?? []) as Array<{ key: string, value: string }>
@@ -142,10 +188,6 @@ export async function buildPublicShellPayload(
   if (organization.seo_description) config.seo_description = organization.seo_description
   if (organization.canonical_url) config.canonical_url = organization.canonical_url
   if (organization.search_console_verification) config.search_console_verification = organization.search_console_verification
-
-  const activeLocationIds = new Set(rawLocations.map(location => String(location.id)))
-  const productLocationRows = (results[indexes.productLocations]?.results ?? []) as Array<{ location_id: string }>
-  experiences ??= (await listOrganizationProducts(db, { organizationId: organization.id, kind: 'experience', publishedOnly: true, bookableOnly: true, env })).map(publicProduct)
 
   return {
     platformMessages: null,
@@ -165,8 +207,6 @@ export async function buildPublicShellPayload(
       media: [],
       syncedAt: null,
     },
-    hasProducts: productLocationRows.some(row => activeLocationIds.has(String(row.location_id))),
-    hasBookableProducts: experiences.length > 0,
-    hasReservations: rawLocations.some(location => Number(location.has_reservations) === 1),
+    sections: sections.site,
   }
 }

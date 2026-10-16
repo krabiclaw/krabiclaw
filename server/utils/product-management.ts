@@ -499,17 +499,18 @@ export async function listLocationProducts(db: DbClient, input: ProductListInput
 export async function summarizeLocationProducts(db: DbClient, input: {
   organizationId: string; locationId: string
 }): Promise<CatalogCounts> {
-  const row = await queryFirst<{ total: number; experiences: number; dishes: number }>(db, `
+  const row = await queryFirst<{ total: number; experiences: number; dishes: number; stays: number }>(db, `
     SELECT count(*) AS total,
            count(CASE WHEN p.kind = 'experience' THEN 1 END) AS experiences,
-           count(CASE WHEN p.kind = 'dish' THEN 1 END) AS dishes
+           count(CASE WHEN p.kind = 'dish' THEN 1 END) AS dishes,
+           count(CASE WHEN p.kind = 'stay' THEN 1 END) AS stays
       FROM products p
       JOIN product_locations pl ON pl.product_id = p.id AND pl.organization_id = p.organization_id
      WHERE p.organization_id = ? AND pl.location_id = ?
   `, [input.organizationId, input.locationId])
-  // The same two numbers countCatalog reads off the rows, so a surface is
+  // The same numbers countCatalog reads off the rows, so a surface is
   // assigned identically whether the caller counted rows or SQL did.
-  return { total: Number(row?.total ?? 0), experiences: Number(row?.experiences ?? 0), dishes: Number(row?.dishes ?? 0) }
+  return { total: Number(row?.total ?? 0), experiences: Number(row?.experiences ?? 0), dishes: Number(row?.dishes ?? 0), stays: Number(row?.stays ?? 0) }
 }
 
 export async function listCollectionProducts(db: DbClient, input: {

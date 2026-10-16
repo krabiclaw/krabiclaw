@@ -5,15 +5,15 @@
 <script setup lang="ts">
 import ProductCollectionPage from '~/components/products/ProductCollectionPage.vue'
 import { isCurrencyCode } from '~/shared/currencies'
-import { presentationForSurface } from '~/utils/product-presentation'
+import { presentationForSurface, productSurfaceOf } from '~/utils/product-presentation'
 
 const { template, social_image: socialImage } = useTenantOrganization().organization
 if (template.slug === 'blawby') throw createError({ statusCode: 404 })
 const { t } = useI18n()
 const { products, collections, locations, config, organization, data: pagePayload } = await usePublicPageData({ lazy: false })
-// What the merchant sells over the counter. Anything a guest books a seat on
-// is an Experience and has its own surface, so it is not listed twice.
-const goods = computed(() => products.value.filter(product => product.kind === 'item' || product.kind === 'service'))
+// What the merchant sells over the counter. A dish, an Experience and a home
+// each have their own surface, so none is listed twice.
+const goods = computed(() => products.value.filter(product => productSurfaceOf(null, product) === 'products'))
 // A surface with nothing on it is not a page: a studio that sells no
 // merchandise has no /products, rather than an indexable empty one. The
 // navigation hides it for the same reason.

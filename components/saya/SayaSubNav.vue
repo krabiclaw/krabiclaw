@@ -26,46 +26,32 @@
 </template>
 
 <script setup lang="ts">
-import { isExperience } from '~/utils/product-presentation'
+import type { PublicLocationSection } from '~/utils/public-resource-contracts'
 
 const props = defineProps<{
   locationSlug: string
   active: 'overview' | 'menu' | 'products' | 'experiences' | 'posts' | 'reviews' | 'photos' | 'qa' | 'contact'
 }>()
 
-const { products, location } = await usePublicPageData({ lazy: false })
+const { location } = await usePublicPageData({ lazy: false })
 const { localePath, t } = useI18n()
 
+// Each of this branch's sections is a tab only when the branch has something
+// on it: the same flags the section pages answer 404 by.
+const SECTION_TABS: Array<{ key: PublicLocationSection, label: string }> = [
+  { key: 'menu', label: 'saya.subnav.menu' },
+  { key: 'products', label: 'saya.footer.products' },
+  { key: 'experiences', label: 'saya.footer.experiences' },
+  { key: 'posts', label: 'saya.subnav.posts' },
+  { key: 'reviews', label: 'saya.subnav.reviews' },
+  { key: 'photos', label: 'saya.subnav.photos' },
+  { key: 'qa', label: 'saya.subnav.qa' },
+]
 
-const items = computed(() => {
-  const list = [
-    { key: 'overview', label: t('saya.subnav.overview'), href: `/locations/${props.locationSlug}` }
-  ]
-  // Two surfaces, each shown only when this branch has something on it: what
-  // the branch sells over the counter, and what a guest can book a seat on.
-  const here = location.value
-    ? products.value.filter(product => product.locations.some(entry => entry.location_id === location.value?.id && entry.published))
-    : []
-  if (here.some(product => product.kind === 'dish')) {
-    list.push({ key: 'menu', label: t('saya.subnav.menu'), href: `/locations/${props.locationSlug}/menu` })
-  }
-  if (here.some(product => product.kind === 'item' || product.kind === 'service' || product.kind === 'stay')) {
-    list.push({ key: 'products', label: t('saya.footer.products'), href: `/locations/${props.locationSlug}/products` })
-  }
-  if (here.some(isExperience)) {
-    list.push({
-      key: 'experiences',
-      label: t('saya.footer.experiences'),
-      href: `/locations/${props.locationSlug}/experiences`,
-    })
-  }
-  list.push(
-    { key: 'posts',    label: t('saya.subnav.posts'),   href: `/locations/${props.locationSlug}/posts` },
-    { key: 'reviews',  label: t('saya.subnav.reviews'), href: `/locations/${props.locationSlug}/reviews` },
-    { key: 'photos',   label: t('saya.subnav.photos'),  href: `/locations/${props.locationSlug}/photos` },
-    { key: 'qa',       label: t('saya.subnav.qa'),      href: `/locations/${props.locationSlug}/qa` },
-    { key: 'contact',  label: t('saya.subnav.visit'),   href: `/locations/${props.locationSlug}/contact` }
-  )
-  return list
-})
+const items = computed(() => [
+  { key: 'overview', label: t('saya.subnav.overview'), href: `/locations/${props.locationSlug}` },
+  ...SECTION_TABS.filter(tab => location.value?.sections[tab.key] === true)
+    .map(tab => ({ key: tab.key, label: t(tab.label), href: `/locations/${props.locationSlug}/${tab.key}` })),
+  { key: 'contact', label: t('saya.subnav.visit'), href: `/locations/${props.locationSlug}/contact` },
+])
 </script>

@@ -80,11 +80,16 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'update_location',
-      description: 'Update a location\'s own details: regular opening hours, temporary closures/special hours, and contact info. To change its hero media, call set_media with { owner_type: "business_location", owner_id: <location.id>, slot: "hero" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.',
+      description: 'Update a location\'s own details: its name, URL slug and descriptions, regular opening hours, temporary closures/special hours, and contact info. Renaming changes the location\'s slug, and so its public URL, unless slug is given in the same call. To change its hero media, call set_media with { owner_type: "business_location", owner_id: <location.id>, slot: "hero" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.',
       domain: 'locations',
       minimumRole: 'admin',
       inputSchema: {
         location_id: { type: 'string', description: 'Internal location ID returned by list_locations or get_workspace_context.' },
+        title: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'Location name shown to guests. Changing it regenerates the slug from the new name unless slug is given in the same call.' },
+        slug: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'URL slug for the location page. Normalized, and suffixed -2, -3… when another location already uses it. Changes the public URL.' },
+        description: { type: ['string', 'null'], description: 'Long description shown on the location page. Pass null to clear it.' },
+        short_description: { type: ['string', 'null'], description: 'One-line summary shown on location cards. Pass null to clear it.' },
+        status: { type: 'string', enum: ['active', 'inactive'], description: 'inactive takes the location and everything held there off the website and frees its plan slot; active puts it back, and is refused when every slot the plan covers is in use.' },
         address: postalAddressSchema,
         phone: { type: 'string', description: 'Public phone number shown to guests on the website and in booking/reservation confirmation emails.' },
         email: { type: ['string', 'null'], description: 'Public email shown to guests on the website and in booking/reservation confirmation emails. Pass null to clear it.' },

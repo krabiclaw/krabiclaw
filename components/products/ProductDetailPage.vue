@@ -431,6 +431,7 @@ const { localePath, t, locale } = useI18n()
 const collectionLabel = computed(() => {
   if (props.vertical === 'service' && (props.pageDocument || !props.location)) return t('blawby.footer.services')
   if (props.presentation.locationCollectionSegment === 'menu') return t('saya.footer.menu')
+  if (props.presentation.locationCollectionSegment === 'stays') return t('saya.footer.stays')
   return props.presentation.locationCollectionSegment === 'experiences'
     ? t('saya.footer.experiences')
     : t('saya.footer.products')
@@ -438,7 +439,8 @@ const collectionLabel = computed(() => {
 const breadcrumbs = computed(() => [
   { to: localePath('/'), label: t('saya.experience_detail.home') },
   { to: localePath(props.pageDocument ? '/services' : props.presentation.collectionPath), label: collectionLabel.value },
-  ...(props.location ? [{ to: localePath(props.presentation.locationCollectionSegment === 'experiences'
+  // A home is its own page, so no branch stands between it and its index.
+  ...(props.location && props.presentation.locationCollectionSegment !== 'stays' ? [{ to: localePath(props.presentation.locationCollectionSegment === 'experiences'
     ? `/locations/${encodeURIComponent(props.location.slug)}/experiences`
     : productLocationCollectionPath(props.vertical, props.location.slug)), label: props.location.title }] : []),
   { to: localePath(props.pageDocument?.path ?? props.presentation.productPath(props.location?.slug ?? '', props.product.slug)), label: displayTitle.value },

@@ -134,6 +134,8 @@ const organizationName = computed(() => String((organization as ApiValue)?.name 
 
 const { location, reviewsAggregate, reviewsList, pending } = await usePublicPageData()
 if (!location.value) throw createError({ statusCode: 404, statusMessage: 'Location not found' })
+// A section with nothing on it is not a page; the navigation hides it by the same flag.
+if (!location.value.sections.reviews) throw createError({ statusCode: 404 })
 const aggregate = reviewsAggregate
 const reviews = reviewsList
 

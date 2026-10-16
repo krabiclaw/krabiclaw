@@ -489,7 +489,7 @@ test('a guest opens a stay\'s booking dialog, picks nights the calendar allows a
   const baseURL = `https://${environmentTenantAliasHostname(platform.hostname, 'saltleaf-stays-demo')}`
   const homePage = await page.request.get(`${baseURL}/`)
   expect(homePage.status()).toBe(200)
-  const path = (await homePage.text()).match(/\/locations\/[a-z0-9-]+\/products\/([a-z0-9-]+)/)
+  const path = (await homePage.text()).match(/\/stays\/([a-z0-9-]+)/)
   expect(path, 'the lodging demo home page offers no stay').not.toBeNull()
   const stayPath = path![0]
   const slug = path![1]!

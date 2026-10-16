@@ -1,5 +1,8 @@
 import type { ProductKind } from '~/shared/product-details'
-import { productSurfaceOf, presentationForProduct, presentationForSurface, resolveProductPresentation  } from '~/utils/product-presentation'
+import { catalogNavigation, locationSurfacePath, productSurfaceOf, presentationForProduct, resolveProductPresentation } from '~/utils/product-presentation'
+import { PUBLIC_CONTENT_SECTIONS_SQL, publicSections, type PublicContentSectionRow } from '~/server/utils/public-shell-query'
+import { publicLocationHomeSlugSql, publicLocationSql } from '~/server/utils/public-locations'
+import type { PublicSiteSection } from '~/utils/public-resource-contracts'
 import { publicTenantPageSql } from '~/server/utils/content/pages'
 import { isSubscriptionStateInvalid } from '~/server/utils/billing-access'
 import type { SitemapUrlInput } from '#sitemap/types'
@@ -15,6 +18,12 @@ import { TENANT_TYPES } from '~/utils/tenant-routing'
 import { resolvePublicTemplate } from '~/utils/template-registry'
 import { assertOrganizationLanguageEntitlement } from '~/server/utils/localization'
 import { listOrganizationProducts } from '~/server/utils/product-management'
+
+// A collection path that is a section is listed only when the section has something on it.
+const SECTION_PATHS: Record<string, PublicSiteSection> = {
+  '/menu': 'menu', '/products': 'products', '/experiences': 'experiences', '/stays': 'stays', '/reservations': 'reservations',
+  '/blog': 'blog', '/posts': 'posts', '/reviews': 'reviews', '/qa': 'qa', '/photos': 'photos',
+}
 
 interface SitemapEntry {
   loc: string
@@ -151,7 +160,8 @@ export default definePlugin((nitroApp) => {
 
     const template = resolvePublicTemplate({ themeId: organization.theme_id, vertical: organization.vertical })
     const productPresentation = resolveProductPresentation(organization.vertical)
-    const publicProductIds = JSON.stringify((await listOrganizationProducts(db, { organizationId, publishedOnly: true, env })).map(product => product.id))
+    const publicProducts = await listOrganizationProducts(db, { organizationId, publishedOnly: true, env })
+    const publicProductIds = JSON.stringify(publicProducts.map(product => product.id))
 
     const localizedLocales = await queryAll<{ locale: string; organization_id: string }>(db, `
       SELECT l.locale, l.organization_id
@@ -207,7 +217,7 @@ export default definePlugin((nitroApp) => {
         for (const product of localizedProducts) {
           const presentation = presentationForProduct(organization.vertical, product)
           const locationSlug = product.location_path?.split('/').filter(Boolean).at(-1)
-          if (product.kind !== 'experience' && !locationSlug) continue
+          if (product.kind !== 'experience' && product.kind !== 'stay' && !locationSlug) continue
           entries.push({ loc: `/${candidate.locale}${presentation.productPath(locationSlug ?? '', product.slug)}`, lastmod: product.updated_at })
         }
       }
@@ -233,15 +243,16 @@ export default definePlugin((nitroApp) => {
       }
     }
 
-    const [locations, products, posts, tenantPages] = await Promise.all([
+    const [locations, products, posts, tenantPages, contentRows] = await Promise.all([
       queryAll<ApiRecord>(
         db,
         `SELECT bl.id, bl.slug, bl.updated_at,
                 EXISTS (SELECT 1 FROM location_reservation_configs c
-                         WHERE c.organization_id = bl.organization_id AND c.location_id = bl.id) AS has_reservations
+                         WHERE c.organization_id = bl.organization_id AND c.location_id = bl.id) AS has_reservations,
+                ${publicLocationHomeSlugSql('bl')} AS home_slug
          FROM business_locations bl
          WHERE bl.organization_id = ?
-           AND bl.status = 'active'`,
+           AND ${publicLocationSql('bl')}`,
         [organizationId],
       ),
       queryAll<ApiRecord>(
@@ -261,25 +272,30 @@ export default definePlugin((nitroApp) => {
       ),
       listSitemapArticleEntries(db, organizationId, template),
       listPublishedTenantSitemapPages(db, organizationId),
+      queryAll<PublicContentSectionRow>(db, PUBLIC_CONTENT_SECTIONS_SQL, Array.from({ length: 9 }, () => organizationId)),
     ])
+    // The sections the site's navigation offers, from the same flags.
+    const sections = publicSections(organization.vertical, publicProducts, contentRows,
+      locations.some(location => Number(location.has_reservations) === 1))
 
-    entries.push(...template.sitemap.exactPaths.filter(loc => !['/menu', '/products', '/experiences', '/reservations'].includes(loc)).map(loc => ({ loc })))
+    entries.push(...template.sitemap.exactPaths
+      .filter(loc => !(loc in SECTION_PATHS) || sections.site[SECTION_PATHS[loc]!])
+      .map(loc => ({ loc })))
+    for (const item of catalogNavigation(sections.site)) entries.push({ loc: item.path })
+    if (sections.site.reservations) entries.push({ loc: '/reservations' })
 
-    if (locations.length > 0) entries.push({ loc: '/locations' })
-    // The reservations page exists for a site whose locations take them, the
-    // same fact the site header uses to offer it.
-    if (locations.some(location => Number(location.has_reservations) === 1)) entries.push({ loc: '/reservations' })
-    const productSurfaces = new Set(products.map(product => productSurfaceOf(organization.vertical, { kind: product.kind as ProductKind })))
-    for (const surface of productSurfaces) entries.push({ loc: presentationForSurface(organization.vertical, surface).collectionPath })
+    // A location that is one home is listed as that home's page, below.
+    const locationPages = locations.filter(location => location.slug && !location.home_slug)
+    if (locationPages.length > 0) entries.push({ loc: '/locations' })
 
     entries.push(
-      ...locations
-        .filter(location => location.slug)
-        .map(location => ({ loc: `/locations/${location.slug}`, lastmod: location.updated_at as string | undefined })),
-      ...locations.filter(location => location.slug).flatMap(location => [...new Set(products.filter(product => product.location_id === location.id).map(product => productSurfaceOf(organization.vertical, { kind: product.kind as ProductKind })))].map(surface => ({ loc: `/locations/${location.slug}/${surface}`, lastmod: location.updated_at as string | undefined }))),
+      ...locationPages.map(location => ({ loc: `/locations/${location.slug}`, lastmod: location.updated_at as string | undefined })),
+      ...locationPages.flatMap(location => [...new Set(products.filter(product => product.location_id === location.id).map(product => productSurfaceOf(organization.vertical, { kind: product.kind as ProductKind })))]
+        .filter(surface => surface !== 'stays')
+        .map(surface => ({ loc: locationSurfacePath(String(location.slug), surface), lastmod: location.updated_at as string | undefined }))),
       ...(productPresentation
         ? products
-            .filter(product => product.slug && (product.kind === 'experience' || product.location_slug))
+            .filter(product => product.slug && (product.kind === 'experience' || product.kind === 'stay' || product.location_slug))
             .map(product => ({
               loc: presentationForProduct(organization.vertical, { kind: product.kind as ProductKind })
                 .productPath(String(product.location_slug ?? ''), String(product.slug)),

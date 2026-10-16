@@ -66,7 +66,7 @@
         <NuxtLink
           v-for="loc in locations"
           :key="loc.id"
-          :to="localePath(`/locations/${loc.slug}`)"
+          :to="localePath(publicLocationPath(loc))"
           class="inline-flex items-center rounded-full border border-white/40 bg-white/5 px-5 py-2.5 text-sm text-white backdrop-blur-sm no-underline transition hover:bg-white/10"
         >
           {{ loc.title }}
@@ -94,6 +94,7 @@
 
 <script setup lang="ts">
 import { cfImageSrcset, cfImageVariant } from '~/utils/cf-image'
+import { publicLocationPath } from '~/utils/product-presentation'
 
 const { localePath } = useI18n()
 
@@ -114,7 +115,7 @@ interface Props {
     // caller — not part of getHero()'s return shape, so it can't be read off
     // `hero` the way title/subtitle/image/video can.
     eyebrow?: string | null
-    locations?: Array<{ id: string; slug: string; title: string }>
+    locations?: Array<{ id: string; slug: string; title: string; home_slug: string | null }>
     businessTitle?: string
     businessSubtitle?: string
     ctaRoute?: string

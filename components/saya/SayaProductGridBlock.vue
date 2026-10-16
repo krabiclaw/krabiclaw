@@ -7,7 +7,7 @@ import SayaFeaturedContent from '~/components/saya/SayaFeaturedContent.vue'
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import { blockText, blockRecords } from '~/utils/tenant-page-block-data'
-import { resolveProductPresentation } from '~/utils/product-presentation'
+import { productCtaKey, resolveProductPresentation } from '~/utils/product-presentation'
 import { resolveSocialImageUrl } from '~/utils/social-metadata'
 
 // Saya's catalogue preview. The block names the products — a collection, or a
@@ -26,7 +26,6 @@ const brandName = organization.name
 const items = computed(() => blockRecords(props.block.data.items).map((item) => {
   const media = blockRecords(item.media)[0] ?? null
   const url = blockText(item.url)
-  const isExperience = item.kind === 'experience'
   return {
     kind: blockText(item.kind),
     name: blockText(item.title),
@@ -45,7 +44,7 @@ const items = computed(() => blockRecords(props.block.data.items).map((item) => 
     // card is shown without a link rather than sent to a location the merchant
     // did not name.
     href: url || null,
-    ctaText: isExperience ? t('saya.common.view_experience') : t('saya.common.view_dish'),
+    ctaText: t(productCtaKey(blockText(item.kind))),
     // A product with no current offer cannot be bought today, whatever the
     // card says next to it.
     unavailable: item.unavailable === true,

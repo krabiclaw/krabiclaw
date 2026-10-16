@@ -122,15 +122,17 @@ function billingInterval(value: string | undefined): 'month' | 'year' | undefine
   throw new Error(`Subscription billing interval ${value} is not a plan interval`)
 }
 
+// Only an active location is on the site, so only an active one uses a slot.
 async function countOrganizationLocations(db: DbClient, organizationId: string): Promise<number> {
-  const row = await queryFirst<{ count: number }>(db, 'SELECT COUNT(*) AS count FROM business_locations WHERE organization_id = ?', [organizationId])
+  const row = await queryFirst<{ count: number }>(db, "SELECT COUNT(*) AS count FROM business_locations WHERE organization_id = ? AND status = 'active'", [organizationId])
   if (!row) throw new Error('Location count could not be read')
   return row.count
 }
 
 /**
- * The locations this organization has against the ones its plan covers. Every
- * surface that adds a location — dashboard and MCP — asks here first.
+ * The active locations this organization has against the ones its plan covers.
+ * Every surface that adds or reactivates a location — dashboard and MCP — asks
+ * here first.
  */
 export async function organizationLocations(env: CloudflareEnv, db: DbClient, organizationId: string): Promise<OrganizationLocations & { plan: string }> {
   const [subscriptions, used] = await Promise.all([

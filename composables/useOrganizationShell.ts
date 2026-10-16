@@ -57,9 +57,8 @@ export const useOrganizationShellState = () => {
   const config = computed(() => (data.value?.config ?? {}) as Record<string, string>);
   const shellOrganization = computed(() => data.value?.organization ?? null);
   const googleMaps = computed(() => data.value?.googleMaps ?? null);
-  const hasProducts = computed(() => data.value?.hasProducts ?? false);
-  const hasBookableProducts = computed(() => data.value?.hasBookableProducts ?? false);
-  const hasReservations = computed(() => data.value?.hasReservations ?? false);
+  // Before the shell loads no section is known to have anything on it.
+  const sections = computed(() => data.value?.sections ?? null);
   const platformMessages = useState<Record<string, string> | null>('platform-locale-messages', () => null)
   watch(
     () => data.value?.platformMessages,
@@ -71,9 +70,7 @@ export const useOrganizationShellState = () => {
     config,
     organization: shellOrganization,
     googleMaps,
-    hasProducts,
-    hasBookableProducts,
-    hasReservations,
+    sections,
     data,
     pending,
     error,

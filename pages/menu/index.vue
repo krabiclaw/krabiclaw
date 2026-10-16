@@ -10,7 +10,9 @@ import { presentationForSurface } from '~/utils/product-presentation'
 definePageMeta({ layout: 'saya' })
 const { template, social_image: organizationSocialImage } = useTenantOrganization().organization
 if (template.slug === 'blawby') throw createError({ statusCode: 404 })
-const { products, collections, locations, config, organization } = await usePublicPageData({ lazy: false })
+const { products, collections, locations, config, organization, sections } = await usePublicPageData({ lazy: false })
+// A section with nothing on it is not a page; the navigation hides it by the same flag.
+if (sections.value?.menu === false) throw createError({ statusCode: 404 })
 // What the merchant sells over the counter. Anything a guest books a seat on
 // is an Experience and has its own surface, so it is not listed twice.
 const goods = computed(() => products.value.filter(product => product.kind === 'dish'))

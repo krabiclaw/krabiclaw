@@ -14,9 +14,7 @@
           :organization="null"
           :locations="[]"
           :error="null"
-          :has-products="false"
-          :has-bookable-products="false"
-          :has-reservations="false"
+          :sections="null"
         />
       </UTheme>
     </div>

@@ -83,6 +83,8 @@ const { location, media: photos } = await usePublicPageData({ lazy: false })
 // around a null location answered 200 with an empty shell — a soft 404 a
 // crawler indexes. The sibling menu and product indexes already refuse it.
 if (!location.value) throw createError({ statusCode: 404, statusMessage: 'Location not found' })
+// A section with nothing on it is not a page; the navigation hides it by the same flag.
+if (!location.value.sections.photos) throw createError({ statusCode: 404 })
 
 
 const photoCategoryKeys: Record<string, string> = {

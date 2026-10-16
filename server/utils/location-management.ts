@@ -235,19 +235,8 @@ export async function createLocation(
   if (organization.onboarding_status !== 'active') {
     return { status: 409, data: { error: 'Finish website setup before adding another location.', code: 'ONBOARDING_INCOMPLETE' } };
   }
-  const locations = await organizationLocations(env, db, organizationId);
-  if (locations.used >= locations.covered) {
-    return {
-      status: 402,
-      data: {
-        error: isKnownRecurringPlan(locations.plan)
-          ? `Your plan covers ${locations.covered} locations. Add a location to your plan in Billing (${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}), then create it.`
-          : `Basic includes ${INCLUDED_LOCATIONS} locations. Choose Growth or Business in Billing to add more.`,
-        code: 'LOCATION_LIMIT',
-        locations: { used: locations.used, covered: locations.covered },
-      },
-    };
-  }
+  const limit = await locationLimitRefusal(env, db, organizationId, 'create it');
+  if (limit) return limit;
 
   const title = input.title.trim();
   if (!title) {
@@ -421,6 +410,26 @@ export function coordinatesFailure(input: Pick<UpdateLocationInput, 'latitude' |
   return null;
 }
 
+/**
+ * The plan covers its active locations: an inactive one is off the site and
+ * does not hold a slot. Creating a location, or making one active again, is
+ * refused when every slot is taken.
+ */
+async function locationLimitRefusal(env: CloudflareEnv, db: D1Database, organizationId: string, action: string) {
+  const locations = await organizationLocations(env, db, organizationId);
+  if (locations.used < locations.covered) return null;
+  return {
+    status: 402,
+    data: {
+      error: isKnownRecurringPlan(locations.plan)
+        ? `Your plan covers ${locations.covered} locations. Add a location to your plan in Billing (${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}), then ${action}.`
+        : `Basic includes ${INCLUDED_LOCATIONS} locations. Choose Growth or Business in Billing to add more.`,
+      code: 'LOCATION_LIMIT',
+      locations: { used: locations.used, covered: locations.covered },
+    },
+  };
+}
+
 export async function updateLocation(
   db: D1Database,
   organizationId: string,
@@ -453,6 +462,10 @@ export async function updateLocation(
 
   if (Object.keys(input).length === 0) {
     return { status: 400, data: { error: "No update fields provided.", code: 'EMPTY_LOCATION_UPDATE' } };
+  }
+  if (input.status === 'active' && existing.status !== 'active') {
+    const limit = await locationLimitRefusal(env, db, organizationId, 'make it active');
+    if (limit) return limit;
   }
 
   if (input.title !== undefined && !input.title.trim()) {

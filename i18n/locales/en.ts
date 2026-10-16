@@ -318,6 +318,7 @@ export default {
       "menu": "Menu",
       "products": "Products",
       "experiences": "Experiences",
+      "stays": "Places to stay",
       "gallery": "Gallery",
       "our_story": "Our Story",
       "reviews": "Reviews",
@@ -353,6 +354,10 @@ export default {
       "collection_title": "{organization} Products",
       "empty": "No products published.",
       "meta_description": "Products from {organization}."
+    },
+    "stays": {
+      "collection_title": "Stay with {organization}",
+      "meta_description": "Places to stay you can book with {organization}."
     },
     "experiences": {
       "collection_title": "{organization} Experiences",
