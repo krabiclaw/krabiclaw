@@ -24,7 +24,13 @@ export interface StayInvalidation extends DashboardInvalidationBase {
   stayId: string | null
 }
 
-export type DashboardInvalidation = GuestThreadInvalidation | NotificationInvalidation | StayInvalidation
+/** A team conversation gained a message or was started; only its members receive it. */
+export interface TeamThreadInvalidation extends DashboardInvalidationBase {
+  type: 'team_thread.changed'
+  teamThreadId: string
+}
+
+export type DashboardInvalidation = GuestThreadInvalidation | NotificationInvalidation | StayInvalidation | TeamThreadInvalidation
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -34,8 +40,11 @@ export function isDashboardInvalidation(value: unknown): value is DashboardInval
   if (!isRecord(value)
     || typeof value.eventId !== 'string' || !value.eventId
     || typeof value.organizationId !== 'string' || !value.organizationId
-    || typeof value.occurredAt !== 'string' || !value.occurredAt
-    || !(value.locationId === null || typeof value.locationId === 'string')) return false
+    || typeof value.occurredAt !== 'string' || !value.occurredAt) return false
+
+  if (value.type === 'team_thread.changed') return typeof value.teamThreadId === 'string' && Boolean(value.teamThreadId)
+
+  if (!(value.locationId === null || typeof value.locationId === 'string')) return false
 
   if (value.type === 'notification.created' || value.type === 'notification.read') {
     return value.targetUserId === null || typeof value.targetUserId === 'string'

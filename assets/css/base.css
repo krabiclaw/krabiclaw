@@ -38,6 +38,11 @@
      redefining a standard one moved every `sm:` and `lg:` away from the 40rem
      and 64rem that handwritten media queries and Nuxt UI's themes assume. */
   --breakpoint-xs: 375px;
+  /* Tailwind's own md and lg, restated only so they are always emitted: the
+     dashboard's script reads them (useDashboardBreakpoint), and Tailwind emits
+     a theme variable only when some CSS happens to use it. */
+  --breakpoint-md: 48rem;
+  --breakpoint-lg: 64rem;
   /* The public shell swaps between the desktop nav pill and the shared
      hamburger here; header, mobile nav and footer all key off it. */
   --breakpoint-nav: 1080px;

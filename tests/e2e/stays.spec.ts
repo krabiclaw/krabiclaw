@@ -39,16 +39,21 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   const locations = await call<{ locations: Array<{ id: string; title: string }> }>('list_locations', {})
   const location = locations.data!.locations[0]!
   expect(location).toBeTruthy()
+  const placed = await call<{ location: { address: { regionCode: string; addressLines: string[]; locality?: string; administrativeArea?: string; postalCode?: string } | null } }>('get_location', { location_id: location.id })
+  expect(placed.error).toBeNull()
+  // The home reads its location's address in the shape a home is added with.
+  const postal = placed.data!.location.address
+  const homeAddress = postal && { address: postal.addressLines.join(', '), city: postal.locality ?? null, state: postal.administrativeArea ?? null, country: postal.regionCode, zip_code: postal.postalCode ?? null }
 
   // The one Product editor walks a place to stay through its stay settings.
   await page.goto(`/dashboard/${slug}/products/new?kind=stay&location_id=${encodeURIComponent(location.id)}`)
-  await page.getByRole('button', { name: 'Start with Name' }).click()
+  // The kind is given, so the walk opens on its first outstanding step.
+  await expect(page).toHaveURL(/\/products\/new\/name\?/)
   await page.getByRole('textbox', { name: 'Name' }).fill('Cliff Cabin')
   await page.getByRole('button', { name: 'Next: Stay settings', exact: true }).click()
   await expect(page).toHaveURL(/\/products\/new\/stay/)
   await page.getByRole('textbox', { name: 'Sleeps' }).fill('4')
   await page.getByRole('textbox', { name: 'Minimum nights' }).fill('2')
-  // The index offers the same create action; the leaf's own save commits what it shows.
   await page.locator('#dashboard-panel-product-stay').getByRole('button', { name: 'Create place to stay', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/dashboard/${slug}/products/(?!new)[^/?]+`))
   const productId = new URL(page.url()).pathname.split('/')[4]!
@@ -59,7 +64,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(`/dashboard/${slug}/products`)
-  const stayTile = page.getByTestId('catalog-section-stay').getByTestId(`selector-item-${productId}`)
+  const stayTile = page.getByTestId('catalog-grid').getByTestId(`selector-item-${productId}`)
   await expect(stayTile).toHaveAttribute('href', `/dashboard/${slug}/products/${productId}`)
   await expect(stayTile).toHaveAccessibleName('Cliff Cabin')
   await stayTile.click()
@@ -82,7 +87,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   const arrival = page.getByRole('link', { name: /3:00\sPM Ana arrives today with 2 guests/ })
   await expect(arrival).toHaveAttribute('href', `/dashboard/${slug}/bookings/stay/${stay.data!.stay.id}`)
   await arrival.click()
-  await expect(page.getByRole('heading', { name: 'Ana Silva', level: 1, exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Ana Silva', level: 2, exact: true })).toBeVisible()
 
   await page.getByRole('textbox', { name: 'Amount (THB)' }).fill('100')
   await page.getByRole('button', { name: 'Record payment' }).click()
@@ -106,10 +111,26 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   expect(homes.status(), await homes.text()).toBe(200)
   // The editor created the home without a nightly price, so it has no base price; its currency is the organization's.
   expect((await homes.json() as { homes: unknown[] }).homes).toEqual([{
-    product_id: productId, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null,
+    product_id: productId, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null,
     check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: null, channel: null,
-    check_in_instructions: null,
+    check_in_instructions: null, photos: [],
+    // Created in the editor with no listing details, at a provisioned location Google never placed, and not yet listed.
+    description: '', published: false, address: homeAddress, latitude: null, longitude: null,
+    property_type: null, bedrooms: null, beds: null, bathrooms: null, amenities: [], cancellation_policy: null, long_term_cancellation_policy: null,
+    check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
   }])
+
+  // A home's photos are its product's media; the photo routes refuse what is not a photo before storing anything.
+  const photos = api(`stay-homes/${productId}/photos`)
+  const ordered = await request.put(photos, { headers, data: { photo_ids: [] } })
+  expect(ordered.status(), await ordered.text()).toBe(200)
+  expect((await ordered.json() as { home: { photos: unknown[] } }).home.photos).toEqual([])
+  const notAPhoto = await request.post(photos, { headers, multipart: { image: { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('not a photo') } } })
+  expect(notAPhoto.status(), await notAPhoto.text()).toBe(415)
+  expect(await notAPhoto.json()).toMatchObject({ data: { code: 'UNSUPPORTED_PHOTO_TYPE', field: 'image' } })
+  const missing = await request.patch(api(`stay-homes/${productId}/photos/absent`), { headers, data: { alt_text: 'The deck at sunset' } })
+  expect(missing.status(), await missing.text()).toBe(404)
+  expect(await missing.json()).toMatchObject({ data: { code: 'PHOTO_NOT_FOUND', field: 'photo_id' } })
 
   const later = [localDay(10), localDay(13)] as const
   const made = await request.post(api('stays'), { headers, data: { product_id: productId, check_in_date: later[0], check_out_date: later[1], adults: 2, guest_name: 'Kai', total_minor: 450_00, idempotency_key: `${slug}-native` } })
@@ -217,7 +238,7 @@ test('a cleaner sees only assigned-home arrivals and departures on Today and Upc
     await expect(arrival).toHaveCount(1)
     await expect(arrival).toHaveAttribute('href', arrivalPath)
     await arrival.click()
-    await expect(cleanerPage.getByRole('heading', { name: 'Ana Silva', level: 1, exact: true })).toBeVisible()
+    await expect(cleanerPage.getByRole('heading', { name: 'Ana Silva', level: 2, exact: true })).toBeVisible()
     await expect(cleanerPage.getByRole('button', { name: 'Cancel stay', exact: true })).toHaveCount(0)
     await expect(cleanerPage.getByRole('button', { name: 'Record payment', exact: true })).toHaveCount(0)
     await cleanerPage.goto(`/dashboard/${slug}?range=upcoming`)
@@ -226,14 +247,14 @@ test('a cleaner sees only assigned-home arrivals and departures on Today and Upc
     await expect(departure).toContainText('Ana leaves in 2 days with 2 guests')
     await expect(departure).toHaveAttribute('href', `${arrivalPath}?range=upcoming`)
     await departure.click()
-    await expect(cleanerPage.getByRole('heading', { name: 'Ana Silva', level: 1, exact: true })).toBeVisible()
+    await expect(cleanerPage.getByRole('heading', { name: 'Ana Silva', level: 2, exact: true })).toBeVisible()
 
     // Another device's edit updates the assigned stay without navigation. An
     // ordered later event proves that the intervening other-home event was filtered.
     const current = await call<{ stay: { version: number } }>('get_stay', { stay_id: stays[0]!.id })
     const renamed = await call<{ stay: { version: number } }>('update_stay', { stay_id: stays[0]!.id, expected_version: current.data!.stay.version, guest_name: 'Ana Live' })
     expect(renamed.error).toBeNull()
-    await expect(cleanerPage.getByRole('heading', { name: 'Ana Live Silva', level: 1, exact: true })).toBeVisible()
+    await expect(cleanerPage.getByRole('heading', { name: 'Ana Live Silva', level: 2, exact: true })).toBeVisible()
     const privateStay = await call<{ stay: { version: number } }>('get_stay', { stay_id: stays[1]!.id })
     expect((await call('update_stay', { stay_id: stays[1]!.id, expected_version: privateStay.data!.stay.version, notes: 'Other home only' })).error).toBeNull()
     const noted = await call<{ stay: { version: number } }>('update_stay', { stay_id: stays[0]!.id, expected_version: renamed.data!.stay.version, notes: 'Visible live note' })
@@ -317,14 +338,14 @@ test('a stay socket in a service organization closes when Better Auth removes it
     const openedRead = cleanerPage.waitForResponse(response => response.request().method() === 'GET'
       && new URL(response.url()).pathname === `/api/dashboard/stays/${stay.id}`)
     expect((await cleanerPage.goto(`/dashboard/${slug}/bookings/stay/${stay.id}`))?.status()).toBe(200)
-    await expect(cleanerPage.getByRole('heading', { name: 'Membership Guest', level: 1, exact: true })).toBeVisible()
+    await expect(cleanerPage.getByRole('heading', { name: 'Membership Guest', level: 2, exact: true })).toBeVisible()
     // The real first-open reconciliation read proves the app socket completed
     // its upgrade before the other device publishes the event under assertion.
     expect((await openedRead).status()).toBe(200)
     const renamed = await page.request.patch(api(`stays/${stay.id}`), { data: { expected_version: stay.version, guest_name: 'Membership Live' } })
     expect(renamed.status(), await renamed.text()).toBe(200)
     const version = (await renamed.json() as { stay: { version: number } }).stay.version
-    await expect(cleanerPage.getByRole('heading', { name: 'Membership Live', level: 1, exact: true })).toBeVisible()
+    await expect(cleanerPage.getByRole('heading', { name: 'Membership Live', level: 2, exact: true })).toBeVisible()
     await expect.poll(() => liveEvents.filter(event => event.type === 'stay.changed').length).toBe(1)
     const socket = sockets.find(socket => !socket.isClosed())
     expect(socket).toBeDefined()
@@ -336,6 +357,11 @@ test('a stay socket in a service organization closes when Better Auth removes it
     expect(changed.status(), await changed.text()).toBe(200)
     await closed
     expect(liveEvents).toHaveLength(beforeRemoval)
+    // A removed member looks after no home, read back through the manager's list.
+    const homes = await page.request.get(api('stay-homes'))
+    expect(homes.status(), await homes.text()).toBe(200)
+    expect((await homes.json() as { homes: Array<{ product_id: string; assigned_member_id: string | null }> }).homes)
+      .toEqual([expect.objectContaining({ product_id: home.product_id, assigned_member_id: null })])
   } finally {
     await cleaner.close()
   }

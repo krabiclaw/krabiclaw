@@ -1,12 +1,12 @@
 <template>
   <!-- One product: its rows are the things it holds, each a leaf below this level. -->
-  <DashboardIndexPanel id="product" :title="form.name || presentation.itemLabel" :auto-open="autoOpenTarget">
+  <DashboardIndexPanel id="product" :title="pageTitle" :auto-open="autoOpenTarget" :create="firstStep">
     <template v-if="product" #right>
       <DashboardResourceLocalization
       :organization-id="organizationId"
       resource-type="product"
       :resource-id="productId"
-      :resource-label="presentation.itemLabel.toLowerCase()"
+      :resource-label="itemLabel.toLowerCase()"
       :fields="productLocalizationFields"
       :load-values="loadProductLocalization"
       :save-values="saveProductLocalization"
@@ -19,15 +19,10 @@
       color="error"
       variant="soft"
       icon="i-lucide-triangle-alert"
-      :title="`${presentation.itemLabel} could not be loaded`"
+      :title="`${itemLabel} could not be loaded`"
       :description="loadError"
     />
-    <template v-else>
-      <div v-if="isNew" class="mb-6 flex justify-end">
-        <UButton :label="createActionLabel" :loading="saving" @click="startOrCreate" />
-      </div>
-      <EditorNavigationList :groups="navigationGroups" :active-item="level.child.value" />
-    </template>
+    <EditorNavigationList v-else :groups="navigationGroups" :active-item="level.child.value" />
   </DashboardIndexPanel>
 </template>
 
@@ -35,6 +30,7 @@
 import type { ComputedRef, InjectionKey, Ref } from 'vue'
 import type { Collection, Product } from '~/server/types/products'
 import type { DashboardLocation } from '~/composables/useDashboardOrganization'
+import type { GalleryMediaItem } from '~/components/dashboard/DashboardMediaGalleryField.vue'
 
 export const SECTION_KEYS = ['photo', 'kind', 'name', 'price', 'description', 'page', 'options', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections', 'stay'] as const
 export type SectionKey = typeof SECTION_KEYS[number]
@@ -111,7 +107,7 @@ export interface ProductForm {
 export interface ProductEditor {
   form: ProductForm
   product: ComputedRef<Product | null>
-  presentation: ComputedRef<{ itemLabel: string }>
+  itemLabel: ComputedRef<string>
   currency: string
   organizationId: string
   /** The location this editor is scoped to by its URL, or null for the whole organization. */
@@ -135,6 +131,12 @@ export interface ProductEditor {
   saveLabel: Ref<string>
   saveDisabled: Ref<boolean>
   setPrimaryImage: (assetId: string | null) => Promise<void>
+  /** The photos after the cover, in order, and an empty row while one is being chosen. */
+  galleryRows: ComputedRef<GalleryMediaItem[]>
+  addGalleryRow: () => void
+  setGalleryAsset: (index: number, asset: { asset_id: string } | null) => Promise<void>
+  removeGalleryPhoto: (index: number) => Promise<void>
+  moveGalleryPhoto: (from: number, to: number) => Promise<void>
   /** Make the page this product owns, when it has none; opening Page content never does. */
   createPage: () => Promise<void>
   addOption: () => void
@@ -171,7 +173,7 @@ import { majorAmountToMinor, minorAmountToMajor, selectPrice, type Price } from 
 import { formatProductMoney } from '~/utils/product-money'
 import { isChannelPush } from '~/shared/channel-push'
 import type { ProductMutation } from '~/server/utils/product-management'
-import { presentationForProduct, requireProductPresentation } from '~/utils/product-presentation'
+import { presentationForProduct } from '~/utils/product-presentation'
 import { MINUTE_TIME_PATTERN } from '~/utils/timezone'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 
@@ -206,11 +208,14 @@ const location = computed(() => organizationLocations.value.find(entry => entry.
 
 const vertical = dashboard.organization.value?.vertical
 if (!vertical) throw createError({ statusCode: 500, statusMessage: 'Organization vertical is not configured' })
-// The words follow the product: a class is an experience whatever the site
-// sells otherwise. Until the row has loaded, and for a product being created,
-// the screen speaks the vertical's own surface — it is not yet known to be
-// anything else.
-const presentation = computed(() => (product.value ? presentationForProduct(vertical, product.value, dashboard.organization.value?.theme_id) : requireProductPresentation(vertical, dashboard.organization.value?.theme_id)))
+// The words follow the product's kind: a class is an experience whatever the
+// site sells otherwise. Until a kind is loaded or chosen there are no words for
+// it, and the screen says only that it is a product.
+const presentation = computed(() => {
+  const kind = product.value?.kind ?? form.kind
+  return kind ? presentationForProduct(vertical, { kind: assertProductKind(kind) }, dashboard.organization.value?.theme_id) : null
+})
+const itemLabel = computed(() => presentation.value?.itemLabel ?? 'Product')
 const rawCurrency = dashboard.organization.value?.default_currency
 if (!isCurrencyCode(rawCurrency)) throw createError({ statusCode: 500, statusMessage: 'Unsupported organization currency' })
 const currency = rawCurrency
@@ -219,7 +224,7 @@ const currency = rawCurrency
 
 const sectionLabels: Record<SectionKey, string> = {
   'kind': 'Type',
-  'photo': 'Photo',
+  'photo': 'Photos',
   'name': 'Name',
   'price': 'Price',
   'description': 'Description',
@@ -231,7 +236,11 @@ const sectionLabels: Record<SectionKey, string> = {
   'booking': 'Scheduling',
   'locations': 'Locations',
   'stay': 'Stay settings',
-  get collections() { return product.value?.kind === 'dish' ? 'Menu sections' : presentation.value.collectionGroupLabelPlural },
+  // Only a product with a kind has collections to choose.
+  get collections() {
+    if (!presentation.value) throw new Error('A product has no collections before its kind is chosen')
+    return product.value?.kind === 'dish' ? 'Menu sections' : presentation.value.collectionGroupLabelPlural
+  },
 }
 
 const detailKey = computed(() => level.child.value)
@@ -281,7 +290,7 @@ const collections = computed(() => loaded.value?.collections ?? [])
 // A product that is not there is not a page. A request that failed is a state
 // this level shows, because the product may well still exist.
 watchEffect(() => {
-  if (loadFailure.value && isNotFoundError(loadFailure.value)) showError(createError({ statusCode: 404, statusMessage: `${presentation.value.itemLabel} not found` }))
+  if (loadFailure.value && isNotFoundError(loadFailure.value)) showError(createError({ statusCode: 404, statusMessage: `${itemLabel.value} not found` }))
 })
 /**
  * A place to stay always has its stay settings. Missing or malformed ones are a
@@ -302,7 +311,7 @@ const stayConfigError = computed(() => {
   return invalid.length ? `This place to stay has invalid stay settings: ${invalid.join(', ')}.` : null
 })
 const loadError = computed(() => (loadFailure.value && !isNotFoundError(loadFailure.value)
-  ? getErrorMessage(loadFailure.value, `Failed to load this ${presentation.value.itemLabel.toLowerCase()}`)
+  ? getErrorMessage(loadFailure.value, `Failed to load this ${itemLabel.value.toLowerCase()}`)
   : stayConfigError.value))
 
 /**
@@ -639,7 +648,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
   return [{
     id: 'item',
     items: [
-      { id: 'photo', label: 'Photo', summary: image ? '' : 'No photo yet', placeholder: !image, to: sectionPath('photo') },
+      { id: 'photo', label: 'Photos', summary: image ? (product.value.gallery.length ? `${product.value.gallery.length + 1} photos` : '') : 'No photo yet', placeholder: !image, to: sectionPath('photo') },
       { id: 'name', label: 'Name', summary: form.name || 'Not named yet', placeholder: !form.name, to: sectionPath('name') },
       { id: 'description', label: 'Description', summary: form.description || 'Nothing written yet', placeholder: !form.description, to: sectionPath('description') },
       // A service is shown by a page of its own. The page has one editor, in
@@ -669,7 +678,8 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       },
       { id: 'kind', label: 'Type', summary: form.kind ? PRODUCT_KIND_LABELS[form.kind] : 'Choose a type', to: sectionPath('kind') },
       ...(form.kind === 'stay' ? [] : [{ id: 'booking', label: form.kind === 'service' ? 'Bookings' : 'Scheduling', summary: form.bookable ? bookingSummary() : 'Not bookable', placeholder: !form.bookable, to: sectionPath('booking') }]),
-      { id: 'order-url', label: form.kind === 'stay' ? 'Booking link' : 'External link', summary: form.order_url || 'No external link', placeholder: !form.order_url, to: sectionPath('order-url') },
+      // Guests book a place to stay on this site; it has no external link.
+      ...(form.kind === 'stay' ? [] : [{ id: 'order-url', label: 'External link', summary: form.order_url || 'No external link', placeholder: !form.order_url, to: sectionPath('order-url') }]),
       ...(form.kind === 'stay' ? [] : [{ id: 'locations', label: 'Locations', summary: locationsSummary(), placeholder: !Object.keys(form.locations).length, to: sectionPath('locations') }]),
       { id: 'collections', label: sectionLabels.collections, summary: collectionsSummary(), placeholder: !form.collection_ids.length, to: sectionPath('collections') },
       { id: 'publication', label: 'Website visibility', summary: publicationSummary(), to: sectionPath('publication') },
@@ -808,19 +818,21 @@ function payload() {
   }
 }
 
-const { createActionLabel, saveLabel: createSaveLabel, saveDisabled, save: saveCurrentEditor, startOrCreate } = useCreateWalk({
+const { title: newTitle, firstStep, saveLabel: createSaveLabel, saveDisabled, save: saveCurrentEditor } = useCreateWalk({
   recordPath: itemPath,
   isNew,
   openKey: editorKey,
   labels: sectionLabels,
   order: () => form.kind === 'stay' ? ['kind', 'name', 'stay'] : ['kind', 'name'],
   missing: key => key === 'name' ? !form.name.trim() : key === 'stay' ? stayIncomplete() : !form.kind,
-  noun: () => form.kind ? presentationForProduct(vertical, { kind: assertProductKind(form.kind) }, dashboard.organization.value?.theme_id).itemLabel.toLowerCase() : 'product',
+  noun: () => itemLabel.value.toLowerCase(),
   saving,
   // A product that could not be read has no draft worth writing over it.
   existingBlocked: () => !product.value || Boolean(loadError.value) || !sectionValid.value,
   commit,
 })
+
+const pageTitle = computed(() => isNew.value ? newTitle.value : form.name || itemLabel.value)
 
 // Saving content and publishing the listing are separate owner decisions.
 const saveLabel = computed(() => createSaveLabel.value ?? 'Save')
@@ -888,7 +900,7 @@ async function commit(bookingConcern?: BookingConcern) {
     if (bookingConcern !== undefined) await reloadSchedule()
     await (closeTo.value ? navigateTo(closeTo.value) : level.close())
   } catch (error) {
-    saveError.value = getErrorMessage(error, `Failed to save ${presentation.value.itemLabel.toLowerCase()}`)
+    saveError.value = getErrorMessage(error, `Failed to save ${itemLabel.value.toLowerCase()}`)
   } finally {
     saving.value = false
   }
@@ -1038,6 +1050,77 @@ async function setPrimaryImage(assetId: string | null) {
   }
 }
 
+/**
+ * The photos after the cover are the product's ordered `gallery`. Each change
+ * is saved as it is made, through the same placement operations every other
+ * gallery uses, and the product is read again so the list is the server's.
+ */
+const choosingGalleryPhoto = ref(false)
+const galleryRows = computed<GalleryMediaItem[]>(() => [
+  ...(product.value?.gallery ?? []).map(asset => ({ _key: asset.asset_id, asset_id: asset.asset_id, url: asset.public_url, thumbnail_url: asset.thumbnail_url, kind: asset.kind })),
+  ...(choosingGalleryPhoto.value ? [{ _key: 'new', asset_id: null }] : []),
+])
+const galleryPlacement = () => ({ owner_type: 'product', owner_id: productId.value, slot: 'gallery' })
+const isPlacementResponse = (value: unknown): value is { asset_ids: string[] } => isRecord(value) && Array.isArray(value.asset_ids)
+
+async function changeGallery(change: () => Promise<void>) {
+  photoError.value = null
+  try {
+    await change()
+  } catch (error) {
+    photoError.value = getErrorMessage(error, 'Failed to update the photos')
+  }
+  choosingGalleryPhoto.value = false
+  // Whatever the outcome: a failed change may have made part of its writes.
+  try {
+    await reload()
+  } catch (error) {
+    photoError.value ??= getErrorMessage(error, 'Failed to read the photos again')
+  }
+}
+
+function galleryCall(action: 'attach' | 'remove' | 'reorder', body: Record<string, unknown>) {
+  return dashboardApi(`/api/editor/organizations/${organizationId}/media/placements/${action}`, {
+    method: 'POST', body: { placement: galleryPlacement(), ...body }, validate: isPlacementResponse,
+  })
+}
+
+function addGalleryRow() {
+  choosingGalleryPhoto.value = true
+}
+
+async function setGalleryAsset(index: number, asset: { asset_id: string } | null) {
+  const rows = galleryRows.value
+  const replaced = rows[index]?.asset_id ?? null
+  const next = rows[index + 1]?.asset_id ?? null
+  await changeGallery(async () => {
+    if (replaced) await galleryCall('remove', { asset_id: replaced })
+    if (!asset) return
+    await galleryCall('attach', { asset_id: asset.asset_id })
+    // Attaching appends; a replaced photo keeps its place.
+    if (replaced && next) await galleryCall('reorder', { moves: [{ asset_id: asset.asset_id, before_asset_id: next }] })
+  })
+}
+
+async function removeGalleryPhoto(index: number) {
+  const assetId = galleryRows.value[index]?.asset_id ?? null
+  if (!assetId) {
+    choosingGalleryPhoto.value = false
+    return
+  }
+  await changeGallery(async () => { await galleryCall('remove', { asset_id: assetId }) })
+}
+
+async function moveGalleryPhoto(from: number, to: number) {
+  const ids = (product.value?.gallery ?? []).map(asset => asset.asset_id)
+  const moved = ids[from]
+  const anchor = ids[to]
+  if (!moved || !anchor || from === to) return
+  await changeGallery(async () => {
+    await galleryCall('reorder', { moves: [to < from ? { asset_id: moved, before_asset_id: anchor } : { asset_id: moved, after_asset_id: anchor }] })
+  })
+}
+
 // ── Localization ────────────────────────────────────────
 /**
  * Which fields can be translated comes from the tenant's own definitions, so
@@ -1090,7 +1173,7 @@ async function loadProductLocalization(locale: string): Promise<Record<string, u
 
 async function saveProductLocalization(locale: string, submitted: Record<string, unknown>): Promise<void> {
   const row = product.value
-  if (!row) throw new Error(`The ${presentation.value.itemLabel.toLowerCase()} is unavailable.`)
+  if (!row) throw new Error(`The ${itemLabel.value.toLowerCase()} is unavailable.`)
   const values: Record<string, unknown> = {}
   for (const key of ['name', 'description']) {
     if (Object.hasOwn(submitted, key)) values[key] = submitted[key]
@@ -1107,11 +1190,11 @@ async function saveProductLocalization(locale: string, submitted: Record<string,
   })
 }
 
-useSeoMeta({ title: () => `${form.name || presentation.value.itemLabel} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${pageTitle.value} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
 provide(productEditorKey, {
   form,
   product,
-  presentation,
+  itemLabel,
   currency,
   organizationId,
   locationId,
@@ -1130,6 +1213,11 @@ provide(productEditorKey, {
   saveLabel,
   saveDisabled,
   setPrimaryImage,
+  galleryRows,
+  addGalleryRow,
+  setGalleryAsset,
+  removeGalleryPhoto,
+  moveGalleryPhoto,
   createPage,
   addOption,
   removeOption,

@@ -87,6 +87,8 @@
           :style="{ scrollMarginTop: `${categoryNavHeight}px` }"
         >
           <div class="mb-8 border-b border-default pb-6">
+            <!-- A section's own picture introduces it. -->
+            <img v-if="mediaStillUrl(group.image)" :src="mediaStillUrl(group.image)!" :alt="group.image!.alt_text || group.category" class="mb-8 aspect-[16/9] w-full rounded-lg object-cover" loading="lazy" decoding="async">
             <p v-if="showLocations && group.location_id" class="saya-kicker mb-2">{{ locationTitle(group.location_id) }}</p>
             <h2 class="saya-display saya-italic text-5xl text-default">{{ group.category }}</h2>
             <p v-if="group.description" class="mt-4 text-sm leading-relaxed text-muted">{{ group.description }}</p>
@@ -172,6 +174,7 @@
     <div v-else class="mx-auto max-w-7xl px-4 pb-24 sm:px-6 lg:px-8">
       <section v-for="group in groups" :key="group.id" class="mb-20">
         <div class="mb-8 border-b border-default pb-6">
+          <img v-if="mediaStillUrl(group.image)" :src="mediaStillUrl(group.image)!" :alt="group.image!.alt_text || group.category" class="mb-8 aspect-[16/9] w-full rounded-lg object-cover" loading="lazy" decoding="async">
           <p v-if="showLocations && group.location_id" class="saya-kicker mb-2">{{ locationTitle(group.location_id) }}</p>
           <h2 class="saya-display saya-italic text-5xl">{{ group.category }}</h2>
           <p v-if="group.description" class="mt-4 text-sm leading-relaxed text-muted">{{ group.description }}</p>
@@ -246,6 +249,7 @@ import { formatProductMoney, formatProductPriceRange, summarizeProductPrices } f
 import { minorAmountToMajor, type Price } from '~/shared/prices'
 import { PRICING_NOTE_HANDLE } from '~/shared/product-details'
 import { groupProductsByCollection, productLocationCollectionPath } from '~/utils/product-presentation'
+import { mediaStillUrl } from '~/shared/media-placement-contract'
 import { extractDietarySchemaUrls } from '~/utils/product-seo'
 import { getVerticalCopy } from '~/utils/vertical-copy'
 import { resolveSeoUrl } from '~/utils/social-metadata'
@@ -386,10 +390,10 @@ const priceLabel = (product: Product, collectionLocationId: string | null = null
 // groupProductsByCollection for what membership does and does not imply.
 const groups = computed(() => {
   const grouped = groupProductsByCollection(props.products, props.collections)
-    .map(group => ({ id: group.id, category: group.name, description: group.description, sort_order: group.sort_order, location_id: group.location_id, products: group.products }))
+    .map(group => ({ id: group.id, category: group.name, description: group.description, image: group.image, sort_order: group.sort_order, location_id: group.location_id, products: group.products }))
   const included = new Set(grouped.flatMap(group => group.products.map(product => product.id)))
   const ungrouped = props.products.filter(product => !included.has(product.id))
-  if (ungrouped.length) grouped.push({ id: 'catalog', category: props.presentation.collectionLabel, description: null, sort_order: grouped.length, location_id: null, products: ungrouped })
+  if (ungrouped.length) grouped.push({ id: 'catalog', category: props.presentation.collectionLabel, description: null, image: null, sort_order: grouped.length, location_id: null, products: ungrouped })
   return grouped
 })
 const categoryTabs = computed(() => groups.value.map(group => ({
@@ -475,6 +479,8 @@ useSchemaOrg(computed(() => props.presentation.structuredDataType === 'MenuItem'
       hasMenuSection: groups.value.map(group => ({
         '@type': 'MenuSection',
         name: group.category,
+        description: group.description ?? undefined,
+        image: mediaStillUrl(group.image) ? resolveSeoUrl(mediaStillUrl(group.image)!, requestURL.origin) : undefined,
         hasMenuItem: group.products.map(product => {
           const dietUrls = extractDietarySchemaUrls(product)
           return {

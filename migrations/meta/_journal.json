@@ -15,6 +15,34 @@
       "when": 1792127605440,
       "tag": "0001_guest_thread_invites",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792137077903,
+      "tag": "0002_team_messages",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1792138999594,
+      "tag": "0003_direct_stay_holds",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1792142418082,
+      "tag": "0004_stay_listing_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792146573786,
+      "tag": "0005_collection_media",
+      "breakpoints": true
     }
   ]
 }

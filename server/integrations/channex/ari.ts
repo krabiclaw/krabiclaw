@@ -9,9 +9,8 @@ import type { ChannelPush } from '~/shared/channel-push'
 /**
  * Outbound availability, prices and stay rules for a home connected through
  * Channex. KrabiClaw is the master: after a write changes nights, their current
- * values go to Channex, and each night records what Channex took. Ported from
- * the lodging Worker's ari.ts, with restrictions added because nights here
- * also carry their price and stay rules.
+ * values go to Channex, and each night records what Channex took. Restrictions
+ * are sent too, because nights here carry their price and stay rules.
  *
  * A refusal, a partial rejection (200 with meta.warnings) or an outcome
  * Channex never confirmed marks those nights needs_review with the reason and

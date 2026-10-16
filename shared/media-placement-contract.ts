@@ -3,6 +3,8 @@ export const MEDIA_PLACEMENT_SLOTS = {
   organization: ['logo', 'logo_dark', 'favicon', 'social_share', 'social_card', 'compliance_document', 'announcement'],
   business_location: ['hero', 'gallery', 'social_card'],
   product: ['image', 'gallery', 'social_card'],
+  // A menu section's own picture: the intro over its dishes on the site and its tile in Catalog.
+  collection: ['image'],
   content_document: ['cover', 'gallery', 'social_card'],
   content_block: [
     'media', 'gallery', 'background', 'featured', 'decoration',
@@ -17,12 +19,14 @@ export const MEDIA_PLACEMENT_SLOTS = {
   review_request: ['gallery'],
   // The photos a message in a guest thread carries, in the order they were sent.
   activity_entry: ['attachments'],
+  // The photos a message in a team conversation carries, in the order they were sent.
+  team_message: ['attachments'],
 } as const
 
 export type MediaPlacementOwnerType = keyof typeof MEDIA_PLACEMENT_SLOTS
 
 export const EDITABLE_MEDIA_PLACEMENT_OWNERS = [
-  'organization', 'business_location', 'product', 'content_document',
+  'organization', 'business_location', 'product', 'collection', 'content_document',
   'content_block', 'review_request',
 ] as const satisfies readonly MediaPlacementOwnerType[]
 
@@ -50,7 +54,7 @@ export const INDEXED_MEDIA_PLACEMENT_SLOTS = [
 const ORDERED_PLACEMENTS = new Set([
   'business_location:gallery', 'product:gallery', 'content_document:gallery',
   'content_block:gallery', 'review:gallery', 'review_request:gallery',
-  'organization:compliance_document', 'activity_entry:attachments',
+  'organization:compliance_document', 'activity_entry:attachments', 'team_message:attachments',
 ])
 
 /**

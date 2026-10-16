@@ -6,15 +6,10 @@
 
 <script setup lang="ts">
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
+import { PRODUCT_KINDS, PRODUCT_KIND_LABELS } from '~/shared/product-details'
 definePageMeta({ layout: 'dashboard' })
 const p = inject(productEditorKey)!
 // A place to stay keeps its kind, and nothing else becomes one: its location and
 // stays are held by the kind, so the choice is made once, when it is created.
-const items = computed(() => [
-  { value: 'dish', label: 'Food or drink' },
-  { value: 'experience', label: 'Experience or class' },
-  { value: 'service', label: 'Service or appointment' },
-  { value: 'item', label: 'Physical item' },
-  { value: 'stay', label: 'Place to stay' },
-].filter(item => p.isNew.value || (item.value === 'stay') === (p.product.value?.kind === 'stay')))
+const items = computed(() => PRODUCT_KINDS.map((value): { value: string; label: string } => ({ value, label: PRODUCT_KIND_LABELS[value] })).filter(item => p.isNew.value || (item.value === 'stay') === (p.product.value?.kind === 'stay')))
 </script>

@@ -5,7 +5,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { connectedBuyerCustomer } from '~/server/utils/billing-customer'
 import { tokenHash } from './buyer'
 import { requirePayment, type Payment } from './index'
-import { surchargeBasisPoints, type PaymentReview } from './checkout'
+import { isStayPurchase, surchargeBasisPoints, type PaymentReview } from './checkout'
 import { reconcilePaymentIntent } from './events'
 
 /**
@@ -37,9 +37,13 @@ function parseReview(value: string | null): PaymentReview | null {
 }
 
 function snapshotOf(payment: Payment) {
-  const snapshot = JSON.parse(payment.price_snapshot_json) as { title?: unknown; quantity?: unknown; method_configuration_id?: unknown }
+  const snapshot = JSON.parse(payment.price_snapshot_json) as { title?: unknown; quantity?: unknown; method_configuration_id?: unknown; stay?: unknown }
   if (typeof snapshot.title !== 'string' || !Number.isSafeInteger(snapshot.quantity) || typeof snapshot.method_configuration_id !== 'string') throw new Error('Payment purchase snapshot is invalid')
-  return { title: snapshot.title, quantity: snapshot.quantity as number }
+  if (payment.subject_type === 'stay' && !isStayPurchase(snapshot.stay)) throw new Error('Stay payment has no valid stay purchase')
+  const stay = payment.subject_type === 'stay' && isStayPurchase(snapshot.stay)
+    ? { check_in_date: snapshot.stay.check_in_date, check_out_date: snapshot.stay.check_out_date, nights: snapshot.stay.nightly.length, adults: snapshot.stay.adults, children: snapshot.stay.children, infants: snapshot.stay.infants }
+    : null
+  return { title: snapshot.title, quantity: snapshot.quantity as number, stay }
 }
 
 /** What the pay page needs to mount Stripe's Payment Element on the connected account. */
@@ -60,7 +64,7 @@ export async function paymentHandoff(db: DbClient, stripe: Stripe, publishableKe
     }
   }
   return {
-    payment_id: payment.id, state, title: snapshot.title, quantity: snapshot.quantity, subtotal: payment.amount, currency: payment.currency, expires_at: attempt.expires_at,
+    payment_id: payment.id, state, title: snapshot.title, quantity: snapshot.quantity, stay: snapshot.stay, subtotal: payment.amount, currency: payment.currency, expires_at: attempt.expires_at,
     stripe_account_id: payment.stripe_account_id, publishable_key: publishableKey, payment_method_types: intent.payment_method_types,
     customer_session_client_secret: customerSession,
     surcharge_basis_points: await surchargeBasisPoints(db, organizationId, payment.stripe_account_id),

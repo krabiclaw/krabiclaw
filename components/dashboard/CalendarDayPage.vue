@@ -11,7 +11,7 @@
         action that flips it. A closure is the tenant's whole day, written to
         the location's special hours — the same thing its hours leaf edits.
       -->
-      <div v-if="location" class="rounded-xl bg-elevated/70 p-5">
+      <UCard v-if="location" variant="subtle">
         <div class="flex items-center justify-between gap-3">
           <p class="text-sm text-muted">{{ availability.open ? 'Available' : 'Unavailable' }}</p>
           <span v-if="!availability.open" class="size-2 rounded-full bg-primary" aria-hidden="true" />
@@ -36,7 +36,7 @@
           :loading="saving"
           @click="toggleClosure"
         />
-      </div>
+      </UCard>
       <p v-else-if="!personalScope" class="text-sm text-muted">Choose a location to manage this day's availability.</p>
 
       <div v-if="items.length" class="divide-y divide-default border-y border-default">

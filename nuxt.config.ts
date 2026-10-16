@@ -81,6 +81,7 @@ export default defineNuxtConfig({
     '@nuxtjs/sitemap',
     'nuxt-schema-org',
     '@nuxt/ui',
+    './build/guest-inbox-hub-dev',
   ],
 
   ui: {
@@ -298,6 +299,7 @@ export default defineNuxtConfig({
           '/oauth',
           '/transfer',
           '/accept-invitation',
+          '/invite/',
           '/contact/confirmed',
           '/forgot-password',
           '/login',

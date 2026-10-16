@@ -4,8 +4,8 @@ import { expect, test } from '@playwright/test'
 import { findE2eAuthFixture } from '../../config/development-auth-fixtures'
 import { devLoginHeaders } from './test-env'
 
-// The native app and the lodging Worker authenticate with a Better Auth bearer
-// session and nothing else: no cookies, no Origin, no fetch-metadata headers.
+// The native app authenticates with a Better Auth bearer session and nothing
+// else: no cookies, no Origin, no fetch-metadata headers.
 // These use node:http, which sends only the headers given — fetch adds
 // Sec-Fetch-Mode, which a native URLSession never sends and which makes Better
 // Auth demand an Origin — and keeps no cookie jar, so a cookie can never stand
@@ -14,7 +14,6 @@ import { devLoginHeaders } from './test-env'
 
 const fixture = findE2eAuthFixture('user-e2e-lodging-native')
 const invitee = findE2eAuthFixture('user-e2e-lodging-invitee')
-const lodgingSecret = process.env.LODGING_SERVICE_SECRET ?? ''
 
 test.describe('lodging identity boundary', () => {
   const session = (baseURL: string | undefined) => {
@@ -67,7 +66,7 @@ test.describe('lodging identity boundary', () => {
     return { api, signInBearer }
   }
 
-  test('a bearer session resolves its principal, keeps its only organization, and stops at sign-out', async ({ baseURL }) => {
+  test('a bearer session keeps its only organization, joins by invite link, and stops at sign-out', async ({ baseURL, page }) => {
     const { api, signInBearer } = session(baseURL)
     const bearer = await signInBearer(fixture.email)
 
@@ -78,39 +77,14 @@ test.describe('lodging identity boundary', () => {
     })
     expect(created.status, await created.text()).toBe(200)
     const organization = await created.json() as { id: string; name: string }
+    const members = async () => {
+      const listed = await api.get(`/api/auth/organization/list-members?organizationId=${encodeURIComponent(organization.id)}`, { headers: bearer })
+      expect(listed.status, await listed.text()).toBe(200)
+      return (await listed.json() as { members: Array<{ id: string; userId: string; role: string }> }).members
+    }
 
     try {
-      const principal = await api.get(`/api/lodging/principal?organizationId=${encodeURIComponent(organization.id)}`, { headers: bearer })
-      expect(principal.status, await principal.text()).toBe(200)
-      const body = await principal.json() as {
-        user: { id: string; email: string }
-        session: { id: string; expiresAt: string; impersonatedBy: string | null }
-        organization: { id: string; slug: string; name: string; default_currency: string; timezone: string }
-        member: { id: string; role: string }
-      }
-      expect(body.user).toMatchObject({ id: fixture.id, email: fixture.email })
-      expect(body.organization).toEqual({ id: organization.id, slug, name: organization.name, default_currency: 'THB', timezone: 'Asia/Bangkok' })
-      expect(body.member.role).toBe('owner')
-      expect(body.session.impersonatedBy).toBeNull()
-      expect(Date.parse(body.session.expiresAt)).toBeGreaterThan(Date.now())
-
-      // The member id and role, read back through Better Auth's own route.
-      const members = await api.get(`/api/auth/organization/list-members?organizationId=${encodeURIComponent(organization.id)}`, { headers: bearer })
-      expect(members.status, await members.text()).toBe(200)
-      expect((await members.json() as { members: Array<{ id: string; userId: string; role: string }> }).members)
-        .toEqual([expect.objectContaining({ id: body.member.id, userId: fixture.id, role: 'owner' })])
-
-      expect((await api.get('/api/lodging/principal', { headers: bearer })).status).toBe(400)
-      expect((await api.get(`/api/lodging/principal?organizationId=org-demo`, { headers: bearer })).status).toBe(403)
-      expect((await api.get(`/api/lodging/principal?organizationId=org-missing-${crypto.randomUUID()}`, { headers: bearer })).status).toBe(404)
-      expect((await api.get(`/api/lodging/principal?organizationId=${encodeURIComponent(organization.id)}`)).status).toBe(401)
-
-      if (!lodgingSecret) throw new Error('LODGING_SERVICE_SECRET is not configured for the local Worker.')
-      const service = { 'x-krabiclaw-lodging-secret': lodgingSecret }
-      const facts = await api.post('/api/internal/lodging/members', { headers: service, data: { organizationId: organization.id } })
-      expect(facts.status, await facts.text()).toBe(200)
-      expect(await facts.json()).toEqual([{ userId: fixture.id, memberId: body.member.id, role: 'owner', name: fixture.name, email: fixture.email, image: null, sessionIds: expect.arrayContaining([body.session.id]) }])
-      expect((await api.post('/api/internal/lodging/members', { headers: { ...bearer }, data: { organizationId: organization.id } })).status).toBe(401)
+      expect(await members()).toEqual([expect.objectContaining({ userId: fixture.id, role: 'owner' })])
 
       // A single-use link adds whoever accepts it, with the link's role.
       const link = await api.post(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer, data: { role: 'admin' } })
@@ -120,30 +94,45 @@ test.describe('lodging identity boundary', () => {
       const pending = await api.get(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer })
       expect(pending.status, await pending.text()).toBe(200)
       expect((await pending.json() as { inviteLinks: Array<{ id: string; role: string }> }).inviteLinks).toEqual([expect.objectContaining({ id: inviteLinkId, role: 'admin' })])
-      const offered = await api.get(`/api/internal/lodging/invite-links/${encodeURIComponent(inviteToken)}`, { headers: service })
+      // Anyone holding the link reads what it offers, and the public page shows it.
+      const offered = await api.get(`/api/invite-links/${encodeURIComponent(inviteToken)}`)
       expect(offered.status, await offered.text()).toBe(200)
-      expect(await offered.json()).toEqual({ organizationName: organization.name, role: 'admin', status: 'pending', expiresAt })
-      expect((await api.get(`/api/internal/lodging/invite-links/${encodeURIComponent(inviteToken)}`, { headers: bearer })).status).toBe(401)
+      expect(await offered.json()).toEqual({ organization: { name: organization.name }, role: 'admin', expiresAt })
+      const invitePage = await api.get(`/invite/${encodeURIComponent(inviteToken)}`)
+      expect(invitePage.status).toBe(200)
+      expect(await invitePage.text()).toContain(`Join ${organization.name}`)
+      // In a browser with no session the page offers sign-in and the app.
+      await page.goto(`/invite/${encodeURIComponent(inviteToken)}`)
+      await expect(page.getByRole('heading', { name: `Join ${organization.name}`, level: 1 })).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Sign in with email' })).toHaveAttribute('href', `/login?redirect=${encodeURIComponent(`/invite/${encodeURIComponent(inviteToken)}`)}`)
+      await expect(page.getByRole('link', { name: 'Open this invite in the KrabiClaw app' })).toHaveAttribute('href', `krabiclaw://invite?token=${encodeURIComponent(inviteToken)}`)
+      expect((await api.post(`/api/invite-links/${encodeURIComponent(inviteToken)}/accept`)).status).toBe(401)
       const inviteeBearer = await signInBearer(invitee.email)
       const accepted = await api.post(`/api/invite-links/${encodeURIComponent(inviteToken)}/accept`, { headers: inviteeBearer })
       expect(accepted.status, await accepted.text()).toBe(200)
-      expect(await accepted.json()).toMatchObject({ organization: { id: organization.id, name: organization.name }, role: 'admin' })
-      const joined = await api.get(`/api/lodging/principal?organizationId=${encodeURIComponent(organization.id)}`, { headers: inviteeBearer })
-      expect(joined.status, await joined.text()).toBe(200)
-      expect((await joined.json() as { member: { role: string } }).member.role).toBe('admin')
-      expect((await api.post(`/api/invite-links/${encodeURIComponent(inviteToken)}/accept`, { headers: inviteeBearer })).status).toBe(410)
-      // Used links are no longer pending, and a withdrawn link cannot be accepted.
+      const joined = await accepted.json() as { organization: { id: string; name: string }; role: string; memberId: string }
+      expect(joined).toMatchObject({ organization: { id: organization.id, name: organization.name }, role: 'admin' })
+      expect(await members()).toEqual(expect.arrayContaining([expect.objectContaining({ id: joined.memberId, userId: invitee.id, role: 'admin' })]))
+      const reused = await api.post(`/api/invite-links/${encodeURIComponent(inviteToken)}/accept`, { headers: inviteeBearer })
+      expect(reused.status).toBe(410)
+      expect(await reused.json()).toMatchObject({ data: { code: 'INVITE_LINK_USED', field: 'token' } })
+      const usedRead = await api.get(`/api/invite-links/${encodeURIComponent(inviteToken)}`)
+      expect(usedRead.status).toBe(410)
+      expect(await usedRead.json()).toMatchObject({ data: { code: 'INVITE_LINK_USED', field: 'token' } })
+      // Used links are no longer pending, and a withdrawn link cannot be read or accepted.
       expect((await (await api.get(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer })).json() as { inviteLinks: unknown[] }).inviteLinks).toEqual([])
       const withdrawn = await api.post(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links`, { headers: bearer, data: { role: 'member' } })
       expect(withdrawn.status, await withdrawn.text()).toBe(201)
       const withdrawnLink = await withdrawn.json() as { id: string; token: string }
       expect((await api.delete(`/api/organizations/${encodeURIComponent(organization.id)}/invite-links/${withdrawnLink.id}`, { headers: bearer })).status).toBe(204)
-      expect((await api.get(`/api/internal/lodging/invite-links/${encodeURIComponent(withdrawnLink.token)}`, { headers: service })).status).toBe(404)
+      const gone = await api.get(`/api/invite-links/${encodeURIComponent(withdrawnLink.token)}`)
+      expect(gone.status).toBe(404)
+      expect(await gone.json()).toMatchObject({ data: { code: 'INVITE_LINK_NOT_FOUND', field: 'token' } })
       expect((await api.post(`/api/invite-links/${encodeURIComponent(withdrawnLink.token)}/accept`, { headers: inviteeBearer })).status).toBe(404)
       expect((await api.post(`/api/organizations/org-demo/invite-links`, { headers: inviteeBearer, data: { role: 'member' } })).status).toBe(404)
       const inviteeLeft = await api.post('/api/auth/organization/leave', { headers: inviteeBearer, data: { organizationId: organization.id } })
       expect(inviteeLeft.status, await inviteeLeft.text()).toBe(200)
-      expect((await api.get(`/api/lodging/principal?organizationId=${encodeURIComponent(organization.id)}`, { headers: inviteeBearer })).status).toBe(403)
+      expect(await members()).toEqual([expect.objectContaining({ userId: fixture.id, role: 'owner' })])
 
       // Deleting the only owner would orphan the organization.
       const refused = await api.post('/api/auth/delete-user', { headers: bearer, data: {} })
@@ -156,15 +145,19 @@ test.describe('lodging identity boundary', () => {
       const deleted = await api.post('/api/auth/organization/delete', { headers: bearer, data: { organizationId: organization.id } })
       expect(deleted.status, await deleted.text()).toBe(200)
     }
-    expect((await api.get(`/api/lodging/principal?organizationId=${encodeURIComponent(organization.id)}`, { headers: bearer })).status).toBe(404)
+    const remaining = await api.get('/api/auth/organization/list', { headers: bearer })
+    expect(remaining.status, await remaining.text()).toBe(200)
+    expect((await remaining.json() as Array<{ id: string }>).map(row => row.id)).not.toContain(organization.id)
 
     // A bearer caller reads no cookie cache, so sign-out is immediate.
     const signOut = await api.post('/api/auth/sign-out', { headers: bearer, data: {} })
     expect(signOut.status, await signOut.text()).toBe(200)
-    expect((await api.get(`/api/lodging/principal?organizationId=org-demo`, { headers: bearer })).status).toBe(401)
+    const signedOut = await api.get('/api/auth/get-session', { headers: bearer })
+    expect(signedOut.status).toBe(200)
+    expect(await signedOut.json()).toBeNull()
   })
 
-  test('a lodging organization publishes a Saya site and cannot be deleted without the lodging service', async ({ baseURL }) => {
+  test('a lodging organization publishes a Saya site and is deleted by its owner', async ({ baseURL }) => {
     const { api, signInBearer } = session(baseURL)
     const bearer = await signInBearer(fixture.email)
     const slug = `e2e-lodging-${crypto.randomUUID().slice(0, 8)}`
@@ -187,22 +180,23 @@ test.describe('lodging identity boundary', () => {
     const home = await api.get('/', { headers: { 'x-preview-tenant': slug } })
     expect(home.status).toBe(200)
     expect(await home.text()).toContain(name)
-    // The seeded location is described as a lodging business, and with stays
-    // booked in the lodging service it offers no availability call to action.
+    // The seeded location is described as a lodging business and offers no
+    // availability call to action.
     const location = await api.get('/locations/main', { headers: { 'x-preview-tenant': slug } })
     expect(location.status).toBe(200)
     const locationHtml = await location.text()
     expect(locationHtml).toContain('"LodgingBusiness"')
-    expect(locationHtml).not.toContain('Check availability')
+    // The rendered page has no such control; the platform message catalog the shell
+    // payload carries also holds the words, as data, so only element text is checked.
+    expect(locationHtml).not.toMatch(/>\s*Check availability\s*</)
     // Its location takes no table reservations, so the site has no reservations page.
     expect((await api.get('/reservations', { headers: { 'x-preview-tenant': slug } })).status).toBe(404)
 
-    // Its homes live in the lodging service, so deleting it must reach that
-    // service first. With none configured here the deletion fails and the
-    // organization stays; the e2e sweep removes it.
-    const refused = await api.post('/api/auth/organization/delete', { headers: bearer, data: { organizationId: organization.id } })
-    expect(refused.status, await refused.text()).toBe(500)
-    expect(await refused.json()).toMatchObject({ code: 'LODGING_SERVICE_NOT_CONFIGURED' })
-    expect((await api.get(`/api/lodging/principal?organizationId=${encodeURIComponent(organization.id)}`, { headers: bearer })).status).toBe(200)
+    // Everything it holds lives in KrabiClaw, so its owner deletes it outright.
+    const deleted = await api.post('/api/auth/organization/delete', { headers: bearer, data: { organizationId: organization.id } })
+    expect(deleted.status, await deleted.text()).toBe(200)
+    const remaining = await api.get('/api/auth/organization/list', { headers: bearer })
+    expect(remaining.status, await remaining.text()).toBe(200)
+    expect((await remaining.json() as Array<{ id: string }>).map(row => row.id)).not.toContain(organization.id)
   })
 })

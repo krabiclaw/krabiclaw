@@ -7,7 +7,7 @@ import { resolvePublicTemplate } from '~/utils/template-registry'
   server/plugins/public-resource-hints.ts already treats as private and never
   hints. Preloading the wrong sheet costs a download and warms nothing.
 */
-const PLATFORM_APP_ROUTE_PREFIXES = ['/help', '/unsubscribe', '/accept-invitation']
+const PLATFORM_APP_ROUTE_PREFIXES = ['/help', '/unsubscribe', '/accept-invitation', '/invite']
 
 const isPlatformAppRoute = (path: string) =>
   PLATFORM_APP_ROUTE_PREFIXES.some(prefix => path === prefix || path.startsWith(`${prefix}/`))

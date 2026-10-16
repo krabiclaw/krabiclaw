@@ -580,17 +580,10 @@ test.describe('stateless MCP server', () => {
       await page.getByRole('option', { name: 'Pricing', exact: true }).click()
       await page.getByRole('button', { name: 'Add a question', exact: true }).click()
       await expect(page).toHaveURL(url => url.pathname.includes('/qa/new') && url.searchParams.get('page_path') === pagePath)
-      await page.getByRole('button', { name: 'Start with Question', exact: true }).click()
+      // A question being made opens on its one required step; the answer is the record's once it exists.
       await expect(page).toHaveURL(url => url.pathname.endsWith('/qa/new/question') && url.searchParams.get('page_path') === pagePath)
+      await expect(page.locator('#dashboard-panel-organization-qa-record h1')).toHaveText('New question')
       await page.getByRole('textbox', { name: /^Question/ }).fill(question)
-      await page.getByTestId('dashboard-navbar-close').click()
-      await page.getByRole('link', { name: /^Answer / }).click()
-      await expect(page).toHaveURL(url => url.pathname.endsWith('/qa/new/answer') && url.searchParams.get('page_path') === pagePath)
-      await page.getByRole('textbox', { name: 'Answer', exact: true }).fill(answer)
-      await page.getByTestId('dashboard-navbar-close').click()
-      await page.getByRole('link', { name: 'Visibility Published', exact: true }).click()
-      await expect(page).toHaveURL(url => url.pathname.endsWith('/qa/new/visibility') && url.searchParams.get('page_path') === pagePath)
-      await expect(page.locator('#dashboard-panel-organization-qa-visibility').getByRole('switch')).toBeChecked()
       const [created] = await Promise.all([
         page.waitForResponse(response => response.request().method() === 'POST' && new URL(response.url()).pathname === new URL(qaUrl).pathname),
         page.getByRole('button', { name: 'Create question', exact: true }).last().click(),
@@ -598,6 +591,16 @@ test.describe('stateless MCP server', () => {
       expect(created.status(), await created.text()).toBe(201)
       createdId = (await created.json()).id
       expect(createdId).toBeTruthy()
+      await expect(page).toHaveURL(url => url.pathname === `/dashboard/${encodeURIComponent(slug)}/website/qa/${createdId}` && url.searchParams.get('page_path') === pagePath)
+      await expect(page.getByRole('link', { name: 'Visibility Published', exact: true })).toBeVisible()
+      await page.getByRole('link', { name: /^Answer / }).click()
+      await expect(page).toHaveURL(url => url.pathname.endsWith(`/qa/${createdId}/answer`) && url.searchParams.get('page_path') === pagePath)
+      await page.getByRole('textbox', { name: 'Answer', exact: true }).fill(answer)
+      const [answered] = await Promise.all([
+        page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `${new URL(qaUrl).pathname}/${createdId}`),
+        page.locator('#dashboard-panel-organization-qa-answer').getByRole('button', { name: 'Save', exact: true }).click(),
+      ])
+      expect(answered.status(), await answered.text()).toBe(200)
       await expect(page).toHaveURL(url => url.pathname === `/dashboard/${encodeURIComponent(slug)}/website/qa/${createdId}` && url.searchParams.get('page_path') === pagePath)
       await page.getByTestId('dashboard-navbar-back').filter({ visible: true }).click()
       await expect(page).toHaveURL(url => url.pathname === `/dashboard/${encodeURIComponent(slug)}/website/qa` && url.searchParams.get('page_path') === pagePath)

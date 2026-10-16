@@ -3,7 +3,6 @@
     <DashboardListEditor
       v-model:editing="editing"
       title="Blog"
-      description="Long-form articles published on this site."
       :items="listItems"
       :error="loadError"
       empty-title="No posts yet"
@@ -19,7 +18,7 @@
         <UButton label="Categories" icon="i-lucide-folder" color="neutral" variant="soft" :to="`${level.path.value}/categories`" data-testid="blog-categories-link" />
       </template>
       <template #filters>
-        <UTabs v-model="activeTab" :items="statusTabs" :content="false" aria-label="Post status" />
+        <DashboardFilterPills id="blog-filter" v-model="activeTab" label="Post status" :items="statusTabs" />
       </template>
 
       <template #item="{ item }">
@@ -77,7 +76,7 @@ const statusTabs = [
   { value: 'published', label: 'Live' },
   ...ARTICLE_COLLECTION_SLUGS.map(slug => ({ value: slug, label: ARTICLE_COLLECTIONS[slug].label })),
 ]
-const activeTab = ref<string | number>('all')
+const activeTab = ref('all')
 const editing = ref(false)
 const removingId = ref<string | null>(null)
 

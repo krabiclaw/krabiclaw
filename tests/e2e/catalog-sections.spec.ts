@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test'
 import { randomUUID } from 'node:crypto'
-import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
+import { dismissPreviewToolbar, openTenantPage, tenantBaseURL, tenantExtraHeaders, waitForNuxtHydration } from './helpers'
 import { loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import type { Collection, Product } from '../../server/types/products'
@@ -124,5 +124,66 @@ test('shared-section membership survives a location-filtered edit', async ({ pag
       expect(remainingProducts.filter(product => products.some(created => created.id === product.id))).toEqual([])
       expect(remainingSections.filter(section => sections.some(created => created.id === section.id))).toEqual([])
     } finally { await release() }
+  }
+})
+
+// A section's own photo introduces it on the public menu and in its
+// MenuSection structured data. The photo is set through the placement the
+// section editor writes, read back through the collections list, and seen on
+// the storefront; the section's previous photo is put back afterwards.
+test('a section photo introduces its section on the public menu', async ({ page, baseURL }, testInfo) => {
+  test.setTimeout(90_000)
+  const release = await acquireTenantMutationLock(testInfo, organizationId)
+  let restore: { id: string; assetId: string | null } | null = null
+  const setPhoto = async (collectionId: string, assetId: string | null) => {
+    const response = await page.request.put(`${editor}/media/placements`, {
+      data: { placement: { owner_type: 'collection', owner_id: collectionId, slot: 'image' }, asset_id: assetId },
+    })
+    expect(response.status(), await response.text()).toBe(200)
+  }
+  try {
+    await loginAs(page.request, baseURL!, 'user-e2e-demo-owner')
+    await openTenantPage(page, `${tenantBaseURL}/menu`, tenantExtraHeaders)
+    const listed = await page.request.get(`${editor}/collections`)
+    expect(listed.status(), await listed.text()).toBe(200)
+    const collections = (await listed.json() as { collections: Collection[] }).collections
+    let section: Collection | undefined
+    for (const candidate of collections) {
+      if (await page.getByRole('heading', { level: 2, name: candidate.name, exact: true }).count()) { section = candidate; break }
+    }
+    expect(section, 'The public menu shows one of the demo sections').toBeDefined()
+    restore = { id: section!.id, assetId: section!.image?.asset_id ?? null }
+    // One of the demo's own images, so the run stores nothing new.
+    const assetId = section!.image?.asset_id === 'media-demo-burrata' ? 'media-demo-margherita' : 'media-demo-burrata'
+    await setPhoto(section!.id, assetId)
+
+    const reread = await page.request.get(`${editor}/collections`)
+    expect(reread.status(), await reread.text()).toBe(200)
+    const image = (await reread.json() as { collections: Collection[] }).collections.find(row => row.id === section!.id)?.image
+    expect(image?.asset_id).toBe(assetId)
+    expect(image?.public_url).toBeTruthy()
+
+    await openTenantPage(page, `${tenantBaseURL}/menu`, tenantExtraHeaders)
+    // The picture that introduces the section is the one set above its own heading, not a dish's.
+    const intro = page.getByRole('heading', { level: 2, name: section!.name, exact: true }).locator('xpath=preceding-sibling::img')
+    await expect(intro).toHaveCount(1)
+    await intro.scrollIntoViewIfNeeded()
+    await expect(intro).toBeVisible()
+    await expect(intro).toHaveAttribute('src', image!.public_url)
+    const menuSections: unknown[] = []
+    const collect = (value: unknown): void => {
+      if (Array.isArray(value)) return value.forEach(collect)
+      if (!value || typeof value !== 'object') return
+      if ((value as { '@type'?: unknown })['@type'] === 'MenuSection') menuSections.push(value)
+      Object.values(value).forEach(collect)
+    }
+    for (const text of await page.locator('script[type="application/ld+json"]').allTextContents()) collect(JSON.parse(text))
+    expect(menuSections).toContainEqual(expect.objectContaining({ name: section!.name, image: image!.public_url }))
+  } finally {
+    try {
+      if (restore) await setPhoto(restore.id, restore.assetId)
+    } finally {
+      await release()
+    }
   }
 })

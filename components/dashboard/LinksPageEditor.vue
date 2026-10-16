@@ -8,7 +8,7 @@
     <template #right>
       <UButton
         color="neutral"
-        variant="ghost"
+        variant="soft"
         :icon="copiedUrl ? 'i-lucide-check' : 'i-lucide-copy'"
         :disabled="!publicLinksUrl"
         @click="copyPublicUrl"

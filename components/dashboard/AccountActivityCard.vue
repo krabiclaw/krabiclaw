@@ -1,8 +1,11 @@
 <template>
   <!-- Airbnb's trip card: the place's picture, where, when, and who went. -->
-  <NuxtLink
+  <UCard
+    :as="NuxtLink"
     :to="`/dashboard/account/activity/${item.kind}/${encodeURIComponent(item.id)}`"
-    class="flex items-center gap-5 rounded-2xl bg-elevated/50 p-4 no-underline shadow-sm ring ring-default transition-colors hover:bg-elevated"
+    variant="subtle"
+    class="block no-underline transition-colors hover:bg-elevated"
+    :ui="{ body: 'flex items-center gap-5' }"
     :data-testid="`account-activity-${item.kind}-${item.id}`"
   >
     <span class="flex size-24 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-elevated sm:size-28">
@@ -19,10 +22,11 @@
         <span v-else-if="item.kind === 'order' || item.kind === 'payment'" class="text-xs text-dimmed">{{ purchaseLabel(item.status) }}</span>
       </span>
     </span>
-  </NuxtLink>
+  </UCard>
 </template>
 
 <script setup lang="ts">
+import { NuxtLink } from '#components'
 import { authClient } from '~/lib/auth-client'
 import type { AccountActivityItem } from '~/shared/account-activity'
 import { formatTimestamp } from '~/utils/timezone'

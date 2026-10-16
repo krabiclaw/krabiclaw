@@ -1,5 +1,5 @@
 <template>
-  <DashboardIndexPanel id="account-message-thread" :title="thread?.organizationName || 'Conversation'" :ui="{ body: 'p-0 sm:p-0 gap-0' }" fill>
+  <DashboardIndexPanel id="account-message-thread" :title="thread?.organizationName || 'Conversation'" fill>
     <!-- Airbnb's "Show reservation": the record this conversation is about. A contact thread has none. -->
     <template v-if="activityTo" #right><UButton :to="activityTo" color="neutral" variant="soft" class="rounded-full" :label="/\/(booking|reservation)\//.test(activityTo) ? 'Show booking' : 'Show purchase'" /></template>
     <GuestThreadDetail :thread-id="threadId" personal-scope />

@@ -1,5 +1,5 @@
 <template>
-  <section class="rounded-2xl p-6 ring ring-default" aria-label="Payments help">
+  <UCard as="section" variant="subtle" aria-label="Payments help">
     <h2 class="text-xl font-semibold text-highlighted">Need help?</h2>
     <div class="mt-2 divide-y divide-default">
       <NuxtLink v-for="article in articles" :key="article.path" :to="`https://krabiclaw.com${article.path}`" external class="flex items-center justify-between gap-4 py-4">
@@ -11,7 +11,7 @@
         <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
       </NuxtLink>
     </div>
-  </section>
+  </UCard>
 </template>
 
 <script setup lang="ts">

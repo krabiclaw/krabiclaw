@@ -1,13 +1,15 @@
 import { HTTPError } from 'nitro'
-import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
-import { assertRoleAllows, assignedHomeSql, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
+import { assertRoleAllows, assignedHomeSql, isOrganizationWideRole, organizationAdapter, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery } from '~/server/utils/organization-events'
-import { createLocation, updateLocation } from '~/server/utils/location-management'
-import { createProduct, getProduct, updateProduct } from '~/server/utils/product-management'
+import { coordinatesFailure, createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
+import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
+import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayLongTermCancellationPolicy, type StayPropertyType } from '~/shared/stay-listing'
+import { createProduct, getProduct, setProductPublication, updateProduct } from '~/server/utils/product-management'
 import type { Product, UpdateProductInput } from '~/server/types/products'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
-import { selectPrice, type Price } from '~/shared/prices'
+import { selectPrice, type Price, type PriceTaxBehavior } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
 import { pushStayNights, requireChannelPush } from '~/server/integrations/channex/ari'
 import type { ChannelPush } from '~/shared/channel-push'
@@ -15,6 +17,11 @@ import { isValidTimezone } from '~/utils/timezone'
 import { stayThreadQueries } from '~/server/domain/requests'
 import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planStayMessages } from '~/server/domain/scheduled-guest-messages'
+import { arrangeProductPhotos, readProductPhotos, type MediaPlacementItem } from '~/server/utils/media-placement'
+import { deleteMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
+import { sanitizeFilename, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
+import { MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, sniffMediaMimeType } from '~/server/utils/media-mime'
+import { mediaStillUrl, MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
 
 /**
  * Places to stay: the one implementation of stays, nights and offline
@@ -92,9 +99,26 @@ export interface StayPayment {
   created_by: string
 }
 
-/** A stay with what the host has recorded collecting for it. Channel stays are paid through their channel. */
+/** The Stripe payment a guest made when booking the stay on the site. The payments row is its record; nothing is copied here. */
+export interface StayOnlinePayment {
+  payment_id: string
+  state: 'pending' | 'captured' | 'failed' | 'recovery' | 'refunded'
+  currency: string
+  amount_minor: number
+  captured_minor: number
+  refunded_minor: number
+  receipt_url: string | null
+  created_at: string
+}
+
+/**
+ * A stay with what was collected for it: the Stripe payment a guest made on
+ * the site, if any, and what the host recorded collecting outside Stripe.
+ * paid_minor is both, net of refunds. Channel stays are paid through their channel.
+ */
 export interface StayDetail extends Stay {
   payments: StayPayment[]
+  online_payment: StayOnlinePayment | null
   paid_minor: number
   payment_status: 'unpaid' | 'partial' | 'paid' | 'overpaid' | null
 }
@@ -106,11 +130,38 @@ export interface StayHome {
   timezone: string
   currency: CurrencyCode
   base_price_minor: number | null
+  /** How tax relates to the base nightly price; null when the home has no base price. */
+  base_price_tax_behavior: PriceTaxBehavior | null
   check_in_time: string
   check_out_time: string
   max_guests: number
   min_nights: number
+  /** The product's description, the listing text guests read; empty when the host has written none. */
+  description: string
+  /** Whether the home is listed on the site: its product's publication there. */
+  published: boolean
+  /** The home's location: its address and the pin its host placed, each null until set. */
+  address: StayAddress | null
+  latitude: number | null
+  longitude: number | null
+  property_type: StayPropertyType | null
+  bedrooms: number | null
+  beds: number | null
+  bathrooms: number | null
+  amenities: StayAmenity[]
+  cancellation_policy: StayCancellationPolicy | null
+  long_term_cancellation_policy: StayLongTermCancellationPolicy | null
+  /**
+   * The arrival guide. Private: only managers and the home's assigned members
+   * read it here; no public page or payload carries it.
+   */
+  check_in_method: StayCheckInMethod | null
   check_in_instructions: string | null
+  wifi_network: string | null
+  wifi_password: string | null
+  directions: string | null
+  house_manual: string | null
+  checkout_instructions: StayCheckoutInstruction[]
   /** The member (member.id) and the team who look after the home; assigned members see its stays. */
   assigned_member_id: string | null
   assigned_team_id: string | null
@@ -120,6 +171,48 @@ export interface StayHome {
    * nights; one importing or disconnected does not.
    */
   channel: { provider: 'channex'; status: 'importing' | 'connected' | 'disconnected' } | null
+  /**
+   * The home's photos in order, the cover first: its product's own media
+   * (the product image, then its gallery), the same pictures its pages show.
+   */
+  photos: StayPhoto[]
+}
+
+/** A home's address as a home is added with it: street, city, state, ISO country and postal code. */
+export interface StayAddress {
+  address: string
+  city: string | null
+  state: string | null
+  country: string
+  zip_code: string | null
+}
+
+function stayAddress(value: unknown): StayAddress | null {
+  const postal = parsePostalAddress(value)
+  return postal && { address: postal.addressLines.join(', '), city: postal.locality ?? null, state: postal.administrativeArea ?? null, country: postal.regionCode, zip_code: postal.postalCode ?? null }
+}
+
+/** The postal address a location stores for a home's address. */
+function postalAddress(address: Omit<StayAddress, 'city'> & { city: string }): PostalAddress {
+  return { regionCode: address.country, addressLines: [address.address], locality: address.city, ...(address.state ? { administrativeArea: address.state } : {}), ...(address.zip_code ? { postalCode: address.zip_code } : {}) }
+}
+
+/** One thing guests are asked to do before they leave, with the host's details for it. */
+export interface StayCheckoutInstruction {
+  task: StayCheckoutTask
+  details: string | null
+}
+
+/** One of a home's photos. Its id is the media asset's id. */
+export interface StayPhoto {
+  id: string
+  /** A video placed from the media library shows its poster frame as its url. */
+  kind: 'image' | 'video'
+  url: string
+  width: number | null
+  height: number | null
+  alt_text: string | null
+  position: number
 }
 
 export interface StayNight {
@@ -134,6 +227,8 @@ export interface StayNight {
   closed_to_arrival: boolean
   closed_to_departure: boolean
   source: 'host' | 'import' | null
+  /** When a guest's checkout hold on this night lapses; null when no guest is paying for it. A held night is not available. */
+  held_until: string | null
   /** What the connected channel last took for this night; null when the home has no channel or the night was never pushed. */
   channel: { state: 'pending' | 'pushed' | 'needs_review'; detail: string | null } | null
 }
@@ -144,8 +239,8 @@ const MAX_STAY_NIGHTS = 365
 const DATE = /^\d{4}-\d{2}-\d{2}$/
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/
 
-function fail(statusCode: number, code: string, message: string, field?: string): never {
-  throw new HTTPError({ statusCode, statusMessage: message, data: { code, ...(field ? { field } : {}) } })
+function fail(statusCode: number, code: string, message: string, field?: string, detail: Record<string, unknown> = {}): never {
+  throw new HTTPError({ statusCode, statusMessage: message, data: { code, ...(field ? { field } : {}), ...detail } })
 }
 
 function locationFailure(result: { status: number; data: unknown }): never {
@@ -165,6 +260,15 @@ function date(value: unknown, field: string): string {
 
 function days(from: string, to: string): number {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000)
+}
+
+function addDays(day: string, count: number): string {
+  return new Date(Date.parse(`${day}T00:00:00Z`) + count * 86_400_000).toISOString().slice(0, 10)
+}
+
+/** Today's date where the home is. */
+function homeToday(timezone: string): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
 }
 
 function range(input: { from: unknown; to: unknown }, max: number): { from: string; to: string } {
@@ -212,41 +316,75 @@ function requireManager(access: StayAccess): asserts access is StayAccess & { ma
 
 /** The homes this caller may see, or one of them; one query for the homes and one for their prices. */
 async function stayHomes(db: DbClient, access: StayAccess, productId: string | null): Promise<StayHome[]> {
-  const scope = visibleHomes(access)
+  return stayHomesWhere(db, access.organizationId, productId, visibleHomes(access))
+}
+
+async function stayHomesWhere(db: DbClient, organizationId: string, productId: string | null, scope: { sql: string; params: string[] }): Promise<StayHome[]> {
   const rows = await queryAll<Record<string, unknown>>(db, `
-    SELECT p.id AS product_id, p.name, c.location_id, l.timezone, o.default_currency, c.check_in_time, c.check_out_time, c.max_guests, c.min_nights, c.check_in_instructions,
-           c.assigned_member_id, c.assigned_team_id, m.enabled AS channel_enabled, m.import_stage AS channel_stage
+    SELECT p.id AS product_id, p.name, p.description, c.location_id, l.timezone, l.address, l.latitude, l.longitude, o.default_currency,
+           c.check_in_time, c.check_out_time, c.max_guests, c.min_nights, c.property_type, c.bedrooms, c.beds, c.bathrooms, c.amenities,
+           c.cancellation_policy, c.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
+           c.directions, c.house_manual, c.checkout_instructions, c.assigned_member_id, c.assigned_team_id,
+           COALESCE((SELECT pp.published FROM product_publications pp WHERE pp.organization_id = c.organization_id AND pp.product_id = c.product_id), 0) AS published,
+           m.enabled AS channel_enabled, m.import_stage AS channel_stage
       FROM product_stay_configs c
       JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
       JOIN organization o ON o.id = c.organization_id
       LEFT JOIN product_channel_mappings m ON m.organization_id = c.organization_id AND m.product_id = c.product_id AND m.provider = 'channex'
      WHERE c.organization_id = ? ${productId ? 'AND c.product_id = ?' : ''} AND ${scope.sql}
-     ORDER BY p.name, p.id`, [access.organizationId, ...(productId ? [productId] : []), ...scope.params])
+     ORDER BY p.name, p.id`, [organizationId, ...(productId ? [productId] : []), ...scope.params])
   if (!rows.length) return []
   const prices = await queryAll<Price & { product_id: string }>(db, `
     SELECT pr.*, v.product_id FROM prices pr
       JOIN product_variants v ON v.organization_id = pr.organization_id AND v.id = pr.product_variant_id
       JOIN product_stay_configs c ON c.organization_id = v.organization_id AND c.product_id = v.product_id
      WHERE pr.organization_id = ? ${productId ? 'AND v.product_id = ?' : ''} AND v.active = 1
-     ORDER BY v.sort_order, v.id`, [access.organizationId, ...(productId ? [productId] : [])])
+     ORDER BY v.sort_order, v.id`, [organizationId, ...(productId ? [productId] : [])])
+  const photos = await readProductPhotos(db, { organizationId, productIds: rows.map(row => String(row.product_id)) })
   return rows.map((row) => {
-    if (!isCurrencyCode(row.default_currency)) throw new Error(`Organization ${access.organizationId} has an unsupported default currency`)
+    if (!isCurrencyCode(row.default_currency)) throw new Error(`Organization ${organizationId} has an unsupported default currency`)
     const own = prices.filter(price => price.product_id === row.product_id).map(price => ({ ...price, active: Number(price.active) === 1 }))
     const base = selectPrice(own, { currency: row.default_currency, location_id: String(row.location_id) })
     return {
       product_id: String(row.product_id), name: String(row.name), location_id: String(row.location_id), timezone: String(row.timezone),
-      currency: row.default_currency, base_price_minor: base ? base.unit_amount : null,
+      currency: row.default_currency, base_price_minor: base ? base.unit_amount : null, base_price_tax_behavior: base ? base.tax_behavior : null,
       check_in_time: String(row.check_in_time), check_out_time: String(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
-      check_in_instructions: row.check_in_instructions === null ? null : String(row.check_in_instructions),
+      description: String(row.description), published: Number(row.published) === 1,
+      address: stayAddress(row.address), latitude: nullableNumber(row.latitude), longitude: nullableNumber(row.longitude),
+      property_type: nullableText(row.property_type) as StayPropertyType | null,
+      bedrooms: nullableNumber(row.bedrooms), beds: nullableNumber(row.beds), bathrooms: nullableNumber(row.bathrooms),
+      amenities: JSON.parse(String(row.amenities)) as StayAmenity[],
+      cancellation_policy: nullableText(row.cancellation_policy) as StayCancellationPolicy | null,
+      long_term_cancellation_policy: nullableText(row.long_term_cancellation_policy) as StayLongTermCancellationPolicy | null,
+      check_in_method: nullableText(row.check_in_method) as StayCheckInMethod | null,
+      check_in_instructions: nullableText(row.check_in_instructions),
+      wifi_network: nullableText(row.wifi_network), wifi_password: nullableText(row.wifi_password),
+      directions: nullableText(row.directions), house_manual: nullableText(row.house_manual),
+      checkout_instructions: JSON.parse(String(row.checkout_instructions)) as StayCheckoutInstruction[],
       assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
       assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
       channel: row.channel_stage === null ? null : {
         provider: 'channex',
         status: Number(row.channel_enabled) === 1 ? 'connected' : row.channel_stage === 'reservations' || row.channel_stage === 'messages' || row.channel_stage === 'complete' ? 'disconnected' : 'importing',
       },
+      photos: (photos.get(String(row.product_id)) ?? []).map(stayPhoto),
     }
   })
+}
+
+function nullableText(value: unknown): string | null {
+  return value === null ? null : String(value)
+}
+
+function nullableNumber(value: unknown): number | null {
+  return value === null ? null : Number(value)
+}
+
+function stayPhoto(item: MediaPlacementItem, position: number): StayPhoto {
+  const url = mediaStillUrl(item)
+  if ((item.kind !== 'image' && item.kind !== 'video') || !url) throw new Error(`Media asset ${item.asset_id} has no picture to show`)
+  return { id: item.asset_id, kind: item.kind, url, width: item.width ?? null, height: item.height ?? null, alt_text: item.alt_text ?? null, position }
 }
 
 /** Every place to stay this caller may see: all of them for managers, their assigned homes for members. */
@@ -323,19 +461,99 @@ export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
   const { text, timezone, time, name, maxGuests, minNights, basePrice } = homeDetails(body)
   const home: NewStayHome = {
     name: name(true)!, timezone: timezone(true)!,
-    address: text('address', 200, true)!, city: text('city', 100, true)!, state: text('state', 100, false),
-    country: text('country', 2, true)!, zip_code: text('zip_code', 32, false),
+    ...homeAddress(body, ''),
     phone: text('phone', 32, false), email: text('email', 254, false),
     check_in_time: time('check_in_time', true)!, check_out_time: time('check_out_time', true)!,
     max_guests: maxGuests(true)!, min_nights: minNights(true)!,
     base_price_minor: basePrice(),
   }
-  if (!/^[A-Z]{2}$/.test(home.country)) fail(422, 'INVALID_DETAIL', 'country must be a two-letter ISO country code', 'country')
   if (home.email !== null && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(home.email)) fail(422, 'INVALID_DETAIL', 'Enter a valid contact email', 'email')
   return home
 }
 
-const EDITABLE_HOME_FIELDS = ['name', 'timezone', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'check_in_instructions', 'base_price_minor', 'assigned_member_id', 'assigned_team_id'] as const
+/** A home's address read from a request; each problem names its field under the prefix. */
+function homeAddress(body: Record<string, unknown>, prefix: string): Pick<NewStayHome, 'address' | 'city' | 'state' | 'country' | 'zip_code'> {
+  const { text } = homeDetails(body)
+  const named = <T>(read: () => T): T => {
+    try { return read() } catch (error) {
+      if (prefix && error instanceof HTTPError && typeof (error.data as { field?: unknown })?.field === 'string') {
+        const data = error.data as { code: string; field: string }
+        fail(error.status, data.code, error.message, `${prefix}${data.field}`)
+      }
+      throw error
+    }
+  }
+  const address = named(() => ({
+    address: text('address', 200, true)!, city: text('city', 100, true)!, state: text('state', 100, false),
+    country: text('country', 2, true)!, zip_code: text('zip_code', 32, false),
+  }))
+  if (!/^[A-Z]{2}$/.test(address.country)) fail(422, 'INVALID_DETAIL', 'country must be a two-letter ISO country code', `${prefix}country`)
+  return address
+}
+
+/** What the home is and offers: product stay settings, checked by the product writer. */
+const LISTING_FIELDS = ['property_type', 'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy'] as const
+/** The arrival guide: private columns only this module reads and writes. */
+const ARRIVAL_TEXT = { check_in_instructions: 5000, wifi_network: 100, wifi_password: 100, directions: 5000, house_manual: 5000 } as const
+const ARRIVAL_FIELDS = [...Object.keys(ARRIVAL_TEXT) as Array<keyof typeof ARRIVAL_TEXT>, 'check_in_method', 'checkout_instructions'] as const
+const LOCATION_FIELDS = ['address', 'latitude', 'longitude'] as const
+const EDITABLE_HOME_FIELDS = ['name', 'description', 'published', 'timezone', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'base_price_minor',
+  'assigned_member_id', 'assigned_team_id', ...LISTING_FIELDS, ...ARRIVAL_FIELDS, ...LOCATION_FIELDS] as const
+
+/** The arrival guide fields a request names, checked; each problem names its field. */
+function arrivalPatch(body: Record<string, unknown>): Record<string, string | null> {
+  const patch: Record<string, string | null> = {}
+  for (const [key, max] of Object.entries(ARRIVAL_TEXT)) {
+    if (!(key in body)) continue
+    const value = body[key]
+    // A wifi password is kept exactly as typed; spaces can be part of it.
+    const text = typeof value === 'string' ? (key === 'wifi_password' ? value : value.trim()) : value
+    if (text !== null && (typeof text !== 'string' || !text.trim() || text.length > max)) fail(422, 'INVALID_DETAIL', `${key} must contain 1 to ${max} characters, or null`, key)
+    patch[key] = text as string | null
+  }
+  if ('check_in_method' in body) {
+    const method = body.check_in_method
+    if (method !== null && !Object.hasOwn(STAY_CHECK_IN_METHODS, method as string)) fail(422, 'INVALID_DETAIL', `check_in_method must be one of ${Object.keys(STAY_CHECK_IN_METHODS).join(', ')}, or null`, 'check_in_method')
+    patch.check_in_method = method as string | null
+  }
+  if ('checkout_instructions' in body) {
+    const list = body.checkout_instructions
+    if (!Array.isArray(list)) fail(422, 'INVALID_DETAIL', 'checkout_instructions must list { task, details } entries', 'checkout_instructions')
+    const tasks = new Set<string>()
+    const instructions = list.map((entry: unknown, index): StayCheckoutInstruction => {
+      const field = `checkout_instructions[${index}]`
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) fail(422, 'INVALID_DETAIL', `${field} must be { task, details }`, field)
+      const { task, details, ...rest } = entry as Record<string, unknown>
+      if (Object.keys(rest).length) fail(422, 'INVALID_DETAIL', `${field} takes only task and details`, `${field}.${Object.keys(rest)[0]}`)
+      if (typeof task !== 'string' || !Object.hasOwn(STAY_CHECKOUT_TASKS, task)) fail(422, 'INVALID_DETAIL', `${field}.task must be one of ${Object.keys(STAY_CHECKOUT_TASKS).join(', ')}`, `${field}.task`)
+      if (tasks.has(task)) fail(422, 'INVALID_DETAIL', `${field}.task is already listed`, `${field}.task`)
+      tasks.add(task)
+      const text = typeof details === 'string' ? details.trim() : details
+      if (text !== null && (typeof text !== 'string' || !text || text.length > 500)) fail(422, 'INVALID_DETAIL', `${field}.details must contain 1 to 500 characters, or null`, `${field}.details`)
+      if (task === 'additional' && text === null) fail(422, 'INVALID_DETAIL', 'Additional requests need their details', `${field}.details`)
+      return { task: task as StayCheckoutTask, details: text as string | null }
+    })
+    patch.checkout_instructions = JSON.stringify(instructions)
+  }
+  return patch
+}
+
+/** The location fields a request names, as the location writer takes them. */
+function locationPatch(body: Record<string, unknown>): UpdateLocationInput {
+  const patch: UpdateLocationInput = {}
+  if ('address' in body) {
+    const value = body.address
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) fail(422, 'INVALID_DETAIL', 'address must be { address, city, state, country, zip_code }', 'address')
+    const unknown = Object.keys(value).find(key => !['address', 'city', 'state', 'country', 'zip_code'].includes(key))
+    if (unknown) fail(422, 'INVALID_DETAIL', `address.${unknown} is not part of an address`, `address.${unknown}`)
+    patch.address = postalAddress(homeAddress(value as Record<string, unknown>, 'address.'))
+  }
+  if ('latitude' in body) patch.latitude = body.latitude as number | null
+  if ('longitude' in body) patch.longitude = body.longitude as number | null
+  const pin = coordinatesFailure(patch)
+  if (pin) fail(422, 'INVALID_DETAIL', pin.error, pin.field)
+  return patch
+}
 
 /**
  * Change a home's details. Fields left out keep their value. Its time zone is
@@ -366,12 +584,13 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   if (guests !== null) stay.max_guests = guests
   const nights = minNights(false)
   if (nights !== null) stay.min_nights = nights
-  if ('check_in_instructions' in body) {
-    const instructions = body.check_in_instructions
-    if (instructions !== null && (typeof instructions !== 'string' || !instructions.trim() || instructions.trim().length > 5000)) {
-      fail(422, 'INVALID_DETAIL', 'check_in_instructions must contain 1 to 5000 characters, or null', 'check_in_instructions')
-    }
-  }
+  const arrival = arrivalPatch(body)
+  const location = locationPatch(body)
+  if ('published' in body && typeof body.published !== 'boolean') fail(422, 'INVALID_DETAIL', 'published must be true or false', 'published')
+  // Publication is refused until the home can take bookings; on its own, a refusal leaves nothing else half-saved.
+  if ('published' in body && Object.keys(body).length > 1) fail(422, 'INVALID_DETAIL', 'Change published on its own', 'published')
+  if ('description' in body && typeof body.description !== 'string') fail(422, 'INVALID_DETAIL', 'description must be text; send an empty one to clear it', 'description')
+  for (const key of LISTING_FIELDS) if (key in body) (stay as Record<string, unknown>)[key] = body[key]
   for (const [key, table, column] of [['assigned_member_id', 'member', 'organizationId'], ['assigned_team_id', 'team', 'organizationId']] as const) {
     if (!(key in body)) continue
     const value = body[key]
@@ -383,6 +602,7 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   const patch: UpdateProductInput = {}
   const renamed = name(false)
   if (renamed !== null) patch.name = renamed
+  if ('description' in body) patch.description = (body.description as string).trim()
   if (Object.keys(stay).length) patch.stay = stay
   const pricing = 'base_price_minor' in body
   if (pricing) {
@@ -400,17 +620,22 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   if (pushes && patch.variants === undefined && patch.stay?.min_nights === undefined) await requireChannelPush(db, env, access.organizationId, productId)
   if (Object.keys(patch).length) await updateProduct(db, { organizationId: access.organizationId, productId, patch, actor: { actorId: access.actorId }, env, deferStayNightPush: true })
   // The product's checks are the ones a valid request can still fail, so it is written first.
-  if (zone !== null && zone !== home.timezone) {
-    const moved = await updateLocation(db as D1Database, access.organizationId, home.location_id, { timezone: zone }, access.actorId, env)
+  if ((zone !== null && zone !== home.timezone) || Object.keys(location).length) {
+    const moved = await updateLocation(db as D1Database, access.organizationId, home.location_id, { ...location, ...(zone !== null && zone !== home.timezone ? { timezone: zone } : {}) }, access.actorId, env)
     if (moved.status !== 200) locationFailure(moved)
   }
-  const instructionsAt = 'check_in_instructions' in body ? new Date().toISOString() : null
+  if ('published' in body && body.published !== home.published) {
+    await setProductPublication(db, { organizationId: access.organizationId, productId, published: body.published as boolean, actor: { actorId: access.actorId }, env })
+  }
+  const columns = Object.keys(arrival)
+  const instructionsAt = columns.length ? new Date().toISOString() : null
   if (instructionsAt !== null) {
     const results = await executeBatch(db, [{
-      query: 'UPDATE product_stay_configs SET check_in_instructions = ?, updated_at = ?, updated_by = ? WHERE organization_id = ? AND product_id = ?',
-      params: [body.check_in_instructions === null ? null : (body.check_in_instructions as string).trim(), instructionsAt, access.actorId, access.organizationId, productId],
-    }, organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.instructions_updated', entityType: 'stay_home', entityId: productId, onlyIfPreviousChangedOneRow: true })], { operation: 'Update home check-in instructions' })
-    if (results[0]?.meta.changes !== 1) fail(409, 'HOME_CHANGED', 'The home changed before its check-in instructions were saved; reload it', 'product_id')
+      query: `UPDATE product_stay_configs SET ${columns.map(column => `${column} = ?`).join(', ')}, updated_at = ?, updated_by = ? WHERE organization_id = ? AND product_id = ?`,
+      params: [...columns.map(column => arrival[column]!), instructionsAt, access.actorId, access.organizationId, productId],
+    }, organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.instructions_updated', entityType: 'stay_home', entityId: productId,
+      metadata: { fields: columns.sort().join(',') }, onlyIfPreviousChangedOneRow: true })], { operation: 'Update home arrival guide' })
+    if (results[0]?.meta.changes !== 1) fail(409, 'HOME_CHANGED', 'The home changed before its arrival guide was saved; reload it', 'product_id')
   }
   const product = pushes ? await getProduct(db, access.organizationId, productId) : null
   const channelPush = product ? await pushStayHomeNights(db, env, access, product) : null
@@ -419,10 +644,99 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   if (product && channelPush !== null) {
     await publishStayInvalidation(env, { type: 'nights.changed', organizationId: access.organizationId, productId, locationId: updated.location_id, stayId: null }, { updated_at: product.updated_at })
   }
-  if (instructionsAt !== null) {
-    await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId, locationId: updated.location_id, stayId: null }, { updated_at: instructionsAt })
+  // A product or location change already announced itself; the arrival guide and the listing switch do here.
+  if (instructionsAt !== null || 'published' in body) {
+    await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId, locationId: updated.location_id, stayId: null }, { updated_at: instructionsAt ?? new Date().toISOString() })
   }
   return { home: updated, channel_push: channelPush }
+}
+
+/**
+ * The homes one member looks after, set at once. Each named home is assigned
+ * to that member — a home has one assigned member, so another member's
+ * assignment there is replaced — and the member's other homes are cleared.
+ * Owners and admins already see every home and are never assigned one.
+ */
+export async function setMemberHomes(env: CloudflareEnv & GuestInboxPublicationEnv, db: DbClient, access: StayAccess, memberId: string, productIds: unknown): Promise<{ memberId: string; productIds: string[] }> {
+  requireManager(access)
+  const member = await (await organizationAdapter(env)).findMemberById(memberId)
+  if (!member || member.organizationId !== access.organizationId) fail(404, 'MEMBER_NOT_FOUND', 'That person is not a member of this organization', 'memberId')
+  if (isOrganizationWideRole(member.role)) fail(409, 'MEMBER_SEES_ALL_HOMES', 'Owners and admins already see every home', 'memberId')
+  if (!Array.isArray(productIds) || productIds.some(id => typeof id !== 'string' || !id)) fail(422, 'INVALID_HOME_IDS', 'productIds must list homes of this organization', 'productIds')
+  const selected = [...new Set(productIds as string[])]
+  const homes = await queryAll<{ product_id: string; location_id: string; assigned_member_id: string | null }>(db, `
+    SELECT product_id, location_id, assigned_member_id FROM product_stay_configs
+     WHERE organization_id = ? AND (product_id IN (SELECT value FROM json_each(?)) OR assigned_member_id = ?)`, [access.organizationId, d1JsonStringSet(selected), memberId])
+  const chosen = new Set(selected)
+  if (homes.filter(home => chosen.has(home.product_id)).length !== selected.length) fail(422, 'INVALID_HOME_IDS', 'productIds must list homes of this organization', 'productIds')
+  const changed = homes.filter(home => chosen.has(home.product_id) ? home.assigned_member_id !== memberId : home.assigned_member_id === memberId)
+  const now = new Date().toISOString()
+  if (changed.length) {
+    await executeBatch(db, [{
+      query: `UPDATE product_stay_configs SET assigned_member_id = ?, updated_at = ?, updated_by = ?
+               WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) AND assigned_member_id IS NOT ?`,
+      params: [memberId, now, access.actorId, access.organizationId, d1JsonStringSet(selected), memberId],
+    }, {
+      query: `UPDATE product_stay_configs SET assigned_member_id = NULL, updated_at = ?, updated_by = ?
+               WHERE organization_id = ? AND assigned_member_id = ? AND product_id NOT IN (SELECT value FROM json_each(?))`,
+      params: [now, access.actorId, access.organizationId, memberId, d1JsonStringSet(selected)],
+    }, organizationEventQuery({ organizationId: access.organizationId, actorId: access.actorId, eventType: 'stay.homes_assigned', entityType: 'member', entityId: memberId,
+      metadata: { product_ids: selected.sort(), changed_product_ids: changed.map(home => home.product_id).sort() } })], { operation: 'Assign homes to a member' })
+  }
+  // The member may have left or become a manager after the check above; the
+  // release scan that change ran may have finished before this write, so the
+  // write is undone here and the caller told.
+  const current = await (await organizationAdapter(env)).findMemberById(memberId)
+  if (changed.length && (!current || current.organizationId !== access.organizationId || current.role.split(',').some(isOrganizationWideRole))) {
+    await releaseUnassignableHomes(env, db, { organizationId: access.organizationId })
+    fail(409, 'MEMBER_CHANGED', 'That person left the organization or now sees every home', 'memberId')
+  }
+  const assigned = await queryAll<{ product_id: string }>(db, 'SELECT product_id FROM product_stay_configs WHERE organization_id = ? AND assigned_member_id = ? ORDER BY product_id', [access.organizationId, memberId])
+  // The member's Today and Calendar, and everyone else's open views of these homes, reload.
+  for (const home of changed) {
+    await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId: home.product_id, locationId: home.location_id, stayId: null }, { updated_at: now })
+  }
+  return { memberId, productIds: assigned.map(row => row.product_id) }
+}
+
+/**
+ * Homes looked after only by a current member who is not an owner or admin;
+ * every other assignment is released. A member who left, was removed or now
+ * sees every home looks after none, and so does `departingUserId`, whose
+ * account is being deleted. Better Auth has committed the membership change and
+ * names no actor to its hooks, so the system records it; open views of those
+ * homes reload. It reconciles the whole organization, so if one run fails the
+ * next membership change there clears what it left.
+ */
+export async function releaseUnassignableHomes(env: GuestInboxPublicationEnv, db: DbClient, input: { organizationId: string; departingUserId?: string }): Promise<void> {
+  const unassignable = `organization_id = ? AND assigned_member_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM member m WHERE m.id = product_stay_configs.assigned_member_id AND m."organizationId" = product_stay_configs.organization_id
+      AND m."userId" IS NOT ? AND (',' || m.role || ',') NOT LIKE '%,owner,%' AND (',' || m.role || ',') NOT LIKE '%,admin,%')`
+  const params = [input.organizationId, input.departingUserId ?? null]
+  const homes = await queryAll<{ product_id: string; location_id: string; assigned_member_id: string }>(db,
+    `SELECT product_id, location_id, assigned_member_id FROM product_stay_configs WHERE ${unassignable}`, params)
+  if (!homes.length) return
+  const now = new Date().toISOString()
+  // Each home read above is cleared only while it still names the member read,
+  // in the same transaction as its audit entry, so the entries and
+  // invalidations name exactly the homes released; an assignment written
+  // meanwhile is left to the writer's own re-check.
+  const cleared: typeof homes = []
+  for (let start = 0; start < homes.length; start += 400) {
+    const chunk = homes.slice(start, start + 400)
+    const results = await executeBatch(db, chunk.flatMap(home => [{
+      query: `UPDATE product_stay_configs SET assigned_member_id = NULL, updated_at = ?, updated_by = 'system'
+               WHERE ${unassignable} AND product_id = ? AND assigned_member_id = ?`,
+      params: [now, ...params, home.product_id, home.assigned_member_id],
+    }, organizationEventQuery({
+      organizationId: input.organizationId, actorType: 'system', eventType: 'stay.homes_assigned', entityType: 'member', entityId: home.assigned_member_id,
+      metadata: { product_ids: [], changed_product_ids: [home.product_id] }, onlyIfPreviousChangedOneRow: true,
+    })]), { operation: 'Release homes no current member looks after' })
+    chunk.forEach((home, index) => { if (results[index * 2]?.meta.changes === 1) cleared.push(home) })
+  }
+  for (const home of cleared) {
+    await publishStayInvalidation(env, { type: 'stay.changed', organizationId: input.organizationId, productId: home.product_id, locationId: home.location_id, stayId: null }, { updated_at: now })
+  }
 }
 
 /**
@@ -435,7 +749,7 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
   requireManager(access)
   const located = await createLocation(env, db as D1Database, access.organizationId, {
     title: home.name, timezone: home.timezone, phone: home.phone, email: home.email,
-    address: { regionCode: home.country, addressLines: [home.address], locality: home.city, administrativeArea: home.state ?? undefined, postalCode: home.zip_code ?? undefined },
+    address: postalAddress(home),
   }, access.actorId, { idempotencyKey })
   if (located.status !== 201) locationFailure(located)
   const location = 'location' in located.data ? located.data.location : undefined
@@ -443,6 +757,8 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
   const locationId = location.id
   const product = await createProduct(db, {
     organizationId: access.organizationId, actor: { actorId: access.actorId }, idempotencyKey, env,
+    // On the site unpublished, like a product added in the editor, so it can carry photos and a page.
+    publication: { published: false },
     product: {
       kind: 'stay', name: home.name,
       ...(home.base_price_minor === null ? {} : { variants: [{ name: home.name, prices: [{ unit_amount: home.base_price_minor }] }] }),
@@ -450,6 +766,108 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
     },
   })
   return await readStayHome(db, access, product.id)
+}
+
+/**
+ * A home's photos are its product's media, so its pages and booking site
+ * show the same pictures. Only managers change them; each change is checked
+ * against the photos the caller's change was based on, and returns the home.
+ */
+async function arrangeHomePhotos(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, home: StayHome, to: string[]): Promise<StayHome> {
+  await arrangeProductPhotos(db, { organizationId: access.organizationId, env, principal, productId: home.product_id, from: home.photos.map(photo => photo.id), to })
+  const updated = await readStayHome(db, access, home.product_id)
+  await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId: home.product_id, locationId: home.location_id, stayId: null }, { updated_at: new Date().toISOString() })
+  return updated
+}
+
+async function managedHome(db: DbClient, access: StayAccess, productId: string): Promise<StayHome> {
+  requireManager(access)
+  return await readStayHome(db, access, productId)
+}
+
+function homePhoto(home: StayHome, photoId: string): StayPhoto {
+  const photo = home.photos.find(entry => entry.id === photoId)
+  if (!photo) fail(404, 'PHOTO_NOT_FOUND', 'That photo is not one of this home\'s photos', 'photo_id')
+  return photo
+}
+
+/** Add a photo after the home's others; the first photo a home gets is its cover. The file is kept in the organization's media library. */
+export async function addStayHomePhoto(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, productId: string, file: unknown): Promise<StayHome> {
+  const home = await managedHome(db, access, productId)
+  if (!(file instanceof File)) fail(422, 'PHOTO_REQUIRED', 'Send the photo as the multipart field image', 'image')
+  if (file.size > MAX_IMAGE_BYTES) fail(413, 'PHOTO_TOO_LARGE', `A photo can be at most ${MAX_IMAGE_BYTES / 1024 / 1024} MB`, 'image')
+  if (home.photos.length >= MAX_ORDERED_MEDIA_ASSETS) fail(422, 'PHOTO_LIMIT', `A home holds at most ${MAX_ORDERED_MEDIA_ASSETS} photos`, 'image')
+  const buffer = new Uint8Array(await file.arrayBuffer())
+  if (!buffer.byteLength) fail(422, 'PHOTO_REQUIRED', 'The photo is empty', 'image')
+  const contentType = sniffMediaMimeType(buffer)
+  if (!RESOLVED_MEDIA_IMAGE_TYPES.has(contentType)) fail(415, 'UNSUPPORTED_PHOTO_TYPE', 'A photo must be a JPEG, PNG, WebP, GIF, AVIF or SVG image', 'image')
+  const uploaded = await uploadResolvedMediaToAssetStore({
+    db, env, organizationId: access.organizationId, userId: access.actorId, source: 'uploaded', kind: 'image',
+    buffer, contentType, filename: sanitizeFilename(file.name),
+    fileSize: buffer.byteLength,
+  })
+  try {
+    return await arrangeHomePhotos(db, env, access, principal, home, [...home.photos.map(photo => photo.id), uploaded.assetId])
+  } catch (error) {
+    // Nobody else knows the new asset: unless the arrangement placed it before
+    // failing, it is deleted rather than left in the library unseen.
+    const placed = (await readProductPhotos(db, { organizationId: access.organizationId, productIds: [home.product_id] })).get(home.product_id)?.some(item => item.asset_id === uploaded.assetId)
+    if (!placed) {
+      try {
+        await deleteMediaAsset(db, env, uploaded.assetId, access.organizationId, access.actorId)
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], `The photo was not added and its upload ${uploaded.assetId} could not be deleted`, { cause: cleanupError })
+      }
+    }
+    throw error
+  }
+}
+
+/**
+ * Put the home's photos in this order; the first is the cover. The order is
+ * the whole list, so it must name every photo the home has, once: a photo
+ * added or removed since the caller read them refuses it.
+ */
+export async function reorderStayHomePhotos(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, productId: string, body: Record<string, unknown>): Promise<StayHome> {
+  const home = await managedHome(db, access, productId)
+  const unknown = Object.keys(body).find(key => key !== 'photo_ids')
+  if (unknown) fail(422, 'INVALID_PHOTO_ORDER', `${unknown} cannot be changed here`, unknown)
+  const ids = body.photo_ids
+  if (!Array.isArray(ids) || ids.some(id => typeof id !== 'string' || !id) || new Set(ids).size !== ids.length) {
+    fail(422, 'INVALID_PHOTO_ORDER', 'photo_ids must list photo ids, each once', 'photo_ids')
+  }
+  const order = ids as string[]
+  if (order.length !== home.photos.length || order.some(id => !home.photos.some(photo => photo.id === id))) {
+    fail(409, 'PHOTOS_CHANGED', 'photo_ids must name every photo the home has; reload them and try again', 'photo_ids')
+  }
+  return await arrangeHomePhotos(db, env, access, principal, home, order)
+}
+
+/** Describe a photo for guests and search engines. The text is the media asset's own, so every page showing the photo uses it. */
+export async function updateStayHomePhoto(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, productId: string, photoId: string, body: Record<string, unknown>): Promise<StayHome> {
+  const home = await managedHome(db, access, productId)
+  homePhoto(home, photoId)
+  const unknown = Object.keys(body).find(key => key !== 'alt_text')
+  if (unknown) fail(422, 'INVALID_PHOTO_FIELD', `${unknown} cannot be changed here`, unknown)
+  if (!('alt_text' in body)) fail(422, 'INVALID_PHOTO_FIELD', 'alt_text is required', 'alt_text')
+  const alt = body.alt_text
+  if (alt !== null && (typeof alt !== 'string' || !alt.trim() || alt.trim().length > 500)) {
+    fail(422, 'INVALID_PHOTO_FIELD', 'alt_text must contain 1 to 500 characters, or null', 'alt_text')
+  }
+  const placedOn = { owner_type: 'product', owner_id: productId, slots: ['image', 'gallery'] }
+  if (!await updateMediaAssetMetadata(db, photoId, access.organizationId, { alt_text: alt === null ? null : (alt as string).trim() }, placedOn)) {
+    fail(409, 'PHOTOS_CHANGED', 'The photo was taken off the home before its description was saved; reload the photos', 'photo_id')
+  }
+  const updated = await readStayHome(db, access, productId)
+  await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId, locationId: home.location_id, stayId: null }, { updated_at: new Date().toISOString() })
+  return updated
+}
+
+/** Take a photo off the home. The file stays in the organization's media library; when the cover goes, the next photo becomes the cover. */
+export async function removeStayHomePhoto(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, productId: string, photoId: string): Promise<StayHome> {
+  const home = await managedHome(db, access, productId)
+  homePhoto(home, photoId)
+  return await arrangeHomePhotos(db, env, access, principal, home, home.photos.map(photo => photo.id).filter(id => id !== photoId))
 }
 
 /** Stays overlapping [from, to), newest check-in last. Cancelled stays are included only when asked for. */
@@ -479,36 +897,59 @@ export async function getStay(db: DbClient, access: StayAccess, stayId: string):
      WHERE s.organization_id = ? AND s.id = ? AND ${scope.sql}`, [access.organizationId, stayId, ...scope.params])
   if (!row) fail(404, 'STAY_NOT_FOUND', 'That stay is not in this organization')
   const stay = mapStay(row)
-  const payments = await queryAll<StayPayment>(db, `
-    SELECT id, stay_id, amount_minor, currency, method, paid_on, reference, note, created_at, created_by
-      FROM stay_payments WHERE organization_id = ? AND stay_id = ? ORDER BY paid_on, created_at`, [access.organizationId, stayId])
-  const paid = payments.reduce((sum, payment) => sum + payment.amount_minor, 0)
+  const [payments, online] = await Promise.all([
+    queryAll<StayPayment>(db, `
+      SELECT id, stay_id, amount_minor, currency, method, paid_on, reference, note, created_at, created_by
+        FROM stay_payments WHERE organization_id = ? AND stay_id = ? ORDER BY paid_on, created_at`, [access.organizationId, stayId]),
+    queryAll<{ id: string; state: StayOnlinePayment['state']; currency: string; amount: number; captured_amount: number; refunded_amount: number; receipt_url: string | null; created_at: string }>(db, `
+      SELECT id, state, currency, amount, captured_amount, refunded_amount, receipt_url, created_at
+        FROM payments WHERE organization_id = ? AND subject_type = 'stay' AND subject_id = ?`, [access.organizationId, stayId]),
+  ])
+  if (online.length > 1) fail(500, 'STAY_PAYMENT_AMBIGUOUS', 'This stay has more than one online payment', 'online_payment')
+  const onlinePayment: StayOnlinePayment | null = online[0] ? {
+    payment_id: online[0].id, state: online[0].state, currency: online[0].currency, amount_minor: online[0].amount,
+    captured_minor: online[0].captured_amount, refunded_minor: online[0].refunded_amount, receipt_url: online[0].receipt_url, created_at: online[0].created_at,
+  } : null
+  const paid = payments.reduce((sum, payment) => sum + payment.amount_minor, 0) + (onlinePayment ? onlinePayment.captured_minor - onlinePayment.refunded_minor : 0)
   const status = stay.owner === 'channel' ? null
     : paid === 0 ? 'unpaid' : paid < stay.total_minor ? 'partial' : paid === stay.total_minor ? 'paid' : 'overpaid'
-  return { ...stay, payments, paid_minor: paid, payment_status: status }
+  return { ...stay, payments, online_payment: onlinePayment, paid_minor: paid, payment_status: status }
 }
 
 /** Every night of [from, to) at one home: whether it is free, its price and rules, and the stay holding it. */
 export async function readStayCalendar(db: DbClient, access: StayAccess, input: { productId: string; from: unknown; to: unknown }): Promise<{ home: StayHome; nights: StayNight[]; stays: Stay[] }> {
   const { from, to } = range(input, MAX_CALENDAR_DAYS)
   const home = await readStayHome(db, access, input.productId)
-  const [overrides, claims, pushes, stays] = await Promise.all([
-    queryAll<Record<string, unknown>>(db, 'SELECT * FROM product_nights WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ?', [access.organizationId, input.productId, from, to]),
-    queryAll<{ date: string; stay_id: string }>(db, 'SELECT date, stay_id FROM stay_nights WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ?', [access.organizationId, input.productId, from, to]),
-    queryAll<{ date: string; state: 'pending' | 'pushed' | 'needs_review'; detail: string | null }>(db, 'SELECT date, state, detail FROM channel_night_pushes WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ?', [access.organizationId, input.productId, from, to]),
-    staysOverlapping(db, access, { from, to, productId: input.productId }),
+  const [nights, stays] = await Promise.all([homeNights(db, access.organizationId, home, from, to), staysOverlapping(db, access, { from, to, productId: input.productId })])
+  return { home, nights, stays }
+}
+
+/** A hold's claim counts while its hold is active and unexpired; this selects the claims that no longer do. */
+const LAPSED_HOLD_CLAIM_SQL = `stay_nights.hold_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM payment_checkout_holds h
+  WHERE h.id = stay_nights.hold_id AND h.status = 'active' AND h.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`
+
+/** Every night of [from, to) at one home, read for whoever already has the home. */
+async function homeNights(db: DbClient, organizationId: string, home: StayHome, from: string, to: string): Promise<StayNight[]> {
+  const [overrides, claims, pushes] = await Promise.all([
+    queryAll<Record<string, unknown>>(db, 'SELECT * FROM product_nights WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ?', [organizationId, home.product_id, from, to]),
+    queryAll<{ date: string; stay_id: string | null; held_until: string | null }>(db, `SELECT stay_nights.date, stay_nights.stay_id, h.expires_at AS held_until FROM stay_nights
+      LEFT JOIN payment_checkout_holds h ON h.id = stay_nights.hold_id
+      WHERE stay_nights.organization_id = ? AND stay_nights.product_id = ? AND stay_nights.date >= ? AND stay_nights.date < ? AND NOT (${LAPSED_HOLD_CLAIM_SQL})`, [organizationId, home.product_id, from, to]),
+    queryAll<{ date: string; state: 'pending' | 'pushed' | 'needs_review'; detail: string | null }>(db, 'SELECT date, state, detail FROM channel_night_pushes WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ?', [organizationId, home.product_id, from, to]),
   ])
   const overrideByDate = new Map(overrides.map(row => [String(row.date), row]))
-  const claimByDate = new Map(claims.map(row => [row.date, row.stay_id]))
+  const claimByDate = new Map(claims.map(row => [row.date, row]))
   const pushByDate = new Map(pushes.map(row => [row.date, { state: row.state, detail: row.detail }]))
   const nights: StayNight[] = []
   for (let offset = 0; offset < days(from, to); offset++) {
-    const night = new Date(Date.parse(`${from}T00:00:00Z`) + offset * 86_400_000).toISOString().slice(0, 10)
+    const night = addDays(from, offset)
     const row = overrideByDate.get(night)
-    const stayId = claimByDate.get(night) ?? null
+    const claim = claimByDate.get(night)
+    const stayId = claim?.stay_id ?? null
+    const heldUntil = claim && claim.stay_id === null ? claim.held_until : null
     const closed = Number(row?.closed ?? 0) === 1
     nights.push({
-      date: night, available: !closed && stayId === null, stay_id: stayId, closed,
+      date: night, available: !closed && !claim, stay_id: stayId, closed,
       price_minor: row?.price_minor === null || row?.price_minor === undefined ? home.base_price_minor : Number(row.price_minor),
       min_stay_arrival: row?.min_stay_arrival == null ? null : Number(row.min_stay_arrival),
       min_stay_through: row?.min_stay_through == null ? null : Number(row.min_stay_through),
@@ -516,10 +957,11 @@ export async function readStayCalendar(db: DbClient, access: StayAccess, input: 
       closed_to_arrival: Number(row?.closed_to_arrival ?? 0) === 1,
       closed_to_departure: Number(row?.closed_to_departure ?? 0) === 1,
       source: row ? row.source as 'host' | 'import' : null,
+      held_until: heldUntil,
       channel: pushByDate.get(night) ?? null,
     })
   }
-  return { home, nights, stays }
+  return nights
 }
 
 /**
@@ -543,8 +985,8 @@ export async function pushStayHomeNights(db: DbClient, env: ChannexEnv, access: 
   try {
     const home = await readStayHome(db, access, productId)
     if (home.channel?.status !== 'connected') return null
-    const today = new Intl.DateTimeFormat('en-CA', { timeZone: home.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
-    const until = new Date(Date.parse(`${today}T00:00:00Z`) + MAX_CALENDAR_DAYS * 86_400_000).toISOString().slice(0, 10)
+    const today = homeToday(home.timezone)
+    const until = addDays(today, MAX_CALENDAR_DAYS)
     return await pushNights(db, env, access, productId, [[today, until]])
   } catch (cause) {
     throw new HTTPError({ statusCode: 503, message: 'The home was saved, but its channel update did not complete. Reload its calendar before retrying.',
@@ -562,6 +1004,11 @@ export async function pushStayHomeNights(db: DbClient, env: ChannexEnv, access: 
 function reconcileNightsQueries(organizationId: string, stayId: string): BatchQuery[] {
   const row = `(SELECT check_in_date, check_out_date, status, overbooked, product_id FROM stays WHERE organization_id = ? AND id = ?)`
   return [{
+    // A lapsed checkout hold on one of these nights no longer holds it.
+    query: `DELETE FROM stay_nights WHERE ${LAPSED_HOLD_CLAIM_SQL} AND EXISTS (SELECT 1 FROM ${row} st
+              WHERE stay_nights.product_id = st.product_id AND stay_nights.date >= st.check_in_date AND stay_nights.date < st.check_out_date)`,
+    params: [organizationId, stayId],
+  }, {
     query: `DELETE FROM stay_nights WHERE organization_id = ? AND stay_id = ? AND EXISTS (SELECT 1 FROM ${row} st
               WHERE st.status = 'cancelled' OR st.overbooked = 1 OR stay_nights.product_id <> st.product_id OR stay_nights.date < st.check_in_date OR stay_nights.date >= st.check_out_date)`,
     params: [organizationId, stayId, organizationId, stayId],
@@ -576,7 +1023,7 @@ function reconcileNightsQueries(organizationId: string, stayId: string): BatchQu
   }]
 }
 
-function isNightConflict(error: unknown): boolean {
+export function isStayNightConflict(error: unknown): boolean {
   return /UNIQUE constraint failed: stay_nights\./.test(error instanceof Error ? error.message : String(error))
 }
 
@@ -666,7 +1113,7 @@ export async function createStay(db: DbClient, env: StayMutationEnv, access: Sta
       organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.created', entityType: 'stay', entityId: id }),
     ], { operation: 'Create stay' })
   } catch (error) {
-    if (isNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay already holds one of these nights', 'check_in_date')
+    if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay already holds one of these nights', 'check_in_date')
     if (/UNIQUE constraint failed: stays\.organization_id, stays\.idempotency_key/.test(error instanceof Error ? error.message : String(error))) {
       const concurrent = await replay()
       if (concurrent) return pushed(concurrent)
@@ -715,7 +1162,7 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
       ...stayThreadQueries({ organizationId: access.organizationId, stayId, now, openedBy: { userId: access.actorId } }),
     ], { operation: 'Update stay' })
   } catch (error) {
-    if (isNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay already holds one of these nights', 'check_in_date')
+    if (isStayNightConflict(error)) fail(409, 'STAY_OVERLAP', 'Another stay already holds one of these nights', 'check_in_date')
     throw error
   }
   if (!versionChanged(results)) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
@@ -1030,7 +1477,7 @@ export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicati
   try {
     writes = await executeBatch(db, write(0), { operation: 'Apply channel booking' })
   } catch (error) {
-    if (!isNightConflict(error)) throw error
+    if (!isStayNightConflict(error)) throw error
     // Rule 1: another stay holds one of these nights. The channel stay still lands, flagged and holding none.
     writes = await executeBatch(db, write(1), { operation: 'Apply overbooked channel booking' })
   }
@@ -1073,4 +1520,243 @@ async function storedStay(db: DbClient, organizationId: string, stayId: string):
      WHERE s.organization_id = ? AND s.id = ?`, [organizationId, stayId])
   if (!row) throw new Error(`Stay ${stayId} is not in organization ${organizationId}`)
   return mapStay(row)
+}
+
+/**
+ * Booking on the site. A guest picks nights on a published home and pays in
+ * full: the checkout holds those nights (stay_nights rows naming the hold) for
+ * the hold's lifetime, and capture turns the hold into a confirmed direct stay.
+ * The rules a guest is held to are the ones the home offers channels.
+ */
+
+/** A home a guest can book on the site: active, published on the site and at its active location. */
+export async function readPublicStayHome(db: DbClient, organizationId: string, slug: string): Promise<StayHome> {
+  const row = await queryFirst<{ id: string }>(db, `SELECT p.id FROM products p
+      JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
+     WHERE p.organization_id = ? AND p.slug = ? AND ${PUBLIC_STAY_SQL}`, [organizationId, slug])
+  if (!row) fail(404, 'STAY_NOT_FOUND', 'That place to stay is not open for booking', 'slug')
+  const [home] = await stayHomesWhere(db, organizationId, row.id, { sql: '1 = 1', params: [] })
+  if (!home) fail(404, 'STAY_NOT_FOUND', 'That place to stay is not open for booking', 'slug')
+  return home
+}
+
+/** The published, active, located home `p` with stay settings `c`, as one predicate a write can repeat. */
+const PUBLIC_STAY_SQL = `p.kind = 'stay' AND p.active = 1
+  AND EXISTS (SELECT 1 FROM product_publications pub WHERE pub.organization_id = p.organization_id AND pub.product_id = p.id AND pub.published = 1)
+  AND EXISTS (SELECT 1 FROM product_locations pl JOIN business_locations l ON l.organization_id = pl.organization_id AND l.id = pl.location_id AND l.status = 'active'
+    WHERE pl.organization_id = c.organization_id AND pl.product_id = c.product_id AND pl.location_id = c.location_id AND pl.active = 1 AND pl.published = 1)`
+
+/** One night as a guest sees it: whether it can be part of a stay, its price, and the home's rules for it. */
+export interface PublicStayNight {
+  date: string
+  available: boolean
+  price_minor: number | null
+  min_stay_arrival: number
+  min_stay_through: number | null
+  max_stay: number | null
+  closed_to_arrival: boolean
+  closed_to_departure: boolean
+}
+
+export interface PublicStayCalendar {
+  home: { currency: CurrencyCode; timezone: string; today: string; check_in_time: string; check_out_time: string; max_guests: number; min_nights: number; base_price_minor: number | null }
+  nights: PublicStayNight[]
+}
+
+function publicNight(night: StayNight, home: StayHome, today: string): PublicStayNight {
+  return {
+    date: night.date,
+    available: night.available && night.price_minor !== null && night.date >= today,
+    price_minor: night.price_minor,
+    min_stay_arrival: night.min_stay_arrival ?? home.min_nights,
+    min_stay_through: night.min_stay_through,
+    max_stay: night.max_stay,
+    closed_to_arrival: night.closed_to_arrival,
+    closed_to_departure: night.closed_to_departure,
+  }
+}
+
+/** The nights of [from, to) a guest can choose from. Nothing about who holds a night is shown. */
+export async function readPublicStayCalendar(db: DbClient, organizationId: string, slug: string, input: { from: unknown; to: unknown }): Promise<PublicStayCalendar> {
+  const { from, to } = range(input, MAX_LIST_DAYS)
+  const home = await readPublicStayHome(db, organizationId, slug)
+  const today = homeToday(home.timezone)
+  const nights = await homeNights(db, organizationId, home, from, to)
+  return {
+    home: { currency: home.currency, timezone: home.timezone, today, check_in_time: home.check_in_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, base_price_minor: home.base_price_minor },
+    nights: nights.map(night => publicNight(night, home, today)),
+  }
+}
+
+/** What a guest pays for a run of nights, checked against every rule the home offers. */
+export interface StayQuote {
+  product_id: string
+  name: string
+  location_id: string
+  timezone: string
+  currency: CurrencyCode
+  tax_behavior: PriceTaxBehavior
+  check_in_date: string
+  check_out_date: string
+  check_in_time: string
+  check_out_time: string
+  nights: number
+  adults: number
+  children: number
+  infants: number
+  nightly: Array<{ date: string; price_minor: number }>
+  total_minor: number
+}
+
+export interface StayQuoteInput { check_in_date: unknown; check_out_date: unknown; adults: unknown; children?: unknown; infants?: unknown }
+
+/**
+ * Quote a stay at this home, or refuse it with the rule it breaks: the dates,
+ * the guests, a night that is taken, closed or unpriced, closed to arrival or
+ * departure, the minimum stay on arrival or through any night, or the
+ * maximum stay. Every refusal names its code and the field it is about.
+ */
+export async function quoteStay(db: DbClient, organizationId: string, home: StayHome, input: StayQuoteInput): Promise<StayQuote> {
+  const checkIn = date(input.check_in_date, 'check_in_date')
+  const checkOut = date(input.check_out_date, 'check_out_date')
+  const today = homeToday(home.timezone)
+  if (checkIn < today) fail(422, 'STAY_CHECK_IN_PAST', 'Check-in cannot be before today where the home is', 'check_in_date', { today })
+  const count_ = days(checkIn, checkOut)
+  if (count_ < 1) fail(422, 'INVALID_DATE', 'check_out_date must be after check_in_date', 'check_out_date')
+  if (count_ > MAX_STAY_NIGHTS) fail(422, 'STAY_TOO_LONG', `A stay is at most ${MAX_STAY_NIGHTS} nights`, 'check_out_date', { max_nights: MAX_STAY_NIGHTS })
+  if (checkOut > addDays(today, MAX_CALENDAR_DAYS)) fail(422, 'STAY_TOO_FAR_AHEAD', `Stays can be booked up to ${MAX_CALENDAR_DAYS} days ahead`, 'check_out_date')
+  const adults = count(input.adults, 'adults', 1)
+  const children = count(input.children ?? 0, 'children', 0)
+  const infants = count(input.infants ?? 0, 'infants', 0)
+  if (adults + children > home.max_guests) fail(422, 'STAY_TOO_MANY_GUESTS', `This home sleeps at most ${home.max_guests} guests`, 'adults', { max_guests: home.max_guests })
+  // The check-out day is read too: closed to departure is a rule of that day.
+  const all = await homeNights(db, organizationId, home, checkIn, addDays(checkOut, 1))
+  const stayed = all.slice(0, count_)
+  const departure = all[count_]!
+  const taken = stayed.filter(night => !night.available).map(night => night.date)
+  if (taken.length) fail(409, 'STAY_NIGHTS_UNAVAILABLE', 'Some of these nights are no longer available', 'check_in_date', { dates: taken })
+  const unpriced = stayed.find(night => night.price_minor === null)
+  if (unpriced) fail(409, 'STAY_NIGHT_UNPRICED', `${unpriced.date} has no nightly price yet`, 'check_in_date', { date: unpriced.date })
+  const arrival = stayed[0]!
+  if (arrival.closed_to_arrival) fail(422, 'STAY_CLOSED_TO_ARRIVAL', `Guests cannot check in on ${checkIn}`, 'check_in_date')
+  if (departure.closed_to_departure) fail(422, 'STAY_CLOSED_TO_DEPARTURE', `Guests cannot check out on ${checkOut}`, 'check_out_date')
+  const minimum = arrival.min_stay_arrival ?? home.min_nights
+  if (count_ < minimum) fail(422, 'STAY_MIN_NIGHTS', `Stays arriving on ${checkIn} are at least ${minimum} nights`, 'check_out_date', { min_nights: minimum })
+  const through = stayed.reduce((most, night) => Math.max(most, night.min_stay_through ?? 1), 1)
+  if (count_ < through) fail(422, 'STAY_MIN_NIGHTS_THROUGH', `Stays over these nights are at least ${through} nights`, 'check_out_date', { min_nights: through })
+  if (arrival.max_stay !== null && count_ > arrival.max_stay) fail(422, 'STAY_MAX_NIGHTS', `Stays arriving on ${checkIn} are at most ${arrival.max_stay} nights`, 'check_out_date', { max_nights: arrival.max_stay })
+  if (home.base_price_tax_behavior === null) fail(409, 'STAY_BASE_PRICE_REQUIRED', 'This home has no base nightly price', 'base_price_minor')
+  const nightly = stayed.map(night => ({ date: night.date, price_minor: night.price_minor! }))
+  const total = nightly.reduce((sum, night) => sum + night.price_minor, 0)
+  if (!Number.isSafeInteger(total) || total < 1) fail(409, 'STAY_TOTAL_INVALID', 'These nights have no amount to pay', 'check_in_date')
+  return {
+    product_id: home.product_id, name: home.name, location_id: home.location_id, timezone: home.timezone, currency: home.currency, tax_behavior: home.base_price_tax_behavior,
+    check_in_date: checkIn, check_out_date: checkOut, check_in_time: home.check_in_time, check_out_time: home.check_out_time,
+    nights: count_, adults, children, infants, nightly, total_minor: total,
+  }
+}
+
+/**
+ * The nights a checkout hold claims, in the batch that inserts the hold. A
+ * lapsed hold on one of them is cleared first; a night another stay or live
+ * hold has fails the batch on stay_nights' primary key.
+ */
+export function stayHoldClaimQueries(input: { organizationId: string; productId: string; holdId: string; checkIn: string; checkOut: string }): BatchQuery[] {
+  return [{
+    query: `DELETE FROM stay_nights WHERE ${LAPSED_HOLD_CLAIM_SQL} AND stay_nights.product_id = ? AND stay_nights.date >= ? AND stay_nights.date < ?`,
+    params: [input.productId, input.checkIn, input.checkOut],
+  }, {
+    query: `WITH RECURSIVE night(d) AS (SELECT ? UNION ALL SELECT date(d, '+1 day') FROM night WHERE date(d, '+1 day') < ?)
+            INSERT INTO stay_nights (organization_id, product_id, date, hold_id)
+            SELECT ?, ?, d, ? FROM night WHERE EXISTS (SELECT 1 FROM payment_checkout_holds WHERE id = ? AND status = 'active')`,
+    params: [input.checkIn, input.checkOut, input.organizationId, input.productId, input.holdId, input.holdId],
+  }]
+}
+
+/** The condition a stay hold is inserted under: the home is still bookable and none of its nights is closed. */
+export function stayHoldPredicate(input: { organizationId: string; productId: string; checkIn: string; checkOut: string }): { query: string; params: string[] } {
+  return {
+    query: `EXISTS (SELECT 1 FROM products p JOIN product_stay_configs c ON c.organization_id = p.organization_id AND c.product_id = p.id
+              WHERE p.organization_id = ? AND p.id = ? AND ${PUBLIC_STAY_SQL})
+            AND NOT EXISTS (SELECT 1 FROM product_nights WHERE organization_id = ? AND product_id = ? AND date >= ? AND date < ? AND closed = 1)`,
+    params: [input.organizationId, input.productId, input.organizationId, input.productId, input.checkIn, input.checkOut],
+  }
+}
+
+/** Tell the home's channel about nights a checkout hold took or gave back, and the calendar that they changed. */
+export async function pushStayHoldNights(db: DbClient, env: StayMutationEnv, organizationId: string, productId: string, checkIn: string, checkOut: string): Promise<ChannelPush | null> {
+  const access: StayAccess = { organizationId, actorId: 'system', manage: true }
+  const home = await readStayHome(db, access, productId)
+  const channelPush = await pushNights(db, env, access, productId, [[checkIn, checkOut]])
+  await publishStayInvalidation(env, { type: 'nights.changed', organizationId, locationId: home.location_id, productId, stayId: null }, { updated_at: new Date().toISOString() })
+  return channelPush
+}
+
+/**
+ * Lapsed checkout holds still claiming nights: the nights are reopened on each
+ * home's channel, then their claims are deleted. A night another write already
+ * reclaimed was cleared by that write and is not here.
+ */
+export async function releaseLapsedStayHolds(db: DbClient, env: StayMutationEnv): Promise<{ released: number; channel_push: ChannelPush[] }> {
+  const lapsed = await queryAll<{ hold_id: string; organization_id: string; product_id: string; check_in: string; check_out: string }>(db, `
+    SELECT stay_nights.hold_id, stay_nights.organization_id, stay_nights.product_id, MIN(stay_nights.date) AS check_in, date(MAX(stay_nights.date), '+1 day') AS check_out
+      FROM stay_nights WHERE ${LAPSED_HOLD_CLAIM_SQL}
+     GROUP BY stay_nights.hold_id, stay_nights.organization_id, stay_nights.product_id LIMIT 100`)
+  const pushes: ChannelPush[] = []
+  for (const hold of lapsed) {
+    // The calendar already reads a lapsed claim as free, so the channel is told first; the claims
+    // go only once it has been, and a push that throws leaves them for the next run to retry.
+    const pushed = await pushStayHoldNights(db, env, hold.organization_id, hold.product_id, hold.check_in, hold.check_out)
+    if (pushed) pushes.push(pushed)
+    await executeBatch(db, [{ query: `DELETE FROM stay_nights WHERE hold_id = ? AND ${LAPSED_HOLD_CLAIM_SQL}`, params: [hold.hold_id] }], { operation: 'Release lapsed stay hold' })
+  }
+  return { released: lapsed.length, channel_push: pushes }
+}
+
+/** What a captured checkout made a stay of: its frozen quote and the guest who paid. */
+export interface CheckoutStay {
+  quote: Pick<StayQuote, 'product_id' | 'check_in_date' | 'check_out_date' | 'adults' | 'children' | 'infants' | 'total_minor' | 'currency'>
+  guest: { name: string; email: string; phone: string | null; notes: string | null }
+}
+
+/**
+ * The batch that makes a captured stay hold a confirmed direct stay: the hold's
+ * claims go, the stay takes the same nights (failing the batch on a night
+ * someone else now holds), and its guest conversation opens.
+ */
+export function stayFromCheckoutQueries(input: { organizationId: string; locationId: string; stayId: string; holdId: string; paymentId: string; buyerUserId: string | null; now: string; stay: CheckoutStay }): BatchQuery[] {
+  const { quote, guest } = input.stay
+  return [
+    { query: 'DELETE FROM stay_nights WHERE hold_id = ?', params: [input.holdId] },
+    {
+      query: `INSERT INTO stays (id, organization_id, product_id, channel, owner, status, check_in_date, check_out_date, adults, children, infants,
+                guest_name, guest_email, guest_phone, user_id, total_minor, currency, notes, idempotency_key, booking_received_at, created_at, updated_at)
+              SELECT ?, ?, ?, 'direct', 'app', 'confirmed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+               WHERE EXISTS (SELECT 1 FROM payments WHERE id = ? AND organization_id = ? AND state = 'captured' AND refunded_amount = 0)`,
+      params: [input.stayId, input.organizationId, quote.product_id, quote.check_in_date, quote.check_out_date, quote.adults, quote.children, quote.infants,
+        guest.name, guest.email, guest.phone, input.buyerUserId, quote.total_minor, quote.currency, guest.notes, `checkout:${input.paymentId}`, input.now, input.now, input.now,
+        input.paymentId, input.organizationId],
+    },
+    organizationEventQuery({ organizationId: input.organizationId, locationId: input.locationId, actorId: null, eventType: 'stay.created', entityType: 'stay', entityId: input.stayId, metadata: { channel: 'direct', payment_id: input.paymentId }, onlyIfPreviousChangedOneRow: true }),
+    ...reconcileNightsQueries(input.organizationId, input.stayId),
+    ...stayThreadQueries({ organizationId: input.organizationId, stayId: input.stayId, now: input.now, openedBy: 'guest' }),
+  ]
+}
+
+/** After a stay is made from a checkout: its scheduled messages, its channel and the screens showing it. */
+export async function completeStayFromCheckout(db: DbClient, env: StayMutationEnv, organizationId: string, stayId: string): Promise<{ stay: Stay; channel_push: ChannelPush | null }> {
+  const stay = await storedStay(db, organizationId, stayId)
+  await planStayMessages(db, organizationId, stayId)
+  const access: StayAccess = { organizationId, actorId: 'system', manage: true }
+  const channelPush = await pushNights(db, env, access, stay.product_id, [[stay.check_in_date, stay.check_out_date]])
+  await publishStayChange(env, db, organizationId, stay, true)
+  return { stay, channel_push: channelPush }
+}
+
+/** The stay a captured checkout made, read for its confirmation. */
+export async function readCheckoutStay(db: DbClient, organizationId: string, stayId: string): Promise<Stay & { home: StayHome }> {
+  const stay = await storedStay(db, organizationId, stayId)
+  const [home] = await stayHomesWhere(db, organizationId, stay.product_id, { sql: '1 = 1', params: [] })
+  if (!home) throw new Error(`Stay ${stayId} has no home`)
+  return { ...stay, home }
 }

@@ -8,185 +8,165 @@
   <!--
     The provider owns its chrome: the levels below inject what this component
     holds, and `<NuxtPage>` reaches them only from inside its own subtree. In
-    the thread's drawer there is no column to own, so it is the body alone.
+    the thread's leaf there is no column to own, so it is the body alone.
   -->
   <component :is="embedded ? 'div' : DashboardIndexPanel" v-bind="chrome">
-    <!-- The panel body pads and scrolls its level; only the drawer, which has no panel, needs its own. -->
-    <div v-if="error" :class="embedded ? 'p-5 sm:p-8' : undefined">
-      <UAlert color="error" variant="soft" title="Booking details could not be loaded" :description="getErrorMessage(error, 'Booking request failed')" />
-    </div>
-    <template v-else>
-      <div :class="embedded ? 'min-h-0 flex-1 overflow-y-auto p-5 sm:p-8' : undefined">
-        <UAlert
-          v-if="actionError"
-          class="mb-5"
-          color="error"
-          variant="soft"
-          icon="i-lucide-circle-alert"
-          :description="actionError"
-        />
-        <UAlert
-          v-if="realtime.status.value === 'failed'"
-          class="mb-5"
-          color="warning"
-          variant="soft"
-          icon="i-lucide-wifi-off"
-          title="Reservation details may be out of date"
-          description="The live dashboard connection is unavailable."
+    <UAlert v-if="error" color="error" variant="soft" title="Booking details could not be loaded" :description="getErrorMessage(error, 'Booking request failed')" />
+    <div v-else>
+      <UAlert
+        v-if="actionError"
+        class="mb-5"
+        color="error"
+        variant="soft"
+        icon="i-lucide-circle-alert"
+        :description="actionError"
+      />
+      <template v-if="booking">
+        <img
+          v-if="bookingImageUrl"
+          :src="bookingImageUrl"
+          alt=""
+          class="mb-6 aspect-[4/3] w-full rounded-xl object-cover"
         >
-          <template #actions>
-            <UButton color="warning" variant="soft" size="xs" @click="retryRealtime">Refresh</UButton>
-          </template>
-        </UAlert>
-        <template v-if="booking">
-          <div class="mx-auto w-full" :class="dashboardColumnWidths.leaf">
-          <img
-            v-if="bookingImageUrl"
-            :src="bookingImageUrl"
-            alt=""
-            class="mb-6 aspect-[4/3] w-full rounded-xl object-cover"
-          >
 
-          <!-- The business reads who is coming; the account reads what it booked and where. A purchase is what was bought, for both. -->
-          <h1 class="text-[32px] font-semibold leading-tight text-highlighted">{{ personalScope || purchase ? booking.resourceTitle : partyTitle }}</h1>
-          <p class="mt-1 text-base text-muted">{{ subline }}</p>
+        <!-- The business reads who is coming; the account reads what it booked and where. A purchase is what was bought, for both. -->
+        <h2 class="text-2xl font-semibold text-highlighted">{{ personalScope || purchase ? booking.resourceTitle : partyTitle }}</h2>
+        <p class="mt-1 text-base text-muted">{{ subline }}</p>
 
-          <template v-if="booking.type === 'booking' && !personalScope">
-            <component :is="canChangeBooking ? NuxtLink : 'div'" :to="canChangeBooking ? `${editorPath}/team-member` : undefined" class="mt-6 flex items-center gap-4 border-y border-default py-6">
-              <span class="min-w-0 flex-1"><span class="block text-base font-medium text-highlighted">Team member</span><span class="block text-sm text-muted">{{ booking.assignedMemberName || (booking.assignedMemberId ? 'Previously assigned member' : booking.organizationName) }}</span></span>
-              <UIcon v-if="canChangeBooking" name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
-            </component>
-            <UAlert v-if="booking.providerConflict" class="mt-4" color="warning" description="This booking overlaps a busy time. Contact your guest to change it." />
-            <UAlert v-if="booking.providerCalendarStatus" class="mt-4" color="warning" :description="booking.providerCalendarStatus" />
-          </template>
-          <!-- Airbnb's "Change requested", for both sides and both kinds: the proposal is out and the record stays as it is until the guest answers. -->
-          <UAlert
-            v-if="booking.pendingChange"
-            class="mt-4"
-            color="info"
+        <template v-if="booking.type === 'booking' && !personalScope">
+          <component :is="canChangeBooking ? NuxtLink : 'div'" :to="canChangeBooking ? `${editorPath}/team-member` : undefined" class="mt-6 flex items-center gap-4 border-y border-default py-6">
+            <span class="min-w-0 flex-1"><span class="block text-base font-medium text-highlighted">Team member</span><span class="block text-sm text-muted">{{ booking.assignedMemberName || (booking.assignedMemberId ? 'Previously assigned member' : booking.organizationName) }}</span></span>
+            <UIcon v-if="canChangeBooking" name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
+          </component>
+          <UAlert v-if="booking.providerConflict" class="mt-4" color="warning" description="This booking overlaps a busy time. Contact your guest to change it." />
+          <UAlert v-if="booking.providerCalendarStatus" class="mt-4" color="warning" :description="booking.providerCalendarStatus" />
+        </template>
+        <!-- Airbnb's "Change requested", for both sides and both kinds: the proposal is out and the record stays as it is until the guest answers. -->
+        <UAlert
+          v-if="booking.pendingChange"
+          class="mt-4"
+          color="info"
+          variant="soft"
+          icon="i-lucide-clock"
+          :title="personalScope ? `${booking.organizationName} requested a change` : 'Change requested'"
+          :description="`${booking.pendingChange.afterLabel} · ${booking.pendingChange.partySize} ${booking.pendingChange.partySize === 1 ? 'guest' : 'guests'}${personalScope ? '' : ` · Waiting for ${firstName(booking.guestName ?? '')} to respond`}`"
+          :actions="personalScope ? [
+            { label: 'Accept', color: 'neutral' as const, loading: answering === 'accept', onClick: () => answerChange('accept') },
+            { label: 'Decline', color: 'neutral' as const, variant: 'soft' as const, loading: answering === 'decline', onClick: () => answerChange('decline') },
+          ] : undefined"
+        />
+        <div class="mt-6 space-y-2">
+          <UButton
+            v-if="canChangeBooking && !personalScope"
+            :label="`Change ${noun}`"
+            color="neutral"
             variant="soft"
-            icon="i-lucide-clock"
-            :title="personalScope ? `${booking.organizationName} requested a change` : 'Change requested'"
-            :description="`${booking.pendingChange.afterLabel} · ${booking.pendingChange.partySize} ${booking.pendingChange.partySize === 1 ? 'guest' : 'guests'}${personalScope ? '' : ` · Waiting for ${firstName(booking.guestName ?? '')} to respond`}`"
-            :actions="personalScope ? [
-              { label: 'Accept', color: 'neutral' as const, loading: answering === 'accept', onClick: () => answerChange('accept') },
-              { label: 'Decline', color: 'neutral' as const, variant: 'soft' as const, loading: answering === 'decline', onClick: () => answerChange('decline') },
-            ] : undefined"
+            block
+            class="h-12 justify-center rounded-xl text-base font-medium"
+            :to="`${editorPath}/change`"
+            @click="beginChange"
           />
-          <div class="mt-6 space-y-2">
-            <UButton
-              v-if="canChangeBooking && !personalScope"
-              :label="`Change ${noun}`"
-              color="neutral"
-              variant="soft"
-              block
-              class="h-12 justify-center rounded-xl text-base font-medium"
-              :to="`${editorPath}/change`"
-              @click="beginChange"
-            />
-            <UButton
-              v-if="messageTo"
-              :label="personalScope ? 'Message' : 'Message guest'"
-              color="neutral"
-              variant="soft"
-              block
-              class="h-12 justify-center rounded-xl text-base font-medium"
-              :to="messageTo"
-            />
-            <UButton
-              v-if="personalScope && booking.contactPhone"
-              label="Call"
-              color="neutral"
-              variant="soft"
-              block
-              class="h-12 justify-center rounded-xl text-base font-medium"
-              :to="`tel:${booking.contactPhone.replace(/\s/g, '')}`"
-            />
+          <UButton
+            v-if="messageTo"
+            :label="personalScope ? 'Message' : 'Message guest'"
+            color="neutral"
+            variant="soft"
+            block
+            class="h-12 justify-center rounded-xl text-base font-medium"
+            :to="messageTo"
+          />
+          <UButton
+            v-if="personalScope && booking.contactPhone"
+            label="Call"
+            color="neutral"
+            variant="soft"
+            block
+            class="h-12 justify-center rounded-xl text-base font-medium"
+            :to="`tel:${booking.contactPhone.replace(/\s/g, '')}`"
+          />
+        </div>
+
+        <div v-if="!purchase" class="mt-8 grid grid-cols-2 gap-4 border-t border-default pt-6">
+          <div>
+            <p class="text-base font-semibold text-highlighted">Date</p>
+            <p class="mt-1 text-base text-muted">{{ formattedDate }}</p>
           </div>
-
-          <div v-if="!purchase" class="mt-8 grid grid-cols-2 gap-4 border-t border-default pt-6">
-            <div>
-              <p class="text-base font-semibold text-highlighted">Date</p>
-              <p class="mt-1 text-base text-muted">{{ formattedDate }}</p>
-            </div>
-            <div>
-              <p class="text-base font-semibold text-highlighted">Time</p>
-              <p class="mt-1 text-base text-muted">{{ formattedTime }}</p>
-            </div>
+          <div>
+            <p class="text-base font-semibold text-highlighted">Time</p>
+            <p class="mt-1 text-base text-muted">{{ formattedTime }}</p>
           </div>
+        </div>
 
-          <PaymentDetails v-for="detail in booking.payments" :key="detail.payment.id" :payment="detail.payment" :refunds="detail.refunds" :order="detail.order">
-            <template v-if="!personalScope && detail.payment.captured_amount > detail.payment.refunded_amount" #actions>
-              <!-- Airbnb's host sends money from the reservation; the amount is asked for on its own leaf. -->
-              <NuxtLink :to="{ path: `${editorPath}/refund`, query: { payment: detail.payment.id } }" class="flex items-center gap-4 border-t border-default py-4">
-                <span class="min-w-0 flex-1 text-base font-medium text-highlighted">Send a refund</span>
-                <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
-              </NuxtLink>
-            </template>
-          </PaymentDetails>
-
-          <div class="mt-6 border-t border-default pt-2">
-            <!-- The business opens the guest; the account reads its own party, as Airbnb's "Who's coming". A purchase names its buyer and nothing opens. -->
-            <div v-if="personalScope && !purchase" class="py-4">
-              <p class="text-base font-medium text-highlighted">Who’s coming</p>
-              <p class="mt-1 text-sm text-muted">{{ guestCountLabel }}</p>
-            </div>
-            <component :is="purchase ? 'div' : NuxtLink" v-else-if="!personalScope && booking.guestName" :to="purchase ? undefined : `${editorPath}/guest`" class="flex items-center gap-4 py-4">
-              <UAvatar :src="booking.guestImageUrl || undefined" :alt="booking.guestName" icon="i-lucide-user" size="md" class="shrink-0" />
-              <span class="min-w-0 flex-1">
-                <span class="block text-base font-medium text-highlighted">{{ booking.guestName }}</span>
-                <span v-if="!purchase" class="block text-sm text-muted">{{ guestCountLabel }}</span>
-              </span>
-              <UIcon v-if="!purchase" name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
-            </component>
-
-            <div v-if="booking.requests" class="border-t border-default py-4">
-              <p class="text-base font-medium text-highlighted">{{ personalScope ? 'Your requests' : 'Guest requests' }}</p>
-              <p class="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-muted">{{ booking.requests }}</p>
-            </div>
-
-            <button v-if="!purchase" type="button" class="flex w-full items-center gap-4 border-t border-default py-4 text-left" @click="policyOpen = true">
-              <span class="min-w-0 flex-1">
-                <span class="block text-base font-medium text-highlighted">Cancellation policy</span>
-                <span class="block text-sm text-muted">{{ cancellationSummary }}</span>
-              </span>
-              <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
-            </button>
-
-            <NuxtLink v-if="!personalScope && !purchase" :to="`${editorPath}/notes`" class="flex items-center gap-4 border-t border-default py-4">
-              <span class="min-w-0 flex-1">
-                <span class="block text-base font-medium text-highlighted">Your notes</span>
-                <span class="block text-sm text-muted">{{ notesSummary }}</span>
-              </span>
+        <PaymentDetails v-for="detail in booking.payments" :key="detail.payment.id" :payment="detail.payment" :refunds="detail.refunds" :order="detail.order">
+          <template v-if="!personalScope && detail.payment.captured_amount > detail.payment.refunded_amount" #actions>
+            <!-- Airbnb's host sends money from the reservation; the amount is asked for on its own leaf. -->
+            <NuxtLink :to="{ path: `${editorPath}/refund`, query: { payment: detail.payment.id } }" class="flex items-center gap-4 border-t border-default py-4">
+              <span class="min-w-0 flex-1 text-base font-medium text-highlighted">Send a refund</span>
               <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
             </NuxtLink>
+          </template>
+        </PaymentDetails>
 
-
-            <div class="flex items-center gap-4 border-t border-default py-4">
-              <span class="min-w-0 flex-1">
-                <span class="block text-base font-medium text-highlighted">{{ capitalize(noun) }} made</span>
-                <span class="block text-sm text-muted">{{ formatCreatedAt(booking.createdAt) }}</span>
-              </span>
-            </div>
-
-            <div v-if="availableActions.length" class="border-t border-default pt-4">
-              <UButton
-                v-for="action in availableActions"
-                :key="action.value"
-                :label="action.label"
-                :color="action.color"
-                variant="ghost"
-                block
-                class="h-12 justify-start rounded-xl text-base font-medium"
-                :loading="pendingAction === action.value"
-                @click="action.value === 'cancel' && !booking.guestCanRetryCancellation ? openCancel() : runAction(action.value)"
-              />
-            </div>
+        <div class="mt-6 border-t border-default pt-2">
+          <!-- The business opens the guest; the account reads its own party, as Airbnb's "Who's coming". A purchase names its buyer and nothing opens. -->
+          <div v-if="personalScope && !purchase" class="py-4">
+            <p class="text-base font-medium text-highlighted">Who’s coming</p>
+            <p class="mt-1 text-sm text-muted">{{ guestCountLabel }}</p>
           </div>
+          <component :is="purchase ? 'div' : NuxtLink" v-else-if="!personalScope && booking.guestName" :to="purchase ? undefined : `${editorPath}/guest`" class="flex items-center gap-4 py-4">
+            <UAvatar :src="booking.guestImageUrl || undefined" :alt="booking.guestName" icon="i-lucide-user" size="md" class="shrink-0" />
+            <span class="min-w-0 flex-1">
+              <span class="block text-base font-medium text-highlighted">{{ booking.guestName }}</span>
+              <span v-if="!purchase" class="block text-sm text-muted">{{ guestCountLabel }}</span>
+            </span>
+            <UIcon v-if="!purchase" name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
+          </component>
+
+          <div v-if="booking.requests" class="border-t border-default py-4">
+            <p class="text-base font-medium text-highlighted">{{ personalScope ? 'Your requests' : 'Guest requests' }}</p>
+            <p class="mt-1 whitespace-pre-wrap text-sm leading-relaxed text-muted">{{ booking.requests }}</p>
           </div>
-        </template>
-      </div>
-    </template>
+
+          <button v-if="!purchase" type="button" class="flex w-full items-center gap-4 border-t border-default py-4 text-left" @click="policyOpen = true">
+            <span class="min-w-0 flex-1">
+              <span class="block text-base font-medium text-highlighted">Cancellation policy</span>
+              <span class="block text-sm text-muted">{{ cancellationSummary }}</span>
+            </span>
+            <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
+          </button>
+
+          <NuxtLink v-if="!personalScope && !purchase" :to="`${editorPath}/notes`" class="flex items-center gap-4 border-t border-default py-4">
+            <span class="min-w-0 flex-1">
+              <span class="block text-base font-medium text-highlighted">Your notes</span>
+              <span class="block text-sm text-muted">{{ notesSummary }}</span>
+            </span>
+            <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
+          </NuxtLink>
+
+
+          <div class="flex items-center gap-4 border-t border-default py-4">
+            <span class="min-w-0 flex-1">
+              <span class="block text-base font-medium text-highlighted">{{ capitalize(noun) }} made</span>
+              <span class="block text-sm text-muted">{{ formatCreatedAt(booking.createdAt) }}</span>
+            </span>
+          </div>
+
+          <div v-if="availableActions.length" class="border-t border-default pt-4">
+            <UButton
+              v-for="action in availableActions"
+              :key="action.value"
+              :label="action.label"
+              :color="action.color"
+              variant="ghost"
+              block
+              class="h-12 justify-start rounded-xl text-base font-medium"
+              :loading="pendingAction === action.value"
+              @click="action.value === 'cancel' && !booking.guestCanRetryCancellation ? openCancel() : runAction(action.value)"
+            />
+          </div>
+        </div>
+      </template>
+    </div>
   </component>
 
   <DashboardListItemDialog v-model:open="policyOpen" :title="booking?.policy?.heading || 'Cancellation policy'" :show-actions="false">
@@ -291,7 +271,6 @@ import { NuxtLink } from '#components'
 import { formatCalendarDate, formatTime, formatTimestamp } from '~/utils/timezone'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
-import { dashboardColumnWidths } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import { getErrorMessage } from '~/utils/errors'
 import { htmlToPlainText } from '~/utils/markdown'
 
@@ -300,7 +279,7 @@ const props = defineProps<{
   bookingId: string
   /** The record's canonical URL, which the rows that change it link into. */
   editorPath: string
-  /** Mounted inside the guest thread's drawer, which already owns the column. */
+  /** Mounted inside the guest thread's leaf, which already owns the column and its padding. */
   embedded?: boolean
   /** The account that booked, reading its own record: no team controls, its own cancel. */
   personalScope?: boolean
@@ -312,10 +291,10 @@ const dashboardApi = props.personalScope ? applicationFetch : useDashboardApi()
 const realtime = useDashboardInvalidations()
 const actionError = ref<string | null>(null)
 const editorPath = computed(() => props.editorPath)
-// Owning the column means owning its header; inside the drawer it is a plain body.
+// Owning the column means owning its header; inside the thread's leaf it is that leaf's body.
 const chrome = computed(() => (props.embedded
-  ? { class: 'flex min-h-0 flex-1 flex-col' }
-  : { id: props.personalScope ? 'account-booking-details' : 'booking-details', title: pageTitle.value }))
+  ? {}
+  : { id: props.personalScope ? 'account-booking-details' : 'booking-details', title: pageTitle.value, column: 'leaf' as const }))
 /** Which note a leaf is editing, or none for a new one. */
 const openNoteId = ref<string | null>(null)
 const selectedNote = computed(() => booking.value?.notes.find(note => note.id === openNoteId.value))
@@ -523,11 +502,6 @@ function openCancel() {
   cancelNote.value = ''
   actionError.value = null
   cancelOpen.value = true
-}
-
-function retryRealtime() {
-  realtime.connect()
-  void refreshDetails()
 }
 
 watch(realtime.event, (event) => {

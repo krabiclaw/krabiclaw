@@ -1,6 +1,6 @@
 <template>
   <!-- A question: its rows are the three things it holds, each a leaf below. -->
-  <DashboardIndexPanel id="organization-qa-record" :title="isNew ? 'New question' : form.question || 'Question'" :auto-open="navigationGroups[0]?.items.find(item => item.to)?.to ?? null">
+  <DashboardIndexPanel id="organization-qa-record" :title="isNew ? newTitle : form.question || 'Question'" :auto-open="navigationGroups[0]?.items.find(item => item.to)?.to ?? null" :create="firstStep">
     <template v-if="!isNew" #right>
       <DashboardResourceLocalization
         :organization-id="organizationId"
@@ -29,9 +29,6 @@
       icon="i-lucide-triangle-alert"
       :description="errorMessage"
     />
-    <div v-if="isNew" class="mb-6 flex justify-end">
-      <UButton :label="createActionLabel" :loading="saving" @click="startOrCreate" />
-    </div>
     <EditorNavigationList :groups="navigationGroups" :active-item="level.child.value" />
   </DashboardIndexPanel>
 </template>
@@ -142,7 +139,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => [
   },
 ])
 
-const { createActionLabel, saveLabel, saveDisabled, save: saveOpenSection, startOrCreate } = useCreateWalk({
+const { title: newTitle, firstStep, saveLabel, saveDisabled, save: saveOpenSection } = useCreateWalk({
   recordPath,
   isNew,
   openKey,

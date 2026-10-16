@@ -1,6 +1,7 @@
 import { organizationTool, type McpToolDefinition } from './shared'
 import { NOT_HANDLED, requiredString, type McpExecutorContext } from './execution'
 import { CHANNEL_PUSH_SCHEMA } from '~/shared/channel-push'
+import { STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
 import { memberAccessPrincipal } from '~/server/utils/member-access'
 import { cancelStay, createStay, deleteStayPayment, getStay, listStays, readStayCalendar, recordStayPayment, setStayNights, stayAccessFor, updateStay, STAY_CHANNELS, STAY_PAYMENT_METHODS, STAY_STATUSES } from '~/server/domain/stays'
 
@@ -26,15 +27,48 @@ const stayProperties = {
 }
 const stay = { type: 'object', properties: stayProperties, required: Object.keys(stayProperties) }
 const channelPush = { ...CHANNEL_PUSH_SCHEMA, description: "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it." }
-export const stayDetail = { type: 'object', properties: { ...stayProperties, payments: { type: 'array', items: payment }, paid_minor: { type: 'integer' }, payment_status: { type: ['string', 'null'], enum: ['unpaid', 'partial', 'paid', 'overpaid', null] }, channel_push: channelPush },
-  required: [...Object.keys(stayProperties), 'payments', 'paid_minor', 'payment_status'] }
-export const stayHomeObject = { type: 'object', properties: { product_id: text, name: text, location_id: text, timezone: text, currency: text, base_price_minor: { type: ['integer', 'null'] }, check_in_time: text, check_out_time: text, max_guests: { type: 'integer' }, min_nights: { type: 'integer' }, check_in_instructions: nullableText,
+const onlinePayment = { type: ['object', 'null'], description: 'The Stripe payment the guest made when booking this stay on the site; null for a stay booked any other way. paid_minor counts it net of refunds.',
+  properties: { payment_id: text, state: { type: 'string', enum: ['pending', 'captured', 'failed', 'recovery', 'refunded'] }, currency: text, amount_minor: { type: 'integer' }, captured_minor: { type: 'integer' }, refunded_minor: { type: 'integer' }, receipt_url: nullableText, created_at: text },
+  required: ['payment_id', 'state', 'currency', 'amount_minor', 'captured_minor', 'refunded_minor', 'receipt_url', 'created_at'] }
+export const stayDetail = { type: 'object', properties: { ...stayProperties, payments: { type: 'array', items: payment }, online_payment: onlinePayment, paid_minor: { type: 'integer' }, payment_status: { type: ['string', 'null'], enum: ['unpaid', 'partial', 'paid', 'overpaid', null] }, channel_push: channelPush },
+  required: [...Object.keys(stayProperties), 'payments', 'online_payment', 'paid_minor', 'payment_status'] }
+const nullableCode = (vocabulary: Record<string, unknown>, description: string) => ({ type: ['string', 'null'], enum: [...Object.keys(vocabulary), null], description })
+/** What a home is and offers: public product stay settings. */
+export const STAY_LISTING_SCHEMA = {
+  property_type: nullableCode(STAY_PROPERTY_TYPES, `What the home is: ${Object.entries(STAY_PROPERTY_TYPES).map(([code, label]) => `${code} (${label})`).join(', ')}. Null when not said.`),
+  bedrooms: { type: ['integer', 'null'], minimum: 0, maximum: 50, description: 'Bedrooms; 0 is a studio.' },
+  beds: { type: ['integer', 'null'], minimum: 1, maximum: 50 },
+  bathrooms: { type: ['number', 'null'], minimum: 0, maximum: 50, multipleOf: 0.5, description: 'Whole and half baths, such as 1.5.' },
+  amenities: { type: 'array', uniqueItems: true, items: { type: 'string', enum: Object.keys(STAY_AMENITIES) }, description: 'Amenity codes the home offers; replaces the whole list. Empty offers none.' },
+  cancellation_policy: nullableCode(STAY_CANCELLATION_POLICIES, 'Policy shown to guests for stays under 28 nights. It does not refund by itself.'),
+  long_term_cancellation_policy: nullableCode(STAY_LONG_TERM_CANCELLATION_POLICIES, 'Policy shown to guests for stays of 28 nights or more.'),
+}
+const checkoutInstruction = { type: 'object', properties: { task: { type: 'string', enum: Object.keys(STAY_CHECKOUT_TASKS) }, details: { type: ['string', 'null'], minLength: 1, maxLength: 500, description: 'Required for additional.' } }, required: ['task', 'details'], additionalProperties: false }
+/** The private arrival guide: managers and assigned members read it; no public page carries it. */
+export const STAY_ARRIVAL_SCHEMA = {
+  check_in_method: nullableCode(STAY_CHECK_IN_METHODS, 'How guests get in.'),
+  check_in_instructions: { type: ['string', 'null'], minLength: 1, maxLength: 5000 },
+  wifi_network: { type: ['string', 'null'], minLength: 1, maxLength: 100 },
+  wifi_password: { type: ['string', 'null'], minLength: 1, maxLength: 100 },
+  directions: { type: ['string', 'null'], minLength: 1, maxLength: 5000 },
+  house_manual: { type: ['string', 'null'], minLength: 1, maxLength: 5000 },
+  checkout_instructions: { type: 'array', items: checkoutInstruction, description: 'What guests do before leaving, in order, each task once; replaces the whole list.' },
+}
+const homeAddress = { type: ['object', 'null'], properties: { address: text, city: nullableText, state: nullableText, country: { type: 'string', pattern: '^[A-Z]{2}$' }, zip_code: nullableText }, required: ['address', 'city', 'state', 'country', 'zip_code'] }
+const photo = { type: 'object', properties: { id: text, kind: { type: 'string', enum: ['image', 'video'] }, url: { ...text, description: 'The picture to show; a video shows its poster frame.' }, width: { type: ['integer', 'null'] }, height: { type: ['integer', 'null'] }, alt_text: nullableText, position: { type: 'integer', minimum: 0 } },
+  required: ['id', 'kind', 'url', 'width', 'height', 'alt_text', 'position'] }
+export const stayHomeObject = { type: 'object', properties: { product_id: text, name: text, location_id: text, timezone: text, currency: text, base_price_minor: { type: ['integer', 'null'] }, base_price_tax_behavior: { type: ['string', 'null'], enum: ['unspecified', 'inclusive', 'exclusive', null] }, check_in_time: text, check_out_time: text, max_guests: { type: 'integer' }, min_nights: { type: 'integer' },
+  description: { type: 'string', description: 'The listing description; empty when none is written.' }, published: { type: 'boolean', description: 'Whether the home is listed on the site.' },
+  address: { ...homeAddress, description: "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one." }, latitude: { type: ['number', 'null'] }, longitude: { type: ['number', 'null'] },
+  ...STAY_LISTING_SCHEMA, ...STAY_ARRIVAL_SCHEMA,
   assigned_member_id: { ...nullableText, description: 'The member (member id) who looks after this home.' }, assigned_team_id: { ...nullableText, description: 'The team that looks after this home.' },
-  channel: { type: ['object', 'null'], description: 'The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.', properties: { provider: { type: 'string', enum: ['channex'] }, status: { type: 'string', enum: ['importing', 'connected', 'disconnected'] } }, required: ['provider', 'status'] } },
-  required: ['product_id', 'name', 'location_id', 'timezone', 'currency', 'base_price_minor', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'check_in_instructions', 'assigned_member_id', 'assigned_team_id', 'channel'] }
-const night = { type: 'object', properties: { date: day, available: { type: 'boolean' }, stay_id: nullableText, closed: { type: 'boolean' }, price_minor: { type: ['integer', 'null'] }, min_stay_arrival: { type: ['integer', 'null'] }, min_stay_through: { type: ['integer', 'null'] }, max_stay: { type: ['integer', 'null'] }, closed_to_arrival: { type: 'boolean' }, closed_to_departure: { type: 'boolean' }, source: { type: ['string', 'null'], enum: ['host', 'import', null] },
+  channel: { type: ['object', 'null'], description: 'The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.', properties: { provider: { type: 'string', enum: ['channex'] }, status: { type: 'string', enum: ['importing', 'connected', 'disconnected'] } }, required: ['provider', 'status'] },
+  photos: { type: 'array', description: "The home's photos in order, the cover first: its product's image, then its gallery. id is the media asset id; set_media, attach_media, reorder_media, remove_media and update_media_asset change them.", items: photo } },
+  required: ['product_id', 'name', 'location_id', 'timezone', 'currency', 'base_price_minor', 'base_price_tax_behavior', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights',
+    'description', 'published', 'address', 'latitude', 'longitude', ...Object.keys(STAY_LISTING_SCHEMA), ...Object.keys(STAY_ARRIVAL_SCHEMA), 'assigned_member_id', 'assigned_team_id', 'channel', 'photos'] }
+const night = { type: 'object', properties: { date: day, available: { type: 'boolean' }, stay_id: nullableText, held_until: { ...nullableText, description: 'When a guest checkout hold on this night lapses; null when no guest is paying for it. A held night is not available.' }, closed: { type: 'boolean' }, price_minor: { type: ['integer', 'null'] }, min_stay_arrival: { type: ['integer', 'null'] }, min_stay_through: { type: ['integer', 'null'] }, max_stay: { type: ['integer', 'null'] }, closed_to_arrival: { type: 'boolean' }, closed_to_departure: { type: 'boolean' }, source: { type: ['string', 'null'], enum: ['host', 'import', null] },
   channel: { type: ['object', 'null'], properties: { state: { type: 'string', enum: ['pending', 'pushed', 'needs_review'] }, detail: nullableText }, required: ['state', 'detail'] } },
-  required: ['date', 'available', 'stay_id', 'closed', 'price_minor', 'min_stay_arrival', 'min_stay_through', 'max_stay', 'closed_to_arrival', 'closed_to_departure', 'source', 'channel'] }
+  required: ['date', 'available', 'stay_id', 'closed', 'price_minor', 'min_stay_arrival', 'min_stay_through', 'max_stay', 'closed_to_arrival', 'closed_to_departure', 'source', 'held_until', 'channel'] }
 const calendar = { type: 'object', properties: { home: stayHomeObject, nights: { type: 'array', items: night }, stays: { type: 'array', items: stay }, channel_push: channelPush }, required: ['home', 'nights', 'stays'] }
 const guestFields = {
   check_in_date: day, check_out_date: { ...day, description: 'The morning the guest leaves; the stay holds the nights before it.' }, arrival_time: time,

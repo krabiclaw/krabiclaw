@@ -10,7 +10,7 @@ import type { PublicLocaleRepresentation } from '~/utils/public-resource-contrac
 import type { TenantPageHowToData } from '~/utils/tenant-page-blocks'
 import type { BlawbyDocumentPayload } from '~/utils/blawby-document-contract'
 import { markdownToPlainText } from '~/utils/markdown'
-import { isDemoHost, isDemoOrg } from '~/shared/demo'
+import { isDemoHost, isDemoOrganization } from '~/shared/demo'
 
 export interface PageBreadcrumb {
   name: string
@@ -116,7 +116,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
       // Whatever the page would otherwise say about itself, nothing
       // reached this way is Google's to keep — and deciding it here means no
       // page can be added that forgets to.
-      discoverability: previewAuthorized || isDemoHost(requestURL.hostname) || isDemoOrg(organization.id)
+      discoverability: previewAuthorized || isDemoHost(requestURL.hostname) || isDemoOrganization(organization)
         ? 'private'
         : value.discoverability,
     }

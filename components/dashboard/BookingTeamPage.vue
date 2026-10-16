@@ -1,10 +1,10 @@
 <template>
-  <DashboardIndexPanel v-if="!concern" id="booking-team" :title="team?.name ?? 'New booking team'" :auto-open="creating ? `${level.path.value}/name` : null">
+  <DashboardIndexPanel v-if="!concern" id="booking-team" :title="creating ? newTitle : team?.name ?? 'Booking team'" :create="firstStep">
     <UAlert v-if="loadError || saveError" color="error" :description="saveError ?? getErrorMessage(loadError, 'Booking team could not be loaded')" />
     <EditorNavigationList :groups="groups" :active-item="level.child.value" />
     <UButton v-if="team" class="mt-8" color="error" variant="ghost" :loading="saving" @click="remove">Delete team</UButton>
   </DashboardIndexPanel>
-  <DashboardLeafPanel v-else id="booking-team-setting" :title="concern === 'name' ? 'Team name' : 'Team members'" :lead="concern === 'members' ? 'Bookings can use the working hours of any included member.' : undefined" :save-label="creating ? 'Create team' : 'Save'" :saving="saving" :disabled="Boolean(loadError) || (!form?.dirty && !saveError) || !valid" :error="saveError ?? (loadError ? getErrorMessage(loadError, 'Booking team could not be loaded') : '')" @cancel="reset(); revision += 1" @save="form?.submit()">
+  <DashboardLeafPanel v-else id="booking-team-setting" :title="concern === 'name' ? 'Team name' : 'Team members'" :lead="concern === 'members' ? 'Bookings can use the working hours of any included member.' : undefined" :save-label="createSaveLabel ?? 'Save'" :saving="saving" :disabled="Boolean(loadError) || (!form?.dirty && !saveError) || !valid" :error="saveError ?? (loadError ? getErrorMessage(loadError, 'Booking team could not be loaded') : '')" @cancel="reset(); revision += 1" @save="saveStep">
     <UForm ref="form" :key="revision" :state="{ name, included }" @submit="save">
       <UFormField v-if="concern === 'name'" name="name">
         <UInput v-model="name" aria-label="Team name" variant="none" autofocus class="w-full" :ui="{ base: 'px-0 text-2xl md:text-2xl' }" />
@@ -48,6 +48,21 @@ const groups = computed(() => [{ id: 'team', items: [
 watchEffect(() => {
   if (level.mode.value === 'yield') return
   if ((!creating.value && data.value && !team.value) || (props.concern && (!['name', 'members'].includes(props.concern) || (creating.value && props.concern !== 'name')))) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
+})
+// A team being made gives its name first; everything else waits until it exists.
+const { title: newTitle, firstStep, saveLabel: createSaveLabel, save: saveStep } = useCreateWalk({
+  recordPath: level.path,
+  isNew: creating,
+  openKey: computed(() => 'name' as const),
+  labels: { name: 'Name' },
+  order: ['name'],
+  missing: () => !name.value.trim(),
+  noun: 'booking team',
+  saving,
+  commit: async () => {
+    if (!form.value) throw new Error('The team form is not mounted')
+    await form.value.submit()
+  },
 })
 function reset() { name.value = team.value?.name ?? ''; included.value = team.value?.members.map(member => member.userId) ?? []; saveError.value = null }
 watch([team, () => props.concern], reset, { immediate: true })

@@ -1,6 +1,6 @@
 <template>
   <!-- A post: its rows are the things it holds, each a leaf below this level. -->
-  <DashboardIndexPanel id="post" :title="isNew ? 'New post' : editor.form.title || 'Post'" :auto-open="navigationGroups[0]?.items.find(item => item.to)?.to ?? null">
+  <DashboardIndexPanel id="post" :title="isNew ? newTitle : editor.form.title || 'Post'" :auto-open="navigationGroups[0]?.items.find(item => item.to)?.to ?? null" :create="firstStep">
     <template v-if="post" #right>
       <DashboardResourceLocalization
         :organization-id="organizationId"
@@ -15,9 +15,6 @@
 
     <UAlert v-if="loadError" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Post could not be loaded" :description="loadError" />
     <template v-else>
-      <div v-if="isNew" class="mb-6 flex justify-end">
-        <UButton :label="createActionLabel" :loading="editor.saving.value" @click="startOrCreate" />
-      </div>
       <!-- The post as a visitor will see it, before and after it is live. -->
       <div v-if="post" class="mb-6 flex flex-wrap items-center gap-2">
         <UBadge :color="post.status === 'published' ? 'success' : 'neutral'" variant="soft">{{ post.status === 'published' ? 'Live on the website' : 'Draft' }}</UBadge>
@@ -218,7 +215,7 @@ const sectionValid = computed(() => {
   const action = editor.form.callToAction
   return !action || (Boolean(action.label.trim()) && Boolean(action.url.trim()))
 })
-const { createActionLabel, saveLabel, saveDisabled: walkSaveDisabled, save: saveCurrentEditor, startOrCreate } = useCreateWalk<SectionKey>({
+const { title: newTitle, firstStep, saveLabel, saveDisabled: walkSaveDisabled, save: saveCurrentEditor } = useCreateWalk<SectionKey>({
   recordPath: postPath,
   isNew,
   openKey: editorKey,
@@ -275,6 +272,6 @@ function localizedPostPath(locale: string): string {
   return `/${locale}/posts/${slug}`
 }
 
-useSeoMeta({ title: () => `${isNew.value ? 'New post' : editor.form.title || 'Post'} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${isNew.value ? newTitle.value : editor.form.title || 'Post'} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
 provide(postEditorKey, { editor, organizationLocations, organizationId, postId, isNew, post, loadError, sectionLabels, saveLabel, saveDisabled, revert, save: saveCurrentEditor })
 </script>

@@ -41,6 +41,29 @@ function tenantGraph(org: string): string[] {
   ]
 }
 
+/** One lodging tenant: a home with its stay, Airbnb mapping and connection, a saved and a scheduled message, and a team conversation about the stay. */
+function lodgingGraph(org: string): string[] {
+  const location = `${org}-location`
+  const home = `${org}-home`
+  const stay = `${org}-stay`
+  const member = `${org}-member`
+  const thread = `${org}-team-thread`
+  return [
+    `INSERT INTO products (kind, id,organization_id,name,slug,created_by,updated_by) VALUES ('stay', '${home}','${org}','Cabin','cabin','t','t')`,
+    `INSERT INTO product_locations (organization_id,product_id,location_id,active,published,created_by,updated_by) VALUES ('${org}','${home}','${location}',1,1,'t','t')`,
+    `INSERT INTO product_stay_configs (product_id,organization_id,location_id,check_in_time,check_out_time,max_guests,assigned_member_id,created_by,updated_by) VALUES ('${home}','${org}','${location}','15:00','11:00',4,'${member}','t','t')`,
+    `INSERT INTO stays (id,organization_id,product_id,channel,owner,status,check_in_date,check_out_date,adults,guest_name,total_minor,currency) VALUES ('${stay}','${org}','${home}','direct','app','confirmed','2099-01-05','2099-01-07',2,'Ana',30000,'USD')`,
+    `INSERT INTO channex_connections (organization_id,status,group_id) VALUES ('${org}','not_connected','${org}-group')`,
+    `INSERT INTO product_channel_mappings (organization_id,product_id,provider,listing_id,channel_id,import_stage) VALUES ('${org}','${home}','channex','${org}-listing','${org}-channel','property')`,
+    `INSERT INTO message_templates (id,organization_id,title,body,version,created_at,updated_at) VALUES ('${org}-template','${org}','Welcome','Hello',1,'${NOW}','${NOW}')`,
+    `INSERT INTO scheduled_guest_messages (id,organization_id,product_id,stay_id,template_id,template_title,template_version,stay_version,body,due_at,timezone,status,created_at,updated_at)
+      VALUES ('${org}-scheduled','${org}','${home}','${stay}','${org}-template','Welcome',1,1,'Hello','2099-01-05T08:00:00.000Z','Asia/Bangkok','pending','${NOW}','${NOW}')`,
+    `INSERT INTO team_threads (id,organization_id,stay_id,participants_key,last_message_at) VALUES ('${thread}','${org}','${stay}','${member}','${NOW}')`,
+    `INSERT INTO team_thread_members (thread_id,organization_id,member_id) VALUES ('${thread}','${org}','${member}')`,
+    `INSERT INTO team_messages (id,organization_id,thread_id,sender_user_id,body,idempotency_key,request_hash) VALUES ('${org}-team-message','${org}','${thread}','${org}-guest','Cleaned','k','h')`,
+  ]
+}
+
 /** Every table that scopes a row to an organization, and how many rows it holds for this one. */
 async function rowsOwnedBy(db: D1Database, org: string): Promise<Record<string, number>> {
   const tables = await db.prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite\\_%' ESCAPE '\\' AND name NOT LIKE '\\_cf\\_%' ESCAPE '\\' ORDER BY name").all<{ name: string }>()
@@ -73,9 +96,13 @@ test('guest records refuse an ordinary parent delete and cascade away with their
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
-    const baseline = readFileSync('migrations/0000_baseline.sql', 'utf8').split('--> statement-breakpoint').map(statement => statement.trim()).filter(Boolean)
-    await db.batch(baseline.map(statement => db.prepare(statement)))
-    await db.batch([...tenantGraph('doomed'), ...tenantGraph('bystander')].map(statement => db.prepare(statement)))
+    // The baseline and every forward migration after it, in the journal's order.
+    const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ tag: string }> }
+    for (const { tag } of journal.entries) {
+      const statements = readFileSync(`migrations/${tag}.sql`, 'utf8').split('--> statement-breakpoint').map(statement => statement.trim()).filter(Boolean)
+      await db.batch(statements.map(statement => db.prepare(statement)))
+    }
+    await db.batch(['doomed', 'bystander'].flatMap(org => [...tenantGraph(org), ...lodgingGraph(org)]).map(statement => db.prepare(statement)))
     const bystanderBefore = await rowsOwnedBy(db, 'bystander')
 
     for (const [parent, statement] of [
@@ -87,6 +114,9 @@ test('guest records refuse an ordinary parent delete and cascade away with their
       // generated session name.
       ['product', "DELETE FROM products WHERE id = 'doomed-product'"],
       ['availability rule', "DELETE FROM product_availability_rules WHERE id = 'doomed-rule'"],
+      // A stay pins its home, and a team conversation and a scheduled message pin their stay.
+      ['stay home', "DELETE FROM product_stay_configs WHERE product_id = 'doomed-home'"],
+      ['stay', "DELETE FROM stays WHERE id = 'doomed-stay'"],
     ] as const) {
       await assert.rejects(db.prepare(statement).run(), /FOREIGN KEY constraint failed/, `deleting the ${parent} alone must be refused`)
     }

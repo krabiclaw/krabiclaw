@@ -5,7 +5,7 @@
     into, so the editors exist once here and once there.
   -->
   <DashboardLeafPanel v-if="stayId" id="thread-record" :title="recordTitle" :footer="false">
-    <StayDetails :stay-id="stayId" />
+    <StayDetails :stay-id="stayId" embedded />
   </DashboardLeafPanel>
   <DashboardLeafPanel v-else-if="bookingType && bookingId" id="thread-record" :title="recordTitle" :footer="false">
     <BookingDetails

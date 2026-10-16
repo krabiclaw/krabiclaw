@@ -12,7 +12,6 @@ import { localNow, timezoneLabel } from '../../utils/timezone'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import type { Collection, Product } from '../../server/types/products'
 import type { DashboardLocation } from '../../composables/useDashboardOrganization'
-import { mediaStillUrl } from '../../shared/media-placement-contract'
 import type { TodayFeedPayload } from '../../shared/dashboard-today'
 
 // The dashboard's pane topology is the nested route tree (DESIGN.md, Route
@@ -55,7 +54,7 @@ test.describe('dashboard pane hierarchy', () => {
   test('each Menu destination is a root at its own URL, and Website content nests under Website', async ({ page }) => {
     await page.setViewportSize(WIDE)
     await open(page, `${ORG}/menu`)
-    const segments = ['website/pages', 'website/blog', 'website/qa', 'website/brand', 'website/pages/links', 'website/posts', 'locations', 'team', 'products', 'products/menu', 'products/services']
+    const segments = ['website/pages', 'website/blog', 'website/qa', 'website/brand', 'website/pages/links', 'website/posts', 'locations', 'team', 'products', 'products/menu']
     const resolved = await page.evaluate(({ org, segments }) => {
       const router = (document.querySelector('#__nuxt') as Element & {
         __vue_app__: { config: { globalProperties: { $router: { resolve: (path: string) => { path: string; matched: Array<{ path: string; meta: { tab?: unknown; back?: unknown } }> } } } } }
@@ -83,7 +82,6 @@ test.describe('dashboard pane hierarchy', () => {
       'team': { path: `${ORG}/team`, levels: [`${o}/team`], ...website },
       'products': { path: `${ORG}/products`, levels: [`${o}/products`], tab: 'catalog', back: null },
       'products/menu': { path: `${ORG}/products/menu`, levels: [`${o}/products`, `${o}/products/menu`], tab: 'catalog', back: null },
-      'products/services': { path: `${ORG}/products/services`, levels: [`${o}/products`, `${o}/products/services`], tab: 'catalog', back: null },
     })
   })
 
@@ -192,10 +190,10 @@ test.describe('dashboard pane hierarchy', () => {
       const leaf = page.locator('#dashboard-panel-booking-team-setting')
       await expect(page.getByRole('dialog', { name: 'Team name', exact: true })).toBeVisible()
       await expect(page.locator('#dashboard-panel-booking-team')).toBeVisible()
-      await expect(leaf.getByRole('button', { name: 'Create team', exact: true })).toBeDisabled()
+      await expect(leaf.getByRole('button', { name: 'Create booking team', exact: true })).toBeDisabled()
       await leaf.getByRole('textbox', { name: 'Team name', exact: true }).fill(name)
       const created = page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/organization/create-team' && response.request().method() === 'POST')
-      await leaf.getByRole('button', { name: 'Create team', exact: true }).click()
+      await leaf.getByRole('button', { name: 'Create booking team', exact: true }).click()
       const createdResponse = await created
       expect(createdResponse.status(), await createdResponse.text()).toBe(200)
       teamId = (await createdResponse.json() as { id: string }).id
@@ -516,7 +514,7 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page.locator('#dashboard-panel-catalog [data-testid="dashboard-navbar-back"]')).toHaveCount(0)
   })
 
-  test('Catalog shows real sections and offerings as desktop tiles and mobile rows with their locations', async ({ page }, testInfo) => {
+  test('Catalog opens one menu per location and every other offering as cards, filtered by kind pills', async ({ page }, testInfo) => {
     const [productResponse, collectionResponse, locationResponse] = await Promise.all([
       page.request.get('/api/editor/organizations/org-demo/products'),
       page.request.get('/api/editor/organizations/org-demo/collections'),
@@ -526,92 +524,80 @@ test.describe('dashboard pane hierarchy', () => {
     const { products } = await productResponse.json() as { products: Product[] }
     const { collections } = await collectionResponse.json() as { collections: Collection[] }
     const { locations } = await locationResponse.json() as { locations: DashboardLocation[] }
-    const section = collections.find(collection => products.some(product => product.kind === 'dish' && product.collections.some(membership => membership.collection_id === collection.id)))
-    expect(section, 'The demo has a real menu section containing dishes').toBeDefined()
+    expect(locations.length, 'The demo has more than one location, so it has more than one menu').toBeGreaterThan(1)
+    const section = collections.find(collection => collection.location_id && products.some(product => product.kind === 'dish' && product.collections.some(membership => membership.collection_id === collection.id)))
+    expect(section, 'The demo has a location-owned menu section containing dishes').toBeDefined()
+    const menuSections = collections.filter(collection => {
+      const members = products.filter(product => product.collections.some(membership => membership.collection_id === collection.id))
+      return !members.length || members.some(product => product.kind === 'dish')
+    })
 
     await page.setViewportSize(WIDE)
     await open(page, `${ORG}/products`)
     const catalog = page.locator('#dashboard-panel-catalog')
-    await expect(catalog.getByRole('heading', { level: 2 })).toHaveText(['Menu', 'Experiences', 'Products', 'Services'])
-    await expect(catalog.getByRole('link', { name: /^All items/ })).toHaveCount(0)
-    const menu = page.getByTestId('catalog-section-menu')
-    const sectionCard = menu.getByTestId(`selector-item-${section!.id}`)
-    const sectionPath = `${ORG}/products/menu/${section!.id}${section!.location_id ? `?location_id=${encodeURIComponent(section!.location_id)}` : ''}`
-    await expect(sectionCard).toHaveAttribute('href', sectionPath)
-    await expect(sectionCard.getByRole('heading', { level: 3 })).toHaveText(section!.name)
-    const sectionLocation = section!.location_id ? locations.find(location => location.id === section!.location_id) : null
-    if (section!.location_id) expect(sectionLocation, 'A section’s location must exist in its tenant').toBeDefined()
-    await expect(sectionCard).toContainText(sectionLocation?.title ?? 'Shared by every location')
+    await expect(catalog.getByTestId('catalog-kind-all')).toHaveAttribute('aria-pressed', 'true')
+    await expect(catalog.getByRole('combobox', { name: 'Location', exact: true })).toHaveCount(0)
+    const grid = catalog.getByTestId('catalog-grid')
 
-    for (const kind of ['experience', 'item', 'service'] as const) {
-      const group = page.getByTestId(`catalog-section-${kind}`)
-      const expected = products.filter(product => product.kind === kind)
-      await expect(group.locator('a[data-testid^="selector-item-"]')).toHaveCount(expected.length)
-      for (const product of expected) {
-        const card = group.getByTestId(`selector-item-${product.id}`)
-        await expect(card).toHaveAttribute('href', `${ORG}/products/${product.id}`)
-        await expect(card.getByRole('heading', { level: 3 })).toHaveText(product.name)
-        for (const binding of product.locations) {
-          const location = locations.find(row => row.id === binding.location_id)
-          expect(location, 'An offering’s location must exist in its tenant').toBeDefined()
-          await expect(card).toContainText(location!.title)
-        }
-        if (product.booking?.held_online) await expect(card).toContainText('Online')
-        else if (!product.locations.length) await expect(card).toContainText('No locations set')
-        for (const membership of product.collections) {
-          const category = collections.find(row => row.id === membership.collection_id)
-          expect(category, 'An offering’s category must exist in its tenant').toBeDefined()
-          await expect(card).toContainText(category!.name)
-        }
-        if (product.variants.every(variant => !variant.prices.length)) await expect(card).toContainText('No price set')
-      }
+    for (const location of locations) {
+      const card = grid.getByTestId(`selector-item-menu-${location.id}`)
+      const count = menuSections.filter(collection => collection.location_id === null || collection.location_id === location.id).length
+      await expect(card).toHaveAttribute('href', `${ORG}/products/menu?location_id=${encodeURIComponent(location.id)}`)
+      await expect(card.getByRole('heading', { level: 2 })).toHaveText(location.title)
+      await expect(card).toContainText(`${count} ${count === 1 ? 'section' : 'sections'}`)
     }
-    const desktopImage = await sectionCard.locator('[data-selector-image]').boundingBox()
+    const offerings = products.filter(product => product.kind !== 'dish')
+    await expect(grid.locator('a[data-testid^="selector-item-"]')).toHaveCount(locations.length + offerings.length)
+    for (const product of offerings) {
+      const card = grid.getByTestId(`selector-item-${product.id}`)
+      await expect(card).toHaveAttribute('href', `${ORG}/products/${product.id}`)
+      await expect(card.getByRole('heading', { level: 2 })).toHaveText(product.name)
+      for (const binding of product.locations) {
+        const location = locations.find(row => row.id === binding.location_id)
+        expect(location, 'An offering’s location must exist in its tenant').toBeDefined()
+        await expect(card).toContainText(location!.title)
+      }
+      if (product.booking?.held_online) await expect(card).toContainText('Online')
+      else if (!product.locations.length) await expect(card).toContainText('No locations set')
+      if (product.variants.every(variant => !variant.prices.length)) await expect(card).toContainText('No price set')
+    }
+    const firstCard = grid.locator('a[data-testid^="selector-item-"]').first()
+    const desktopImage = await firstCard.locator('[data-selector-image]').boundingBox()
     expect(desktopImage).not.toBeNull()
     expect(desktopImage!.width / desktopImage!.height).toBeCloseTo(20 / 19, 2)
-    const sectionPhotos = products
-      .filter(product => product.collections.some(membership => membership.collection_id === section!.id))
-      .map(product => mediaStillUrl(product.image))
-      .filter((url): url is string => Boolean(url))
-    if (sectionPhotos.length) {
-      const photo = sectionCard.locator('img')
-      await expect(photo).toHaveCount(1)
-      expect(sectionPhotos, 'The menu section displays one of its own items’ real photos').toContain(await photo.getAttribute('src'))
-      await expect.poll(() => photo.evaluate(image => (image as HTMLImageElement).complete && (image as HTMLImageElement).naturalWidth > 0), {
-        message: 'The fixture’s menu photo must finish rendering before the Catalog screenshot',
-      }).toBe(true)
-    }
     await page.screenshot({ path: testInfo.outputPath('catalog-desktop.png'), fullPage: true })
 
+    // A kind pill narrows the grid in place and is held in the URL.
+    const kind = (['experience', 'item', 'service'] as const).find(value => offerings.some(product => product.kind === value))
+    expect(kind, 'The demo offers something besides its menu').toBeDefined()
+    await catalog.getByTestId(`catalog-kind-${kind}`).click()
+    await expect(page).toHaveURL(`${ORG}/products?kind=${kind}`)
+    await expect(catalog.getByTestId(`catalog-kind-${kind}`)).toHaveAttribute('aria-pressed', 'true')
+    await expect(grid.locator('a[data-testid^="selector-item-"]')).toHaveCount(offerings.filter(product => product.kind === kind).length)
+    await expect(grid.locator('a[data-testid^="selector-item-menu-"]')).toHaveCount(0)
+    await catalog.getByTestId('catalog-kind-menu').click()
+    await expect(page).toHaveURL(`${ORG}/products?kind=menu`)
+    await expect(grid.locator('a[data-testid^="selector-item-"]')).toHaveCount(locations.length)
+
+    // A phone shows the same cards, each the full width of the grid.
     await page.setViewportSize({ width: 390, height: 844 })
-    const mobileImage = await sectionCard.locator('[data-selector-image]').boundingBox()
-    const mobileRow = await sectionCard.boundingBox()
-    const mobileSection = await menu.boundingBox()
+    const mobileCard = grid.locator('a[data-testid^="selector-item-"]').first()
+    const mobileImage = await mobileCard.locator('[data-selector-image]').boundingBox()
+    const mobileGrid = await grid.boundingBox()
     expect(mobileImage).not.toBeNull()
-    expect(mobileRow).not.toBeNull()
-    expect(mobileSection).not.toBeNull()
-    expect(mobileImage!.width).toBeCloseTo(60, 1)
-    expect(mobileImage!.height).toBeCloseTo(60, 1)
-    expect(mobileRow!.width).toBeCloseTo(mobileSection!.width, 1)
+    expect(mobileGrid).not.toBeNull()
+    expect(mobileImage!.width).toBeCloseTo(mobileGrid!.width, 0)
     await page.screenshot({ path: testInfo.outputPath('catalog-mobile.png'), fullPage: true })
 
-    const location = locations.find(row => row.id === 'loc-demo')
-    expect(location, 'The demo fixture carries its Brooklyn location').toBeDefined()
-    await catalog.getByRole('combobox', { name: 'Location', exact: true }).click()
-    await page.getByRole('option', { name: `${location!.title}${location!.status === 'active' ? '' : ` (${location!.status})`}`, exact: true }).click()
-    await expect(page).toHaveURL(`${ORG}/products?location_id=loc-demo`)
-    await page.reload()
-    await waitForNuxtHydration(page)
-    await expect(page).toHaveURL(`${ORG}/products?location_id=loc-demo`)
-    for (const kind of ['experience', 'item', 'service'] as const) {
-      const group = page.getByTestId(`catalog-section-${kind}`)
-      const expected = products.filter(product => product.kind === kind && product.locations.some(binding => binding.location_id === 'loc-demo'))
-      await expect(group.locator('a[data-testid^="selector-item-"]')).toHaveCount(expected.length)
-      for (const product of expected) await expect(group.getByTestId(`selector-item-${product.id}`)).toHaveAttribute('href', `${ORG}/products/${product.id}?location_id=loc-demo`)
-    }
-    const shared = collections.find(collection => collection.location_id === null && products.some(product => product.kind === 'dish' && product.collections.some(membership => membership.collection_id === collection.id)))
-    if (shared) await expect(menu.getByTestId(`selector-item-${shared.id}`)).toHaveAttribute('href', `${ORG}/products/menu/${shared.id}`)
-    await open(page, sectionPath)
+    // A location's card opens its menu, named under the title, with nothing to switch.
+    const owner = locations.find(row => row.id === section!.location_id)!
+    await page.setViewportSize(WIDE)
+    await grid.getByTestId(`selector-item-menu-${owner.id}`).click()
+    await expect(page).toHaveURL(`${ORG}/products/menu?location_id=${encodeURIComponent(owner.id)}`)
+    const menu = page.locator('#dashboard-panel-catalog-menu')
+    await expect(menu).toContainText(owner.title)
+    await expect(menu.getByRole('combobox', { name: 'Location', exact: true })).toHaveCount(0)
+    await open(page, `${ORG}/products/menu/${section!.id}?location_id=${encodeURIComponent(owner.id)}`)
     const member = products.find(product => product.kind === 'dish' && product.collections.some(membership => membership.collection_id === section!.id))!
     await expect(page.getByTestId(`product-${member.id}`)).toContainText(member.name)
   })
@@ -642,7 +628,7 @@ test.describe('dashboard pane hierarchy', () => {
       await open(page, entry.path)
       const panel = page.locator(`#dashboard-panel-${entry.id}`)
       const body = panel.locator(':scope > [data-slot="body"]')
-      const header = panel.locator(':scope > [data-slot="root"]')
+      const header = panel.locator(':scope > :has(h1)')
       const nav = page.getByTestId('dashboard-mobile-nav')
       const rows = entry.id === 'catalog' ? panel.locator('a[data-testid^="selector-item-"]') : panel.locator('span[data-testid^="product-"]')
       expect(await rows.count()).toBeGreaterThan(0)
@@ -692,13 +678,13 @@ test.describe('dashboard pane hierarchy', () => {
     expect(productsRead.status(), await productsRead.text()).toBe(200)
     const product = (await productsRead.json() as { products: Product[] }).products.find(row => row.kind === 'dish')
     expect(product, 'The demo has an existing dish to describe').toBeDefined()
-    await page.setViewportSize({ width: 390, height: 568 })
+    await page.setViewportSize({ width: 390, height: 480 })
     await open(page, `${ORG}/products/${product!.id}/description`)
     const dialog = page.getByRole('dialog', { name: 'Description', exact: true })
     const panel = page.locator('#dashboard-panel-product-description')
     const body = panel.locator(':scope > [data-slot="body"]')
     const parentBody = page.locator('#dashboard-panel-product > [data-slot="body"]')
-    const header = panel.locator(':scope > [data-slot="root"]')
+    const header = panel.locator(':scope > :has(h1)')
     const save = panel.getByRole('button', { name: 'Save', exact: true })
     await expect(dialog).toBeVisible()
     await expect(panel.getByRole('textbox', { name: 'Description', exact: true })).toHaveValue(product!.description ?? '')
@@ -784,7 +770,7 @@ test.describe('dashboard pane hierarchy', () => {
       await open(page, entry.path)
       const panel = page.locator(`#dashboard-panel-${entry.id}`)
       const body = panel.locator(':scope > [data-slot="body"]')
-      const header = panel.locator(':scope > [data-slot="root"]')
+      const header = panel.locator(':scope > :has(h1)')
       const nav = page.getByTestId('dashboard-mobile-nav')
       const last = entry.id === 'org-calendar' ? panel.locator('[data-month]').last()
         : entry.id === 'earnings-payouts' ? panel.getByRole('region', { name: 'Payments help', exact: true })
@@ -1280,7 +1266,7 @@ test.describe('dashboard pane hierarchy', () => {
     })
     await page.setViewportSize(PHONE)
     await open(page, leafPath)
-    const outer = page.getByRole('dialog', { name: 'Photo', exact: true })
+    const outer = page.getByRole('dialog', { name: 'Photos', exact: true })
     const leaf = page.locator('#dashboard-panel-product-photo')
     await expect(outer).toBeVisible()
     await expect(leaf.getByTestId('product-photo').locator('img')).toHaveAttribute('src', product!.image!.public_url)
@@ -1437,6 +1423,20 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(parent.getByRole('link', { name: /^Title/ })).toContainText(savedTitle)
   })
 
+  // Making a record is its steps, at every width: a phone lands on the first
+  // one rather than on a list with a button, and dismissing it leaves the making.
+  test('a phone opens a new record on its first step and dismissing it returns to Catalog', async ({ page }) => {
+    await page.setViewportSize(PHONE)
+    await open(page, `${ORG}/products/new`)
+    await expect(page).toHaveURL(`${ORG}/products/new/kind`)
+    await expect(page.getByRole('dialog', { name: 'Type', exact: true })).toBeVisible()
+    // The level behind the sheet is hidden from assistive technology while the sheet is open.
+    await expect(page.locator('#dashboard-panel-product h1')).toHaveText('New product')
+    await page.locator('#dashboard-panel-product-kind').getByTestId('dashboard-navbar-close').click()
+    await expect(page).toHaveURL(`${ORG}/products`)
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+  })
+
   // A service is a Product and the page that shows it: Catalog's Add opens the
   // shared create walk, and Create writes both, bound, through one request.
   test('Catalog adds a service with its page through the one Product editor', async ({ page, baseURL }) => {
@@ -1453,10 +1453,12 @@ test.describe('dashboard pane hierarchy', () => {
     await kind.getByRole('radio', { name: 'Service or appointment', exact: true }).check()
     await kind.getByRole('button', { name: 'Next: Name', exact: true }).click()
     await expect(page).toHaveURL(`${services}/products/new/name`)
+    // The level is named for what is being made, and the step's own footer is the only commit.
+    await expect(page.locator('#dashboard-panel-product').getByRole('heading', { name: 'New service', level: 1, exact: true })).toBeVisible()
+    await expect(page.locator('#dashboard-panel-product').getByRole('button', { name: 'Create service', exact: true })).toHaveCount(0)
     const name = `E2E Service ${Date.now().toString(36)}`
     await page.getByRole('textbox', { name: 'Name' }).fill(name)
     const created = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/products` && response.request().method() === 'POST')
-    // The walk's index and its Name leaf both offer the commit; the leaf's is the one beside the field.
     await page.locator('#dashboard-panel-product-name').getByRole('button', { name: 'Create service', exact: true }).click()
     const response = await created
     expect(response.status(), await response.text()).toBe(201)
@@ -1479,7 +1481,7 @@ test.describe('dashboard pane hierarchy', () => {
       await page.locator('#dashboard-panel-product').getByTestId('dashboard-navbar-back').click()
       await expect(page).toHaveURL(`${services}/products`)
       await expectPanes(page, ['catalog'])
-      const catalogService = page.getByTestId('catalog-section-service').getByTestId(`selector-item-${productId}`)
+      const catalogService = page.getByTestId('catalog-grid').getByTestId(`selector-item-${productId}`)
       await expect(catalogService).toHaveAttribute('href', `${services}/products/${productId}`)
       await expect(catalogService).toContainText(name)
       await expect(catalogService).toContainText('No photo')

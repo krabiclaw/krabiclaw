@@ -1,8 +1,8 @@
 <template>
   <div class="flex min-h-0 flex-col gap-6 py-6" :data-onboarding-step="step.id" data-onboarding-hydrated="true">
     <div class="flex flex-col gap-3">
-      <h1 class="text-2xl font-bold leading-snug text-highlighted">{{ step.title(state) }}</h1>
-      <p v-if="step.lede" class="text-[15px] leading-relaxed text-toned">{{ step.lede(state) }}</p>
+      <h1 :class="dashboardTitleClass">{{ step.title(state) }}</h1>
+      <p v-if="step.lede" class="text-base text-muted">{{ step.lede(state) }}</p>
     </div>
 
     <OnboardingChoiceGrid
@@ -68,6 +68,7 @@
 </template>
 
 <script setup lang="ts">
+import { dashboardTitleClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import { PLATFORM_LOCALES } from '~/shared/platform-locales'
 const LANGUAGE_CHOICES = PLATFORM_LOCALES.map(locale => ({ value: locale.locale, label: locale.label, icon: 'i-lucide-languages' }))
 import IntakeDetailsCard from '~/lib/components/workspace/onboarding/IntakeDetailsCard.vue'

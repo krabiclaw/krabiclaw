@@ -5,7 +5,7 @@ import { sql } from "drizzle-orm"
 import { sqliteTable, integer, text, real, unique, uniqueIndex, index, check, foreignKey, primaryKey } from "drizzle-orm/sqlite-core"
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
 import type { CONTENT_DOCUMENT_KINDS } from "../../shared/content-registries"
-import { NOTIFICATION_CATEGORIES, type NotificationCategory } from "../../shared/notification-categories"
+import { NOTIFICATION_CATEGORIES, PUSH_ONLY_CATEGORIES, type NotificationCategory } from "../../shared/notification-categories"
 
 export const account = sqliteTable("account", {
 	id: text().primaryKey(),
@@ -304,7 +304,7 @@ export const media_placements = sqliteTable("media_placements", {
 		foreignColumns: [media_assets.organization_id, media_assets.id],
 		name: "media_placements_asset_scope_fk",
 	}).onDelete("cascade"),
-	check("media_placements_owner_type_check", sql`owner_type IN ('organization', 'business_location', 'product', 'content_document', 'content_block', 'review', 'review_request', 'activity_entry')`),
+	check("media_placements_owner_type_check", sql`owner_type IN ('organization', 'business_location', 'product', 'collection', 'content_document', 'content_block', 'review', 'review_request', 'activity_entry', 'team_message')`),
 	check("media_placements_sort_order_check", sql`sort_order >= 0`),
 	unique("media_placements_org_owner_slot_asset_unique").on(table.owner_type, table.owner_id, table.slot, table.asset_id),
 	unique("media_placements_org_owner_slot_order_unique").on(table.owner_type, table.owner_id, table.slot, table.sort_order),
@@ -1110,6 +1110,26 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	max_guests: integer().notNull(),
 	min_nights: integer().default(1).notNull(),
 	check_in_instructions: text(),
+	// What the home is, as guests and search engines read it. Codes come from
+	// shared/stay-listing.ts; NULL means the host has not said.
+	property_type: text(),
+	bedrooms: integer(),
+	beds: integer(),
+	// Whole and half baths (Airbnb's "3.5 baths").
+	bathrooms: real(),
+	// The amenity codes the home offers; an empty list offers none.
+	amenities: text().default("[]").notNull(),
+	cancellation_policy: text(),
+	long_term_cancellation_policy: text(),
+	// Private arrival information: managers and the home's assigned members read
+	// it through server/domain/stays.ts; no public payload carries it.
+	check_in_method: text(),
+	wifi_network: text(),
+	wifi_password: text(),
+	directions: text(),
+	house_manual: text(),
+	// [{ task, details }] in the order guests read them; each task once.
+	checkout_instructions: text().default("[]").notNull(),
 	assigned_member_id: text(),
 	assigned_team_id: text().references(() => team.id, { onDelete: "set null" }),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
@@ -1126,6 +1146,19 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	check("product_stay_configs_guests_check", sql`max_guests >= 1`),
 	check("product_stay_configs_min_nights_check", sql`min_nights >= 1`),
 	check("product_stay_configs_instructions_check", sql`check_in_instructions IS NULL OR (length(trim(check_in_instructions)) BETWEEN 1 AND 5000)`),
+	check("product_stay_configs_property_type_check", sql`property_type IS NULL OR property_type IN ('apartment', 'house', 'secondary_unit', 'unique_space', 'bed_and_breakfast', 'boutique_hotel')`),
+	check("product_stay_configs_bedrooms_check", sql`bedrooms IS NULL OR bedrooms BETWEEN 0 AND 50`),
+	check("product_stay_configs_beds_check", sql`beds IS NULL OR beds BETWEEN 1 AND 50`),
+	check("product_stay_configs_bathrooms_check", sql`bathrooms IS NULL OR (bathrooms BETWEEN 0 AND 50 AND bathrooms * 2 = CAST(bathrooms * 2 AS INTEGER))`),
+	check("product_stay_configs_amenities_check", sql`json_valid(amenities) AND json_type(amenities) = 'array'`),
+	check("product_stay_configs_cancellation_check", sql`cancellation_policy IS NULL OR cancellation_policy IN ('flexible', 'moderate', 'limited', 'firm', 'strict')`),
+	check("product_stay_configs_long_term_cancellation_check", sql`long_term_cancellation_policy IS NULL OR long_term_cancellation_policy IN ('firm', 'strict')`),
+	check("product_stay_configs_check_in_method_check", sql`check_in_method IS NULL OR check_in_method IN ('smart_lock', 'keypad', 'lockbox', 'building_staff', 'in_person', 'other')`),
+	check("product_stay_configs_wifi_network_check", sql`wifi_network IS NULL OR length(trim(wifi_network)) BETWEEN 1 AND 100`),
+	check("product_stay_configs_wifi_password_check", sql`wifi_password IS NULL OR length(wifi_password) BETWEEN 1 AND 100`),
+	check("product_stay_configs_directions_check", sql`directions IS NULL OR length(trim(directions)) BETWEEN 1 AND 5000`),
+	check("product_stay_configs_house_manual_check", sql`house_manual IS NULL OR length(trim(house_manual)) BETWEEN 1 AND 5000`),
+	check("product_stay_configs_checkout_instructions_check", sql`json_valid(checkout_instructions) AND json_type(checkout_instructions) = 'array'`),
 ]);
 
 // Workspace-owned reply text, optionally scheduled for explicitly named homes.
@@ -1268,22 +1301,30 @@ export const stays = sqliteTable("stays", {
 	check("stays_instants_check", sql`(cancelled_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', cancelled_at, '+0 days') IS cancelled_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
 ]);
 
-// Row meaning: this stay holds this night at this home.
-// The primary key is the overlap guard: a night is held by at most one stay,
-//   so two concurrent writes for the same night cannot both commit. Claims are
-//   written in the same batch as the stay and deleted when it is cancelled.
-//   An overbooked or cancelled stay holds none.
-// Deletion: cascades from the stay.
+// Row meaning: this stay, or this guest's checkout hold, holds this night at
+//   this home. Exactly one of stay_id and hold_id is set.
+// The primary key is the overlap guard: a night is held by at most one stay or
+//   hold, so two concurrent writes for the same night cannot both commit.
+//   Claims are written in the same batch as the stay or hold and deleted when
+//   it is cancelled or converted. An overbooked or cancelled stay holds none.
+// A hold's claim counts only while its hold is active and unexpired. Every
+//   batch that claims nights first deletes, in its range, the claims of holds
+//   that no longer count; the stay-checkout-holds task deletes the rest and
+//   reopens those nights on the home's channel.
+// Deletion: cascades from the stay or the hold.
 export const stay_nights = sqliteTable("stay_nights", {
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	product_id: text().notNull(),
 	date: text().notNull(),
-	stay_id: text().notNull(),
+	stay_id: text(),
+	hold_id: text().references(() => payment_checkout_holds.id, { onDelete: "cascade" }),
 }, (table) => [
 	primaryKey({ columns: [table.product_id, table.date], name: "stay_nights_pk" }),
 	foreignKey({ columns: [table.organization_id, table.product_id, table.stay_id], foreignColumns: [stays.organization_id, stays.product_id, stays.id], name: "stay_nights_stay_scope_fk" }).onDelete("cascade"),
 	index("stay_nights_stay_idx").on(table.stay_id),
+	index("stay_nights_hold_idx").on(table.hold_id),
 	check("stay_nights_date_check", sql`date(date, '+0 days') IS date`),
+	check("stay_nights_claimant_check", sql`(stay_id IS NULL) <> (hold_id IS NULL)`),
 ]);
 
 // Row meaning: the host recorded receiving (or, negative, refunding) this
@@ -2049,6 +2090,72 @@ export const device_tokens = sqliteTable("device_tokens", {
 	check("device_tokens_updated_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 ]);
 
+// ---------------------------------------------------------------------------
+// Team conversations: members of one organization talking to each other, for
+// example a cleaner and the host about one stay. Guests are never in them.
+//
+// A seat is a Better Auth member row, so removing someone from the
+// organization removes their seats; their messages stay, sent by their user.
+// The thread may be about one stay (stay_id); that stay cannot be deleted
+// while a conversation names it.
+// ---------------------------------------------------------------------------
+export const team_threads = sqliteTable("team_threads", {
+	id: text().primaryKey(),
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	stay_id: text(),
+	created_by_user_id: text().references(() => user.id, { onDelete: "set null" }),
+	// SHA-256 of the stay and the sorted member ids the conversation was started
+	// with: starting the same conversation again, or twice at once, finds this one.
+	participants_key: text().notNull(),
+	// The newest message's time, or the creation time before the first message.
+	last_message_at: text().notNull(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+}, (table) => [
+	foreignKey({ columns: [table.organization_id, table.stay_id], foreignColumns: [stays.organization_id, stays.id], name: "team_threads_stay_scope_fk" }).onDelete("no action"),
+	unique("team_threads_org_id_unique").on(table.organization_id, table.id),
+	uniqueIndex("team_threads_participants_unique").on(table.organization_id, table.participants_key),
+	index("team_threads_org_activity_idx").on(table.organization_id, table.last_message_at),
+	index("team_threads_org_stay_idx").on(table.organization_id, table.stay_id),
+	check("team_threads_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', last_message_at, '+0 days') IS last_message_at AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
+]);
+
+// One seat per member, with how far that member has read.
+export const team_thread_members = sqliteTable("team_thread_members", {
+	thread_id: text().notNull(),
+	organization_id: text().notNull(),
+	member_id: text().notNull(),
+	last_read_at: text(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+}, (table) => [
+	primaryKey({ columns: [table.thread_id, table.member_id] }),
+	foreignKey({ columns: [table.organization_id, table.thread_id], foreignColumns: [team_threads.organization_id, team_threads.id], name: "team_thread_members_thread_scope_fk" }).onDelete("cascade"),
+	foreignKey({ columns: [table.member_id, table.organization_id], foreignColumns: [member.id, member.organizationId], name: "team_thread_members_member_scope_fk" }).onDelete("cascade"),
+	index("team_thread_members_member_idx").on(table.member_id),
+	check("team_thread_members_instants_check", sql`(last_read_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', last_read_at, '+0 days') IS last_read_at) AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
+]);
+
+// A message's photos are media placements (team_message / attachments).
+// sender_user_id is NULL only once the sender's account has been deleted.
+// The sender's idempotency key replays the same message instead of a second one.
+export const team_messages = sqliteTable("team_messages", {
+	id: text().primaryKey(),
+	organization_id: text().notNull(),
+	thread_id: text().notNull(),
+	sender_user_id: text().references(() => user.id, { onDelete: "set null" }),
+	body: text().notNull(),
+	idempotency_key: text().notNull(),
+	request_hash: text().notNull(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+}, (table) => [
+	foreignKey({ columns: [table.organization_id, table.thread_id], foreignColumns: [team_threads.organization_id, team_threads.id], name: "team_messages_thread_scope_fk" }).onDelete("cascade"),
+	unique("team_messages_org_id_unique").on(table.organization_id, table.id),
+	uniqueIndex("team_messages_thread_idempotency_unique").on(table.thread_id, table.idempotency_key),
+	index("team_messages_thread_created_idx").on(table.thread_id, table.created_at, table.id),
+	check("team_messages_body_check", sql`length(body) <= 5000 AND body = trim(body)`),
+	check("team_messages_idempotency_check", sql`length(idempotency_key) BETWEEN 1 AND 200`),
+	check("team_messages_created_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
+]);
+
 
 
 export const organization_redirects = sqliteTable("organization_redirects", {
@@ -2709,6 +2816,7 @@ export const user_notification_preferences = sqliteTable("user_notification_pref
 	check("user_notification_preferences_category_check", sql`category IN (${sql.raw([...NOTIFICATION_CATEGORIES].map(value => `'${value}'`).join(', '))})`),
 	check("user_notification_preferences_updated_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 	check("user_notification_preferences_account_security_check", sql`category != 'account_security' OR email_enabled = 1`),
+	check("user_notification_preferences_push_only_check", sql`category NOT IN (${sql.raw([...PUSH_ONLY_CATEGORIES].map(value => `'${value}'`).join(', '))}) OR (email_enabled = 0 AND whatsapp_enabled = 0)`),
 ]);
 
 // One article, one broadcast, forever. The unique content_document_id is what
@@ -2788,7 +2896,7 @@ export const payments = sqliteTable("payments", {
  buyer_user_id: text().references(() => user.id, { onDelete: "set null" }),
  stripe_account_id: text().notNull(),
  livemode: integer({ mode: "boolean" }).notNull(),
- subject_type: text().$type<'booking' | 'order' | 'reservation' | 'invoice'>().notNull(),
+ subject_type: text().$type<'booking' | 'order' | 'reservation' | 'invoice' | 'stay'>().notNull(),
  subject_id: text(),
  location_id: text(),
  currency: text().notNull(),
@@ -2854,11 +2962,15 @@ export const payment_checkout_holds = sqliteTable("payment_checkout_holds", {
  created_at: text().notNull(),
  converted_booking_id: text(),
  converted_reservation_id: text(),
+ converted_stay_id: text(),
 }, t => [
  index("payment_holds_capacity_idx").on(t.session_id, t.status, t.expires_at),
  index("payment_holds_reservation_idx").on(t.organization_id, t.location_id, t.starts_at, t.status, t.expires_at),
  check("payment_holds_quantity_check", sql`quantity > 0 AND amount > 0`),
- check("payment_holds_subject_check", sql`(product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL AND converted_reservation_id IS NULL) OR (product_id IS NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL)`),
+ // A session booking; a table reservation; a stay, whose starts_at and ends_at
+ // are its check-in and check-out dates at the home (product_id) and whose
+ // nights are claimed in stay_nights.
+ check("payment_holds_subject_check", sql`(product_id IS NOT NULL AND variant_id IS NOT NULL AND price_id IS NOT NULL AND session_id IS NOT NULL AND converted_reservation_id IS NULL AND converted_stay_id IS NULL) OR (product_id IS NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL AND converted_stay_id IS NULL) OR (product_id IS NOT NULL AND variant_id IS NULL AND price_id IS NULL AND session_id IS NULL AND location_id IS NOT NULL AND timezone IS NOT NULL AND assigned_member_id IS NULL AND converted_booking_id IS NULL AND converted_reservation_id IS NULL AND date(starts_at, '+0 days') IS starts_at AND date(ends_at, '+0 days') IS ends_at AND ends_at > starts_at)`),
 ]);
 
 export const payment_orders = sqliteTable("payment_orders", {

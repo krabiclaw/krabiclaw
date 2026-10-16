@@ -1,6 +1,6 @@
 <template>
   <!-- Nothing connected: the product's mark and the one way to connect it. -->
-  <div v-if="!connection" class="mx-auto flex max-w-sm flex-col items-center gap-8 py-16 text-center">
+  <div v-if="!connection" class="flex flex-col items-center gap-8">
     <UIcon :name="logo" class="size-24" />
     <div class="w-full space-y-4 text-left">
       <slot />

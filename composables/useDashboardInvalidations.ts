@@ -20,6 +20,16 @@ const HEARTBEAT_INTERVAL_MS = 20_000
 const HEARTBEAT_TIMEOUT_MS = 8_000
 
 export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<string | null>>): DashboardInvalidationConnection {
+  // `nuxt dev` cannot carry this socket: its dev server answers the upgrade
+  // with a plain 200 (docs/local-development.md). Realtime runs under
+  // `yarn dev:worker`, staging and production; here the dashboard stays on its
+  // reads instead of retrying a connection that cannot open and reporting it.
+  if (import.meta.dev) {
+    const connection: DashboardInvalidationConnection = { status: ref('closed'), event: shallowRef(null), connectionEpoch: ref(0), connect: () => {} }
+    provide(dashboardInvalidationKey, connection)
+    return connection
+  }
+
   const status = ref<DashboardInvalidationStatus>('closed')
   const event = shallowRef<DashboardInvalidation | null>(null)
   const connectionEpoch = ref(0)

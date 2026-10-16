@@ -27,8 +27,8 @@
         <USelect :model-value="form.fontPreset ?? undefined" :items="fontItems" @update:model-value="value => form.fontPreset = value ?? null" value-key="value" label-key="label" class="w-full" placeholder="The template's own" :disabled="disabled" />
       </UFormField>
 
-      <div v-if="showBrand" class="rounded-xl border border-default bg-elevated p-3">
-        <p class="mb-2 text-[12px] font-bold text-highlighted">Logo</p>
+      <UCard v-if="showBrand" variant="subtle">
+        <p class="mb-2 text-xs font-bold text-highlighted">Logo</p>
         <div class="flex items-center gap-3">
           <button
             type="button"
@@ -70,10 +70,10 @@
             {{ shape.label }}
           </button>
         </div>
-      </div>
+      </UCard>
 
-      <div v-if="showHero" class="rounded-xl border border-default bg-elevated p-3">
-        <p class="mb-2 text-[12px] font-bold text-highlighted">Hero photo</p>
+      <UCard v-if="showHero" variant="subtle">
+        <p class="mb-2 text-xs font-bold text-highlighted">Hero photo</p>
         <button
           type="button"
           class="flex aspect-[16/9] w-full items-center justify-center overflow-hidden rounded-xl border border-default bg-default transition-colors hover:border-primary"
@@ -96,7 +96,7 @@
           {{ form.heroPreviewUrl ? 'Replace photo' : 'Upload photo' }}
         </UButton>
         <UInput ref="heroInput" type="file" accept="image/*" class="hidden" @change="event => uploadDraftImage(event, 'hero')" />
-      </div>
+      </UCard>
 
       <UFormField v-if="showHero" label="Hero headline" required>
         <UInput v-model="form.heroHeadline" class="w-full" placeholder="A clear promise guests remember" />

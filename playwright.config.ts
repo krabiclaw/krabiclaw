@@ -35,9 +35,6 @@ if (!previewUrl) {
   // The provider-ingress spec builds a signed reply address with this and the
   // local Worker verifies it; neither reads the deployed secret.
   process.env.EMAIL_REPLY_SECRET = 'local-playwright-email-reply-secret'
-  // The lodging-identity spec calls the lodging service's internal members
-  // route with this; the local Worker inherits it.
-  process.env.LODGING_SERVICE_SECRET = 'local-playwright-lodging-service-secret'
 }
 
 const localWorkerEnvironment = [

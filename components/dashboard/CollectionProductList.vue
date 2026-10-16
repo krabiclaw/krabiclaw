@@ -1,11 +1,14 @@
 <template>
-  <!-- One collection: its products, in the order customers see them. Each opens its one editor in Catalog. -->
+  <!--
+    One section: the rows that describe it — name, description, photo — then
+    its items in the order guests see them, each opening its one editor in Catalog.
+  -->
   <DashboardIndexPanel id="menu-section" :title="collection?.name ?? 'Section'">
+    <EditorNavigationList class="mb-8" :groups="rows" :active-item="level.child.value" />
     <DashboardListEditor
       v-model:editing="editing"
       v-model:selected="selected"
       :title="collection?.name ?? 'Section'"
-      description="Guests see items in this order."
       :items="listItems"
       :error="loadError"
       empty-title="No items in this section yet"
@@ -61,14 +64,18 @@
 <script setup lang="ts">
 // One menu section's items. Rendered by `products/menu/[collectionId].vue`, which owns the frame.
 import DashboardListEditor from '~/components/dashboard/DashboardListEditor.vue'
+import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardMediaThumb from '~/components/dashboard/DashboardMediaThumb.vue'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import type { Product } from '~/server/types/products'
 import { getErrorMessage } from '~/utils/errors'
 import { groupProductsByCollection } from '~/utils/product-presentation'
 
+defineProps<{ /** The rows that describe the section, from its editor. */ rows: EditorNavigationGroup[] }>()
+
 
 const route = useRoute()
+const level = useRouteLevel()
 const router = useRouter()
 const dashboardApi = useDashboardApi()
 const organizationId = await useDashboardOrganizationId()

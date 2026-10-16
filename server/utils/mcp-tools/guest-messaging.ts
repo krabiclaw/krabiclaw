@@ -4,7 +4,7 @@ import { memberAccessPrincipal, assertAssignedBookingAccess } from '~/server/uti
 import { stayAccessFor, updateStayHome } from '~/server/domain/stays'
 import { cancelScheduledGuestMessage, deleteMessageTemplate, guestThreadMessagingContext, listMessageTemplates, listScheduledGuestMessages, saveMessageTemplate } from '~/server/domain/guest-messaging'
 import { mcpPageInfo, mcpPageWindow } from '~/server/utils/mcp-pagination'
-import { stayDetail, stayHomeObject } from './stays'
+import { stayDetail, stayHomeObject, STAY_ARRIVAL_SCHEMA } from './stays'
 
 const text = { type: 'string', minLength: 1 }, nullableText = { type: ['string', 'null'] }
 const products = { type: 'array', minItems: 1, maxItems: 100, uniqueItems: true, items: { ...text, description: 'Canonical home product ID, never a provider property ID.' } }
@@ -34,8 +34,8 @@ export const GUEST_MESSAGING_TOOLS: McpToolDefinition[] = [
     inputSchema: { template_id: text, expected_version: { type: 'integer', minimum: 1 } }, required: ['template_id', 'expected_version'], outputSchema: { type: 'object', properties: { status: { const: 'deleted' } }, required: ['status'] } }),
   organizationTool({ name: 'get_guest_messaging_context', domain: 'guest_messaging', minimumRole: 'member', description: 'Read the actual home and optional stay behind a canonical guest conversation, including private check-in instructions the host may choose to share. Contact conversations may have no home or stay; channel inquiries can have a home without a booked stay.',
     inputSchema: { request_id: text }, required: ['request_id'], outputSchema: { type: 'object', properties: { requestId: text, home: { ...stayHomeObject, type: ['object', 'null'] }, stay: { ...stayDetail, type: ['object', 'null'] } }, required: ['requestId', 'home', 'stay'] } }),
-  organizationTool({ name: 'set_stay_check_in_instructions', domain: 'guest_messaging', minimumRole: 'admin', description: 'Save private check-in instructions for one home; null removes them. Saving does not send the instructions to a guest or publish them on the site.',
-    inputSchema: { product_id: text, instructions: { type: ['string', 'null'], minLength: 1, maxLength: 5000 } }, required: ['product_id', 'instructions'], outputSchema: { type: 'object', properties: { home: stayHomeObject }, required: ['home'] } }),
+  organizationTool({ name: 'update_stay_arrival_guide', domain: 'guest_messaging', minimumRole: 'admin', description: 'Save one home\'s private arrival guide: check-in method and instructions, wifi, directions, house manual and checkout instructions. Fields left out keep their values; null removes one. Saving does not send anything to a guest or publish it on the site.',
+    inputSchema: { product_id: text, ...STAY_ARRIVAL_SCHEMA }, required: ['product_id'], outputSchema: { type: 'object', properties: { home: stayHomeObject }, required: ['home'] } }),
   organizationTool({ name: 'list_scheduled_guest_messages', domain: 'guest_messaging', minimumRole: 'member', description: 'Read scheduled guest-message snapshots and visible failure reasons, optionally for one canonical guest conversation. Members see only assigned homes. Read provider delivery receipts through get_guest_conversation; no provider result is inferred from a scheduled time.',
     inputSchema: { request_id: text, ...paginationInputSchema }, outputSchema: { type: 'object', properties: { messages: { type: 'array', items: messageObject }, page_info: pageInfoObject }, required: ['messages', 'page_info'] } }),
   organizationTool({ name: 'cancel_scheduled_guest_message', domain: 'guest_messaging', minimumRole: 'admin', description: 'Cancel one pending automatic guest message. A message already sending, sent or requiring review cannot be cancelled or resent by this operation.',
@@ -58,8 +58,9 @@ export async function handleGuestMessagingTools(ctx: McpExecutorContext): Promis
       return { status: 'deleted' }
     }
     case 'get_guest_messaging_context': return guestThreadMessagingContext(db, principal, requiredString(args, 'request_id'))
-    case 'set_stay_check_in_instructions': {
-      const result = await updateStayHome(env, db, access, requiredString(args, 'product_id'), { check_in_instructions: args.instructions })
+    case 'update_stay_arrival_guide': {
+      const { product_id: _productId, ...guide } = args
+      const result = await updateStayHome(env, db, access, requiredString(args, 'product_id'), guide)
       return { home: result.home }
     }
     case 'list_scheduled_guest_messages': {

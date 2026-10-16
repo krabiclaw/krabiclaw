@@ -49,7 +49,6 @@
 
     <template #footer>
       <DashboardPanelFooter
-        column="leaf"
         save-label="Send request"
         :loading="b.changeSaving.value"
         :disabled="!b.changeValid.value || !b.changeDirty.value"

@@ -54,12 +54,29 @@ check-out messages only, because KrabiClaw cannot tell an imported historical
 reservation from a new one. A scheduled message goes through the
 conversation's own address and records the same delivery receipt as a reply;
 one that fails or whose outcome is unknown stays visible with its reason and is
-never resent automatically. Each home can hold private check-in instructions
-the host chooses when to share.
+never resent automatically. Each home holds a private arrival guide — check-in
+method and instructions, wifi, directions, house manual and checkout
+instructions — that the host chooses when to share.
 
 Workspace members can receive owner notifications as push notifications on the
 KrabiClaw iPhone app, per notification category, alongside email and WhatsApp.
 A push that Apple refuses is recorded as failed.
+
+## Team conversations
+
+Members of one workspace message each other in team conversations, optionally
+about one stay, with text and photos. Only the members in a conversation can
+read it; leaving the workspace ends a person's place in it, while what they
+wrote remains. Each member has their own unread state. A new message is pushed
+to the other members' phones unless they switched team messages off; team
+messages have no email or WhatsApp channel. Owners and admins choose which
+homes a member looks after; each home has one assigned member. A member who
+leaves, is removed or becomes an owner or admin looks after none.
+
+Owners and admins add people with a single-use invite link that lasts seven
+days. Whoever opens it sees the workspace and the role on KrabiClaw's invite
+page, signs in or creates an account, and joins; the iPhone app accepts the
+same link. A used, expired or withdrawn link says so.
 
 ## Plans
 

@@ -224,6 +224,8 @@ export interface ProductCollectionGroup {
   id: string
   name: string
   description: string | null
+  /** The section's own picture, which introduces it; null when it has none. */
+  image: Collection['image']
   sort_order: number
   /** The location whose collection this is, or null for a site-wide one. */
   location_id: string | null
@@ -261,6 +263,7 @@ export function groupProductsByCollection(
         id: collection.id,
         name: collection.name,
         description: collection.description,
+        image: collection.image,
         sort_order: collection.sort_order,
         location_id: collection.location_id,
         products: positions

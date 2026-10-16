@@ -6,7 +6,7 @@
   </DashboardLeafPanel>
 </template>
 <script setup lang="ts">
-import { blogPostCreateKey } from '~/components/dashboard/BlogPostCreatePage.vue'
+import { blogPostCreateKey } from '~/components/dashboard/BlogPostEditorPage.vue'
 definePageMeta({ layout: 'dashboard' })
 const editor = inject(blogPostCreateKey)!
 </script>

@@ -14,22 +14,22 @@
 
     <div>
       <UAlert
-        v-if="loadError || realtimeFailed"
-        color="warning"
+        v-if="loadError"
+        color="error"
         variant="soft"
-        icon="i-lucide-wifi-off"
-        title="Updates may be out of date"
-        :description="loadError ? getErrorMessage(loadError, 'Updates could not be loaded.') : 'The live dashboard connection is unavailable.'"
+        icon="i-lucide-circle-alert"
+        title="Updates could not be loaded"
+        :description="getErrorMessage(loadError, 'Updates request failed')"
         class="mb-4"
       >
         <template #actions>
-          <UButton color="warning" variant="soft" size="xs" :loading="status === 'pending'" @click="retryNotifications">
+          <UButton color="error" variant="soft" size="xs" :loading="status === 'pending'" @click="retryNotifications">
             Refresh
           </UButton>
         </template>
       </UAlert>
       <UAlert v-if="actionError" color="error" :description="actionError" class="mb-4" />
-      <div v-if="!loadError && !realtimeFailed && notifications.length === 0" class="py-16 text-center">
+      <div v-if="!loadError && notifications.length === 0" class="py-16 text-center">
         <UIcon name="i-lucide-bell-off" class="mx-auto mb-3 size-7 text-muted" />
         <p class="text-sm text-muted">No updates yet.</p>
       </div>
@@ -119,7 +119,6 @@ const notifications = computed(() => data.value?.notifications ?? [])
 const unreadCount = computed(() => data.value?.unread_count ?? 0)
 const markingAll = ref(false)
 const actionError = ref<string | null>(null)
-const realtimeFailed = computed(() => !props.personalScope && realtime.status.value === 'failed')
 
 /** The mark for what happened: a message, a booking, a review, a person. */
 function iconFor(template: string) {

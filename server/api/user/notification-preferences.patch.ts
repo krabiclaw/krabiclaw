@@ -10,7 +10,7 @@ import { defineHandler, HTTPError } from 'nitro'
 import { cloudflareEnv, jsonResponse, readStrictBody } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
 import { getNotificationPreferences, setNotificationPreference } from '~/server/domain/notification-preferences'
-import { isMandatoryEmailCategory, isNotificationCategory } from '~/shared/notification-categories'
+import { isMandatoryEmailCategory, isNotificationCategory, isPushOnlyCategory } from '~/shared/notification-categories'
 
 const CHANNELS = ['email', 'whatsapp', 'push'] as const
 
@@ -34,6 +34,12 @@ export default defineHandler(async (event) => {
   const setting = { email: body.email as boolean, whatsapp: body.whatsapp as boolean, push: body.push as boolean }
   if (isMandatoryEmailCategory(body.category) && !setting.email) {
     throw new HTTPError({ statusCode: 422, message: `${body.category} email cannot be switched off`, data: { code: 'MANDATORY_EMAIL_CATEGORY', field: 'email' } })
+  }
+
+  if (isPushOnlyCategory(body.category)) {
+    for (const channel of ['email', 'whatsapp'] as const) {
+      if (setting[channel]) throw new HTTPError({ statusCode: 422, message: `${body.category} is delivered by push only`, data: { code: 'PUSH_ONLY_CATEGORY', field: channel } })
+    }
   }
 
   await setNotificationPreference(db, env, session.user.id, body.category, setting)

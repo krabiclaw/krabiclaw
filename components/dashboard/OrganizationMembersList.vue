@@ -6,7 +6,7 @@
   -->
   <div class="space-y-8">
     <section>
-      <h2 class="px-1 text-sm font-semibold text-muted">Team</h2>
+      <h2 class="text-sm font-semibold text-muted">Team</h2>
       <UAlert
         v-if="loadError"
         class="mt-3"
@@ -67,7 +67,7 @@
     </section>
 
     <section>
-      <h2 class="px-1 text-sm font-semibold text-muted">Pending Invitations</h2>
+      <h2 class="text-sm font-semibold text-muted">Pending Invitations</h2>
       <ul v-if="invitations.length">
         <li v-for="invitation in invitations" :key="invitation.id" class="flex items-center justify-between gap-4 border-b border-default py-6 last:border-b-0">
           <div class="min-w-0">

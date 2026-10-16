@@ -27,6 +27,8 @@ const statements = {
   settings: ['read', 'update'],
   integrations: ['read', 'create', 'update', 'delete'],
   operations: ['read', 'reply', 'update', 'assigned'],
+  // Conversations between the organization's own members; every role takes part.
+  team_messages: ['read', 'send'],
 } as const
 
 export const organizationAccessControl = createAccessControl(statements)
@@ -41,7 +43,7 @@ export type OrganizationPermissions = {
   [Resource in keyof typeof statements]?: Array<(typeof statements)[Resource][number]>
 }
 export const organizationRoles = {
-  member: organizationAccessControl.newRole({ scheduling: ['own'], products: ['assigned'], operations: ['assigned'] }),
+  member: organizationAccessControl.newRole({ scheduling: ['own'], products: ['assigned'], operations: ['assigned'], team_messages: ['read', 'send'] }),
   owner: organizationAccessControl.newRole({
     ...ownerAc.statements,
     scheduling: ['own'],
@@ -68,6 +70,7 @@ export const organizationRoles = {
     settings: ['read', 'update'],
     integrations: ['read', 'create', 'update', 'delete'],
     operations: ['read', 'reply', 'update'],
+    team_messages: ['read', 'send'],
   }),
   admin: organizationAccessControl.newRole({
     ...adminAc.statements,
@@ -95,5 +98,6 @@ export const organizationRoles = {
     settings: ['read', 'update'],
     integrations: ['read', 'create', 'update', 'delete'],
     operations: ['read', 'reply', 'update'],
+    team_messages: ['read', 'send'],
   }),
 }

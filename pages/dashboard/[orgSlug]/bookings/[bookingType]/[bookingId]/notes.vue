@@ -24,7 +24,7 @@
     </div>
 
     <template #footer>
-      <DashboardPanelFooter column="leaf" :loading="b.noteSaving.value" :disabled="!b.noteDraft.value.trim()" @cancel="cancel" @save="save" />
+      <DashboardPanelFooter :loading="b.noteSaving.value" :disabled="!b.noteDraft.value.trim()" @cancel="cancel" @save="save" />
     </template>
   </DashboardIndexPanel>
 </template>

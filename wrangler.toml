@@ -215,9 +215,6 @@ crons = []
 [env.staging.vars]
 # Channex staging, where the Airbnb test accounts live. CHANNEX_API_KEY is a secret.
 CHANNEX_BASE_URL = "https://staging.channex.io/api/v1"
-# The hosted lodging Worker that reads KrabiClaw staging (docs/shared-auth-contract.md).
-# Production has no lodging Worker yet, so it sets none and a lodging change there fails visibly.
-LODGING_API_URL = "https://bookyboo-api-development.paulchrisluke.workers.dev"
 # Sign in with Apple audience: the native app's bundle id.
 APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
 # APNs token authentication (APNS_PRIVATE_KEY is a secret: yarn wrangler secret put APNS_PRIVATE_KEY).

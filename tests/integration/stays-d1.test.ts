@@ -4,7 +4,7 @@ import type { CloudflareEnv } from '../../server/utils/auth.ts'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
-import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, setProductPublication, updateProduct } from '../../server/utils/product-management.ts'
+import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, updateProduct } from '../../server/utils/product-management.ts'
 import { applyChannelBooking, cancelStay, createStay, deleteStayPayment, getStay, listStays, readStayCalendar, recordStayPayment, setStayNights, updateStay, type StayAccess } from '../../server/domain/stays.ts'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
 
@@ -249,7 +249,8 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site', team: 'cleaning' })
     assert.equal(cabin.kind, 'stay')
     assert.equal(cabin.unit_label, 'night')
-    assert.deepEqual(cabin.stay, { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: 'cleaning' })
+    assert.deepEqual(cabin.stay, { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2,
+      property_type: null, bedrooms: null, beds: null, bathrooms: null, amenities: [], cancellation_policy: null, long_term_cancellation_policy: null, assigned_member_id: null, assigned_team_id: 'cleaning' })
     // Its one location shows it; the product's publication decides whether anyone does.
     assert.deepEqual(cabin.locations, [{ location_id: 'cabin-site', active: true, published: true }])
     await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { location_id: 'lake-site', max_guests: 2 } as never } }), /keeps its location/)
@@ -257,8 +258,8 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     await assert.rejects(setProductLocation(db, { organizationId: ORG, productId: cabin.id, locationId: 'lake-site', actor: { actorId: OWNER } }), /exactly one location/)
     await assert.rejects(removeProductLocation(db, { organizationId: ORG, productId: cabin.id, locationId: 'cabin-site' }), /cannot leave the location/)
     await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { kind: 'experience' } }), /keeps its kind/)
-    // Guests book through an external link until direct stays exist.
-    await assert.rejects(setProductPublication(db, { organizationId: ORG, productId: cabin.id, published: true, actor: { actorId: OWNER } }), /link where guests book/)
+    // Guests book a place to stay on the site and pay in full, so it takes no external booking link.
+    await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { order_url: 'https://www.airbnb.com/rooms/1' } }), /takes no external booking link/)
     const edited = await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { max_guests: 6 } } })
     // A save that does not name stay settings leaves them as stored, even if they changed meanwhile.
     await db.prepare('UPDATE product_stay_configs SET min_nights = 5 WHERE product_id = ?').bind(cabin.id).run()

@@ -319,7 +319,7 @@ function replySubject(submissionType: GuestThreadSubmissionType, fromName: strin
  */
 async function renderMemberReply(env: ReplyEmailEnv, db: DbClient, organizationId: string, organizationName: string, entry: GuestThreadEntryRow) {
   const organizationLogoUrl = await organizationLogo(db, organizationId)
-  const photos = (await listMessagePhotos(db, [entry.id])).get(entry.id) ?? []
+  const photos = (await listMessagePhotos(db, 'activity_entry', [entry.id])).get(entry.id) ?? []
   return renderNotificationEmail(guestThreadReplyMessage({
     organizationName,
     organizationLogoUrl,
@@ -587,7 +587,7 @@ async function executeReply(
           `,
           params: [deliveryId, emailProvider(input.env), purpose, now, now, entryId, context.thread.id],
         }] : [],
-        ...messagePhotoPlacements(organizationId, entryId, assetIds, now),
+        ...messagePhotoPlacements(organizationId, 'activity_entry', entryId, assetIds, now),
       ], { operation: 'guest thread reply receipt' })
     } catch (error) {
       let concurrent: GuestThreadEntryRow | null

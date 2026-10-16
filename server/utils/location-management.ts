@@ -52,6 +52,9 @@ export interface CreateLocationInput {
 
 export interface UpdateLocationInput extends Partial<CreateLocationInput> {
   status?: "active" | "inactive" | "sync_error";
+  /** Where the place is on the map, as its owner placed the pin. Both or neither; null clears both. */
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 export interface LocationRecord {
@@ -404,6 +407,20 @@ export async function createLocation(
   };
 }
 
+/** A pin is a latitude and longitude set together, or both cleared; null when the input names a valid one or none. */
+export function coordinatesFailure(input: Pick<UpdateLocationInput, 'latitude' | 'longitude'>): { error: string; field: 'latitude' | 'longitude' } | null {
+  if ((input.latitude === undefined) !== (input.longitude === undefined) || (input.latitude === null) !== (input.longitude === null)) {
+    return { error: "latitude and longitude are set together.", field: input.latitude === undefined || input.latitude === null ? 'latitude' : 'longitude' };
+  }
+  for (const [field, limit] of [["latitude", 90], ["longitude", 180]] as const) {
+    const value = input[field];
+    if (value !== undefined && value !== null && (typeof value !== "number" || !Number.isFinite(value) || Math.abs(value) > limit)) {
+      return { error: `${field} must be a number from -${limit} to ${limit}.`, field };
+    }
+  }
+  return null;
+}
+
 export async function updateLocation(
   db: D1Database,
   organizationId: string,
@@ -479,6 +496,8 @@ export async function updateLocation(
       },
     };
   }
+  const coordinates = coordinatesFailure(input);
+  if (coordinates) return { status: 400, data: { ...coordinates, code: 'INVALID_LOCATION_FIELD' } };
   const normalizedTimezone = input.timezone === undefined
     ? undefined
     : normalizeTimezone(input.timezone);
@@ -520,6 +539,8 @@ export async function updateLocation(
     "google_place_id",
     "timezone",
     "max_capacity",
+    "latitude",
+    "longitude",
     "status",
     "seo_title",
     "seo_description",
@@ -593,6 +614,8 @@ export async function updateLocation(
       },
       onlyIfPreviousChangedOneRow: true,
     }));
+    // The site changed: recorded with the change, so its caches and search index follow it.
+    statements.push(publicResourceCacheInvalidationQuery(organizationId, 'location_updated'));
 
     const results = await executeBatch(db, [...(writeGuard ? [writeGuard] : []), ...statements]);
     return (results[writeGuard ? 1 : 0]?.meta?.changes ?? 0) === 1;
