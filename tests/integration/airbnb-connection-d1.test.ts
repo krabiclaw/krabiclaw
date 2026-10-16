@@ -229,3 +229,22 @@ test('deleting the organization releases its Airbnb channel, every property in i
     await runtime.dispose()
   }
 })
+
+test('a channel Channex already deleted counts as disconnected, and the group is still released', async () => {
+  const { runtime, db } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    const owner = new AirbnbConnection(db, env, ORG, OWNER)
+    await owner.start()
+    assert.deepEqual(await owner.complete(channex.token!, 'chan-1'), { connected: true })
+    channex.channelExists = false
+    await owner.deleteForOrganization()
+    assert.deepEqual([channex.groupExists, channex.groupProperties], [false, []])
+    assert.deepEqual(await db.prepare('SELECT status, channel_id, group_id FROM channex_connections').first(), { status: 'not_connected', channel_id: null, group_id: null })
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})

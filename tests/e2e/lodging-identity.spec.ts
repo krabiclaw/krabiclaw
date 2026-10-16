@@ -66,7 +66,7 @@ test.describe('lodging identity boundary', () => {
     return { api, signInBearer }
   }
 
-  test('a bearer session keeps its only organization, joins by invite link, and stops at sign-out', async ({ baseURL }) => {
+  test('a bearer session keeps its only organization, joins by invite link, and stops at sign-out', async ({ baseURL, page }) => {
     const { api, signInBearer } = session(baseURL)
     const bearer = await signInBearer(fixture.email)
 
@@ -98,9 +98,14 @@ test.describe('lodging identity boundary', () => {
       const offered = await api.get(`/api/invite-links/${encodeURIComponent(inviteToken)}`)
       expect(offered.status, await offered.text()).toBe(200)
       expect(await offered.json()).toEqual({ organization: { name: organization.name }, role: 'admin', expiresAt })
-      const page = await api.get(`/invite/${encodeURIComponent(inviteToken)}`)
-      expect(page.status).toBe(200)
-      expect(await page.text()).toContain(`Join ${organization.name}`)
+      const invitePage = await api.get(`/invite/${encodeURIComponent(inviteToken)}`)
+      expect(invitePage.status).toBe(200)
+      expect(await invitePage.text()).toContain(`Join ${organization.name}`)
+      // In a browser with no session the page offers sign-in and the app.
+      await page.goto(`/invite/${encodeURIComponent(inviteToken)}`)
+      await expect(page.getByRole('heading', { name: `Join ${organization.name}`, level: 1 })).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Sign in with email' })).toHaveAttribute('href', `/login?redirect=${encodeURIComponent(`/invite/${encodeURIComponent(inviteToken)}`)}`)
+      await expect(page.getByRole('link', { name: 'Open this invite in the KrabiClaw app' })).toHaveAttribute('href', `krabiclaw://invite?token=${encodeURIComponent(inviteToken)}`)
       expect((await api.post(`/api/invite-links/${encodeURIComponent(inviteToken)}/accept`)).status).toBe(401)
       const inviteeBearer = await signInBearer(invitee.email)
       const accepted = await api.post(`/api/invite-links/${encodeURIComponent(inviteToken)}/accept`, { headers: inviteeBearer })

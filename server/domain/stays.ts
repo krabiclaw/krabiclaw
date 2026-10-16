@@ -529,21 +529,30 @@ export async function setMemberHomes(env: CloudflareEnv & GuestInboxPublicationE
 }
 
 /**
- * A member who leaves or is removed, or who now sees every home as an owner or
- * admin, looks after none: their homes become unassigned. Better Auth has
- * already committed the membership change and names no actor to its hooks, so
- * the system records it; open views of those homes reload.
+ * Homes looked after only by a current member who is not an owner or admin;
+ * every other assignment is released. A member who left, was removed or now
+ * sees every home looks after none, and so does `departingUserId`, whose
+ * account is being deleted. Better Auth has committed the membership change and
+ * names no actor to its hooks, so the system records it; open views of those
+ * homes reload. It reconciles the whole organization, so if one run fails the
+ * next membership change there clears what it left.
  */
-export async function releaseMemberHomes(env: GuestInboxPublicationEnv, db: DbClient, input: { organizationId: string; memberId: string }): Promise<void> {
-  const homes = await queryAll<{ product_id: string; location_id: string }>(db,
-    'SELECT product_id, location_id FROM product_stay_configs WHERE organization_id = ? AND assigned_member_id = ?', [input.organizationId, input.memberId])
+export async function releaseUnassignableHomes(env: GuestInboxPublicationEnv, db: DbClient, input: { organizationId: string; departingUserId?: string }): Promise<void> {
+  const unassignable = `organization_id = ? AND assigned_member_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1 FROM member m WHERE m.id = product_stay_configs.assigned_member_id AND m."organizationId" = product_stay_configs.organization_id
+      AND m."userId" IS NOT ? AND (',' || m.role || ',') NOT LIKE '%,owner,%' AND (',' || m.role || ',') NOT LIKE '%,admin,%')`
+  const params = [input.organizationId, input.departingUserId ?? null]
+  const homes = await queryAll<{ product_id: string; location_id: string; assigned_member_id: string }>(db,
+    `SELECT product_id, location_id, assigned_member_id FROM product_stay_configs WHERE ${unassignable}`, params)
   if (!homes.length) return
   const now = new Date().toISOString()
   await executeBatch(db, [{
-    query: 'UPDATE product_stay_configs SET assigned_member_id = NULL, updated_at = ?, updated_by = ? WHERE organization_id = ? AND assigned_member_id = ?',
-    params: [now, 'system', input.organizationId, input.memberId],
-  }, organizationEventQuery({ organizationId: input.organizationId, actorType: 'system', eventType: 'stay.homes_assigned', entityType: 'member', entityId: input.memberId,
-    metadata: { product_ids: [], changed_product_ids: homes.map(home => home.product_id).sort() } })], { operation: 'Release a former member\'s homes' })
+    query: `UPDATE product_stay_configs SET assigned_member_id = NULL, updated_at = ?, updated_by = 'system' WHERE ${unassignable}`,
+    params: [now, ...params],
+  }, ...[...new Set(homes.map(home => home.assigned_member_id))].map(memberId => organizationEventQuery({
+    organizationId: input.organizationId, actorType: 'system', eventType: 'stay.homes_assigned', entityType: 'member', entityId: memberId,
+    metadata: { product_ids: [], changed_product_ids: homes.filter(home => home.assigned_member_id === memberId).map(home => home.product_id).sort() },
+  }))], { operation: 'Release homes no current member looks after' })
   for (const home of homes) {
     await publishStayInvalidation(env, { type: 'stay.changed', organizationId: input.organizationId, productId: home.product_id, locationId: home.location_id, stayId: null }, { updated_at: now })
   }

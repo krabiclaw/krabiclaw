@@ -10,6 +10,9 @@ import { acceptInviteLink } from '~/server/utils/invite-links'
 export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
   const session = await getAuthSession(event, env)
-  if (!session) throw new HTTPError({ statusCode: 401, message: 'Sign in to accept this invite', data: { code: 'AUTHENTICATION_REQUIRED', field: 'session' } })
+  // A guest identity is not an account that can join a workspace.
+  if (!session || (session.user as { isAnonymous?: boolean | null }).isAnonymous) {
+    throw new HTTPError({ statusCode: 401, message: 'Sign in to accept this invite', data: { code: 'AUTHENTICATION_REQUIRED', field: 'session' } })
+  }
   return jsonResponse(await acceptInviteLink(env, getRouterParam(event, 'token') ?? '', session.user.id), { headers: { 'cache-control': 'private, no-store' } })
 })

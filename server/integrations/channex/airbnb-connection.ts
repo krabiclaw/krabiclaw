@@ -614,7 +614,12 @@ export class AirbnbConnection {
   async deleteForOrganization(): Promise<void> {
     if (!await this.row()) return
     // Each disconnect call removes one mapping and verifies it before the next.
+    // A channel Channex answers 404 for is already deleted.
     for (let row = await this.row(); row?.channel_id; row = await this.row()) {
+      if (!await this.present(`/channels/${encodeURIComponent(row.channel_id)}`, 'channel')) {
+        await this.locked(async locked => this.save(locked, { channel_id: null, connected_at: null, status: 'not_connected' }))
+        break
+      }
       if ((await this.disconnect()).disconnected) break
     }
     await this.locked(async (row) => {

@@ -24,7 +24,6 @@ import { validatePassword } from '~/utils/password-validation'
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import type { InferSelectModel } from 'drizzle-orm'
 import { organizationAccessControl, organizationRoles } from '~/utils/organization-access'
-import { isOrganizationWideRole } from '~/server/utils/member-access'
 import { platformAdminAccessControl, platformAdminRoles } from '~/utils/platform-admin-access'
 import { createStripePlanLoader } from '~/server/utils/better-auth-stripe'
 import { handleStripeGa4Event } from '~/server/utils/stripe-ga4'
@@ -294,13 +293,6 @@ async function prepareAccountDeletion(env: CloudflareEnv, db: ReturnType<typeof 
   // failure then leaves no unrevoked grant behind, and the retry brings a new
   // code.
   if (appleAccount && appleCode) await revokeAppleGrant(env, await exchangeAppleAuthorizationCode(env, appleCode, appleAccount.accountId))
-
-  // The account's member rows cascade away with it; the homes it looked after
-  // are released first, since an assignment names a member without a foreign key.
-  const { releaseMemberHomes } = await import('~/server/domain/stays')
-  for (const member of await queryAll<{ id: string; organizationId: string }>(db, 'SELECT id, "organizationId" FROM member WHERE "userId" = ?', [userId])) {
-    await releaseMemberHomes(env, db, { organizationId: member.organizationId, memberId: member.id })
-  }
 }
 
 /** Where a password is chosen, and the body field that carries it. */
@@ -338,20 +330,20 @@ function buildAuth(env: CloudflareEnv) {
       beforeCreateOrganization: async ({ organization }: { organization: Record<string, unknown> }) => assertOrganizationFacts(organization),
       beforeUpdateOrganization: async ({ organization }: { organization: Record<string, unknown> }) => assertOrganizationFacts(organization),
       // A removed member or changed role reads differently on every site. A
-      // member who is gone, or who now sees every home, looks after none; the
-      // live dashboard socket re-reads membership for every event it carries.
+      // member who is gone, or who now sees every home, looks after none
+      // (reconciled across the organization, so a failed run is repaired by the
+      // next change); the live dashboard socket re-reads membership per event.
       // Better Auth's /organization/leave runs no member hook, so the
       // after-hook below covers it.
-      afterRemoveMember: async ({ member, organization }: { member: { id: string }; organization: { id: string } }) => {
+      afterRemoveMember: async ({ organization }: { organization: { id: string } }) => {
         await recordMemberChange(organization.id)
-        const { releaseMemberHomes } = await import('~/server/domain/stays')
-        await releaseMemberHomes(env, db, { organizationId: organization.id, memberId: member.id })
+        const { releaseUnassignableHomes } = await import('~/server/domain/stays')
+        await releaseUnassignableHomes(env, db, { organizationId: organization.id })
       },
-      afterUpdateMemberRole: async ({ member, organization }: { member: { id: string; role: string }; organization: { id: string } }) => {
+      afterUpdateMemberRole: async ({ organization }: { organization: { id: string } }) => {
         await recordMemberChange(organization.id)
-        if (!member.role.split(',').some(isOrganizationWideRole)) return
-        const { releaseMemberHomes } = await import('~/server/domain/stays')
-        await releaseMemberHomes(env, db, { organizationId: organization.id, memberId: member.id })
+        const { releaseUnassignableHomes } = await import('~/server/domain/stays')
+        await releaseUnassignableHomes(env, db, { organizationId: organization.id })
       },
       afterAddTeamMember: async ({ team, user }: { team: { organizationId: string }; user: { id: string } }) => {
         const { materializeMemberSessions } = await import('~/server/utils/availability')
@@ -400,8 +392,8 @@ function buildAuth(env: CloudflareEnv) {
     // updatePhoneNumber it signs in whoever holds that number.
     //
     // An administrator does not delete accounts: /admin/remove-user would skip
-    // the ownership guard, Apple revocation and home release that
-    // /delete-user runs in deleteUser.beforeDelete.
+    // the ownership guard and Apple revocation that /delete-user runs in
+    // deleteUser.beforeDelete.
     disabledPaths: ['/sign-in/phone-number', '/phone-number/request-password-reset', '/phone-number/reset-password', '/admin/remove-user'],
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
@@ -456,8 +448,8 @@ function buildAuth(env: CloudflareEnv) {
           if (left instanceof Error || !ctx.context.session) return
           const organizationId = (ctx.body as { organizationId: string }).organizationId
           await recordMemberChange(organizationId)
-          const { releaseMemberHomes } = await import('~/server/domain/stays')
-          await releaseMemberHomes(env, db, { organizationId, memberId: (left as { id: string }).id })
+          const { releaseUnassignableHomes } = await import('~/server/domain/stays')
+          await releaseUnassignableHomes(env, db, { organizationId })
           return
         }
         if (ctx.path !== '/callback/:id') return
@@ -540,6 +532,13 @@ function buildAuth(env: CloudflareEnv) {
             // A deleted account's Customer at every business it paid goes with it, and the cards saved there.
             await deleteBuyerCustomers(db, stripeClient, user.id)
             await execute(db, "DELETE FROM activity_entries WHERE kind='notification' AND scope_kind='global' AND target_user_id=?", [user.id])
+            // The account's member rows cascade away with it; the homes they
+            // looked after are released last, since an assignment names a member
+            // without a foreign key.
+            const { releaseUnassignableHomes } = await import('~/server/domain/stays')
+            for (const { organizationId } of await queryAll<{ organizationId: string }>(db, 'SELECT DISTINCT "organizationId" FROM member WHERE "userId" = ?', [user.id])) {
+              await releaseUnassignableHomes(env, db, { organizationId, departingUserId: user.id })
+            }
           },
         },
         update: {
