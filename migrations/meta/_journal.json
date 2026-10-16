@@ -29,6 +29,13 @@
       "when": 1792138999594,
       "tag": "0003_direct_stay_holds",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1792142418082,
+      "tag": "0004_stay_listing_fields",
+      "breakpoints": true
     }
   ]
 }

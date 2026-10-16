@@ -2,8 +2,10 @@ import { HTTPError } from 'nitro'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedHomeSql, isOrganizationWideRole, organizationAdapter, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery } from '~/server/utils/organization-events'
-import { createLocation, updateLocation } from '~/server/utils/location-management'
-import { createProduct, getProduct, updateProduct } from '~/server/utils/product-management'
+import { coordinatesFailure, createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
+import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
+import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayLongTermCancellationPolicy, type StayPropertyType } from '~/shared/stay-listing'
+import { createProduct, getProduct, setProductPublication, updateProduct } from '~/server/utils/product-management'
 import type { Product, UpdateProductInput } from '~/server/types/products'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
@@ -134,7 +136,32 @@ export interface StayHome {
   check_out_time: string
   max_guests: number
   min_nights: number
+  /** The product's description, the listing text guests read; empty when the host has written none. */
+  description: string
+  /** Whether the home is listed on the site: its product's publication there. */
+  published: boolean
+  /** The home's location: its address and the pin its host placed, each null until set. */
+  address: StayAddress | null
+  latitude: number | null
+  longitude: number | null
+  property_type: StayPropertyType | null
+  bedrooms: number | null
+  beds: number | null
+  bathrooms: number | null
+  amenities: StayAmenity[]
+  cancellation_policy: StayCancellationPolicy | null
+  long_term_cancellation_policy: StayLongTermCancellationPolicy | null
+  /**
+   * The arrival guide. Private: only managers and the home's assigned members
+   * read it here; no public page or payload carries it.
+   */
+  check_in_method: StayCheckInMethod | null
   check_in_instructions: string | null
+  wifi_network: string | null
+  wifi_password: string | null
+  directions: string | null
+  house_manual: string | null
+  checkout_instructions: StayCheckoutInstruction[]
   /** The member (member.id) and the team who look after the home; assigned members see its stays. */
   assigned_member_id: string | null
   assigned_team_id: string | null
@@ -149,6 +176,31 @@ export interface StayHome {
    * (the product image, then its gallery), the same pictures its pages show.
    */
   photos: StayPhoto[]
+}
+
+/** A home's address as a home is added with it: street, city, state, ISO country and postal code. */
+export interface StayAddress {
+  address: string
+  city: string | null
+  state: string | null
+  country: string
+  zip_code: string | null
+}
+
+function stayAddress(value: unknown): StayAddress | null {
+  const postal = parsePostalAddress(value)
+  return postal && { address: postal.addressLines.join(', '), city: postal.locality ?? null, state: postal.administrativeArea ?? null, country: postal.regionCode, zip_code: postal.postalCode ?? null }
+}
+
+/** The postal address a location stores for a home's address. */
+function postalAddress(address: Omit<StayAddress, 'city'> & { city: string }): PostalAddress {
+  return { regionCode: address.country, addressLines: [address.address], locality: address.city, ...(address.state ? { administrativeArea: address.state } : {}), ...(address.zip_code ? { postalCode: address.zip_code } : {}) }
+}
+
+/** One thing guests are asked to do before they leave, with the host's details for it. */
+export interface StayCheckoutInstruction {
+  task: StayCheckoutTask
+  details: string | null
 }
 
 /** One of a home's photos. Its id is the media asset's id. */
@@ -269,8 +321,12 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
 
 async function stayHomesWhere(db: DbClient, organizationId: string, productId: string | null, scope: { sql: string; params: string[] }): Promise<StayHome[]> {
   const rows = await queryAll<Record<string, unknown>>(db, `
-    SELECT p.id AS product_id, p.name, c.location_id, l.timezone, o.default_currency, c.check_in_time, c.check_out_time, c.max_guests, c.min_nights, c.check_in_instructions,
-           c.assigned_member_id, c.assigned_team_id, m.enabled AS channel_enabled, m.import_stage AS channel_stage
+    SELECT p.id AS product_id, p.name, p.description, c.location_id, l.timezone, l.address, l.latitude, l.longitude, o.default_currency,
+           c.check_in_time, c.check_out_time, c.max_guests, c.min_nights, c.property_type, c.bedrooms, c.beds, c.bathrooms, c.amenities,
+           c.cancellation_policy, c.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
+           c.directions, c.house_manual, c.checkout_instructions, c.assigned_member_id, c.assigned_team_id,
+           COALESCE((SELECT pp.published FROM product_publications pp WHERE pp.organization_id = c.organization_id AND pp.product_id = c.product_id), 0) AS published,
+           m.enabled AS channel_enabled, m.import_stage AS channel_stage
       FROM product_stay_configs c
       JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
@@ -294,7 +350,18 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       product_id: String(row.product_id), name: String(row.name), location_id: String(row.location_id), timezone: String(row.timezone),
       currency: row.default_currency, base_price_minor: base ? base.unit_amount : null, base_price_tax_behavior: base ? base.tax_behavior : null,
       check_in_time: String(row.check_in_time), check_out_time: String(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
-      check_in_instructions: row.check_in_instructions === null ? null : String(row.check_in_instructions),
+      description: String(row.description), published: Number(row.published) === 1,
+      address: stayAddress(row.address), latitude: nullableNumber(row.latitude), longitude: nullableNumber(row.longitude),
+      property_type: nullableText(row.property_type) as StayPropertyType | null,
+      bedrooms: nullableNumber(row.bedrooms), beds: nullableNumber(row.beds), bathrooms: nullableNumber(row.bathrooms),
+      amenities: JSON.parse(String(row.amenities)) as StayAmenity[],
+      cancellation_policy: nullableText(row.cancellation_policy) as StayCancellationPolicy | null,
+      long_term_cancellation_policy: nullableText(row.long_term_cancellation_policy) as StayLongTermCancellationPolicy | null,
+      check_in_method: nullableText(row.check_in_method) as StayCheckInMethod | null,
+      check_in_instructions: nullableText(row.check_in_instructions),
+      wifi_network: nullableText(row.wifi_network), wifi_password: nullableText(row.wifi_password),
+      directions: nullableText(row.directions), house_manual: nullableText(row.house_manual),
+      checkout_instructions: JSON.parse(String(row.checkout_instructions)) as StayCheckoutInstruction[],
       assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
       assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
       channel: row.channel_stage === null ? null : {
@@ -304,6 +371,14 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       photos: (photos.get(String(row.product_id)) ?? []).map(stayPhoto),
     }
   })
+}
+
+function nullableText(value: unknown): string | null {
+  return value === null ? null : String(value)
+}
+
+function nullableNumber(value: unknown): number | null {
+  return value === null ? null : Number(value)
 }
 
 function stayPhoto(item: MediaPlacementItem, position: number): StayPhoto {
@@ -386,19 +461,99 @@ export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
   const { text, timezone, time, name, maxGuests, minNights, basePrice } = homeDetails(body)
   const home: NewStayHome = {
     name: name(true)!, timezone: timezone(true)!,
-    address: text('address', 200, true)!, city: text('city', 100, true)!, state: text('state', 100, false),
-    country: text('country', 2, true)!, zip_code: text('zip_code', 32, false),
+    ...homeAddress(body, ''),
     phone: text('phone', 32, false), email: text('email', 254, false),
     check_in_time: time('check_in_time', true)!, check_out_time: time('check_out_time', true)!,
     max_guests: maxGuests(true)!, min_nights: minNights(true)!,
     base_price_minor: basePrice(),
   }
-  if (!/^[A-Z]{2}$/.test(home.country)) fail(422, 'INVALID_DETAIL', 'country must be a two-letter ISO country code', 'country')
   if (home.email !== null && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(home.email)) fail(422, 'INVALID_DETAIL', 'Enter a valid contact email', 'email')
   return home
 }
 
-const EDITABLE_HOME_FIELDS = ['name', 'timezone', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'check_in_instructions', 'base_price_minor', 'assigned_member_id', 'assigned_team_id'] as const
+/** A home's address read from a request; each problem names its field under the prefix. */
+function homeAddress(body: Record<string, unknown>, prefix: string): Pick<NewStayHome, 'address' | 'city' | 'state' | 'country' | 'zip_code'> {
+  const { text } = homeDetails(body)
+  const named = <T>(read: () => T): T => {
+    try { return read() } catch (error) {
+      if (prefix && error instanceof HTTPError && typeof (error.data as { field?: unknown })?.field === 'string') {
+        const data = error.data as { code: string; field: string }
+        fail(error.status, data.code, error.message, `${prefix}${data.field}`)
+      }
+      throw error
+    }
+  }
+  const address = named(() => ({
+    address: text('address', 200, true)!, city: text('city', 100, true)!, state: text('state', 100, false),
+    country: text('country', 2, true)!, zip_code: text('zip_code', 32, false),
+  }))
+  if (!/^[A-Z]{2}$/.test(address.country)) fail(422, 'INVALID_DETAIL', 'country must be a two-letter ISO country code', `${prefix}country`)
+  return address
+}
+
+/** What the home is and offers: product stay settings, checked by the product writer. */
+const LISTING_FIELDS = ['property_type', 'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy'] as const
+/** The arrival guide: private columns only this module reads and writes. */
+const ARRIVAL_TEXT = { check_in_instructions: 5000, wifi_network: 100, wifi_password: 100, directions: 5000, house_manual: 5000 } as const
+const ARRIVAL_FIELDS = [...Object.keys(ARRIVAL_TEXT) as Array<keyof typeof ARRIVAL_TEXT>, 'check_in_method', 'checkout_instructions'] as const
+const LOCATION_FIELDS = ['address', 'latitude', 'longitude'] as const
+const EDITABLE_HOME_FIELDS = ['name', 'description', 'published', 'timezone', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'base_price_minor',
+  'assigned_member_id', 'assigned_team_id', ...LISTING_FIELDS, ...ARRIVAL_FIELDS, ...LOCATION_FIELDS] as const
+
+/** The arrival guide fields a request names, checked; each problem names its field. */
+function arrivalPatch(body: Record<string, unknown>): Record<string, string | null> {
+  const patch: Record<string, string | null> = {}
+  for (const [key, max] of Object.entries(ARRIVAL_TEXT)) {
+    if (!(key in body)) continue
+    const value = body[key]
+    // A wifi password is kept exactly as typed; spaces can be part of it.
+    const text = typeof value === 'string' ? (key === 'wifi_password' ? value : value.trim()) : value
+    if (text !== null && (typeof text !== 'string' || !text.trim() || text.length > max)) fail(422, 'INVALID_DETAIL', `${key} must contain 1 to ${max} characters, or null`, key)
+    patch[key] = text as string | null
+  }
+  if ('check_in_method' in body) {
+    const method = body.check_in_method
+    if (method !== null && !Object.hasOwn(STAY_CHECK_IN_METHODS, method as string)) fail(422, 'INVALID_DETAIL', `check_in_method must be one of ${Object.keys(STAY_CHECK_IN_METHODS).join(', ')}, or null`, 'check_in_method')
+    patch.check_in_method = method as string | null
+  }
+  if ('checkout_instructions' in body) {
+    const list = body.checkout_instructions
+    if (!Array.isArray(list)) fail(422, 'INVALID_DETAIL', 'checkout_instructions must list { task, details } entries', 'checkout_instructions')
+    const tasks = new Set<string>()
+    const instructions = list.map((entry: unknown, index): StayCheckoutInstruction => {
+      const field = `checkout_instructions[${index}]`
+      if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) fail(422, 'INVALID_DETAIL', `${field} must be { task, details }`, field)
+      const { task, details, ...rest } = entry as Record<string, unknown>
+      if (Object.keys(rest).length) fail(422, 'INVALID_DETAIL', `${field} takes only task and details`, `${field}.${Object.keys(rest)[0]}`)
+      if (typeof task !== 'string' || !Object.hasOwn(STAY_CHECKOUT_TASKS, task)) fail(422, 'INVALID_DETAIL', `${field}.task must be one of ${Object.keys(STAY_CHECKOUT_TASKS).join(', ')}`, `${field}.task`)
+      if (tasks.has(task)) fail(422, 'INVALID_DETAIL', `${field}.task is already listed`, `${field}.task`)
+      tasks.add(task)
+      const text = typeof details === 'string' ? details.trim() : details
+      if (text !== null && (typeof text !== 'string' || !text || text.length > 500)) fail(422, 'INVALID_DETAIL', `${field}.details must contain 1 to 500 characters, or null`, `${field}.details`)
+      if (task === 'additional' && text === null) fail(422, 'INVALID_DETAIL', 'Additional requests need their details', `${field}.details`)
+      return { task: task as StayCheckoutTask, details: text as string | null }
+    })
+    patch.checkout_instructions = JSON.stringify(instructions)
+  }
+  return patch
+}
+
+/** The location fields a request names, as the location writer takes them. */
+function locationPatch(body: Record<string, unknown>): UpdateLocationInput {
+  const patch: UpdateLocationInput = {}
+  if ('address' in body) {
+    const value = body.address
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) fail(422, 'INVALID_DETAIL', 'address must be { address, city, state, country, zip_code }', 'address')
+    const unknown = Object.keys(value).find(key => !['address', 'city', 'state', 'country', 'zip_code'].includes(key))
+    if (unknown) fail(422, 'INVALID_DETAIL', `address.${unknown} is not part of an address`, `address.${unknown}`)
+    patch.address = postalAddress(homeAddress(value as Record<string, unknown>, 'address.'))
+  }
+  if ('latitude' in body) patch.latitude = body.latitude as number | null
+  if ('longitude' in body) patch.longitude = body.longitude as number | null
+  const pin = coordinatesFailure(patch)
+  if (pin) fail(422, 'INVALID_DETAIL', pin.error, pin.field)
+  return patch
+}
 
 /**
  * Change a home's details. Fields left out keep their value. Its time zone is
@@ -429,12 +584,13 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   if (guests !== null) stay.max_guests = guests
   const nights = minNights(false)
   if (nights !== null) stay.min_nights = nights
-  if ('check_in_instructions' in body) {
-    const instructions = body.check_in_instructions
-    if (instructions !== null && (typeof instructions !== 'string' || !instructions.trim() || instructions.trim().length > 5000)) {
-      fail(422, 'INVALID_DETAIL', 'check_in_instructions must contain 1 to 5000 characters, or null', 'check_in_instructions')
-    }
-  }
+  const arrival = arrivalPatch(body)
+  const location = locationPatch(body)
+  if ('published' in body && typeof body.published !== 'boolean') fail(422, 'INVALID_DETAIL', 'published must be true or false', 'published')
+  // Publication is refused until the home can take bookings; on its own, a refusal leaves nothing else half-saved.
+  if ('published' in body && Object.keys(body).length > 1) fail(422, 'INVALID_DETAIL', 'Change published on its own', 'published')
+  if ('description' in body && typeof body.description !== 'string') fail(422, 'INVALID_DETAIL', 'description must be text; send an empty one to clear it', 'description')
+  for (const key of LISTING_FIELDS) if (key in body) (stay as Record<string, unknown>)[key] = body[key]
   for (const [key, table, column] of [['assigned_member_id', 'member', 'organizationId'], ['assigned_team_id', 'team', 'organizationId']] as const) {
     if (!(key in body)) continue
     const value = body[key]
@@ -446,6 +602,7 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   const patch: UpdateProductInput = {}
   const renamed = name(false)
   if (renamed !== null) patch.name = renamed
+  if ('description' in body) patch.description = (body.description as string).trim()
   if (Object.keys(stay).length) patch.stay = stay
   const pricing = 'base_price_minor' in body
   if (pricing) {
@@ -463,17 +620,22 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   if (pushes && patch.variants === undefined && patch.stay?.min_nights === undefined) await requireChannelPush(db, env, access.organizationId, productId)
   if (Object.keys(patch).length) await updateProduct(db, { organizationId: access.organizationId, productId, patch, actor: { actorId: access.actorId }, env, deferStayNightPush: true })
   // The product's checks are the ones a valid request can still fail, so it is written first.
-  if (zone !== null && zone !== home.timezone) {
-    const moved = await updateLocation(db as D1Database, access.organizationId, home.location_id, { timezone: zone }, access.actorId, env)
+  if ((zone !== null && zone !== home.timezone) || Object.keys(location).length) {
+    const moved = await updateLocation(db as D1Database, access.organizationId, home.location_id, { ...location, ...(zone !== null && zone !== home.timezone ? { timezone: zone } : {}) }, access.actorId, env)
     if (moved.status !== 200) locationFailure(moved)
   }
-  const instructionsAt = 'check_in_instructions' in body ? new Date().toISOString() : null
+  if ('published' in body && body.published !== home.published) {
+    await setProductPublication(db, { organizationId: access.organizationId, productId, published: body.published as boolean, actor: { actorId: access.actorId }, env })
+  }
+  const columns = Object.keys(arrival)
+  const instructionsAt = columns.length ? new Date().toISOString() : null
   if (instructionsAt !== null) {
     const results = await executeBatch(db, [{
-      query: 'UPDATE product_stay_configs SET check_in_instructions = ?, updated_at = ?, updated_by = ? WHERE organization_id = ? AND product_id = ?',
-      params: [body.check_in_instructions === null ? null : (body.check_in_instructions as string).trim(), instructionsAt, access.actorId, access.organizationId, productId],
-    }, organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.instructions_updated', entityType: 'stay_home', entityId: productId, onlyIfPreviousChangedOneRow: true })], { operation: 'Update home check-in instructions' })
-    if (results[0]?.meta.changes !== 1) fail(409, 'HOME_CHANGED', 'The home changed before its check-in instructions were saved; reload it', 'product_id')
+      query: `UPDATE product_stay_configs SET ${columns.map(column => `${column} = ?`).join(', ')}, updated_at = ?, updated_by = ? WHERE organization_id = ? AND product_id = ?`,
+      params: [...columns.map(column => arrival[column]!), instructionsAt, access.actorId, access.organizationId, productId],
+    }, organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.instructions_updated', entityType: 'stay_home', entityId: productId,
+      metadata: { fields: columns.sort().join(',') }, onlyIfPreviousChangedOneRow: true })], { operation: 'Update home arrival guide' })
+    if (results[0]?.meta.changes !== 1) fail(409, 'HOME_CHANGED', 'The home changed before its arrival guide was saved; reload it', 'product_id')
   }
   const product = pushes ? await getProduct(db, access.organizationId, productId) : null
   const channelPush = product ? await pushStayHomeNights(db, env, access, product) : null
@@ -482,8 +644,9 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   if (product && channelPush !== null) {
     await publishStayInvalidation(env, { type: 'nights.changed', organizationId: access.organizationId, productId, locationId: updated.location_id, stayId: null }, { updated_at: product.updated_at })
   }
-  if (instructionsAt !== null) {
-    await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId, locationId: updated.location_id, stayId: null }, { updated_at: instructionsAt })
+  // A product or location change already announced itself; the arrival guide and the listing switch do here.
+  if (instructionsAt !== null || 'published' in body) {
+    await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId, locationId: updated.location_id, stayId: null }, { updated_at: instructionsAt ?? new Date().toISOString() })
   }
   return { home: updated, channel_push: channelPush }
 }
@@ -538,7 +701,7 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
   requireManager(access)
   const located = await createLocation(env, db as D1Database, access.organizationId, {
     title: home.name, timezone: home.timezone, phone: home.phone, email: home.email,
-    address: { regionCode: home.country, addressLines: [home.address], locality: home.city, administrativeArea: home.state ?? undefined, postalCode: home.zip_code ?? undefined },
+    address: postalAddress(home),
   }, access.actorId, { idempotencyKey })
   if (located.status !== 201) locationFailure(located)
   const location = 'location' in located.data ? located.data.location : undefined

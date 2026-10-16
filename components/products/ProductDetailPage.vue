@@ -363,6 +363,7 @@
 import WhoYouMeet from '~/components/booking/WhoYouMeet.vue'
 import type { ProductPresentation, PublicProduct } from '~/server/types/products'
 import { useSchemaOrg } from '#imports'
+import { STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
 import type { CurrencyCode } from '~/shared/currencies'
 import { minorAmountToMajor, selectPrice, type Price } from '~/shared/prices'
 import { formatProductMoney } from '~/utils/product-money'
@@ -528,10 +529,14 @@ const galleryItems = computed(() => [
  * calendar cannot disagree.
  */
 const factChips = computed(() => {
-  const chips: Array<{ icon: 'clock' | 'user-group' | 'video-camera' | 'check-circle' | 'moon'; label: string }> = []
+  const chips: Array<{ icon: 'clock' | 'user-group' | 'video-camera' | 'check-circle' | 'moon' | 'home'; label: string }> = []
   const stay = props.product.stay
   if (stay) {
+    if (stay.property_type) chips.push({ icon: 'home', label: STAY_PROPERTY_TYPES[stay.property_type] })
     chips.push({ icon: 'user-group', label: t('stay.sleeps', { count: stay.max_guests }) })
+    if (stay.bedrooms !== null) chips.push({ icon: 'home', label: t('stay.bedrooms', { count: stay.bedrooms }) })
+    if (stay.beds !== null) chips.push({ icon: 'home', label: t('stay.beds', { count: stay.beds }) })
+    if (stay.bathrooms !== null) chips.push({ icon: 'home', label: t('stay.bathrooms', { count: stay.bathrooms }) })
     chips.push({ icon: 'clock', label: t('stay.check_in_after', { time: formatTime(stay.check_in_time, locale.value) }) })
     chips.push({ icon: 'clock', label: t('stay.check_out_before', { time: formatTime(stay.check_out_time, locale.value) }) })
     if (stay.min_nights > 1) chips.push({ icon: 'moon', label: t('stay.min_nights', { count: stay.min_nights }) })
@@ -573,7 +578,20 @@ const visibleDetails = computed(() => productDetailFields(props.product.kind).fl
   if (value === undefined || value === null) return []
   const values = Array.isArray(value) ? value : [String(value)]
   return values.length ? [{ key: definition.id, label: definition.name, values }] : []
-}))
+}).concat(stayDetails(props.product.stay)))
+
+/** A place to stay's amenities and cancellation policies, named from their catalogs. */
+function stayDetails(stay: typeof props.product.stay): Array<{ key: string; label: string; values: string[] }> {
+  if (!stay) return []
+  const policies = [
+    ...(stay.cancellation_policy ? [STAY_CANCELLATION_POLICIES[stay.cancellation_policy]] : []),
+    ...(stay.long_term_cancellation_policy ? [STAY_LONG_TERM_CANCELLATION_POLICIES[stay.long_term_cancellation_policy]] : []),
+  ]
+  return [
+    ...(stay.amenities.length ? [{ key: 'amenities', label: 'Amenities', values: stay.amenities.map(code => STAY_AMENITIES[code].label) }] : []),
+    ...(policies.length ? [{ key: 'cancellation_policy', label: 'Cancellation policy', values: policies }] : []),
+  ]
+}
 
 const { data: initialSessions, error: initialSessionsError } = await useAsyncData(`product-detail-sessions:${props.organizationId}:${props.product.id}:${props.location?.id ?? 'online'}`, async () => {
   if (!props.booking || props.product.order_url || props.scopeRequired) return []
@@ -747,7 +765,6 @@ function sessionEvent(session: PublicProductSession) {
 const stayStructuredData = computed(() => {
   const stay = props.product.stay
   if (!stay) return null
-  const amenities = attribute('amenities', asList) ?? []
   const price = offer.value
   return {
     '@type': 'Accommodation',
@@ -760,7 +777,11 @@ const stayStructuredData = computed(() => {
       ...(props.location.latitude !== null && props.location.longitude !== null ? { geo: { '@type': 'GeoCoordinates', latitude: props.location.latitude, longitude: props.location.longitude } } : {}),
     } : {}),
     occupancy: { '@type': 'QuantitativeValue', minValue: 1, maxValue: stay.max_guests },
-    ...(amenities.length ? { amenityFeature: amenities.map(name => ({ '@type': 'LocationFeatureSpecification', name, value: true })) } : {}),
+    ...(stay.property_type ? { accommodationCategory: STAY_PROPERTY_TYPES[stay.property_type] } : {}),
+    ...(stay.bedrooms !== null ? { numberOfBedrooms: stay.bedrooms } : {}),
+    ...(stay.bathrooms !== null ? { numberOfBathroomsTotal: stay.bathrooms } : {}),
+    ...(stay.beds !== null ? { bed: { '@type': 'BedDetails', numberOfBeds: stay.beds } } : {}),
+    ...(stay.amenities.length ? { amenityFeature: stay.amenities.map(code => ({ '@type': 'LocationFeatureSpecification', name: STAY_AMENITIES[code].label, value: true })) } : {}),
     additionalProperty: [
       { '@type': 'PropertyValue', name: 'checkinTime', value: stay.check_in_time },
       { '@type': 'PropertyValue', name: 'checkoutTime', value: stay.check_out_time },

@@ -866,7 +866,7 @@ export const EXPECTED_TOOL_ANNOTATIONS = {
   update_message_template: { ...D, openWorldHint: true },
   delete_message_template: D,
   get_guest_messaging_context: R,
-  set_stay_check_in_instructions: D,
+  update_stay_arrival_guide: D,
   list_scheduled_guest_messages: R,
   cancel_scheduled_guest_message: D,
   append_content_block: { ...W, openWorldHint: true },

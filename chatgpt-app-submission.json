@@ -1640,18 +1640,6 @@
         "destructive_justification": "Creates or overwrites the selected product’s publication setting, including removing it from public display."
       }
     },
-    "set_stay_check_in_instructions": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Saves or removes one home’s private check-in instructions; nothing is sent to a guest or published.",
-        "open_world_justification": "Saves or removes one home’s private check-in instructions; nothing is sent to a guest or published. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Saves or removes one home’s private check-in instructions; nothing is sent to a guest or published."
-      }
-    },
     "set_stay_nights": {
       "annotations": {
         "readOnlyHint": false,
@@ -1890,6 +1878,18 @@
         "read_only_justification": "Changes a host-entered stay’s dates, party, guest details, total or notes under its version, moving its night claims; channel stays are refused.",
         "open_world_justification": "Changes a host-entered stay’s dates, party, guest details, total or notes under its version, moving its night claims; channel stays are refused. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
         "destructive_justification": "Changes a host-entered stay’s dates, party, guest details, total or notes under its version, moving its night claims; channel stays are refused."
+      }
+    },
+    "update_stay_arrival_guide": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Saves one home’s private arrival guide (check-in method and instructions, wifi, directions, house manual, checkout instructions); nothing is sent to a guest or published.",
+        "open_world_justification": "Saves one home’s private arrival guide (check-in method and instructions, wifi, directions, house manual, checkout instructions); nothing is sent to a guest or published. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Saves one home’s private arrival guide (check-in method and instructions, wifi, directions, house manual, checkout instructions); nothing is sent to a guest or published."
       }
     },
     "update_team": {
