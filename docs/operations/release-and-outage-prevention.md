@@ -499,10 +499,11 @@ Staging v19 was loaded from `krabiclaw-staging-v18` before the binding change
 merged: 100 tables, 81,340 rows, `foreign_key_check` empty, one transform
 (`notification_preferences_push_default`, 2 rows).
 
-The staging, development and E2E bindings use v19, so local schema is v19. The
-top-level production binding stays on `krabiclaw-production-v18` until
-production v19 is loaded from it; that binding moves in its own change
-immediately before promotion.
+The staging binding uses v19. The top-level production binding, and the
+development and E2E bindings that share its local D1 id, stay on
+`krabiclaw-production-v18` until production v19 is loaded from it; local schema
+still comes from the v19 baseline in `migrations/`. All three move together in
+their own change immediately before promotion.
 
 Before dropping or retiring a legacy table or writer:
 
