@@ -1,3 +1,4 @@
+import type { StayAmenity, StayCancellationPolicy, StayLongTermCancellationPolicy, StayPropertyType } from '~/shared/stay-listing'
 import type { ResolvedMediaAsset } from '~/server/utils/media-asset-manager'
 import type { Price, PriceInput } from '~/shared/prices'
 import type { ProductDetails, ProductKind } from '~/shared/product-details'
@@ -71,10 +72,27 @@ export interface ProductStayConfig {
   check_out_time: string
   max_guests: number
   min_nights: number
+  /** What the home is, in Airbnb's property groups; null when the host has not said. */
+  property_type: StayPropertyType | null
+  /** 0 is a studio. null when the host has not said. */
+  bedrooms: number | null
+  beds: number | null
+  /** Whole and half baths, such as 3.5. */
+  bathrooms: number | null
+  /** The amenity codes the home offers, in catalog order; empty offers none. */
+  amenities: StayAmenity[]
+  /** For stays shorter than 28 nights. Shown to guests; it does not refund by itself. */
+  cancellation_policy: StayCancellationPolicy | null
+  /** For stays of 28 nights or more. */
+  long_term_cancellation_policy: StayLongTermCancellationPolicy | null
   /** Who looks after the home: their stays are what an assigned member sees. */
   assigned_member_id: string | null
   assigned_team_id: string | null
 }
+
+/** What a home is and offers; unsaid when a home is created without them. */
+export type StayListingField = 'property_type' | 'bedrooms' | 'beds' | 'bathrooms' | 'amenities' | 'cancellation_policy' | 'long_term_cancellation_policy'
+export type ProductStayConfigInput = Omit<ProductStayConfig, StayListingField> & Partial<Pick<ProductStayConfig, StayListingField>>
 
 /** Who looks after a product: workspace state the public site never carries. */
 export type StaffAssignment = 'assigned_member_id' | 'assigned_team_id'
@@ -182,7 +200,7 @@ export interface CreateProductInput {
   details?: ProductDetails
   source?: ProductSource
   /** Required for kind `stay` and refused for every other kind. */
-  stay?: ProductStayConfig
+  stay?: ProductStayConfigInput
 }
 
 /** Existing identities accept partial fields; a new entry must supply its required fields. */

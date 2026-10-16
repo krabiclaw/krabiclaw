@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:d4b6626e1cae609ef8deb8889db86d8937cb9e8c41683863f6ef8931a77ab74e",
-  "documentationFingerprint": "sha256:5da2cc8361a276c68c94f29aebbb5b6366e691bcbe299195942b2d42e52521e1",
+  "fingerprint": "sha256:7de1e2e466cae21077cdcac1ec425b6fb1191f3e7997d53598e1f4a5384e1fc9",
+  "documentationFingerprint": "sha256:3816cf03d3cdb2042bc52bf9ee1004c4460c7dbd4178e685b363501083821264",
   "tools": [
     {
       "name": "append_content_block",
@@ -6071,18 +6071,6 @@
                       "type": "array",
                       "uniqueItems": true
                     },
-                    "amenities": {
-                      "description": "What the home offers guests, such as Wifi or a kitchen.",
-                      "items": {
-                        "maxLength": 1000,
-                        "minLength": 1,
-                        "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                        "type": "string"
-                      },
-                      "maxItems": 100,
-                      "type": "array",
-                      "uniqueItems": true
-                    },
                     "cancellation_policy": {
                       "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
                       "maxLength": 10000,
@@ -6668,18 +6656,6 @@
                       "type": "array",
                       "uniqueItems": true
                     },
-                    "amenities": {
-                      "description": "What the home offers guests, such as Wifi or a kitchen.",
-                      "items": {
-                        "maxLength": 1000,
-                        "minLength": 1,
-                        "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                        "type": "string"
-                      },
-                      "maxItems": 100,
-                      "type": "array",
-                      "uniqueItems": true
-                    },
                     "cancellation_policy": {
                       "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
                       "maxLength": 10000,
@@ -7159,8 +7135,72 @@
                   "type": "string"
                 },
                 "stay": {
-                  "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it). Guest-facing house rules are the house_rules detail.",
+                  "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail.",
                   "properties": {
+                    "amenities": {
+                      "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                      "items": {
+                        "enum": [
+                          "hair_dryer",
+                          "shampoo",
+                          "hot_water",
+                          "bathtub",
+                          "essentials",
+                          "bed_linens",
+                          "hangers",
+                          "iron",
+                          "washer",
+                          "dryer",
+                          "tv",
+                          "pool_table",
+                          "piano",
+                          "exercise_equipment",
+                          "crib",
+                          "high_chair",
+                          "air_conditioning",
+                          "heating",
+                          "indoor_fireplace",
+                          "smoke_alarm",
+                          "carbon_monoxide_alarm",
+                          "fire_extinguisher",
+                          "first_aid_kit",
+                          "wifi",
+                          "dedicated_workspace",
+                          "kitchen",
+                          "refrigerator",
+                          "microwave",
+                          "cooking_basics",
+                          "dishes_and_silverware",
+                          "dishwasher",
+                          "stove",
+                          "oven",
+                          "coffee_maker",
+                          "lake_access",
+                          "beach_access",
+                          "ski_in_out",
+                          "private_entrance",
+                          "patio",
+                          "bbq_grill",
+                          "outdoor_dining",
+                          "fire_pit",
+                          "outdoor_shower",
+                          "free_parking",
+                          "paid_parking",
+                          "ev_charger",
+                          "pool",
+                          "hot_tub",
+                          "gym",
+                          "elevator",
+                          "self_check_in",
+                          "long_term_stays",
+                          "luggage_dropoff",
+                          "pets_allowed"
+                        ],
+                        "type": "string"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
                     "assigned_member_id": {
                       "description": "Member who looks after the home; their assigned access shows its stays.",
                       "type": [
@@ -7170,6 +7210,48 @@
                     },
                     "assigned_team_id": {
                       "description": "Team who look after the home, such as cleaners.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "bathrooms": {
+                      "description": "Whole and half baths, such as 1.5.",
+                      "maximum": 50,
+                      "minimum": 0,
+                      "multipleOf": 0.5,
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "bedrooms": {
+                      "description": "Bedrooms; 0 is a studio.",
+                      "maximum": 50,
+                      "minimum": 0,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "beds": {
+                      "maximum": 50,
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "cancellation_policy": {
+                      "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                      "enum": [
+                        "flexible",
+                        "moderate",
+                        "limited",
+                        "firm",
+                        "strict",
+                        null
+                      ],
                       "type": [
                         "string",
                         "null"
@@ -7188,6 +7270,18 @@
                     "location_id": {
                       "type": "string"
                     },
+                    "long_term_cancellation_policy": {
+                      "description": "Policy shown to guests for stays of 28 nights or more.",
+                      "enum": [
+                        "firm",
+                        "strict",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "max_guests": {
                       "maximum": 99,
                       "minimum": 1,
@@ -7198,6 +7292,22 @@
                       "maximum": 365,
                       "minimum": 1,
                       "type": "integer"
+                    },
+                    "property_type": {
+                      "description": "What the home is: apartment (Apartment), house (House), secondary_unit (Secondary unit), unique_space (Unique space), bed_and_breakfast (Bed and breakfast), boutique_hotel (Boutique hotel). Null when not said.",
+                      "enum": [
+                        "apartment",
+                        "house",
+                        "secondary_unit",
+                        "unique_space",
+                        "bed_and_breakfast",
+                        "boutique_hotel",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
@@ -7207,7 +7317,14 @@
                     "max_guests",
                     "min_nights",
                     "assigned_member_id",
-                    "assigned_team_id"
+                    "assigned_team_id",
+                    "property_type",
+                    "bedrooms",
+                    "beds",
+                    "bathrooms",
+                    "amenities",
+                    "cancellation_policy",
+                    "long_term_cancellation_policy"
                   ],
                   "type": [
                     "object",
@@ -17900,18 +18017,6 @@
                 "type": "array",
                 "uniqueItems": true
               },
-              "amenities": {
-                "description": "What the home offers guests, such as Wifi or a kitchen.",
-                "items": {
-                  "maxLength": 1000,
-                  "minLength": 1,
-                  "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                  "type": "string"
-                },
-                "maxItems": 100,
-                "type": "array",
-                "uniqueItems": true
-              },
               "cancellation_policy": {
                 "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
                 "maxLength": 10000,
@@ -20176,6 +20281,70 @@
             "additionalProperties": false,
             "description": "Required for kind stay and refused for every other kind: the location the home is at (fixed once created) and its stay settings. Guest-facing house rules go in details.house_rules. Base nightly rate is the variant price.",
             "properties": {
+              "amenities": {
+                "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                "items": {
+                  "enum": [
+                    "hair_dryer",
+                    "shampoo",
+                    "hot_water",
+                    "bathtub",
+                    "essentials",
+                    "bed_linens",
+                    "hangers",
+                    "iron",
+                    "washer",
+                    "dryer",
+                    "tv",
+                    "pool_table",
+                    "piano",
+                    "exercise_equipment",
+                    "crib",
+                    "high_chair",
+                    "air_conditioning",
+                    "heating",
+                    "indoor_fireplace",
+                    "smoke_alarm",
+                    "carbon_monoxide_alarm",
+                    "fire_extinguisher",
+                    "first_aid_kit",
+                    "wifi",
+                    "dedicated_workspace",
+                    "kitchen",
+                    "refrigerator",
+                    "microwave",
+                    "cooking_basics",
+                    "dishes_and_silverware",
+                    "dishwasher",
+                    "stove",
+                    "oven",
+                    "coffee_maker",
+                    "lake_access",
+                    "beach_access",
+                    "ski_in_out",
+                    "private_entrance",
+                    "patio",
+                    "bbq_grill",
+                    "outdoor_dining",
+                    "fire_pit",
+                    "outdoor_shower",
+                    "free_parking",
+                    "paid_parking",
+                    "ev_charger",
+                    "pool",
+                    "hot_tub",
+                    "gym",
+                    "elevator",
+                    "self_check_in",
+                    "long_term_stays",
+                    "luggage_dropoff",
+                    "pets_allowed"
+                  ],
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
               "assigned_member_id": {
                 "description": "Member who looks after the home; their assigned access shows its stays.",
                 "type": [
@@ -20185,6 +20354,48 @@
               },
               "assigned_team_id": {
                 "description": "Team who look after the home, such as cleaners.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "bathrooms": {
+                "description": "Whole and half baths, such as 1.5.",
+                "maximum": 50,
+                "minimum": 0,
+                "multipleOf": 0.5,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "bedrooms": {
+                "description": "Bedrooms; 0 is a studio.",
+                "maximum": 50,
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "beds": {
+                "maximum": 50,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "cancellation_policy": {
+                "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                "enum": [
+                  "flexible",
+                  "moderate",
+                  "limited",
+                  "firm",
+                  "strict",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -20203,6 +20414,18 @@
               "location_id": {
                 "type": "string"
               },
+              "long_term_cancellation_policy": {
+                "description": "Policy shown to guests for stays of 28 nights or more.",
+                "enum": [
+                  "firm",
+                  "strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "max_guests": {
                 "maximum": 99,
                 "minimum": 1,
@@ -20213,6 +20436,22 @@
                 "maximum": 365,
                 "minimum": 1,
                 "type": "integer"
+              },
+              "property_type": {
+                "description": "What the home is: apartment (Apartment), house (House), secondary_unit (Secondary unit), unique_space (Unique space), bed_and_breakfast (Bed and breakfast), boutique_hotel (Boutique hotel). Null when not said.",
+                "enum": [
+                  "apartment",
+                  "house",
+                  "secondary_unit",
+                  "unique_space",
+                  "bed_and_breakfast",
+                  "boutique_hotel",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -20533,18 +20772,6 @@
                 "properties": {
                   "allergens": {
                     "description": "Allergens the merchant states this dish contains.",
-                    "items": {
-                      "maxLength": 1000,
-                      "minLength": 1,
-                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                      "type": "string"
-                    },
-                    "maxItems": 100,
-                    "type": "array",
-                    "uniqueItems": true
-                  },
-                  "amenities": {
-                    "description": "What the home offers guests, such as Wifi or a kitchen.",
                     "items": {
                       "maxLength": 1000,
                       "minLength": 1,
@@ -21034,8 +21261,72 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it). Guest-facing house rules are the house_rules detail.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail.",
                 "properties": {
+                  "amenities": {
+                    "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                    "items": {
+                      "enum": [
+                        "hair_dryer",
+                        "shampoo",
+                        "hot_water",
+                        "bathtub",
+                        "essentials",
+                        "bed_linens",
+                        "hangers",
+                        "iron",
+                        "washer",
+                        "dryer",
+                        "tv",
+                        "pool_table",
+                        "piano",
+                        "exercise_equipment",
+                        "crib",
+                        "high_chair",
+                        "air_conditioning",
+                        "heating",
+                        "indoor_fireplace",
+                        "smoke_alarm",
+                        "carbon_monoxide_alarm",
+                        "fire_extinguisher",
+                        "first_aid_kit",
+                        "wifi",
+                        "dedicated_workspace",
+                        "kitchen",
+                        "refrigerator",
+                        "microwave",
+                        "cooking_basics",
+                        "dishes_and_silverware",
+                        "dishwasher",
+                        "stove",
+                        "oven",
+                        "coffee_maker",
+                        "lake_access",
+                        "beach_access",
+                        "ski_in_out",
+                        "private_entrance",
+                        "patio",
+                        "bbq_grill",
+                        "outdoor_dining",
+                        "fire_pit",
+                        "outdoor_shower",
+                        "free_parking",
+                        "paid_parking",
+                        "ev_charger",
+                        "pool",
+                        "hot_tub",
+                        "gym",
+                        "elevator",
+                        "self_check_in",
+                        "long_term_stays",
+                        "luggage_dropoff",
+                        "pets_allowed"
+                      ],
+                      "type": "string"
+                    },
+                    "type": "array",
+                    "uniqueItems": true
+                  },
                   "assigned_member_id": {
                     "description": "Member who looks after the home; their assigned access shows its stays.",
                     "type": [
@@ -21045,6 +21336,48 @@
                   },
                   "assigned_team_id": {
                     "description": "Team who look after the home, such as cleaners.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "bathrooms": {
+                    "description": "Whole and half baths, such as 1.5.",
+                    "maximum": 50,
+                    "minimum": 0,
+                    "multipleOf": 0.5,
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "bedrooms": {
+                    "description": "Bedrooms; 0 is a studio.",
+                    "maximum": 50,
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "beds": {
+                    "maximum": 50,
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "cancellation_policy": {
+                    "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                    "enum": [
+                      "flexible",
+                      "moderate",
+                      "limited",
+                      "firm",
+                      "strict",
+                      null
+                    ],
                     "type": [
                       "string",
                       "null"
@@ -21063,6 +21396,18 @@
                   "location_id": {
                     "type": "string"
                   },
+                  "long_term_cancellation_policy": {
+                    "description": "Policy shown to guests for stays of 28 nights or more.",
+                    "enum": [
+                      "firm",
+                      "strict",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "max_guests": {
                     "maximum": 99,
                     "minimum": 1,
@@ -21073,6 +21418,22 @@
                     "maximum": 365,
                     "minimum": 1,
                     "type": "integer"
+                  },
+                  "property_type": {
+                    "description": "What the home is: apartment (Apartment), house (House), secondary_unit (Secondary unit), unique_space (Unique space), bed_and_breakfast (Bed and breakfast), boutique_hotel (Boutique hotel). Null when not said.",
+                    "enum": [
+                      "apartment",
+                      "house",
+                      "secondary_unit",
+                      "unique_space",
+                      "bed_and_breakfast",
+                      "boutique_hotel",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
@@ -21082,7 +21443,14 @@
                   "max_guests",
                   "min_nights",
                   "assigned_member_id",
-                  "assigned_team_id"
+                  "assigned_team_id",
+                  "property_type",
+                  "bedrooms",
+                  "beds",
+                  "bathrooms",
+                  "amenities",
+                  "cancellation_policy",
+                  "long_term_cancellation_policy"
                 ],
                 "type": [
                   "object",
@@ -39484,6 +39852,113 @@
         "properties": {
           "home": {
             "properties": {
+              "address": {
+                "description": "The home's location address.",
+                "properties": {
+                  "addressLines": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "administrativeArea": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "languageCode": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "locality": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "postalCode": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "regionCode": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "sublocality": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "regionCode",
+                  "addressLines"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "amenities": {
+                "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                "items": {
+                  "enum": [
+                    "hair_dryer",
+                    "shampoo",
+                    "hot_water",
+                    "bathtub",
+                    "essentials",
+                    "bed_linens",
+                    "hangers",
+                    "iron",
+                    "washer",
+                    "dryer",
+                    "tv",
+                    "pool_table",
+                    "piano",
+                    "exercise_equipment",
+                    "crib",
+                    "high_chair",
+                    "air_conditioning",
+                    "heating",
+                    "indoor_fireplace",
+                    "smoke_alarm",
+                    "carbon_monoxide_alarm",
+                    "fire_extinguisher",
+                    "first_aid_kit",
+                    "wifi",
+                    "dedicated_workspace",
+                    "kitchen",
+                    "refrigerator",
+                    "microwave",
+                    "cooking_basics",
+                    "dishes_and_silverware",
+                    "dishwasher",
+                    "stove",
+                    "oven",
+                    "coffee_maker",
+                    "lake_access",
+                    "beach_access",
+                    "ski_in_out",
+                    "private_entrance",
+                    "patio",
+                    "bbq_grill",
+                    "outdoor_dining",
+                    "fire_pit",
+                    "outdoor_shower",
+                    "free_parking",
+                    "paid_parking",
+                    "ev_charger",
+                    "pool",
+                    "hot_tub",
+                    "gym",
+                    "elevator",
+                    "self_check_in",
+                    "long_term_stays",
+                    "luggage_dropoff",
+                    "pets_allowed"
+                  ],
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
               "assigned_member_id": {
                 "description": "The member (member id) who looks after this home.",
                 "type": [
@@ -39509,6 +39984,48 @@
                   "unspecified",
                   "inclusive",
                   "exclusive",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "bathrooms": {
+                "description": "Whole and half baths, such as 1.5.",
+                "maximum": 50,
+                "minimum": 0,
+                "multipleOf": 0.5,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "bedrooms": {
+                "description": "Bedrooms; 0 is a studio.",
+                "maximum": 50,
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "beds": {
+                "maximum": 50,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "cancellation_policy": {
+                "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                "enum": [
+                  "flexible",
+                  "moderate",
+                  "limited",
+                  "firm",
+                  "strict",
                   null
                 ],
                 "type": [
@@ -39544,6 +40061,24 @@
                 ]
               },
               "check_in_instructions": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "check_in_method": {
+                "description": "How guests get in.",
+                "enum": [
+                  "smart_lock",
+                  "keypad",
+                  "lockbox",
+                  "building_staff",
+                  "in_person",
+                  "other",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -39557,13 +40092,91 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "checkout_instructions": {
+                "description": "What guests do before leaving, in order, each task once; replaces the whole list.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "details": {
+                      "description": "Required for additional.",
+                      "maxLength": 500,
+                      "minLength": 1,
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "task": {
+                      "enum": [
+                        "gather_towels",
+                        "throw_trash",
+                        "turn_off",
+                        "lock_up",
+                        "return_keys",
+                        "additional"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "task",
+                    "details"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "currency": {
                 "minLength": 1,
                 "type": "string"
               },
+              "description": {
+                "description": "The listing description; empty when none is written.",
+                "type": "string"
+              },
+              "directions": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "house_manual": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "latitude": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
               "location_id": {
                 "minLength": 1,
                 "type": "string"
+              },
+              "long_term_cancellation_policy": {
+                "description": "Policy shown to guests for stays of 28 nights or more.",
+                "enum": [
+                  "firm",
+                  "strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "longitude": {
+                "type": [
+                  "number",
+                  "null"
+                ]
               },
               "max_guests": {
                 "type": "integer"
@@ -39635,9 +40248,45 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "property_type": {
+                "description": "What the home is: apartment (Apartment), house (House), secondary_unit (Secondary unit), unique_space (Unique space), bed_and_breakfast (Bed and breakfast), boutique_hotel (Boutique hotel). Null when not said.",
+                "enum": [
+                  "apartment",
+                  "house",
+                  "secondary_unit",
+                  "unique_space",
+                  "bed_and_breakfast",
+                  "boutique_hotel",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "published": {
+                "description": "Whether the home is listed on the site.",
+                "type": "boolean"
+              },
               "timezone": {
                 "minLength": 1,
                 "type": "string"
+              },
+              "wifi_network": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "wifi_password": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -39652,7 +40301,25 @@
               "check_out_time",
               "max_guests",
               "min_nights",
+              "description",
+              "published",
+              "address",
+              "latitude",
+              "longitude",
+              "property_type",
+              "bedrooms",
+              "beds",
+              "bathrooms",
+              "amenities",
+              "cancellation_policy",
+              "long_term_cancellation_policy",
+              "check_in_method",
               "check_in_instructions",
+              "wifi_network",
+              "wifi_password",
+              "directions",
+              "house_manual",
+              "checkout_instructions",
               "assigned_member_id",
               "assigned_team_id",
               "channel",
@@ -44069,18 +44736,6 @@
                     "type": "array",
                     "uniqueItems": true
                   },
-                  "amenities": {
-                    "description": "What the home offers guests, such as Wifi or a kitchen.",
-                    "items": {
-                      "maxLength": 1000,
-                      "minLength": 1,
-                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                      "type": "string"
-                    },
-                    "maxItems": 100,
-                    "type": "array",
-                    "uniqueItems": true
-                  },
                   "cancellation_policy": {
                     "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
                     "maxLength": 10000,
@@ -44560,8 +45215,72 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it). Guest-facing house rules are the house_rules detail.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail.",
                 "properties": {
+                  "amenities": {
+                    "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                    "items": {
+                      "enum": [
+                        "hair_dryer",
+                        "shampoo",
+                        "hot_water",
+                        "bathtub",
+                        "essentials",
+                        "bed_linens",
+                        "hangers",
+                        "iron",
+                        "washer",
+                        "dryer",
+                        "tv",
+                        "pool_table",
+                        "piano",
+                        "exercise_equipment",
+                        "crib",
+                        "high_chair",
+                        "air_conditioning",
+                        "heating",
+                        "indoor_fireplace",
+                        "smoke_alarm",
+                        "carbon_monoxide_alarm",
+                        "fire_extinguisher",
+                        "first_aid_kit",
+                        "wifi",
+                        "dedicated_workspace",
+                        "kitchen",
+                        "refrigerator",
+                        "microwave",
+                        "cooking_basics",
+                        "dishes_and_silverware",
+                        "dishwasher",
+                        "stove",
+                        "oven",
+                        "coffee_maker",
+                        "lake_access",
+                        "beach_access",
+                        "ski_in_out",
+                        "private_entrance",
+                        "patio",
+                        "bbq_grill",
+                        "outdoor_dining",
+                        "fire_pit",
+                        "outdoor_shower",
+                        "free_parking",
+                        "paid_parking",
+                        "ev_charger",
+                        "pool",
+                        "hot_tub",
+                        "gym",
+                        "elevator",
+                        "self_check_in",
+                        "long_term_stays",
+                        "luggage_dropoff",
+                        "pets_allowed"
+                      ],
+                      "type": "string"
+                    },
+                    "type": "array",
+                    "uniqueItems": true
+                  },
                   "assigned_member_id": {
                     "description": "Member who looks after the home; their assigned access shows its stays.",
                     "type": [
@@ -44571,6 +45290,48 @@
                   },
                   "assigned_team_id": {
                     "description": "Team who look after the home, such as cleaners.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "bathrooms": {
+                    "description": "Whole and half baths, such as 1.5.",
+                    "maximum": 50,
+                    "minimum": 0,
+                    "multipleOf": 0.5,
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "bedrooms": {
+                    "description": "Bedrooms; 0 is a studio.",
+                    "maximum": 50,
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "beds": {
+                    "maximum": 50,
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "cancellation_policy": {
+                    "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                    "enum": [
+                      "flexible",
+                      "moderate",
+                      "limited",
+                      "firm",
+                      "strict",
+                      null
+                    ],
                     "type": [
                       "string",
                       "null"
@@ -44589,6 +45350,18 @@
                   "location_id": {
                     "type": "string"
                   },
+                  "long_term_cancellation_policy": {
+                    "description": "Policy shown to guests for stays of 28 nights or more.",
+                    "enum": [
+                      "firm",
+                      "strict",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "max_guests": {
                     "maximum": 99,
                     "minimum": 1,
@@ -44599,6 +45372,22 @@
                     "maximum": 365,
                     "minimum": 1,
                     "type": "integer"
+                  },
+                  "property_type": {
+                    "description": "What the home is: apartment (Apartment), house (House), secondary_unit (Secondary unit), unique_space (Unique space), bed_and_breakfast (Bed and breakfast), boutique_hotel (Boutique hotel). Null when not said.",
+                    "enum": [
+                      "apartment",
+                      "house",
+                      "secondary_unit",
+                      "unique_space",
+                      "bed_and_breakfast",
+                      "boutique_hotel",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
@@ -44608,7 +45397,14 @@
                   "max_guests",
                   "min_nights",
                   "assigned_member_id",
-                  "assigned_team_id"
+                  "assigned_team_id",
+                  "property_type",
+                  "bedrooms",
+                  "beds",
+                  "bathrooms",
+                  "amenities",
+                  "cancellation_policy",
+                  "long_term_cancellation_policy"
                 ],
                 "type": [
                   "object",
@@ -45156,18 +45952,6 @@
                               "type": "array",
                               "uniqueItems": true
                             },
-                            "amenities": {
-                              "description": "What the home offers guests, such as Wifi or a kitchen.",
-                              "items": {
-                                "maxLength": 1000,
-                                "minLength": 1,
-                                "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                                "type": "string"
-                              },
-                              "maxItems": 100,
-                              "type": "array",
-                              "uniqueItems": true
-                            },
                             "cancellation_policy": {
                               "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
                               "maxLength": 10000,
@@ -45372,18 +46156,6 @@
                       "properties": {
                         "allergens": {
                           "description": "Allergens the merchant states this dish contains.",
-                          "items": {
-                            "maxLength": 1000,
-                            "minLength": 1,
-                            "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                            "type": "string"
-                          },
-                          "maxItems": 100,
-                          "type": "array",
-                          "uniqueItems": true
-                        },
-                        "amenities": {
-                          "description": "What the home offers guests, such as Wifi or a kitchen.",
                           "items": {
                             "maxLength": 1000,
                             "minLength": 1,
@@ -47669,18 +48441,6 @@
                             "properties": {
                               "allergens": {
                                 "description": "Allergens the merchant states this dish contains.",
-                                "items": {
-                                  "maxLength": 1000,
-                                  "minLength": 1,
-                                  "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                                  "type": "string"
-                                },
-                                "maxItems": 100,
-                                "type": "array",
-                                "uniqueItems": true
-                              },
-                              "amenities": {
-                                "description": "What the home offers guests, such as Wifi or a kitchen.",
                                 "items": {
                                   "maxLength": 1000,
                                   "minLength": 1,
@@ -54408,6 +55168,113 @@
           },
           "home": {
             "properties": {
+              "address": {
+                "description": "The home's location address.",
+                "properties": {
+                  "addressLines": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "administrativeArea": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "languageCode": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "locality": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "postalCode": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "regionCode": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "sublocality": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "regionCode",
+                  "addressLines"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "amenities": {
+                "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                "items": {
+                  "enum": [
+                    "hair_dryer",
+                    "shampoo",
+                    "hot_water",
+                    "bathtub",
+                    "essentials",
+                    "bed_linens",
+                    "hangers",
+                    "iron",
+                    "washer",
+                    "dryer",
+                    "tv",
+                    "pool_table",
+                    "piano",
+                    "exercise_equipment",
+                    "crib",
+                    "high_chair",
+                    "air_conditioning",
+                    "heating",
+                    "indoor_fireplace",
+                    "smoke_alarm",
+                    "carbon_monoxide_alarm",
+                    "fire_extinguisher",
+                    "first_aid_kit",
+                    "wifi",
+                    "dedicated_workspace",
+                    "kitchen",
+                    "refrigerator",
+                    "microwave",
+                    "cooking_basics",
+                    "dishes_and_silverware",
+                    "dishwasher",
+                    "stove",
+                    "oven",
+                    "coffee_maker",
+                    "lake_access",
+                    "beach_access",
+                    "ski_in_out",
+                    "private_entrance",
+                    "patio",
+                    "bbq_grill",
+                    "outdoor_dining",
+                    "fire_pit",
+                    "outdoor_shower",
+                    "free_parking",
+                    "paid_parking",
+                    "ev_charger",
+                    "pool",
+                    "hot_tub",
+                    "gym",
+                    "elevator",
+                    "self_check_in",
+                    "long_term_stays",
+                    "luggage_dropoff",
+                    "pets_allowed"
+                  ],
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
               "assigned_member_id": {
                 "description": "The member (member id) who looks after this home.",
                 "type": [
@@ -54433,6 +55300,48 @@
                   "unspecified",
                   "inclusive",
                   "exclusive",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "bathrooms": {
+                "description": "Whole and half baths, such as 1.5.",
+                "maximum": 50,
+                "minimum": 0,
+                "multipleOf": 0.5,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "bedrooms": {
+                "description": "Bedrooms; 0 is a studio.",
+                "maximum": 50,
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "beds": {
+                "maximum": 50,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "cancellation_policy": {
+                "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                "enum": [
+                  "flexible",
+                  "moderate",
+                  "limited",
+                  "firm",
+                  "strict",
                   null
                 ],
                 "type": [
@@ -54468,6 +55377,24 @@
                 ]
               },
               "check_in_instructions": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "check_in_method": {
+                "description": "How guests get in.",
+                "enum": [
+                  "smart_lock",
+                  "keypad",
+                  "lockbox",
+                  "building_staff",
+                  "in_person",
+                  "other",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -54481,13 +55408,91 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "checkout_instructions": {
+                "description": "What guests do before leaving, in order, each task once; replaces the whole list.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "details": {
+                      "description": "Required for additional.",
+                      "maxLength": 500,
+                      "minLength": 1,
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "task": {
+                      "enum": [
+                        "gather_towels",
+                        "throw_trash",
+                        "turn_off",
+                        "lock_up",
+                        "return_keys",
+                        "additional"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "task",
+                    "details"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "currency": {
                 "minLength": 1,
                 "type": "string"
               },
+              "description": {
+                "description": "The listing description; empty when none is written.",
+                "type": "string"
+              },
+              "directions": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "house_manual": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "latitude": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
               "location_id": {
                 "minLength": 1,
                 "type": "string"
+              },
+              "long_term_cancellation_policy": {
+                "description": "Policy shown to guests for stays of 28 nights or more.",
+                "enum": [
+                  "firm",
+                  "strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "longitude": {
+                "type": [
+                  "number",
+                  "null"
+                ]
               },
               "max_guests": {
                 "type": "integer"
@@ -54559,9 +55564,45 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "property_type": {
+                "description": "What the home is: apartment (Apartment), house (House), secondary_unit (Secondary unit), unique_space (Unique space), bed_and_breakfast (Bed and breakfast), boutique_hotel (Boutique hotel). Null when not said.",
+                "enum": [
+                  "apartment",
+                  "house",
+                  "secondary_unit",
+                  "unique_space",
+                  "bed_and_breakfast",
+                  "boutique_hotel",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "published": {
+                "description": "Whether the home is listed on the site.",
+                "type": "boolean"
+              },
               "timezone": {
                 "minLength": 1,
                 "type": "string"
+              },
+              "wifi_network": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "wifi_password": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -54576,7 +55617,25 @@
               "check_out_time",
               "max_guests",
               "min_nights",
+              "description",
+              "published",
+              "address",
+              "latitude",
+              "longitude",
+              "property_type",
+              "bedrooms",
+              "beds",
+              "bathrooms",
+              "amenities",
+              "cancellation_policy",
+              "long_term_cancellation_policy",
+              "check_in_method",
               "check_in_instructions",
+              "wifi_network",
+              "wifi_password",
+              "directions",
+              "house_manual",
+              "checkout_instructions",
               "assigned_member_id",
               "assigned_team_id",
               "channel",
@@ -68768,18 +69827,6 @@
                     "type": "array",
                     "uniqueItems": true
                   },
-                  "amenities": {
-                    "description": "What the home offers guests, such as Wifi or a kitchen.",
-                    "items": {
-                      "maxLength": 1000,
-                      "minLength": 1,
-                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                      "type": "string"
-                    },
-                    "maxItems": 100,
-                    "type": "array",
-                    "uniqueItems": true
-                  },
                   "cancellation_policy": {
                     "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
                     "maxLength": 10000,
@@ -70820,18 +71867,6 @@
                             "properties": {
                               "allergens": {
                                 "description": "Allergens the merchant states this dish contains.",
-                                "items": {
-                                  "maxLength": 1000,
-                                  "minLength": 1,
-                                  "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                                  "type": "string"
-                                },
-                                "maxItems": 100,
-                                "type": "array",
-                                "uniqueItems": true
-                              },
-                              "amenities": {
-                                "description": "What the home offers guests, such as Wifi or a kitchen.",
                                 "items": {
                                   "maxLength": 1000,
                                   "minLength": 1,
@@ -73776,18 +74811,6 @@
                       "type": "array",
                       "uniqueItems": true
                     },
-                    "amenities": {
-                      "description": "What the home offers guests, such as Wifi or a kitchen.",
-                      "items": {
-                        "maxLength": 1000,
-                        "minLength": 1,
-                        "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                        "type": "string"
-                      },
-                      "maxItems": 100,
-                      "type": "array",
-                      "uniqueItems": true
-                    },
                     "cancellation_policy": {
                       "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
                       "maxLength": 10000,
@@ -74418,18 +75441,6 @@
                       "type": "array",
                       "uniqueItems": true
                     },
-                    "amenities": {
-                      "description": "What the home offers guests, such as Wifi or a kitchen.",
-                      "items": {
-                        "maxLength": 1000,
-                        "minLength": 1,
-                        "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                        "type": "string"
-                      },
-                      "maxItems": 100,
-                      "type": "array",
-                      "uniqueItems": true
-                    },
                     "cancellation_policy": {
                       "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
                       "maxLength": 10000,
@@ -74909,8 +75920,72 @@
                   "type": "string"
                 },
                 "stay": {
-                  "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it). Guest-facing house rules are the house_rules detail.",
+                  "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail.",
                   "properties": {
+                    "amenities": {
+                      "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                      "items": {
+                        "enum": [
+                          "hair_dryer",
+                          "shampoo",
+                          "hot_water",
+                          "bathtub",
+                          "essentials",
+                          "bed_linens",
+                          "hangers",
+                          "iron",
+                          "washer",
+                          "dryer",
+                          "tv",
+                          "pool_table",
+                          "piano",
+                          "exercise_equipment",
+                          "crib",
+                          "high_chair",
+                          "air_conditioning",
+                          "heating",
+                          "indoor_fireplace",
+                          "smoke_alarm",
+                          "carbon_monoxide_alarm",
+                          "fire_extinguisher",
+                          "first_aid_kit",
+                          "wifi",
+                          "dedicated_workspace",
+                          "kitchen",
+                          "refrigerator",
+                          "microwave",
+                          "cooking_basics",
+                          "dishes_and_silverware",
+                          "dishwasher",
+                          "stove",
+                          "oven",
+                          "coffee_maker",
+                          "lake_access",
+                          "beach_access",
+                          "ski_in_out",
+                          "private_entrance",
+                          "patio",
+                          "bbq_grill",
+                          "outdoor_dining",
+                          "fire_pit",
+                          "outdoor_shower",
+                          "free_parking",
+                          "paid_parking",
+                          "ev_charger",
+                          "pool",
+                          "hot_tub",
+                          "gym",
+                          "elevator",
+                          "self_check_in",
+                          "long_term_stays",
+                          "luggage_dropoff",
+                          "pets_allowed"
+                        ],
+                        "type": "string"
+                      },
+                      "type": "array",
+                      "uniqueItems": true
+                    },
                     "assigned_member_id": {
                       "description": "Member who looks after the home; their assigned access shows its stays.",
                       "type": [
@@ -74920,6 +75995,48 @@
                     },
                     "assigned_team_id": {
                       "description": "Team who look after the home, such as cleaners.",
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "bathrooms": {
+                      "description": "Whole and half baths, such as 1.5.",
+                      "maximum": 50,
+                      "minimum": 0,
+                      "multipleOf": 0.5,
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "bedrooms": {
+                      "description": "Bedrooms; 0 is a studio.",
+                      "maximum": 50,
+                      "minimum": 0,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "beds": {
+                      "maximum": 50,
+                      "minimum": 1,
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "cancellation_policy": {
+                      "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                      "enum": [
+                        "flexible",
+                        "moderate",
+                        "limited",
+                        "firm",
+                        "strict",
+                        null
+                      ],
                       "type": [
                         "string",
                         "null"
@@ -74938,6 +76055,18 @@
                     "location_id": {
                       "type": "string"
                     },
+                    "long_term_cancellation_policy": {
+                      "description": "Policy shown to guests for stays of 28 nights or more.",
+                      "enum": [
+                        "firm",
+                        "strict",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
                     "max_guests": {
                       "maximum": 99,
                       "minimum": 1,
@@ -74948,6 +76077,22 @@
                       "maximum": 365,
                       "minimum": 1,
                       "type": "integer"
+                    },
+                    "property_type": {
+                      "description": "What the home is: apartment (Apartment), house (House), secondary_unit (Secondary unit), unique_space (Unique space), bed_and_breakfast (Bed and breakfast), boutique_hotel (Boutique hotel). Null when not said.",
+                      "enum": [
+                        "apartment",
+                        "house",
+                        "secondary_unit",
+                        "unique_space",
+                        "bed_and_breakfast",
+                        "boutique_hotel",
+                        null
+                      ],
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
@@ -74957,7 +76102,14 @@
                     "max_guests",
                     "min_nights",
                     "assigned_member_id",
-                    "assigned_team_id"
+                    "assigned_team_id",
+                    "property_type",
+                    "bedrooms",
+                    "beds",
+                    "bathrooms",
+                    "amenities",
+                    "cancellation_policy",
+                    "long_term_cancellation_policy"
                   ],
                   "type": [
                     "object",
@@ -76635,18 +77787,6 @@
                     "type": "array",
                     "uniqueItems": true
                   },
-                  "amenities": {
-                    "description": "What the home offers guests, such as Wifi or a kitchen.",
-                    "items": {
-                      "maxLength": 1000,
-                      "minLength": 1,
-                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                      "type": "string"
-                    },
-                    "maxItems": 100,
-                    "type": "array",
-                    "uniqueItems": true
-                  },
                   "cancellation_policy": {
                     "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
                     "maxLength": 10000,
@@ -77126,8 +78266,72 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it). Guest-facing house rules are the house_rules detail.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail.",
                 "properties": {
+                  "amenities": {
+                    "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                    "items": {
+                      "enum": [
+                        "hair_dryer",
+                        "shampoo",
+                        "hot_water",
+                        "bathtub",
+                        "essentials",
+                        "bed_linens",
+                        "hangers",
+                        "iron",
+                        "washer",
+                        "dryer",
+                        "tv",
+                        "pool_table",
+                        "piano",
+                        "exercise_equipment",
+                        "crib",
+                        "high_chair",
+                        "air_conditioning",
+                        "heating",
+                        "indoor_fireplace",
+                        "smoke_alarm",
+                        "carbon_monoxide_alarm",
+                        "fire_extinguisher",
+                        "first_aid_kit",
+                        "wifi",
+                        "dedicated_workspace",
+                        "kitchen",
+                        "refrigerator",
+                        "microwave",
+                        "cooking_basics",
+                        "dishes_and_silverware",
+                        "dishwasher",
+                        "stove",
+                        "oven",
+                        "coffee_maker",
+                        "lake_access",
+                        "beach_access",
+                        "ski_in_out",
+                        "private_entrance",
+                        "patio",
+                        "bbq_grill",
+                        "outdoor_dining",
+                        "fire_pit",
+                        "outdoor_shower",
+                        "free_parking",
+                        "paid_parking",
+                        "ev_charger",
+                        "pool",
+                        "hot_tub",
+                        "gym",
+                        "elevator",
+                        "self_check_in",
+                        "long_term_stays",
+                        "luggage_dropoff",
+                        "pets_allowed"
+                      ],
+                      "type": "string"
+                    },
+                    "type": "array",
+                    "uniqueItems": true
+                  },
                   "assigned_member_id": {
                     "description": "Member who looks after the home; their assigned access shows its stays.",
                     "type": [
@@ -77137,6 +78341,48 @@
                   },
                   "assigned_team_id": {
                     "description": "Team who look after the home, such as cleaners.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "bathrooms": {
+                    "description": "Whole and half baths, such as 1.5.",
+                    "maximum": 50,
+                    "minimum": 0,
+                    "multipleOf": 0.5,
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "bedrooms": {
+                    "description": "Bedrooms; 0 is a studio.",
+                    "maximum": 50,
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "beds": {
+                    "maximum": 50,
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "cancellation_policy": {
+                    "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                    "enum": [
+                      "flexible",
+                      "moderate",
+                      "limited",
+                      "firm",
+                      "strict",
+                      null
+                    ],
                     "type": [
                       "string",
                       "null"
@@ -77155,6 +78401,18 @@
                   "location_id": {
                     "type": "string"
                   },
+                  "long_term_cancellation_policy": {
+                    "description": "Policy shown to guests for stays of 28 nights or more.",
+                    "enum": [
+                      "firm",
+                      "strict",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "max_guests": {
                     "maximum": 99,
                     "minimum": 1,
@@ -77165,6 +78423,22 @@
                     "maximum": 365,
                     "minimum": 1,
                     "type": "integer"
+                  },
+                  "property_type": {
+                    "description": "What the home is: apartment (Apartment), house (House), secondary_unit (Secondary unit), unique_space (Unique space), bed_and_breakfast (Bed and breakfast), boutique_hotel (Boutique hotel). Null when not said.",
+                    "enum": [
+                      "apartment",
+                      "house",
+                      "secondary_unit",
+                      "unique_space",
+                      "bed_and_breakfast",
+                      "boutique_hotel",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
@@ -77174,7 +78448,14 @@
                   "max_guests",
                   "min_nights",
                   "assigned_member_id",
-                  "assigned_team_id"
+                  "assigned_team_id",
+                  "property_type",
+                  "bedrooms",
+                  "beds",
+                  "bathrooms",
+                  "amenities",
+                  "cancellation_policy",
+                  "long_term_cancellation_policy"
                 ],
                 "type": [
                   "object",
@@ -84150,18 +85431,6 @@
                           "type": "array",
                           "uniqueItems": true
                         },
-                        "amenities": {
-                          "description": "What the home offers guests, such as Wifi or a kitchen.",
-                          "items": {
-                            "maxLength": 1000,
-                            "minLength": 1,
-                            "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                            "type": "string"
-                          },
-                          "maxItems": 100,
-                          "type": "array",
-                          "uniqueItems": true
-                        },
                         "cancellation_policy": {
                           "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
                           "maxLength": 10000,
@@ -88472,18 +89741,6 @@
                     "type": "array",
                     "uniqueItems": true
                   },
-                  "amenities": {
-                    "description": "What the home offers guests, such as Wifi or a kitchen.",
-                    "items": {
-                      "maxLength": 1000,
-                      "minLength": 1,
-                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                      "type": "string"
-                    },
-                    "maxItems": 100,
-                    "type": "array",
-                    "uniqueItems": true
-                  },
                   "cancellation_policy": {
                     "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
                     "maxLength": 10000,
@@ -88963,8 +90220,72 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it). Guest-facing house rules are the house_rules detail.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail.",
                 "properties": {
+                  "amenities": {
+                    "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                    "items": {
+                      "enum": [
+                        "hair_dryer",
+                        "shampoo",
+                        "hot_water",
+                        "bathtub",
+                        "essentials",
+                        "bed_linens",
+                        "hangers",
+                        "iron",
+                        "washer",
+                        "dryer",
+                        "tv",
+                        "pool_table",
+                        "piano",
+                        "exercise_equipment",
+                        "crib",
+                        "high_chair",
+                        "air_conditioning",
+                        "heating",
+                        "indoor_fireplace",
+                        "smoke_alarm",
+                        "carbon_monoxide_alarm",
+                        "fire_extinguisher",
+                        "first_aid_kit",
+                        "wifi",
+                        "dedicated_workspace",
+                        "kitchen",
+                        "refrigerator",
+                        "microwave",
+                        "cooking_basics",
+                        "dishes_and_silverware",
+                        "dishwasher",
+                        "stove",
+                        "oven",
+                        "coffee_maker",
+                        "lake_access",
+                        "beach_access",
+                        "ski_in_out",
+                        "private_entrance",
+                        "patio",
+                        "bbq_grill",
+                        "outdoor_dining",
+                        "fire_pit",
+                        "outdoor_shower",
+                        "free_parking",
+                        "paid_parking",
+                        "ev_charger",
+                        "pool",
+                        "hot_tub",
+                        "gym",
+                        "elevator",
+                        "self_check_in",
+                        "long_term_stays",
+                        "luggage_dropoff",
+                        "pets_allowed"
+                      ],
+                      "type": "string"
+                    },
+                    "type": "array",
+                    "uniqueItems": true
+                  },
                   "assigned_member_id": {
                     "description": "Member who looks after the home; their assigned access shows its stays.",
                     "type": [
@@ -88974,6 +90295,48 @@
                   },
                   "assigned_team_id": {
                     "description": "Team who look after the home, such as cleaners.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "bathrooms": {
+                    "description": "Whole and half baths, such as 1.5.",
+                    "maximum": 50,
+                    "minimum": 0,
+                    "multipleOf": 0.5,
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "bedrooms": {
+                    "description": "Bedrooms; 0 is a studio.",
+                    "maximum": 50,
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "beds": {
+                    "maximum": 50,
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "cancellation_policy": {
+                    "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                    "enum": [
+                      "flexible",
+                      "moderate",
+                      "limited",
+                      "firm",
+                      "strict",
+                      null
+                    ],
                     "type": [
                       "string",
                       "null"
@@ -88992,6 +90355,18 @@
                   "location_id": {
                     "type": "string"
                   },
+                  "long_term_cancellation_policy": {
+                    "description": "Policy shown to guests for stays of 28 nights or more.",
+                    "enum": [
+                      "firm",
+                      "strict",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "max_guests": {
                     "maximum": 99,
                     "minimum": 1,
@@ -89002,6 +90377,22 @@
                     "maximum": 365,
                     "minimum": 1,
                     "type": "integer"
+                  },
+                  "property_type": {
+                    "description": "What the home is: apartment (Apartment), house (House), secondary_unit (Secondary unit), unique_space (Unique space), bed_and_breakfast (Bed and breakfast), boutique_hotel (Boutique hotel). Null when not said.",
+                    "enum": [
+                      "apartment",
+                      "house",
+                      "secondary_unit",
+                      "unique_space",
+                      "bed_and_breakfast",
+                      "boutique_hotel",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
@@ -89011,7 +90402,14 @@
                   "max_guests",
                   "min_nights",
                   "assigned_member_id",
-                  "assigned_team_id"
+                  "assigned_team_id",
+                  "property_type",
+                  "bedrooms",
+                  "beds",
+                  "bathrooms",
+                  "amenities",
+                  "cancellation_policy",
+                  "long_term_cancellation_policy"
                 ],
                 "type": [
                   "object",
@@ -89386,18 +90784,6 @@
                     "type": "array",
                     "uniqueItems": true
                   },
-                  "amenities": {
-                    "description": "What the home offers guests, such as Wifi or a kitchen.",
-                    "items": {
-                      "maxLength": 1000,
-                      "minLength": 1,
-                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                      "type": "string"
-                    },
-                    "maxItems": 100,
-                    "type": "array",
-                    "uniqueItems": true
-                  },
                   "cancellation_policy": {
                     "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
                     "maxLength": 10000,
@@ -89877,8 +91263,72 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it). Guest-facing house rules are the house_rules detail.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail.",
                 "properties": {
+                  "amenities": {
+                    "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                    "items": {
+                      "enum": [
+                        "hair_dryer",
+                        "shampoo",
+                        "hot_water",
+                        "bathtub",
+                        "essentials",
+                        "bed_linens",
+                        "hangers",
+                        "iron",
+                        "washer",
+                        "dryer",
+                        "tv",
+                        "pool_table",
+                        "piano",
+                        "exercise_equipment",
+                        "crib",
+                        "high_chair",
+                        "air_conditioning",
+                        "heating",
+                        "indoor_fireplace",
+                        "smoke_alarm",
+                        "carbon_monoxide_alarm",
+                        "fire_extinguisher",
+                        "first_aid_kit",
+                        "wifi",
+                        "dedicated_workspace",
+                        "kitchen",
+                        "refrigerator",
+                        "microwave",
+                        "cooking_basics",
+                        "dishes_and_silverware",
+                        "dishwasher",
+                        "stove",
+                        "oven",
+                        "coffee_maker",
+                        "lake_access",
+                        "beach_access",
+                        "ski_in_out",
+                        "private_entrance",
+                        "patio",
+                        "bbq_grill",
+                        "outdoor_dining",
+                        "fire_pit",
+                        "outdoor_shower",
+                        "free_parking",
+                        "paid_parking",
+                        "ev_charger",
+                        "pool",
+                        "hot_tub",
+                        "gym",
+                        "elevator",
+                        "self_check_in",
+                        "long_term_stays",
+                        "luggage_dropoff",
+                        "pets_allowed"
+                      ],
+                      "type": "string"
+                    },
+                    "type": "array",
+                    "uniqueItems": true
+                  },
                   "assigned_member_id": {
                     "description": "Member who looks after the home; their assigned access shows its stays.",
                     "type": [
@@ -89888,6 +91338,48 @@
                   },
                   "assigned_team_id": {
                     "description": "Team who look after the home, such as cleaners.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "bathrooms": {
+                    "description": "Whole and half baths, such as 1.5.",
+                    "maximum": 50,
+                    "minimum": 0,
+                    "multipleOf": 0.5,
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "bedrooms": {
+                    "description": "Bedrooms; 0 is a studio.",
+                    "maximum": 50,
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "beds": {
+                    "maximum": 50,
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "cancellation_policy": {
+                    "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                    "enum": [
+                      "flexible",
+                      "moderate",
+                      "limited",
+                      "firm",
+                      "strict",
+                      null
+                    ],
                     "type": [
                       "string",
                       "null"
@@ -89906,6 +91398,18 @@
                   "location_id": {
                     "type": "string"
                   },
+                  "long_term_cancellation_policy": {
+                    "description": "Policy shown to guests for stays of 28 nights or more.",
+                    "enum": [
+                      "firm",
+                      "strict",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "max_guests": {
                     "maximum": 99,
                     "minimum": 1,
@@ -89916,6 +91420,22 @@
                     "maximum": 365,
                     "minimum": 1,
                     "type": "integer"
+                  },
+                  "property_type": {
+                    "description": "What the home is: apartment (Apartment), house (House), secondary_unit (Secondary unit), unique_space (Unique space), bed_and_breakfast (Bed and breakfast), boutique_hotel (Boutique hotel). Null when not said.",
+                    "enum": [
+                      "apartment",
+                      "house",
+                      "secondary_unit",
+                      "unique_space",
+                      "bed_and_breakfast",
+                      "boutique_hotel",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
@@ -89925,7 +91445,14 @@
                   "max_guests",
                   "min_nights",
                   "assigned_member_id",
-                  "assigned_team_id"
+                  "assigned_team_id",
+                  "property_type",
+                  "bedrooms",
+                  "beds",
+                  "bathrooms",
+                  "amenities",
+                  "cancellation_policy",
+                  "long_term_cancellation_policy"
                 ],
                 "type": [
                   "object",
@@ -90127,242 +91654,6 @@
       "uiResourceUri": null
     },
     {
-      "name": "set_stay_check_in_instructions",
-      "title": "Set stay check in instructions",
-      "description": "Save private check-in instructions for one home; null removes them. Saving does not send the instructions to a guest or publish them on the site.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "instructions": {
-            "maxLength": 5000,
-            "minLength": 1,
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "organization_id": {
-            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
-            "type": "string"
-          },
-          "product_id": {
-            "minLength": 1,
-            "type": "string"
-          }
-        },
-        "required": [
-          "product_id",
-          "instructions"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "properties": {
-          "home": {
-            "properties": {
-              "assigned_member_id": {
-                "description": "The member (member id) who looks after this home.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "assigned_team_id": {
-                "description": "The team that looks after this home.",
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "base_price_minor": {
-                "type": [
-                  "integer",
-                  "null"
-                ]
-              },
-              "base_price_tax_behavior": {
-                "enum": [
-                  "unspecified",
-                  "inclusive",
-                  "exclusive",
-                  null
-                ],
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "channel": {
-                "description": "The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.",
-                "properties": {
-                  "provider": {
-                    "enum": [
-                      "channex"
-                    ],
-                    "type": "string"
-                  },
-                  "status": {
-                    "enum": [
-                      "importing",
-                      "connected",
-                      "disconnected"
-                    ],
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "provider",
-                  "status"
-                ],
-                "type": [
-                  "object",
-                  "null"
-                ]
-              },
-              "check_in_instructions": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "check_in_time": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "check_out_time": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "currency": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "location_id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "max_guests": {
-                "type": "integer"
-              },
-              "min_nights": {
-                "type": "integer"
-              },
-              "name": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "photos": {
-                "description": "The home's photos in order, the cover first: its product's image, then its gallery. id is the media asset id; set_media, attach_media, reorder_media, remove_media and update_media_asset change them.",
-                "items": {
-                  "properties": {
-                    "alt_text": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "height": {
-                      "type": [
-                        "integer",
-                        "null"
-                      ]
-                    },
-                    "id": {
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "kind": {
-                      "enum": [
-                        "image",
-                        "video"
-                      ],
-                      "type": "string"
-                    },
-                    "position": {
-                      "minimum": 0,
-                      "type": "integer"
-                    },
-                    "url": {
-                      "description": "The picture to show; a video shows its poster frame.",
-                      "minLength": 1,
-                      "type": "string"
-                    },
-                    "width": {
-                      "type": [
-                        "integer",
-                        "null"
-                      ]
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "kind",
-                    "url",
-                    "width",
-                    "height",
-                    "alt_text",
-                    "position"
-                  ],
-                  "type": "object"
-                },
-                "type": "array"
-              },
-              "product_id": {
-                "minLength": 1,
-                "type": "string"
-              },
-              "timezone": {
-                "minLength": 1,
-                "type": "string"
-              }
-            },
-            "required": [
-              "product_id",
-              "name",
-              "location_id",
-              "timezone",
-              "currency",
-              "base_price_minor",
-              "base_price_tax_behavior",
-              "check_in_time",
-              "check_out_time",
-              "max_guests",
-              "min_nights",
-              "check_in_instructions",
-              "assigned_member_id",
-              "assigned_team_id",
-              "channel",
-              "photos"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "home"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": true,
-        "openWorldHint": false,
-        "readOnlyHint": false
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "guest_messaging",
-      "minimumRole": "admin",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
       "name": "set_stay_nights",
       "title": "Set stay nights",
       "description": "Close or open nights, set a nightly price, or set stay rules for a date range at one place to stay. Fields left out keep each night’s value; price_minor null returns to the base price; reset removes the range’s overrides.",
@@ -90483,6 +91774,113 @@
           },
           "home": {
             "properties": {
+              "address": {
+                "description": "The home's location address.",
+                "properties": {
+                  "addressLines": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "administrativeArea": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "languageCode": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "locality": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "postalCode": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "regionCode": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "sublocality": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "regionCode",
+                  "addressLines"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "amenities": {
+                "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                "items": {
+                  "enum": [
+                    "hair_dryer",
+                    "shampoo",
+                    "hot_water",
+                    "bathtub",
+                    "essentials",
+                    "bed_linens",
+                    "hangers",
+                    "iron",
+                    "washer",
+                    "dryer",
+                    "tv",
+                    "pool_table",
+                    "piano",
+                    "exercise_equipment",
+                    "crib",
+                    "high_chair",
+                    "air_conditioning",
+                    "heating",
+                    "indoor_fireplace",
+                    "smoke_alarm",
+                    "carbon_monoxide_alarm",
+                    "fire_extinguisher",
+                    "first_aid_kit",
+                    "wifi",
+                    "dedicated_workspace",
+                    "kitchen",
+                    "refrigerator",
+                    "microwave",
+                    "cooking_basics",
+                    "dishes_and_silverware",
+                    "dishwasher",
+                    "stove",
+                    "oven",
+                    "coffee_maker",
+                    "lake_access",
+                    "beach_access",
+                    "ski_in_out",
+                    "private_entrance",
+                    "patio",
+                    "bbq_grill",
+                    "outdoor_dining",
+                    "fire_pit",
+                    "outdoor_shower",
+                    "free_parking",
+                    "paid_parking",
+                    "ev_charger",
+                    "pool",
+                    "hot_tub",
+                    "gym",
+                    "elevator",
+                    "self_check_in",
+                    "long_term_stays",
+                    "luggage_dropoff",
+                    "pets_allowed"
+                  ],
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
               "assigned_member_id": {
                 "description": "The member (member id) who looks after this home.",
                 "type": [
@@ -90508,6 +91906,48 @@
                   "unspecified",
                   "inclusive",
                   "exclusive",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "bathrooms": {
+                "description": "Whole and half baths, such as 1.5.",
+                "maximum": 50,
+                "minimum": 0,
+                "multipleOf": 0.5,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "bedrooms": {
+                "description": "Bedrooms; 0 is a studio.",
+                "maximum": 50,
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "beds": {
+                "maximum": 50,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "cancellation_policy": {
+                "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                "enum": [
+                  "flexible",
+                  "moderate",
+                  "limited",
+                  "firm",
+                  "strict",
                   null
                 ],
                 "type": [
@@ -90543,6 +91983,24 @@
                 ]
               },
               "check_in_instructions": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "check_in_method": {
+                "description": "How guests get in.",
+                "enum": [
+                  "smart_lock",
+                  "keypad",
+                  "lockbox",
+                  "building_staff",
+                  "in_person",
+                  "other",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -90556,13 +92014,91 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "checkout_instructions": {
+                "description": "What guests do before leaving, in order, each task once; replaces the whole list.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "details": {
+                      "description": "Required for additional.",
+                      "maxLength": 500,
+                      "minLength": 1,
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "task": {
+                      "enum": [
+                        "gather_towels",
+                        "throw_trash",
+                        "turn_off",
+                        "lock_up",
+                        "return_keys",
+                        "additional"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "task",
+                    "details"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "currency": {
                 "minLength": 1,
                 "type": "string"
               },
+              "description": {
+                "description": "The listing description; empty when none is written.",
+                "type": "string"
+              },
+              "directions": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "house_manual": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "latitude": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
               "location_id": {
                 "minLength": 1,
                 "type": "string"
+              },
+              "long_term_cancellation_policy": {
+                "description": "Policy shown to guests for stays of 28 nights or more.",
+                "enum": [
+                  "firm",
+                  "strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "longitude": {
+                "type": [
+                  "number",
+                  "null"
+                ]
               },
               "max_guests": {
                 "type": "integer"
@@ -90634,9 +92170,45 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "property_type": {
+                "description": "What the home is: apartment (Apartment), house (House), secondary_unit (Secondary unit), unique_space (Unique space), bed_and_breakfast (Bed and breakfast), boutique_hotel (Boutique hotel). Null when not said.",
+                "enum": [
+                  "apartment",
+                  "house",
+                  "secondary_unit",
+                  "unique_space",
+                  "bed_and_breakfast",
+                  "boutique_hotel",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "published": {
+                "description": "Whether the home is listed on the site.",
+                "type": "boolean"
+              },
               "timezone": {
                 "minLength": 1,
                 "type": "string"
+              },
+              "wifi_network": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "wifi_password": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "required": [
@@ -90651,7 +92223,25 @@
               "check_out_time",
               "max_guests",
               "min_nights",
+              "description",
+              "published",
+              "address",
+              "latitude",
+              "longitude",
+              "property_type",
+              "bedrooms",
+              "beds",
+              "bathrooms",
+              "amenities",
+              "cancellation_policy",
+              "long_term_cancellation_policy",
+              "check_in_method",
               "check_in_instructions",
+              "wifi_network",
+              "wifi_password",
+              "directions",
+              "house_manual",
+              "checkout_instructions",
               "assigned_member_id",
               "assigned_team_id",
               "channel",
@@ -97315,18 +98905,6 @@
                             "type": "array",
                             "uniqueItems": true
                           },
-                          "amenities": {
-                            "description": "What the home offers guests, such as Wifi or a kitchen.",
-                            "items": {
-                              "maxLength": 1000,
-                              "minLength": 1,
-                              "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                              "type": "string"
-                            },
-                            "maxItems": 100,
-                            "type": "array",
-                            "uniqueItems": true
-                          },
                           "cancellation_policy": {
                             "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
                             "maxLength": 10000,
@@ -97972,18 +99550,6 @@
                             "type": "array",
                             "uniqueItems": true
                           },
-                          "amenities": {
-                            "description": "What the home offers guests, such as Wifi or a kitchen.",
-                            "items": {
-                              "maxLength": 1000,
-                              "minLength": 1,
-                              "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                              "type": "string"
-                            },
-                            "maxItems": 100,
-                            "type": "array",
-                            "uniqueItems": true
-                          },
                           "cancellation_policy": {
                             "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
                             "maxLength": 10000,
@@ -98463,8 +100029,72 @@
                         "type": "string"
                       },
                       "stay": {
-                        "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it). Guest-facing house rules are the house_rules detail.",
+                        "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail.",
                         "properties": {
+                          "amenities": {
+                            "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                            "items": {
+                              "enum": [
+                                "hair_dryer",
+                                "shampoo",
+                                "hot_water",
+                                "bathtub",
+                                "essentials",
+                                "bed_linens",
+                                "hangers",
+                                "iron",
+                                "washer",
+                                "dryer",
+                                "tv",
+                                "pool_table",
+                                "piano",
+                                "exercise_equipment",
+                                "crib",
+                                "high_chair",
+                                "air_conditioning",
+                                "heating",
+                                "indoor_fireplace",
+                                "smoke_alarm",
+                                "carbon_monoxide_alarm",
+                                "fire_extinguisher",
+                                "first_aid_kit",
+                                "wifi",
+                                "dedicated_workspace",
+                                "kitchen",
+                                "refrigerator",
+                                "microwave",
+                                "cooking_basics",
+                                "dishes_and_silverware",
+                                "dishwasher",
+                                "stove",
+                                "oven",
+                                "coffee_maker",
+                                "lake_access",
+                                "beach_access",
+                                "ski_in_out",
+                                "private_entrance",
+                                "patio",
+                                "bbq_grill",
+                                "outdoor_dining",
+                                "fire_pit",
+                                "outdoor_shower",
+                                "free_parking",
+                                "paid_parking",
+                                "ev_charger",
+                                "pool",
+                                "hot_tub",
+                                "gym",
+                                "elevator",
+                                "self_check_in",
+                                "long_term_stays",
+                                "luggage_dropoff",
+                                "pets_allowed"
+                              ],
+                              "type": "string"
+                            },
+                            "type": "array",
+                            "uniqueItems": true
+                          },
                           "assigned_member_id": {
                             "description": "Member who looks after the home; their assigned access shows its stays.",
                             "type": [
@@ -98474,6 +100104,48 @@
                           },
                           "assigned_team_id": {
                             "description": "Team who look after the home, such as cleaners.",
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "bathrooms": {
+                            "description": "Whole and half baths, such as 1.5.",
+                            "maximum": 50,
+                            "minimum": 0,
+                            "multipleOf": 0.5,
+                            "type": [
+                              "number",
+                              "null"
+                            ]
+                          },
+                          "bedrooms": {
+                            "description": "Bedrooms; 0 is a studio.",
+                            "maximum": 50,
+                            "minimum": 0,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "beds": {
+                            "maximum": 50,
+                            "minimum": 1,
+                            "type": [
+                              "integer",
+                              "null"
+                            ]
+                          },
+                          "cancellation_policy": {
+                            "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                            "enum": [
+                              "flexible",
+                              "moderate",
+                              "limited",
+                              "firm",
+                              "strict",
+                              null
+                            ],
                             "type": [
                               "string",
                               "null"
@@ -98492,6 +100164,18 @@
                           "location_id": {
                             "type": "string"
                           },
+                          "long_term_cancellation_policy": {
+                            "description": "Policy shown to guests for stays of 28 nights or more.",
+                            "enum": [
+                              "firm",
+                              "strict",
+                              null
+                            ],
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
                           "max_guests": {
                             "maximum": 99,
                             "minimum": 1,
@@ -98502,6 +100186,22 @@
                             "maximum": 365,
                             "minimum": 1,
                             "type": "integer"
+                          },
+                          "property_type": {
+                            "description": "What the home is: apartment (Apartment), house (House), secondary_unit (Secondary unit), unique_space (Unique space), bed_and_breakfast (Bed and breakfast), boutique_hotel (Boutique hotel). Null when not said.",
+                            "enum": [
+                              "apartment",
+                              "house",
+                              "secondary_unit",
+                              "unique_space",
+                              "bed_and_breakfast",
+                              "boutique_hotel",
+                              null
+                            ],
+                            "type": [
+                              "string",
+                              "null"
+                            ]
                           }
                         },
                         "required": [
@@ -98511,7 +100211,14 @@
                           "max_guests",
                           "min_nights",
                           "assigned_member_id",
-                          "assigned_team_id"
+                          "assigned_team_id",
+                          "property_type",
+                          "bedrooms",
+                          "beds",
+                          "bathrooms",
+                          "amenities",
+                          "cancellation_policy",
+                          "long_term_cancellation_policy"
                         ],
                         "type": [
                           "object",
@@ -99993,18 +101700,6 @@
                 "type": "array",
                 "uniqueItems": true
               },
-              "amenities": {
-                "description": "What the home offers guests, such as Wifi or a kitchen.",
-                "items": {
-                  "maxLength": 1000,
-                  "minLength": 1,
-                  "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                  "type": "string"
-                },
-                "maxItems": 100,
-                "type": "array",
-                "uniqueItems": true
-              },
               "cancellation_policy": {
                 "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
                 "maxLength": 10000,
@@ -100277,6 +101972,70 @@
             "additionalProperties": false,
             "description": "Stay settings to change on a place to stay. Its location is fixed.",
             "properties": {
+              "amenities": {
+                "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                "items": {
+                  "enum": [
+                    "hair_dryer",
+                    "shampoo",
+                    "hot_water",
+                    "bathtub",
+                    "essentials",
+                    "bed_linens",
+                    "hangers",
+                    "iron",
+                    "washer",
+                    "dryer",
+                    "tv",
+                    "pool_table",
+                    "piano",
+                    "exercise_equipment",
+                    "crib",
+                    "high_chair",
+                    "air_conditioning",
+                    "heating",
+                    "indoor_fireplace",
+                    "smoke_alarm",
+                    "carbon_monoxide_alarm",
+                    "fire_extinguisher",
+                    "first_aid_kit",
+                    "wifi",
+                    "dedicated_workspace",
+                    "kitchen",
+                    "refrigerator",
+                    "microwave",
+                    "cooking_basics",
+                    "dishes_and_silverware",
+                    "dishwasher",
+                    "stove",
+                    "oven",
+                    "coffee_maker",
+                    "lake_access",
+                    "beach_access",
+                    "ski_in_out",
+                    "private_entrance",
+                    "patio",
+                    "bbq_grill",
+                    "outdoor_dining",
+                    "fire_pit",
+                    "outdoor_shower",
+                    "free_parking",
+                    "paid_parking",
+                    "ev_charger",
+                    "pool",
+                    "hot_tub",
+                    "gym",
+                    "elevator",
+                    "self_check_in",
+                    "long_term_stays",
+                    "luggage_dropoff",
+                    "pets_allowed"
+                  ],
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
               "assigned_member_id": {
                 "description": "Member who looks after the home; their assigned access shows its stays.",
                 "type": [
@@ -100286,6 +102045,48 @@
               },
               "assigned_team_id": {
                 "description": "Team who look after the home, such as cleaners.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "bathrooms": {
+                "description": "Whole and half baths, such as 1.5.",
+                "maximum": 50,
+                "minimum": 0,
+                "multipleOf": 0.5,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "bedrooms": {
+                "description": "Bedrooms; 0 is a studio.",
+                "maximum": 50,
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "beds": {
+                "maximum": 50,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "cancellation_policy": {
+                "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                "enum": [
+                  "flexible",
+                  "moderate",
+                  "limited",
+                  "firm",
+                  "strict",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -100301,6 +102102,18 @@
                 "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
                 "type": "string"
               },
+              "long_term_cancellation_policy": {
+                "description": "Policy shown to guests for stays of 28 nights or more.",
+                "enum": [
+                  "firm",
+                  "strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "max_guests": {
                 "maximum": 99,
                 "minimum": 1,
@@ -100311,6 +102124,22 @@
                 "maximum": 365,
                 "minimum": 1,
                 "type": "integer"
+              },
+              "property_type": {
+                "description": "What the home is: apartment (Apartment), house (House), secondary_unit (Secondary unit), unique_space (Unique space), bed_and_breakfast (Bed and breakfast), boutique_hotel (Boutique hotel). Null when not said.",
+                "enum": [
+                  "apartment",
+                  "house",
+                  "secondary_unit",
+                  "unique_space",
+                  "bed_and_breakfast",
+                  "boutique_hotel",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
               }
             },
             "type": "object"
@@ -100680,18 +102509,6 @@
                 "properties": {
                   "allergens": {
                     "description": "Allergens the merchant states this dish contains.",
-                    "items": {
-                      "maxLength": 1000,
-                      "minLength": 1,
-                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                      "type": "string"
-                    },
-                    "maxItems": 100,
-                    "type": "array",
-                    "uniqueItems": true
-                  },
-                  "amenities": {
-                    "description": "What the home offers guests, such as Wifi or a kitchen.",
                     "items": {
                       "maxLength": 1000,
                       "minLength": 1,
@@ -101181,8 +102998,72 @@
                 "type": "string"
               },
               "stay": {
-                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it). Guest-facing house rules are the house_rules detail.",
+                "description": "Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail.",
                 "properties": {
+                  "amenities": {
+                    "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                    "items": {
+                      "enum": [
+                        "hair_dryer",
+                        "shampoo",
+                        "hot_water",
+                        "bathtub",
+                        "essentials",
+                        "bed_linens",
+                        "hangers",
+                        "iron",
+                        "washer",
+                        "dryer",
+                        "tv",
+                        "pool_table",
+                        "piano",
+                        "exercise_equipment",
+                        "crib",
+                        "high_chair",
+                        "air_conditioning",
+                        "heating",
+                        "indoor_fireplace",
+                        "smoke_alarm",
+                        "carbon_monoxide_alarm",
+                        "fire_extinguisher",
+                        "first_aid_kit",
+                        "wifi",
+                        "dedicated_workspace",
+                        "kitchen",
+                        "refrigerator",
+                        "microwave",
+                        "cooking_basics",
+                        "dishes_and_silverware",
+                        "dishwasher",
+                        "stove",
+                        "oven",
+                        "coffee_maker",
+                        "lake_access",
+                        "beach_access",
+                        "ski_in_out",
+                        "private_entrance",
+                        "patio",
+                        "bbq_grill",
+                        "outdoor_dining",
+                        "fire_pit",
+                        "outdoor_shower",
+                        "free_parking",
+                        "paid_parking",
+                        "ev_charger",
+                        "pool",
+                        "hot_tub",
+                        "gym",
+                        "elevator",
+                        "self_check_in",
+                        "long_term_stays",
+                        "luggage_dropoff",
+                        "pets_allowed"
+                      ],
+                      "type": "string"
+                    },
+                    "type": "array",
+                    "uniqueItems": true
+                  },
                   "assigned_member_id": {
                     "description": "Member who looks after the home; their assigned access shows its stays.",
                     "type": [
@@ -101192,6 +103073,48 @@
                   },
                   "assigned_team_id": {
                     "description": "Team who look after the home, such as cleaners.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "bathrooms": {
+                    "description": "Whole and half baths, such as 1.5.",
+                    "maximum": 50,
+                    "minimum": 0,
+                    "multipleOf": 0.5,
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "bedrooms": {
+                    "description": "Bedrooms; 0 is a studio.",
+                    "maximum": 50,
+                    "minimum": 0,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "beds": {
+                    "maximum": 50,
+                    "minimum": 1,
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "cancellation_policy": {
+                    "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                    "enum": [
+                      "flexible",
+                      "moderate",
+                      "limited",
+                      "firm",
+                      "strict",
+                      null
+                    ],
                     "type": [
                       "string",
                       "null"
@@ -101210,6 +103133,18 @@
                   "location_id": {
                     "type": "string"
                   },
+                  "long_term_cancellation_policy": {
+                    "description": "Policy shown to guests for stays of 28 nights or more.",
+                    "enum": [
+                      "firm",
+                      "strict",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
                   "max_guests": {
                     "maximum": 99,
                     "minimum": 1,
@@ -101220,6 +103155,22 @@
                     "maximum": 365,
                     "minimum": 1,
                     "type": "integer"
+                  },
+                  "property_type": {
+                    "description": "What the home is: apartment (Apartment), house (House), secondary_unit (Secondary unit), unique_space (Unique space), bed_and_breakfast (Bed and breakfast), boutique_hotel (Boutique hotel). Null when not said.",
+                    "enum": [
+                      "apartment",
+                      "house",
+                      "secondary_unit",
+                      "unique_space",
+                      "bed_and_breakfast",
+                      "boutique_hotel",
+                      null
+                    ],
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
@@ -101229,7 +103180,14 @@
                   "max_guests",
                   "min_nights",
                   "assigned_member_id",
-                  "assigned_team_id"
+                  "assigned_team_id",
+                  "property_type",
+                  "bedrooms",
+                  "beds",
+                  "bathrooms",
+                  "amenities",
+                  "cancellation_policy",
+                  "long_term_cancellation_policy"
                 ],
                 "type": [
                   "object",
@@ -109799,6 +111757,622 @@
       "uiResourceUri": null
     },
     {
+      "name": "update_stay_arrival_guide",
+      "title": "Update stay arrival guide",
+      "description": "Save one home's private arrival guide: check-in method and instructions, wifi, directions, house manual and checkout instructions. Fields left out keep their values; null removes one. Saving does not send anything to a guest or publish it on the site.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "check_in_instructions": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "check_in_method": {
+            "description": "How guests get in.",
+            "enum": [
+              "smart_lock",
+              "keypad",
+              "lockbox",
+              "building_staff",
+              "in_person",
+              "other",
+              null
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "checkout_instructions": {
+            "description": "What guests do before leaving, in order, each task once; replaces the whole list.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "details": {
+                  "description": "Required for additional.",
+                  "maxLength": 500,
+                  "minLength": 1,
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "task": {
+                  "enum": [
+                    "gather_towels",
+                    "throw_trash",
+                    "turn_off",
+                    "lock_up",
+                    "return_keys",
+                    "additional"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "task",
+                "details"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "directions": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "house_manual": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          },
+          "product_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "wifi_network": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "wifi_password": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "product_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "properties": {
+          "home": {
+            "properties": {
+              "address": {
+                "description": "The home's location address.",
+                "properties": {
+                  "addressLines": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "administrativeArea": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "languageCode": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "locality": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "postalCode": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "regionCode": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "sublocality": {
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "regionCode",
+                  "addressLines"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "amenities": {
+                "description": "Amenity codes the home offers; replaces the whole list. Empty offers none.",
+                "items": {
+                  "enum": [
+                    "hair_dryer",
+                    "shampoo",
+                    "hot_water",
+                    "bathtub",
+                    "essentials",
+                    "bed_linens",
+                    "hangers",
+                    "iron",
+                    "washer",
+                    "dryer",
+                    "tv",
+                    "pool_table",
+                    "piano",
+                    "exercise_equipment",
+                    "crib",
+                    "high_chair",
+                    "air_conditioning",
+                    "heating",
+                    "indoor_fireplace",
+                    "smoke_alarm",
+                    "carbon_monoxide_alarm",
+                    "fire_extinguisher",
+                    "first_aid_kit",
+                    "wifi",
+                    "dedicated_workspace",
+                    "kitchen",
+                    "refrigerator",
+                    "microwave",
+                    "cooking_basics",
+                    "dishes_and_silverware",
+                    "dishwasher",
+                    "stove",
+                    "oven",
+                    "coffee_maker",
+                    "lake_access",
+                    "beach_access",
+                    "ski_in_out",
+                    "private_entrance",
+                    "patio",
+                    "bbq_grill",
+                    "outdoor_dining",
+                    "fire_pit",
+                    "outdoor_shower",
+                    "free_parking",
+                    "paid_parking",
+                    "ev_charger",
+                    "pool",
+                    "hot_tub",
+                    "gym",
+                    "elevator",
+                    "self_check_in",
+                    "long_term_stays",
+                    "luggage_dropoff",
+                    "pets_allowed"
+                  ],
+                  "type": "string"
+                },
+                "type": "array",
+                "uniqueItems": true
+              },
+              "assigned_member_id": {
+                "description": "The member (member id) who looks after this home.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "assigned_team_id": {
+                "description": "The team that looks after this home.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "base_price_minor": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "base_price_tax_behavior": {
+                "enum": [
+                  "unspecified",
+                  "inclusive",
+                  "exclusive",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "bathrooms": {
+                "description": "Whole and half baths, such as 1.5.",
+                "maximum": 50,
+                "minimum": 0,
+                "multipleOf": 0.5,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "bedrooms": {
+                "description": "Bedrooms; 0 is a studio.",
+                "maximum": 50,
+                "minimum": 0,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "beds": {
+                "maximum": 50,
+                "minimum": 1,
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "cancellation_policy": {
+                "description": "Policy shown to guests for stays under 28 nights. It does not refund by itself.",
+                "enum": [
+                  "flexible",
+                  "moderate",
+                  "limited",
+                  "firm",
+                  "strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "channel": {
+                "description": "The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.",
+                "properties": {
+                  "provider": {
+                    "enum": [
+                      "channex"
+                    ],
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "importing",
+                      "connected",
+                      "disconnected"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "provider",
+                  "status"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "check_in_instructions": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "check_in_method": {
+                "description": "How guests get in.",
+                "enum": [
+                  "smart_lock",
+                  "keypad",
+                  "lockbox",
+                  "building_staff",
+                  "in_person",
+                  "other",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "check_in_time": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "check_out_time": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "checkout_instructions": {
+                "description": "What guests do before leaving, in order, each task once; replaces the whole list.",
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "details": {
+                      "description": "Required for additional.",
+                      "maxLength": 500,
+                      "minLength": 1,
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "task": {
+                      "enum": [
+                        "gather_towels",
+                        "throw_trash",
+                        "turn_off",
+                        "lock_up",
+                        "return_keys",
+                        "additional"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "task",
+                    "details"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "currency": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "description": {
+                "description": "The listing description; empty when none is written.",
+                "type": "string"
+              },
+              "directions": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "house_manual": {
+                "maxLength": 5000,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "latitude": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "location_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "long_term_cancellation_policy": {
+                "description": "Policy shown to guests for stays of 28 nights or more.",
+                "enum": [
+                  "firm",
+                  "strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "longitude": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "max_guests": {
+                "type": "integer"
+              },
+              "min_nights": {
+                "type": "integer"
+              },
+              "name": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "photos": {
+                "description": "The home's photos in order, the cover first: its product's image, then its gallery. id is the media asset id; set_media, attach_media, reorder_media, remove_media and update_media_asset change them.",
+                "items": {
+                  "properties": {
+                    "alt_text": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "height": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "image",
+                        "video"
+                      ],
+                      "type": "string"
+                    },
+                    "position": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "url": {
+                      "description": "The picture to show; a video shows its poster frame.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "width": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "kind",
+                    "url",
+                    "width",
+                    "height",
+                    "alt_text",
+                    "position"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "product_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "property_type": {
+                "description": "What the home is: apartment (Apartment), house (House), secondary_unit (Secondary unit), unique_space (Unique space), bed_and_breakfast (Bed and breakfast), boutique_hotel (Boutique hotel). Null when not said.",
+                "enum": [
+                  "apartment",
+                  "house",
+                  "secondary_unit",
+                  "unique_space",
+                  "bed_and_breakfast",
+                  "boutique_hotel",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "published": {
+                "description": "Whether the home is listed on the site.",
+                "type": "boolean"
+              },
+              "timezone": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "wifi_network": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "wifi_password": {
+                "maxLength": 100,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "product_id",
+              "name",
+              "location_id",
+              "timezone",
+              "currency",
+              "base_price_minor",
+              "base_price_tax_behavior",
+              "check_in_time",
+              "check_out_time",
+              "max_guests",
+              "min_nights",
+              "description",
+              "published",
+              "address",
+              "latitude",
+              "longitude",
+              "property_type",
+              "bedrooms",
+              "beds",
+              "bathrooms",
+              "amenities",
+              "cancellation_policy",
+              "long_term_cancellation_policy",
+              "check_in_method",
+              "check_in_instructions",
+              "wifi_network",
+              "wifi_password",
+              "directions",
+              "house_manual",
+              "checkout_instructions",
+              "assigned_member_id",
+              "assigned_team_id",
+              "channel",
+              "photos"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "home"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "guest_messaging",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "update_team",
       "title": "Update team",
       "description": "Rename a team in this business.",
@@ -109925,18 +112499,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:74f3f4aee0166a4dac1ec7ee4c57695a6ef3a7981c0f59b05bbc52c466d43698",
-        "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
+        "create_product": "sha256:c4dcc195a8437e9373e03c2221bf8c991682abe1e610672276768863ee8d2c9d",
+        "get_product": "sha256:0a0a10bbc891c1eed81fd09c32bb2012685e2b12ec31ced63ee92aa066d08efd",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:ed2b8d9ead80fe1abb797f39ae69c813956fc9750e7a2636416e7abe6236801e",
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
-        "reconcile_products": "sha256:ca6f8f1bdb95081538ddc8cb43a040e3c093f045fb3d600a10e85af049cc10e9",
+        "reconcile_products": "sha256:740da50966be1dc760bc91c1d7be486e754fedfdd3dfd70c1f64d2604dc74f93",
         "reorder_collections": "sha256:7337b52f13f1caddb073c69300d67ecac75a9b62869dd7afc0a54d8b0741217f",
         "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
-        "update_menu": "sha256:63cbd21c021e0b61799765308bf3f7fba7caac5bc647ab6d9698b215038949d4",
-        "update_product": "sha256:e7a8c9a40063a41c48109e14b984d285490a1097579496d280d571d5f9cfd387"
+        "update_menu": "sha256:8042c0e84d8bc6efa9431424366b4d90ceba7db74fe3181a9d6b18f3fee01475",
+        "update_product": "sha256:5e147a4e84385e292b16b4e1e40e46282c439c7ddf9656bbd74371a3eeda5a85"
       }
     },
     {
@@ -109981,8 +112555,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:010b4cb1cd55f355ae72e255d70c3f17cecb18a68daf4345dee1774638635a7b",
-        "create_product": "sha256:74f3f4aee0166a4dac1ec7ee4c57695a6ef3a7981c0f59b05bbc52c466d43698",
-        "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
+        "create_product": "sha256:c4dcc195a8437e9373e03c2221bf8c991682abe1e610672276768863ee8d2c9d",
+        "get_product": "sha256:0a0a10bbc891c1eed81fd09c32bb2012685e2b12ec31ced63ee92aa066d08efd",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
@@ -110046,7 +112620,7 @@
         "attach_media": "sha256:010b4cb1cd55f355ae72e255d70c3f17cecb18a68daf4345dee1774638635a7b",
         "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
-        "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
+        "get_product": "sha256:0a0a10bbc891c1eed81fd09c32bb2012685e2b12ec31ced63ee92aa066d08efd",
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "save_media_attachment": "sha256:69bd4bf687fca2e9c3a05e5526c9b6e3a955245bdd06713e08942d433ad677dc",
@@ -110062,7 +112636,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:74f3f4aee0166a4dac1ec7ee4c57695a6ef3a7981c0f59b05bbc52c466d43698",
+        "create_product": "sha256:c4dcc195a8437e9373e03c2221bf8c991682abe1e610672276768863ee8d2c9d",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_website_draft": "sha256:fccf7d7281ba30d1e79163929e61abec1893c2e910460c4068364a65784a7bac",
@@ -110073,7 +112647,7 @@
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
-        "update_menu": "sha256:63cbd21c021e0b61799765308bf3f7fba7caac5bc647ab6d9698b215038949d4",
+        "update_menu": "sha256:8042c0e84d8bc6efa9431424366b4d90ceba7db74fe3181a9d6b18f3fee01475",
         "update_organization_settings": "sha256:3454f63997eec1f0379204170954ab64862914c016110f93d2e05e89c9134ea7",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
@@ -110088,7 +112662,7 @@
       },
       "toolContracts": {
         "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
-        "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
+        "get_product": "sha256:0a0a10bbc891c1eed81fd09c32bb2012685e2b12ec31ced63ee92aa066d08efd",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -110096,7 +112670,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "replace_product_weekly_schedule": "sha256:d4f5ba8f99874961aa0d9cb91f22c8ef2b640aeeeff6a52fc8e7ed758fbf4ae2",
         "set_product_booking_config": "sha256:727bf4fc651ced45ea84cc49b1c1e864366dbadac346e8dabdba56db426e1acc",
-        "update_product": "sha256:e7a8c9a40063a41c48109e14b984d285490a1097579496d280d571d5f9cfd387",
+        "update_product": "sha256:5e147a4e84385e292b16b4e1e40e46282c439c7ddf9656bbd74371a3eeda5a85",
         "update_reservation_policy": "sha256:f1e5e7eda32993dc7be3ffc459ceb97517ed309bb144d2a5f29a0f0b082f784f"
       }
     },
@@ -110116,7 +112690,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "set_media": "sha256:4bf16ab96284e37a96cfd24355a24eff1426d3afcf1c45d0395365fe45a3e709",
-        "update_product": "sha256:e7a8c9a40063a41c48109e14b984d285490a1097579496d280d571d5f9cfd387",
+        "update_product": "sha256:5e147a4e84385e292b16b4e1e40e46282c439c7ddf9656bbd74371a3eeda5a85",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
     },
@@ -110132,14 +112706,14 @@
         "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_organization_analytics": "sha256:aad678e4cef26c11f2a5304b650d582662912ff4a1395bffb04b7d791778db43",
-        "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
+        "get_product": "sha256:0a0a10bbc891c1eed81fd09c32bb2012685e2b12ec31ced63ee92aa066d08efd",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
-        "update_product": "sha256:e7a8c9a40063a41c48109e14b984d285490a1097579496d280d571d5f9cfd387"
+        "update_product": "sha256:5e147a4e84385e292b16b4e1e40e46282c439c7ddf9656bbd74371a3eeda5a85"
       }
     }
   ],
@@ -110167,7 +112741,7 @@
       "slug": "update-your-menu-with-an-ai-assistant",
       "contentHash": "sha256:aa8642030ebe66e3d27ab8abecff519d51ee2eaf11f7ee1e02875ee4e1ea987e",
       "toolContracts": {
-        "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
+        "get_product": "sha256:0a0a10bbc891c1eed81fd09c32bb2012685e2b12ec31ced63ee92aa066d08efd",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:ed2b8d9ead80fe1abb797f39ae69c813956fc9750e7a2636416e7abe6236801e",
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
@@ -110175,7 +112749,7 @@
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
         "reorder_collections": "sha256:7337b52f13f1caddb073c69300d67ecac75a9b62869dd7afc0a54d8b0741217f",
         "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
-        "update_menu": "sha256:63cbd21c021e0b61799765308bf3f7fba7caac5bc647ab6d9698b215038949d4"
+        "update_menu": "sha256:8042c0e84d8bc6efa9431424366b4d90ceba7db74fe3181a9d6b18f3fee01475"
       }
     },
     {

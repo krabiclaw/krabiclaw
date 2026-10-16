@@ -1110,6 +1110,26 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	max_guests: integer().notNull(),
 	min_nights: integer().default(1).notNull(),
 	check_in_instructions: text(),
+	// What the home is, as guests and search engines read it. Codes come from
+	// shared/stay-listing.ts; NULL means the host has not said.
+	property_type: text(),
+	bedrooms: integer(),
+	beds: integer(),
+	// Whole and half baths (Airbnb's "3.5 baths").
+	bathrooms: real(),
+	// The amenity codes the home offers; an empty list offers none.
+	amenities: text().default("[]").notNull(),
+	cancellation_policy: text(),
+	long_term_cancellation_policy: text(),
+	// Private arrival information: managers and the home's assigned members read
+	// it through server/domain/stays.ts; no public payload carries it.
+	check_in_method: text(),
+	wifi_network: text(),
+	wifi_password: text(),
+	directions: text(),
+	house_manual: text(),
+	// [{ task, details }] in the order guests read them; each task once.
+	checkout_instructions: text().default("[]").notNull(),
 	assigned_member_id: text(),
 	assigned_team_id: text().references(() => team.id, { onDelete: "set null" }),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
@@ -1126,6 +1146,19 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	check("product_stay_configs_guests_check", sql`max_guests >= 1`),
 	check("product_stay_configs_min_nights_check", sql`min_nights >= 1`),
 	check("product_stay_configs_instructions_check", sql`check_in_instructions IS NULL OR (length(trim(check_in_instructions)) BETWEEN 1 AND 5000)`),
+	check("product_stay_configs_property_type_check", sql`property_type IS NULL OR property_type IN ('apartment', 'house', 'secondary_unit', 'unique_space', 'bed_and_breakfast', 'boutique_hotel')`),
+	check("product_stay_configs_bedrooms_check", sql`bedrooms IS NULL OR bedrooms BETWEEN 0 AND 50`),
+	check("product_stay_configs_beds_check", sql`beds IS NULL OR beds BETWEEN 1 AND 50`),
+	check("product_stay_configs_bathrooms_check", sql`bathrooms IS NULL OR (bathrooms BETWEEN 0 AND 50 AND bathrooms * 2 = CAST(bathrooms * 2 AS INTEGER))`),
+	check("product_stay_configs_amenities_check", sql`json_valid(amenities) AND json_type(amenities) = 'array'`),
+	check("product_stay_configs_cancellation_check", sql`cancellation_policy IS NULL OR cancellation_policy IN ('flexible', 'moderate', 'limited', 'firm', 'strict')`),
+	check("product_stay_configs_long_term_cancellation_check", sql`long_term_cancellation_policy IS NULL OR long_term_cancellation_policy IN ('firm', 'strict')`),
+	check("product_stay_configs_check_in_method_check", sql`check_in_method IS NULL OR check_in_method IN ('smart_lock', 'keypad', 'lockbox', 'building_staff', 'in_person', 'other')`),
+	check("product_stay_configs_wifi_network_check", sql`wifi_network IS NULL OR length(trim(wifi_network)) BETWEEN 1 AND 100`),
+	check("product_stay_configs_wifi_password_check", sql`wifi_password IS NULL OR length(wifi_password) BETWEEN 1 AND 100`),
+	check("product_stay_configs_directions_check", sql`directions IS NULL OR length(trim(directions)) BETWEEN 1 AND 5000`),
+	check("product_stay_configs_house_manual_check", sql`house_manual IS NULL OR length(trim(house_manual)) BETWEEN 1 AND 5000`),
+	check("product_stay_configs_checkout_instructions_check", sql`json_valid(checkout_instructions) AND json_type(checkout_instructions) = 'array'`),
 ]);
 
 // Workspace-owned reply text, optionally scheduled for explicitly named homes.

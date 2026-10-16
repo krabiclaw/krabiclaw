@@ -54,8 +54,9 @@ check-out messages only, because KrabiClaw cannot tell an imported historical
 reservation from a new one. A scheduled message goes through the
 conversation's own address and records the same delivery receipt as a reply;
 one that fails or whose outcome is unknown stays visible with its reason and is
-never resent automatically. Each home can hold private check-in instructions
-the host chooses when to share.
+never resent automatically. Each home holds a private arrival guide — check-in
+method and instructions, wifi, directions, house manual and checkout
+instructions — that the host chooses when to share.
 
 Workspace members can receive owner notifications as push notifications on the
 KrabiClaw iPhone app, per notification category, alongside email and WhatsApp.

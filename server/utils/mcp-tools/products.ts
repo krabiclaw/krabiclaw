@@ -1,3 +1,4 @@
+import { STAY_LISTING_SCHEMA } from './stays'
 import type { McpToolDefinition } from './shared'
 import { HTTPError } from 'nitro'
 import { pageInfoObject, paginationInputSchema, resolvedMediaAssetObject, organizationTool } from './shared'
@@ -212,9 +213,10 @@ const stayRules = {
   min_nights: { type: 'integer', minimum: 1, maximum: 365, description: 'Default minimum nights; individual nights may set their own.' },
   assigned_member_id: { type: ['string', 'null'], description: 'Member who looks after the home; their assigned access shows its stays.' },
   assigned_team_id: { type: ['string', 'null'], description: 'Team who look after the home, such as cleaners.' },
+  ...STAY_LISTING_SCHEMA,
 }
-const stayObject = { type: ['object', 'null'], description: 'Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it). Guest-facing house rules are the house_rules detail.', properties: { location_id: { type: 'string' }, ...stayRules },
-  required: ['location_id', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'assigned_member_id', 'assigned_team_id'] }
+const stayObject = { type: ['object', 'null'], description: 'Non-null exactly for a place to stay: its one location and stay settings (arrival, departure, guests, minimum nights, who looks after it, what it is and offers, its cancellation policies). Guest-facing house rules are the house_rules detail.', properties: { location_id: { type: 'string' }, ...stayRules },
+  required: ['location_id', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'assigned_member_id', 'assigned_team_id', ...Object.keys(STAY_LISTING_SCHEMA)] }
 const staySetup = { type: 'object', description: 'Required for kind stay and refused for every other kind: the location the home is at (fixed once created) and its stay settings. Guest-facing house rules go in details.house_rules. Base nightly rate is the variant price.',
   properties: { location_id: { type: 'string' }, ...stayRules }, required: ['location_id', 'check_in_time', 'check_out_time', 'max_guests'], additionalProperties: false }
 const stayPatch = { type: 'object', description: 'Stay settings to change on a place to stay. Its location is fixed.', properties: stayRules, additionalProperties: false }

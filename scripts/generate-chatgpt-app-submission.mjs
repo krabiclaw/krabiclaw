@@ -68,7 +68,7 @@ const effects = {
   update_message_template: 'Replaces a saved guest reply and its schedule under its version, re-planning only pending scheduled messages; completed, failed and uncertain sends are kept.',
   delete_message_template: 'Deletes a saved guest reply under its version and cancels its pending scheduled messages, keeping earlier delivery records.',
   get_guest_messaging_context: 'Reads the home, private check-in instructions and optional stay behind one guest conversation.',
-  set_stay_check_in_instructions: 'Saves or removes one home’s private check-in instructions; nothing is sent to a guest or published.',
+  update_stay_arrival_guide: 'Saves one home’s private arrival guide (check-in method and instructions, wifi, directions, house manual, checkout instructions); nothing is sent to a guest or published.',
   list_scheduled_guest_messages: 'Reads scheduled guest-message snapshots with their status and recorded failure reasons; members see only assigned homes.',
   cancel_scheduled_guest_message: 'Cancels one pending scheduled guest message so it is never sent; a message already sending, sent or under review is refused.',
   list_stays: 'Reads stays at the selected business’s places to stay overlapping a date range; members see only the homes their team looks after.',
