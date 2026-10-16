@@ -295,7 +295,7 @@
           </template>
         </UModal>
 
-        <p v-if="!canReply" class="mt-2 text-xs text-warning">This guest has no email on file, so a reply cannot be sent.</p>
+        <p v-if="!canReply" class="mt-2 text-xs text-warning">This guest has no email on file. Once they accept an invite to this conversation, your replies reach their KrabiClaw inbox.</p>
       </div>
     </template>
   </div>
@@ -327,7 +327,7 @@ const session = authClient.useSession()
 // The one copy of this thread. The record beside the conversation reads the
 // same entry, so writing a reply's answer into it updates both.
 const { data, thread, pending, error, refresh } = await useGuestThread(computed(() => props.threadId),computed(()=>props.personalScope))
-const canReply = computed(() => props.personalScope || thread.value?.replyChannel === 'airbnb' || Boolean(thread.value?.guestEmail))
+const canReply = computed(() => props.personalScope || thread.value?.replyChannel === 'airbnb' || Boolean(thread.value?.guestEmail) || Boolean(thread.value?.guestAccountLinked))
 const threadPath = computed(() => props.personalScope ? `/api/account/messages/${encodeURIComponent(props.threadId)}` : `/api/dashboard/organizations/${dashboard.organizationId.value}/guest-threads/${encodeURIComponent(props.threadId)}`)
 
 const draft = ref('')

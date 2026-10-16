@@ -93,10 +93,10 @@ test('the cron sends due messages, leaves future ones pending and records failur
     assert.deepEqual(await db.prepare('SELECT e.request_id, e.actor_kind, e.actor_user_id, e.event_name, e.body, d.channel, d.purpose, d.status FROM activity_entries e JOIN guest_thread_deliveries d ON d.entry_id = e.id WHERE e.id = ?').bind(sent.entry_id).first(), {
       request_id: ana.request_id, actor_kind: 'system', actor_user_id: null, event_name: 'thread.scheduled_message', body: 'Thanks for booking the cabin.', channel: 'email', purpose: 'scheduled_message', status: 'sent',
     })
-    // Phone alone is no email address: the failure is recorded with its own facts.
+    // Phone alone, with no guest who joined through an invite, is nowhere to send: the failure is recorded with its own facts.
     const failed = (await planned(dee.id, welcome.id))!
     assert.deepEqual([failed.status, failed.error_code, failed.error_field, failed.reason, failed.entry_id, failed.sent_at],
-      ['failed', 'GUEST_EMAIL_REQUIRED', 'stay.guestEmail', 'The stay has no current guest email to send to.', null, null])
+      ['failed', 'GUEST_INVITE_REQUIRED', 'request_id', 'The stay has no guest email and its guest has not joined the conversation through an invite.', null, null])
     const review = (await planned(cy.id, welcome.id))!
     assert.deepEqual([review.status, review.error_code, review.error_field, review.sent_at], ['needs_review', 'IDEMPOTENCY_CONFLICT', 'idempotencyKey', null])
     assert.ok(review.reason)

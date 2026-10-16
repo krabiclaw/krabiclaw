@@ -94,6 +94,9 @@ export default defineHandler(async (event) => {
     if (outcome.reason === 'no_guest_email') {
       return jsonResponse({ error: 'This guest has no email on file', code: 'NO_GUEST_EMAIL', field: 'guest.email' }, { status: 400 })
     }
+    if (outcome.reason === 'guest_invite_required') {
+      return jsonResponse({ error: outcome.message, code: outcome.code, field: outcome.field }, { status: outcome.status })
+    }
     if (outcome.reason === 'empty_body') {
       return jsonResponse({ error: 'Write a message or add a photo', code: 'EMPTY_MESSAGE', field: 'body' }, { status: 400 })
     }

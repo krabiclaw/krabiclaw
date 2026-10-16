@@ -100,6 +100,7 @@ export function isThreadDetailResponse(value: unknown): value is { thread: Threa
     && (value.thread.guestName === null || typeof value.thread.guestName === 'string')
     && typeof value.thread.participantLabel === 'string'
     && (value.thread.replyChannel === 'email' || value.thread.replyChannel === 'airbnb')
+    && typeof value.thread.guestAccountLinked === 'boolean'
     && (value.thread.organizationName === null || typeof value.thread.organizationName === 'string')
     && (value.thread.organizationVertical === null || typeof value.thread.organizationVertical === 'string')
     && Array.isArray(value.thread.entries)
