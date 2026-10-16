@@ -535,7 +535,7 @@ const factChips = computed(() => {
   const chips: Array<{ icon: 'clock' | 'user-group' | 'video-camera' | 'check-circle' | 'moon' | 'home'; label: string }> = []
   const stay = props.product.stay
   if (stay) {
-    if (stay.property_type) chips.push({ icon: 'home', label: STAY_PROPERTY_TYPES[stay.property_type] })
+    if (stay.property_type) chips.push({ icon: 'home', label: STAY_PROPERTY_TYPES[stay.property_type].label })
     chips.push({ icon: 'user-group', label: t('stay.sleeps', { count: stay.max_guests }) })
     if (stay.bedrooms !== null) chips.push({ icon: 'home', label: t('stay.bedrooms', { count: stay.bedrooms }) })
     if (stay.beds !== null) chips.push({ icon: 'home', label: t('stay.beds', { count: stay.beds }) })
@@ -587,8 +587,8 @@ const visibleDetails = computed(() => productDetailFields(props.product.kind).fl
 function stayDetails(stay: typeof props.product.stay): Array<{ key: string; label: string; values: string[] }> {
   if (!stay) return []
   const policies = [
-    ...(stay.cancellation_policy ? [STAY_CANCELLATION_POLICIES[stay.cancellation_policy]] : []),
-    ...(stay.long_term_cancellation_policy ? [STAY_LONG_TERM_CANCELLATION_POLICIES[stay.long_term_cancellation_policy]] : []),
+    ...(stay.cancellation_policy ? [STAY_CANCELLATION_POLICIES[stay.cancellation_policy].label] : []),
+    ...(stay.long_term_cancellation_policy ? [STAY_LONG_TERM_CANCELLATION_POLICIES[stay.long_term_cancellation_policy].label] : []),
   ]
   return [
     ...(stay.amenities.length ? [{ key: 'amenities', label: 'Amenities', values: stay.amenities.map(code => STAY_AMENITIES[code].label) }] : []),
@@ -784,7 +784,7 @@ const stayStructuredData = computed(() => {
       ...(props.location.latitude !== null && props.location.longitude !== null ? { geo: { '@type': 'GeoCoordinates', latitude: props.location.latitude, longitude: props.location.longitude } } : {}),
     } : {}),
     occupancy: { '@type': 'QuantitativeValue', minValue: 1, maxValue: stay.max_guests },
-    ...(stay.property_type ? { accommodationCategory: STAY_PROPERTY_TYPES[stay.property_type] } : {}),
+    ...(stay.property_type ? { accommodationCategory: STAY_PROPERTY_TYPES[stay.property_type].label } : {}),
     ...(stay.bedrooms !== null ? { numberOfBedrooms: stay.bedrooms } : {}),
     ...(stay.bathrooms !== null ? { numberOfBathroomsTotal: stay.bathrooms } : {}),
     ...(stay.beds !== null ? { bed: { '@type': 'BedDetails', numberOfBeds: stay.beds } } : {}),

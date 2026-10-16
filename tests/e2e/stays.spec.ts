@@ -116,7 +116,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
     check_in_instructions: null, photos: [],
     // Created in the editor with no listing details, at a provisioned location Google never placed, and not yet listed.
     description: '', published: false, address: homeAddress, latitude: null, longitude: null,
-    property_type: null, bedrooms: null, beds: null, bathrooms: null, amenities: [], cancellation_policy: null, long_term_cancellation_policy: null,
+    property_type_group: null, property_type: null, bedrooms: null, beds: null, bathrooms: null, amenities: [], cancellation_policy: null, long_term_cancellation_policy: null,
     check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
   }])
 

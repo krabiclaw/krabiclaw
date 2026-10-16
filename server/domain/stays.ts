@@ -4,7 +4,7 @@ import { assertRoleAllows, assignedHomeSql, isOrganizationWideRole, organization
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { coordinatesFailure, createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
 import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
-import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayLongTermCancellationPolicy, type StayPropertyType } from '~/shared/stay-listing'
+import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
 import { createProduct, getProduct, setProductPublication, updateProduct } from '~/server/utils/product-management'
 import type { Product, UpdateProductInput } from '~/server/types/products'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -144,6 +144,7 @@ export interface StayHome {
   address: StayAddress | null
   latitude: number | null
   longitude: number | null
+  property_type_group: StayPropertyTypeGroup | null
   property_type: StayPropertyType | null
   bedrooms: number | null
   beds: number | null
@@ -322,7 +323,7 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
 async function stayHomesWhere(db: DbClient, organizationId: string, productId: string | null, scope: { sql: string; params: string[] }): Promise<StayHome[]> {
   const rows = await queryAll<Record<string, unknown>>(db, `
     SELECT p.id AS product_id, p.name, p.description, c.location_id, l.timezone, l.address, l.latitude, l.longitude, o.default_currency,
-           c.check_in_time, c.check_out_time, c.max_guests, c.min_nights, c.property_type, c.bedrooms, c.beds, c.bathrooms, c.amenities,
+           c.check_in_time, c.check_out_time, c.max_guests, c.min_nights, c.property_type_group, c.property_type, c.bedrooms, c.beds, c.bathrooms, c.amenities,
            c.cancellation_policy, c.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
            c.directions, c.house_manual, c.checkout_instructions, c.assigned_member_id, c.assigned_team_id,
            COALESCE((SELECT pp.published FROM product_publications pp WHERE pp.organization_id = c.organization_id AND pp.product_id = c.product_id), 0) AS published,
@@ -352,6 +353,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       check_in_time: String(row.check_in_time), check_out_time: String(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
       description: String(row.description), published: Number(row.published) === 1,
       address: stayAddress(row.address), latitude: nullableNumber(row.latitude), longitude: nullableNumber(row.longitude),
+      property_type_group: nullableText(row.property_type_group) as StayPropertyTypeGroup | null,
       property_type: nullableText(row.property_type) as StayPropertyType | null,
       bedrooms: nullableNumber(row.bedrooms), beds: nullableNumber(row.beds), bathrooms: nullableNumber(row.bathrooms),
       amenities: JSON.parse(String(row.amenities)) as StayAmenity[],
@@ -492,7 +494,7 @@ function homeAddress(body: Record<string, unknown>, prefix: string): Pick<NewSta
 }
 
 /** What the home is and offers: product stay settings, checked by the product writer. */
-const LISTING_FIELDS = ['property_type', 'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy'] as const
+const LISTING_FIELDS = ['property_type_group', 'property_type', 'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy'] as const
 /** The arrival guide: private columns only this module reads and writes. */
 const ARRIVAL_TEXT = { check_in_instructions: 5000, wifi_network: 100, wifi_password: 100, directions: 5000, house_manual: 5000 } as const
 const ARRIVAL_FIELDS = [...Object.keys(ARRIVAL_TEXT) as Array<keyof typeof ARRIVAL_TEXT>, 'check_in_method', 'checkout_instructions'] as const
