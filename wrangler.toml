@@ -53,6 +53,9 @@ NUXT_PUBLIC_SITE_URL = "https://krabiclaw.com"
 NUXT_PUBLIC_HELP_URL = "https://krabiclaw.com/help"
 NUXT_PUBLIC_WHATSAPP_NUMBER = "16197200000"
 MEDIA_BASE_URL = "https://media.krabiclaw.com"
+# Channex: production uses the Channex staging account (owner decision 2026-10-16) until
+# Channex certification. CHANNEX_API_KEY and CHANNEX_WEBHOOK_SECRET are secrets.
+CHANNEX_BASE_URL = "https://staging.channex.io/api/v1"
 AI_SEARCH_NAMESPACE = "default"
 AI_SEARCH_INSTANCE_ID = "krabiclaw-platform-knowledge"
 # Production is the only environment that should send real email/WhatsApp. Every environment
