@@ -445,6 +445,50 @@ delta, inspect changed and deleted keys, and reconcile important edits without
 overwriting writes made to v18. Keep v17 intact until that review and the schema,
 foreign-key and customer-journey checks pass.
 
+The v18-to-v19 epoch admits channel-addressable Airbnb inquiries in the one
+guest inbox (#1381 step 4.2). `requests_guest_payload_check` now accepts an
+explicit channel participant with the provider's conversation title and nullable
+actual guest name, email and phone. A contact-backed payload keeps its existing
+requirements; an invalid present participant never becomes a contact payload.
+Because `requests` is referenced by the activity, booking, stay, review and
+payment tables, changing this CHECK requires another replacement database.
+
+The unchanged v18 migration SQL and metadata are archived in
+`migrations-history/v18/`. The v19 baseline adds `channel_threads`, which maps a
+provider conversation and optional booking to one local request and home, and
+admits Channex/Airbnb delivery receipts. No source conversation, activity entry,
+delivery receipt, authentication row or OAuth token is transformed. An inquiry
+adopts an existing stay conversation when one exists; two existing conversations
+produce an explicit association conflict instead of moving or deleting history.
+The `product_channel_mappings_stage_check` and enabled-stage CHECK also admit a
+Messages import stage after reservation loading. A failed message read remains
+visible at that stage and can be retried without repeating the reservation
+write or claiming the conversation history is complete.
+
+The same v19 baseline also carries the rest of #1381 step 4 as additive schema,
+so it needs no forward migration of its own: `device_tokens` (an APNs device of
+one Better Auth session, cascading with the session and user), the per-category
+push preference, private `product_stay_configs.check_in_instructions`,
+`message_templates`, `scheduled_guest_messages` and
+`stays.booking_received_at`. Copied v18 rows get no device, no template, no
+scheduled message, no instructions and a null `booking_received_at`: only a
+direct stay created after cutover is a newly received reservation, so a
+new-reservation schedule never messages a historical or imported stay. A saved
+v18 category preference predates push; the transfer gives it that category's
+product push default, the same value a person who never saved the category
+gets, and records the `notification_preferences_push_default` transform. A
+v18 chain is recognized from `migrations-history/v18/`.
+
+Prepare separate WNAM v19 databases from each environment's own v18 database
+using the canonical snapshot path above. Keep the replacements unbound until
+their schema, copy invariants, foreign keys and local source gates pass. Before
+and after cutover, inspect canonical delta changes/deletions and reconcile only
+reviewed source edits with guards that preserve replacement writes. Do not run
+the new Worker against a v18 binding: its migration ledger already contains the
+same baseline filename. No v19 database has been provisioned by this source
+change, and real Airbnb message/webhook/reply qualification remains required
+before retiring the lodging Worker.
+
 Before dropping or retiring a legacy table or writer:
 
 - remove every runtime reader and writer;
