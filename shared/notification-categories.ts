@@ -15,6 +15,7 @@ export const NOTIFICATION_CATEGORIES = [
   'account_security',
   'reservations_bookings',
   'guest_messages',
+  'team_messages',
   'reviews',
   'review_requests',
   'organization_and_billing',
@@ -47,10 +48,23 @@ export function isMandatoryEmailCategory(category: NotificationCategory): boolea
   return (MANDATORY_EMAIL_CATEGORIES as readonly NotificationCategory[]).includes(category)
 }
 
+/**
+ * Team conversations live in the KrabiClaw app and reach a member only by
+ * push. Nothing sends them by email or WhatsApp, so those switches do not exist
+ * for these categories rather than being switches that do nothing.
+ */
+export const PUSH_ONLY_CATEGORIES = ['team_messages'] as const satisfies readonly NotificationCategory[]
+
+export function isPushOnlyCategory(category: NotificationCategory): boolean {
+  return (PUSH_ONLY_CATEGORIES as readonly NotificationCategory[]).includes(category)
+}
+
 export const NOTIFICATION_CATEGORY_DEFAULTS = {
   account_security: { email: true, whatsapp: false, push: false },
   reservations_bookings: { email: true, whatsapp: true, push: true },
   guest_messages: { email: true, whatsapp: true, push: true },
+  // Delivered by push only: a member's app is where team conversations live.
+  team_messages: { email: false, whatsapp: false, push: true },
   reviews: { email: true, whatsapp: false, push: false },
   review_requests: { email: true, whatsapp: false, push: false },
   organization_and_billing: { email: true, whatsapp: false, push: false },
@@ -61,6 +75,7 @@ export const NOTIFICATION_CATEGORY_LABELS = {
   account_security: 'Account and security',
   reservations_bookings: 'Reservations and bookings',
   guest_messages: 'Guest messages',
+  team_messages: 'Team messages',
   reviews: 'New reviews',
   review_requests: 'Review requests',
   organization_and_billing: 'Organization and billing',

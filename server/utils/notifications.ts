@@ -1605,6 +1605,50 @@ export async function notifyGuestThreadReply(
   raiseUnrecordedOwnerAlertFailures('notifyGuestThreadReply', `thread ${opts.threadId}`, results.map(result => ({ result, task: 'ownerAlert' })))
 }
 
+export interface TeamMessageNotificationInput {
+  organizationId: string
+  threadId: string
+  messageId: string
+  /** The message's organization audit entry; every push's delivery receipt hangs off it. */
+  entryId: string
+  senderName: string
+  /** The message's words, or what it sent when it has none. */
+  preview: string
+  /** The conversation's other members, as users. */
+  recipientUserIds: string[]
+}
+
+/**
+ * A team message, pushed to every device each other member of the conversation
+ * is signed in on, unless they switched team-message push off. Each send is
+ * recorded on its own delivery; a recorded failure stays visible on the
+ * message and does not undo it, and a replay sends only what has not been sent.
+ * Anything that could not even be recorded is raised.
+ */
+export async function notifyTeamMessage(env: NotificationEnv, db: DbClient, input: TeamMessageNotificationInput): Promise<void> {
+  const targets = (await Promise.all(input.recipientUserIds.map(async userId =>
+    await wantsNotification(db, userId, 'team_messages', 'push')
+      ? (await listUserDevices(db, userId)).map(device => ({ userId, device }))
+      : []))).flat()
+  const results = await Promise.allSettled(targets.map(({ userId, device }) => sendPushThreadNotification(env, db, {
+    userId,
+    device,
+    delivery: {
+      threadId: null,
+      entryId: input.entryId,
+      purpose: 'team_message',
+      idempotencyKey: `team-message:${input.messageId}:push:${createHash('sha256').update(JSON.stringify([userId, device.token])).digest('hex')}`,
+    },
+    alert: {
+      title: input.senderName,
+      body: input.preview,
+      threadId: `team:${input.threadId}`,
+      data: { organizationId: input.organizationId, userId, kind: 'team', threadId: input.threadId },
+    },
+  })))
+  raiseUnrecordedOwnerAlertFailures('notifyTeamMessage', `team thread ${input.threadId}`, results.map(result => ({ result, task: 'push' })))
+}
+
 export interface OrganizationInvitationInput {
   organizationId: string
   invitationId: string

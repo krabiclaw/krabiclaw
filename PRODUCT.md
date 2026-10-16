@@ -61,6 +61,16 @@ Workspace members can receive owner notifications as push notifications on the
 KrabiClaw iPhone app, per notification category, alongside email and WhatsApp.
 A push that Apple refuses is recorded as failed.
 
+## Team conversations
+
+Members of one workspace message each other in team conversations, optionally
+about one stay, with text and photos. Only the members in a conversation can
+read it; leaving the workspace ends a person's place in it, while what they
+wrote remains. Each member has their own unread state. A new message is pushed
+to the other members' phones unless they switched team messages off; team
+messages have no email or WhatsApp channel. Owners and admins choose which
+homes a member looks after; each home has one assigned member.
+
 ## Plans
 
 New subscriptions use `growth` ($49/month or $588/year) and `business` ($99/month);

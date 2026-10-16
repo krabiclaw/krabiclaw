@@ -267,11 +267,16 @@ try {
       // Cross-environment payloads deliberately leave the destination's signing keys
       // untouched. Verify only the tables the payload actually replaces.
       const restoredTables = manifest.tables.filter(table => !(omitJwks && table.table === 'jwks'))
-      // One row of scalar counts: D1 refuses a UNION ALL across every table
-      // ("too many terms in compound SELECT").
-      const [loaded] = query<Record<string, number>>(`SELECT ${restoredTables.map(table =>
-        `(SELECT count(*) FROM ${identifier(table.table)}) AS ${identifier(table.table)}`,
-      ).join(', ')}`)
+      // Rows of scalar counts: D1 refuses a UNION ALL across every table
+      // ("too many terms in compound SELECT") and more than 100 result
+      // columns, so the tables are counted 50 to a row.
+      const loaded: Record<string, number> = {}
+      for (let start = 0; start < restoredTables.length; start += 50) {
+        const [counts] = query<Record<string, number>>(`SELECT ${restoredTables.slice(start, start + 50).map(table =>
+          `(SELECT count(*) FROM ${identifier(table.table)}) AS ${identifier(table.table)}`,
+        ).join(', ')}`)
+        Object.assign(loaded, counts)
+      }
       const mismatches = restoredTables.filter(table => loaded?.[table.table] !== table.target_rows)
       if (mismatches.length) throw new Error(`${target} import row counts differ: ${mismatches.map(table => table.table).join(', ')}`)
     }

@@ -15,6 +15,13 @@
       "when": 1792127605440,
       "tag": "0001_guest_thread_invites",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1792137077903,
+      "tag": "0002_team_messages",
+      "breakpoints": true
     }
   ]
 }
