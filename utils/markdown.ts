@@ -1,4 +1,4 @@
-import { marked, type Token } from "marked";
+import { marked, type Token, type Tokens } from "marked";
 
 // marked's text renderer HTML-escapes apostrophes/quotes (e.g. "you're"
 // becomes "you&#39;re"). Stripping non-alphanumeric chars without decoding
@@ -70,8 +70,8 @@ export function markdownHeadings(markdown: string, blockIndex: number): Markdown
       if (token.type === "heading" && (token.depth === 2 || token.depth === 3)) {
         const html = marked.parseInline(token.text, { gfm: true, breaks: true }) as string;
         headings.push({ id: `${slugifyHeading(html)}-${blockIndex}`, text: decodeHtmlEntities(html.replace(/<[^>]+>/g, "")), depth: token.depth });
-      } else if (token.type === "blockquote") visit(token.tokens);
-      else if (token.type === "list") for (const item of token.items) visit(item.tokens);
+      } else if (token.type === "blockquote") visit((token as Tokens.Blockquote).tokens);
+      else if (token.type === "list") for (const item of (token as Tokens.List).items) visit(item.tokens);
     }
   };
   visit(marked.lexer(markdown, { gfm: true, breaks: true }));
