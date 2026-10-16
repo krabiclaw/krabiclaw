@@ -93,7 +93,7 @@
     </div>
   </section>
 
-  <section v-else :class="backgroundClass" :style="backgroundStyle" class="relative overflow-hidden" data-parity-section="page-hero">
+  <section v-else :data-blawby-dark-hero="isDark ? 'true' : undefined" :style="backgroundStyle" class="relative overflow-hidden" data-parity-section="page-hero">
     <div class="blawby-container relative">
       <div class="px-6 pb-4 pt-16 lg:px-8">
         <div class="mx-auto max-w-4xl text-center">
@@ -102,13 +102,19 @@
           </p>
           <h1 v-if="titleWords.length" :aria-label="title" class="blawby-display text-3xl font-bold sm:text-4xl">
             <template v-for="(word, index) in titleWords" :key="`${word}-${index}`">
-              <span :class="index === 1 || index === 2 ? 'text-[var(--blawby-accent-strong)]' : 'text-[var(--blawby-primary)]'">{{ word + (index < titleWords.length - 1 ? ' ' : '') }}</span>
+              <span :class="titleWordClass(index)">{{ word + (index < titleWords.length - 1 ? ' ' : '') }}</span>
             </template>
           </h1>
           <div v-if="descriptionParts.length" class="mt-6 text-left text-lg leading-8 text-[var(--blawby-primary)]">
             <div v-for="(part, index) in descriptionParts" :key="index" class="flex items-start gap-3">
               <BlawbyRichText :content="part" unstyled class="blawby-page-hero-copy contents prose prose-lg max-w-none" />
             </div>
+          </div>
+          <div v-if="ctaUrl && ctaLabel" class="mt-10">
+            <BlawbyButton :to="ctaUrl" class="gap-2" @click="trackCtaClick">
+              <svg class="-ml-0.5 mr-2 size-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7.5 4.5h9A4.5 4.5 0 0 1 21 9v3a4.5 4.5 0 0 1-4.5 4.5h-4.86L7.2 20.2a.75.75 0 0 1-1.2-.6v-3.35A4.5 4.5 0 0 1 3 12V9a4.5 4.5 0 0 1 4.5-4.5Z" /></svg>
+              {{ ctaLabel }}
+            </BlawbyButton>
           </div>
           <div v-if="$slots.default" class="mt-12">
             <slot />
@@ -122,6 +128,7 @@
 <script setup lang="ts">
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
+import type { BlawbyDocumentPayload } from '~/utils/blawby-document-contract'
 import { blockText, blockTextOrNull, blockMedia } from '~/utils/tenant-page-block-data'
 import { blawbyHeroProseBlockId, blawbyShieldVariant, blawbySplitAccent, blawbySurface, type BlawbyShieldVariant } from '~/types/blawby'
 
@@ -188,10 +195,22 @@ const secondaryUrl = computed(() => {
   return url && url.startsWith('/') ? localePath(url) : url
 })
 
+const document = inject<Ref<BlawbyDocumentPayload> | null>('blawby-document', null)
+if (!document) throw createError({ statusCode: 500, statusMessage: 'Blawby layout did not provide the requested page' })
+const { trackConsultationClick } = useOrganizationConversionTracking(() => document.value.shell.consultation)
+function trackCtaClick() {
+  trackConsultationClick(props.page.recipe ?? 'page', props.page.path, ctaUrl.value!, props.page.page_id)
+}
+
 // The page's own colour, which the shield below cuts its shape out of, so the
-// two cannot drift apart. Only the dark one restates its text colours.
+// two cannot drift apart. Only the dark one restates its text colours, on the
+// words themselves: a colour on the heading lost to the colour each word sets.
 const backgroundStyle = computed(() => ({ backgroundColor: blawbySurface(variant.value) }))
-const backgroundClass = computed(() => (variant.value === 'schedule' ? '[&_h1]:text-white [&_p]:text-gray-200' : undefined))
+const isDark = computed(() => variant.value === 'schedule')
+function titleWordClass(index: number) {
+  if (index === 1 || index === 2) return isDark.value ? 'text-[var(--blawby-accent)]' : 'text-[var(--blawby-accent-strong)]'
+  return isDark.value ? 'text-white' : 'text-[var(--blawby-primary)]'
+}
 const titleWords = computed(() => title.value.trim().split(/\s+/).filter(Boolean))
 const descriptionParts = computed(() => (description.value ?? '')
   .split(/\n\s*\n/)
@@ -205,6 +224,14 @@ const descriptionParts = computed(() => (description.value ?? '')
   font-size: 1.125rem !important;
   line-height: 2rem !important;
   margin: 0 0 1rem !important;
+}
+
+[data-blawby-dark-hero] .blawby-page-hero-copy p {
+  color: var(--color-gray-200) !important;
+}
+
+[data-blawby-dark-hero] .blawby-page-hero-copy strong {
+  color: var(--color-white);
 }
 
 .blawby-page-hero-copy strong {
