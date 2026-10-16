@@ -485,8 +485,8 @@ their schema, copy invariants, foreign keys and local source gates pass. Before
 and after cutover, inspect canonical delta changes/deletions and reconcile only
 reviewed source edits with guards that preserve replacement writes. Do not run
 the new Worker against a v18 binding: its migration ledger already contains the
-same baseline filename. Real Airbnb message/webhook/reply qualification remains
-required before retiring the lodging Worker.
+same baseline filename. Real Airbnb message/webhook/reply qualification against
+KrabiClaw remains required.
 
 Both v19 replacement databases were created with `--location wnam` on
 2026-10-16 (Asia/Bangkok), and Cloudflare reported WNAM before the baseline was

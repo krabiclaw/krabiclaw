@@ -38,7 +38,6 @@ import { timingSafeEqualText } from '~/server/utils/dev-route-auth'
 import { notifyOrganizationInvited } from '~/server/utils/notifications'
 import { cleanupOrganizationBeforeDelete } from '~/server/utils/tenant-deletion'
 import { APPLE_AUTHORIZATION_CODE_HEADER, exchangeAppleAuthorizationCode, revokeAppleGrant } from '~/server/utils/apple-revocation'
-import { deleteLodgingOrganization, deleteLodgingUser, hasLodgingMembership, isLodgingOrganization, notifyLodgingMembershipChanged } from '~/server/utils/lodging-service'
 import { reconcileZarazAnalytics } from '~/server/utils/zaraz-analytics'
 import { isKnownRecurringPlan, isNewSalePlan, normalizeBillingPlanId } from '~/shared/billing-model'
 
@@ -116,11 +115,7 @@ function organizationDeletionCleanupPlugin(env: CloudflareEnv): BetterAuthPlugin
         ...existingHooks,
         beforeDeleteOrganization: async (data, hookCtx) => {
           await beforeDeleteOrganization?.(data, hookCtx)
-          // The lodging Worker removes the organization's homes, Channex
-          // properties and team data first; a failure there keeps the
-          // organization, so nothing is left behind keyed to a deleted id.
-          if (await isLodgingOrganization(env.DB, data.organization.id)) await deleteLodgingOrganization(env, data.organization.id)
-          await cleanupOrganizationBeforeDelete(env, data.organization.id)
+          await cleanupOrganizationBeforeDelete(env, data.organization.id, data.user.id)
         },
         afterDeleteOrganization: async (data, hookCtx) => {
           await afterDeleteOrganization?.(data, hookCtx)
@@ -154,11 +149,9 @@ export interface CloudflareEnv {
   APPLE_TEAM_ID?: string
   APPLE_KEY_ID?: string
   APPLE_PRIVATE_KEY?: string
-  LODGING_SERVICE_SECRET?: string
   CHANNEX_BASE_URL?: string
   CHANNEX_API_KEY?: string
   CHANNEX_WEBHOOK_SECRET?: string
-  LODGING_API_URL?: string
   CF_ACCOUNT_ID?: string
   CLOUDFLARE_API_TOKEN?: string
   CLOUDFLARE_IMAGES_API_TOKEN?: string
@@ -298,10 +291,8 @@ async function prepareAccountDeletion(env: CloudflareEnv, db: ReturnType<typeof 
   }
   // The code is single use, so the grant it yields is revoked at once: a later
   // failure then leaves no unrevoked grant behind, and the retry brings a new
-  // code. Lodging cleanup is idempotent, so it is safe to repeat.
+  // code.
   if (appleAccount && appleCode) await revokeAppleGrant(env, await exchangeAppleAuthorizationCode(env, appleCode, appleAccount.accountId))
-
-  if (await hasLodgingMembership(db, userId)) await deleteLodgingUser(env, userId)
 }
 
 /** Where a password is chosen, and the body field that carries it. */
@@ -338,17 +329,21 @@ function buildAuth(env: CloudflareEnv) {
     organizationHooks: {
       beforeCreateOrganization: async ({ organization }: { organization: Record<string, unknown> }) => assertOrganizationFacts(organization),
       beforeUpdateOrganization: async ({ organization }: { organization: Record<string, unknown> }) => assertOrganizationFacts(organization),
-      // A removed member or changed role reads differently on every site, and
-      // a lodging organization's Worker closes that member's live sockets and
-      // drops their home assignments. Better Auth's /organization/leave runs
-      // no member hook, so the after-hook below covers it.
-      afterRemoveMember: async ({ member, organization }: { member: { userId: string }; organization: { id: string } }) => {
+      // A removed member or changed role reads differently on every site. A
+      // member who is gone, or who now sees every home, looks after none
+      // (reconciled across the organization, so a failed run is repaired by the
+      // next change); the live dashboard socket re-reads membership per event.
+      // Better Auth's /organization/leave runs no member hook, so the
+      // after-hook below covers it.
+      afterRemoveMember: async ({ organization }: { organization: { id: string } }) => {
         await recordMemberChange(organization.id)
-        if (await isLodgingOrganization(db, organization.id)) await notifyLodgingMembershipChanged(env, { organizationId: organization.id, userId: member.userId, change: 'removed' })
+        const { releaseUnassignableHomes } = await import('~/server/domain/stays')
+        await releaseUnassignableHomes(env, db, { organizationId: organization.id })
       },
-      afterUpdateMemberRole: async ({ member, organization }: { member: { userId: string; role: string }; organization: { id: string } }) => {
+      afterUpdateMemberRole: async ({ organization }: { organization: { id: string } }) => {
         await recordMemberChange(organization.id)
-        if (await isLodgingOrganization(db, organization.id)) await notifyLodgingMembershipChanged(env, { organizationId: organization.id, userId: member.userId, change: 'role_changed', role: member.role })
+        const { releaseUnassignableHomes } = await import('~/server/domain/stays')
+        await releaseUnassignableHomes(env, db, { organizationId: organization.id })
       },
       afterAddTeamMember: async ({ team, user }: { team: { organizationId: string }; user: { id: string } }) => {
         const { materializeMemberSessions } = await import('~/server/utils/availability')
@@ -397,8 +392,8 @@ function buildAuth(env: CloudflareEnv) {
     // updatePhoneNumber it signs in whoever holds that number.
     //
     // An administrator does not delete accounts: /admin/remove-user would skip
-    // the ownership guard, Apple revocation and lodging cleanup that
-    // /delete-user runs in deleteUser.beforeDelete.
+    // the ownership guard and Apple revocation that /delete-user runs in
+    // deleteUser.beforeDelete.
     disabledPaths: ['/sign-in/phone-number', '/phone-number/request-password-reset', '/phone-number/reset-password', '/admin/remove-user'],
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
@@ -453,7 +448,8 @@ function buildAuth(env: CloudflareEnv) {
           if (left instanceof Error || !ctx.context.session) return
           const organizationId = (ctx.body as { organizationId: string }).organizationId
           await recordMemberChange(organizationId)
-          if (await isLodgingOrganization(db, organizationId)) await notifyLodgingMembershipChanged(env, { organizationId, userId: ctx.context.session.user.id, change: 'removed' })
+          const { releaseUnassignableHomes } = await import('~/server/domain/stays')
+          await releaseUnassignableHomes(env, db, { organizationId })
           return
         }
         if (ctx.path !== '/callback/:id') return
@@ -536,6 +532,13 @@ function buildAuth(env: CloudflareEnv) {
             // A deleted account's Customer at every business it paid goes with it, and the cards saved there.
             await deleteBuyerCustomers(db, stripeClient, user.id)
             await execute(db, "DELETE FROM activity_entries WHERE kind='notification' AND scope_kind='global' AND target_user_id=?", [user.id])
+            // The account's member rows cascade away with it; the homes they
+            // looked after are released last, since an assignment names a member
+            // without a foreign key.
+            const { releaseUnassignableHomes } = await import('~/server/domain/stays')
+            for (const { organizationId } of await queryAll<{ organizationId: string }>(db, 'SELECT DISTINCT "organizationId" FROM member WHERE "userId" = ?', [user.id])) {
+              await releaseUnassignableHomes(env, db, { organizationId, departingUserId: user.id })
+            }
           },
         },
         update: {

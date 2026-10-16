@@ -4,7 +4,7 @@ import { ChannexDataError, integer, object, string } from './data'
 
 /**
  * What an Airbnb listing says about itself, read through Channex: its details
- * and its next 500 nights. Ported from the lodging Worker's import. A field
+ * and its next 500 nights. A field
  * Airbnb leaves out is reported as missing for the host to supply; nothing is
  * filled in for them.
  */

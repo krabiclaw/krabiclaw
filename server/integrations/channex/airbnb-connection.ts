@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { d1JsonStringSet, execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { createStayHome, importStayNights, stayHomeInput, type StayAccess } from '~/server/domain/stays'
 import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
@@ -13,7 +13,8 @@ import { backfillChannexMessages } from '~/server/domain/guest-threads/channel-m
 /**
  * An organization's Airbnb account, connected through Channex: start a
  * single-use sign-in, complete it from the callback, read the account's
- * listings, and disconnect. Ported from the lodging Worker's AirbnbService.
+ * listings, disconnect, and release everything in Channex when the organization
+ * is deleted.
  *
  * Every step holds the row's operation lock. A provider write is preceded by
  * naming it in pending_step; if that write fails without proof Channex refused
@@ -601,6 +602,75 @@ export class AirbnbConnection {
       }
       return { disconnected: true }
     })
+  }
+
+  /**
+   * Before the organization is deleted: disconnects Airbnb in Channex's
+   * documented order (mappings, deactivate, delete), then deletes every
+   * property in the organization's dedicated group with `force=true` and the
+   * group itself, each verified gone. A property mapped here but outside the
+   * group must already be gone. Any failure keeps the organization.
+   */
+  async deleteForOrganization(): Promise<void> {
+    if (!await this.row()) return
+    // Each disconnect call removes one mapping and verifies it before the next.
+    // A channel Channex answers 404 for is already deleted.
+    for (let row = await this.row(); row?.channel_id; row = await this.row()) {
+      if (!await this.present(`/channels/${encodeURIComponent(row.channel_id)}`, 'channel')) {
+        await this.locked(async locked => this.save(locked, { channel_id: null, connected_at: null, status: 'not_connected' }))
+        break
+      }
+      if ((await this.disconnect()).disconnected) break
+    }
+    await this.locked(async (row) => {
+      const mapped = (await this.mappings()).flatMap(mapping => mapping.property_id ? [mapping.property_id] : [])
+      if (row.setup_property_id) mapped.push(row.setup_property_id)
+      if (!row.group_id) {
+        if (mapped.length) fail(500, 'INVALID_CONNECTION_MAPPING', 'This organization maps Channex properties without its Channex group.')
+        return
+      }
+      const groupPath = `/groups/${encodeURIComponent(row.group_id)}`
+      const group = await this.present(groupPath, 'group')
+      const grouped = group ? provided(() => {
+        const data = object(object(group.relationships, 'group.relationships').properties, 'group.relationships.properties').data
+        if (!Array.isArray(data)) throw new ChannexDataError('group.relationships.properties.data must be a list')
+        return data.map(entry => string(object(entry, 'group property').id, 'group property id'))
+      }) : []
+      for (const id of mapped.filter(id => !grouped.includes(id))) {
+        if (await this.present(`/properties/${encodeURIComponent(id)}`, 'property')) fail(409, 'PROPERTY_OUTSIDE_GROUP', `Channex property ${id} is mapped here but is not in this organization's group.`)
+      }
+      const shared = await queryFirst<{ organization_id: string }>(this.db, `
+        SELECT organization_id FROM product_channel_mappings WHERE provider = 'channex' AND organization_id <> ? AND property_id IN (SELECT value FROM json_each(?))
+        UNION SELECT organization_id FROM channex_connections WHERE organization_id <> ? AND (group_id = ? OR setup_property_id IN (SELECT value FROM json_each(?)))
+        LIMIT 1`, [this.organizationId, d1JsonStringSet(grouped), this.organizationId, row.group_id, d1JsonStringSet(grouped)])
+      if (shared) fail(409, 'SHARED_PROVIDER_PROPERTY', 'A Channex property in this group belongs to another organization.')
+      await execute(this.db, "UPDATE product_channel_mappings SET enabled = 0, updated_at = ? WHERE organization_id = ? AND provider = 'channex'", [now(), this.organizationId])
+      for (const id of grouped) {
+        const path = `/properties/${encodeURIComponent(id)}`
+        await this.save(row, { pending_step: `delete_property:${id}` })
+        await channexRequest(this.env, `${path}?force=true`, 'DELETE')
+        // Channex accepted the delete, so a retry may send it again.
+        await this.save(row, { pending_step: null })
+        if (await this.present(path, 'property')) fail(502, 'PROVIDER_DELETION_PENDING', `Channex still has property ${id}.`)
+      }
+      if (group) {
+        await this.save(row, { pending_step: 'delete_group' })
+        await channexRequest(this.env, groupPath, 'DELETE')
+        await this.save(row, { pending_step: null })
+        if (await this.present(groupPath, 'group')) fail(502, 'PROVIDER_DELETION_PENDING', `Channex still has group ${row.group_id}.`)
+      }
+      await this.save(row, { group_id: null, setup_property_id: null })
+    })
+  }
+
+  /** The resource, or null when Channex answers 404 (deleted already). */
+  private async present(path: string, type: string): Promise<Resource | null> {
+    try {
+      return await channexGet(this.env, path, type)
+    } catch (error) {
+      if (error instanceof ChannexError && error.status === 404) return null
+      throw error
+    }
   }
 }
 

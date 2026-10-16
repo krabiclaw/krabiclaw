@@ -228,7 +228,7 @@ function setResolvedTenantContext(
   }
 }
 
-const SESSION_SCOPED_API_PREFIXES = ["/api/dashboard", "/api/organizations", "/api/mcp", "/api/lodging", "/api/internal/lodging", "/api/invite-links", "/api/integrations/channex"] as const;
+const SESSION_SCOPED_API_PREFIXES = ["/api/dashboard", "/api/organizations", "/api/mcp", "/api/invite-links", "/api/integrations/channex"] as const;
 
 export default defineHandler(async (event) => {
   // Nested self-fetches (i18n/icon/internal API calls during SSR) never carry
@@ -246,7 +246,7 @@ export default defineHandler(async (event) => {
   // Diagnostics must still reach operational logs when tenant/D1 resolution fails.
   if (tenantPath === BROWSER_ERROR_PATH) return;
   if (tenantPath === "/api/auth" || tenantPath.startsWith("/api/auth/")) return;
-  // The dashboard, organization, MCP, lodging and invite-link APIs are scoped by the session and the
+  // The dashboard, organization, MCP and invite-link APIs are scoped by the session and the
   // organization the request names, never by the host. Resolving the platform
   // site for them cost every call its tenant row, its redirect lookups and the
   // preview check before authentication ran: six D1 statements and 100-190 ms
