@@ -218,7 +218,6 @@ export default {
       "view_dish": "View Dish",
       "view_experience": "View experience",
       "view_item": "View item",
-      "view_stay": "View stay",
       "temporarily_unavailable": "Temporarily unavailable"
     },
     "search": {

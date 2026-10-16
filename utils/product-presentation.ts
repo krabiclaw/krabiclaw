@@ -96,7 +96,7 @@ export function parseSiteProductPath(path: string): { surface: SiteProductSurfac
 export function productCtaKey(kind: string | null | undefined): string {
   return kind === 'experience' ? 'saya.common.view_experience'
     : kind === 'dish' ? 'saya.common.view_dish'
-      : kind === 'stay' ? 'saya.common.view_stay'
+      : kind === 'stay' ? 'stay.check_availability'
         : 'saya.common.view_item'
 }
 

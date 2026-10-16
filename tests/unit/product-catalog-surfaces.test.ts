@@ -137,7 +137,7 @@ test('a home is named by its own slug, and a location that is one home is that h
 })
 
 test('a card names what it opens by the product kind', () => {
-  assert.equal(productCtaKey('stay'), 'saya.common.view_stay')
+  assert.equal(productCtaKey('stay'), 'stay.check_availability')
   assert.equal(productCtaKey('dish'), 'saya.common.view_dish')
   assert.equal(productCtaKey('experience'), 'saya.common.view_experience')
   assert.equal(productCtaKey('item'), 'saya.common.view_item')
