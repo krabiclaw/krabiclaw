@@ -5,7 +5,7 @@ import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
-import { createStay, listStayHomes, setMemberHomes, stayAccessFor, type StayAccess } from '../../server/domain/stays.ts'
+import { createStay, listStayHomes, releaseUnassignableHomes, setMemberHomes, stayAccessFor, type StayAccess } from '../../server/domain/stays.ts'
 import { createTeamThread, listTeamMembers, listTeamMessages, listTeamThreads, markTeamThreadRead, sendTeamMessage, teamAccessFor } from '../../server/domain/team-messages.ts'
 import { setNotificationPreference } from '../../server/domain/notification-preferences.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
@@ -149,6 +149,18 @@ test('members talk in team conversations, see unread state and receive recorded 
     const after = (await listTeamThreads(env, db, owner)).find(thread => thread.id === direct.id)!
     assert.deepEqual(after.participants.map(participant => participant.id), ['owner'])
     assert.equal((await listTeamMessages(db, owner, direct.id, {})).messages.find(message => message.body === 'Towels are out')?.senderId, 'cleaner')
+
+    // A member whose account is being deleted, or who becomes a manager, looks after no home; each release is audited.
+    const assignee = async () => (await listStayHomes(db, manager)).find(home => home.product_id === cabin.id)?.assigned_member_id
+    await releaseUnassignableHomes(env, db, { organizationId: ORG })
+    assert.equal(await assignee(), 'm-cook')
+    await releaseUnassignableHomes(env, db, { organizationId: ORG, departingUserId: 'cook' })
+    assert.equal(await assignee(), null)
+    await setMemberHomes(env, db, ownerStays, 'm-cook', [cabin.id])
+    await db.prepare("UPDATE member SET role = 'admin' WHERE id = 'm-cook'").run()
+    await releaseUnassignableHomes(env, db, { organizationId: ORG })
+    assert.equal(await assignee(), null)
+    assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM activity_entries WHERE event_name = 'stay.homes_assigned' AND actor_kind = 'system' AND organization_id = ?").bind(ORG).first('n'), 2)
   } finally {
     await runtime.dispose()
   }
