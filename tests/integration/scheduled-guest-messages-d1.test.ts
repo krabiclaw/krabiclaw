@@ -48,8 +48,9 @@ test('the cron sends due messages, leaves future ones pending and records failur
     const ana = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'ana', check_in_date: day(3), check_out_date: day(5), adults: 2, guest_name: 'Ana', guest_email: 'ana@example.test', total_minor: 30_000 })
     const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(10), check_out_date: day(11), adults: 1, guest_name: 'Dee', guest_phone: '+15557770000', total_minor: 15_000 })
     const cy = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'cy', check_in_date: day(20), check_out_date: day(21), adults: 1, guest_name: 'Cy', guest_email: 'cy@example.test', total_minor: 15_000 })
+    const eve = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'eve', check_in_date: day(30), check_out_date: day(31), adults: 1, guest_name: 'Eve', guest_email: 'eve@example.test', total_minor: 15_000 })
     const planned = (stayId: string, templateId: string) => db.prepare('SELECT * FROM scheduled_guest_messages WHERE stay_id = ? AND template_id = ?').bind(stayId, templateId).first<Record<string, string | null>>()
-    for (const stay of [ana, dee, cy]) {
+    for (const stay of [ana, dee, cy, eve]) {
       assert.equal((await planned(stay.id, welcome.id))?.status, 'pending')
       assert.equal((await planned(stay.id, arrival.id))?.status, 'pending')
     }
@@ -61,9 +62,30 @@ test('the cron sends due messages, leaves future ones pending and records failur
       VALUES ('earlier-attempt', ?, 'message', 'request', 'system', 'email', 'Different words', 'thread.scheduled_message', '{"request_hash":"other"}', ?, 99, ?, ?)`)
       .bind(cy.request_id, `guest-thread-operation:${cy.request_id}:scheduled-guest-message:${cyWelcome.id}`, new Date().toISOString(), new Date().toISOString()).run()
 
+    // Eve's conversation is addressed through Channex. The provider's answer to
+    // the read before any send is malformed, so nothing is sent and the
+    // message fails with the provider's typed facts instead of staying sending.
+    await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled)
+      VALUES (?, ?, 'channex', 'listing', 'channel', 'property', 'room', 'rate', 'complete', 1)`).bind(ORG, cabin.id).run()
+    await db.prepare(`INSERT INTO channel_threads (provider, external_thread_id, organization_id, product_id, request_id, external_booking_id, provider_updated_at)
+      VALUES ('channex', 'thread-eve', ?, ?, ?, NULL, '2026-10-16T00:00:00')`).bind(ORG, cabin.id, eve.request_id).run()
+    const channexEnv = { ...env, CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'test-provider-key' } as CloudflareEnv
+    const realFetch = globalThis.fetch
+    const providerCalls: string[] = []
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      providerCalls.push(`${init?.method ?? 'GET'} ${new URL(String(input)).pathname}`)
+      return new Response('{}', { status: 200, headers: { 'content-type': 'application/json' } })
+    }) as typeof fetch
+
     // Ten minutes later every welcome is due and no arrival note is.
     const later = new Date(Date.now() + 10 * 60_000).toISOString()
-    assert.deepEqual(await sendDueScheduledGuestMessages(db, env, later), { sent: 1, failed: 1, needs_review: 1 })
+    try {
+      assert.deepEqual(await sendDueScheduledGuestMessages(db, channexEnv, later), { sent: 1, failed: 2, needs_review: 1 })
+    } finally { globalThis.fetch = realFetch }
+    assert.deepEqual(providerCalls.filter(call => call.startsWith('POST')), [])
+    const providerFailed = (await planned(eve.id, welcome.id))!
+    assert.deepEqual([providerFailed.status, providerFailed.error_code, providerFailed.error_field, providerFailed.entry_id, providerFailed.sent_at], ['failed', 'INVALID_PROVIDER_RESPONSE', 'data', null, null])
+    assert.ok(providerFailed.reason)
 
     const sent = (await planned(ana.id, welcome.id))!
     assert.equal(sent.status, 'sent')
@@ -78,10 +100,10 @@ test('the cron sends due messages, leaves future ones pending and records failur
     const review = (await planned(cy.id, welcome.id))!
     assert.deepEqual([review.status, review.error_code, review.error_field, review.sent_at], ['needs_review', 'IDEMPOTENCY_CONFLICT', 'idempotencyKey', null])
     assert.ok(review.reason)
-    for (const stay of [ana, dee, cy]) assert.equal((await planned(stay.id, arrival.id))?.status, 'pending')
+    for (const stay of [ana, dee, cy, eve]) assert.equal((await planned(stay.id, arrival.id))?.status, 'pending')
 
     // A repeated run sends nothing again and changes no recorded outcome.
-    assert.deepEqual(await sendDueScheduledGuestMessages(db, env, later), { sent: 0, failed: 0, needs_review: 0 })
+    assert.deepEqual(await sendDueScheduledGuestMessages(db, channexEnv, later), { sent: 0, failed: 0, needs_review: 0 })
     assert.equal(await db.prepare("SELECT count(*) AS n FROM activity_entries WHERE event_name = 'thread.scheduled_message'").first('n'), 2)
 
     // A schedule saved after its event has passed records the miss instead of sending late.

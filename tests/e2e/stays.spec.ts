@@ -238,6 +238,8 @@ test('a cleaner sees only assigned-home arrivals and departures on Today and Upc
     const noted = await call<{ stay: { version: number } }>('update_stay', { stay_id: stays[0]!.id, expected_version: renamed.data!.stay.version, notes: 'Visible live note' })
     expect(noted.error).toBeNull()
     await expect(cleanerPage.getByText('Visible live note', { exact: true })).toBeVisible()
+    // The page can render the note before the socket's frame is recorded here.
+    await expect.poll(() => liveEvents.filter(event => 'stayId' in event).length).toBe(2)
     expect(liveEvents.filter(event => 'stayId' in event).map(event => event.stayId)).toEqual([stays[0]!.id, stays[0]!.id])
 
     // A cookie cache read must not keep this socket authorized after sign-out.

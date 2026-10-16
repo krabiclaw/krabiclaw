@@ -400,23 +400,40 @@ async function loadPage(offset: number, signal?: AbortSignal): Promise<ThreadLis
   if (page.pagination.limit !== query.limit || page.pagination.offset !== offset) throw createError({ statusCode: 502, statusMessage: 'Messages returned a different page than requested' })
   return page
 }
+/** A conversation already loaded that reappears on a later page means the list moved between reads. */
+class ShiftedPages extends Error {}
 function appendLoadedPage(before: ThreadListPage, page: ThreadListPage): ThreadListPage {
   const ids = new Set(before.threads.map(thread => thread.id))
-  if (page.threads.some(thread => ids.has(thread.id))) throw createError({ statusCode: 409, statusMessage: 'Conversations changed while loading. Reload messages to continue.' })
+  if (page.threads.some(thread => ids.has(thread.id))) throw new ShiftedPages('Conversations moved between pages while loading')
   return { threads: [...before.threads, ...page.threads], pagination: page.pagination }
+}
+// New activity reorders the inbox while its pages are read, which shifts a row
+// across a page boundary. That ordinary case re-reads the window from the top;
+// only a window that keeps shifting is reported.
+const WINDOW_READ_ATTEMPTS = 3
+async function loadWindow(pages: number, scope: string, signal: AbortSignal): Promise<{ page: ThreadListPage; fetched: number }> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      let page = await loadPage(0, signal)
+      let fetched = 1
+      while (fetched < pages && page.pagination.nextOffset !== null) {
+        if (scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
+        page = appendLoadedPage(page, await loadPage(page.pagination.nextOffset, signal))
+        fetched += 1
+      }
+      return { page, fetched }
+    } catch (error) {
+      if (!(error instanceof ShiftedPages)) throw error
+      if (attempt === WINDOW_READ_ATTEMPTS) throw createError({ statusCode: 409, statusMessage: 'Conversations kept changing while loading. Reload messages to continue.' })
+    }
+  }
 }
 const { data, pending, error: threadsError, refresh } = await useAsyncData<ThreadListPage>(listKey, async (_app, { signal }) => {
   pageController?.abort()
   nextPageError.value = null
   const scope = listKey.value
   if (loadedScope !== scope) { loadedScope = scope; loadedPages = 1 }
-  let page = await loadPage(0, signal)
-  let fetched = 1
-  while (fetched < loadedPages && page.pagination.nextOffset !== null) {
-    if (scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
-    page = appendLoadedPage(page, await loadPage(page.pagination.nextOffset, signal))
-    fetched += 1
-  }
+  const { page, fetched } = await loadWindow(loadedPages, scope, signal)
   if (scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
   loadedPages = fetched
   return page
@@ -434,8 +451,15 @@ async function loadMore() {
   try {
     const page = await loadPage(before.pagination.nextOffset, controller.signal)
     if (controller.signal.aborted || key !== listKey.value || data.value !== before) return
-    data.value = appendLoadedPage(before, page)
-    loadedPages = Math.ceil(data.value.threads.length / 100)
+    try {
+      data.value = appendLoadedPage(before, page)
+      loadedPages = Math.ceil(data.value.threads.length / 100)
+    } catch (shift) {
+      if (!(shift instanceof ShiftedPages)) throw shift
+      // The list moved since the loaded pages were read: read the window and the next page again.
+      loadedPages = Math.ceil(before.threads.length / 100) + 1
+      await refresh()
+    }
   } catch (error) {
     if (!controller.signal.aborted) nextPageError.value = error
   } finally {

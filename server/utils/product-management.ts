@@ -1064,10 +1064,9 @@ function productPageInput(product: Pick<CreateProductInput, 'kind' | 'name' | 'd
     : undefined)
 }
 
-export async function publishStayProducts(env: CloudflareEnv | undefined, products: readonly Product[]): Promise<void> {
+export async function publishStayProducts(env: CloudflareEnv, products: readonly Product[]): Promise<void> {
   for (const product of products) {
     if (product.kind !== 'stay') continue
-    if (!env) throw new HTTPError({ statusCode: 503, message: 'The home change was saved, but publishing it requires the organization environment', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', committed: true, product_id: product.id, updated_at: product.updated_at } })
     if (!product.stay) throw new HTTPError({ statusCode: 500, message: 'The place to stay has no home configuration', data: { code: 'STAY_HOME_CONFIGURATION_REQUIRED', field: 'stay' } })
     const input = { organizationId: product.organization_id, productId: product.id, locationId: product.stay.location_id, stayId: null }
     await publishStayInvalidation(env, { ...input, type: 'stay.changed' }, { updated_at: product.updated_at })
@@ -1091,7 +1090,7 @@ export async function createProduct(db: DbClient, input: {
   organizationId: string
   product: CreateProductInput
   actor: Actor
-  env?: CloudflareEnv
+  env: CloudflareEnv
   /** Publish it on `organizationId` in the same batch — see planProductCreateWrites. */
   publication?: { published: boolean }
   /**
@@ -1105,7 +1104,7 @@ export async function createProduct(db: DbClient, input: {
 }): Promise<Product> {
   const key = input.idempotencyKey?.trim()
   if (input.idempotencyKey !== undefined && (!key || key.length > 200)) invalid('idempotency_key must be 1 to 200 characters')
-  const env = input.env ?? input.page?.env ?? input.booking?.env
+  const env = input.env
   const pageInput = productPageInput(input.product, env, input.page)
   const product = input.product
   const dedupeKey = key ? creationDedupeKey('product', input.organizationId, key) : null
@@ -1307,11 +1306,11 @@ async function replayCatalogWrite(db: DbClient, organizationId: string, dedupeKe
 }
 
 export async function createProductsBatch(db: DbClient, input: {
-  organizationId: string; products: CreateProductInput[]; actor: Actor; env?: CloudflareEnv; publication?: { published: boolean }; idempotencyKey?: string
+  organizationId: string; products: CreateProductInput[]; actor: Actor; env: CloudflareEnv; publication?: { published: boolean }; idempotencyKey?: string
 }): Promise<Product[]> {
   const complete = async (products: Product[]): Promise<Product[]> => {
     for (const product of products) if (product.page) {
-      await refreshTenantPageCard(db, input.env ?? invalid('The service page requires the organization environment'), { variantId: product.page.id, path: product.page.path }, input.actor.actorId)
+      await refreshTenantPageCard(db, input.env, { variantId: product.page.id, path: product.page.path }, input.actor.actorId)
     }
     await publishStayProducts(input.env, products)
     return products
@@ -1553,13 +1552,13 @@ export async function updateProduct(db: DbClient, input: {
   productId: string
   patch: UpdateProductInput
   actor: Actor
-  env?: CloudflareEnv
+  env: CloudflareEnv
   booking?: { data: ProductBookingSetupInput; env: CloudflareEnv }
   idempotencyKey?: string
   /** updateStayHome completes once after its optional location timezone write. */
   deferStayNightPush?: true
 }): Promise<ProductMutation> {
-  const env = input.env ?? input.booking?.env
+  const env = input.env
   const reprice = input.patch.variants !== undefined || input.patch.stay?.min_nights !== undefined
   const complete = async (product: Product): Promise<ProductMutation> => {
     let channelPush: ChannelPush | null = null
@@ -1587,7 +1586,7 @@ export async function updateProduct(db: DbClient, input: {
   const now = new Date().toISOString()
   const { writes, keptVariants, product: planned } = await planProductUpdate(db, {
     organizationId: input.organizationId, current, patch: input.patch, actor: input.actor, now,
-    env: input.env ?? input.booking?.env, booking: input.booking?.data,
+    env: input.env, booking: input.booking?.data,
     cacheInvalidations: await productCacheInvalidations(db, input.organizationId, input.productId, 'product_updated'),
   })
   if (current.kind === 'stay' && reprice) {
@@ -1633,7 +1632,7 @@ export async function updateProduct(db: DbClient, input: {
 }
 
 export async function deleteProduct(db: DbClient, input: {
-  organizationId: string; productId: string; env?: CloudflareEnv
+  organizationId: string; productId: string; env: CloudflareEnv
 }): Promise<void> {
   const product = await getProduct(db, input.organizationId, input.productId)
   const bound = await queryAll<{ id: string; updated_at: string }>(db, `
@@ -2110,7 +2109,7 @@ async function planProductReconciliation(db: DbClient, input: {
 }
 
 export async function reconcileProducts(db: DbClient, input: {
-  organizationId: string; products: ReconcileProductInput[]; actor: Actor; env?: CloudflareEnv; deactivateMissing?: boolean; idempotencyKey?: string
+  organizationId: string; products: ReconcileProductInput[]; actor: Actor; env: CloudflareEnv; deactivateMissing?: boolean; idempotencyKey?: string
 }): Promise<ProductMutation[]> {
   if (!Array.isArray(input.products)) throw new HTTPError({ statusCode: 400, message: 'products must be an array', data: { code: 'INVALID_PRODUCT_FIELD', field: 'products' } })
   input.products.forEach((product, index) => {

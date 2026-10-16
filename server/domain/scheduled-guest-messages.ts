@@ -5,6 +5,7 @@ import { guestMessageDueAt, messagingError } from './guest-message-schedule'
 import { templateSchedule, type MessageTemplateRow, type ScheduledGuestMessageRow } from './guest-messaging'
 import { sendScheduledGuestReply, type OperationOutcome } from './guest-threads/operations'
 import { publishGuestInboxThreadEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { ChannexError } from '~/server/integrations/channex/client'
 
 interface PlanningStay {
   id: string
@@ -191,9 +192,11 @@ async function sendScheduledGuestMessage(db: DbClient, env: SendEnv, row: Pick<S
   try {
     sent = await sendScheduledGuestReply(db, { threadId: current.request_id, organizationId: current.organization_id, body: current.body, idempotencyKey: `scheduled-guest-message:${current.id}`, env })
   } catch (error) {
-    const data = error instanceof HTTPError ? error.data : null
+    // The Channex send itself records its own outcome on the reply receipt, so a
+    // ChannexError here came from a read before anything was sent.
+    const data = error instanceof HTTPError || error instanceof ChannexError ? error.data : null
     if (!data || typeof data !== 'object' || !('code' in data) || typeof data.code !== 'string' || !('field' in data) || typeof data.field !== 'string') throw error
-    await finishSend(db, current.id, { status: 'failed', reason: (error as HTTPError).message, error_code: data.code, error_field: data.field, entry_id: null, sent_at: null })
+    await finishSend(db, current.id, { status: 'failed', reason: (error as Error).message, error_code: data.code, error_field: data.field, entry_id: null, sent_at: null })
     return 'failed'
   }
   if (sent.outcome.ok) {

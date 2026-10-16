@@ -410,7 +410,7 @@ export async function updateLocation(
   locationIdOrSlug: string,
   input: UpdateLocationInput,
   userId: string,
-  env?: CloudflareEnv,
+  env: CloudflareEnv,
   writeGuard?: BatchQuery,
 ) {
   const existing = await loadLocation(db, organizationId, locationIdOrSlug);
@@ -421,7 +421,6 @@ export async function updateLocation(
   const publishHomes = async (updatedAt: unknown) => {
     const homes = await queryAll<{ product_id: string }>(db, 'SELECT product_id FROM product_stay_configs WHERE organization_id = ? AND location_id = ?', [organizationId, locationId]);
     if (!homes.length) return;
-    if (!env) throw new HTTPError({ statusCode: 503, message: 'The location was saved, but its home updates require the organization environment', data: { code: 'REALTIME_CONFIGURATION_REQUIRED', field: 'GUEST_INBOX_HUBS', committed: true, location_id: locationId, updated_at: updatedAt } });
     if (typeof updatedAt !== 'string' || !updatedAt) throw new HTTPError({ statusCode: 500, message: 'The saved home location has no update timestamp', data: { code: 'LOCATION_NOT_READABLE', field: 'location.updated_at', committed: true, location_id: locationId } });
     for (const home of homes) {
       const input = { organizationId, productId: home.product_id, locationId, stayId: null };
@@ -630,8 +629,8 @@ export async function updateLocation(
     }
 
     if (updated) {
+      if (cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId })
       await publishHomes(updated.location?.updated_at);
-      if (env && cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId })
       return { status: 200, data: { success: true, location: updated.location } };
     }
 
@@ -648,8 +647,8 @@ export async function updateLocation(
   if (!(await runUpdate(params))) return stale;
   const location = await loadLocation(db, organizationId, locationId);
   if (!location) throw new HTTPError({ statusCode: 500, statusMessage: 'Updated location could not be read back', data: { code: 'LOCATION_NOT_READABLE', field: 'location.id' } });
+  if (cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId })
   await publishHomes(location.updated_at);
-  if (env && cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId })
   return { status: 200, data: { success: true, location } };
 }
 

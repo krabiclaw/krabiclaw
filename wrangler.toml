@@ -93,8 +93,8 @@ MCP_DIAGNOSTICS_ENABLED = "true"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-production-v19"
-database_id = "3baf9b09-2c05-4ed8-8944-cafe9e84c9e3"
+database_name = "krabiclaw-production-v18"
+database_id = "8d953c89-a6cd-4ade-b7c4-1eb6d372adbd"
 migrations_dir = "migrations"
 remote = false
 
