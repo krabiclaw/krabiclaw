@@ -88,6 +88,10 @@ test('an assigned member receives no owner work or unassigned restaurant work', 
   expect(actor).toBeTruthy()
   const memberContext = await browser.newContext()
   try {
+    const ownerResponse = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo' } })
+    expect(ownerResponse.status(), await ownerResponse.text()).toBe(200)
+    const ownerFeed = await ownerResponse.json() as TodayFeedPayload
+    expect(ownerFeed.cards.length, 'The owner sees organization-wide work the member must not').toBeGreaterThan(0)
     const changed = await page.request.post('/api/auth/organization/update-member-role', {
       headers: authRequestHeaders(baseURL!), data: { organizationId: 'org-demo', memberId: actor!.id, role: 'member' },
     })
