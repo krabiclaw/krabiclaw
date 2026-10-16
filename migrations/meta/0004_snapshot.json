@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c7044014-dde3-43ff-a79d-1f12ce9d3d3c",
+  "id": "81631a69-af59-4bb9-b6c8-a60f34cc06e1",
   "prevId": "c1e0696b-a676-43ec-b40f-3fd36c007546",
   "tables": {
     "account": {
@@ -5325,7 +5325,7 @@
         },
         "media_placements_owner_type_check": {
           "name": "media_placements_owner_type_check",
-          "value": "owner_type IN ('organization', 'business_location', 'product', 'collection', 'content_document', 'content_block', 'review', 'review_request', 'activity_entry', 'team_message')"
+          "value": "owner_type IN ('organization', 'business_location', 'product', 'content_document', 'content_block', 'review', 'review_request', 'activity_entry', 'team_message')"
         },
         "media_placements_sort_order_check": {
           "name": "media_placements_sort_order_check",
@@ -11934,6 +11934,99 @@
           "notNull": false,
           "autoincrement": false
         },
+        "property_type": {
+          "name": "property_type",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "bedrooms": {
+          "name": "bedrooms",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "beds": {
+          "name": "beds",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "bathrooms": {
+          "name": "bathrooms",
+          "type": "real",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "amenities": {
+          "name": "amenities",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
+        "cancellation_policy": {
+          "name": "cancellation_policy",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "long_term_cancellation_policy": {
+          "name": "long_term_cancellation_policy",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "check_in_method": {
+          "name": "check_in_method",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "wifi_network": {
+          "name": "wifi_network",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "wifi_password": {
+          "name": "wifi_password",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "directions": {
+          "name": "directions",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "house_manual": {
+          "name": "house_manual",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "checkout_instructions": {
+          "name": "checkout_instructions",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'[]'"
+        },
         "assigned_member_id": {
           "name": "assigned_member_id",
           "type": "text",
@@ -12086,6 +12179,58 @@
         "product_stay_configs_instructions_check": {
           "name": "product_stay_configs_instructions_check",
           "value": "check_in_instructions IS NULL OR (length(trim(check_in_instructions)) BETWEEN 1 AND 5000)"
+        },
+        "product_stay_configs_property_type_check": {
+          "name": "product_stay_configs_property_type_check",
+          "value": "property_type IS NULL OR property_type IN ('apartment', 'house', 'secondary_unit', 'unique_space', 'bed_and_breakfast', 'boutique_hotel')"
+        },
+        "product_stay_configs_bedrooms_check": {
+          "name": "product_stay_configs_bedrooms_check",
+          "value": "bedrooms IS NULL OR bedrooms BETWEEN 0 AND 50"
+        },
+        "product_stay_configs_beds_check": {
+          "name": "product_stay_configs_beds_check",
+          "value": "beds IS NULL OR beds BETWEEN 1 AND 50"
+        },
+        "product_stay_configs_bathrooms_check": {
+          "name": "product_stay_configs_bathrooms_check",
+          "value": "bathrooms IS NULL OR (bathrooms BETWEEN 0 AND 50 AND bathrooms * 2 = CAST(bathrooms * 2 AS INTEGER))"
+        },
+        "product_stay_configs_amenities_check": {
+          "name": "product_stay_configs_amenities_check",
+          "value": "json_valid(amenities) AND json_type(amenities) = 'array'"
+        },
+        "product_stay_configs_cancellation_check": {
+          "name": "product_stay_configs_cancellation_check",
+          "value": "cancellation_policy IS NULL OR cancellation_policy IN ('flexible', 'moderate', 'limited', 'firm', 'strict')"
+        },
+        "product_stay_configs_long_term_cancellation_check": {
+          "name": "product_stay_configs_long_term_cancellation_check",
+          "value": "long_term_cancellation_policy IS NULL OR long_term_cancellation_policy IN ('firm', 'strict')"
+        },
+        "product_stay_configs_check_in_method_check": {
+          "name": "product_stay_configs_check_in_method_check",
+          "value": "check_in_method IS NULL OR check_in_method IN ('smart_lock', 'keypad', 'lockbox', 'building_staff', 'in_person', 'other')"
+        },
+        "product_stay_configs_wifi_network_check": {
+          "name": "product_stay_configs_wifi_network_check",
+          "value": "wifi_network IS NULL OR length(trim(wifi_network)) BETWEEN 1 AND 100"
+        },
+        "product_stay_configs_wifi_password_check": {
+          "name": "product_stay_configs_wifi_password_check",
+          "value": "wifi_password IS NULL OR length(wifi_password) BETWEEN 1 AND 100"
+        },
+        "product_stay_configs_directions_check": {
+          "name": "product_stay_configs_directions_check",
+          "value": "directions IS NULL OR length(trim(directions)) BETWEEN 1 AND 5000"
+        },
+        "product_stay_configs_house_manual_check": {
+          "name": "product_stay_configs_house_manual_check",
+          "value": "house_manual IS NULL OR length(trim(house_manual)) BETWEEN 1 AND 5000"
+        },
+        "product_stay_configs_checkout_instructions_check": {
+          "name": "product_stay_configs_checkout_instructions_check",
+          "value": "json_valid(checkout_instructions) AND json_type(checkout_instructions) = 'array'"
         }
       }
     },

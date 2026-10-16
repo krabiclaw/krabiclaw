@@ -10,6 +10,7 @@ import createHomeRoute from '../../server/api/dashboard/stay-homes/index.post.ts
 import listHomesRoute from '../../server/api/dashboard/stay-homes/index.get.ts'
 import editHomeRoute from '../../server/api/dashboard/stay-homes/[productId].patch.ts'
 import { getLocation } from '../../server/utils/location-management.ts'
+import { getProduct } from '../../server/utils/product-management.ts'
 import { createStayHome, stayHomeInput } from '../../server/domain/stays.ts'
 
 // A home added by hand through the native app's route: its details are
@@ -93,6 +94,8 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
 
     const home = {
       name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, base_price_tax_behavior: 'unspecified', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, check_in_instructions: null, assigned_member_id: null, assigned_team_id: null, channel: null, photos: [],
+      address: { address: '1 Cliff Rd', city: 'Moab', state: 'UT', country: 'US', zip_code: '84532' }, latitude: null, longitude: null,
+      description: '', published: false, property_type: null, bedrooms: null, beds: null, bathrooms: null, amenities: [], cancellation_policy: null, long_term_cancellation_policy: null, check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
     }
     const keyedCabin = { ...cabin, idempotency_key: 'a'.repeat(200) }
     const created = await call(owner, 'POST', keyedCabin)
@@ -126,6 +129,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     // Editing: each problem names its field and changes nothing.
     const edit = (cookie: string, body: Record<string, unknown>) => call(cookie, 'PATCH', body, made.product_id)
     assert.deepEqual(refusal(await edit(owner, { address: '2 Other Rd' })), { status: 422, code: 'INVALID_DETAIL', field: 'address' })
+    assert.deepEqual(refusal(await edit(owner, { address: { address: '2 Other Rd', city: 'Moab', country: 'USA' } })), { status: 422, code: 'INVALID_DETAIL', field: 'address.country' })
     assert.deepEqual(refusal(await edit(owner, { name: null })), { status: 422, code: 'INVALID_DETAIL', field: 'name' })
     assert.deepEqual(refusal(await edit(owner, { name: 'Renamed', timezone: 'Mars/Olympus' })), { status: 422, code: 'INVALID_DETAIL', field: 'timezone' })
     assert.deepEqual(refusal(await edit(owner, { name: '  ' })), { status: 422, code: 'INVALID_DETAIL', field: 'name' })
@@ -141,6 +145,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     const changed = {
       product_id: made.product_id, location_id: made.location_id, name: 'Cliff Cabin North', timezone: 'America/Los_Angeles', currency: 'USD', base_price_minor: 210_00, base_price_tax_behavior: 'unspecified',
       check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 3, check_in_instructions: null, assigned_member_id: 'm-helper', assigned_team_id: null, channel: null, photos: [],
+      address: home.address, latitude: null, longitude: null, description: '', published: false, property_type: null, bedrooms: null, beds: null, bathrooms: null, amenities: [], cancellation_policy: null, long_term_cancellation_policy: null, check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
     }
     assert.deepEqual(edited.body, { home: changed, channel_push: null })
     // Read back through other paths: the homes list, the location, and the member now assigned seeing it.
@@ -151,6 +156,53 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM prices WHERE organization_id = ?').bind(ORG).first('n'), 1)
     const unpriced = await edit(owner, { base_price_minor: null, assigned_member_id: null })
     assert.deepEqual(unpriced.body, { home: { ...changed, base_price_minor: null, base_price_tax_behavior: null, assigned_member_id: null }, channel_push: null })
+
+    // What the home is and offers, and its private arrival guide: each refused value names its field and changes nothing.
+    assert.deepEqual(refusal(await edit(owner, { property_type: 'castle' })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.property_type' })
+    assert.deepEqual(refusal(await edit(owner, { bathrooms: 1.25 })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.bathrooms' })
+    assert.deepEqual(refusal(await edit(owner, { amenities: ['wifi', 'jetpack'] })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.amenities' })
+    assert.deepEqual(refusal(await edit(owner, { check_in_method: 'drone' })), { status: 422, code: 'INVALID_DETAIL', field: 'check_in_method' })
+    assert.deepEqual(refusal(await edit(owner, { checkout_instructions: [{ task: 'lock_up', details: null }, { task: 'lock_up', details: null }] })), { status: 422, code: 'INVALID_DETAIL', field: 'checkout_instructions[1].task' })
+    assert.deepEqual(refusal(await edit(owner, { latitude: 38.57 })), { status: 422, code: 'INVALID_DETAIL', field: 'longitude' })
+    assert.deepEqual(refusal(await edit(owner, { latitude: 91, longitude: -109.55 })), { status: 422, code: 'INVALID_DETAIL', field: 'latitude' })
+    const described = await edit(owner, {
+      description: '  A cabin above the canyon.  ', property_type: 'house', bedrooms: 2, beds: 3, bathrooms: 1.5, amenities: ['wifi', 'air_conditioning', 'kitchen'],
+      cancellation_policy: 'firm', long_term_cancellation_policy: 'strict', check_in_method: 'keypad', check_in_instructions: 'Code is on the booking.',
+      wifi_network: 'Cliff', wifi_password: ' pass word ', directions: 'Second gravel road on the left.', house_manual: 'Heater is in the hall.',
+      checkout_instructions: [{ task: 'lock_up', details: null }, { task: 'additional', details: 'Leave keys on the table.' }],
+      address: { address: '3 Rim Rd', city: 'Moab', state: 'UT', country: 'US', zip_code: '84532' }, latitude: 38.57, longitude: -109.55,
+    })
+    const listed = {
+      ...changed, base_price_minor: null, base_price_tax_behavior: null, assigned_member_id: null,
+      description: 'A cabin above the canyon.', property_type: 'house', bedrooms: 2, beds: 3, bathrooms: 1.5,
+      // Amenities read in catalog order, whatever order they were sent in.
+      amenities: ['air_conditioning', 'wifi', 'kitchen'], cancellation_policy: 'firm', long_term_cancellation_policy: 'strict',
+      check_in_method: 'keypad', check_in_instructions: 'Code is on the booking.', wifi_network: 'Cliff', wifi_password: ' pass word ',
+      directions: 'Second gravel road on the left.', house_manual: 'Heater is in the hall.',
+      checkout_instructions: [{ task: 'lock_up', details: null }, { task: 'additional', details: 'Leave keys on the table.' }],
+      address: { address: '3 Rim Rd', city: 'Moab', state: 'UT', country: 'US', zip_code: '84532' }, latitude: 38.57, longitude: -109.55,
+    }
+    assert.deepEqual(described.body, { home: listed, channel_push: null })
+    assert.deepEqual(((await call(owner, 'GET')).body.homes as Array<{ product_id: string }>).find(home => home.product_id === made.product_id), listed)
+    // The location holds the address and the pin; the product holds what the home is; private arrival columns stay out of the product.
+    const moved = (await getLocation(db, ORG, made.location_id))!
+    assert.deepEqual(await db.prepare('SELECT latitude, longitude FROM business_locations WHERE id = ?').bind(made.location_id).first(), { latitude: 38.57, longitude: -109.55 })
+    assert.deepEqual(moved.address, { regionCode: 'US', addressLines: ['3 Rim Rd'], locality: 'Moab', administrativeArea: 'UT', postalCode: '84532' })
+    const product = await getProduct(db, ORG, made.product_id)
+    assert.equal(product.description, 'A cabin above the canyon.')
+    assert.deepEqual(Object.keys(product.stay!).filter(key => ['wifi_network', 'wifi_password', 'house_manual', 'directions', 'check_in_method', 'checkout_instructions', 'check_in_instructions'].includes(key)), [])
+    // Clearing: null removes a value, an empty list offers nothing.
+    const cleared = await edit(owner, { wifi_password: null, amenities: [], bedrooms: null, checkout_instructions: [] })
+    assert.deepEqual(cleared.body, { home: { ...listed, wifi_password: null, amenities: [], bedrooms: null, checkout_instructions: [] }, channel_push: null })
+    assert.deepEqual(((await call(owner, 'GET')).body.homes as Array<{ product_id: string }>).find(home => home.product_id === made.product_id), cleared.body.home)
+    assert.deepEqual(await db.prepare('SELECT wifi_password, amenities, bedrooms, checkout_instructions FROM product_stay_configs WHERE product_id = ?').bind(made.product_id).first(),
+      { wifi_password: null, amenities: '[]', bedrooms: null, checkout_instructions: '[]' })
+    // Listing the home is its product's publication, refused until it can take bookings.
+    assert.deepEqual(refusal(await edit(owner, { published: 'yes' })), { status: 422, code: 'INVALID_DETAIL', field: 'published' })
+    assert.deepEqual(refusal(await edit(owner, { published: true, description: 'Half saved?' })), { status: 422, code: 'INVALID_DETAIL', field: 'published' })
+    assert.equal((await getProduct(db, ORG, made.product_id)).description, 'A cabin above the canyon.')
+    assert.equal((await edit(owner, { published: true })).status, 409)
+    assert.equal(((await call(owner, 'GET')).body.homes as Array<{ product_id: string; published: boolean }>).find(home => home.product_id === made.product_id)!.published, false)
   } finally {
     await runtime.dispose()
   }

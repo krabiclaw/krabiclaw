@@ -33,7 +33,7 @@ async function ownedImageIds(db: DbClient, organizationId: string): Promise<stri
  *
  * The Better Auth organization lifecycle owns authorization, subscription
  * gating and the organization/member deletion itself. This function only
- * releases the Cloudflare resources D1 cannot cascade to. The organization's
+ * releases the Channex and Cloudflare resources D1 cannot cascade to. The organization's
  * rows, including its integration selections and imported content, go with the
  * organization through the schema's ON DELETE CASCADE. Provider credentials are
  * the user's Better Auth linked accounts and are not the organization's to
@@ -42,9 +42,14 @@ async function ownedImageIds(db: DbClient, organizationId: string): Promise<stri
 export async function cleanupOrganizationBeforeDelete(
   env: CloudflareEnv,
   organizationId: string,
+  userId: string,
 ): Promise<void> {
   const db = env.DB
   await retainPaymentsForTenantDeletion(db, organizationId)
+  // Its Airbnb channel, Channex properties and group go first: a failure there
+  // keeps the organization, so nothing in Channex outlives it unowned.
+  const { AirbnbConnection } = await import('~/server/integrations/channex/airbnb-connection')
+  await new AirbnbConnection(db, env, organizationId, userId).deleteForOrganization()
   await stageCalendarOrganizationCleanup(db, organizationId)
   await deleteOrganizationCustomDomains(env, db, organizationId)
 
@@ -83,7 +88,7 @@ export async function deleteAbandonedDraftTenant(
   const abandoned = await queryFirst<{ id: string }>(db, "SELECT id FROM onboarding_drafts WHERE id = ? AND user_id = ? AND organization_id = ? AND subdomain_candidate = ? AND status = 'abandoned' AND updated_at = ?", [claim.draftId, userId, organizationId, subdomain, claim.updatedAt])
   if (!abandoned) return { refused: 'draft_changed' }
 
-  await cleanupOrganizationBeforeDelete(env, organizationId)
+  await cleanupOrganizationBeforeDelete(env, organizationId, userId)
   const current = await queryFirst<{ id: string }>(db, "SELECT d.id FROM onboarding_drafts d JOIN organization o ON o.id = d.organization_id WHERE d.id = ? AND d.user_id = ? AND d.organization_id = ? AND d.status = 'abandoned' AND d.updated_at = ? AND o.onboarding_status IN ('pending', 'failed')", [claim.draftId, userId, organizationId, claim.updatedAt])
   if (!current) return { refused: 'draft_changed' }
   const adapter = await organizationAdapter(env)

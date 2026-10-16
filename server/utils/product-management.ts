@@ -1,3 +1,4 @@
+import { isStayAmenity, stayCodes, STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_TYPES, type StayAmenity, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType } from '~/shared/stay-listing'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { ASSIGNED_SERVICE_SQL } from '~/server/utils/member-access'
 import type { ProductBookingSetupInput, SessionAvailability } from '~/server/utils/availability'
@@ -38,6 +39,7 @@ import type {
   ProductOption,
   ProductSource,
   ProductStayConfig,
+  StayListingField,
   PublicProduct,
   StaffAssignment,
   ProductVariant,
@@ -249,7 +251,8 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
       WHERE organization_id = ? AND row_role = 'root' AND kind = 'page' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
-    { query: `SELECT product_id, location_id, check_in_time, check_out_time, max_guests, min_nights, assigned_member_id, assigned_team_id FROM product_stay_configs
+    { query: `SELECT product_id, location_id, check_in_time, check_out_time, max_guests, min_nights, property_type, bedrooms, beds, bathrooms, amenities,
+        cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id FROM product_stay_configs
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
   ], { operation: 'Hydrate products' })
   const rowsAt = (index: number): Row[] => (batched[index] as { results?: Row[] })?.results ?? []
@@ -268,6 +271,7 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     if (product) product.stay = {
       location_id: String(row.location_id), check_in_time: String(row.check_in_time), check_out_time: String(row.check_out_time),
       max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
+      ...storedStayListing(row),
       assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
       assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
     }
@@ -730,7 +734,57 @@ async function planStayConfig(db: DbClient, organizationId: string, kind: Produc
   const assignedTeamId = stay.assigned_team_id ?? null
   if (assignedMemberId !== null && (typeof assignedMemberId !== 'string' || !await queryFirst(db, 'SELECT 1 FROM member WHERE organizationId = ? AND id = ?', [organizationId, assignedMemberId]))) notFound('stay.assigned_member_id is not a member of this organization')
   if (assignedTeamId !== null && (typeof assignedTeamId !== 'string' || !await queryFirst(db, 'SELECT 1 FROM team WHERE organizationId = ? AND id = ?', [organizationId, assignedTeamId]))) notFound('stay.assigned_team_id is not a team of this organization')
-  return { location_id: locationId, check_in_time: stay.check_in_time as string, check_out_time: stay.check_out_time as string, max_guests: maxGuests, min_nights: minNights, assigned_member_id: assignedMemberId as string | null, assigned_team_id: assignedTeamId as string | null }
+  return { location_id: locationId, check_in_time: stay.check_in_time as string, check_out_time: stay.check_out_time as string, max_guests: maxGuests, min_nights: minNights,
+    ...planStayListing(stay), assigned_member_id: assignedMemberId as string | null, assigned_team_id: assignedTeamId as string | null }
+}
+
+function invalidStayField(field: string, message: string): never {
+  throw new HTTPError({ statusCode: 400, statusMessage: message, data: { code: 'INVALID_STAY_FIELD', field: `stay.${field}` } })
+}
+
+function stayCode<T extends string>(stay: Record<string, unknown>, field: string, codes: readonly T[]): T | null {
+  const value = stay[field] ?? null
+  if (value !== null && !codes.includes(value as T)) invalidStayField(field, `stay.${field} must be one of ${codes.join(', ')}, or null`)
+  return value as T | null
+}
+
+function stayCount(stay: Record<string, unknown>, field: string, min: number, max: number, step: 1 | 0.5): number | null {
+  const value = stay[field] ?? null
+  if (value !== null && (typeof value !== 'number' || !Number.isInteger(value / step) || value < min || value > max)) {
+    invalidStayField(field, `stay.${field} must be a ${step === 1 ? 'whole number' : 'whole or half number'} from ${min} to ${max}, or null`)
+  }
+  return value as number | null
+}
+
+/** What a home is and offers, checked against the stay vocabularies. A field left out is unsaid. */
+function planStayListing(stay: Record<string, unknown>): Pick<ProductStayConfig, StayListingField> {
+  const amenities = stay.amenities ?? []
+  if (!Array.isArray(amenities) || amenities.some(code => !isStayAmenity(code)) || new Set(amenities).size !== amenities.length) {
+    invalidStayField('amenities', 'stay.amenities must list amenity codes from the catalog, each once')
+  }
+  const chosen = new Set(amenities as StayAmenity[])
+  return {
+    property_type: stayCode(stay, 'property_type', stayCodes(STAY_PROPERTY_TYPES)),
+    bedrooms: stayCount(stay, 'bedrooms', 0, 50, 1),
+    beds: stayCount(stay, 'beds', 1, 50, 1),
+    bathrooms: stayCount(stay, 'bathrooms', 0, 50, 0.5),
+    amenities: stayCodes(STAY_AMENITIES).filter(code => chosen.has(code)),
+    cancellation_policy: stayCode(stay, 'cancellation_policy', stayCodes(STAY_CANCELLATION_POLICIES)),
+    long_term_cancellation_policy: stayCode(stay, 'long_term_cancellation_policy', stayCodes(STAY_LONG_TERM_CANCELLATION_POLICIES)),
+  }
+}
+
+/** A stored home's listing facts; the table's checks guarantee their codes. */
+function storedStayListing(row: Row): Pick<ProductStayConfig, StayListingField> {
+  return {
+    property_type: row.property_type === null ? null : String(row.property_type) as StayPropertyType,
+    bedrooms: row.bedrooms === null ? null : Number(row.bedrooms),
+    beds: row.beds === null ? null : Number(row.beds),
+    bathrooms: row.bathrooms === null ? null : Number(row.bathrooms),
+    amenities: parseJsonArray<StayAmenity>(row.amenities, 'stay amenities'),
+    cancellation_policy: row.cancellation_policy === null ? null : String(row.cancellation_policy) as StayCancellationPolicy,
+    long_term_cancellation_policy: row.long_term_cancellation_policy === null ? null : String(row.long_term_cancellation_policy) as StayLongTermCancellationPolicy,
+  }
 }
 
 async function assertBookableOffering(db: DbClient, organizationId: string, product: PlannedProduct, locationId: string | null): Promise<void> {
@@ -988,14 +1042,19 @@ function productWrites(
                VALUES (?, ?, ?, 1, 1, ?, ?, ?, ?) ON CONFLICT (product_id, location_id) DO NOTHING`,
       params: [organizationId, planned.id, planned.stay.location_id, now, now, actor.actorId, actor.actorId],
     }, {
-      query: `INSERT INTO product_stay_configs (product_id, organization_id, location_id, check_in_time, check_out_time, max_guests, min_nights, assigned_member_id, assigned_team_id, created_at, updated_at, created_by, updated_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      query: `INSERT INTO product_stay_configs (product_id, organization_id, location_id, check_in_time, check_out_time, max_guests, min_nights,
+                 property_type, bedrooms, beds, bathrooms, amenities, cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id, created_at, updated_at, created_by, updated_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (product_id) DO UPDATE SET check_in_time = excluded.check_in_time, check_out_time = excluded.check_out_time,
-                 max_guests = excluded.max_guests, min_nights = excluded.min_nights, assigned_member_id = excluded.assigned_member_id,
+                 max_guests = excluded.max_guests, min_nights = excluded.min_nights, property_type = excluded.property_type, bedrooms = excluded.bedrooms,
+                 beds = excluded.beds, bathrooms = excluded.bathrooms, amenities = excluded.amenities, cancellation_policy = excluded.cancellation_policy,
+                 long_term_cancellation_policy = excluded.long_term_cancellation_policy, assigned_member_id = excluded.assigned_member_id,
                  assigned_team_id = excluded.assigned_team_id, updated_at = excluded.updated_at, updated_by = excluded.updated_by
                WHERE product_stay_configs.organization_id = excluded.organization_id AND product_stay_configs.location_id = excluded.location_id`,
       params: [planned.id, organizationId, planned.stay.location_id, planned.stay.check_in_time, planned.stay.check_out_time,
-        planned.stay.max_guests, planned.stay.min_nights, planned.stay.assigned_member_id, planned.stay.assigned_team_id, now, now, actor.actorId, actor.actorId],
+        planned.stay.max_guests, planned.stay.min_nights, planned.stay.property_type, planned.stay.bedrooms, planned.stay.beds, planned.stay.bathrooms,
+        JSON.stringify(planned.stay.amenities), planned.stay.cancellation_policy, planned.stay.long_term_cancellation_policy,
+        planned.stay.assigned_member_id, planned.stay.assigned_team_id, now, now, actor.actorId, actor.actorId],
     })
   }
 

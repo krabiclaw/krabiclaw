@@ -299,6 +299,7 @@ export default defineNuxtConfig({
           '/oauth',
           '/transfer',
           '/accept-invitation',
+          '/invite/',
           '/contact/confirmed',
           '/forgot-password',
           '/login',

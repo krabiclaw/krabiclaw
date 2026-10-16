@@ -312,6 +312,16 @@ those nights (and closes them on a connected channel), and the captured payment
 becomes a confirmed direct stay with its guest conversation. A lapsed hold gives
 its nights back.
 
+What the home is and offers — its property type, bedrooms, beds and baths, its
+amenities from the fixed catalog in `shared/stay-listing.ts`, and its short- and
+long-term cancellation policies — are stay settings on the product, shown on
+its page and in its `Accommodation` data. Its address and map pin are its
+location's. Its arrival guide (check-in method and instructions, wifi,
+directions, house manual and checkout instructions) is private: only managers
+and the home's assigned members read it, and no public page carries it. The
+iPhone listing editor and MCP edit these; the web Product editor does not show
+them yet.
+
 ### Organizations
 
 The tenant is Better Auth's organization, and the dashboard calls it that:
