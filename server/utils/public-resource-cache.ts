@@ -189,7 +189,7 @@ export function buildPublicBlawbyDocumentCacheKey(
   return [
     'public',
     encodeKeyField(organizationId),
-    'v11',
+    'v12',
     'blawby-document',
     encodeKeyField(recipe),
     encodeKeyField(slug),
@@ -201,7 +201,7 @@ export function buildPublicResourceCacheKey(organizationId: string, params: Publ
   return [
     'public',
     encodeKeyField(organizationId),
-    'v11',
+    'v12',
     params.contract,
     encodeKeyField(params.page),
     encodeKeyField(params.location),

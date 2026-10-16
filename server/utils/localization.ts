@@ -1,5 +1,6 @@
 import { HTTPError } from 'nitro'
 import { platformLocale } from '~/shared/platform-locales'
+import { parseSiteProductPath } from '~/utils/product-presentation'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { getOrganizationEntitlements, isSubscriptionStateInvalid } from '~/server/utils/billing-access'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -374,18 +375,11 @@ export async function resolveLocalizedPublicRoute(
   }
   const { listPublicLocaleRepresentations, listPublicResourceLocaleRepresentations } = await import('~/server/utils/public-locale-representations')
 
-  const experienceSlug = /^\/experiences\/([^/]+)$/.exec(routePath.slice(locale.length + 1))?.[1]
-  if (experienceSlug) {
-    let slug: string
-    try {
-      slug = decodeURIComponent(experienceSlug)
-    } catch (error) {
-      if (error instanceof URIError) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Localized route was not found', { locale, route_path: routePath })
-      throw error
-    }
-    // Site-wide experiences use the same published offer as their public page.
-    const { loadPublicExperienceDetail } = await import('~/server/utils/public-products')
-    const detail = await loadPublicExperienceDetail(env, db, organizationId, false, slug, locale)
+  const siteProduct = parseSiteProductPath(routePath.slice(locale.length + 1))
+  if (siteProduct) {
+    // Site-wide experiences and homes use the same published offer as their public page.
+    const { loadPublicSiteProductDetail } = await import('~/server/utils/public-products')
+    const detail = await loadPublicSiteProductDetail(env, db, organizationId, siteProduct.surface, false, siteProduct.slug, locale)
     if (!detail) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Localized route was not found', { locale, route_path: routePath })
     const localization = await getResourceLocalization(env, db, organizationId, 'product', detail.product.id, locale)
     return {

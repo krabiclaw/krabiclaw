@@ -16,6 +16,8 @@ const { products, collections, locations, location, config, organization } = awa
 const goods = computed(() => products.value.filter(product => product.kind === 'dish'))
 const currentLocation = location.value
 if (!currentLocation) throw createError({ statusCode: 404 })
+// A section with nothing on it is not a page; the navigation hides it by the same flag.
+if (!currentLocation.sections.menu) throw createError({ statusCode: 404 })
 const brandName = organization.value?.name
 if (typeof brandName !== 'string' || brandName.trim().length === 0) throw createError({ statusCode: 500, statusMessage: 'Organization brand is unavailable' })
 const vertical = String(organization.value?.vertical ?? '')

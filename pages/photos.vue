@@ -70,7 +70,9 @@ definePageMeta({ layout: 'saya' })
 
 const { localePath, t } = useI18n()
 const { organization } = useTenantOrganization()
-const { locations, media: photos, pending } = await usePublicPageData()
+const { locations, media: photos, pending, sections } = await usePublicPageData()
+// A section with nothing on it is not a page; the navigation hides it by the same flag.
+if (sections.value?.photos === false) throw createError({ statusCode: 404 })
 const organizationName = organization.name
 
 const locationsById = computed(() => Object.fromEntries(locations.value.map(l => [l.id, l])))

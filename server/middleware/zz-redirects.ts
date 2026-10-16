@@ -4,7 +4,7 @@ import {    redirect, setResponseHeader } from 'nitro/h3';
 import { queryFirst } from '~/server/db'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
-import { EXPERIENCE_PRESENTATION } from '~/utils/product-presentation'
+import { presentationForProduct } from '~/utils/product-presentation'
 
 const redirects: Record<string, string> = {
   // Every site's policies are its page documents under /policies.
@@ -57,9 +57,10 @@ const PLATFORM_GONE_PATHS = new Set(['/changelog'])
  * nothing redirects them. Two things still point at pages that moved: the
  * cancellation link mailed with every booking taken before the cutover, and
  * the location-scoped URL an experience briefly had between the cutover
- * and this change. An experience's page is named by its own slug.
+ * and this change. An experience's page is named by its own slug, and so is a
+ * home's, which was listed under its location until it moved to /stays.
  */
-async function resolveRetiredExperiencePath(event: H3Event, path: string) {
+async function resolveRetiredSiteProductPath(event: H3Event, path: string) {
   // A guest cancelling from an email sent before the epoch. The link carries
   // the booking in its query and the token in its fragment, and the page that
   // reads both is the same page under its own name.
@@ -80,14 +81,14 @@ async function resolveRetiredExperiencePath(event: H3Event, path: string) {
   if (!db || !organizationId) return null
   // Product kind owns the route. A service can take bookings while retaining
   // its branch's product URL.
-  const experience = await queryFirst<{ slug: string } | null>(db, `
-    SELECT p.slug FROM products p
+  const product = await queryFirst<{ slug: string; kind: 'experience' | 'stay' } | null>(db, `
+    SELECT p.slug, p.kind FROM products p
       JOIN product_publications pp ON pp.product_id = p.id AND pp.organization_id = ? AND pp.published = 1
-     WHERE p.slug = ? AND p.active = 1 AND p.kind = 'experience'
+     WHERE p.slug = ? AND p.active = 1 AND p.kind IN ('experience', 'stay')
      LIMIT 1
   `, [organizationId, slug])
-  if (!experience) return null
-  return EXPERIENCE_PRESENTATION.productPath('', experience.slug)
+  if (!product) return null
+  return presentationForProduct(null, product).productPath('', product.slug)
 }
 
 async function resolveTenantRedirectForRequest(event: H3Event) {
@@ -208,7 +209,7 @@ export default defineHandler(async (event) => {
   // one of these paths has said where it goes, and this is the default for the
   // ones nobody wrote.
   if (event.context.tenantType === TENANT_TYPES.TENANT) {
-    const retired = await resolveRetiredExperiencePath(event, normalizedPathname)
+    const retired = await resolveRetiredSiteProductPath(event, normalizedPathname)
     if (retired) return redirect(`${retired}${url.search}${url.hash}`, 301)
   }
 

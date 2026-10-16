@@ -9,7 +9,7 @@ import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import createHomeRoute from '../../server/api/dashboard/stay-homes/index.post.ts'
 import listHomesRoute from '../../server/api/dashboard/stay-homes/index.get.ts'
 import editHomeRoute from '../../server/api/dashboard/stay-homes/[productId].patch.ts'
-import { getLocation } from '../../server/utils/location-management.ts'
+import { getLocation, updateLocation } from '../../server/utils/location-management.ts'
 import { getProduct } from '../../server/utils/product-management.ts'
 import { createStayHome, stayHomeInput } from '../../server/domain/stays.ts'
 
@@ -203,6 +203,16 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.equal((await getProduct(db, ORG, made.product_id)).description, 'A cabin above the canyon.')
     assert.equal((await edit(owner, { published: true })).status, 409)
     assert.equal(((await call(owner, 'GET')).body.homes as Array<{ product_id: string; published: boolean }>).find(home => home.product_id === made.product_id)!.published, false)
+
+    // The plan covers active locations: one taken off the site frees its slot,
+    // and putting it back is refused while every slot is in use.
+    const loftLocation = (second.body.home as { location_id: string }).location_id
+    assert.equal((await updateLocation(db, ORG, loftLocation, { status: 'inactive' }, 'owner', env)).status, 200)
+    assert.equal((await call(owner, 'POST', { ...cabin, idempotency_key: 'barn-after-loft', name: 'Barn' })).status, 201)
+    assert.deepEqual(await updateLocation(db, ORG, loftLocation, { status: 'active' }, 'owner', env), {
+      status: 402, data: { error: 'Basic includes 2 locations. Choose Growth or Business in Billing to add more.', code: 'LOCATION_LIMIT', locations: { used: 2, covered: 2 } },
+    })
+    assert.equal((await getLocation(db, ORG, loftLocation))!.status, 'inactive')
   } finally {
     await runtime.dispose()
   }

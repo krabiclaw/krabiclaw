@@ -479,20 +479,19 @@ for (const tenant of tenants) {
   })
 }
 
-// The staging lodging demo (docs/operations/lodging-demo.md), Stripe test mode
-// ready: the first stay its home page offers opens the booking dialog from the
-// card and walks a guest to the contact step. Nothing is submitted. A pressed
-// "Check availability" once flipped the dialog's checkbox shut.
+// The staging lodging demo's studio (docs/operations/lodging-demo.md), Stripe
+// test mode ready: reached from the home page's link, it opens the booking
+// dialog from the card and walks a guest to the contact step. Nothing is
+// submitted. A pressed "Check availability" once flipped the dialog's checkbox shut.
 test('a guest opens a stay\'s booking dialog, picks nights the calendar allows and reaches the contact step', async ({ page }) => {
   const platform = new URL(testBaseUrl())
   test.skip(platform.hostname !== 'staging.krabiclaw.com', 'The lodging demo with online payments exists on staging only')
   const baseURL = `https://${environmentTenantAliasHostname(platform.hostname, 'saltleaf-stays-demo')}`
+  const slug = 'saltleaf-ocean-avenue-studio'
+  const stayPath = `/stays/${slug}`
   const homePage = await page.request.get(`${baseURL}/`)
   expect(homePage.status()).toBe(200)
-  const path = (await homePage.text()).match(/\/locations\/[a-z0-9-]+\/products\/([a-z0-9-]+)/)
-  expect(path, 'the lodging demo home page offers no stay').not.toBeNull()
-  const stayPath = path![0]
-  const slug = path![1]!
+  expect(await homePage.text(), 'the lodging demo home page does not offer the studio').toContain(`href="${stayPath}"`)
   type Night = { date: string; available: boolean; price_minor: number | null; min_stay_arrival: number; min_stay_through: number | null; max_stay: number | null; closed_to_arrival: boolean; closed_to_departure: boolean }
   const from = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
   const to = new Date(Date.now() + 120 * 86_400_000).toISOString().slice(0, 10)

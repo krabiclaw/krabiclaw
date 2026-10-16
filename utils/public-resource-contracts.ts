@@ -13,6 +13,14 @@ export interface PublicShellOrganization {
   config: { phone: string | null } | null
 }
 
+/** The sections of a location's own pages; each is a page only when it has something on it. */
+export const PUBLIC_LOCATION_SECTIONS = ['menu', 'products', 'experiences', 'posts', 'reviews', 'qa', 'photos'] as const
+export type PublicLocationSection = typeof PUBLIC_LOCATION_SECTIONS[number]
+
+/** The site's sections. The navigation offers, the sitemap lists and the page renders exactly the ones that are true. */
+export const PUBLIC_SITE_SECTIONS = ['menu', 'products', 'experiences', 'stays', 'reservations', 'blog', 'posts', 'reviews', 'qa', 'photos'] as const
+export type PublicSiteSection = typeof PUBLIC_SITE_SECTIONS[number]
+
 export interface PublicShellLocation {
   [key: string]: ApiValue
   id: string
@@ -21,6 +29,9 @@ export interface PublicShellLocation {
   address?: ApiValue
   city?: ApiValue
   social_image?: SocialImageSource | null
+  /** The one home this location holds and nothing besides; its page is the home's. */
+  home_slug: string | null
+  sections: Record<PublicLocationSection, boolean>
 }
 
 export interface PublicShellPayload {
@@ -28,13 +39,12 @@ export interface PublicShellPayload {
   locations: PublicShellLocation[]
   config: Record<string, string>
   googleMaps: ApiRecord
-  /** The site sells something that is not booked: a dish, a t-shirt. */
-  hasProducts: boolean
-  /** The site has something a guest books a seat on. */
-  hasBookableProducts: boolean
-  hasReservations: boolean
+  sections: Record<PublicSiteSection, boolean>
   platformMessages: Record<string, string> | null
 }
+
+const sectionFlags = (value: unknown, names: readonly string[]): boolean =>
+  isRecord(value) && names.every(name => typeof value[name] === 'boolean')
 
 const nullableString = (value: unknown): value is string | null =>
   value === null || typeof value === 'string'
@@ -55,7 +65,9 @@ export const isPublicShellPayload = (value: unknown): value is PublicShellPayloa
       isRecord(location)
       && typeof location.id === 'string'
       && typeof location.slug === 'string'
-      && typeof location.title === 'string')) return false
+      && typeof location.title === 'string'
+      && (location.home_slug === null || typeof location.home_slug === 'string')
+      && sectionFlags(location.sections, PUBLIC_LOCATION_SECTIONS))) return false
   if (!isRecord(value.config)
     || !Object.values(value.config).every(item => typeof item === 'string')) return false
   if (!isRecord(value.googleMaps)
@@ -64,7 +76,7 @@ export const isPublicShellPayload = (value: unknown): value is PublicShellPayloa
     || !Array.isArray(value.googleMaps.media)) return false
   if (value.platformMessages !== null && (!isRecord(value.platformMessages)
     || !Object.values(value.platformMessages).every(message => typeof message === 'string'))) return false
-  return typeof value.hasProducts === 'boolean' && typeof value.hasBookableProducts === 'boolean' && typeof value.hasReservations === 'boolean'
+  return sectionFlags(value.sections, PUBLIC_SITE_SECTIONS)
 }
 
 export interface PublicPagePayload {

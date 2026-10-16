@@ -510,5 +510,8 @@
   "stay.error_min_nights": "この日程の最低宿泊数は{count}泊です。",
   "stay.error_max_nights": "この日程の最大宿泊数は{count}泊です。",
   "stay.error_no_check_in": "その日はチェックインできません。",
-  "stay.error_no_check_out": "その日はチェックアウトできません。"
+  "stay.error_no_check_out": "その日はチェックアウトできません。",
+  "saya.footer.stays": "宿泊先",
+  "saya.stays.collection_title": "{organization}の宿泊先",
+  "saya.stays.meta_description": "{organization}で予約できる宿泊先。"
 }

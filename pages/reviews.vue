@@ -69,7 +69,9 @@ definePageMeta({ layout: 'saya' })
 const { organization } = useTenantOrganization()
 const { localePath, t } = useI18n()
 
-const { googleMaps, locations } = await usePublicPageData()
+const { googleMaps, locations, sections } = await usePublicPageData()
+// A section with nothing on it is not a page; the navigation hides it by the same flag.
+if (sections.value?.reviews === false) throw createError({ statusCode: 404 })
 const allReviews = computed(() => googleMaps.value?.reviews ?? [])
 
 const googleReviewSummary = computed(() => {

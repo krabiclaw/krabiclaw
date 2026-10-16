@@ -41,7 +41,7 @@
             <div v-if="loc.phone" class="mt-1 text-sm text-muted">{{ loc.phone }}</div>
             <div v-if="loc.hoursToday" class="mt-2 text-xs text-highlighted/40">{{ loc.hoursToday }}</div>
             <NuxtLink
-              :to="localePath(`/locations/${loc.slug}`)"
+              :to="localePath(publicLocationPath(loc))"
               class="mt-3 inline-block border-b border-current pb-0.5 text-xs uppercase tracking-widest text-highlighted transition hover:opacity-70"
             >
               {{ t('saya.footer.visit_page') }}
@@ -55,26 +55,22 @@
         <div>
           <h4 class="saya-eyebrow mb-5 text-dimmed">{{ t('saya.footer.heading_experience') }}</h4>
           <ul class="space-y-3 text-sm">
-            <li v-if="showProducts"><NuxtLink :to="localePath(productPresentation!.collectionPath)" class="text-muted no-underline transition hover:text-highlighted">{{ productCollectionLabel }}</NuxtLink></li>
-            <li v-if="showExperiences"><NuxtLink :to="localePath(EXPERIENCE_PRESENTATION.collectionPath)" class="text-muted no-underline transition hover:text-highlighted">{{ t('saya.footer.experiences') }}</NuxtLink></li>
-            <li v-if="hasReservations"><NuxtLink :to="localePath('/reservations')" class="text-muted no-underline transition hover:text-highlighted">{{ t('saya.header.reservations') }}</NuxtLink></li>
-            <li v-if="!isExperienceOrganization"><NuxtLink :to="localePath('/photos')" class="text-muted no-underline transition hover:text-highlighted">{{ t('saya.footer.gallery') }}</NuxtLink></li>
+            <li v-for="item in catalogLinks" :key="item.surface"><NuxtLink :to="localePath(item.path)" class="text-muted no-underline transition hover:text-highlighted">{{ t(item.labelKey) }}</NuxtLink></li>
+            <li v-if="sections?.reservations"><NuxtLink :to="localePath('/reservations')" class="text-muted no-underline transition hover:text-highlighted">{{ t('saya.header.reservations') }}</NuxtLink></li>
+            <li v-if="sections?.photos"><NuxtLink :to="localePath('/photos')" class="text-muted no-underline transition hover:text-highlighted">{{ t('saya.footer.gallery') }}</NuxtLink></li>
             <li><NuxtLink :to="localePath('/about')" class="text-muted no-underline transition hover:text-highlighted">{{ t('saya.footer.our_story') }}</NuxtLink></li>
           </ul>
         </div>
-        <div>
+        <div v-if="discoverLinks.length">
           <h4 class="saya-eyebrow mb-5 text-dimmed">{{ t('saya.footer.heading_discover') }}</h4>
           <ul class="space-y-3 text-sm">
-            <li><NuxtLink :to="localePath('/blog')" class="text-muted no-underline transition hover:text-highlighted">{{ t('saya.footer.blog') }}</NuxtLink></li>
-            <li><NuxtLink :to="localePath('/reviews')" class="text-muted no-underline transition hover:text-highlighted">{{ t('saya.footer.reviews') }}</NuxtLink></li>
-            <li><NuxtLink :to="localePath('/posts')" class="text-muted no-underline transition hover:text-highlighted">{{ t('saya.footer.latest_updates') }}</NuxtLink></li>
-            <li><NuxtLink :to="localePath('/qa')" class="text-muted no-underline transition hover:text-highlighted">{{ t('saya.footer.qa') }}</NuxtLink></li>
+            <li v-for="item in discoverLinks" :key="item.path"><NuxtLink :to="localePath(item.path)" class="text-muted no-underline transition hover:text-highlighted">{{ t(item.labelKey) }}</NuxtLink></li>
           </ul>
         </div>
         <div>
           <h4 class="saya-eyebrow mb-5 text-dimmed">{{ t('saya.footer.heading_connect') }}</h4>
           <ul class="space-y-3 text-sm">
-            <li><NuxtLink :to="localePath('/locations')" class="text-muted no-underline transition hover:text-highlighted">{{ t('saya.footer.all_locations') }}</NuxtLink></li>
+            <li v-if="showLocations"><NuxtLink :to="localePath('/locations')" class="text-muted no-underline transition hover:text-highlighted">{{ t('saya.footer.all_locations') }}</NuxtLink></li>
             <li><NuxtLink :to="localePath('/contact')" class="text-muted no-underline transition hover:text-highlighted">{{ t('saya.footer.contact_us') }}</NuxtLink></li>
           </ul>
         </div>
@@ -88,7 +84,8 @@
 <script setup lang="ts">
 import { getActiveSpecialClosure } from '~/utils/formatters'
 import { getTodayHoursLabel, type OpeningHours, type SpecialHours } from '~/shared/reservation-hours'
-import { EXPERIENCE_PRESENTATION, resolveProductPresentation } from '~/utils/product-presentation'
+import { catalogNavigation, publicLocationPath } from '~/utils/product-presentation'
+import type { PublicShellPayload } from '~/utils/public-resource-contracts'
 import { formatPostalAddress, type PostalAddress } from '~/utils/postal-address'
 
 interface Organization {
@@ -102,6 +99,7 @@ interface Organization {
 interface PublicLocation {
   id: string
   slug: string
+  home_slug: string | null
   title: string
   address?: PostalAddress | null
   phone?: string | null
@@ -118,22 +116,22 @@ const props = defineProps<{
   organization: Organization | null
   locations: PublicLocation[]
   error: unknown
-  hasProducts: boolean
-  hasBookableProducts: boolean
-  hasReservations: boolean
+  sections: PublicShellPayload['sections'] | null
 }>()
 
 const { t, locale, localePath } = useI18n()
-const isExperienceOrganization = computed(() => props.organization?.vertical === 'experience')
 const locationsError = computed(() => props.error)
 
-const productPresentation = computed(() => resolveProductPresentation(props.organization?.vertical))
-const showProducts = computed(() => props.hasProducts && productPresentation.value !== null)
-// Offered only when the site has something a guest can book.
-const showExperiences = computed(() => props.hasBookableProducts)
-const productCollectionLabel = computed(() => productPresentation.value?.locationCollectionSegment === 'menu'
-  ? t('saya.footer.menu')
-  : t('saya.footer.products'))
+// Every link is to a section the site has something on.
+const catalogLinks = computed(() => catalogNavigation(props.sections))
+const discoverLinks = computed(() => [
+  { section: 'blog', path: '/blog', labelKey: 'saya.footer.blog' },
+  { section: 'reviews', path: '/reviews', labelKey: 'saya.footer.reviews' },
+  { section: 'posts', path: '/posts', labelKey: 'saya.footer.latest_updates' },
+  { section: 'qa', path: '/qa', labelKey: 'saya.footer.qa' },
+].filter(item => props.sections?.[item.section as keyof PublicShellPayload['sections']] === true))
+// A home is reached as itself, so the index is offered for locations with pages of their own.
+const showLocations = computed(() => props.locations.some(location => !location.home_slug))
 const restaurantName = computed(() => props.organization?.name?.trim() || '')
 const tagline = computed(() => props.organization?.brand_description?.trim() || '')
 

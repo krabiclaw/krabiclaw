@@ -30,7 +30,9 @@ const { organization } = useTenantOrganization()
 const isPlatform = organization.template.slug === 'platform'
 const { t, localePath } = useI18n()
 
-const { locations } = await usePublicPageData()
+const { locations, sections } = await usePublicPageData()
+// A section with nothing on it is not a page; the navigation hides it by the same flag.
+if (sections.value?.posts === false) throw createError({ statusCode: 404 })
 const feed = await useSocialPostFeed(() => ({ locationId: null }))
 const organizationName = organization.name
 

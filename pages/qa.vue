@@ -28,7 +28,9 @@ definePageMeta({ layout: 'saya' })
 const { organization } = useTenantOrganization()
 const { localePath, t } = useI18n()
 
-const { qaList, locations } = await usePublicPageData()
+const { qaList, locations, sections } = await usePublicPageData()
+// A section with nothing on it is not a page; the navigation hides it by the same flag.
+if (sections.value?.qa === false) throw createError({ statusCode: 404 })
 const organizationName = organization.name
 
 useSocialMetadata(() => ({

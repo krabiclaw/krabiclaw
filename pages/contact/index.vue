@@ -191,13 +191,14 @@
 
                   <div class="flex flex-wrap items-center gap-3">
                     <NuxtLink
+                      v-if="!loc.home_slug"
                       :to="localePath(`/locations/${loc.slug}/contact`)"
                       class="inline-flex items-center rounded-full bg-inverted px-5 py-2.5 text-[11px] font-medium uppercase tracking-widest text-inverted no-underline transition hover:opacity-80"
                     >
                       {{ t('saya.contact_page.plan_visit') }}
                     </NuxtLink>
                     <NuxtLink
-                      :to="localePath(`/locations/${loc.slug}`)"
+                      :to="localePath(publicLocationPath(loc))"
                       class="inline-flex items-center rounded-full border border-default px-5 py-2.5 text-[11px] font-medium uppercase tracking-widest text-default no-underline transition hover:bg-muted"
                     >
                       {{ t('saya.contact_page.directions') }}
@@ -245,6 +246,7 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 // now that this page no longer depends on Nuxt UI (see SayaFormField.vue).
 import { FORM_INPUT_CLASS } from '~/utils/form-constants'
 import { addressPlaceName, formatPostalAddress, type PostalAddress } from '~/utils/postal-address'
+import { publicLocationPath } from '~/utils/product-presentation'
 const inputClass = FORM_INPUT_CLASS
 
 const businessName = organization.name

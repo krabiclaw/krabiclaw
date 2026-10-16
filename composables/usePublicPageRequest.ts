@@ -166,6 +166,14 @@ export function getPublicPageRequest(path: string): Omit<PublicPageRequest, "loc
       datasets: ['products'],
       blogSlug: null,
     };
+  // A home's page is site-wide too, so /stays/<slug> reads its collection's dataset.
+  if (path === '/stays' || path.startsWith('/stays/'))
+    return {
+      page: 'stays',
+      location: null,
+      datasets: ['products'],
+      blogSlug: null,
+    };
   if (path === "/blog" || path === "/blog/")
     return {
       page: "blog",

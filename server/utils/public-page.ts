@@ -36,6 +36,7 @@ import { recordRequestPhase } from "~/server/utils/request-metrics";
 import { isNonProductionHost } from "~/server/utils/tenant-hosts";
 import { loadPublicBase } from "~/server/utils/public-base";
 import { appendPublicShellQueries, buildPublicShellPayload } from "~/server/utils/public-shell-query";
+import { publicLocationSql } from "~/server/utils/public-locations";
 import { isPublicPagePayload } from '~/utils/public-resource-contracts'
 import type { LocalizedResourceType } from '~/server/utils/localization-registry'
 import { listPublicLocaleRepresentations } from '~/server/utils/public-locale-representations'
@@ -232,7 +233,7 @@ async function loadPublicPageSource(
   const VALID_PAGES = new Set([
     'home', 'locations', 'location', 'about', 'contact', 'reservations',
     'qa', 'reviews', 'posts', 'photos', 'menu', 'products',
-    'experiences', 'blog',
+    'experiences', 'stays', 'blog',
   ]);
   const areDatasetsValid = [...requestedDatasets].every(dataset => VALID_DATASETS.has(dataset));
   const isValidLocale = locale === undefined || /^[a-z]{2}(-[A-Z]{2})?$/.test(locale);
@@ -323,8 +324,8 @@ async function loadPublicPageSource(
     ? await queryFirst<{ id: string; slug: string }>(
         db,
         localizedLocationId
-          ? `SELECT id, slug FROM business_locations WHERE organization_id = ? AND id = ? AND status = 'active' LIMIT 1`
-          : `SELECT id, slug FROM business_locations WHERE organization_id = ? AND slug = ? AND status = 'active' LIMIT 1`,
+          ? `SELECT bl.id, bl.slug FROM business_locations bl WHERE bl.organization_id = ? AND bl.id = ? AND ${publicLocationSql('bl')} LIMIT 1`
+          : `SELECT bl.id, bl.slug FROM business_locations bl WHERE bl.organization_id = ? AND bl.slug = ? AND ${publicLocationSql('bl')} LIMIT 1`,
         [organizationId, localizedLocationId ?? locationSlug],
       )
     : null
@@ -559,7 +560,7 @@ async function loadPublicPageSource(
     tenantPagePromise,
     buildPublicShellPayload(db, organization, batchResults, shellIndexes, env),
     includeProducts
-      ? listOrganizationProducts(db, { organizationId: orgId, kind: page === 'experiences' ? 'experience' : page === 'menu' ? 'dish' : undefined, publishedOnly: true, env }).then(products => products.map(publicProduct))
+      ? listOrganizationProducts(db, { organizationId: orgId, kind: page === 'experiences' ? 'experience' : page === 'menu' ? 'dish' : page === 'stays' ? 'stay' : undefined, publishedOnly: true, env }).then(products => products.map(publicProduct))
       : [],
     includeProducts
       ? locationId

@@ -22,7 +22,7 @@ import {
 } from '../../server/utils/product-management.ts'
 import { AmbiguousPriceError } from '../../shared/prices.ts'
 import { claimSessionCapacity, listSessions } from '../../server/utils/availability.ts'
-import { loadPublicExperienceDetail, loadPublicProductCollection, loadPublicProductDetail, loadPublicProductSessions } from '../../server/utils/public-products.ts'
+import { loadPublicSiteProductDetail, loadPublicProductCollection, loadPublicProductDetail, loadPublicProductSessions } from '../../server/utils/public-products.ts'
 import { listPublicBookingSessions } from '../../server/utils/public-session-booking.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
@@ -129,7 +129,7 @@ test('public experiences require a configured booking flow and retain full or te
     assert.equal((await productBookingReadiness(db, ORG, pausedOffering, { requireAllocation: true })).ready, false)
     await setProductPublication(db, { organizationId: ORG, productId: legacy.id, published: true, actor: ACTOR })
     assert.deepEqual((await visible()).sort(), ids, 'pausing a location offering retains its published information')
-    const experienceDetail = await loadPublicExperienceDetail({} as CloudflareEnv, db, ORG, false, legacy.slug)
+    const experienceDetail = await loadPublicSiteProductDetail({} as CloudflareEnv, db, ORG, 'experiences', false, legacy.slug)
     assert.equal(experienceDetail?.product.id, legacy.id)
     assert.equal(experienceDetail?.location, null)
     assert.deepEqual(await loadPublicProductSessions(db, experienceDetail!, {} as CloudflareEnv), [], 'an in-person-only paused offering never requests online sessions')

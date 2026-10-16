@@ -5,8 +5,8 @@ import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { bookingWindow, listSessions } from '~/server/utils/availability'
 import { getProductBySlug, hydrateProductMedia, listCollections, listLocationProducts, listOrganizationProducts, publicProduct } from '~/server/utils/product-management'
 import { assertProductKind } from '~/shared/product-details'
-import type { Collection, ProductBookingConfig, ProductPresentation, ProductSurface, PublicProduct, StaffAssignment } from '~/server/types/products'
-import { isExperience, productSurfaceOf, resolveProductPresentation, presentationForSurface } from '~/utils/product-presentation'
+import type { Collection, ProductBookingConfig, ProductPresentation, ProductSurface, PublicProduct, SiteProductSurface, StaffAssignment } from '~/server/types/products'
+import { productSurfaceOf, resolveProductPresentation, presentationForSurface } from '~/utils/product-presentation'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import {
   loadExactPublicLocalizations,
@@ -177,7 +177,7 @@ export async function loadPublicProductCollection(
   if (locationSlug && locationRows.length !== 1) return null
   const locations = locationRows
   if (locationSlug && locations.length !== 1) return null
-  const kind = routeKind === 'experiences' ? 'experience' : routeKind === 'menu' ? 'dish' : undefined
+  const kind = routeKind === 'experiences' ? 'experience' : routeKind === 'menu' ? 'dish' : routeKind === 'stays' ? 'stay' : undefined
   let setup: ReturnType<typeof readStripeCheckoutSetup> | undefined
   const paymentSetup = () => {
     if (!env) throw new Error('The organization environment is required to assess paid booking readiness')
@@ -305,11 +305,12 @@ export async function loadPublicProductDetail(
   }
 }
 
-/** One experience page; a guest chooses among its actual booking scopes. */
-export async function loadPublicExperienceDetail(
+/** One site-wide page, an experience's or a home's; a guest chooses among its actual booking scopes. */
+export async function loadPublicSiteProductDetail(
   env: CloudflareEnv,
   db: DbClient,
   organizationId: string,
+  routeKind: SiteProductSurface,
   previewAuthorized: boolean,
   productSlug: string,
   locale?: string,
@@ -317,11 +318,11 @@ export async function loadPublicExperienceDetail(
 ): Promise<PublicProductDetail | null> {
   const [sourceLocale, collection] = await Promise.all([
     getSourceLocale(db, organizationId),
-    loadPublicProductCollection(db, organizationId, 'experiences', previewAuthorized, undefined, env),
+    loadPublicProductCollection(db, organizationId, routeKind, previewAuthorized, undefined, env),
   ])
   locale ??= sourceLocale
   if (!collection) return null
-  const found = collection.products.find(product => product.slug === productSlug && isExperience(product))
+  const found = collection.products.find(product => product.slug === productSlug && productSurfaceOf(null, product) === routeKind)
   if (!found) return null
   return projectPublicOffering(env, db, collection, found, locale, requestedScope, collection.presentation.productPath('', found.slug), sourceLocale)
 }
