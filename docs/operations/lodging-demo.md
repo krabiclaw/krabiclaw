@@ -24,8 +24,8 @@ no home and is inactive, so it takes no plan location and stays off the public
 site.
 
 The staging post-deploy stay test (`tests/e2e/tenant-rendering.spec.ts`) books
-through the first stay the homepage offers, Saltleaf Ocean Avenue Studio at
-`/stays/saltleaf-ocean-avenue-studio`. Keep the subdomain, that home's name (its
+Saltleaf Ocean Avenue Studio at `/stays/saltleaf-ocean-avenue-studio`, and
+checks the homepage links to it. Keep the subdomain, that home's name (its
 slug), its online payments and its open nights, and keep it published and
 featured on the homepage.
 
