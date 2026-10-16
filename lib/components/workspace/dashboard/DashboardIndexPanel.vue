@@ -64,7 +64,8 @@
   arrival: an index of deterministic settings or fields names its first one, the
   way a listing editor lands on its first section; a list of records names none.
   Below the pane width the index is the screen and nothing is chosen for the
-  tenant. `replace`, so Back still leaves the index. A level in a mode named by
+  tenant — except a record being made (`create`), which opens its first step at
+  every width. `replace`, so Back still leaves the index. A level in a mode named by
   its URL's `editMode`, such as its translations, is that mode's screen, and
   choosing a child would leave the mode; it opens one when the mode closes.
 */
@@ -75,6 +76,12 @@ const props = defineProps<{
   id: string
   title: string
   autoOpen?: RouteLocationRaw | null
+  /**
+   * A record being made: its first step, opened on arrival at every width, as
+   * Airbnb's flows open on their first question. Dismissing a step leaves the
+   * making for where Back goes; the list behind it is never a stop.
+   */
+  create?: RouteLocationRaw | null
   /** The level is exactly the panel's height and scrolls inside itself, padding its own rows with the gutter: a conversation with its composer at the foot. */
   fill?: boolean
   /** The level is a column at every width rather than the frame: a menu, a statement, a calendar. */
@@ -98,13 +105,16 @@ const width = computed((): string | undefined => {
 })
 // Read through the instance: vue-tsc cannot type `props.id` here (TS2590), and the id is a plain string.
 const instance = getCurrentInstance()
-provide(dashboardLeafParentKey, { focus: () => {
-  const heading = document.getElementById(`dashboard-panel-${String(instance?.props.id ?? '')}`)?.querySelector<HTMLElement>('h1')
-  if (heading) {
-    heading.tabIndex = -1
-    heading.focus({ preventScroll: true })
-  }
-} })
+provide(dashboardLeafParentKey, {
+  focus: () => {
+    const heading = document.getElementById(`dashboard-panel-${String(instance?.props.id ?? '')}`)?.querySelector<HTMLElement>('h1')
+    if (heading) {
+      heading.tabIndex = -1
+      heading.focus({ preventScroll: true })
+    }
+  },
+  exit: () => (instance?.props.create ? level.to.value : null),
+})
 // Not prefixed `dashboard-panel-`: that prefix names panes, and this is a slot inside one.
 const actionsId = computed(() => `${String(instance?.props.id ?? '')}-list-actions`)
 provide(dashboardPanelActionsKey, actionsId)
@@ -120,8 +130,9 @@ if (!scope) throw createError({ statusCode: 500, statusMessage: 'Dashboard pane 
 onNuxtReady(() => {
   if (!scope.active) return
   scope.run(() => {
-    watch((): [RouteLocationRaw | null | undefined, boolean, RouteLevelMode, unknown] => [props.autoOpen, pane.value, level.mode.value, route.query.editMode], ([target, wide, mode, editMode]) => {
-      if (!target || !wide || mode !== 'index' || editMode) return
+    // A record being made opens its step at every width; any other index chooses only beside its child.
+    watch((): [RouteLocationRaw | null | undefined, boolean, RouteLevelMode, unknown] => [props.create ?? (pane.value ? props.autoOpen : null), pane.value, level.mode.value, route.query.editMode], ([target, , mode, editMode]) => {
+      if (!target || mode !== 'index' || editMode) return
       // Only an arrival opens a child: the router is at this index's own URL.
       // An index on its way out still reads the route it rendered for, which
       // may be its bare URL; opening from there pulled the tenant back into the

@@ -103,7 +103,8 @@ import { getErrorMessage } from '~/utils/errors'
   once rather than re-drawn per screen.
 
   Cancel is the leaf's own Back: a push to the level that contains it, which is
-  the route record above this one.
+  the route record above this one — or, for a step of a record being made,
+  where that record's index goes Back to, so the making is left whole.
 
   Beside its index — two columns, `lg` — the leaf has no Close and no Cancel:
   the index's Back is the way out and Save is the only control, which is what
@@ -150,7 +151,7 @@ watch(drawerTarget, async (target) => {
 // route parent as Cancel. Save keeps the behavior defined by the owning editor.
 function cancel() {
   if (props.saving || dismissal) return
-  dismissal = { from: router.currentRoute.value.fullPath, to: level.to.value ?? '/dashboard' }
+  dismissal = { from: router.currentRoute.value.fullPath, to: parent?.exit() ?? level.to.value ?? '/dashboard' }
   dismissError.value = ''
   emit('cancel')
   if (pane.value) return finishDismissal()

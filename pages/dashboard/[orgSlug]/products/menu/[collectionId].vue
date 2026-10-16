@@ -4,11 +4,8 @@
     its name to give. Either way the level below is a leaf or a product.
   -->
   <CollectionProductList v-if="!isNew" :rows="collectionNavigation" />
-  <DashboardIndexPanel v-else id="menu-section-new" title="New section" :auto-open="collectionNavigation[0]?.items.find(item => item.to)?.to ?? null">
+  <DashboardIndexPanel v-else id="menu-section-new" :title="newTitle" :create="firstStep">
     <UAlert v-if="errorMessage" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="errorMessage" />
-    <div class="mb-6 flex justify-end">
-      <UButton :label="createActionLabel" :loading="saving" @click="startOrCreate" />
-    </div>
     <EditorNavigationList :groups="collectionNavigation" :active-item="level.child.value" />
   </DashboardIndexPanel>
 </template>
@@ -113,7 +110,7 @@ const collectionNavigation = computed<EditorNavigationGroup[]>(() => [{
 const collectionLocalizationFields = computed(() => [{ key: 'name', label: 'Name', source: collection.value?.name }])
 const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/localization`)
 
-const { createActionLabel, saveLabel, saveDisabled, save: saveLeaf, startOrCreate } = useCreateWalk({
+const { title: newTitle, firstStep, saveLabel, saveDisabled, save: saveLeaf } = useCreateWalk({
   recordPath: collectionPath,
   isNew,
   openKey,

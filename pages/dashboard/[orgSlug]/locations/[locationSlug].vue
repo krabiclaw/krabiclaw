@@ -4,7 +4,7 @@
     page shows it, each stating what it holds now. Every card is a level below
     this one; the gear opens the settings that a guest never sees.
   -->
-  <DashboardIndexPanel id="location-index" :title="isNew ? 'New location' : location?.title || 'Location'" :auto-open="atLimit ? null : cards[0]?.to ?? null">
+  <DashboardIndexPanel id="location-index" :title="isNew ? newLocation.title.value : location?.title || 'Location'" :auto-open="atLimit ? null : cards[0]?.to ?? null" :create="atLimit ? null : newLocation.firstStep.value">
     <template v-if="!isNew" #right>
       <UButton
         :to="`${level.path.value}/settings`"
@@ -42,9 +42,6 @@
         <UButton v-else label="Choose a plan" :to="`/dashboard/${route.params.orgSlug}/payments?tab=plan`" />
       </div>
       <template v-else>
-        <div class="mb-6 flex justify-end">
-          <UButton :label="newLocation.createActionLabel.value" :loading="newLocation.creating.value" @click="newLocation.startOrCreate" />
-        </div>
         <UAlert v-if="newLocation.createError.value" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="newLocation.createError.value" />
         <EditorNavigationList :groups="navigationGroups" :active-item="level.child.value" />
       </template>
@@ -293,5 +290,5 @@ const { data: overview, error: overviewError } = await useAsyncData<LocationOver
   )
 })
 
-useSeoMeta({ title: () => `${isNew.value ? 'New location' : location.value?.title || 'Location'} | KrabiClaw`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${isNew.value ? newLocation.title.value : location.value?.title || 'Location'} | KrabiClaw`, robots: 'noindex, nofollow' })
 </script>

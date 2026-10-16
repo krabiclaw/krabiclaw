@@ -1,5 +1,5 @@
 <template>
-  <DashboardLeafPanel id="product-session" :title="isNew ? 'Add a session' : 'Edit session'" :lead="timezone ? `Times are in ${timezone}.` : 'Choose a location first; online times come from the provider\'s working hours.'" :saving="saving" :disabled="pending || !valid || (!isNew && !form?.dirty && !saveError)" :error="saveError ?? p.loadError.value ?? (error ? getErrorMessage(error, 'Session could not be loaded') : '')" :save-label="isNew ? 'Add session' : 'Save'" @cancel="reset(); revision += 1" @save="form?.submit()">
+  <DashboardLeafPanel id="product-session" :title="isNew ? newSession.title : 'Edit session'" :lead="timezone ? `Times are in ${timezone}.` : 'Choose a location first; online times come from the provider\'s working hours.'" :saving="saving" :disabled="pending || !valid || (!isNew && !form?.dirty && !saveError)" :error="saveError ?? p.loadError.value ?? (error ? getErrorMessage(error, 'Session could not be loaded') : '')" :save-label="isNew ? newSession.action : 'Save'" @cancel="reset(); revision += 1" @save="form?.submit()">
     <UForm ref="form" :key="revision" :state="{ startsAt, endsAt, capacity, sessionStatus }" class="space-y-6" @submit="save">
       <UFormField name="startsAt" label="Starts" required><UInput v-model="startsAt" type="datetime-local" step="60" class="w-full" :disabled="hasGuests" /></UFormField>
       <UFormField name="endsAt" label="Ends" required><UInput v-model="endsAt" type="datetime-local" step="60" class="w-full" :disabled="hasGuests" /></UFormField>
@@ -26,6 +26,7 @@ const level = useRouteLevel()
 const dashboardApi = useDashboardApi()
 const sessionId = computed(() => String(route.params.sessionId))
 const isNew = computed(() => sessionId.value === 'new')
+const newSession = newRecordLabels('session')
 const endpoint = computed(() => `/api/editor/organizations/${p.organizationId}/products/${route.params.productId}/sessions`)
 const { data, error, pending } = await useAsyncData(
   () => `product-session:${p.organizationId}:${route.params.productId}:${sessionId.value}`,

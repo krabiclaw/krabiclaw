@@ -44,7 +44,7 @@
     />
   </DashboardLeafPanel>
 
-  <DashboardIndexPanel v-else id="organization-page-block" :title="blockLabel" :auto-open="navigationGroups[0]?.items.find(item => item.to)?.to ?? null">
+  <DashboardIndexPanel v-else id="organization-page-block" :title="blockLabel" :auto-open="navigationGroups[0]?.items.find(item => item.to)?.to ?? null" :create="newBlock ? firstStep : null">
     <UFormField v-if="isNew && !loadError" label="Section type" required class="mb-6">
       <USelect
         :model-value="newType"
@@ -57,9 +57,6 @@
       />
     </UFormField>
     <UAlert v-if="loadError || errorMessage" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="loadError ?? errorMessage" />
-    <div v-if="isNew && newBlock" class="mb-6 flex justify-end">
-      <UButton :label="createActionLabel" :loading="saving" @click="startOrCreate" />
-    </div>
     <EditorNavigationList v-if="navigationGroups.length" :groups="navigationGroups" :active-item="level.child.value" />
   </DashboardIndexPanel>
 </template>
@@ -117,7 +114,7 @@ const block = computed<TenantPageBlock | null>(() => (isNew.value
   ? newBlock.value
   : draft.value.blocks.find(candidate => candidate.id === props.blockId) ?? null))
 
-const blockLabel = computed(() => (isNew.value ? 'New section' : block.value ? tenantPageBlockLabel(block.value.type) : 'Section'))
+const blockLabel = computed(() => (isNew.value ? newTitle.value : block.value ? tenantPageBlockLabel(block.value.type) : 'Section'))
 const sections = computed<readonly TenantPageBlockSection[]>(() => (block.value ? tenantPageBlockSections(block.value) : []))
 /** A block with one concern is that concern; there is no row to open it with. */
 const singleSection = computed(() => (sections.value.length === 1 ? sections.value[0]! : null))
@@ -205,7 +202,7 @@ const walkOrder = computed<string[]>(() => ['type', ...sections.value.map(sectio
 const newBlockInvalid = computed(() => Boolean(newBlock.value && validateTenantPageBlock(newBlock.value).length))
 const openWalkKey = computed(() => level.child.value ?? 'type')
 
-const { createActionLabel, saveLabel, saveDisabled: walkSaveDisabled, save: saveWalk, startOrCreate } = useCreateWalk({
+const { title: newTitle, firstStep, saveLabel, saveDisabled: walkSaveDisabled, save: saveWalk } = useCreateWalk({
   recordPath: level.path,
   isNew,
   openKey: openWalkKey,

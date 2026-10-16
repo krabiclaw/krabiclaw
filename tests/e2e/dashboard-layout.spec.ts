@@ -190,10 +190,10 @@ test.describe('dashboard pane hierarchy', () => {
       const leaf = page.locator('#dashboard-panel-booking-team-setting')
       await expect(page.getByRole('dialog', { name: 'Team name', exact: true })).toBeVisible()
       await expect(page.locator('#dashboard-panel-booking-team')).toBeVisible()
-      await expect(leaf.getByRole('button', { name: 'Create team', exact: true })).toBeDisabled()
+      await expect(leaf.getByRole('button', { name: 'Create booking team', exact: true })).toBeDisabled()
       await leaf.getByRole('textbox', { name: 'Team name', exact: true }).fill(name)
       const created = page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/organization/create-team' && response.request().method() === 'POST')
-      await leaf.getByRole('button', { name: 'Create team', exact: true }).click()
+      await leaf.getByRole('button', { name: 'Create booking team', exact: true }).click()
       const createdResponse = await created
       expect(createdResponse.status(), await createdResponse.text()).toBe(200)
       teamId = (await createdResponse.json() as { id: string }).id
@@ -1423,6 +1423,19 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(parent.getByRole('link', { name: /^Title/ })).toContainText(savedTitle)
   })
 
+  // Making a record is its steps, at every width: a phone lands on the first
+  // one rather than on a list with a button, and dismissing it leaves the making.
+  test('a phone opens a new record on its first step and dismissing it returns to Catalog', async ({ page }) => {
+    await page.setViewportSize(PHONE)
+    await open(page, `${ORG}/products/new`)
+    await expect(page).toHaveURL(`${ORG}/products/new/kind`)
+    await expect(page.getByRole('dialog', { name: 'Type', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'New product', level: 1, exact: true })).toBeAttached()
+    await page.locator('#dashboard-panel-product-kind').getByTestId('dashboard-navbar-close').click()
+    await expect(page).toHaveURL(`${ORG}/products`)
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+  })
+
   // A service is a Product and the page that shows it: Catalog's Add opens the
   // shared create walk, and Create writes both, bound, through one request.
   test('Catalog adds a service with its page through the one Product editor', async ({ page, baseURL }) => {
@@ -1439,10 +1452,12 @@ test.describe('dashboard pane hierarchy', () => {
     await kind.getByRole('radio', { name: 'Service or appointment', exact: true }).check()
     await kind.getByRole('button', { name: 'Next: Name', exact: true }).click()
     await expect(page).toHaveURL(`${services}/products/new/name`)
+    // The level is named for what is being made, and the step's own footer is the only commit.
+    await expect(page.locator('#dashboard-panel-product').getByRole('heading', { name: 'New service', level: 1, exact: true })).toBeVisible()
+    await expect(page.locator('#dashboard-panel-product').getByRole('button', { name: 'Create service', exact: true })).toHaveCount(0)
     const name = `E2E Service ${Date.now().toString(36)}`
     await page.getByRole('textbox', { name: 'Name' }).fill(name)
     const created = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/products` && response.request().method() === 'POST')
-    // The walk's index and its Name leaf both offer the commit; the leaf's is the one beside the field.
     await page.locator('#dashboard-panel-product-name').getByRole('button', { name: 'Create service', exact: true }).click()
     const response = await created
     expect(response.status(), await response.text()).toBe(201)

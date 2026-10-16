@@ -42,13 +42,13 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
 
   // The one Product editor walks a place to stay through its stay settings.
   await page.goto(`/dashboard/${slug}/products/new?kind=stay&location_id=${encodeURIComponent(location.id)}`)
-  await page.getByRole('button', { name: 'Start with Name' }).click()
+  // The kind is given, so the walk opens on its first outstanding step.
+  await expect(page).toHaveURL(/\/products\/new\/name\?/)
   await page.getByRole('textbox', { name: 'Name' }).fill('Cliff Cabin')
   await page.getByRole('button', { name: 'Next: Stay settings', exact: true }).click()
   await expect(page).toHaveURL(/\/products\/new\/stay/)
   await page.getByRole('textbox', { name: 'Sleeps' }).fill('4')
   await page.getByRole('textbox', { name: 'Minimum nights' }).fill('2')
-  // The index offers the same create action; the leaf's own save commits what it shows.
   await page.locator('#dashboard-panel-product-stay').getByRole('button', { name: 'Create place to stay', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/dashboard/${slug}/products/(?!new)[^/?]+`))
   const productId = new URL(page.url()).pathname.split('/')[4]!

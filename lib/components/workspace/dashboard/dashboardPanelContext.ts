@@ -36,5 +36,9 @@ export const dashboardTitleClass = 'text-2xl font-semibold text-highlighted lg:t
  */
 export const dashboardPanelActionsKey: InjectionKey<ComputedRef<string>> = Symbol('dashboard-panel-actions')
 
-/** The nearest index stays behind a leaf drawer and receives focus on return. */
-export const dashboardLeafParentKey: InjectionKey<{ focus: () => void }> = Symbol('dashboard-leaf-parent')
+/**
+ * The nearest index stays behind a leaf drawer and receives focus on return.
+ * An index making a record names `exit`: dismissing one of its steps leaves the
+ * making, for where the index's own Back goes, rather than returning to it.
+ */
+export const dashboardLeafParentKey: InjectionKey<{ focus: () => void; exit: () => string | null }> = Symbol('dashboard-leaf-parent')

@@ -1,6 +1,6 @@
 <template>
   <!-- One product: its rows are the things it holds, each a leaf below this level. -->
-  <DashboardIndexPanel id="product" :title="form.name || itemLabel" :auto-open="autoOpenTarget">
+  <DashboardIndexPanel id="product" :title="pageTitle" :auto-open="autoOpenTarget" :create="firstStep">
     <template v-if="product" #right>
       <DashboardResourceLocalization
       :organization-id="organizationId"
@@ -22,12 +22,7 @@
       :title="`${itemLabel} could not be loaded`"
       :description="loadError"
     />
-    <template v-else>
-      <div v-if="isNew" class="mb-6 flex justify-end">
-        <UButton :label="createActionLabel" :loading="saving" @click="startOrCreate" />
-      </div>
-      <EditorNavigationList :groups="navigationGroups" :active-item="level.child.value" />
-    </template>
+    <EditorNavigationList v-else :groups="navigationGroups" :active-item="level.child.value" />
   </DashboardIndexPanel>
 </template>
 
@@ -822,7 +817,7 @@ function payload() {
   }
 }
 
-const { createActionLabel, saveLabel: createSaveLabel, saveDisabled, save: saveCurrentEditor, startOrCreate } = useCreateWalk({
+const { title: newTitle, firstStep, saveLabel: createSaveLabel, saveDisabled, save: saveCurrentEditor } = useCreateWalk({
   recordPath: itemPath,
   isNew,
   openKey: editorKey,
@@ -835,6 +830,8 @@ const { createActionLabel, saveLabel: createSaveLabel, saveDisabled, save: saveC
   existingBlocked: () => !product.value || Boolean(loadError.value) || !sectionValid.value,
   commit,
 })
+
+const pageTitle = computed(() => isNew.value ? newTitle.value : form.name || itemLabel.value)
 
 // Saving content and publishing the listing are separate owner decisions.
 const saveLabel = computed(() => createSaveLabel.value ?? 'Save')
@@ -1192,7 +1189,7 @@ async function saveProductLocalization(locale: string, submitted: Record<string,
   })
 }
 
-useSeoMeta({ title: () => `${form.name || itemLabel.value} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${pageTitle.value} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
 provide(productEditorKey, {
   form,
   product,
