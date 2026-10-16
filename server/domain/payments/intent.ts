@@ -98,13 +98,13 @@ export async function reviewPayment(db: DbClient, stripe: Stripe, organizationId
   }
   const review: PaymentReview = { payment_method_id: method.id, subtotal: payment.amount, surcharge, total: payment.amount + surcharge, reviewed_at: new Date().toISOString() }
   await execute(db, 'UPDATE payment_attempts SET review_json=?,updated_at=? WHERE id=?', [JSON.stringify(review), review.reviewed_at, attempt.id])
-  return { ...review, currency: payment.currency, method: { type: method.type, brand: method.card?.brand ?? null, last4: method.card?.last4 ?? null, funding: method.card?.funding ?? null, wallet: method.card?.wallet?.type ?? null } }
+  return { ...review, currency: payment.currency, method: { type: method.type, brand: method.card?.brand ?? null, last4: method.card?.last4 ?? method.us_bank_account?.last4 ?? null, funding: method.card?.funding ?? null, wallet: method.card?.wallet?.type ?? null, bank_name: method.us_bank_account?.bank_name ?? null } }
 }
 
 /**
  * Confirms exactly what was reviewed: the same method on the intent, the same
- * total. Stripe's own 3DS and capture follow; a succeeded intent settles here
- * and again, idempotently, from the webhook.
+ * total. Stripe's own 3DS, bank clearing and capture follow; a succeeded intent
+ * settles here and again, idempotently, from the webhook.
  */
 export async function confirmPayment(db: DbClient, stripe: Stripe, env: CloudflareEnv, organizationId: string, paymentId: string, claim: string, input: { payment_method_id: string; total: number }) {
   const { payment, attempt, state } = await requireOpenAttempt(db, organizationId, paymentId, claim)
@@ -121,6 +121,13 @@ export async function confirmPayment(db: DbClient, stripe: Stripe, env: Cloudfla
     // The surcharged total is what Stripe charges; the surcharge inside it is named so receipts and refunds carry it.
     ...(review.surcharge > 0 ? { amount_to_confirm: review.total, amount_details: { surcharge: { amount: review.surcharge, enforce_validation: 'enabled' } } } : {}),
   } as Stripe.PaymentIntentConfirmParams, { stripeAccount: payment.stripe_account_id, idempotencyKey: `krabiclaw-confirm:${payment.id}:${review.reviewed_at}` })
-  if (confirmed.status === 'succeeded') await reconcilePaymentIntent(db, stripe, payment, confirmed, env)
+  if (confirmed.status === 'processing') {
+    await execute(db, "UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND status='active'", [
+      new Date(Date.now() + 14 * 86400 * 1000).toISOString(),
+      payment.id,
+    ])
+  } else if (confirmed.status === 'succeeded') {
+    await reconcilePaymentIntent(db, stripe, payment, confirmed, env)
+  }
   return { status: confirmed.status, client_secret: confirmed.client_secret, requires_action: confirmed.status === 'requires_action', return_url: returnUrl }
 }

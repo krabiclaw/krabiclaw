@@ -91,6 +91,7 @@ const methodLabel = computed(() => {
   const method = review.value?.method
   if (!method) return ''
   if (method.wallet) return method.wallet.replace('_', ' ')
+  if (method.bank_name && method.last4) return `${method.bank_name} •••• ${method.last4}`
   return method.brand && method.last4 ? `${method.brand} •••• ${method.last4}` : method.type
 })
 

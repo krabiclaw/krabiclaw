@@ -343,7 +343,7 @@ export async function requireStripeCheckoutAcceptance(db: DbClient, stripe: Stri
   for (const [name, value] of Object.entries(methods)) {
     if (value && typeof value === 'object' && 'available' in value && 'display_preference' in value && value.available
       && value.display_preference && typeof value.display_preference === 'object' && 'value' in value.display_preference
-      && value.display_preference.value === 'on' && !['card', 'link', 'apple_pay', 'google_pay'].includes(name)) {
+      && value.display_preference.value === 'on' && !['card', 'link', 'apple_pay', 'google_pay', 'us_bank_account'].includes(name)) {
       throw new HTTPError({ statusCode: 409, statusMessage: `Disable delayed or unsupported checkout method ${name} before accepting booked payments`, data: handoff })
     }
   }

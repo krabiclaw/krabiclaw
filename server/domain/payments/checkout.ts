@@ -182,9 +182,9 @@ export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: C
     const intent = await stripe.paymentIntents.create({
       amount, currency: price.currency.toLowerCase(),
       ...(customer ? { customer: customer.customerId } : {}),
-      // The connected configuration the acceptance check verified: cards, Link and the wallets, nothing that pays later.
+      // The connected configuration the acceptance check verified: cards, Link, wallets, and ACH Direct Debit.
       payment_method_configuration: methodConfigurationId,
-      automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
+      automatic_payment_methods: { enabled: true, allow_redirects: 'always' },
       application_fee_amount: 0,
       description: projectionTitle,
       metadata: { krabiclaw_payment_id: id },
