@@ -21,7 +21,7 @@ upstream_protocol = "http"
 [triggers]
 # Every expression is dispatched through Nitro's cloudflare:scheduled hook.
 # Keep this list in sync with SCHEDULED_TASKS in server/scheduled-tasks.ts.
-crons = ["*/5 * * * *", "*/2 * * * *", "*/10 * * * *", "0 3 * * *", "0 4 * * *", "0 0 * * SUN", "0 * * * *"]
+crons = ["*/5 * * * *", "*/2 * * * *", "*/10 * * * *", "0 3 * * *", "0 0 * * SUN", "0 * * * *"]
 
 [[routes]]
 pattern = "*.krabiclaw.com/*"

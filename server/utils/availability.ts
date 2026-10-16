@@ -374,10 +374,15 @@ export interface MaterializeSessionsResult {
  *     intended occurrence, not the actual instant).
  *
  * Bounded: at most MAX_GENERATION_DAYS ahead, so a rule cannot fill the table.
+ *
+ * `existing` names occurrence keys already stored. Their insert would meet the
+ * key's own conflict target and do nothing, so no statement is written for
+ * them: re-running over a full window issued one no-op statement per
+ * occurrence, 235,000 a day from the scheduled task alone.
  */
 function prepareSessionMaterialization(input: {
   organizationId: string; productId: string; fromDate?: string; throughDate: string; actorId: string; now?: string
-}, config: ProductBookingConfigRecord, rules: ProductAvailabilityRule[], locations: ReadonlyMap<string, SessionLocation>, providers: Array<string | null>): { queries: BatchQuery[]; planned: number; skipped: OccurrenceSkip[]; sessions: Array<{ starts_at: string; ends_at: string }> } {
+}, config: ProductBookingConfigRecord, rules: ProductAvailabilityRule[], locations: ReadonlyMap<string, SessionLocation>, providers: Array<string | null>, existing: ReadonlySet<string> = new Set()): { queries: BatchQuery[]; planned: number; skipped: OccurrenceSkip[]; sessions: Array<{ starts_at: string; ends_at: string }> } {
   assertAvailabilityDate(input.throughDate, 'through')
   if (input.fromDate) assertAvailabilityDate(input.fromDate, 'from')
 
@@ -414,6 +419,9 @@ function prepareSessionMaterialization(input: {
       }
       sessions.push(resolved)
       planned += providers.length
+      const key = occurrenceKey(rule.id, date, rule.start_time)
+      const missing = providers.filter(provider => !existing.has(provider === null ? key : `${key}:member:${provider}`))
+      if (missing.length === 0) continue
       // A slot that was removed and added back meets its own old sessions at
       // the same instant: the removal cancelled the unbooked ones and left the
       // booked ones scheduled, and cut every one of them loose from the rule.
@@ -445,9 +453,9 @@ function prepareSessionMaterialization(input: {
         `,
         params: [
           crypto.randomUUID(), input.organizationId, input.productId, rule.location_id, rule.id,
-          occurrenceKey(rule.id, date, rule.start_time), rule.timezone,
+          key, rule.timezone,
           resolved.starts_at, resolved.ends_at, capacity, now, now, input.actorId, input.actorId,
-          JSON.stringify(providers), config.assigned_team_id, input.organizationId,
+          JSON.stringify(missing), config.assigned_team_id, input.organizationId,
         ],
       })
     }
@@ -476,8 +484,15 @@ export async function materializeSessions(db: DbClient, input: {
   if (rules.length === 0) return { created: providerCreated, existing: 0, skipped: [] }
 
   const locations = await queryAll<SessionLocation>(db, 'SELECT id,timezone,status,opening_hours,special_hours FROM business_locations WHERE organization_id=? AND id IN (SELECT value FROM json_each(?))', [input.organizationId, JSON.stringify([...new Set(rules.map(rule => rule.location_id))])])
-  const { queries: writes, planned, skipped } = prepareSessionMaterialization(input, config, rules, new Map(locations.map(location => [location.id, location])), await sessionProviders(db, config))
-  if (writes.length === 0) return { created: providerCreated, existing: 0, skipped }
+  // Occurrences already stored, read by the product's start index from two
+  // days back: a rule's local today begins at most a day before now. A key
+  // missed here only costs its insert, which then does nothing.
+  const stored = await queryAll<{ source_occurrence_key: string }>(db, `
+    SELECT source_occurrence_key FROM product_sessions
+     WHERE product_id = ? AND starts_at >= ? AND organization_id = ? AND source_occurrence_key IS NOT NULL
+  `, [input.productId, new Date(Date.now() - 2 * 86_400_000).toISOString(), input.organizationId])
+  const { queries: writes, planned, skipped } = prepareSessionMaterialization(input, config, rules, new Map(locations.map(location => [location.id, location])), await sessionProviders(db, config), new Set(stored.map(row => row.source_occurrence_key)))
+  if (writes.length === 0) return { created: providerCreated, existing: planned, skipped }
   const results = await executeBatch(db, writes, { operation: 'Materialize product sessions' })
   const created = results.reduce((sum, result) => sum + (result.meta?.changes ?? 0), 0)
   return { created: providerCreated + created, existing: planned - created, skipped }

@@ -65,10 +65,13 @@ export async function drainPublicResourceCacheInvalidations(
   const nowIso = now.toISOString()
   const staleClaimCutoff = new Date(now.getTime() - CACHE_INVALIDATION_RETRY_AFTER_MS).toISOString()
   const terminalRetentionCutoff = new Date(now.getTime() - CACHE_INVALIDATION_TERMINAL_RETENTION_MS).toISOString()
+  // A row is processed after it is created, so the created_at bound removes
+  // nothing the processed_at one keeps; it lets the status index range-scan
+  // instead of reading every retained row on each two-minute run.
   await execute(db, `
     DELETE FROM public_resource_cache_invalidations
-     WHERE status IN ('processed', 'failed') AND processed_at < ?
-  `, [terminalRetentionCutoff])
+     WHERE status IN ('processed', 'failed') AND created_at < ? AND processed_at < ?
+  `, [terminalRetentionCutoff, terminalRetentionCutoff])
   await execute(db, `
     UPDATE public_resource_cache_invalidations
        SET status = 'failed', claimed_at = NULL, processed_at = ?,
