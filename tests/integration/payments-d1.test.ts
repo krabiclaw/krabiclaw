@@ -22,8 +22,8 @@ import { deliverPaymentsUsage, paymentsUsageStatus, reconcileNativeBillingCredit
 import { getStripe } from '../../server/utils/billing.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { approveRefundAuthorization, executeRefund, requirePayment } from '../../server/domain/payments/index.ts'
-import { reviewPayment, confirmPayment } from '../../server/domain/payments/intent.ts'
-import { reconcilePaymentIntent } from '../../server/domain/payments/events.ts'
+import { reviewPayment, confirmPayment, requireOpenAttempt } from '../../server/domain/payments/intent.ts'
+import { reconcilePaymentIntent, processPaymentEvent } from '../../server/domain/payments/events.ts'
 import { canRetryGuestReservationRefund } from '../../server/domain/payments/visit-refund.ts'
 import { mcpFinancialApprovalErrorResult } from '../../server/utils/mcp-financial-handoff.ts'
 import { handlePaymentsTools } from '../../server/utils/mcp-tools/payments.ts'
@@ -766,6 +766,19 @@ test('ACH Direct Debit payment review and confirmation handles bank account deta
     const hash = await tokenHash(claim)
     await db.prepare("INSERT INTO payment_claims(token_hash, payment_id, expires_at) VALUES (?, 'ach-payment', '2099-01-01T00:00:00.000Z')").bind(hash).run()
 
+    // A confirmation decline leaves the purchase open for another method.
+    const declinedIntent = {
+      id: 'pi_ach-payment', livemode: false, currency: 'usd',
+      metadata: { krabiclaw_payment_id: 'ach-payment' },
+      status: 'requires_payment_method', amount: 10000,
+      last_payment_error: { type: 'card_error', code: 'card_declined' },
+    } as Stripe.PaymentIntent
+    const originalHold = await db.prepare("SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id='ach-payment'").first()
+    await reconcilePaymentIntent(db, stripe, await requirePayment(db, ORG, 'ach-payment'), declinedIntent, env)
+    assert.equal((await requirePayment(db, ORG, 'ach-payment')).state, 'pending')
+    assert.equal((await requireOpenAttempt(db, ORG, 'ach-payment', claim)).state, 'open')
+    assert.deepEqual(await db.prepare("SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id='ach-payment'").first(), originalHold)
+
     const review = await reviewPayment(db, stripe, ORG, 'ach-payment', claim, 'pm_achproof123')
     assert.equal(review.surcharge, 0)
     assert.equal(review.total, 10000)
@@ -784,7 +797,7 @@ test('ACH Direct Debit payment review and confirmation handles bank account deta
     const expectedMinExpires = Date.now() + 13 * 86400 * 1000
     assert.ok(holdExpires > expectedMinExpires, `Hold expires_at ${hold!.expires_at} should be at least 13 days in the future`)
 
-    // Verify late payment failure releases the hold and updates payment state to failed
+    // A clearing failure is reported, but Stripe still permits a new method.
     const failedIntent = {
       id: 'pi_ach-payment',
       livemode: false,
@@ -792,15 +805,57 @@ test('ACH Direct Debit payment review and confirmation handles bank account deta
       metadata: { krabiclaw_payment_id: 'ach-payment' },
       status: 'requires_payment_method',
       amount: 10000,
-      last_payment_error: { message: 'The payment failed' },
+      last_payment_error: { code: 'bank_account_unusable', message: 'The bank payment failed' },
     } as unknown as Stripe.PaymentIntent
     const payment = await requirePayment(db, ORG, 'ach-payment')
     await reconcilePaymentIntent(db, stripe, payment, failedIntent, env)
 
-    const failedPayment = await requirePayment(db, ORG, 'ach-payment')
-    assert.equal(failedPayment.state, 'failed')
+    assert.equal((await requirePayment(db, ORG, 'ach-payment')).state, 'pending')
+    assert.deepEqual(await db.prepare("SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id='ach-payment'").first(), hold)
+    assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE request_id=? AND event_name='payment.payment_failed'").bind(opening.id).first('count(*)'), 1)
+
+    // Cancellation is terminal and releases the active capacity hold.
+    await reconcilePaymentIntent(db, stripe, await requirePayment(db, ORG, 'ach-payment'), { ...failedIntent, status: 'canceled', last_payment_error: null }, env)
+    assert.equal((await requirePayment(db, ORG, 'ach-payment')).state, 'failed')
+    assert.equal((await requireOpenAttempt(db, ORG, 'ach-payment', claim)).state, 'failed')
     const releasedHold = await db.prepare("SELECT status FROM payment_checkout_holds WHERE payment_id='ach-payment'").first<{ status: string }>()
     assert.equal(releasedHold?.status, 'released')
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('processing webhooks extend only active checkout holds and preserve capacity without a confirmation response', { timeout: 120_000 }, async (t) => {
+  const { db, runtime } = await boot()
+  try {
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+    await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,livemode,country,status,created_at,updated_at) VALUES('connected',?,'acct_seller',0,'US','ready',?,?)").bind(ORG, NOW, NOW).run()
+    const expires = new Date(Date.now() + 5 * 60_000).toISOString()
+    const originalFetch = globalThis.fetch
+    t.mock.method(globalThis, 'fetch', async (request, init) => {
+      const url = new URL(request instanceof Request ? request.url : String(request))
+      if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
+      assert.equal(init?.method, 'GET')
+      assert.equal(new Headers(init?.headers).get('stripe-account'), 'acct_seller')
+      const id = url.pathname.split('/').at(-1)!
+      return Response.json({ id, object: 'payment_intent', livemode: false, currency: 'usd', amount: 10000, status: 'processing', metadata: { krabiclaw_payment_id: id.slice(3) } })
+    })
+    for (const status of ['active', 'released', 'converted']) {
+      const id = `processing-${status}`
+      await payable(db, id, expires)
+      if (status !== 'active') await db.prepare('UPDATE payment_checkout_holds SET status=? WHERE payment_id=?').bind(status, id).run()
+      const event = { id: `evt_${id}`, type: 'payment_intent.processing', account: 'acct_seller', livemode: false, data: { object: { id: `pi_${id}`, metadata: { krabiclaw_payment_id: id } } } } as Stripe.Event
+      assert.equal(await processPaymentEvent(db, getStripe(env), event, env), true)
+      const hold = await db.prepare('SELECT status, expires_at FROM payment_checkout_holds WHERE payment_id=?').bind(id).first<{ status: string; expires_at: string }>()
+      assert.equal(hold?.status, status)
+      assert.equal((await requirePayment(db, ORG, id)).state, 'pending')
+      if (status === 'active') {
+        assert.ok(Date.parse(hold!.expires_at) >= Date.now() + 13 * 86400_000)
+        await assert.rejects(claimSessionCapacity(db, { organizationId: ORG, productId: 'product', sessionId: 'session', productVariantId: 'variant', partySize: 1 }), /no longer has room/u)
+      } else {
+        assert.equal(hold?.expires_at, expires)
+      }
+    }
   } finally {
     await runtime.dispose()
   }

@@ -344,11 +344,14 @@ it; `payments.surcharge_amount` records what Stripe charged.
 cards, surcharging `us_bank_account` returns `surcharge.status = 'unavailable'`;
 ACH is automatically $0.00 surcharge (free to the customer). On confirmation,
 Stripe returns `processing` while bank settlement clears. The active hold's
-expiration is extended by 14 days to preserve booking capacity during ACH
-clearing. Succeeded intents settle via `reconcilePaymentIntent` when the
-`payment_intent.succeeded` webhook fires; late clearing failures
-(`payment_intent.payment_failed` or `requires_payment_method` with
-`last_payment_error`) mark the payment failed and release the hold.
+expiration is extended by 14 days on confirmation and processing webhook
+reconciliation to preserve booking capacity during ACH clearing. Succeeded
+intents settle via `reconcilePaymentIntent` when the `payment_intent.succeeded`
+webhook fires. Clearing failures still generate financial notifications. An
+intent in `requires_payment_method` with `last_payment_error` remains payable
+and retains its active hold so the buyer can retry, including after a
+recoverable confirmation decline. A canceled intent is terminal: it marks the
+payment failed and releases the active hold.
 
 **Expiry.** The buyer's time to pay is the attempt's `expires_at`. Every
 availability query ignores a hold past it, and the confirm endpoint refuses an
