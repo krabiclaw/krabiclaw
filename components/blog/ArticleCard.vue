@@ -9,9 +9,9 @@
     class="group relative"
     :class="compact
       ? (featured ? 'docs-start py-3' : 'docs-task py-1.5')
-      : ['h-full overflow-hidden rounded-2xl border border-default bg-elevated transition-shadow hover:shadow-md', featured && still ? 'md:grid md:grid-cols-2' : '']"
+      : 'h-full overflow-hidden rounded-2xl border border-default bg-elevated transition-shadow hover:shadow-md'"
   >
-    <div v-if="still && !compact" :class="featured ? 'aspect-video md:aspect-auto md:min-h-72' : 'aspect-video'" class="overflow-hidden">
+    <div v-if="still && !compact" class="aspect-video overflow-hidden">
       <img :src="still" :alt="article.cover?.alt_text ?? ''" loading="lazy" class="size-full object-cover transition-transform group-hover:scale-[1.02]">
     </div>
     <div :class="compact ? '' : featured ? 'p-8' : 'p-6'">
