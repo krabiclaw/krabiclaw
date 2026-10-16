@@ -115,6 +115,7 @@
   "saya.common.view_dish": "料理を見る",
   "saya.common.view_experience": "体験を見る",
   "saya.common.view_item": "商品を見る",
+  "saya.common.view_stay": "宿泊先を見る",
   "saya.contact_page.about_product": "{product}について:",
   "saya.contact_page.address": "住所",
   "saya.contact_page.anything_not_location_specific": "店舗を特定しないお問い合わせ",
@@ -510,5 +511,8 @@
   "stay.error_min_nights": "この日程の最低宿泊数は{count}泊です。",
   "stay.error_max_nights": "この日程の最大宿泊数は{count}泊です。",
   "stay.error_no_check_in": "その日はチェックインできません。",
-  "stay.error_no_check_out": "その日はチェックアウトできません。"
+  "stay.error_no_check_out": "その日はチェックアウトできません。",
+  "saya.footer.stays": "宿泊先",
+  "saya.stays.collection_title": "{organization}の宿泊先",
+  "saya.stays.meta_description": "{organization}で予約できる宿泊先。"
 }

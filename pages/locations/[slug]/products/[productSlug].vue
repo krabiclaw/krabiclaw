@@ -4,7 +4,7 @@
 
 <script setup lang="ts">
 import ProductDetailPage from '~/components/products/ProductDetailPage.vue'
-import { presentationForSurface, STAY_PRESENTATION } from '~/utils/product-presentation'
+import { presentationForSurface } from '~/utils/product-presentation'
 import { composeProductSeoDescription } from '~/utils/product-seo'
 
 definePageMeta({ layout: 'saya' })
@@ -15,8 +15,7 @@ const detail = computed(() => {
   if (!value.location) throw createError({ statusCode: 404, statusMessage: 'Location not found' })
   return { ...value, location: value.location }
 })
-// A place to stay is an Accommodation on any vertical; every other product reads as its surface.
-const presentation = detail.value.product.kind === 'stay' ? STAY_PRESENTATION : presentationForSurface(detail.value.vertical, 'products')
+const presentation = presentationForSurface(detail.value.vertical, 'products')
 if (presentation.locationCollectionSegment !== 'products') throw createError({ statusCode: 404 })
 const { t } = useI18n()
 /** The offer context this page quotes: this location, the site currency, now. */

@@ -33,7 +33,7 @@
         <NuxtLink
           v-for="loc in locations"
           :key="loc.id"
-          :to="localePath(`/locations/${loc.slug}`)"
+          :to="localePath(publicLocationPath(loc))"
           class="group block overflow-hidden border border-default text-default no-underline transition-colors hover:border-muted"
         >
           <!-- Photo -->
@@ -104,6 +104,7 @@
 import { authClient } from '~/lib/auth-client'
 import { getTodayHoursLabel } from '~/shared/reservation-hours'
 import { addressPlaceName, formatPostalAddress, type PostalAddress } from '~/utils/postal-address'
+import { publicLocationPath } from '~/utils/product-presentation'
 
 definePageMeta({ layout: 'saya' })
 

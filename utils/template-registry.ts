@@ -59,8 +59,8 @@ export const publicTemplateRegistry: Record<PublicTemplateSlug, PublicTemplateDe
       articleDetailPrefix: '/blog',
     },
     sitemap: {
-      exactPaths: ['/', '/menu', '/products', '/experiences', '/contact', '/blog', '/docs', '/locations', '/reservations', '/posts', '/photos', '/qa', '/reviews'],
-      dynamicPrefixes: ['/blog/', '/docs/', '/experiences/', '/locations/', '/posts/'],
+      exactPaths: ['/', '/menu', '/products', '/experiences', '/stays', '/contact', '/blog', '/docs', '/locations', '/reservations', '/posts', '/photos', '/qa', '/reviews'],
+      dynamicPrefixes: ['/blog/', '/docs/', '/experiences/', '/stays/', '/locations/', '/posts/'],
     },
     nonIndexableExactPaths: ['/contact/confirmed', '/bookings/cancel', '/bookings/confirmed', '/reservations/cancel', '/reservations/confirmed'],
     // Saya reads a document on the routes that request the 'content' dataset.

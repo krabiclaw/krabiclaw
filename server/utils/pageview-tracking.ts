@@ -5,6 +5,7 @@ import { executeBatch, queryAll, queryFirst } from '~/server/db'
 import { resolvePublishedTenantPageIdentity as resolveCanonicalTenantPageIdentity } from '~/server/utils/content/pages'
 import { observeAttribution, resolveAttributionTouch, type AttributionParams, type ObservedAttribution } from '~/utils/analytics-attribution'
 import { resolveTenantLocalePath } from '~/utils/tenant-locale-path'
+import { parseSiteProductPath } from '~/utils/product-presentation'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { findPublishedProductAtRoute, getOrganizationVertical, parseProductRouteSegments, resolveLocalizedPublicRoute } from '~/server/utils/localization'
 import { getSourceLocale } from '~/server/utils/organization-locales'
@@ -147,17 +148,10 @@ export async function resolvePublicPageIdentity(env: CloudflareEnv, db: AppDb, i
   const page = await resolveCanonicalTenantPageIdentity(db, organizationId, routing.sourcePath, sourceLocale)
   if (page) return { ...base, locale: sourceLocale, pageId: page.page_id, pageType: page.page_type, recipe: page.recipe, documentId: null, productId: null }
 
-  const experienceSlug = /^\/experiences\/([^/]+)$/.exec(routing.sourcePath)?.[1]
-  if (experienceSlug) {
-    let slug: string
-    try {
-      slug = decodeURIComponent(experienceSlug)
-    } catch (error) {
-      if (error instanceof URIError) return null
-      throw error
-    }
-    const { loadPublicExperienceDetail } = await import('~/server/utils/public-products')
-    const detail = await loadPublicExperienceDetail(env, db, organizationId, false, slug, sourceLocale)
+  const siteProduct = parseSiteProductPath(routing.sourcePath)
+  if (siteProduct) {
+    const { loadPublicSiteProductDetail } = await import('~/server/utils/public-products')
+    const detail = await loadPublicSiteProductDetail(env, db, organizationId, siteProduct.surface, false, siteProduct.slug, sourceLocale)
     if (!detail) return null
     return { ...base, locale: sourceLocale, locationId: detail.location?.id ?? null, pageId: null, pageType: 'product', recipe: null, documentId: null, productId: detail.product.id }
   }

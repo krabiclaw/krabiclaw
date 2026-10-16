@@ -21,7 +21,8 @@ import {
 import { listPublicLocaleRepresentations, resolvePublicDocumentSourcePath } from '~/server/utils/public-locale-representations'
 import { listPublicSocialPosts } from '~/server/utils/post-management'
 import { resolvePublicTemplate } from '~/utils/template-registry'
-import { EXPERIENCE_PRESENTATION, presentationForProduct } from '~/utils/product-presentation'
+import { EXPERIENCE_PRESENTATION, presentationForProduct, publicLocationPath } from '~/utils/product-presentation'
+import { publicLocationHomeSlugSql, publicLocationSql } from '~/server/utils/public-locations'
 import { formatMinorAmount } from '~/shared/prices'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { listCollections, listOrganizationProducts, publicProduct } from '~/server/utils/product-management'
@@ -271,12 +272,12 @@ async function hydrateBlocks(
     defaultServices ? listOrganizationProducts(db, { organizationId, kind: 'service', publishedOnly: true, env }).then(products => products.map(publicProduct)) : [],
     collectionIds.size || productIds.size || homepage || defaultServices ? loadTenantPageProductCatalog(db, organizationId, locale, localizations, env) : undefined,
     locationIds.size || defaultLocationGrid
-      ? queryAll<{ id: string; title: string; slug: string; address: string | null; description: string | null; short_description: string | null; asset_id: string | null; public_url: string | null; thumbnail_url: string | null; kind: string | null; alt_text: string | null }>(db, `
-          SELECT bl.id, bl.title, bl.slug, bl.address, bl.description, bl.short_description, ma.id AS asset_id, ma.public_url, ma.thumbnail_url, ma.kind, ma.alt_text
+      ? queryAll<{ id: string; title: string; slug: string; home_slug: string | null; address: string | null; description: string | null; short_description: string | null; asset_id: string | null; public_url: string | null; thumbnail_url: string | null; kind: string | null; alt_text: string | null }>(db, `
+          SELECT bl.id, bl.title, bl.slug, ${publicLocationHomeSlugSql('bl')} AS home_slug, bl.address, bl.description, bl.short_description, ma.id AS asset_id, ma.public_url, ma.thumbnail_url, ma.kind, ma.alt_text
             FROM business_locations bl
             LEFT JOIN media_placements mp ON mp.organization_id = bl.organization_id AND mp.owner_type = 'business_location' AND mp.owner_id = bl.id AND mp.slot = 'hero' AND mp.sort_order = 0 AND mp.status = 'active'
             LEFT JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = bl.organization_id AND ma.status = 'active'
-           WHERE bl.organization_id = ? AND bl.status = 'active' AND (? = 1 OR bl.id IN (SELECT value FROM json_each(?)))
+           WHERE bl.organization_id = ? AND bl.status = 'active' AND ((? = 1 AND ${publicLocationSql('bl')}) OR bl.id IN (SELECT value FROM json_each(?)))
            ORDER BY bl.title, bl.id
         `, [organizationId, defaultLocationGrid ? 1 : 0, d1JsonStringSet([...locationIds])])
       : [],
@@ -483,7 +484,10 @@ async function hydrateBlocks(
           // above the title, and the item carried everything except that.
           ...(addressVisible ? { city: addressPlaceName(location.address) || undefined, address: formatPostalAddress(location.address) || undefined } : {}),
           description: location.short_description || location.description || undefined,
-          url: template.slug === 'blawby' ? pagePath === '/contact' ? undefined : '/contact' : 'public_path' in location && typeof location.public_path === 'string' ? location.public_path : `/locations/${location.slug}`,
+          // A location that is one home is reached as that home.
+          url: template.slug === 'blawby' ? pagePath === '/contact' ? undefined : '/contact'
+            : location.home_slug ? `${localizations ? `/${locale}` : ''}${publicLocationPath(location)}`
+              : 'public_path' in location && typeof location.public_path === 'string' ? location.public_path : publicLocationPath(location),
           label: locationCopy.visitLocationCta,
           media: location.asset_id
             ? projectLocalizedMediaAlt([{ asset_id: location.asset_id, slot: 'hero', public_url: location.public_url, thumbnail_url: location.thumbnail_url, kind: location.kind, alt_text: location.alt_text }], localizations ?? [])

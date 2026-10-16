@@ -115,6 +115,7 @@
   "saya.common.view_dish": "Xem món",
   "saya.common.view_experience": "Xem trải nghiệm",
   "saya.common.view_item": "Xem mục",
+  "saya.common.view_stay": "Xem chỗ ở",
   "saya.contact_page.about_product": "Về {product}:",
   "saya.contact_page.address": "Địa chỉ",
   "saya.contact_page.anything_not_location_specific": "Những vấn đề không thuộc riêng một chi nhánh.",
@@ -510,5 +511,8 @@
   "stay.error_min_nights": "Kỳ lưu trú vào những ngày này tối thiểu {count} đêm.",
   "stay.error_max_nights": "Kỳ lưu trú vào những ngày này tối đa {count} đêm.",
   "stay.error_no_check_in": "Không thể nhận phòng vào ngày đó.",
-  "stay.error_no_check_out": "Không thể trả phòng vào ngày đó."
+  "stay.error_no_check_out": "Không thể trả phòng vào ngày đó.",
+  "saya.footer.stays": "Chỗ ở",
+  "saya.stays.collection_title": "Chỗ ở của {organization}",
+  "saya.stays.meta_description": "Chỗ ở bạn có thể đặt với {organization}."
 }

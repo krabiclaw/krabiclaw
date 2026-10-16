@@ -261,16 +261,19 @@ export type ReconcileProductInput = CreateProductInput & { product_id?: string }
 /**
  * The public surfaces a catalog reaches guests through.
  *
- * Three, because guests read three different things: a restaurant's dishes
- * are its Menu, anything a guest books a seat on is an Experience, and the
- * goods a merchant sells are Products. One Product model, named on the page
- * the way the customer says it.
+ * Four, because guests read four different things: a restaurant's dishes
+ * are its Menu, anything a guest books a seat on is an Experience, a place a
+ * guest sleeps is a Place to stay, and the goods a merchant sells are
+ * Products. One Product model, named on the page the way the customer says it.
  */
-export type ProductSurface = 'menu' | 'products' | 'experiences'
+export type ProductSurface = 'menu' | 'products' | 'experiences' | 'stays'
+
+/** The surfaces whose items have a page of the site's own, named by the item's slug alone. */
+export type SiteProductSurface = 'experiences' | 'stays'
 
 export interface ProductPresentation {
   feature: 'products'
-  collectionPath: '/menu' | '/products' | '/experiences' | '/schedule'
+  collectionPath: '/menu' | '/products' | '/experiences' | '/stays' | '/schedule'
   locationCollectionSegment: ProductSurface
   productPath: (_locationSlug: string, _productSlug: string) => string
   collectionLabel: 'Menu' | 'Products' | 'Experiences' | 'Consultations' | 'Services' | 'Places to stay'

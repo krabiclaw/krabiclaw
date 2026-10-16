@@ -1,4 +1,5 @@
 import { STAY_LISTING_SCHEMA } from './stays'
+import { presentationForProduct } from '~/utils/product-presentation'
 import type { McpToolDefinition } from './shared'
 import { HTTPError } from 'nitro'
 import { pageInfoObject, paginationInputSchema, resolvedMediaAssetObject, organizationTool } from './shared'
@@ -387,7 +388,7 @@ async function productResponse(ctx: McpExecutorContext, product: Product) {
   const [hydrated] = await hydrateProductMedia(ctx.organization.db, ctx.organization.organizationId, [product])
   const slug = ctx.organization.organizationSlug
   const value = hydrated!
-  const path = value.kind === 'experience' ? `/experiences/${encodeURIComponent(value.slug)}` : value.page?.path ?? null
+  const path = value.kind === 'experience' || value.kind === 'stay' ? presentationForProduct(null, value).productPath('', value.slug) : value.page?.path ?? null
   const readiness = value.kind === 'experience' || value.kind === 'stay' || value.booking ? await productBookingReadiness(ctx.organization.db, ctx.organization.organizationId, value, { env: ctx.organization.env }) : null
   const published = path && await queryFirst(ctx.organization.db, `SELECT p.id FROM products p
     JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id

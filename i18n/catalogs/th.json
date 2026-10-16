@@ -115,6 +115,7 @@
   "saya.common.view_dish": "ดูเมนูนี้",
   "saya.common.view_experience": "ดูประสบการณ์",
   "saya.common.view_item": "ดูรายการ",
+  "saya.common.view_stay": "ดูที่พัก",
   "saya.contact_page.about_product": "เกี่ยวกับ {product}:",
   "saya.contact_page.address": "ที่อยู่",
   "saya.contact_page.anything_not_location_specific": "เรื่องที่ไม่เกี่ยวกับสาขาโดยตรง",
@@ -510,5 +511,8 @@
   "stay.error_min_nights": "การเข้าพักในวันที่เหล่านี้ต้องพักอย่างน้อย {count} คืน",
   "stay.error_max_nights": "การเข้าพักในวันที่เหล่านี้พักได้สูงสุด {count} คืน",
   "stay.error_no_check_in": "ไม่สามารถเช็กอินในวันนั้นได้",
-  "stay.error_no_check_out": "ไม่สามารถเช็กเอาต์ในวันนั้นได้"
+  "stay.error_no_check_out": "ไม่สามารถเช็กเอาต์ในวันนั้นได้",
+  "saya.footer.stays": "ที่พัก",
+  "saya.stays.collection_title": "ที่พักของ {organization}",
+  "saya.stays.meta_description": "ที่พักที่จองได้กับ {organization}"
 }

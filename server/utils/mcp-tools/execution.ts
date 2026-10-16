@@ -152,18 +152,41 @@ export function toolFileReference(value: unknown, key: string): ToolFileReferenc
   };
 }
 
+const MAX_ATTACHMENT_REDIRECTS = 5;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+// Redirects are followed by hand so every hop passes the same address checks
+// as the URL the client supplied; fetch's own following would skip them.
 async function fetchToolFile(file: ToolFileReference): Promise<Response> {
-  const safeDownloadUrl = assertSafeDownloadUrl(file.download_url, `Attachment ${file.file_id}`);
-  try {
-    return await fetch(safeDownloadUrl, {
-      redirect: "manual",
-    });
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : "unknown network error";
-    throw mcpProtocolError(
-      MCP_ERROR.invalidParams,
-      `Failed to download attachment ${file.file_id}: ${reason}`,
-    );
+  const label = `Attachment ${file.file_id}`;
+  let url = assertSafeDownloadUrl(file.download_url, label);
+  for (let redirects = 0; ; redirects += 1) {
+    let response: Response;
+    try {
+      response = await fetch(url, { redirect: "manual" });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "unknown network error";
+      throw mcpProtocolError(
+        MCP_ERROR.invalidParams,
+        `Failed to download attachment ${file.file_id}: ${reason}`,
+      );
+    }
+    if (!REDIRECT_STATUSES.has(response.status)) return response;
+    await response.body?.cancel();
+    const location = response.headers.get("location");
+    if (!location) {
+      throw mcpProtocolError(
+        MCP_ERROR.invalidParams,
+        `Failed to download attachment ${file.file_id}: ${response.status} without a Location header`,
+      );
+    }
+    if (redirects >= MAX_ATTACHMENT_REDIRECTS) {
+      throw mcpProtocolError(
+        MCP_ERROR.invalidParams,
+        `Failed to download attachment ${file.file_id}: more than ${MAX_ATTACHMENT_REDIRECTS} redirects`,
+      );
+    }
+    url = assertSafeDownloadUrl(new URL(location, url).toString(), `${label} redirect`);
   }
 }
 

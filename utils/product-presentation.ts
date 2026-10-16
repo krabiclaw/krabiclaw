@@ -1,4 +1,4 @@
-import type { Collection, Product, ProductPresentation, ProductSurface } from '~/server/types/products'
+import type { Collection, Product, ProductPresentation, ProductSurface, SiteProductSurface } from '~/server/types/products'
 import { normalizeVertical } from '~/utils/vertical-copy'
 import { isMediaCategory, type MediaCategory } from '~/shared/media-placement-contract'
 import { organizationSupportsBlawbyTemplate } from '~/utils/template-registry'
@@ -9,7 +9,7 @@ export function isExperience(product: Pick<Product, 'kind'>): boolean {
 }
 
 export function productSurfaceOf(_vertical: string | null | undefined, product: Pick<Product, 'kind'>): ProductSurface {
-  return product.kind === 'experience' ? 'experiences' : product.kind === 'dish' ? 'menu' : 'products'
+  return product.kind === 'experience' ? 'experiences' : product.kind === 'dish' ? 'menu' : product.kind === 'stay' ? 'stays' : 'products'
 }
 
 /**
@@ -36,20 +36,68 @@ export const EXPERIENCE_PRESENTATION: ProductPresentation = {
 }
 
 /**
- * A place to stay reads the same on every vertical. It is listed among its
- * location's products, and schema.org calls it an Accommodation.
+ * A place to stay reads the same on every vertical. Its page is the site's,
+ * named by its own slug: a home is the listing a guest books, not a branch's
+ * product. schema.org calls it an Accommodation.
  */
 export const STAY_PRESENTATION: ProductPresentation = {
   feature: 'products',
-  collectionPath: '/products',
-  locationCollectionSegment: 'products',
-  productPath: (locationSlug, productSlug) => `/locations/${encodeURIComponent(locationSlug)}/products/${encodeURIComponent(productSlug)}`,
+  collectionPath: '/stays',
+  locationCollectionSegment: 'stays',
+  productPath: (_locationSlug, productSlug) => `/stays/${encodeURIComponent(productSlug)}`,
   collectionLabel: 'Places to stay',
   itemLabel: 'Place to stay',
   itemLabelPlural: 'Places to stay',
   collectionGroupLabel: 'Collection',
   collectionGroupLabelPlural: 'Collections',
   structuredDataType: 'Accommodation',
+}
+
+/**
+ * The catalog sections a site's navigation offers, in order, each only when
+ * the site has something on it. Header, footer and sitemap read this one list.
+ */
+export function catalogNavigation(sections: Partial<Record<ProductSurface, boolean>> | null): Array<{ surface: ProductSurface, path: string, labelKey: string }> {
+  const order: ProductSurface[] = ['menu', 'products', 'stays', 'experiences']
+  return order.filter(surface => sections?.[surface] === true)
+    .map(surface => ({ surface, path: presentationForSurface(null, surface).collectionPath, labelKey: `saya.footer.${surface}` }))
+}
+
+/** Where a location's items on one surface are listed. Homes have no branch index; they are listed site-wide. */
+export function locationSurfacePath(locationSlug: string, surface: ProductSurface): string {
+  return surface === 'stays' ? STAY_PRESENTATION.collectionPath : `/locations/${encodeURIComponent(locationSlug)}/${surface}`
+}
+
+/**
+ * A location's public page. A location that holds one home and nothing else
+ * is that home, so its page is the home's listing.
+ */
+export function publicLocationPath(location: { slug: string, home_slug?: string | null }): string {
+  return location.home_slug
+    ? STAY_PRESENTATION.productPath('', location.home_slug)
+    : `/locations/${encodeURIComponent(location.slug)}`
+}
+
+/** The site-wide item page a path names — /experiences/<slug> or /stays/<slug> — or null. */
+export function parseSiteProductPath(path: string): { surface: SiteProductSurface, slug: string } | null {
+  const match = /^\/(experiences|stays)\/([^/]+)$/.exec(path)
+  if (!match) return null
+  let slug: string
+  try {
+    slug = decodeURIComponent(match[2]!)
+  } catch (error) {
+    if (error instanceof URIError) return null
+    throw error
+  }
+  return { surface: match[1] as SiteProductSurface, slug }
+}
+
+/** The i18n key for a product card's call to action, by the product's own kind. */
+export function productCtaKey(kind: string | null | undefined): string {
+  return kind === 'experience' ? 'saya.common.view_experience'
+    : kind === 'dish' ? 'saya.common.view_dish'
+      : kind === 'stay' ? 'saya.common.view_stay'
+        : 'saya.common.view_item'
 }
 
 /** The surface this product is read on, and the paths and words that go with it. */
@@ -60,6 +108,7 @@ export function presentationForProduct(vertical: string | null | undefined, prod
 
 /** The words one surface owns: experiences read the same on every vertical. */
 export function presentationForSurface(vertical: string | null | undefined, surface: ProductSurface): ProductPresentation {
+  if (surface === 'stays') return STAY_PRESENTATION
   return surface === 'experiences' ? EXPERIENCE_PRESENTATION : surface === 'menu' ? requireProductPresentation('restaurant') : requireProductPresentation(normalizeVertical(vertical) === 'service' ? 'service' : 'experience')
 }
 
@@ -108,15 +157,21 @@ export function productLocationCollectionPath(vertical: string | null | undefine
   return `/locations/${encodeURIComponent(locationSlug)}/${presentation.locationCollectionSegment}`
 }
 
-/** Counts used to name the catalog’s menu, experience and product surfaces. */
+/** Counts used to name the catalog’s menu, experience, stay and product surfaces. */
 export interface CatalogCounts {
   total: number
   experiences: number
   dishes: number
+  stays: number
 }
 
 export function countCatalog(products: ReadonlyArray<Pick<Product, 'kind'>>): CatalogCounts {
-  return { total: products.length, experiences: products.filter(isExperience).length, dishes: products.filter(product => product.kind === 'dish').length }
+  return {
+    total: products.length,
+    experiences: products.filter(isExperience).length,
+    dishes: products.filter(product => product.kind === 'dish').length,
+    stays: products.filter(product => product.kind === 'stay').length,
+  }
 }
 
 /**
@@ -172,7 +227,8 @@ export function catalogSurfaces(vertical: string | null | undefined, counts: Cat
   const own = requireProductPresentation(vertical).locationCollectionSegment
   const surfaces: ProductSurface[] = []
   if (counts.dishes > 0) surfaces.push('menu')
-  if (counts.total > counts.experiences + counts.dishes) surfaces.push('products')
+  if (counts.total > counts.experiences + counts.dishes + counts.stays) surfaces.push('products')
+  if (counts.stays > 0) surfaces.push('stays')
   if (counts.experiences > 0) surfaces.push('experiences')
   return surfaces.length > 0 ? surfaces : [own]
 }
@@ -193,7 +249,7 @@ export function catalogSummary(vertical: string | null | undefined, counts: Cata
   if (counts.total === 0) return `Add your first ${presentationForSurface(vertical, surfaces[0]!).itemLabel.toLowerCase()}`
   return surfaces.map((surface) => {
     const words = presentationForSurface(vertical, surface)
-    const total = surface === 'experiences' ? counts.experiences : surface === 'menu' ? counts.dishes : counts.total - counts.experiences - counts.dishes
+    const total = surface === 'experiences' ? counts.experiences : surface === 'menu' ? counts.dishes : surface === 'stays' ? counts.stays : counts.total - counts.experiences - counts.dishes - counts.stays
     return `${total} ${(total === 1 ? words.itemLabel : words.itemLabelPlural).toLowerCase()}`
   }).join(' · ')
 }
@@ -201,7 +257,7 @@ export function catalogSummary(vertical: string | null | undefined, counts: Cata
 /** The shared catalog routes support every product type. */
 export function isCatalogSurface(vertical: string | null | undefined, segment: string): segment is ProductSurface {
   requireProductPresentation(vertical)
-  return segment === 'experiences' || segment === 'menu' || segment === 'products'
+  return segment === 'experiences' || segment === 'menu' || segment === 'products' || segment === 'stays'
 }
 
 /** Collections appear on each surface represented by their members. Empty collections remain editable. */

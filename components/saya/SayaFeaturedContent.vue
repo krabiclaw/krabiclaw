@@ -57,7 +57,7 @@
               <span>{{ item.price }}</span>
             </p>
             <span v-if="item.href" class="border-b border-current pb-0.5 text-xs uppercase tracking-widest text-default">
-              {{ item.ctaText || t('saya.common.view_dish') }} →
+              {{ item.ctaText || t('saya.common.view_item') }} →
             </span>
           </div>
         </div>

@@ -68,25 +68,26 @@ export async function usePublicProductDetail(routeKind: ProductSurface) {
   const route = useRoute()
   const requestEvent = useRequestEvent()
   const { id: organizationId } = useTenantOrganization().organization
-  // An Experience's page is site-wide: /experiences/<product-slug> names the
-  // Product in its only slug segment, where a vertical's product page names the
-  // branch first. Same payload either way, so one composable serves both.
+  // An Experience's and a home's page is site-wide: /experiences/<product-slug>
+  // and /stays/<product-slug> name the Product in their only slug segment, where
+  // a vertical's product page names the branch first. Same payload either way,
+  // so one composable serves both.
   const routeSlug = String(route.params.slug ?? '')
   const productSlugParam = String(route.params.productSlug ?? '')
-  const organizationWideExperience = routeKind === 'experiences' && productSlugParam === ''
-  const locationSlug = organizationWideExperience ? '' : routeSlug
-  const productSlug = organizationWideExperience ? routeSlug : productSlugParam
+  const siteWideSurface = (routeKind === 'experiences' || routeKind === 'stays') && productSlugParam === '' ? routeKind : null
+  const locationSlug = siteWideSurface ? '' : routeSlug
+  const productSlug = siteWideSurface ? routeSlug : productSlugParam
   const scope = computed(() => typeof route.query.location_id === 'string' ? route.query.location_id : null)
   const locale = typeof route.params.locale === 'string' ? route.params.locale : useState<string>('public-locale').value
   const localeRepresentations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
-  if (!organizationId || !productSlug || (!organizationWideExperience && !locationSlug)) throw createError({ statusCode: 404, statusMessage: 'Product not found', fatal: true })
+  if (!organizationId || !productSlug || (!siteWideSurface && !locationSlug)) throw createError({ statusCode: 404, statusMessage: 'Product not found', fatal: true })
 
   const { data, error } = await useAsyncData<PublicProductDetailPayload | null>(
     () => `public-product-${organizationId}-${locale}-${locationSlug}-${productSlug}-${scope.value ?? ''}`,
     async (_nuxtApp, { signal }) => {
       if (import.meta.server) {
         if (!requestEvent) throw createError({ statusCode: 500, statusMessage: 'Request context unavailable' })
-        const [{ cloudflareEnv }, { loadPublicExperienceDetail, loadPublicProductDetail, publicProductDetailPayload }] = await Promise.all([
+        const [{ cloudflareEnv }, { loadPublicSiteProductDetail, loadPublicProductDetail, publicProductDetailPayload }] = await Promise.all([
           import('~/server/utils/api-response'),
           import('~/server/utils/public-products'),
         ])
@@ -94,14 +95,14 @@ export async function usePublicProductDetail(routeKind: ProductSurface) {
         const db = env.DB
         if (!db) throw createError({ statusCode: 500, statusMessage: 'Database not available' })
         const previewAuthorized = Boolean(requestEvent.context.previewAuthorized)
-        const detail = organizationWideExperience
-          ? await loadPublicExperienceDetail(env, db, organizationId, previewAuthorized, productSlug, locale, scope.value)
+        const detail = siteWideSurface
+          ? await loadPublicSiteProductDetail(env, db, organizationId, siteWideSurface, previewAuthorized, productSlug, locale, scope.value)
           : await loadPublicProductDetail(env, db, organizationId, routeKind, previewAuthorized, locationSlug, productSlug, locale)
         if (!detail) return null
         return publicProductDetailPayload(db, env, detail)
       }
-      const path = organizationWideExperience
-        ? `/api/public/experiences/${encodeURIComponent(productSlug)}`
+      const path = siteWideSurface
+        ? `/api/public/${siteWideSurface}/${encodeURIComponent(productSlug)}`
         : `/api/public/locations/${encodeURIComponent(locationSlug)}/products/${encodeURIComponent(productSlug)}`
       return publicApiRequest(`${path}?locale=${encodeURIComponent(locale)}${scope.value ? `&location_id=${encodeURIComponent(scope.value)}` : ''}`, {
         signal,

@@ -219,7 +219,7 @@
             <NuxtLink
               v-for="loc in otherLocations"
               :key="loc.id"
-              :to="localePath(`/locations/${loc.slug}`)"
+              :to="localePath(publicLocationPath(loc))"
               class="block overflow-hidden border border-inverted/10 bg-inverted/5 no-underline transition hover:border-inverted/20"
             >
               <div class="aspect-video overflow-hidden bg-inverted/10">
@@ -280,7 +280,7 @@ import SocialPosts from '~/components/social/SocialPosts.vue'
 import { formatOpeningHours, getIsOpenNow, getActiveSpecialClosure, formatClosureMessage } from '~/utils/formatters'
 import { getTodayHoursLabel, schemaOpeningHours } from '~/shared/reservation-hours'
 import { formatProductMoney } from '~/utils/product-money'
-import { catalogSurfaces, countCatalog, presentationForProduct, productSurfaceOf } from '~/utils/product-presentation'
+import { catalogSurfaces, countCatalog, locationSurfacePath, presentationForProduct, productCtaKey, productSurfaceOf, publicLocationPath } from '~/utils/product-presentation'
 import { selectPrice, type Price } from '~/shared/prices'
 import { isCurrencyCode } from '~/shared/currencies'
 import type { Product } from '~/server/types/products'
@@ -317,6 +317,8 @@ const {
 // around a null location answered 200 with an empty shell — a soft 404 a
 // crawler indexes. The sibling menu and product indexes already refuse it.
 if (!location.value) throw createError({ statusCode: 404, statusMessage: 'Location not found' })
+// A location that is one home is that home: its page is the listing.
+if (location.value.home_slug) await navigateTo(localePath(publicLocationPath(location.value)), { redirectCode: 301 })
 const { posts: locationPosts } = await useSocialPostFeed(() => ({ locationId: location.value!.id }), { limit: 3 })
 
 const locationProducts = computed(() => products.value.filter(product =>
@@ -324,7 +326,7 @@ const locationProducts = computed(() => products.value.filter(product =>
 const productSurfaces = computed(() => catalogSurfaces((organization as ApiValue)?.vertical, countCatalog(locationProducts.value)))
 const productCollectionPath = computed(() => {
   if (!location.value) return null
-  return `/locations/${location.value.slug}/${productSurfaces.value[0]}`
+  return locationSurfacePath(location.value.slug, productSurfaces.value[0]!)
 })
 const locationMedia = (location: ApiRecord) => Array.isArray(location.media)
   ? (location.media as ApiRecord[]).find(item => item.slot === 'hero') ?? null
@@ -460,11 +462,11 @@ const collectionProductGroups = computed(() => {
         image: resolveSocialImageUrl(product.image),
         alt: product.image?.alt_text || product.name,
         href: localePath(presentation.productPath(slug.value, product.slug)),
-        ctaText: t(product.kind === 'experience' ? 'saya.common.view_experience' : product.kind === 'dish' ? 'saya.common.view_dish' : 'saya.common.view_item'),
+        ctaText: t(productCtaKey(product.kind)),
         unavailable: !product.active || offer === null,
       }]
     })
-    return items.length ? [{ surface, items, label: t(`saya.footer.${surface}`), path: `/locations/${location.value!.slug}/${surface}` }] : []
+    return items.length ? [{ surface, items, label: t(`saya.footer.${surface}`), path: locationSurfacePath(location.value!.slug, surface) }] : []
   })
 })
 

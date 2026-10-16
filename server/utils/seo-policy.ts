@@ -48,6 +48,7 @@ export const TENANT_ONLY_EXACT_ROUTES = new Set([
   '/qa',
   '/reservations',
   '/reviews',
+  '/stays',
 ])
 
 export const TENANT_ONLY_ROUTE_PREFIXES = [
@@ -62,6 +63,7 @@ export const TENANT_ONLY_ROUTE_PREFIXES = [
   '/qa/',
   '/reservations/',
   '/reviews/',
+  '/stays/',
 ] as const
 
 export interface RuntimeSeoConfig {

@@ -1541,7 +1541,7 @@ export async function readPublicStayHome(db: DbClient, organizationId: string, s
 }
 
 /** The published, active, located home `p` with stay settings `c`, as one predicate a write can repeat. */
-const PUBLIC_STAY_SQL = `p.kind = 'stay' AND p.active = 1
+export const PUBLIC_STAY_SQL = `p.kind = 'stay' AND p.active = 1
   AND EXISTS (SELECT 1 FROM product_publications pub WHERE pub.organization_id = p.organization_id AND pub.product_id = p.id AND pub.published = 1)
   AND EXISTS (SELECT 1 FROM product_locations pl JOIN business_locations l ON l.organization_id = pl.organization_id AND l.id = pl.location_id AND l.status = 'active'
     WHERE pl.organization_id = c.organization_id AND pl.product_id = c.product_id AND pl.location_id = c.location_id AND pl.active = 1 AND pl.published = 1)`

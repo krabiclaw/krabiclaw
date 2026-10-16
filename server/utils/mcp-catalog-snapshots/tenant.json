@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:7dbad7582d2e4b9730f8df2f12f46e213fcd309497a5dc0ead028593595094f1",
-  "documentationFingerprint": "sha256:6723d76cf6487e303ad720bc5a019e85deeb989034e77cf3d8a39d165c626543",
+  "fingerprint": "sha256:309abdbca789b148f73fc58a6c7bb04b07b6f5ecafd0c3896f4d8ad9eade037e",
+  "documentationFingerprint": "sha256:5156dddbac8dfea1fd7283439b5406aac757b554920920620051e7a0bc62af95",
   "tools": [
     {
       "name": "append_content_block",
@@ -98804,7 +98804,7 @@
     {
       "name": "update_location",
       "title": "Update location",
-      "description": "Update a location's own details: regular opening hours, temporary closures/special hours, and contact info. To change its hero media, call set_media with { owner_type: \"business_location\", owner_id: <location.id>, slot: \"hero\" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.",
+      "description": "Update a location's own details: its name, URL slug and descriptions, regular opening hours, temporary closures/special hours, and contact info. Renaming changes the location's slug, and so its public URL, unless slug is given in the same call. To change its hero media, call set_media with { owner_type: \"business_location\", owner_id: <location.id>, slot: \"hero\" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -98857,6 +98857,13 @@
           },
           "canonical_url": {
             "description": "Optional canonical URL override. Leave unset for the default self-referencing canonical.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "description": {
+            "description": "Long description shown on the location page. Pass null to clear it.",
             "type": [
               "string",
               "null"
@@ -99017,6 +99024,20 @@
               "null"
             ]
           },
+          "short_description": {
+            "description": "One-line summary shown on location cards. Pass null to clear it.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "slug": {
+            "description": "URL slug for the location page. Normalized, and suffixed -2, -3… when another location already uses it. Changes the public URL.",
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "\\S",
+            "type": "string"
+          },
           "special_hours": {
             "anyOf": [
               {
@@ -99131,8 +99152,23 @@
             ],
             "description": "Explicit dated hours or closures. Closure starts_on is required; ends_on is inclusive and null means indefinite. Dated hours replace regular hours; periods [] closes the date."
           },
+          "status": {
+            "description": "inactive takes the location and everything held there off the website and frees its plan slot; active puts it back, and is refused when every slot the plan covers is in use.",
+            "enum": [
+              "active",
+              "inactive"
+            ],
+            "type": "string"
+          },
           "timezone": {
             "description": "IANA time zone identifier for this location, e.g. Asia/Bangkok. Used to interpret opening hours and booking slots.",
+            "type": "string"
+          },
+          "title": {
+            "description": "Location name shown to guests. Changing it regenerates the slug from the new name unless slug is given in the same call.",
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "\\S",
             "type": "string"
           }
         },

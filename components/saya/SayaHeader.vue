@@ -18,30 +18,23 @@
         <!-- Desktop nav -->
         <nav data-saya-critical-nav class="hidden items-center gap-1 lg:flex" :aria-label="t('saya.header.nav_aria')">
           <NuxtLink
-            v-if="showProducts"
-            :to="localePath(productPresentation!.collectionPath)"
+            v-for="item in catalogLinks"
+            :key="item.surface"
+            :to="localePath(item.path)"
             class="rounded-full px-3 py-2 text-sm text-muted transition hover:bg-muted hover:text-default"
           >
-            {{ productCollectionLabel }}
+            {{ t(item.labelKey) }}
           </NuxtLink>
 
           <NuxtLink
-            v-if="showExperiences"
-            :to="localePath(EXPERIENCE_PRESENTATION.collectionPath)"
-            class="rounded-full px-3 py-2 text-sm text-muted transition hover:bg-muted hover:text-default"
-          >
-            {{ t('saya.footer.experiences') }}
-          </NuxtLink>
-
-          <NuxtLink
-            v-if="hasReservations"
+            v-if="sections?.reservations"
             :to="localePath('/reservations')"
             class="rounded-full px-3 py-2 text-sm text-muted transition hover:bg-muted hover:text-default"
           >
             {{ t('saya.header.reservations') }}
           </NuxtLink>
           <NuxtLink
-            v-if="locations.length > 1"
+            v-if="showLocations"
             :to="localePath('/locations')"
             class="rounded-full px-3 py-2 text-sm text-muted transition hover:bg-muted hover:text-default"
           >
@@ -81,17 +74,14 @@
               />
               <ArticleSidebar v-if="articleNav" :nav="articleNav" class="mb-3 border-b border-default pb-3" @navigate="closeMobileNav" />
               <nav class="grid gap-1" :aria-label="t('saya.header.mobile_nav_aria')">
-                <NuxtLink v-if="showProducts" :to="localePath(productPresentation!.collectionPath)" class="rounded-full px-4 py-3 text-sm font-semibold text-default hover:bg-muted" @click="closeMobileNav">
-                  {{ productCollectionLabel }}
+                <NuxtLink v-for="item in catalogLinks" :key="item.surface" :to="localePath(item.path)" class="rounded-full px-4 py-3 text-sm font-semibold text-default hover:bg-muted" @click="closeMobileNav">
+                  {{ t(item.labelKey) }}
                 </NuxtLink>
-                <NuxtLink v-if="showExperiences" :to="localePath(EXPERIENCE_PRESENTATION.collectionPath)" class="rounded-full px-4 py-3 text-sm font-semibold text-default hover:bg-muted" @click="closeMobileNav">
-                  {{ t('saya.footer.experiences') }}
-                </NuxtLink>
-                <NuxtLink v-if="locations.length > 1" :to="localePath('/locations')" class="rounded-full px-4 py-3 text-sm text-default hover:bg-muted" @click="closeMobileNav">
+                <NuxtLink v-if="showLocations" :to="localePath('/locations')" class="rounded-full px-4 py-3 text-sm text-default hover:bg-muted" @click="closeMobileNav">
                   {{ t('saya.header.locations') }}
                 </NuxtLink>
                 <div class="my-1 border-t border-default" />
-                <NuxtLink v-if="hasReservations" :to="localePath('/reservations')" class="rounded-full px-4 py-3 text-sm text-default hover:bg-muted" @click="closeMobileNav">
+                <NuxtLink v-if="sections?.reservations" :to="localePath('/reservations')" class="rounded-full px-4 py-3 text-sm text-default hover:bg-muted" @click="closeMobileNav">
                   {{ t('saya.header.reservations') }}
                 </NuxtLink>
                 <NuxtLink :to="localePath('/contact')" class="rounded-full px-4 py-3 text-sm text-default hover:bg-muted" @click="closeMobileNav">
@@ -129,16 +119,15 @@ import { getVerticalCopy } from '~/utils/vertical-copy'
 import ArticleSidebar from '~/components/blog/ArticleSidebar.vue'
 import PlatformCommandSearchTrigger from '~/components/platform/search/PlatformCommandSearchTrigger.vue'
 import { articleNavKey } from '~/composables/useArticleNav'
-import { EXPERIENCE_PRESENTATION, resolveProductPresentation } from '~/utils/product-presentation'
+import { catalogNavigation } from '~/utils/product-presentation'
+import type { PublicShellPayload } from '~/utils/public-resource-contracts'
 
 // Data comes from layouts/saya.vue, which already owns the single shared
 // bootstrap/tenant-site fetch — header is presentation-only, not a fetcher.
 const props = defineProps<{
   organization: Organization | null
   locations: ApiRecord[]
-  hasProducts: boolean
-  hasBookableProducts: boolean
-  hasReservations: boolean
+  sections: PublicShellPayload['sections'] | null
 }>()
 
 const i18n = useI18n() as ApiValue as I18nComposable
@@ -180,18 +169,15 @@ onUnmounted(() => {
 
 const restaurantName = computed(() => props.organization?.name?.trim() || '')
 
-const productPresentation = computed(() => resolveProductPresentation(props.organization?.vertical))
-const showProducts = computed(() => props.hasProducts && productPresentation.value !== null)
-// Two surfaces, each offered only when the site has something on it: what the
-// merchant sells, and what a guest books a seat on.
-const showExperiences = computed(() => props.hasBookableProducts)
-const productCollectionLabel = computed(() => productPresentation.value?.locationCollectionSegment === 'menu'
-  ? t('saya.header.menu')
-  : t('saya.footer.products'))
+// Each section is offered only when the site has something on it.
+const catalogLinks = computed(() => catalogNavigation(props.sections))
+// A location that is one home is reached as that home, so the index of
+// locations is offered only when more than one location has a page of its own.
+const showLocations = computed(() => props.locations.filter(location => !location.home_slug).length > 1)
 const primaryCtaPath = computed(() => {
   const path = verticalCopy.value.ctaRoute
-  return path === '/reservations' ? (props.hasReservations ? path : '')
-    : path === '/experiences' ? (props.hasBookableProducts ? path : '') : path
+  return path === '/reservations' ? (props.sections?.reservations ? path : '')
+    : path === '/experiences' ? (props.sections?.experiences ? path : '') : path
 })
 const primaryCtaLabel = computed(() => verticalCopy.value.reserveCta)
 

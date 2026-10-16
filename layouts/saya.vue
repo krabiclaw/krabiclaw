@@ -20,9 +20,7 @@
     <SayaHeader
       :organization="shellOrganization"
       :locations="locations"
-      :has-products="shell.hasProducts.value"
-      :has-bookable-products="shell.hasBookableProducts.value"
-      :has-reservations="shell.hasReservations.value"
+      :sections="shell.sections.value"
     />
     <main class="grow" :data-route-shell="route.path">
       <slot />
@@ -31,9 +29,7 @@
       :organization="shellOrganization"
       :locations="footerLocations"
       :error="bootstrapError"
-      :has-products="shell.hasProducts.value"
-      :has-bookable-products="shell.hasBookableProducts.value"
-      :has-reservations="shell.hasReservations.value"
+      :sections="shell.sections.value"
     />
   </div>
 </template>
