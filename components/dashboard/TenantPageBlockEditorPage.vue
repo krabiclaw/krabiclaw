@@ -44,7 +44,7 @@
     />
   </DashboardLeafPanel>
 
-  <DashboardIndexPanel v-else id="organization-page-block" :title="blockLabel" :auto-open="navigationGroups[0]?.items.find(item => item.to)?.to ?? null" :create="newBlock ? firstStep : null">
+  <DashboardIndexPanel v-else id="organization-page-block" :title="blockLabel" :auto-open="navigationGroups[0]?.items.find(item => item.to)?.to ?? null" :create="newBlock && sections.length ? firstStep : null">
     <UFormField v-if="isNew && !loadError" label="Section type" required class="mb-6">
       <USelect
         :model-value="newType"
@@ -58,6 +58,10 @@
     </UFormField>
     <UAlert v-if="loadError || errorMessage" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="loadError ?? errorMessage" />
     <EditorNavigationList v-if="navigationGroups.length" :groups="navigationGroups" :active-item="level.child.value" />
+    <!-- A type with nothing to fill in, such as a divider, is made from its type alone. -->
+    <template v-if="isNew && newBlock && !sections.length" #footer>
+      <DashboardPanelFooter :save-label="saveLabel" :loading="saving" :disabled="walkSaveDisabled" @cancel="leaveNewBlock" @save="saveWalk" />
+    </template>
   </DashboardIndexPanel>
 </template>
 
@@ -263,6 +267,12 @@ async function save() {
   } finally {
     saving.value = false
   }
+}
+
+/** Cancel on a block being made from its type alone leaves the making, as dismissing a step does. */
+async function leaveNewBlock() {
+  revertDraft()
+  await navigateTo(level.to.value ?? '/dashboard')
 }
 
 function revertDraft() {
