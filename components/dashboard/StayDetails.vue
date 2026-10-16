@@ -14,8 +14,12 @@
         title="Overbooked"
         :description="`${channelName} confirmed this stay on nights another stay holds. Cancel this stay on ${channelName}, or cancel the other stay where it was booked.`"
       />
-      <UAlert v-if="guest.state === 'missing'" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" title="Guest name missing" description="This stay was made in KrabiClaw, which requires a guest name, but it has none." />
-      <h2 v-if="guest.state === 'named'" class="text-2xl font-semibold text-highlighted">{{ guest.name }}</h2>
+      <UAlert v-if="!personalScope && guest.state === 'missing'" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" title="Guest name missing" description="This stay was made in KrabiClaw, which requires a guest name, but it has none." />
+      <template v-if="personalScope && home">
+        <h2 class="text-2xl font-semibold text-highlighted">{{ home.name }}</h2>
+        <p class="mt-1 text-base text-muted">{{ home.organization_name }}</p>
+      </template>
+      <h2 v-else-if="guest.state === 'named'" class="text-2xl font-semibold text-highlighted">{{ guest.name }}</h2>
       <h2 v-else-if="guest.state === 'not-provided'" class="text-2xl font-semibold text-muted">Name not provided by {{ channelName }}</h2>
       <h2 v-else-if="guest.state === 'missing'" class="text-2xl font-semibold text-error">Guest name missing</h2>
       <p class="mt-1 text-base text-muted">{{ stayDates }} · {{ partyLabel }}</p>
@@ -28,7 +32,35 @@
         </div>
       </dl>
 
-      <template v-if="stay.owner === 'app'">
+      <!-- The policy the guest booked under, in Airbnb's words: what their own cancellation returns. -->
+      <template v-if="policy">
+        <h2 class="mt-8 text-xl font-semibold text-highlighted">Cancellation policy</h2>
+        <p class="mt-1 text-base text-highlighted">{{ policy.label }}</p>
+        <ul class="mt-2 space-y-1 text-base text-muted">
+          <li v-for="term in policy.terms" :key="term">{{ term }}</li>
+        </ul>
+      </template>
+
+      <!-- The Stripe payment the guest made on the site: its record and refunds are the payment's own screens. -->
+      <template v-if="!personalScope && stay.online_payment">
+        <h2 class="mt-8 text-xl font-semibold text-highlighted">Paid on your site</h2>
+        <p class="mt-1 text-base text-muted">{{ money(stay.online_payment.captured_minor) }}{{ stay.online_payment.refunded_minor ? ` · ${money(stay.online_payment.refunded_minor)} refunded` : '' }}</p>
+        <div class="mt-4 divide-y divide-default border-y border-default">
+          <NuxtLink :to="`${paymentPath}`" class="flex items-center gap-4 py-4">
+            <span class="min-w-0 flex-1 text-base font-medium text-highlighted">View payment</span>
+            <UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
+          </NuxtLink>
+          <NuxtLink v-if="manage && stay.online_payment.captured_minor > stay.online_payment.refunded_minor" :to="{ path: `${paymentPath}/refund`, query: { payment: stay.online_payment.payment_id } }" class="flex items-center gap-4 py-4">
+            <span class="min-w-0 flex-1 text-base font-medium text-highlighted">Send a refund</span>
+            <UIcon name="i-lucide-chevron-right" class="size-5 text-muted" />
+          </NuxtLink>
+        </div>
+      </template>
+
+      <template v-if="personalScope">
+        <UButton v-if="cancellation" class="mt-8" color="error" variant="soft" label="Cancel stay" :loading="busy === 'cancel'" @click="cancelAsGuest" />
+      </template>
+      <template v-else-if="stay.owner === 'app'">
         <h2 class="mt-8 text-xl font-semibold text-highlighted">Payments</h2>
         <p class="mt-1 text-sm text-muted">Money you received outside KrabiClaw. Recording it moves no money.</p>
         <ul v-if="stay.payments.length" class="mt-4 divide-y divide-default border-y border-default">
@@ -61,7 +93,7 @@
         </UForm>
         <UButton v-if="manage && stay.status !== 'cancelled'" class="mt-8" color="error" variant="soft" label="Cancel stay" :loading="busy === 'cancel'" @click="cancel" />
       </template>
-      <p v-else class="mt-8 text-base text-muted">{{ channelName }} collected payment for this stay. Change or cancel it on {{ channelName }}.</p>
+      <p v-else-if="!personalScope" class="mt-8 text-base text-muted">{{ channelName }} collected payment for this stay. Change or cancel it on {{ channelName }}.</p>
     </div>
   </component>
 </template>
@@ -69,7 +101,8 @@
 <script setup lang="ts">
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
 import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
-import type { StayDetail, StayPaymentMethod } from '~/server/domain/stays'
+import type { GuestStay, StayDetail, StayPaymentMethod } from '~/server/domain/stays'
+import { STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES } from '~/shared/stay-listing'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
 import { formatCalendarDate, localDateAt } from '~/utils/timezone'
@@ -79,15 +112,31 @@ const props = defineProps<{
   stayId: string
   /** Mounted inside the guest thread's leaf, which already owns the column and its padding. */
   embedded?: boolean
+  /** The guest's own stay, read and cancelled from their account; stayId is then its activity ID. */
+  personalScope?: boolean
 }>()
 const dashboardApi = useDashboardApi()
+const route = useRoute()
 const realtime = useDashboardInvalidations()
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 
 const isStay = (value: unknown): value is { stay: StayDetail; manage?: boolean } => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string'
-const { data, error, refresh } = await useAsyncData(`dashboard-stay:${props.stayId}`, () => dashboardApi(`/api/dashboard/stays/${encodeURIComponent(props.stayId)}`, { validate: isStay }))
+const isGuestStay = (value: unknown): value is GuestStay => isStay(value) && isRecord((value as Record<string, unknown>).home) && 'cancellation' in value
+const { data, error, refresh } = await useAsyncData(`${props.personalScope ? 'account' : 'dashboard'}-stay:${props.stayId}`, (): Promise<{ stay: StayDetail; manage?: boolean } | GuestStay> => props.personalScope
+  ? applicationFetch(`/api/account/stays/${encodeURIComponent(props.stayId)}`, { validate: isGuestStay })
+  : dashboardApi(`/api/dashboard/stays/${encodeURIComponent(props.stayId)}`, { validate: isStay }))
 const stay = computed(() => data.value?.stay ?? null)
-const manage = computed(() => data.value?.manage === true)
+const manage = computed(() => !props.personalScope && data.value !== null && 'manage' in data.value! && data.value.manage === true)
+const home = computed(() => data.value && 'home' in data.value ? data.value.home : null)
+const cancellation = computed(() => data.value && 'cancellation' in data.value ? data.value.cancellation : null)
+const policy = computed(() => {
+  const code = stay.value?.cancellation_policy
+  if (!code) return null
+  return code.startsWith('long_term_')
+    ? STAY_LONG_TERM_CANCELLATION_POLICIES[code.slice('long_term_'.length) as keyof typeof STAY_LONG_TERM_CANCELLATION_POLICIES]
+    : STAY_CANCELLATION_POLICIES[code as keyof typeof STAY_CANCELLATION_POLICIES]
+})
+const paymentPath = computed(() => stay.value?.online_payment ? `/dashboard/${route.params.orgSlug}/bookings/payment/${encodeURIComponent(stay.value.online_payment.payment_id)}` : '')
 watch(realtime.event, event => {
   if (event?.type === 'stay.changed' && (event.stayId === props.stayId || (event.stayId === null && event.productId === stay.value?.product_id))) void refresh()
 })
@@ -110,7 +159,7 @@ const guest = computed<GuestIdentity>(() => {
   const name = [value.guest_name, value.guest_surname].filter(Boolean).join(' ')
   return name ? { state: 'named', name } : { state: 'not-provided' }
 })
-const title = computed(() => guest.value.state === 'named' ? `${guest.value.name}’s stay` : 'Stay')
+const title = computed(() => props.personalScope ? 'Your stay' : guest.value.state === 'named' ? `${guest.value.name}’s stay` : 'Stay')
 const nights = computed(() => stay.value ? Math.round((Date.parse(`${stay.value.check_out_date}T00:00:00Z`) - Date.parse(`${stay.value.check_in_date}T00:00:00Z`)) / 86_400_000) : 0)
 const stayDates = computed(() => stay.value
   ? `${formatCalendarDate(stay.value.check_in_date, 'en')} – ${formatCalendarDate(stay.value.check_out_date, 'en')} · ${nights.value === 1 ? '1 night' : `${nights.value} nights`}`
@@ -136,7 +185,7 @@ const rows = computed(() => {
   const value = stay.value
   if (!value) return []
   return [
-    { label: 'Booked through', value: channelName.value },
+    ...(props.personalScope ? [] : [{ label: 'Booked through', value: channelName.value }]),
     { label: 'Total', value: money(value.total_minor) },
     ...(value.owner === 'app' ? [{ label: 'Paid', value: money(value.paid_minor) }] : []),
     ...(value.arrival_time ? [{ label: 'Arriving', value: value.arrival_time }] : []),
@@ -192,10 +241,41 @@ async function deletePayment(paymentId: string) {
   await run(paymentId, () => dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/payments/${encodeURIComponent(paymentId)}`, { method: 'DELETE', validate: isStay }), 'The payment could not be deleted')
 }
 
+// A stay paid on the site returns the guest's whole payment, as Airbnb's host cancellation does; the host approves that refund next.
 async function cancel() {
   const value = stay.value
   if (!value) return
-  if (!await confirmDialog.open({ title: guest.value.state === 'named' ? `Cancel ${guest.value.name}’s stay` : 'Cancel this stay', description: 'Its nights become available again. Record any refund as a payment.', confirmLabel: 'Cancel stay', cancelLabel: 'Keep stay' })) return
-  await run('cancel', () => dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/cancel`, { method: 'POST', validate: isStay, body: { expected_version: value.version } }), 'The stay could not be cancelled')
+  const held = value.online_payment ? value.online_payment.captured_minor - value.online_payment.refunded_minor : 0
+  const description = held > 0
+    ? `Its nights become available again and ${guest.value.state === 'named' ? guest.value.name : 'the guest'} is refunded ${money(held)} in full. You approve the refund next.`
+    : 'Its nights become available again. Record any refund as a payment.'
+  if (!await confirmDialog.open({ title: guest.value.state === 'named' ? `Cancel ${guest.value.name}’s stay` : 'Cancel this stay', description, confirmLabel: 'Cancel stay', cancelLabel: 'Keep stay' })) return
+  busy.value = 'cancel'
+  actionError.value = null
+  try {
+    await dashboardApi(`/api/dashboard/stays/${encodeURIComponent(value.id)}/cancel`, { method: 'POST', validate: isStay, body: { expected_version: value.version } })
+    await refresh()
+  } catch (cause) {
+    const approval = isRecord(cause) && isRecord(cause.data) && isRecord(cause.data.data) && typeof cause.data.data.financial_approval_url === 'string' ? cause.data.data.financial_approval_url : null
+    if (approval) await navigateTo(approval)
+    else actionError.value = getErrorMessage(cause, 'The stay could not be cancelled')
+  } finally {
+    busy.value = null
+  }
+}
+
+/** The guest cancels their own stay; the policy they booked under decides what comes back. */
+async function cancelAsGuest() {
+  const value = stay.value
+  const quote = cancellation.value
+  if (!value || !quote || !value.request_id || !policy.value) return
+  const description = quote.refund_minor === quote.paid_minor ? `You get back the full ${money(quote.paid_minor)}.`
+    : quote.refund_minor > 0 ? `Under the ${policy.value.label} policy you get back ${money(quote.refund_minor)} of the ${money(quote.paid_minor)} you paid.`
+      : `Under the ${policy.value.label} policy none of the ${money(quote.paid_minor)} you paid comes back.`
+  if (!await confirmDialog.open({ title: 'Cancel your stay?', description, confirmLabel: 'Cancel stay', cancelLabel: 'Keep stay' })) return
+  await run('cancel', () => applicationFetch('/api/account/cancel', {
+    method: 'POST', body: { request_id: value.request_id },
+    validate: (response: unknown): response is { success: true } => isRecord(response) && response.success === true,
+  }), 'Your stay could not be cancelled')
 }
 </script>

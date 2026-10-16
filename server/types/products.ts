@@ -1,4 +1,4 @@
-import type { StayAmenity, StayCancellationPolicy, StayLongTermCancellationPolicy, StayPropertyType } from '~/shared/stay-listing'
+import type { StayAmenity, StayCancellationPolicy, StayLongTermCancellationPolicy, StayPropertyType, StayPropertyTypeGroup } from '~/shared/stay-listing'
 import type { ResolvedMediaAsset } from '~/server/utils/media-asset-manager'
 import type { Price, PriceInput } from '~/shared/prices'
 import type { ProductDetails, ProductKind } from '~/shared/product-details'
@@ -74,7 +74,8 @@ export interface ProductStayConfig {
   check_out_time: string
   max_guests: number
   min_nights: number
-  /** What the home is, in Airbnb's property groups; null when the host has not said. */
+  /** What the home is: Airbnb's property group and a type in it, both or neither; null when the host has not said. */
+  property_type_group: StayPropertyTypeGroup | null
   property_type: StayPropertyType | null
   /** 0 is a studio. null when the host has not said. */
   bedrooms: number | null
@@ -93,7 +94,7 @@ export interface ProductStayConfig {
 }
 
 /** What a home is and offers; unsaid when a home is created without them. */
-export type StayListingField = 'property_type' | 'bedrooms' | 'beds' | 'bathrooms' | 'amenities' | 'cancellation_policy' | 'long_term_cancellation_policy'
+export type StayListingField = 'property_type_group' | 'property_type' | 'bedrooms' | 'beds' | 'bathrooms' | 'amenities' | 'cancellation_policy' | 'long_term_cancellation_policy'
 export type ProductStayConfigInput = Omit<ProductStayConfig, StayListingField> & Partial<Pick<ProductStayConfig, StayListingField>>
 
 /** Who looks after a product: workspace state the public site never carries. */

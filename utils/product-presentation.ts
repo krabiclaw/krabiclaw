@@ -57,10 +57,11 @@ export const STAY_PRESENTATION: ProductPresentation = {
  * The catalog sections a site's navigation offers, in order, each only when
  * the site has something on it. Header, footer and sitemap read this one list.
  */
-export function catalogNavigation(sections: Partial<Record<ProductSurface, boolean>> | null): Array<{ surface: ProductSurface, path: string, labelKey: string }> {
+/** The site's catalog surfaces with content, linked where the site's vertical lists them. */
+export function catalogNavigation(vertical: string | null | undefined, sections: Partial<Record<ProductSurface, boolean>> | null): Array<{ surface: ProductSurface, path: string, labelKey: string }> {
   const order: ProductSurface[] = ['menu', 'products', 'stays', 'experiences']
   return order.filter(surface => sections?.[surface] === true)
-    .map(surface => ({ surface, path: presentationForSurface(null, surface).collectionPath, labelKey: `saya.footer.${surface}` }))
+    .map(surface => ({ surface, path: presentationForSurface(vertical, surface).collectionPath, labelKey: `saya.footer.${surface}` }))
 }
 
 /** Where a location's items on one surface are listed. Homes have no branch index; they are listed site-wide. */

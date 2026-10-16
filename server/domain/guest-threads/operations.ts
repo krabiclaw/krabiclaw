@@ -457,7 +457,7 @@ async function executeSourceMutation(
     : null
   // Declining or cancelling a paid booking returns the payment in the same batch, once the operator approved it.
   const refundPlan = (plan.action === 'reject' || plan.action === 'cancel') && context.record
-    ? await visitRefundQueries(db,{action:plan.action,organizationId:context.thread.organization_id,actorUserId:input.actorUserId,subjectType:plan.kind,subjectId:context.record.id,authorizationId:input.financialAuthorizationId,financialWritesAllowed:input.financialWritesAllowed,note:input.body,entryId,now}) : {queries:[],guard:null}
+    ? await visitRefundQueries(db,{action:plan.action,organizationId:context.thread.organization_id,actorUserId:input.actorUserId,subjectType:plan.kind,subjectId:context.record.id,authorizationId:input.financialAuthorizationId,financialWritesAllowed:input.financialWritesAllowed,note:input.body,committed:{query:'EXISTS(SELECT 1 FROM activity_entries WHERE id=?)',params:[entryId]},now}) : {queries:[],guard:null}
   const queries = [
     operationEntryQuery(context, plan, input, entryId, dedupeKey, now, email,refundPlan.guard),
     sourceUpdateQuery(context, plan, input, entryId, now),

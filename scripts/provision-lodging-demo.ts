@@ -21,6 +21,7 @@
 // both are done the script stops before publishing, naming what is missing.
 
 import { parseArgs } from 'node:util'
+import type { StayPropertyType, StayPropertyTypeGroup } from '../shared/stay-listing.ts'
 
 const DEMO = {
   name: 'Saltleaf Stays',
@@ -48,7 +49,8 @@ interface DemoHome {
   weekend_price_minor: number
   holiday_price_minor: number
   description: string
-  property_type: 'house' | 'apartment' | 'secondary_unit'
+  property_type_group: StayPropertyTypeGroup
+  property_type: StayPropertyType
   bedrooms: number
   beds: number
   bathrooms: number
@@ -81,11 +83,11 @@ const HOMES: DemoHome[] = [
     weekend_price_minor: 14_500,
     holiday_price_minor: 17_500,
     description: 'A bright studio for two a short walk from the beach, with a queen bed, a kitchenette, fast Wi-Fi and a desk. Fictional demo listing.',
-    property_type: 'apartment',
+    property_type_group: 'apartments', property_type: 'apartment',
     bedrooms: 0,
     beds: 1,
     bathrooms: 1,
-    amenities: ['wifi', 'dedicated_workspace', 'air_conditioning', 'kitchen', 'refrigerator', 'microwave', 'coffee_maker', 'cooking_basics', 'dishes_and_silverware', 'tv', 'beach_access', 'self_check_in', 'hot_water', 'essentials', 'bed_linens', 'smoke_alarm', 'carbon_monoxide_alarm', 'fire_extinguisher', 'first_aid_kit'],
+    amenities: ['wireless_internet', 'laptop_friendly_workspace', 'ac', 'kitchen', 'refrigerator', 'microwave', 'coffee_maker', 'cooking_basics', 'dishes_and_silverware', 'tv', 'beach_access', 'hot_water', 'essentials', 'bed_linens', 'smoke_detector', 'carbon_monoxide_detector', 'fire_extinguisher', 'first_aid_kit'],
     cancellation_policy: 'moderate',
     check_in_method: 'smart_lock',
     check_in_instructions: 'Check-in is from 15:00. Your door code for the smart lock arrives by message on your arrival day; enter it on the keypad and press the lock button.',
@@ -108,11 +110,11 @@ const HOMES: DemoHome[] = [
     weekend_price_minor: 22_000,
     holiday_price_minor: 26_500,
     description: 'Three bedrooms around a private saltwater pool, ten minutes on foot from Ao Nang beach. Fictional demo listing.',
-    property_type: 'house',
+    property_type_group: 'houses', property_type: 'house',
     bedrooms: 3,
     beds: 4,
     bathrooms: 3,
-    amenities: ['wifi', 'air_conditioning', 'pool', 'kitchen', 'washer', 'free_parking', 'patio', 'bbq_grill', 'hot_water', 'essentials', 'smoke_alarm', 'first_aid_kit'],
+    amenities: ['wireless_internet', 'ac', 'pool', 'kitchen', 'washer', 'free_parking', 'patio_or_belcony', 'bbq_area', 'hot_water', 'essentials', 'smoke_detector', 'first_aid_kit'],
     cancellation_policy: 'moderate',
     check_in_method: 'in_person',
     check_in_instructions: 'Collect your keys from the Saltleaf guest desk on Ao Nang Beach Road between 15:00 and 21:00. The villa gate code is sent the morning you arrive.',
@@ -135,11 +137,11 @@ const HOMES: DemoHome[] = [
     weekend_price_minor: 11_500,
     holiday_price_minor: 14_000,
     description: 'A one-bedroom loft with a desk, fast Wi-Fi and a balcony over the rice fields, a short ride from Batu Bolong beach. Fictional demo listing.',
-    property_type: 'apartment',
+    property_type_group: 'apartments', property_type: 'apartment',
     bedrooms: 1,
     beds: 1,
     bathrooms: 1,
-    amenities: ['wifi', 'dedicated_workspace', 'air_conditioning', 'kitchen', 'coffee_maker', 'self_check_in', 'long_term_stays', 'hot_water', 'essentials', 'smoke_alarm'],
+    amenities: ['wireless_internet', 'laptop_friendly_workspace', 'ac', 'kitchen', 'coffee_maker', 'long_term_stays_allowed', 'hot_water', 'essentials', 'smoke_detector'],
     cancellation_policy: 'flexible',
     check_in_method: 'lockbox',
     check_in_instructions: 'Self check-in: the lockbox is beside the blue door at the top of the stairs. Its code arrives by message on your arrival day.',
@@ -162,11 +164,11 @@ const HOMES: DemoHome[] = [
     weekend_price_minor: 16_500,
     holiday_price_minor: 21_000,
     description: 'Two bedrooms and a plunge pool under the palms, with bikes for the ride to the beach. Fictional demo listing.',
-    property_type: 'secondary_unit',
+    property_type_group: 'secondary_units', property_type: 'guesthouse',
     bedrooms: 2,
     beds: 2,
     bathrooms: 2,
-    amenities: ['wifi', 'air_conditioning', 'pool', 'kitchen', 'outdoor_shower', 'outdoor_dining', 'beach_access', 'hot_water', 'essentials', 'smoke_alarm', 'fire_extinguisher'],
+    amenities: ['wireless_internet', 'ac', 'pool', 'kitchen', 'alfresco_shower', 'alfresco_dining', 'beach_access', 'hot_water', 'essentials', 'smoke_detector', 'fire_extinguisher'],
     cancellation_policy: 'firm',
     check_in_method: 'keypad',
     check_in_instructions: 'The casita door has a keypad. Its code arrives by message on your arrival day; send your arrival time through your booking messages a day ahead.',
@@ -279,7 +281,7 @@ async function main() {
       description: spec.description, timezone: spec.timezone, check_in_time: spec.check_in_time, check_out_time: spec.check_out_time,
       max_guests: spec.max_guests, min_nights: spec.min_nights, base_price_minor: spec.base_price_minor,
       address: { address: spec.address, city: spec.city, state: spec.state, country: spec.country, zip_code: spec.zip_code },
-      property_type: spec.property_type, bedrooms: spec.bedrooms, beds: spec.beds, bathrooms: spec.bathrooms, amenities: spec.amenities,
+      property_type_group: spec.property_type_group, property_type: spec.property_type, bedrooms: spec.bedrooms, beds: spec.beds, bathrooms: spec.bathrooms, amenities: spec.amenities,
       cancellation_policy: spec.cancellation_policy, check_in_method: spec.check_in_method, check_in_instructions: spec.check_in_instructions,
       checkout_instructions: [{ task: 'gather_towels', details: null }, { task: 'turn_off', details: 'Air conditioning and lights' }, { task: 'lock_up', details: null }],
     })

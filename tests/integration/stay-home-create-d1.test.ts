@@ -95,7 +95,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     const home = {
       name: 'Cliff Cabin', timezone: 'America/Denver', currency: 'USD', base_price_minor: 189_50, base_price_tax_behavior: 'unspecified', check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, check_in_instructions: null, assigned_member_id: null, assigned_team_id: null, channel: null, photos: [],
       address: { address: '1 Cliff Rd', city: 'Moab', state: 'UT', country: 'US', zip_code: '84532' }, latitude: null, longitude: null,
-      description: '', published: false, property_type: null, bedrooms: null, beds: null, bathrooms: null, amenities: [], cancellation_policy: null, long_term_cancellation_policy: null, check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
+      description: '', published: false, property_type_group: null, property_type: null, bedrooms: null, beds: null, bathrooms: null, amenities: [], cancellation_policy: null, long_term_cancellation_policy: null, check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
     }
     const keyedCabin = { ...cabin, idempotency_key: 'a'.repeat(200) }
     const created = await call(owner, 'POST', keyedCabin)
@@ -145,7 +145,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     const changed = {
       product_id: made.product_id, location_id: made.location_id, name: 'Cliff Cabin North', timezone: 'America/Los_Angeles', currency: 'USD', base_price_minor: 210_00, base_price_tax_behavior: 'unspecified',
       check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 3, check_in_instructions: null, assigned_member_id: 'm-helper', assigned_team_id: null, channel: null, photos: [],
-      address: home.address, latitude: null, longitude: null, description: '', published: false, property_type: null, bedrooms: null, beds: null, bathrooms: null, amenities: [], cancellation_policy: null, long_term_cancellation_policy: null, check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
+      address: home.address, latitude: null, longitude: null, description: '', published: false, property_type_group: null, property_type: null, bedrooms: null, beds: null, bathrooms: null, amenities: [], cancellation_policy: null, long_term_cancellation_policy: null, check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
     }
     assert.deepEqual(edited.body, { home: changed, channel_push: null })
     // Read back through other paths: the homes list, the location, and the member now assigned seeing it.
@@ -158,15 +158,16 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.deepEqual(unpriced.body, { home: { ...changed, base_price_minor: null, base_price_tax_behavior: null, assigned_member_id: null }, channel_push: null })
 
     // What the home is and offers, and its private arrival guide: each refused value names its field and changes nothing.
-    assert.deepEqual(refusal(await edit(owner, { property_type: 'castle' })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.property_type' })
+    assert.deepEqual(refusal(await edit(owner, { property_type_group: 'apartments', property_type: 'castle' })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.property_type' })
+    assert.deepEqual(refusal(await edit(owner, { property_type: 'cabin' })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.property_type' })
     assert.deepEqual(refusal(await edit(owner, { bathrooms: 1.25 })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.bathrooms' })
-    assert.deepEqual(refusal(await edit(owner, { amenities: ['wifi', 'jetpack'] })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.amenities' })
+    assert.deepEqual(refusal(await edit(owner, { amenities: ['wireless_internet', 'jetpack'] })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.amenities' })
     assert.deepEqual(refusal(await edit(owner, { check_in_method: 'drone' })), { status: 422, code: 'INVALID_DETAIL', field: 'check_in_method' })
     assert.deepEqual(refusal(await edit(owner, { checkout_instructions: [{ task: 'lock_up', details: null }, { task: 'lock_up', details: null }] })), { status: 422, code: 'INVALID_DETAIL', field: 'checkout_instructions[1].task' })
     assert.deepEqual(refusal(await edit(owner, { latitude: 38.57 })), { status: 422, code: 'INVALID_DETAIL', field: 'longitude' })
     assert.deepEqual(refusal(await edit(owner, { latitude: 91, longitude: -109.55 })), { status: 422, code: 'INVALID_DETAIL', field: 'latitude' })
     const described = await edit(owner, {
-      description: '  A cabin above the canyon.  ', property_type: 'house', bedrooms: 2, beds: 3, bathrooms: 1.5, amenities: ['wifi', 'air_conditioning', 'kitchen'],
+      description: '  A cabin above the canyon.  ', property_type_group: 'houses', property_type: 'cabin', bedrooms: 2, beds: 3, bathrooms: 1.5, amenities: ['wireless_internet', 'ac', 'kitchen'],
       cancellation_policy: 'firm', long_term_cancellation_policy: 'strict', check_in_method: 'keypad', check_in_instructions: 'Code is on the booking.',
       wifi_network: 'Cliff', wifi_password: ' pass word ', directions: 'Second gravel road on the left.', house_manual: 'Heater is in the hall.',
       checkout_instructions: [{ task: 'lock_up', details: null }, { task: 'additional', details: 'Leave keys on the table.' }],
@@ -174,9 +175,9 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     })
     const listed = {
       ...changed, base_price_minor: null, base_price_tax_behavior: null, assigned_member_id: null,
-      description: 'A cabin above the canyon.', property_type: 'house', bedrooms: 2, beds: 3, bathrooms: 1.5,
+      description: 'A cabin above the canyon.', property_type_group: 'houses', property_type: 'cabin', bedrooms: 2, beds: 3, bathrooms: 1.5,
       // Amenities read in catalog order, whatever order they were sent in.
-      amenities: ['air_conditioning', 'wifi', 'kitchen'], cancellation_policy: 'firm', long_term_cancellation_policy: 'strict',
+      amenities: ['ac', 'kitchen', 'wireless_internet'], cancellation_policy: 'firm', long_term_cancellation_policy: 'strict',
       check_in_method: 'keypad', check_in_instructions: 'Code is on the booking.', wifi_network: 'Cliff', wifi_password: ' pass word ',
       directions: 'Second gravel road on the left.', house_manual: 'Heater is in the hall.',
       checkout_instructions: [{ task: 'lock_up', details: null }, { task: 'additional', details: 'Leave keys on the table.' }],
