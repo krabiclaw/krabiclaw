@@ -1,5 +1,5 @@
 <template>
-  <section class="space-y-6">
+  <section>
     <!-- The same rule as DashboardListEditor: the panel's navbar carries the grid's controls. -->
     <header>
       <Teleport :to="actionsTarget ? `#${actionsTarget}` : undefined" :disabled="!actionsTarget" defer>
@@ -25,10 +25,11 @@
         </div>
       </Teleport>
 
-      <p v-if="description" class="text-sm text-muted">{{ description }}</p>
     </header>
 
-    <slot name="filters" />
+    <div v-if="$slots.filters" class="mb-8">
+      <slot name="filters" />
+    </div>
 
     <UAlert
       v-if="error"
@@ -147,7 +148,6 @@ const actionsTarget = inject(dashboardPanelActionsKey, null)
 const props = defineProps<{
   items: T[]
   title: string
-  description?: string
   emptyTitle: string
   emptyIcon: string
   /** Names the add control for screen readers, e.g. "Add photos". */

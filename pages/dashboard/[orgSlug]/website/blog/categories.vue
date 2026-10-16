@@ -9,7 +9,6 @@
       <DashboardListEditor
         v-model:editing="editing"
         title="Categories"
-        description="Readers browse articles by category, in this order, with subcategories under their parent. Every published article is in one."
         :items="listItems"
         :error="loadError"
         empty-title="No categories yet"
@@ -22,7 +21,7 @@
         @move="moveCategory"
       >
         <template #filters>
-          <UTabs v-model="collection" :items="collectionTabs" :content="false" aria-label="Collection" />
+          <DashboardFilterPills id="category-collection" v-model="collection" label="Collection" :items="collectionTabs" />
         </template>
         <template #item="{ item }">
           <!-- A subcategory sits indented under its parent, the way the site's sidebar reads it. -->

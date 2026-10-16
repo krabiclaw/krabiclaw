@@ -12,19 +12,7 @@
 
     <UAlert v-if="loadError" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Catalog could not be loaded" :description="loadError" />
     <template v-else>
-      <div class="mb-8 flex flex-wrap items-center gap-2">
-        <UButton
-          v-for="filter in kindFilters"
-          :key="filter.value"
-          :to="filterTo(filter.value)"
-          :label="filter.label"
-          color="neutral"
-          :variant="kind === filter.value ? 'solid' : 'outline'"
-          class="h-10 rounded-full px-4 text-sm font-normal"
-          :aria-pressed="kind === filter.value"
-          :data-testid="`catalog-kind-${filter.value}`"
-        />
-      </div>
+      <DashboardFilterPills id="catalog-kind" v-model="kind" label="Kind" :items="kindFilters" class="mb-8" />
       <OrganizationLocationSelector
         v-if="items.length"
         :items="items"
@@ -78,13 +66,13 @@ const menuCollections = computed(() => catalog.collections.value.filter(collecti
 }))
 const hasMenu = computed(() => menuCollections.value.length > 0 || catalog.products.value.some(product => product.kind === 'dish'))
 const offered = (value: Exclude<CatalogKind, 'all'>) => value === 'menu' ? hasMenu.value : catalog.products.value.some(product => product.kind === value)
-const kind = computed<CatalogKind>(() => KINDS.find(row => row.value === route.query.kind)?.value ?? 'all')
+// The chosen kind is held in the URL, so a filtered Catalog can be linked and gone Back to.
+const kind = computed({
+  get: (): CatalogKind => KINDS.find(row => row.value === route.query.kind)?.value ?? 'all',
+  set: (value: string) => void navigateTo({ path: level.path.value, query: { ...route.query, kind: value === 'all' ? undefined : value } }),
+})
 const kindFilters = computed(() => [{ value: 'all' as const, label: 'All' }, ...KINDS.filter(row => row.value === kind.value || offered(row.value))])
 const activeFilterLabel = computed(() => kind.value === 'all' ? 'offerings' : KINDS.find(row => row.value === kind.value)!.label)
-
-function filterTo(value: CatalogKind) {
-  return router.resolve({ path: level.path.value, query: { ...route.query, kind: value === 'all' ? undefined : value } }).fullPath
-}
 
 // A menu belongs to a location: one card for each, holding that location's
 // sections and the ones every location shares. With no locations there is one menu.

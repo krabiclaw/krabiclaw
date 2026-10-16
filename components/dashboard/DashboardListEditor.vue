@@ -1,5 +1,5 @@
 <template>
-  <section class="space-y-6">
+  <section>
     <!--
       One rule for every list: the panel's navbar carries Back, the title and
       the list's controls — Edit, Add — and the body carries the list. Inside
@@ -33,14 +33,10 @@
         </div>
       </Teleport>
 
-      <!--
-        In the edit state the description gives way to the selection count, so
-        the row that told you what the list is tells you what you are acting on.
-      -->
-      <p v-if="!readOnly && editing && selectable" class="text-sm text-muted" data-testid="list-editor-selection-count">
+      <!-- A list explains nothing about itself; in the edit state it says what you are acting on. -->
+      <p v-if="!readOnly && editing && selectable" class="mb-6 text-sm text-muted" data-testid="list-editor-selection-count">
         {{ selected.length ? `${selected.length} selected` : 'Select items to move them' }}
       </p>
-      <p v-else-if="description" class="text-sm text-muted">{{ description }}</p>
     </header>
 
     <!--
@@ -48,7 +44,9 @@
       worth separating. It sits under the heading and above the rows because it
       describes the rows, not the list's own controls.
     -->
-    <slot name="filters" />
+    <div v-if="$slots.filters" class="mb-8">
+      <slot name="filters" />
+    </div>
 
     <UAlert
       v-if="error"
@@ -162,7 +160,6 @@ import { dashboardPanelActionsKey } from '~/lib/components/workspace/dashboard/d
 const props = defineProps<{
   items: T[]
   title: string
-  description?: string
   emptyTitle: string
   emptyIcon: string
   /** Names the add control for screen readers, e.g. "Add a question". */

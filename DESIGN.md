@@ -165,6 +165,12 @@ menu; every other offering is its own card, opening the one Product editor.
 Because the menus are already per location, Catalog has no location filter.
 Dishes without a section are listed on the Menu page under its sections.
 
+Every level that narrows its rows does it the same way:
+`DashboardFilterPills`, one row of round pills under the title with the chosen
+one solid, 32px from the title and from the rows — Catalog's kinds, the blog's
+and posts' states, a category collection, a photo category. A list carries no
+sentence explaining itself under its title.
+
 Every offering, from anywhere, opens the one Product editor at
 `O/products/:productId`. Each card names its actual sections, price and location
 relationships. Missing photos and prices say No photo and No price set.

@@ -10,7 +10,6 @@
       v-if="!editor.loadError.value"
       v-model:editing="editing"
       title="Links"
-      description="Add, hide, and reorder the buttons shown on /links."
       :items="listItems"
       empty-title="No links yet"
       empty-icon="i-lucide-link"
