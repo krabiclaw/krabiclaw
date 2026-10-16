@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:03722d089b4f746636fa895660a835820f7a1bc79d416d0f1b50620656ba7148",
-  "documentationFingerprint": "sha256:543b830f7e18c46453ed4a985870f731a5230de13544bbfbd80031ff49afc315",
+  "fingerprint": "sha256:09116dbdeb223e89411a449820aec44440264121c890cb4fce793fc5cb932bef",
+  "documentationFingerprint": "sha256:c01fbba9a5e42616981eab8476286238f5efffcbc20e64f9cb5e1ecd43951792",
   "tools": [
     {
       "name": "append_content_block",
@@ -42010,7 +42010,7 @@
                 "type": "string"
               },
               "announcement": {
-                "description": "The universal announcement modal shown to visitors on the public website, available to every theme. An image, when set, is a separate organization media placement (slot \"announcement\"), not a field here.",
+                "description": "The universal announcement banner or modal shown to visitors on the public website, available to every theme. An image, when set, is a separate organization media placement (slot \"announcement\"), not a field here.",
                 "properties": {
                   "cta_label": {
                     "description": "Button label. Requires cta_url and vice versa.",
@@ -42039,6 +42039,14 @@
                   "enabled": {
                     "description": "Whether the announcement is currently shown. false keeps the saved content without showing it.",
                     "type": "boolean"
+                  },
+                  "format": {
+                    "description": "Display style: modal popup dialog or top banner bar (default modal).",
+                    "enum": [
+                      "modal",
+                      "banner"
+                    ],
+                    "type": "string"
                   },
                   "headline": {
                     "description": "Required in every write, even an empty string when disabling without discarding it.",
@@ -55117,6 +55125,14 @@
               "enabled": {
                 "description": "Whether the announcement is active immediately (default true).",
                 "type": "boolean"
+              },
+              "format": {
+                "description": "Whether to present as a top banner or a popup modal (default modal).",
+                "enum": [
+                  "modal",
+                  "banner"
+                ],
+                "type": "string"
               },
               "headline": {
                 "description": "Announcement modal title.",
@@ -98419,7 +98435,7 @@
     {
       "name": "update_organization_settings",
       "title": "Update organization settings",
-      "description": "Change the selected site’s brand, description, website font, colors, contact email, default currency, visitor announcement popup or Live/Draft status. Only supplied settings change. An announcement replaces all its fields, and null removes it. Logos and announcement images are separate media placements; this tool does not change them. Returns the updated settings. Published website settings change immediately; this does not create a short post, blog article or social publication.",
+      "description": "Change the selected site’s brand, description, website font, colors, contact email, default currency, visitor announcement banner/popup or Live/Draft status. Only supplied settings change. An announcement replaces all its fields, and null removes it. Logos and announcement images are separate media placements; this tool does not change them. Returns the updated settings. Published website settings change immediately; this does not create a short post, blog article or social publication.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -98432,7 +98448,7 @@
             "type": "string"
           },
           "announcement": {
-            "description": "The universal announcement modal shown to visitors on the public website, available to every theme. An image, when set, is a separate organization media placement (slot \"announcement\"), not a field here.",
+            "description": "The universal announcement banner or modal shown to visitors on the public website, available to every theme. An image, when set, is a separate organization media placement (slot \"announcement\"), not a field here.",
             "properties": {
               "cta_label": {
                 "description": "Button label. Requires cta_url and vice versa.",
@@ -98461,6 +98477,14 @@
               "enabled": {
                 "description": "Whether the announcement is currently shown. false keeps the saved content without showing it.",
                 "type": "boolean"
+              },
+              "format": {
+                "description": "Display style: modal popup dialog or top banner bar (default modal).",
+                "enum": [
+                  "modal",
+                  "banner"
+                ],
+                "type": "string"
               },
               "headline": {
                 "description": "Required in every write, even an empty string when disabling without discarding it.",
@@ -109355,7 +109379,7 @@
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
         "update_menu": "sha256:63cbd21c021e0b61799765308bf3f7fba7caac5bc647ab6d9698b215038949d4",
-        "update_organization_settings": "sha256:e9db6807901edd4fa400c86f0c4f9b690927ff8bca927a7190ff8ab507a6d639",
+        "update_organization_settings": "sha256:3454f63997eec1f0379204170954ab64862914c016110f93d2e05e89c9134ea7",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
     },

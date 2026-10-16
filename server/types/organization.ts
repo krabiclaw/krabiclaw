@@ -60,7 +60,7 @@ export interface UpdateOrganizationSettingsRequest {
   brand_description?: string
   // A full replacement of the announcement, or null to remove it entirely. There is no partial
   // patch: the CMS leaf edits every field together, the same way the old banner did.
-  announcement?: { headline: string; description?: string | null; cta_label?: string | null; cta_url?: string | null; dismissible?: boolean; enabled?: boolean } | null
+  announcement?: { headline: string; description?: string | null; cta_label?: string | null; cta_url?: string | null; dismissible?: boolean; enabled?: boolean; format?: 'modal' | 'banner' | null } | null
   contact_email?: string
   address_visibility?: PublicCompliance['address_visibility']
   /** A starter and/or colors to change, or null to return to the template's palette. */

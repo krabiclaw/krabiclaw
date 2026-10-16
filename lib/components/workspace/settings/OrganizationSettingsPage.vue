@@ -39,6 +39,7 @@ export interface OrganizationSettingsForm {
   announcementCtaLabel: string
   announcementCtaUrl: string
   announcementDismissible: boolean
+  announcementFormat: 'modal' | 'banner'
   logoAssetId: string | null
   logoPresentation: LogoPresentation
   logoDarkAssetId: string | null
@@ -160,7 +161,7 @@ const paletteSource = computed(() => loadedSettings.value?.palette_source ?? nul
 const originalSignature = ref('')
 const form = reactive<OrganizationSettingsForm>({
   name: '', brand_description: '',
-  announcementEnabled: true, announcementAssetId: null, announcementHeadline: '', announcementDescription: '', announcementCtaLabel: '', announcementCtaUrl: '', announcementDismissible: true,
+  announcementEnabled: true, announcementAssetId: null, announcementHeadline: '', announcementDescription: '', announcementCtaLabel: '', announcementCtaUrl: '', announcementDismissible: true, announcementFormat: 'modal',
   logoAssetId: null, logoPresentation: ORIGINAL_LOGO_PRESENTATION, logoDarkAssetId: null, logoDarkPresentation: ORIGINAL_LOGO_PRESENTATION,
   faviconAssetId: null, socialShareAssetId: null, contact_email: '', palette: null, font_preset: 'default',
   default_currency: null, status: 'inactive',
@@ -229,7 +230,7 @@ function editorSignature(key: string | null) {
     case 'favicon': return JSON.stringify(form.faviconAssetId)
     case 'sharing-image': return JSON.stringify(form.socialShareAssetId)
     case 'description': return JSON.stringify(form.brand_description)
-    case 'announcement': return JSON.stringify([form.announcementEnabled, form.announcementAssetId, form.announcementHeadline, form.announcementDescription, form.announcementCtaLabel, form.announcementCtaUrl, form.announcementDismissible])
+    case 'announcement': return JSON.stringify([form.announcementEnabled, form.announcementAssetId, form.announcementHeadline, form.announcementDescription, form.announcementCtaLabel, form.announcementCtaUrl, form.announcementDismissible, form.announcementFormat])
     case 'color': return JSON.stringify(form.palette)
     case 'font': return JSON.stringify(form.font_preset)
     case 'contact': return JSON.stringify(form.contact_email)
@@ -287,6 +288,7 @@ function fillForm(settings: OrganizationSettingsResponse) {
   form.announcementCtaLabel = settings.announcement?.cta_label ?? ''
   form.announcementCtaUrl = settings.announcement?.cta_url ?? ''
   form.announcementDismissible = settings.announcement?.dismissible ?? true
+  form.announcementFormat = settings.announcement?.format === 'banner' ? 'banner' : 'modal'
   const logo = settings.media?.find(item => item.slot === 'logo')
   const logoDark = settings.media?.find(item => item.slot === 'logo_dark')
   form.logoAssetId = logo?.asset_id ?? null
@@ -372,6 +374,7 @@ async function saveCurrentEditor() {
             cta_url: form.announcementCtaUrl.trim() || null,
             dismissible: form.announcementDismissible,
             enabled: form.announcementEnabled,
+            format: form.announcementFormat,
           },
           media: [{ asset_id: form.announcementAssetId, slot: 'announcement' }],
         })

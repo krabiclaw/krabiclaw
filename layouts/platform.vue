@@ -1,5 +1,6 @@
 <template>
   <div :class="{ 'platform-docs': section === 'docs' }" class="platform-layout platform-theme min-h-screen flex flex-col font-sans selection:bg-stone-900 selection:text-white" :data-font-preset="fontPreset">
+    <AnnouncementBanner />
     <PlatformHeader :section="section" />
     <main class="grow">
       <slot />

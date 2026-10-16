@@ -16,6 +16,7 @@
          appear later in the same render caused a hydration child-count mismatch. -->
     <div id="saya-portal-root" />
 
+    <AnnouncementBanner />
     <SayaHeader
       :organization="shellOrganization"
       :locations="locations"

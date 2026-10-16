@@ -9,6 +9,7 @@
          source in document order during SSR. -->
     <div id="blawby-portal-root" />
 
+    <AnnouncementBanner />
     <BlawbyHeader :organization="identity" :consultation="consultation" :can-schedule="canSchedule" :page-links="pageLinks" />
     <main>
       <slot />

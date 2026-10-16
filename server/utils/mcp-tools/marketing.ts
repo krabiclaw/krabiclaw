@@ -122,6 +122,7 @@ export const MARKETING_TOOLS: McpToolDefinition[] = [
           cta_url: { type: 'string', description: 'Call-to-action link destination (defaults to target_url).' },
           dismissible: { type: 'boolean', description: 'Whether the announcement can be dismissed by visitors (default true).' },
           enabled: { type: 'boolean', description: 'Whether the announcement is active immediately (default true).' },
+          format: { type: 'string', enum: ['modal', 'banner'], description: 'Whether to present as a top banner or a popup modal (default modal).' },
         },
         required: ['headline'],
       },
@@ -347,6 +348,7 @@ export async function handleMarketingTools(ctx: McpExecutorContext): Promise<unk
         cta_url: optionalString(announcementInput, 'cta_url') ?? targetUrl,
         dismissible: announcementInput.dismissible !== false,
         enabled: announcementInput.enabled !== false,
+        format: optionalString(announcementInput, 'format') === 'banner' ? 'banner' : 'modal',
       }
 
       await updateOrganizationSettingsFields(

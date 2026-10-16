@@ -22,8 +22,11 @@ const to = (segment: string) => `${level.path.value}/${segment}`
 const groups = computed<EditorNavigationGroup[]>(() => {
   const form = editor.form
   const button = [form.announcementCtaLabel, form.announcementCtaUrl].filter(value => value.trim()).join(' · ')
+  const visibilitySummary = form.announcementEnabled
+    ? (form.announcementFormat === 'banner' ? (form.announcementDismissible ? 'Banner' : 'Persisted banner') : 'Popup')
+    : 'Off'
   return [
-    { id: 'visibility', items: [{ id: 'visibility', label: 'Show announcement', summary: form.announcementEnabled ? 'On' : 'Off', to: to('visibility') }] },
+    { id: 'visibility', items: [{ id: 'visibility', label: 'Show announcement', summary: visibilitySummary, to: to('visibility') }] },
     {
       id: 'content',
       items: [

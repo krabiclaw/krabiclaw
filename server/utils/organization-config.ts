@@ -145,6 +145,7 @@ export async function getPublicConfig(db: DbClient, organizationId: string, opti
         cta_label: parsedAnnouncement.cta_label ?? null,
         cta_url: parsedAnnouncement.cta_url ?? null,
         dismissible: parsedAnnouncement.dismissible ?? true,
+        format: parsedAnnouncement.format === 'banner' ? 'banner' : 'modal',
         image_url: organization.announcement_public_url,
       }
     : null
