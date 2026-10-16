@@ -6,13 +6,22 @@ import {
   STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_TYPE_GROUPS, STAY_PROPERTY_TYPES,
 } from '~/shared/stay-listing'
 
-// The vocabularies a home is described in, so an editor offers exactly the codes the server accepts.
+/** A vocabulary as ordered entries: an app decodes JSON objects without their key order. */
+const entries = <T extends object>(vocabulary: Record<string, T>) => Object.entries(vocabulary).map(([code, entry]) => ({ code, ...entry }))
+
+// The vocabularies a home is described in, in the order an editor offers them, so it offers exactly the codes the server accepts.
 export default defineHandler(async (event) => {
   await getDashboardMemberContext(event, {})
   return jsonResponse({
-    property_types: STAY_PROPERTY_TYPES, property_type_groups: STAY_PROPERTY_TYPE_GROUPS,
-    amenities: STAY_AMENITIES, amenity_groups: STAY_AMENITY_GROUPS,
-    cancellation_policies: STAY_CANCELLATION_POLICIES, long_term_cancellation_policies: STAY_LONG_TERM_CANCELLATION_POLICIES,
-    check_in_methods: STAY_CHECK_IN_METHODS, checkout_tasks: STAY_CHECKOUT_TASKS,
+    property_type_groups: Object.entries(STAY_PROPERTY_TYPE_GROUPS).map(([code, group]) => ({
+      code, label: group.label, types: group.types.map(type => ({ code: type, ...STAY_PROPERTY_TYPES[type] })),
+    })),
+    amenity_groups: Object.entries(STAY_AMENITY_GROUPS).map(([code, group]) => ({
+      code, label: group.label, amenities: group.amenities.map(amenity => ({ code: amenity, ...STAY_AMENITIES[amenity] })),
+    })),
+    cancellation_policies: entries(STAY_CANCELLATION_POLICIES),
+    long_term_cancellation_policies: entries(STAY_LONG_TERM_CANCELLATION_POLICIES),
+    check_in_methods: entries(STAY_CHECK_IN_METHODS),
+    checkout_tasks: entries(STAY_CHECKOUT_TASKS),
   })
 })

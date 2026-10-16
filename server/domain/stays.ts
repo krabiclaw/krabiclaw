@@ -4,6 +4,11 @@ import { assertRoleAllows, assignedHomeSql, isOrganizationWideRole, organization
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { coordinatesFailure, createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
 import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
+import { visitRefundQueries } from '~/server/domain/payments/visit-refund'
+import { bookedPolicyFor, LONG_TERM_STAY_NIGHTS, stayCancellationRefund, type StayBookedPolicy, type StayCancellationInput } from '~/shared/stay-cancellation'
+import { executeRefund, requirePayment, type Payment } from '~/server/domain/payments'
+import { createStripeClient } from '~/server/utils/stripe-client'
+import { isRecord } from '~/server/utils/type-guards'
 import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
 import { createProduct, getProduct, setProductPublication, updateProduct } from '~/server/utils/product-management'
 import type { Product, UpdateProductInput } from '~/server/types/products'
@@ -81,6 +86,8 @@ export interface Stay {
   request_id: string | null
   cancelled_at: string | null
   cancellation_reason: string | null
+  /** The policy a guest booked under on the site; null for a stay not paid there. */
+  cancellation_policy: StayBookedPolicy | null
   version: number
   created_at: string
   updated_at: string
@@ -300,7 +307,7 @@ function amount(value: unknown, field: string, allowNegative = false): number {
 
 const STAY_COLUMNS = `s.id, s.product_id, c.location_id, l.timezone, s.channel, s.owner, s.status, s.overbooked, s.check_in_date, s.check_out_date, s.arrival_time,
   s.adults, s.children, s.infants, s.guest_name, s.guest_surname, s.guest_email, s.guest_phone, s.user_id, s.total_minor, s.currency, s.notes,
-  s.provider, s.external_booking_id, s.channel_booking_id, s.request_id, s.cancelled_at, s.cancellation_reason, s.version, s.created_at, s.updated_at`
+  s.provider, s.external_booking_id, s.channel_booking_id, s.request_id, s.cancelled_at, s.cancellation_reason, s.cancellation_policy, s.version, s.created_at, s.updated_at`
 
 function mapStay(row: Record<string, unknown>): Stay {
   return { ...row, overbooked: Number(row.overbooked) === 1 } as unknown as Stay
@@ -1178,26 +1185,131 @@ export async function updateStay(db: DbClient, env: StayMutationEnv, access: Sta
   return { ...await getStay(db, access, stayId), channel_push: channelPush }
 }
 
-export async function cancelStay(db: DbClient, env: StayMutationEnv, access: StayAccess, stayId: string, input: { expected_version: unknown; reason?: unknown }): Promise<StayDetail & { channel_push: ChannelPush | null }> {
+/**
+ * The host cancels a stay. One the guest paid for on the site returns the whole
+ * payment, as Airbnb's host cancellation does: the refund is queued in the same
+ * batch, only under the host's approved financial authorization, and sent by
+ * the caller that holds it (server/api/dashboard/payments/refund.post.ts).
+ * Without one the cancellation is refused with where to approve it.
+ */
+export async function cancelStay(db: DbClient, env: StayMutationEnv, access: StayAccess, stayId: string, input: { expected_version: unknown; reason?: unknown; authorization_id?: string; financial_writes_allowed?: boolean }): Promise<StayDetail & { channel_push: ChannelPush | null }> {
   const current = await requireAppStay(db, access, stayId, input.expected_version)
   const reason = optionalText(input.reason, 'reason', 500)
   await requireChannelPush(db, env, access.organizationId, current.product_id)
   const next = current.version + 1
   const now = new Date().toISOString()
+  const refund = await visitRefundQueries(db, {
+    action: 'cancel', organizationId: access.organizationId, actorUserId: access.actorId, subjectType: 'stay', subjectId: stayId,
+    authorizationId: input.authorization_id, financialWritesAllowed: input.financial_writes_allowed, note: reason ?? undefined, now,
+    committed: { query: "EXISTS(SELECT 1 FROM stays WHERE organization_id=? AND id=? AND status='cancelled' AND version=?)", params: [access.organizationId, stayId, next] },
+  })
   const results = await executeBatch(db, [
     {
       query: `UPDATE stays SET status = 'cancelled', cancelled_at = ?, cancellation_reason = ?, version = ?, updated_at = ?, updated_by = ?
-              WHERE organization_id = ? AND id = ? AND version = ? AND owner = 'app' AND status <> 'cancelled'`,
-      params: [now, reason, next, now, access.actorId, access.organizationId, stayId, current.version],
+              WHERE organization_id = ? AND id = ? AND version = ? AND owner = 'app' AND status <> 'cancelled' AND (${refund.guard?.query ?? '1 = 1'})`,
+      params: [now, reason, next, now, access.actorId, access.organizationId, stayId, current.version, ...(refund.guard?.params ?? [])],
     },
     organizationEventQuery({ organizationId: access.organizationId, locationId: current.location_id, actorId: access.actorId, eventType: 'stay.cancelled', entityType: 'stay', entityId: stayId, onlyIfPreviousChangedOneRow: true }),
     ...reconcileNightsQueries(access.organizationId, stayId),
+    ...refund.queries,
   ], { operation: 'Cancel stay' })
   if (!versionChanged(results)) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
   await planStayMessages(db, access.organizationId, stayId)
   const channelPush = await pushNights(db, env, access, current.product_id, [[current.check_in_date, current.check_out_date]])
   await publishStayChange(env, db, access.organizationId, await getStay(db, access, stayId), true)
   return { ...await getStay(db, access, stayId), channel_push: channelPush }
+}
+
+/** What cancelling a stay returns to its guest now, by the policy they booked under, out of what they paid. */
+export interface StayCancellationQuote { policy: StayBookedPolicy; paid_minor: number; refund_minor: number; currency: string }
+
+/** The guest's own stay, paid on the site and still theirs to cancel, with what cancelling returns now. */
+async function guestStayCancellation(db: DbClient, organizationId: string, stayId: string, buyerUserId: string, now: string) {
+  const stay = await queryFirst<Stay>(db, `SELECT ${STAY_COLUMNS} FROM stays s JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
+      JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
+     WHERE s.organization_id = ? AND s.id = ? AND s.user_id = ? AND s.owner = 'app' AND s.channel = 'direct'`, [organizationId, stayId, buyerUserId])
+  if (!stay) fail(404, 'STAY_NOT_FOUND', 'That stay is not yours to cancel', 'stay_id')
+  const payment = await queryFirst<Payment>(db, "SELECT * FROM payments WHERE organization_id = ? AND subject_type = 'stay' AND subject_id = ? AND captured_amount > 0", [organizationId, stayId])
+  if (!payment) fail(409, 'STAY_NOT_PAID_ONLINE', 'This stay was not paid on the site. Contact the host to cancel it.', 'stay_id')
+  if (!stay.cancellation_policy) throw new Error(`Stay ${stayId} was paid on the site without a cancellation policy`)
+  const snapshot: unknown = JSON.parse(payment.price_snapshot_json)
+  const purchase = isRecord(snapshot) ? snapshot.stay : undefined
+  if (!isRecord(purchase) || !Array.isArray(purchase.nightly)) throw new Error(`Stay ${stayId} payment has no nightly prices`)
+  const home = await queryFirst<{ check_in_time: string }>(db, 'SELECT check_in_time FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [organizationId, stay.product_id])
+  if (!home) throw new Error(`Stay ${stayId} has no home`)
+  const held = payment.captured_amount - payment.refunded_amount
+  const owed = stayCancellationRefund({ policy: stay.cancellation_policy, nightly: purchase.nightly as StayCancellationInput['nightly'], booked_at: stay.created_at, now, timezone: stay.timezone, check_in_time: home.check_in_time })
+  const quote: StayCancellationQuote = { policy: stay.cancellation_policy, paid_minor: payment.captured_amount, refund_minor: Math.min(owed, held), currency: payment.currency }
+  return { stay, payment, quote }
+}
+
+/** A guest's own stay as their account reads it: the stay, its home and host, and what cancelling returns now. */
+export interface GuestStay {
+  stay: StayDetail
+  home: { name: string; organization_name: string; check_in_time: string; check_out_time: string }
+  /** Null once the stay is cancelled, or for a stay not paid on the site. */
+  cancellation: StayCancellationQuote | null
+}
+
+/** The account's stay by its activity ID: its conversation's ID, or the stay's own when it has none. */
+export async function readGuestStay(db: DbClient, buyerUserId: string, activityId: string): Promise<GuestStay> {
+  const owned = await queryFirst<{ id: string; organization_id: string; status: string; name: string; organization_name: string; check_in_time: string; check_out_time: string; paid_online: number }>(db, `
+    SELECT s.id, s.organization_id, s.status, p.name, o.name AS organization_name, c.check_in_time, c.check_out_time,
+           EXISTS (SELECT 1 FROM payments WHERE organization_id = s.organization_id AND subject_type = 'stay' AND subject_id = s.id AND captured_amount > 0) AS paid_online
+      FROM stays s JOIN products p ON p.organization_id = s.organization_id AND p.id = s.product_id
+      JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
+      JOIN organization o ON o.id = s.organization_id
+     WHERE COALESCE(s.request_id, s.id) = ? AND s.user_id = ? AND s.owner = 'app'`, [activityId, buyerUserId])
+  if (!owned) fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'stay_id')
+  const stay = await getStay(db, { organizationId: owned.organization_id, actorId: buyerUserId, manage: true }, owned.id)
+  const cancellation = owned.status !== 'cancelled' && owned.paid_online === 1
+    ? (await guestStayCancellation(db, owned.organization_id, owned.id, buyerUserId, new Date().toISOString())).quote : null
+  return { stay, home: { name: owned.name, organization_name: owned.organization_name, check_in_time: owned.check_in_time, check_out_time: owned.check_out_time }, cancellation }
+}
+
+/**
+ * The guest cancels their own stay. The policy they booked under decides the
+ * refund, which is queued in the same batch as the cancellation and sent to
+ * Stripe after it; a retry of a cancelled stay sends a refund that did not go.
+ */
+export async function cancelStayAsGuest(db: DbClient, env: StayMutationEnv & CloudflareEnv, organizationId: string, stayId: string, buyerUserId: string): Promise<{ stay: Stay; refund_minor: number }> {
+  const now = new Date().toISOString()
+  const { stay, payment, quote } = await guestStayCancellation(db, organizationId, stayId, buyerUserId, now)
+  const key = `guest-cancelled-stay:${stayId}`
+  if (stay.status !== 'cancelled') {
+    const next = stay.version + 1
+    // Stripe's full-remaining refund when the policy returns everything still held.
+    const amount = quote.refund_minor === payment.captured_amount - payment.refunded_amount ? null : quote.refund_minor
+    const results = await executeBatch(db, [
+      {
+        query: `UPDATE stays SET status = 'cancelled', cancelled_at = ?, cancellation_reason = 'guest_cancelled', version = ?, updated_at = ?, updated_by = ?
+                WHERE organization_id = ? AND id = ? AND version = ? AND user_id = ? AND status <> 'cancelled'
+                  AND NOT EXISTS (SELECT 1 FROM payment_refunds WHERE payment_id = ? AND status IN ('queued','creating','pending','requires_action'))`,
+        params: [now, next, now, buyerUserId, organizationId, stayId, stay.version, buyerUserId, payment.id],
+      },
+      organizationEventQuery({ organizationId, locationId: stay.location_id, actorId: buyerUserId, eventType: 'stay.cancelled', entityType: 'stay', entityId: stayId, metadata: { by: 'guest', refund_minor: quote.refund_minor }, onlyIfPreviousChangedOneRow: true }),
+      ...reconcileNightsQueries(organizationId, stayId),
+      ...(quote.refund_minor > 0 ? [{
+        query: `INSERT INTO payment_refunds (id, payment_id, idempotency_key, amount, reason, status, created_by, created_at, updated_at)
+                SELECT ?, ?, ?, ?, 'requested_by_customer', 'queued', ?, ?, ? WHERE EXISTS (SELECT 1 FROM stays WHERE organization_id = ? AND id = ? AND status = 'cancelled' AND version = ?)
+                ON CONFLICT(idempotency_key) DO NOTHING`,
+        params: [crypto.randomUUID(), payment.id, key, amount, buyerUserId, now, now, organizationId, stayId, next],
+      }] : []),
+    ], { operation: 'Guest cancels stay' })
+    if (!versionChanged(results)) fail(409, 'STAY_NOT_CANCELLABLE', 'This stay changed or a refund is already on its way. Reload it and try again.', 'stay_id')
+    await planStayMessages(db, organizationId, stayId)
+    const access: StayAccess = { organizationId, actorId: 'system', manage: true }
+    await pushNights(db, env, access, stay.product_id, [[stay.check_in_date, stay.check_out_date]])
+    await publishStayChange(env, db, organizationId, await storedStay(db, organizationId, stayId), true)
+  } else if (stay.cancellation_reason !== 'guest_cancelled') {
+    fail(409, 'STAY_ALREADY_CANCELLED', 'This stay was already cancelled', 'stay_id')
+  }
+  const refund = await queryFirst<{ amount: number | null; status: string; stripe_refund_id: string | null }>(db, 'SELECT amount, status, stripe_refund_id FROM payment_refunds WHERE payment_id = ? AND idempotency_key = ?', [payment.id, key])
+  if (refund && !refund.stripe_refund_id) {
+    if (!env.STRIPE_SECRET_KEY) throw new Error('Stripe is not configured')
+    await executeRefund(db, createStripeClient(env.STRIPE_SECRET_KEY, 'payments'), await requirePayment(db, organizationId, payment.id), refund.amount, key, 'requested_by_customer', buyerUserId, env)
+  }
+  return { stay: await storedStay(db, organizationId, stayId), refund_minor: refund ? refund.amount ?? payment.captured_amount - payment.refunded_amount : 0 }
 }
 
 /** Record money the host received (or, negative, refunded) outside Stripe for a stay they took. */
@@ -1608,6 +1720,8 @@ export interface StayQuote {
   infants: number
   nightly: Array<{ date: string; price_minor: number }>
   total_minor: number
+  /** The home's policy for a stay this long; the guest books under it. */
+  cancellation_policy: StayBookedPolicy
 }
 
 export interface StayQuoteInput { check_in_date: unknown; check_out_date: unknown; adults: unknown; children?: unknown; infants?: unknown }
@@ -1651,10 +1765,12 @@ export async function quoteStay(db: DbClient, organizationId: string, home: Stay
   const nightly = stayed.map(night => ({ date: night.date, price_minor: night.price_minor! }))
   const total = nightly.reduce((sum, night) => sum + night.price_minor, 0)
   if (!Number.isSafeInteger(total) || total < 1) fail(409, 'STAY_TOTAL_INVALID', 'These nights have no amount to pay', 'check_in_date')
+  const cancellationPolicy = bookedPolicyFor(count_, home)
+  if (!cancellationPolicy) fail(409, 'STAY_CANCELLATION_POLICY_REQUIRED', `This home has no cancellation policy for stays of ${count_ >= LONG_TERM_STAY_NIGHTS ? `${LONG_TERM_STAY_NIGHTS} nights or more` : `under ${LONG_TERM_STAY_NIGHTS} nights`}`, count_ >= LONG_TERM_STAY_NIGHTS ? 'long_term_cancellation_policy' : 'cancellation_policy')
   return {
     product_id: home.product_id, name: home.name, location_id: home.location_id, timezone: home.timezone, currency: home.currency, tax_behavior: home.base_price_tax_behavior,
     check_in_date: checkIn, check_out_date: checkOut, check_in_time: home.check_in_time, check_out_time: home.check_out_time,
-    nights: count_, adults, children, infants, nightly, total_minor: total,
+    nights: count_, adults, children, infants, nightly, total_minor: total, cancellation_policy: cancellationPolicy,
   }
 }
 
@@ -1717,7 +1833,7 @@ export async function releaseLapsedStayHolds(db: DbClient, env: StayMutationEnv)
 
 /** What a captured checkout made a stay of: its frozen quote and the guest who paid. */
 export interface CheckoutStay {
-  quote: Pick<StayQuote, 'product_id' | 'check_in_date' | 'check_out_date' | 'adults' | 'children' | 'infants' | 'total_minor' | 'currency'>
+  quote: Pick<StayQuote, 'product_id' | 'check_in_date' | 'check_out_date' | 'adults' | 'children' | 'infants' | 'total_minor' | 'currency' | 'cancellation_policy'>
   guest: { name: string; email: string; phone: string | null; notes: string | null }
 }
 
@@ -1732,11 +1848,11 @@ export function stayFromCheckoutQueries(input: { organizationId: string; locatio
     { query: 'DELETE FROM stay_nights WHERE hold_id = ?', params: [input.holdId] },
     {
       query: `INSERT INTO stays (id, organization_id, product_id, channel, owner, status, check_in_date, check_out_date, adults, children, infants,
-                guest_name, guest_email, guest_phone, user_id, total_minor, currency, notes, idempotency_key, booking_received_at, created_at, updated_at)
-              SELECT ?, ?, ?, 'direct', 'app', 'confirmed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                guest_name, guest_email, guest_phone, user_id, total_minor, currency, notes, idempotency_key, booking_received_at, created_at, updated_at, cancellation_policy)
+              SELECT ?, ?, ?, 'direct', 'app', 'confirmed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                WHERE EXISTS (SELECT 1 FROM payments WHERE id = ? AND organization_id = ? AND state = 'captured' AND refunded_amount = 0)`,
       params: [input.stayId, input.organizationId, quote.product_id, quote.check_in_date, quote.check_out_date, quote.adults, quote.children, quote.infants,
-        guest.name, guest.email, guest.phone, input.buyerUserId, quote.total_minor, quote.currency, guest.notes, `checkout:${input.paymentId}`, input.now, input.now, input.now,
+        guest.name, guest.email, guest.phone, input.buyerUserId, quote.total_minor, quote.currency, guest.notes, `checkout:${input.paymentId}`, input.now, input.now, input.now, quote.cancellation_policy,
         input.paymentId, input.organizationId],
     },
     organizationEventQuery({ organizationId: input.organizationId, locationId: input.locationId, actorId: null, eventType: 'stay.created', entityType: 'stay', entityId: input.stayId, metadata: { channel: 'direct', payment_id: input.paymentId }, onlyIfPreviousChangedOneRow: true }),

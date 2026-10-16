@@ -587,8 +587,8 @@ const visibleDetails = computed(() => productDetailFields(props.product.kind).fl
 function stayDetails(stay: typeof props.product.stay): Array<{ key: string; label: string; values: string[] }> {
   if (!stay) return []
   const policies = [
-    ...(stay.cancellation_policy ? [STAY_CANCELLATION_POLICIES[stay.cancellation_policy].label] : []),
-    ...(stay.long_term_cancellation_policy ? [STAY_LONG_TERM_CANCELLATION_POLICIES[stay.long_term_cancellation_policy].label] : []),
+    ...(stay.cancellation_policy ? [`${STAY_CANCELLATION_POLICIES[stay.cancellation_policy].label}: ${STAY_CANCELLATION_POLICIES[stay.cancellation_policy].summary}`] : []),
+    ...(stay.long_term_cancellation_policy ? [`${STAY_LONG_TERM_CANCELLATION_POLICIES[stay.long_term_cancellation_policy].label}: ${STAY_LONG_TERM_CANCELLATION_POLICIES[stay.long_term_cancellation_policy].summary}`] : []),
   ]
   return [
     ...(stay.amenities.length ? [{ key: 'amenities', label: 'Amenities', values: stay.amenities.map(code => STAY_AMENITIES[code].label) }] : []),

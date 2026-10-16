@@ -1280,6 +1280,10 @@ export const stays = sqliteTable("stays", {
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 	created_by: text(),
 	updated_by: text(),
+	// The home's cancellation policy the guest booked under, frozen at checkout
+	// (shared/stay-cancellation.ts): it decides what the guest's own
+	// cancellation refunds. NULL for a stay not paid on the site.
+	cancellation_policy: text(),
 }, (table) => [
 	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "stays_home_scope_fk" }).onDelete("no action"),
 	unique("stays_org_product_id_unique").on(table.organization_id, table.product_id, table.id),
@@ -1300,6 +1304,7 @@ export const stays = sqliteTable("stays", {
 	check("stays_money_check", sql`total_minor >= 0 AND length(currency) = 3 AND currency = upper(currency)`),
 	check("stays_provider_check", sql`provider IS NULL OR provider = 'channex'`),
 	check("stays_version_check", sql`version >= 1`),
+	check("stays_cancellation_policy_check", sql`cancellation_policy IS NULL OR cancellation_policy IN ('flexible', 'moderate', 'limited', 'firm', 'strict', 'long_term_firm', 'long_term_strict')`),
 	check("stays_booking_received_at_check", sql`booking_received_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', booking_received_at, '+0 days') IS booking_received_at`),
 	check("stays_instants_check", sql`(cancelled_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', cancelled_at, '+0 days') IS cancelled_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
 ]);

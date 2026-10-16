@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:dc7ed093f3a1a33e9e4e1b50374b5d84392dd3aaea512d4f5c537ef18bf99e61",
-  "documentationFingerprint": "sha256:33c20bac20d52daade1f23698f3c3cbdd0ebc8535a92c9cc80bf2cdec8d6c2f6",
+  "fingerprint": "sha256:89c21c3687d66c80ae4172e7492edd2d1a187f9dbe1775e11fcdaaa77cf23e1f",
+  "documentationFingerprint": "sha256:18f295a52a0fe6d4b30acdc43dcb760f39c1c49733fd125cfeabd4a195e3b85e",
   "tools": [
     {
       "name": "append_content_block",
@@ -8555,6 +8555,23 @@
                   "null"
                 ]
               },
+              "cancellation_policy": {
+                "description": "The home cancellation policy the guest booked under on the site; it decides what their own cancellation refunds. Null for a stay not paid on the site.",
+                "enum": [
+                  "flexible",
+                  "moderate",
+                  "limited",
+                  "firm",
+                  "strict",
+                  "long_term_firm",
+                  "long_term_strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cancellation_reason": {
                 "type": [
                   "string",
@@ -8915,6 +8932,7 @@
               "request_id",
               "cancelled_at",
               "cancellation_reason",
+              "cancellation_policy",
               "version",
               "created_at",
               "updated_at",
@@ -30054,6 +30072,23 @@
                   "null"
                 ]
               },
+              "cancellation_policy": {
+                "description": "The home cancellation policy the guest booked under on the site; it decides what their own cancellation refunds. Null for a stay not paid on the site.",
+                "enum": [
+                  "flexible",
+                  "moderate",
+                  "limited",
+                  "firm",
+                  "strict",
+                  "long_term_firm",
+                  "long_term_strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cancellation_reason": {
                 "type": [
                   "string",
@@ -30414,6 +30449,7 @@
               "request_id",
               "cancelled_at",
               "cancellation_reason",
+              "cancellation_policy",
               "version",
               "created_at",
               "updated_at",
@@ -35185,6 +35221,23 @@
                   "null"
                 ]
               },
+              "cancellation_policy": {
+                "description": "The home cancellation policy the guest booked under on the site; it decides what their own cancellation refunds. Null for a stay not paid on the site.",
+                "enum": [
+                  "flexible",
+                  "moderate",
+                  "limited",
+                  "firm",
+                  "strict",
+                  "long_term_firm",
+                  "long_term_strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cancellation_reason": {
                 "type": [
                   "string",
@@ -35545,6 +35598,7 @@
               "request_id",
               "cancelled_at",
               "cancellation_reason",
+              "cancellation_policy",
               "version",
               "created_at",
               "updated_at",
@@ -41029,6 +41083,23 @@
                   "null"
                 ]
               },
+              "cancellation_policy": {
+                "description": "The home cancellation policy the guest booked under on the site; it decides what their own cancellation refunds. Null for a stay not paid on the site.",
+                "enum": [
+                  "flexible",
+                  "moderate",
+                  "limited",
+                  "firm",
+                  "strict",
+                  "long_term_firm",
+                  "long_term_strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cancellation_reason": {
                 "type": [
                   "string",
@@ -41389,6 +41460,7 @@
               "request_id",
               "cancelled_at",
               "cancellation_reason",
+              "cancellation_policy",
               "version",
               "created_at",
               "updated_at",
@@ -55520,6 +55592,23 @@
                   "null"
                 ]
               },
+              "cancellation_policy": {
+                "description": "The home cancellation policy the guest booked under on the site; it decides what their own cancellation refunds. Null for a stay not paid on the site.",
+                "enum": [
+                  "flexible",
+                  "moderate",
+                  "limited",
+                  "firm",
+                  "strict",
+                  "long_term_firm",
+                  "long_term_strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cancellation_reason": {
                 "type": [
                   "string",
@@ -55880,6 +55969,7 @@
               "request_id",
               "cancelled_at",
               "cancellation_reason",
+              "cancellation_policy",
               "version",
               "created_at",
               "updated_at",
@@ -56743,6 +56833,23 @@
                     "null"
                   ]
                 },
+                "cancellation_policy": {
+                  "description": "The home cancellation policy the guest booked under on the site; it decides what their own cancellation refunds. Null for a stay not paid on the site.",
+                  "enum": [
+                    "flexible",
+                    "moderate",
+                    "limited",
+                    "firm",
+                    "strict",
+                    "long_term_firm",
+                    "long_term_strict",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "cancellation_reason": {
                   "type": [
                     "string",
@@ -56920,6 +57027,7 @@
                 "request_id",
                 "cancelled_at",
                 "cancellation_reason",
+                "cancellation_policy",
                 "version",
                 "created_at",
                 "updated_at"
@@ -62419,6 +62527,23 @@
                     "null"
                   ]
                 },
+                "cancellation_policy": {
+                  "description": "The home cancellation policy the guest booked under on the site; it decides what their own cancellation refunds. Null for a stay not paid on the site.",
+                  "enum": [
+                    "flexible",
+                    "moderate",
+                    "limited",
+                    "firm",
+                    "strict",
+                    "long_term_firm",
+                    "long_term_strict",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "cancellation_reason": {
                   "type": [
                     "string",
@@ -62596,6 +62721,7 @@
                 "request_id",
                 "cancelled_at",
                 "cancellation_reason",
+                "cancellation_policy",
                 "version",
                 "created_at",
                 "updated_at"
@@ -77581,6 +77707,23 @@
                   "null"
                 ]
               },
+              "cancellation_policy": {
+                "description": "The home cancellation policy the guest booked under on the site; it decides what their own cancellation refunds. Null for a stay not paid on the site.",
+                "enum": [
+                  "flexible",
+                  "moderate",
+                  "limited",
+                  "firm",
+                  "strict",
+                  "long_term_firm",
+                  "long_term_strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cancellation_reason": {
                 "type": [
                   "string",
@@ -77941,6 +78084,7 @@
               "request_id",
               "cancelled_at",
               "cancellation_reason",
+              "cancellation_policy",
               "version",
               "created_at",
               "updated_at",
@@ -94384,6 +94528,23 @@
                     "null"
                   ]
                 },
+                "cancellation_policy": {
+                  "description": "The home cancellation policy the guest booked under on the site; it decides what their own cancellation refunds. Null for a stay not paid on the site.",
+                  "enum": [
+                    "flexible",
+                    "moderate",
+                    "limited",
+                    "firm",
+                    "strict",
+                    "long_term_firm",
+                    "long_term_strict",
+                    null
+                  ],
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
                 "cancellation_reason": {
                   "type": [
                     "string",
@@ -94561,6 +94722,7 @@
                 "request_id",
                 "cancelled_at",
                 "cancellation_reason",
+                "cancellation_policy",
                 "version",
                 "created_at",
                 "updated_at"
@@ -113993,6 +114155,23 @@
                   "null"
                 ]
               },
+              "cancellation_policy": {
+                "description": "The home cancellation policy the guest booked under on the site; it decides what their own cancellation refunds. Null for a stay not paid on the site.",
+                "enum": [
+                  "flexible",
+                  "moderate",
+                  "limited",
+                  "firm",
+                  "strict",
+                  "long_term_firm",
+                  "long_term_strict",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "cancellation_reason": {
                 "type": [
                   "string",
@@ -114353,6 +114532,7 @@
               "request_id",
               "cancelled_at",
               "cancellation_reason",
+              "cancellation_policy",
               "version",
               "created_at",
               "updated_at",
@@ -115502,11 +115682,11 @@
         "create_location": "sha256:b25656237d93d456c98da74d8281ec6d1d05435e6a7657a18c14b82654b79b9b",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
-        "get_stay": "sha256:2905f9b1db4d2b65a1f4a48bc97a7335d9ea788a51e6e6d3cd0deecb10eb23d3",
+        "get_stay": "sha256:2acd49c4e0b53e4090d68a33bdb8551a39879326d61db0e6438673625d2b4af6",
         "invite_organization_member": "sha256:f520b4ade47c9c5a5faef9859564f32d1c9dddfd285efdcc27fa099fa60e8a24",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_organization_members": "sha256:f47eb37ec4cfa1df500db883fdd207db7e2228a3839d64e08f4e52351f85b10e",
-        "list_stays": "sha256:fb9f51613819364e72a9f76d3d4178dd3ade4d80f8ea2a51a647cf1362cd4dac",
+        "list_stays": "sha256:5b9e594406177ab852bc7e715f13167cc4f72a0b1a2f5a7e78de728aa95188ea",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
         "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
@@ -115587,11 +115767,11 @@
         "create_table_reservation": "sha256:412c62d5987f89d7d7c7bf57ac2038c65f4101181bb4762341e0a937766c948b",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
-        "get_stay": "sha256:2905f9b1db4d2b65a1f4a48bc97a7335d9ea788a51e6e6d3cd0deecb10eb23d3",
+        "get_stay": "sha256:2acd49c4e0b53e4090d68a33bdb8551a39879326d61db0e6438673625d2b4af6",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_product_bookings": "sha256:ea80e0cc56ffb5b12058725b9644f50e50af6191c4a44493fb0be538224d7373",
         "list_reservation_inquiries": "sha256:85cb564470d0026c00b8727287edb2a6c2d403fec987c2ac13f4aaaa28e5d171",
-        "list_stays": "sha256:fb9f51613819364e72a9f76d3d4178dd3ade4d80f8ea2a51a647cf1362cd4dac",
+        "list_stays": "sha256:5b9e594406177ab852bc7e715f13167cc4f72a0b1a2f5a7e78de728aa95188ea",
         "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
         "request_table_reservation_change": "sha256:f94a16f948498d413eb39b8542a85707c2dec4f2a369f73aaebdd83b305030a4",
         "update_reservation_policy": "sha256:f1e5e7eda32993dc7be3ffc459ceb97517ed309bb144d2a5f29a0f0b082f784f"
