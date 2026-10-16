@@ -236,9 +236,12 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY sort_order, id`, params: [organizationId, ids] },
     { query: `SELECT product_variant_id, product_option_id, product_option_value_id FROM product_variant_option_values
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
-    { query: `SELECT pr.* FROM prices pr
-      JOIN product_variants v ON v.id = pr.product_variant_id AND v.organization_id = pr.organization_id
-      WHERE pr.organization_id = ? AND v.product_id IN (SELECT value FROM json_each(?))
+    // Variants first, then each one's prices by index. Joined the other way
+    // the planner walked every price of the site and re-read the product list
+    // for each: 184,000 rows for one 365-dish menu.
+    { query: `SELECT pr.* FROM product_variants v
+      CROSS JOIN prices pr ON pr.organization_id = v.organization_id AND pr.product_variant_id = v.id
+      WHERE v.organization_id = ? AND v.product_id IN (SELECT value FROM json_each(?))
       ORDER BY pr.product_variant_id, pr.valid_from_at, pr.id`, params: [organizationId, ids] },
     { query: `SELECT product_id, organization_id, published FROM product_publications
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY organization_id`, params: [organizationId, ids] },
