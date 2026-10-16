@@ -11,6 +11,7 @@ export interface TenantContext {
 
 export interface TenantOrganizationInfo {
   id: string
+  subdomain: string
   name: string
   theme_id: string
   vertical: string

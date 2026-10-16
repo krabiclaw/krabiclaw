@@ -2,7 +2,7 @@
 // Avoids the generic dashboard proxy hop for this request path.
 import { jsonResponse } from '~/server/utils/api-response'
 import { getDashboardContext } from '~/server/utils/dashboard-context'
-import { isDemoOrg } from '~/server/utils/demo'
+import { isDemoOrganization } from '~/shared/demo'
 import { updateOrganizationSettingsFields } from '~/server/utils/organization-settings'
 import type { UpdateOrganizationSettingsRequest } from '~/server/types/organization'
 import { defineHandler } from 'nitro'
@@ -25,7 +25,7 @@ export default defineHandler(async (event) => {
 
   try {
     const isPlatformAdmin = await hasPlatformEventPermission(event, env, { platform: ['access'] })
-    if (isDemoOrg(organization.id) && !isPlatformAdmin) {
+    if (isDemoOrganization(organization) && !isPlatformAdmin) {
       return jsonResponse({ error: 'Demo organization is read-only' }, { status: 403 })
     }
 

@@ -24,7 +24,7 @@ Tenant canonical tags and breadcrumb/schema URLs resolve against the rendered re
 
 ### Non-production and demo hosts
 
-Staging, `pages.dev`, `workers.dev`, and demo showcase hosts (`demo.krabiclaw.com`, `demo.localhost`, and organization `org-demo`) are globally non-indexable.
+Staging, `pages.dev`, `workers.dev`, and demo showcase hosts (`demo.krabiclaw.com`, `demo.localhost`) and the demo organizations named in `shared/demo.ts` by subdomain (`demo`, `saltleaf-stays-demo`) are globally non-indexable.
 
 These hosts receive:
 

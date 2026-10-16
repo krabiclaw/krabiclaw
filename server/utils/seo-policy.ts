@@ -1,7 +1,7 @@
 import { TENANT_TYPES, type TenantType } from '../../utils/tenant-routing.ts'
 import { TENANT_NON_INDEXABLE_EXACT_PATHS } from '../../utils/template-registry.ts'
 import { isEnvironmentTenantAliasHost } from './tenant-hosts.ts'
-import { isDemoHost, isDemoOrg } from '../../shared/demo.ts'
+import { isDemoHost, isDemoOrganization } from '../../shared/demo.ts'
 
 /**
  * The platform routes that hold no page document: each renders its own data.
@@ -94,9 +94,9 @@ export function resolveRuntimeSeoConfig(input: {
   origin: string
   hostname: string
   tenantName?: string | null
-  organizationId?: string | null
+  tenantSubdomain?: string | null
 }): RuntimeSeoConfig {
-  const indexable = !isNonIndexableHost(input.hostname) && !isDemoOrg(input.organizationId)
+  const indexable = !isNonIndexableHost(input.hostname) && !isDemoOrganization({ subdomain: input.tenantSubdomain })
 
   if (!indexable) {
     return {

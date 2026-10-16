@@ -8,7 +8,7 @@ import { definePlugin, HTTPError } from 'nitro'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { isNonIndexableHost, PLATFORM_SITEMAP_ROUTES } from '~/server/utils/seo-policy'
-import { isDemoOrg } from '~/shared/demo'
+import { isDemoOrganization } from '~/shared/demo'
 import { ARTICLE_COLLECTIONS, collectionCategoryPath, isArticleCollection } from '~/utils/article-collections'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
@@ -94,8 +94,7 @@ export default definePlugin((nitroApp) => {
   nitroApp.hooks.hook('sitemap:input', async (ctx) => {
     const event = ctx.event
     const hostname = event.url.hostname
-    const eventOrgId = event.context.organizationId as string | undefined
-    if (isNonIndexableHost(hostname) || isDemoOrg(eventOrgId)) {
+    if (isNonIndexableHost(hostname) || isDemoOrganization(event.context.organization as { subdomain?: string } | undefined)) {
       ctx.urls.length = 0
       return
     }
@@ -134,7 +133,7 @@ export default definePlugin((nitroApp) => {
     }
 
     const organizationId = event.context.organizationId as string | undefined
-    if (!organizationId || isDemoOrg(organizationId)) {
+    if (!organizationId || isDemoOrganization(event.context.organization as { subdomain?: string } | undefined)) {
       ctx.urls.length = 0
       return
     }
