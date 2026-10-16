@@ -211,6 +211,7 @@ function setResolvedTenantContext(
   event.context.canonicalDomain = canonicalDomain
   event.context.organization = {
     id: tenant.id,
+    subdomain: tenant.subdomain,
     name: metadata.name,
     brand_description: tenant.brand_description,
     theme_id: metadata.themeId,

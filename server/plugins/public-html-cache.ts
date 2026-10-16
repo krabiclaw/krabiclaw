@@ -3,7 +3,7 @@ import { definePlugin } from 'nitro'
 import { isNonIndexableHost, isPrivateSeoPath } from '~/server/utils/seo-policy'
 import { hostnameOf, isNonProductionHost } from '~/server/utils/tenant-hosts'
 import { PREVIEW_COOKIE_NAME, PREVIEW_TOKEN_QUERY } from '~/server/utils/preview-token'
-import { isDemoHost, isDemoOrg } from '~/shared/demo'
+import { isDemoHost, isDemoOrganization } from '~/shared/demo'
 
 const PRODUCTION_CACHE_CONTROL = 'public, s-maxage=60, stale-while-revalidate=300, max-age=0'
 const NON_PRODUCTION_CACHE_CONTROL = 'private, no-store, max-age=0'
@@ -21,8 +21,8 @@ export default definePlugin((nitroApp) => {
     const isPreviewRequest = url.searchParams.has(PREVIEW_TOKEN_QUERY) || cookies.includes(`${PREVIEW_COOKIE_NAME}=`)
     const privatePath = isPrivateSeoPath(pathname) || isPreviewRequest
     const requestHost = hostnameOf(request.headers.get('host') || '')
-    const organizationId = (event as { context?: { organizationId?: string } }).context?.organizationId
-    const isDemo = isDemoHost(url.hostname) || isDemoHost(requestHost) || isDemoOrg(organizationId)
+    const organization = (event as { context?: { organization?: { subdomain?: string } } }).context?.organization
+    const isDemo = isDemoHost(url.hostname) || isDemoHost(requestHost) || isDemoOrganization(organization)
     if (isNonIndexableHost(url.hostname) || isNonIndexableHost(requestHost) || isDemo || privatePath) {
       response.headers.set('x-robots-tag', 'noindex, nofollow, noarchive')
     }
