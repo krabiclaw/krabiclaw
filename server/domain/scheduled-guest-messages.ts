@@ -123,10 +123,22 @@ export async function planHomeMessages(db: DbClient, organizationId: string, loc
   for (const row of rows) await planStayMessages(db, organizationId, row.id, now)
 }
 
-/** Cron recovery reads the same persisted source versions as foreground writes. */
-export async function reconcileScheduledGuestMessagePlans(db: DbClient, now = new Date().toISOString()): Promise<void> {
+/**
+ * Cron recovery reads the same persisted source versions as foreground writes.
+ * One template's failure does not stop the others; every failure is returned
+ * for the run to report.
+ */
+async function reconcileScheduledGuestMessagePlans(db: DbClient, now: string): Promise<Error[]> {
   const templates = await queryAllPages<MessageTemplateRow>(db, 'SELECT * FROM message_templates WHERE schedule_json IS NOT NULL ORDER BY id', [])
-  for (const template of templates) await planTemplateMessages(db, template, now)
+  const failures: Error[] = []
+  for (const template of templates) {
+    try {
+      await planTemplateMessages(db, template, now)
+    } catch (error) {
+      failures.push(new Error(`Planning template ${template.id} failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error }))
+    }
+  }
+  return failures
 }
 
 type SendEnv = Parameters<typeof sendScheduledGuestReply>[1]['env'] & GuestInboxPublicationEnv
@@ -198,13 +210,20 @@ async function sendScheduledGuestMessage(db: DbClient, env: SendEnv, row: Pick<S
 
 /** The production cron: recover plans from persisted sources, then send what is due. */
 export async function sendDueScheduledGuestMessages(db: DbClient, env: SendEnv, now = new Date().toISOString()): Promise<{ sent: number; failed: number; needs_review: number }> {
-  await reconcileScheduledGuestMessagePlans(db, now)
+  const failures = await reconcileScheduledGuestMessagePlans(db, now)
   const due = await queryAllPages<Pick<ScheduledGuestMessageRow, 'id' | 'organization_id' | 'stay_id'>>(db,
     "SELECT id, organization_id, stay_id FROM scheduled_guest_messages WHERE status = 'pending' AND due_at <= ? ORDER BY due_at, id", [now])
   const counts = { sent: 0, failed: 0, needs_review: 0 }
+  // Each message is sent on its own; an untyped failure leaves its row
+  // visibly sending and fails the run after every other due message is tried.
   for (const row of due) {
-    const result = await sendScheduledGuestMessage(db, env, row, now)
-    if (result !== 'not_due') counts[result] += 1
+    try {
+      const result = await sendScheduledGuestMessage(db, env, row, now)
+      if (result !== 'not_due') counts[result] += 1
+    } catch (error) {
+      failures.push(new Error(`Scheduled message ${row.id} failed: ${error instanceof Error ? error.message : String(error)}`, { cause: error }))
+    }
   }
+  if (failures.length) throw new AggregateError(failures, `${failures.length} scheduled guest message operations failed (sent ${counts.sent}, failed ${counts.failed}, needs review ${counts.needs_review}): ${failures.map(error => error.message).join('; ')}`)
   return counts
 }

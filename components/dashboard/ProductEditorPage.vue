@@ -870,14 +870,14 @@ async function commit(bookingConcern?: BookingConcern) {
       const saved = await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, {
         method: 'PATCH', body: payload(), validate: isMutation,
       })
+      if (editorKey.value === 'publication') await savePublication()
+      if (editorKey.value === 'locations') await saveLocation()
+      if (editorKey.value === 'collections') await saveCollections()
       if (saved.product.channel_push?.state === 'needs_review') {
         await reload()
         saveError.value = `The home was saved. Its channel needs review. ${saved.product.channel_push.detail}`
         return
       }
-      if (editorKey.value === 'publication') await savePublication()
-      if (editorKey.value === 'locations') await saveLocation()
-      if (editorKey.value === 'collections') await saveCollections()
     }
     await reload()
     // A booking write changes what the schedule is: its start times, whether the
