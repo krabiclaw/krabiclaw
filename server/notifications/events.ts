@@ -12,9 +12,11 @@ import type { NotificationFact, NotificationMessage } from './messages'
  * cells is how a reservation reads at a glance.
  */
 
-function fact(key: string, label: string, value: string | null | undefined, lead = false): NotificationFact | null {
-  const text = (value ?? '').toString().trim()
-  return text ? { key, label, value: text, lead } : null
+// A fact the event has is stated as it is; one the event genuinely lacks is
+// null and is left out. Nothing here writes in text for a fact that is absent:
+// a WhatsApp template whose slot it would have filled fails the send instead.
+function fact(key: string, label: string, value: string | null, lead = false): NotificationFact | null {
+  return value === null ? null : { key, label, value: value.trim(), lead }
 }
 
 function facts(...entries: Array<NotificationFact | null>): NotificationFact[] {
@@ -45,9 +47,9 @@ export function reservationCreatedMessage(input: ReservationEventInput): Notific
       fact('date', 'Date', input.date, true),
       fact('time', 'Time', input.time, true),
       fact('partySize', 'Party size', input.partySize, true),
-      fact('context', 'Location', input.locationName ?? 'Location not provided'),
+      fact('context', 'Location', input.locationName),
       fact('guestPhone', 'Phone', input.guestPhone),
-      fact('guestEmail', 'Email', input.guestEmail),
+      fact('guestEmail', 'Email', input.guestEmail, true),
       fact('notes', 'Special requests', input.notes),
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Reply in dashboard' } : undefined,
@@ -98,7 +100,7 @@ export function bookingCreatedMessage(input: BookingEventInput): NotificationMes
       fact('time', 'Time', input.time, true),
       fact('partySize', 'Party size', input.partySize, true),
       fact('guestPhone', 'Phone', input.guestPhone),
-      fact('guestEmail', 'Email', input.guestEmail),
+      fact('guestEmail', 'Email', input.guestEmail, true),
       fact('notes', 'Special requests', input.notes),
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Reply in dashboard' } : undefined,
@@ -182,7 +184,7 @@ export function guestReplyMessage(input: GuestReplyEventInput): NotificationMess
     facts: facts(
       fact('guestName', 'From', input.guestName, true),
       fact('subject', 'Conversation', subject, true),
-      fact('guestEmail', 'Email', input.guestEmail ?? 'No email provided'),
+      fact('guestEmail', 'Email', input.guestEmail),
       fact('message', 'Message', input.messagePreview, true),
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open thread in dashboard' } : undefined,
@@ -276,15 +278,15 @@ export function bookingChangeMessage(input: BookingChangeEventInput): Notificati
       fact('recordKind', 'Type', input.recordKind, true),
       fact('guestName', 'Guest', input.guestName, true),
       fact('status', 'Decision', input.status, true),
-      fact('location', 'Location', input.location),
-      // The approved template has a date slot and a time slot. A proposal
-      // recorded before those were stored separately has only the combined
-      // label, so it fills the date slot and the time slot says to look it up
-      // rather than falling back to the template's own placeholder.
-      fact('date', 'Date', input.date ?? input.whenLabel, true),
-      fact('time', 'Time', input.time ?? 'See dashboard', true),
+      fact('location', 'Location', input.location, true),
+      // A proposal recorded before the date and time were stored separately
+      // has only the combined label. It is stated as itself, never put in the
+      // date slot, and WhatsApp uses the template variant without date and time.
+      fact('when', 'When', input.whenLabel),
+      fact('date', 'Date', input.date, true),
+      fact('time', 'Time', input.time, true),
       fact('partySize', 'Party size', input.partySize, true),
-      fact('summary', 'Summary', input.summary),
+      fact('summary', 'Summary', input.summary, true),
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'View in dashboard' } : undefined,
     category: 'reservations_bookings',

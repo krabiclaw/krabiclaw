@@ -171,14 +171,14 @@ export const BUYER_OPERATION_EVENTS = [
 /** Guest-visible facts; staff diagnostics and financial disputes have no buyer audience. */
 export function isBuyerVisibleThreadEntry(entry:GuestThreadEntryRow):boolean {
  return entry.kind==='submission'
-  || (entry.kind==='message'&&((entry.actor_kind==='guest'&&['web','email','whatsapp'].includes(entry.channel??''))||(entry.actor_kind==='member'&&entry.event_name==='thread.member_reply')))
+  || (entry.kind==='message'&&((entry.actor_kind==='guest'&&['web','email','whatsapp'].includes(entry.channel??''))||(entry.actor_kind==='member'&&entry.event_name==='thread.member_reply')||(entry.actor_kind==='system'&&entry.event_name==='thread.scheduled_message')))
   || (entry.kind==='operation'&&(BUYER_OPERATION_EVENTS as readonly string[]).includes(entry.event_name??''))
 }
 /** The same public activity vocabulary, with per-user canonical acknowledgement rows. */
 export const BUYER_UNREAD_THREAD_SQL = `EXISTS (
  SELECT 1 FROM activity_entries e WHERE e.request_id=gt.id
   AND (e.actor_user_id IS NULL OR e.actor_user_id<>?)
-  AND ((e.kind='message' AND e.actor_kind='member' AND e.event_name='thread.member_reply')
+  AND ((e.kind='message' AND ((e.actor_kind='member' AND e.event_name='thread.member_reply') OR (e.actor_kind='system' AND e.event_name='thread.scheduled_message')))
     OR (e.kind='operation' AND e.event_name IN (SELECT value FROM json_each(?))))
   AND NOT EXISTS(SELECT 1 FROM activity_entries a WHERE a.kind='acknowledgement' AND a.parent_id=e.id AND a.actor_user_id=?)
 )`

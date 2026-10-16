@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:fc153680fee799747cb3375cf139eaaac4506e3c1fe01c4bdea8795c0492af28",
-  "documentationFingerprint": "sha256:7ebb5d86791d825e0621233b70d78f8f35b021d5fab8553ca21407081fe51d14",
+  "fingerprint": "sha256:03722d089b4f746636fa895660a835820f7a1bc79d416d0f1b50620656ba7148",
+  "documentationFingerprint": "sha256:543b830f7e18c46453ed4a985870f731a5230de13544bbfbd80031ff49afc315",
   "tools": [
     {
       "name": "append_content_block",
@@ -8038,6 +8038,188 @@
       "uiResourceUri": null
     },
     {
+      "name": "cancel_scheduled_guest_message",
+      "title": "Cancel scheduled guest message",
+      "description": "Cancel one pending automatic guest message. A message already sending, sent or requiring review cannot be cancelled or resent by this operation.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "message_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "properties": {
+          "message": {
+            "properties": {
+              "body": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "createdAt": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "dueAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "entryId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "errorCode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "errorField": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "organizationId": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "productId": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "requestId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "sentAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "startedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "pending",
+                  "sending",
+                  "sent",
+                  "failed",
+                  "needs_review",
+                  "cancelled",
+                  "skipped"
+                ],
+                "type": "string"
+              },
+              "stayId": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "templateId": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "templateVersion": {
+                "minimum": 1,
+                "type": "integer"
+              },
+              "timezone": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "title": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "updatedAt": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "organizationId",
+              "productId",
+              "stayId",
+              "requestId",
+              "templateId",
+              "title",
+              "templateVersion",
+              "body",
+              "dueAt",
+              "timezone",
+              "status",
+              "reason",
+              "errorCode",
+              "errorField",
+              "entryId",
+              "startedAt",
+              "sentAt",
+              "createdAt",
+              "updatedAt"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "guest_messaging",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "cancel_stay",
       "title": "Cancel stay",
       "description": "Cancel a stay the host took and free its nights. Refunds are recorded separately with record_stay_payment as a negative amount.",
@@ -8111,26 +8293,43 @@
                 ]
               },
               "channel_push": {
-                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
-                "properties": {
-                  "detail": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                "anyOf": [
+                  {
+                    "type": "null"
                   },
-                  "state": {
-                    "enum": [
-                      "pushed",
-                      "needs_review"
+                  {
+                    "properties": {
+                      "detail": {
+                        "type": "null"
+                      },
+                      "state": {
+                        "const": "pushed"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
                     ],
-                    "type": "string"
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "detail": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "const": "needs_review"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
+                    ],
+                    "type": "object"
                   }
-                },
-                "required": [
-                  "state",
-                  "detail"
                 ],
+                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
                 "type": [
                   "object",
                   "null"
@@ -15145,6 +15344,254 @@
         }
       ],
       "domain": "locations",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "create_message_template",
+      "title": "Create message template",
+      "description": "Save a guest reply. schedule:null saves a quick reply without automatic delivery. An explicit schedule plans only eligible future events at the named homes in their own timezones; ambiguous or nonexistent local times fail visibly.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          },
+          "schedule": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "delayMinutes": {
+                    "const": 5
+                  },
+                  "productIds": {
+                    "items": {
+                      "description": "Canonical home product ID, never a provider property ID.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "trigger": {
+                    "const": "booking_received"
+                  }
+                },
+                "required": [
+                  "trigger",
+                  "delayMinutes",
+                  "productIds"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "localTime": {
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                    "type": "string"
+                  },
+                  "offsetDays": {
+                    "maximum": 7,
+                    "minimum": -7,
+                    "type": "integer"
+                  },
+                  "productIds": {
+                    "items": {
+                      "description": "Canonical home product ID, never a provider property ID.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "trigger": {
+                    "enum": [
+                      "check_in",
+                      "check_out"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "trigger",
+                  "offsetDays",
+                  "localTime",
+                  "productIds"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "title": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "body",
+          "schedule"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "properties": {
+          "template": {
+            "properties": {
+              "body": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "createdAt": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "organizationId": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "schedule": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "delayMinutes": {
+                        "const": 5
+                      },
+                      "productIds": {
+                        "items": {
+                          "description": "Canonical home product ID, never a provider property ID.",
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "maxItems": 100,
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "trigger": {
+                        "const": "booking_received"
+                      }
+                    },
+                    "required": [
+                      "trigger",
+                      "delayMinutes",
+                      "productIds"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "localTime": {
+                        "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                        "type": "string"
+                      },
+                      "offsetDays": {
+                        "maximum": 7,
+                        "minimum": -7,
+                        "type": "integer"
+                      },
+                      "productIds": {
+                        "items": {
+                          "description": "Canonical home product ID, never a provider property ID.",
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "maxItems": 100,
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "trigger": {
+                        "enum": [
+                          "check_in",
+                          "check_out"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "trigger",
+                      "offsetDays",
+                      "localTime",
+                      "productIds"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "title": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "updatedAt": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "version": {
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "organizationId",
+              "title",
+              "body",
+              "schedule",
+              "version",
+              "createdAt",
+              "updatedAt"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "template"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "guest_messaging",
       "minimumRole": "admin",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -28671,26 +29118,43 @@
                 ]
               },
               "channel_push": {
-                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
-                "properties": {
-                  "detail": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                "anyOf": [
+                  {
+                    "type": "null"
                   },
-                  "state": {
-                    "enum": [
-                      "pushed",
-                      "needs_review"
+                  {
+                    "properties": {
+                      "detail": {
+                        "type": "null"
+                      },
+                      "state": {
+                        "const": "pushed"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
                     ],
-                    "type": "string"
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "detail": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "const": "needs_review"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
+                    ],
+                    "type": "object"
                   }
-                },
-                "required": [
-                  "state",
-                  "detail"
                 ],
+                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
                 "type": [
                   "object",
                   "null"
@@ -33148,6 +33612,63 @@
       "uiResourceUri": null
     },
     {
+      "name": "delete_message_template",
+      "title": "Delete message template",
+      "description": "Delete a saved reply using its current version and cancel its pending messages. Earlier delivery snapshots remain recorded; an in-flight send cannot be recalled.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "expected_version": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          },
+          "template_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "template_id",
+          "expected_version"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "properties": {
+          "status": {
+            "const": "deleted"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "guest_messaging",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "delete_organization_language",
       "title": "Delete organization language",
       "description": "Permanently delete a disabled website language and all of its translations. Disable it before deletion. Source content is preserved.",
@@ -33671,26 +34192,43 @@
                 ]
               },
               "channel_push": {
-                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
-                "properties": {
-                  "detail": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                "anyOf": [
+                  {
+                    "type": "null"
                   },
-                  "state": {
-                    "enum": [
-                      "pushed",
-                      "needs_review"
+                  {
+                    "properties": {
+                      "detail": {
+                        "type": "null"
+                      },
+                      "state": {
+                        "const": "pushed"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
                     ],
-                    "type": "string"
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "detail": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "const": "needs_review"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
+                    ],
+                    "type": "object"
                   }
-                },
-                "required": [
-                  "state",
-                  "detail"
                 ],
+                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
                 "type": [
                   "object",
                   "null"
@@ -38567,6 +39105,12 @@
                         "object",
                         "null"
                       ]
+                    },
+                    "provider_timestamp": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
@@ -38577,6 +39121,7 @@
                     "body",
                     "event",
                     "occurred_at",
+                    "provider_timestamp",
                     "deliveries",
                     "attachments"
                   ],
@@ -38593,7 +39138,10 @@
                     ]
                   },
                   "name": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "phone": {
                     "type": [
@@ -38667,6 +39215,16 @@
                   "null"
                 ]
               },
+              "participant_label": {
+                "type": "string"
+              },
+              "reply_channel": {
+                "enum": [
+                  "email",
+                  "airbnb"
+                ],
+                "type": "string"
+              },
               "request_id": {
                 "type": "string"
               },
@@ -38695,6 +39253,8 @@
               "state",
               "archived",
               "updated_at",
+              "participant_label",
+              "reply_channel",
               "guest",
               "operational_record",
               "entries"
@@ -38722,6 +39282,501 @@
         }
       ],
       "domain": "submissions",
+      "minimumRole": "member",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "get_guest_messaging_context",
+      "title": "Get guest messaging context",
+      "description": "Read the actual home and optional stay behind a canonical guest conversation, including private check-in instructions the host may choose to share. Contact conversations may have no home or stay; channel inquiries can have a home without a booked stay.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "properties": {
+          "home": {
+            "properties": {
+              "assigned_member_id": {
+                "description": "The member (member id) who looks after this home.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "assigned_team_id": {
+                "description": "The team that looks after this home.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "base_price_minor": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "channel": {
+                "description": "The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.",
+                "properties": {
+                  "provider": {
+                    "enum": [
+                      "channex"
+                    ],
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "importing",
+                      "connected",
+                      "disconnected"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "provider",
+                  "status"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "check_in_instructions": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "check_in_time": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "check_out_time": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "currency": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "location_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "max_guests": {
+                "type": "integer"
+              },
+              "min_nights": {
+                "type": "integer"
+              },
+              "name": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "product_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "timezone": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "product_id",
+              "name",
+              "location_id",
+              "timezone",
+              "currency",
+              "base_price_minor",
+              "check_in_time",
+              "check_out_time",
+              "max_guests",
+              "min_nights",
+              "check_in_instructions",
+              "assigned_member_id",
+              "assigned_team_id",
+              "channel"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "requestId": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "stay": {
+            "properties": {
+              "adults": {
+                "type": "integer"
+              },
+              "arrival_time": {
+                "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "cancellation_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "cancelled_at": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "channel": {
+                "enum": [
+                  "airbnb",
+                  "vrbo",
+                  "direct"
+                ],
+                "type": "string"
+              },
+              "channel_booking_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "channel_push": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "properties": {
+                      "detail": {
+                        "type": "null"
+                      },
+                      "state": {
+                        "const": "pushed"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "detail": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "const": "needs_review"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "check_in_date": {
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                "type": "string"
+              },
+              "check_out_date": {
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                "type": "string"
+              },
+              "children": {
+                "type": "integer"
+              },
+              "created_at": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "currency": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "external_booking_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "guest_email": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "guest_name": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "guest_phone": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "guest_surname": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "infants": {
+                "type": "integer"
+              },
+              "location_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "notes": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "overbooked": {
+                "type": "boolean"
+              },
+              "owner": {
+                "enum": [
+                  "app",
+                  "channel"
+                ],
+                "type": "string"
+              },
+              "paid_minor": {
+                "type": "integer"
+              },
+              "payment_status": {
+                "enum": [
+                  "unpaid",
+                  "partial",
+                  "paid",
+                  "overpaid",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "payments": {
+                "items": {
+                  "properties": {
+                    "amount_minor": {
+                      "type": "integer"
+                    },
+                    "created_at": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "created_by": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "currency": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "id": {
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "method": {
+                      "enum": [
+                        "cash",
+                        "bank_transfer",
+                        "card_external",
+                        "other"
+                      ],
+                      "type": "string"
+                    },
+                    "note": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "paid_on": {
+                      "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                      "type": "string"
+                    },
+                    "reference": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "stay_id": {
+                      "minLength": 1,
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "stay_id",
+                    "amount_minor",
+                    "currency",
+                    "method",
+                    "paid_on",
+                    "reference",
+                    "note",
+                    "created_at",
+                    "created_by"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "product_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "provider": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "request_id": {
+                "description": "The guest conversation about this stay, for get_guest_conversation and reply_to_guest. Null until a named guest with email or phone opens one; an existing conversation is retained.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "status": {
+                "enum": [
+                  "pending",
+                  "confirmed",
+                  "cancelled"
+                ],
+                "type": "string"
+              },
+              "timezone": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "total_minor": {
+                "type": "integer"
+              },
+              "updated_at": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "user_id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "product_id",
+              "location_id",
+              "timezone",
+              "channel",
+              "owner",
+              "status",
+              "overbooked",
+              "check_in_date",
+              "check_out_date",
+              "arrival_time",
+              "adults",
+              "children",
+              "infants",
+              "guest_name",
+              "guest_surname",
+              "guest_email",
+              "guest_phone",
+              "user_id",
+              "total_minor",
+              "currency",
+              "notes",
+              "provider",
+              "external_booking_id",
+              "channel_booking_id",
+              "request_id",
+              "cancelled_at",
+              "cancellation_reason",
+              "version",
+              "created_at",
+              "updated_at",
+              "payments",
+              "paid_minor",
+              "payment_status"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "requestId",
+          "home",
+          "stay"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "guest_messaging",
       "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
@@ -52597,26 +53652,43 @@
                 ]
               },
               "channel_push": {
-                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
-                "properties": {
-                  "detail": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                "anyOf": [
+                  {
+                    "type": "null"
                   },
-                  "state": {
-                    "enum": [
-                      "pushed",
-                      "needs_review"
+                  {
+                    "properties": {
+                      "detail": {
+                        "type": "null"
+                      },
+                      "state": {
+                        "const": "pushed"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
                     ],
-                    "type": "string"
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "detail": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "const": "needs_review"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
+                    ],
+                    "type": "object"
                   }
-                },
-                "required": [
-                  "state",
-                  "detail"
                 ],
+                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
                 "type": [
                   "object",
                   "null"
@@ -52929,26 +54001,43 @@
         "$defs": {},
         "properties": {
           "channel_push": {
-            "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
-            "properties": {
-              "detail": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+            "anyOf": [
+              {
+                "type": "null"
               },
-              "state": {
-                "enum": [
-                  "pushed",
-                  "needs_review"
+              {
+                "properties": {
+                  "detail": {
+                    "type": "null"
+                  },
+                  "state": {
+                    "const": "pushed"
+                  }
+                },
+                "required": [
+                  "state",
+                  "detail"
                 ],
-                "type": "string"
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "detail": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "state": {
+                    "const": "needs_review"
+                  }
+                },
+                "required": [
+                  "state",
+                  "detail"
+                ],
+                "type": "object"
               }
-            },
-            "required": [
-              "state",
-              "detail"
             ],
+            "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
             "type": [
               "object",
               "null"
@@ -53003,6 +54092,12 @@
                   "null"
                 ]
               },
+              "check_in_instructions": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "check_in_time": {
                 "minLength": 1,
                 "type": "string"
@@ -53049,6 +54144,7 @@
               "check_out_time",
               "max_guests",
               "min_nights",
+              "check_in_instructions",
               "assigned_member_id",
               "assigned_team_id",
               "channel"
@@ -54943,7 +56039,7 @@
     {
       "name": "list_guest_conversations",
       "title": "List guest conversations",
-      "description": "Read the business inbox for contacts, table reservations and bookings. Filter by type, current/past and whether a reply is needed. Follow page_info; use request_id to read the whole conversation.",
+      "description": "Read the business inbox for contacts, table reservations, bookings and stay conversations. Filter by type, current/past and whether a reply is needed. Follow page_info; use request_id to read the whole conversation.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -54999,7 +56095,10 @@
             "items": {
               "properties": {
                 "guest_name": {
-                  "type": "string"
+                  "type": [
+                    "string",
+                    "null"
+                  ]
                 },
                 "operational_status": {
                   "type": [
@@ -55007,11 +56106,21 @@
                     "null"
                   ]
                 },
+                "participant_label": {
+                  "type": "string"
+                },
                 "preview": {
                   "type": [
                     "string",
                     "null"
                   ]
+                },
+                "reply_channel": {
+                  "enum": [
+                    "email",
+                    "airbnb"
+                  ],
+                  "type": "string"
                 },
                 "request_id": {
                   "type": "string"
@@ -55029,6 +56138,8 @@
               "required": [
                 "request_id",
                 "guest_name",
+                "participant_label",
+                "reply_channel",
                 "type",
                 "state",
                 "operational_status",
@@ -55855,6 +56966,199 @@
       ],
       "domain": "locations",
       "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "list_message_templates",
+      "title": "List message templates",
+      "description": "Read the workspace’s saved guest replies and their explicit automatic-delivery schedules. Follow page_info for every page.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Opaque next_cursor from the previous page.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Page size. Defaults to 50; maximum 100.",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "properties": {
+          "page_info": {
+            "properties": {
+              "has_more": {
+                "type": "boolean"
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "has_more",
+              "next_cursor"
+            ],
+            "type": "object"
+          },
+          "templates": {
+            "items": {
+              "properties": {
+                "body": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "createdAt": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "organizationId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "schedule": {
+                  "oneOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "delayMinutes": {
+                          "const": 5
+                        },
+                        "productIds": {
+                          "items": {
+                            "description": "Canonical home product ID, never a provider property ID.",
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 100,
+                          "minItems": 1,
+                          "type": "array",
+                          "uniqueItems": true
+                        },
+                        "trigger": {
+                          "const": "booking_received"
+                        }
+                      },
+                      "required": [
+                        "trigger",
+                        "delayMinutes",
+                        "productIds"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "localTime": {
+                          "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                          "type": "string"
+                        },
+                        "offsetDays": {
+                          "maximum": 7,
+                          "minimum": -7,
+                          "type": "integer"
+                        },
+                        "productIds": {
+                          "items": {
+                            "description": "Canonical home product ID, never a provider property ID.",
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "maxItems": 100,
+                          "minItems": 1,
+                          "type": "array",
+                          "uniqueItems": true
+                        },
+                        "trigger": {
+                          "enum": [
+                            "check_in",
+                            "check_out"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "trigger",
+                        "offsetDays",
+                        "localTime",
+                        "productIds"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                },
+                "title": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "updatedAt": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "version": {
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "id",
+                "organizationId",
+                "title",
+                "body",
+                "schedule",
+                "version",
+                "createdAt",
+                "updatedAt"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "templates",
+          "page_info"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "guest_messaging",
+      "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -58104,6 +59408,219 @@
       ],
       "domain": "submissions",
       "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
+      "name": "list_scheduled_guest_messages",
+      "title": "List scheduled guest messages",
+      "description": "Read scheduled guest-message snapshots and visible failure reasons, optionally for one canonical guest conversation. Members see only assigned homes. Read provider delivery receipts through get_guest_conversation; no provider result is inferred from a scheduled time.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "cursor": {
+            "description": "Opaque next_cursor from the previous page.",
+            "type": "string"
+          },
+          "limit": {
+            "description": "Page size. Defaults to 50; maximum 100.",
+            "maximum": 100,
+            "minimum": 1,
+            "type": "number"
+          },
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          },
+          "request_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "properties": {
+          "messages": {
+            "items": {
+              "properties": {
+                "body": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "createdAt": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "dueAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "entryId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "errorCode": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "errorField": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "id": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "organizationId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "productId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "requestId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "sentAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "startedAt": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "pending",
+                    "sending",
+                    "sent",
+                    "failed",
+                    "needs_review",
+                    "cancelled",
+                    "skipped"
+                  ],
+                  "type": "string"
+                },
+                "stayId": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "templateId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "templateVersion": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "timezone": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "title": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "updatedAt": {
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "organizationId",
+                "productId",
+                "stayId",
+                "requestId",
+                "templateId",
+                "title",
+                "templateVersion",
+                "body",
+                "dueAt",
+                "timezone",
+                "status",
+                "reason",
+                "errorCode",
+                "errorField",
+                "entryId",
+                "startedAt",
+                "sentAt",
+                "createdAt",
+                "updatedAt"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          },
+          "page_info": {
+            "properties": {
+              "has_more": {
+                "type": "boolean"
+              },
+              "next_cursor": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "required": [
+              "has_more",
+              "next_cursor"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "messages",
+          "page_info"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": true
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "guest_messaging",
+      "minimumRole": "member",
       "requiredEntitlement": null,
       "fileParams": [],
       "uiResourceUri": null
@@ -72371,6 +73888,48 @@
                     "null"
                   ]
                 },
+                "channel_push": {
+                  "anyOf": [
+                    {
+                      "type": "null"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "null"
+                        },
+                        "state": {
+                          "const": "pushed"
+                        }
+                      },
+                      "required": [
+                        "state",
+                        "detail"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "state": {
+                          "const": "needs_review"
+                        }
+                      },
+                      "required": [
+                        "state",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ],
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
                 "collections": {
                   "items": {
                     "properties": {
@@ -73121,7 +74680,8 @@
                 "collections",
                 "source",
                 "created_at",
-                "updated_at"
+                "updated_at",
+                "channel_push"
               ],
               "type": "object"
             },
@@ -73252,26 +74812,43 @@
                 ]
               },
               "channel_push": {
-                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
-                "properties": {
-                  "detail": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                "anyOf": [
+                  {
+                    "type": "null"
                   },
-                  "state": {
-                    "enum": [
-                      "pushed",
-                      "needs_review"
+                  {
+                    "properties": {
+                      "detail": {
+                        "type": "null"
+                      },
+                      "state": {
+                        "const": "pushed"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
                     ],
-                    "type": "string"
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "detail": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "const": "needs_review"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
+                    ],
+                    "type": "object"
                   }
-                },
-                "required": [
-                  "state",
-                  "detail"
                 ],
+                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
                 "type": [
                   "object",
                   "null"
@@ -82383,7 +83960,7 @@
     {
       "name": "reply_to_guest",
       "title": "Reply to guest",
-      "description": "Email this guest a message, an attached photo, or both, and save the reply in the conversation. Reuse the same key for an identical retry; delivered replies are not sent twice.",
+      "description": "Reply through this conversation’s reply_channel and save the reply. Airbnb replies accept text; email replies accept text, a photo or both. Reuse the same key for an identical retry. A pending or uncertain Airbnb send needs review and is never resent automatically.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -82547,6 +84124,12 @@
                         "object",
                         "null"
                       ]
+                    },
+                    "provider_timestamp": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
@@ -82557,6 +84140,7 @@
                     "body",
                     "event",
                     "occurred_at",
+                    "provider_timestamp",
                     "deliveries",
                     "attachments"
                   ],
@@ -82573,7 +84157,10 @@
                     ]
                   },
                   "name": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "phone": {
                     "type": [
@@ -82647,6 +84234,16 @@
                   "null"
                 ]
               },
+              "participant_label": {
+                "type": "string"
+              },
+              "reply_channel": {
+                "enum": [
+                  "email",
+                  "airbnb"
+                ],
+                "type": "string"
+              },
               "request_id": {
                 "type": "string"
               },
@@ -82675,6 +84272,8 @@
               "state",
               "archived",
               "updated_at",
+              "participant_label",
+              "reply_channel",
               "guest",
               "operational_record",
               "entries"
@@ -84484,6 +86083,12 @@
                         "object",
                         "null"
                       ]
+                    },
+                    "provider_timestamp": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
                     }
                   },
                   "required": [
@@ -84494,6 +86099,7 @@
                     "body",
                     "event",
                     "occurred_at",
+                    "provider_timestamp",
                     "deliveries",
                     "attachments"
                   ],
@@ -84510,7 +86116,10 @@
                     ]
                   },
                   "name": {
-                    "type": "string"
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
                   "phone": {
                     "type": [
@@ -84584,6 +86193,16 @@
                   "null"
                 ]
               },
+              "participant_label": {
+                "type": "string"
+              },
+              "reply_channel": {
+                "enum": [
+                  "email",
+                  "airbnb"
+                ],
+                "type": "string"
+              },
               "request_id": {
                 "type": "string"
               },
@@ -84612,6 +86231,8 @@
               "state",
               "archived",
               "updated_at",
+              "participant_label",
+              "reply_channel",
               "guest",
               "operational_record",
               "entries"
@@ -88000,6 +89621,172 @@
       "uiResourceUri": null
     },
     {
+      "name": "set_stay_check_in_instructions",
+      "title": "Set stay check in instructions",
+      "description": "Save private check-in instructions for one home; null removes them. Saving does not send the instructions to a guest or publish them on the site.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "instructions": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          },
+          "product_id": {
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "product_id",
+          "instructions"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "properties": {
+          "home": {
+            "properties": {
+              "assigned_member_id": {
+                "description": "The member (member id) who looks after this home.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "assigned_team_id": {
+                "description": "The team that looks after this home.",
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "base_price_minor": {
+                "type": [
+                  "integer",
+                  "null"
+                ]
+              },
+              "channel": {
+                "description": "The channel this home is connected to; null when it is kept only in KrabiClaw and its night changes go nowhere else.",
+                "properties": {
+                  "provider": {
+                    "enum": [
+                      "channex"
+                    ],
+                    "type": "string"
+                  },
+                  "status": {
+                    "enum": [
+                      "importing",
+                      "connected",
+                      "disconnected"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "provider",
+                  "status"
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
+              "check_in_instructions": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "check_in_time": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "check_out_time": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "currency": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "location_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "max_guests": {
+                "type": "integer"
+              },
+              "min_nights": {
+                "type": "integer"
+              },
+              "name": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "product_id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "timezone": {
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "product_id",
+              "name",
+              "location_id",
+              "timezone",
+              "currency",
+              "base_price_minor",
+              "check_in_time",
+              "check_out_time",
+              "max_guests",
+              "min_nights",
+              "check_in_instructions",
+              "assigned_member_id",
+              "assigned_team_id",
+              "channel"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "home"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "guest_messaging",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "set_stay_nights",
       "title": "Set stay nights",
       "description": "Close or open nights, set a nightly price, or set stay rules for a date range at one place to stay. Fields left out keep each night’s value; price_minor null returns to the base price; reset removes the range’s overrides.",
@@ -88076,26 +89863,43 @@
         "$defs": {},
         "properties": {
           "channel_push": {
-            "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
-            "properties": {
-              "detail": {
-                "type": [
-                  "string",
-                  "null"
-                ]
+            "anyOf": [
+              {
+                "type": "null"
               },
-              "state": {
-                "enum": [
-                  "pushed",
-                  "needs_review"
+              {
+                "properties": {
+                  "detail": {
+                    "type": "null"
+                  },
+                  "state": {
+                    "const": "pushed"
+                  }
+                },
+                "required": [
+                  "state",
+                  "detail"
                 ],
-                "type": "string"
+                "type": "object"
+              },
+              {
+                "properties": {
+                  "detail": {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "state": {
+                    "const": "needs_review"
+                  }
+                },
+                "required": [
+                  "state",
+                  "detail"
+                ],
+                "type": "object"
               }
-            },
-            "required": [
-              "state",
-              "detail"
             ],
+            "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
             "type": [
               "object",
               "null"
@@ -88150,6 +89954,12 @@
                   "null"
                 ]
               },
+              "check_in_instructions": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "check_in_time": {
                 "minLength": 1,
                 "type": "string"
@@ -88196,6 +90006,7 @@
               "check_out_time",
               "max_guests",
               "min_nights",
+              "check_in_instructions",
               "assigned_member_id",
               "assigned_team_id",
               "channel"
@@ -96262,6 +98073,264 @@
       "uiResourceUri": null
     },
     {
+      "name": "update_message_template",
+      "title": "Update message template",
+      "description": "Replace a saved guest reply and its schedule using the current version. Completed, failed, skipped, cancelled and uncertain deliveries are never recreated by an edit.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "body": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "type": "string"
+          },
+          "expected_version": {
+            "minimum": 1,
+            "type": "integer"
+          },
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          },
+          "schedule": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "delayMinutes": {
+                    "const": 5
+                  },
+                  "productIds": {
+                    "items": {
+                      "description": "Canonical home product ID, never a provider property ID.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "trigger": {
+                    "const": "booking_received"
+                  }
+                },
+                "required": [
+                  "trigger",
+                  "delayMinutes",
+                  "productIds"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "localTime": {
+                    "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                    "type": "string"
+                  },
+                  "offsetDays": {
+                    "maximum": 7,
+                    "minimum": -7,
+                    "type": "integer"
+                  },
+                  "productIds": {
+                    "items": {
+                      "description": "Canonical home product ID, never a provider property ID.",
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "minItems": 1,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "trigger": {
+                    "enum": [
+                      "check_in",
+                      "check_out"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "trigger",
+                  "offsetDays",
+                  "localTime",
+                  "productIds"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "template_id": {
+            "minLength": 1,
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 100,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "template_id",
+          "expected_version",
+          "title",
+          "body",
+          "schedule"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "properties": {
+          "template": {
+            "properties": {
+              "body": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "createdAt": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "organizationId": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "schedule": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "delayMinutes": {
+                        "const": 5
+                      },
+                      "productIds": {
+                        "items": {
+                          "description": "Canonical home product ID, never a provider property ID.",
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "maxItems": 100,
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "trigger": {
+                        "const": "booking_received"
+                      }
+                    },
+                    "required": [
+                      "trigger",
+                      "delayMinutes",
+                      "productIds"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "localTime": {
+                        "pattern": "^([01]\\d|2[0-3]):[0-5]\\d$",
+                        "type": "string"
+                      },
+                      "offsetDays": {
+                        "maximum": 7,
+                        "minimum": -7,
+                        "type": "integer"
+                      },
+                      "productIds": {
+                        "items": {
+                          "description": "Canonical home product ID, never a provider property ID.",
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "maxItems": 100,
+                        "minItems": 1,
+                        "type": "array",
+                        "uniqueItems": true
+                      },
+                      "trigger": {
+                        "enum": [
+                          "check_in",
+                          "check_out"
+                        ],
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "trigger",
+                      "offsetDays",
+                      "localTime",
+                      "productIds"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "title": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "updatedAt": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "version": {
+                "minimum": 1,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "id",
+              "organizationId",
+              "title",
+              "body",
+              "schedule",
+              "version",
+              "createdAt",
+              "updatedAt"
+            ],
+            "type": "object"
+          }
+        },
+        "required": [
+          "template"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "guest_messaging",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "update_organization_member_role",
       "title": "Update organization member role",
       "description": "Change a teammate’s business role. Better Auth enforces owner privileges and protects the last owner.",
@@ -97878,6 +99947,48 @@
                   "null"
                 ]
               },
+              "channel_push": {
+                "anyOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "properties": {
+                      "detail": {
+                        "type": "null"
+                      },
+                      "state": {
+                        "const": "pushed"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "detail": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "const": "needs_review"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
+                    ],
+                    "type": "object"
+                  }
+                ],
+                "type": [
+                  "object",
+                  "null"
+                ]
+              },
               "collections": {
                 "items": {
                   "properties": {
@@ -98628,7 +100739,8 @@
               "collections",
               "source",
               "created_at",
-              "updated_at"
+              "updated_at",
+              "channel_push"
             ],
             "type": "object"
           }
@@ -106656,26 +108768,43 @@
                 ]
               },
               "channel_push": {
-                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
-                "properties": {
-                  "detail": {
-                    "type": [
-                      "string",
-                      "null"
-                    ]
+                "anyOf": [
+                  {
+                    "type": "null"
                   },
-                  "state": {
-                    "enum": [
-                      "pushed",
-                      "needs_review"
+                  {
+                    "properties": {
+                      "detail": {
+                        "type": "null"
+                      },
+                      "state": {
+                        "const": "pushed"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
                     ],
-                    "type": "string"
+                    "type": "object"
+                  },
+                  {
+                    "properties": {
+                      "detail": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "state": {
+                        "const": "needs_review"
+                      }
+                    },
+                    "required": [
+                      "state",
+                      "detail"
+                    ],
+                    "type": "object"
                   }
-                },
-                "required": [
-                  "state",
-                  "detail"
                 ],
+                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
                 "type": [
                   "object",
                   "null"
@@ -107084,11 +109213,11 @@
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
-        "reconcile_products": "sha256:0a37cdc72ef22320946c54eeb58f3fec590648e5f0a283849040fd4871171060",
+        "reconcile_products": "sha256:ca6f8f1bdb95081538ddc8cb43a040e3c093f045fb3d600a10e85af049cc10e9",
         "reorder_collections": "sha256:7337b52f13f1caddb073c69300d67ecac75a9b62869dd7afc0a54d8b0741217f",
         "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
         "update_menu": "sha256:63cbd21c021e0b61799765308bf3f7fba7caac5bc647ab6d9698b215038949d4",
-        "update_product": "sha256:72bbda52826f463b9ebebb2ed91e6ef12189ae4e1de2886b8f02e592d8a6b236"
+        "update_product": "sha256:e7a8c9a40063a41c48109e14b984d285490a1097579496d280d571d5f9cfd387"
       }
     },
     {
@@ -107154,14 +109283,14 @@
         "cancel_product_booking": "sha256:09fbbd2f3d89627aa78eb5b60d27b5e949edc7b8304b610422045cf5a89671a1",
         "cancel_table_reservation": "sha256:671384fbe0abd846ad44296506d6acbb68fab9adeaecd53802aa98d9619a74c3",
         "confirm_product_booking": "sha256:30124315590810ca4e7e259836063d2878e2b2503acc6045b0525ca4daff8c33",
-        "get_guest_conversation": "sha256:6a0cc3fef767411569af75a68be2abcb91cefbcd3f8feba7835500b32b3c589b",
+        "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_product_booking": "sha256:1b6cb2d27c6bd3a8d7da1e8005e855af9c053bd84303d29df9a8705c56e61611",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
-        "list_guest_conversations": "sha256:153f745faeac94cd2caaec6ec20d496592da104ce72fc9615fd39184c5502166",
+        "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_location_reviews": "sha256:b09a24e98ab12f02cb71581d1afc290edd559790a17c4c55308f9b0e059b46fb",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "reject_product_booking": "sha256:557fcf98b488029ac8081da295552e9ee2569dfc54a0ba561418a5ca7b8492d4",
-        "reply_to_guest": "sha256:32b18d18a182751c3fb2fb6eb156f34359d42d7b4aaa2ae7c435345fe80438d2",
+        "reply_to_guest": "sha256:1ef1f07853bfb4e12a4d5ad3660cb43e1864f839d9af3c1326c058aa0eb1b103",
         "request_product_booking_change": "sha256:da50fa96ac71952ddaa8d3097a319ae2965b6e0ec0a3b52208b22cc5f6d95025",
         "request_table_reservation_change": "sha256:f94a16f948498d413eb39b8542a85707c2dec4f2a369f73aaebdd83b305030a4"
       }
@@ -107248,7 +109377,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "replace_product_weekly_schedule": "sha256:d4f5ba8f99874961aa0d9cb91f22c8ef2b640aeeeff6a52fc8e7ed758fbf4ae2",
         "set_product_booking_config": "sha256:727bf4fc651ced45ea84cc49b1c1e864366dbadac346e8dabdba56db426e1acc",
-        "update_product": "sha256:72bbda52826f463b9ebebb2ed91e6ef12189ae4e1de2886b8f02e592d8a6b236",
+        "update_product": "sha256:e7a8c9a40063a41c48109e14b984d285490a1097579496d280d571d5f9cfd387",
         "update_reservation_policy": "sha256:f1e5e7eda32993dc7be3ffc459ceb97517ed309bb144d2a5f29a0f0b082f784f"
       }
     },
@@ -107268,7 +109397,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "set_media": "sha256:4bf16ab96284e37a96cfd24355a24eff1426d3afcf1c45d0395365fe45a3e709",
-        "update_product": "sha256:72bbda52826f463b9ebebb2ed91e6ef12189ae4e1de2886b8f02e592d8a6b236",
+        "update_product": "sha256:e7a8c9a40063a41c48109e14b984d285490a1097579496d280d571d5f9cfd387",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
     },
@@ -107282,16 +109411,16 @@
       },
       "toolContracts": {
         "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
-        "get_guest_conversation": "sha256:6a0cc3fef767411569af75a68be2abcb91cefbcd3f8feba7835500b32b3c589b",
+        "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_organization_analytics": "sha256:aad678e4cef26c11f2a5304b650d582662912ff4a1395bffb04b7d791778db43",
         "get_product": "sha256:48d43ddb64c4dbeb86d5819d6d26529375119a89940f444da7d7f80995886205",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
-        "list_guest_conversations": "sha256:153f745faeac94cd2caaec6ec20d496592da104ce72fc9615fd39184c5502166",
+        "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
-        "reply_to_guest": "sha256:32b18d18a182751c3fb2fb6eb156f34359d42d7b4aaa2ae7c435345fe80438d2",
-        "update_product": "sha256:72bbda52826f463b9ebebb2ed91e6ef12189ae4e1de2886b8f02e592d8a6b236"
+        "reply_to_guest": "sha256:1ef1f07853bfb4e12a4d5ad3660cb43e1864f839d9af3c1326c058aa0eb1b103",
+        "update_product": "sha256:e7a8c9a40063a41c48109e14b984d285490a1097579496d280d571d5f9cfd387"
       }
     }
   ],
@@ -107302,14 +109431,14 @@
       "toolContracts": {
         "create_location": "sha256:b25656237d93d456c98da74d8281ec6d1d05435e6a7657a18c14b82654b79b9b",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
-        "get_guest_conversation": "sha256:6a0cc3fef767411569af75a68be2abcb91cefbcd3f8feba7835500b32b3c589b",
-        "get_stay": "sha256:e8132e2d19ebf3420caeb34d71377c2c30961be38f91ccc8500581483b169bc7",
+        "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
+        "get_stay": "sha256:a93507d7f3e6e2c901387ea4a6ac276512558f3f2bb482349829e7d83209fa12",
         "invite_organization_member": "sha256:f520b4ade47c9c5a5faef9859564f32d1c9dddfd285efdcc27fa099fa60e8a24",
-        "list_guest_conversations": "sha256:153f745faeac94cd2caaec6ec20d496592da104ce72fc9615fd39184c5502166",
+        "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_organization_members": "sha256:f47eb37ec4cfa1df500db883fdd207db7e2228a3839d64e08f4e52351f85b10e",
         "list_stays": "sha256:fb9f51613819364e72a9f76d3d4178dd3ade4d80f8ea2a51a647cf1362cd4dac",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
-        "reply_to_guest": "sha256:32b18d18a182751c3fb2fb6eb156f34359d42d7b4aaa2ae7c435345fe80438d2",
+        "reply_to_guest": "sha256:1ef1f07853bfb4e12a4d5ad3660cb43e1864f839d9af3c1326c058aa0eb1b103",
         "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
         "update_organization_member_role": "sha256:7091eda99b109bbf611aa3f7b316e12785275ab87bc4caed50371b288f981dda",
         "update_product_session": "sha256:719c480fb7c4436732bfe437c820b50e4f7b37a2b23f6aa7e0634bbaf62ea776"
@@ -107386,14 +109515,14 @@
       "toolContracts": {
         "cancel_table_reservation": "sha256:671384fbe0abd846ad44296506d6acbb68fab9adeaecd53802aa98d9619a74c3",
         "create_table_reservation": "sha256:412c62d5987f89d7d7c7bf57ac2038c65f4101181bb4762341e0a937766c948b",
-        "get_guest_conversation": "sha256:6a0cc3fef767411569af75a68be2abcb91cefbcd3f8feba7835500b32b3c589b",
+        "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
-        "get_stay": "sha256:e8132e2d19ebf3420caeb34d71377c2c30961be38f91ccc8500581483b169bc7",
-        "list_guest_conversations": "sha256:153f745faeac94cd2caaec6ec20d496592da104ce72fc9615fd39184c5502166",
+        "get_stay": "sha256:a93507d7f3e6e2c901387ea4a6ac276512558f3f2bb482349829e7d83209fa12",
+        "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_product_bookings": "sha256:ea80e0cc56ffb5b12058725b9644f50e50af6191c4a44493fb0be538224d7373",
         "list_reservation_inquiries": "sha256:85cb564470d0026c00b8727287edb2a6c2d403fec987c2ac13f4aaaa28e5d171",
         "list_stays": "sha256:fb9f51613819364e72a9f76d3d4178dd3ade4d80f8ea2a51a647cf1362cd4dac",
-        "reply_to_guest": "sha256:32b18d18a182751c3fb2fb6eb156f34359d42d7b4aaa2ae7c435345fe80438d2",
+        "reply_to_guest": "sha256:1ef1f07853bfb4e12a4d5ad3660cb43e1864f839d9af3c1326c058aa0eb1b103",
         "request_table_reservation_change": "sha256:f94a16f948498d413eb39b8542a85707c2dec4f2a369f73aaebdd83b305030a4",
         "update_reservation_policy": "sha256:f1e5e7eda32993dc7be3ffc459ceb97517ed309bb144d2a5f29a0f0b082f784f"
       }

@@ -17,33 +17,35 @@ import { MAX_IMAGE_BYTES } from '~/server/utils/media-mime'
 const nullableString = { type: ['string', 'null'] }
 const conversationResult = { type: 'object', properties: { conversation: { type: 'object', properties: {
   request_id: { type: 'string' }, type: { type: 'string', enum: ['contact', 'reservation', 'booking', 'stay'] }, state: nullableString, archived: { type: 'boolean' }, updated_at: { type: 'string' },
-  guest: { type: 'object', properties: { name: { type: 'string' }, email: nullableString, phone: nullableString }, required: ['name', 'email', 'phone'] },
+  participant_label: { type: 'string' }, reply_channel: { type: 'string', enum: ['email', 'airbnb'] },
+  guest: { type: 'object', properties: { name: nullableString, email: nullableString, phone: nullableString }, required: ['name', 'email', 'phone'] },
   operational_record: { type: ['object', 'null'], description: 'For a stay, check_in_date and check_out_date are its nights and id is the stay for get_stay; its starts_at and ends_at only order and archive the conversation.', properties: { id: { type: 'string' }, kind: { type: 'string', enum: ['booking', 'reservation', 'stay'] }, status: { type: 'string' }, starts_at: { type: 'string' }, ends_at: { type: 'string' }, timezone: { type: 'string' }, party_size: { type: 'integer' }, check_in_date: nullableString, check_out_date: nullableString }, required: ['id', 'kind', 'status', 'starts_at', 'ends_at', 'timezone', 'party_size', 'check_in_date', 'check_out_date'] },
-  entries: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, kind: { type: 'string' }, actor: nullableString, channel: nullableString, body: nullableString, event: nullableString, occurred_at: { type: 'string' }, payload: { type: ['object', 'null'] },
+  entries: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, kind: { type: 'string' }, actor: nullableString, channel: nullableString, body: nullableString, event: nullableString, occurred_at: { type: 'string' }, provider_timestamp: nullableString, payload: { type: ['object', 'null'] },
     deliveries: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, channel: { type: 'string' }, purpose: { type: 'string' }, status: { type: 'string' } }, required: ['id', 'channel', 'purpose', 'status'] } },
     attachments: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, url: { type: 'string' }, alt: nullableString, width: { type: ['integer', 'null'] }, height: { type: ['integer', 'null'] } }, required: ['id', 'url', 'alt', 'width', 'height'] } },
-  }, required: ['id', 'kind', 'actor', 'channel', 'body', 'event', 'occurred_at', 'deliveries', 'attachments'] } },
-}, required: ['request_id', 'type', 'state', 'archived', 'updated_at', 'guest', 'operational_record', 'entries'] } }, required: ['conversation'] }
+  }, required: ['id', 'kind', 'actor', 'channel', 'body', 'event', 'occurred_at', 'provider_timestamp', 'deliveries', 'attachments'] } },
+}, required: ['request_id', 'type', 'state', 'archived', 'updated_at', 'participant_label', 'reply_channel', 'guest', 'operational_record', 'entries'] } }, required: ['conversation'] }
 
 async function readConversation(ctx: McpExecutorContext, requestId: string) {
   const { db, organizationId } = ctx.organization
   const detail = await getGuestThreadDetail(db, requestId, organizationId)
   if (!detail) throw new HTTPError({ statusCode: 404, message: 'Guest conversation not found' })
   return { request_id: detail.id, type: detail.submissionType, state: detail.conversationState, archived: detail.manuallyArchived, updated_at: detail.updatedAt,
+    participant_label: detail.participantLabel, reply_channel: detail.replyChannel,
     guest: { name: detail.guestName, email: detail.guestEmail, phone: detail.guestPhone }, operational_record: detail.operationalRecord,
-    entries: detail.entries.map(entry => ({ id: entry.id, kind: entry.kind, actor: entry.actorLabel, channel: entry.channel, body: entry.body, event: entry.eventName, payload: entry.payload, occurred_at: entry.occurredAt, deliveries: entry.deliveries, attachments: entry.attachments })),
+    entries: detail.entries.map(entry => ({ id: entry.id, kind: entry.kind, actor: entry.actorLabel, channel: entry.channel, body: entry.body, event: entry.eventName, payload: entry.payload, occurred_at: entry.occurredAt, provider_timestamp: entry.providerTimestamp, deliveries: entry.deliveries, attachments: entry.attachments })),
   }
 }
 
 export const SUBMISSIONS_TOOLS: McpToolDefinition[] = [
-  organizationTool({ name: 'list_guest_conversations', domain: 'submissions', minimumRole: 'member', description: 'Read the business inbox for contacts, table reservations and bookings. Filter by type, current/past and whether a reply is needed. Follow page_info; use request_id to read the whole conversation.',
+  organizationTool({ name: 'list_guest_conversations', domain: 'submissions', minimumRole: 'member', description: 'Read the business inbox for contacts, table reservations, bookings and stay conversations. Filter by type, current/past and whether a reply is needed. Follow page_info; use request_id to read the whole conversation.',
     inputSchema: { type: { type: 'string', enum: ['contact', 'reservation', 'booking', 'stay'] }, state: { type: 'string', enum: ['needs_attention', 'waiting_on_guest', 'resolved'] }, mailbox: { type: 'string', enum: ['current', 'past'] }, location_id: { type: 'string' }, ...paginationInputSchema },
-    outputSchema: { type: 'object', properties: { conversations: { type: 'array', items: { type: 'object', properties: { request_id: { type: 'string' }, guest_name: { type: 'string' }, type: { type: 'string' }, state: { type: 'string' }, operational_status: { type: ['string', 'null'] }, preview: { type: ['string', 'null'] }, updated_at: { type: 'string' } }, required: ['request_id', 'guest_name', 'type', 'state', 'operational_status', 'preview', 'updated_at'] } }, page_info: pageInfoObject }, required: ['conversations', 'page_info'] },
+    outputSchema: { type: 'object', properties: { conversations: { type: 'array', items: { type: 'object', properties: { request_id: { type: 'string' }, guest_name: nullableString, participant_label: { type: 'string' }, reply_channel: { type: 'string', enum: ['email', 'airbnb'] }, type: { type: 'string' }, state: { type: 'string' }, operational_status: { type: ['string', 'null'] }, preview: { type: ['string', 'null'] }, updated_at: { type: 'string' } }, required: ['request_id', 'guest_name', 'participant_label', 'reply_channel', 'type', 'state', 'operational_status', 'preview', 'updated_at'] } }, page_info: pageInfoObject }, required: ['conversations', 'page_info'] },
   }),
   organizationTool({ name: 'get_guest_conversation', domain: 'submissions', minimumRole: 'member', description: 'Read the entire guest conversation, including messages, booking/reservation, proposals, attachments and delivery receipts. Requires request_id from the inbox or booking read.',
     inputSchema: { request_id: { type: 'string' } }, required: ['request_id'], outputSchema: conversationResult,
   }),
-  organizationTool({ name: 'reply_to_guest', domain: 'submissions', minimumRole: 'member', description: 'Email this guest a message, an attached photo, or both, and save the reply in the conversation. Reuse the same key for an identical retry; delivered replies are not sent twice.',
+  organizationTool({ name: 'reply_to_guest', domain: 'submissions', minimumRole: 'member', description: 'Reply through this conversation’s reply_channel and save the reply. Airbnb replies accept text; email replies accept text, a photo or both. Reuse the same key for an identical retry. A pending or uncertain Airbnb send needs review and is never resent automatically.',
     inputSchema: { request_id: { type: 'string' }, message: { type: 'string', minLength: 1, description: 'Reply text; required when no photo is attached.' }, file: { ...chatgptFileInput, description: 'Photo attachment; required when no reply text is supplied.' }, idempotency_key: { type: 'string', minLength: 1, maxLength: 200 } }, required: ['request_id', 'idempotency_key'], fileParams: ['file'], outputSchema: conversationResult,
   }),
   organizationTool({ name: 'set_guest_conversation_archived', domain: 'submissions', minimumRole: 'admin', description: 'Archive or restore this inbox conversation. Does not cancel a booking or reservation and does not send the guest a message.',
@@ -89,7 +91,7 @@ export async function handleSubmissionsTools(ctx: McpExecutorContext): Promise<u
       const window = mcpPageWindow(args, resource)
       const rows = await listOrganizationGuestThreads(organization.db, { organizationId: organization.organizationId, principal, userId: organization.userId,
         type: args.type as 'contact' | 'reservation' | 'booking' | 'stay' | undefined, conversationState: args.state as 'needs_attention' | 'waiting_on_guest' | 'resolved' | undefined, mailbox: args.mailbox as 'current' | 'past' | undefined, locationId: optionalString(args, 'location_id'), limit: window.limit + 1, offset: window.offset })
-      const conversations = rows.slice(0, window.limit).map(row => ({ request_id: row.id, guest_name: row.guestName, type: row.submissionType, state: row.conversationState, operational_status: row.operationalStatus, preview: row.preview?.text ?? null, updated_at: row.lastActivityAt }))
+      const conversations = rows.slice(0, window.limit).map(row => ({ request_id: row.id, guest_name: row.guestName, participant_label: row.participantLabel, reply_channel: row.replyChannel, type: row.submissionType, state: row.conversationState, operational_status: row.operationalStatus, preview: row.preview?.text ?? null, updated_at: row.lastActivityAt }))
       return { conversations, page_info: mcpPageInfo(window, conversations.length, rows.length > window.limit, resource) }
     }
     case 'get_guest_conversation':

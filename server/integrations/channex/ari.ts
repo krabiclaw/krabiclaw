@@ -3,6 +3,8 @@ import type { StayHome, StayNight } from '~/server/domain/stays'
 import { currencyFractionDigits, type CurrencyCode } from '~/shared/currencies'
 import { channexRequest, ChannexError, type ChannexEnv } from './client'
 import { ChannexDataError, object } from './data'
+import { HTTPError } from 'nitro'
+import type { ChannelPush } from '~/shared/channel-push'
 
 /**
  * Outbound availability, prices and stay rules for a home connected through
@@ -15,11 +17,6 @@ import { ChannexDataError, object } from './data'
  * Channex never confirmed marks those nights needs_review with the reason and
  * is returned to the caller. It is not retried.
  */
-
-export interface ChannelPush {
-  state: 'pushed' | 'needs_review'
-  detail: string | null
-}
 
 interface Mapping { property_id: string; room_type_id: string; rate_plan_id: string }
 
@@ -41,7 +38,9 @@ function rejection(result: Record<string, unknown>): string | null {
 async function connectedMapping(db: DbClient, env: ChannexEnv, organizationId: string, productId: string): Promise<Mapping | null> {
   const mapping = await queryFirst<Mapping>(db, `SELECT property_id, room_type_id, rate_plan_id FROM product_channel_mappings
     WHERE organization_id = ? AND product_id = ? AND provider = 'channex' AND enabled = 1`, [organizationId, productId])
-  if (mapping && (!env.CHANNEX_BASE_URL?.trim() || !env.CHANNEX_API_KEY?.trim())) throw new Error('CHANNEX_BASE_URL and CHANNEX_API_KEY are required to change a home connected to Channex')
+  if (mapping && (!env.CHANNEX_BASE_URL?.trim() || !env.CHANNEX_API_KEY?.trim())) throw new HTTPError({ statusCode: 503,
+    message: 'CHANNEX_BASE_URL and CHANNEX_API_KEY are required to change a home connected to Channex',
+    data: { code: 'CHANNEL_CONFIGURATION_REQUIRED', field: !env.CHANNEX_BASE_URL?.trim() ? 'CHANNEX_BASE_URL' : 'CHANNEX_API_KEY', product_id: productId } })
   return mapping
 }
 

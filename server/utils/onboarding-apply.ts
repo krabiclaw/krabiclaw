@@ -15,7 +15,7 @@ import { parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours
 import { getPlaceDetails, googleReviewUpserts } from '~/server/utils/google-places'
 import { execute, executeBatch, queryAll, queryFirst, type BatchQuery } from '~/server/db'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
-import { planProductCreateWrites, slugCandidate } from '~/server/utils/product-management'
+import { getProduct, planProductCreateWrites, publishStayProducts, slugCandidate } from '~/server/utils/product-management'
 import { updateLocation } from '~/server/utils/location-management'
 import { getDraftMedia, normalizeOnboardingDraftInput, onboardingPublicationMissingFields, readOnboardingDraft, upsertActiveOnboardingDraft, type OnboardingDraftInput, onboardingDraftWriteGuard, onboardingPageBlocks, onboardingPagePath, onboardingPageType, parseOnboardingDraftPayload, readActiveOnboardingDraft, type OnboardingDraftPayload, type SavedOnboardingDraft } from '~/server/utils/onboarding-drafts'
 import { createMediaAsset, insertInitialMediaPlacements, type CreateInput } from '~/server/utils/media-asset-manager'
@@ -425,11 +425,12 @@ export async function applyOnboardingDraft(
   // prices and slugs. This replaces the whole imported catalogue: the previous
   // import's Products are removed first, so re-running onboarding does not
   // leave two copies of every dish.
-  const previouslyImported = await queryAll<{ id: string }>(db, `
-    SELECT p.id FROM products p
+  const previouslyImported = await queryAll<{ id: string; kind: string }>(db, `
+    SELECT p.id, p.kind FROM products p
     JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id 
     WHERE p.organization_id = ? AND p.source = 'import'
   `, [ organizationId])
+  const deletedHomes = await Promise.all(previouslyImported.filter(product => product.kind === 'stay').map(product => getProduct(db, organizationId, product.id)))
   const boundPages = previouslyImported.length ? await queryAll<{ id: string; path: string; updated_at: string }>(db, `
     SELECT id, path, updated_at FROM content_documents
      WHERE organization_id = ? AND kind = 'page' AND row_role = 'root'
@@ -565,6 +566,7 @@ export async function applyOnboardingDraft(
         name: batchError.name, message: batchError.message, stack: batchError.stack, } : String(batchError), })
     throw batchError
   }
+  await publishStayProducts(env, deletedHomes)
   for (const page of productPages) await refreshTenantPageCard(db, env, page, userId)
   if (input.activate) await activateOrganization(db, organizationId, writeGuard, input.draft)
   return { locationSlug: updatedSlug }

@@ -4,9 +4,11 @@ import { getGuestRequest, getThreadOperationalRecord, requestSummary, requestAct
 import { formatOperationalStatusLabel } from './status-labels'
 import { resolveGuestThreadMailbox } from './mailbox'
 import { listThreadEntries, parseEntryPayload, isBuyerVisibleThreadEntry } from './entries'
-import { isVisibleDeliveryFailure, listThreadDeliveries } from './deliveries'
+import { isDeliverySent, isVisibleDeliveryFailure, listThreadDeliveries } from './deliveries'
 import { listMessagePhotos } from './attachments'
 import type { GuestThreadDetailViewModel, GuestThreadEntryDeliveryViewModel, GuestThreadEntryViewModel } from './types'
+import { HTTPError } from 'nitro'
+import { providerTimestamp } from '~/server/integrations/channex/messages'
 
 /** Builds the full canonical thread detail view model — the sole source for the detail API. */
 export async function getGuestThreadDetail(
@@ -23,9 +25,11 @@ export async function getGuestThreadDetail(
   if (!organization) throw new Error('Conversation has no organization')
 
 
-  const [entryRows, deliveryRows] = await Promise.all([
+  const [entryRows, deliveryRows, channelThread] = await Promise.all([
     listThreadEntries(db, threadId),
     listThreadDeliveries(db, threadId),
+    queryFirst(db, `SELECT request_id FROM channel_threads WHERE organization_id = ? AND request_id = ?
+      UNION ALL SELECT request_id FROM stays WHERE organization_id = ? AND request_id = ? AND owner = 'channel' LIMIT 1`, [organizationId, threadId, organizationId, threadId]),
   ])
 
   // One read of the deliveries answers both questions the thread asks of them:
@@ -37,6 +41,9 @@ export async function getGuestThreadDetail(
     deliveriesByEntry.set(delivery.entry_id, forEntry)
   }
   const deliveryFailureRows = deliveryRows.filter(isVisibleDeliveryFailure)
+  if (deliveryRows.some(delivery => delivery.provider === 'channex' && isDeliverySent(delivery) && !delivery.provider_message_id?.trim())) {
+    throw new HTTPError({ statusCode: 500, message: 'A successful channel reply has no provider message ID', data: { code: 'CHANNEL_RECEIPT_INVALID', field: 'delivery.provider_message_id' } })
+  }
 
   const photos = await listMessagePhotos(db, entryRows.filter(entry => entry.kind === 'message').map(entry => entry.id))
 
@@ -47,10 +54,28 @@ export async function getGuestThreadDetail(
         .map(row => [row.id, row.name])
     : [])
 
-  const visibleEntries = audience ? entryRows.filter(isBuyerVisibleThreadEntry) : entryRows
+  // The local attempt and its provider resource remain separate immutable facts.
+  // Only an actual successful receipt ID proves the mirrored property message is
+  // the same reply. No content, timestamp or in-flight state identifies an echo.
+  const acceptedChannelIds = new Set(deliveryRows.flatMap(delivery => delivery.provider === 'channex' && isDeliverySent(delivery) && delivery.provider_message_id !== null ? [delivery.provider_message_id] : []))
+  const presentationEntries = entryRows.filter(entry => {
+    if (entry.event_name !== 'channel.message_mirrored' || entry.actor_kind !== 'member') return true
+    const payload = parseEntryPayload(entry)
+    if (typeof payload?.provider_message_id !== 'string' || !payload.provider_message_id) throw new HTTPError({ statusCode: 500, message: 'The mirrored message has no provider message ID', data: { code: 'CHANNEL_MESSAGE_PAYLOAD_INVALID', field: 'provider_message_id', entry_id: entry.id } })
+    return !acceptedChannelIds.has(payload.provider_message_id)
+  })
+  const visibleEntries = audience ? presentationEntries.filter(isBuyerVisibleThreadEntry) : presentationEntries
   const entries: GuestThreadEntryViewModel[] = visibleEntries.map(entry => {
     const payload = parseEntryPayload(entry)
     if (payload) delete payload.email
+    const mirrored = entry.event_name === 'channel.message_mirrored'
+    if (mirrored && (!payload || !Array.isArray(payload.attachments) || !payload.attachments.every(link => typeof link === 'string' && URL.canParse(link) && new URL(link).protocol === 'https:'))) {
+      throw new HTTPError({ statusCode: 500, message: 'The mirrored message has invalid attachment links', data: { code: 'CHANNEL_MESSAGE_PAYLOAD_INVALID', entry_id: entry.id, field: 'attachments' } })
+    }
+    const providerRecordedAt = mirrored ? providerTimestamp(payload!.provider_inserted_at, `activity_entry:${entry.id}`, 'provider_inserted_at') : null
+    const attachments = mirrored
+      ? (payload!.attachments as string[]).map((url, index) => ({ id: `${entry.id}:${index}`, url, alt: null, width: null, height: null }))
+      : photos.get(entry.id) ?? []
     return {
       id: entry.id,
       kind: entry.kind,
@@ -58,7 +83,10 @@ export async function getGuestThreadDetail(
       actorUserId: audience
         ? entry.actor_kind === 'guest' && entry.channel === 'web' && entry.actor_user_id === audience.buyerUserId ? entry.actor_user_id : null
         : entry.actor_user_id,
-      actorLabel: entry.actor_user_id ? actorNames.get(entry.actor_user_id) ?? null : null,
+      actorLabel: mirrored && entry.actor_kind === 'system' ? 'Airbnb'
+        : mirrored && entry.actor_kind === 'member' ? 'Property on Airbnb'
+          : entry.event_name === 'thread.scheduled_message' ? 'Scheduled message'
+          : entry.actor_user_id ? actorNames.get(entry.actor_user_id) ?? null : null,
       channel: entry.channel,
       body: entry.body,
       eventName: entry.event_name,
@@ -68,8 +96,9 @@ export async function getGuestThreadDetail(
         : payload,
       sequence: entry.sequence,
       occurredAt: entry.occurred_at,
+      providerTimestamp: providerRecordedAt,
       deliveries: audience ? [] : deliveriesByEntry.get(entry.id) ?? [],
-      attachments: photos.get(entry.id) ?? [],
+      attachments,
     }
   })
 
@@ -83,11 +112,12 @@ export async function getGuestThreadDetail(
     organizationVertical: organization.vertical,
     activityPath: audience && thread.kind!=='contact' ? await buyerRequestActivityPath(db,audience.buyerUserId,thread.id) : null,
     guestName: summary.guestName,
+    participantLabel: summary.participantLabel,
+    replyChannel: channelThread ? 'airbnb' : 'email',
     guestEmail: summary.guestEmail,
     guestPhone: summary.guestPhone,
     submissionType: thread.kind,
     submissionId: thread.id,
-    contextLabel: summary.contextLabel,
     locationLabel: summary.locationTitle,
     conversationState: audience ? null : thread.conversation_state,
     operationalRecord: record ? { id: record.id, kind: record.kind, status: record.status, starts_at: record.starts_at, ends_at: record.ends_at, timezone: record.timezone, party_size: record.party_size, check_in_date: record.check_in_date, check_out_date: record.check_out_date } : null,
@@ -131,6 +161,7 @@ export async function getGuestThreadDetail(
       channel: d.channel,
       purpose: d.purpose,
       error: d.error,
+      status: d.status,
       createdAt: d.created_at,
     })),
     createdAt: thread.created_at,

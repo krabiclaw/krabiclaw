@@ -62,8 +62,14 @@ export const guestRequestSchema = z.discriminatedUnion('kind', [
   threadScope.extend({ kind: z.literal('reservation'), payload: threadPayload.extend({ guest: guest.extend({ phone: z.string() }) }) }),
   threadScope.extend({ kind: z.literal('booking'), payload: threadPayload }),
   // A stay's guest may be reachable by phone alone; the database requires an email or a phone.
-  threadScope.extend({ kind: z.literal('stay'), payload: z.object({ guest: guest.extend({ email: z.string().nullable() })
-    .refine(contact => contact.email !== null || contact.phone !== null, 'A stay conversation needs the guest\'s email or phone') }) }),
+  threadScope.extend({ kind: z.literal('stay'), payload: z.union([
+    z.object({ guest: guest.extend({ email: z.string().nullable() })
+      .refine(contact => contact.email !== null || contact.phone !== null, 'A stay conversation needs the guest\'s email or phone') }).strict(),
+    z.object({
+      participant: z.object({ kind: z.literal('channel'), title: z.string().trim().min(1) }).strict(),
+      guest: guest.extend({ name: z.string().nullable(), email: z.string().nullable() }),
+    }).strict(),
+  ]) }),
 ])
 export type GuestRequest = z.infer<typeof guestRequestSchema>
 export type BookingRequest = Extract<GuestRequest, { kind: 'reservation' | 'booking' }>
@@ -122,6 +128,13 @@ export function parseGuestRequest(row: Record<string, unknown>): GuestRequest {
   return guestRequestSchema.parse({ ...row, payload: JSON.parse(row.payload_json) })
 }
 
+/** A provider's conversation title is a label, never a replacement guest identity. */
+export function participantLabel(request: GuestRequest): string {
+  if (request.kind === 'stay' && 'participant' in request.payload) return request.payload.participant.title
+  if (request.payload.guest.name === null) throw new HTTPError({ statusCode: 500, message: 'A contact participant requires its recorded guest name', data: { code: 'REQUEST_PARTICIPANT_INVALID', field: 'guest.name' } })
+  return request.payload.guest.name
+}
+
 /** Resource ownership belongs to the current request and every actual linked operational record. */
 export const REQUEST_CURRENT_BUYER_SQL = `r.user_id IS NOT NULL
  AND NOT EXISTS(SELECT 1 FROM bookings b WHERE b.request_id=r.id AND (b.user_id IS NULL OR b.user_id<>r.user_id OR b.organization_id<>r.organization_id OR r.kind<>'booking'))
@@ -129,7 +142,15 @@ export const REQUEST_CURRENT_BUYER_SQL = `r.user_id IS NOT NULL
 
 export async function getGuestRequest(db: DbClient, id: string, organizationId?: string, kind?: GuestRequestKind, buyerUserId?:string): Promise<GuestRequest | null> {
   const row = await queryFirst<Record<string, unknown>>(db, `SELECT r.* FROM requests r WHERE r.id = ? AND r.kind IN ('contact', 'reservation', 'booking', 'stay')${organizationId ? ' AND r.organization_id = ?' : ''}${kind ? ' AND r.kind = ?' : ''}${buyerUserId?` AND r.user_id=? AND ${REQUEST_CURRENT_BUYER_SQL}`:''}`, [id, ...(organizationId ? [organizationId] : []), ...(kind ? [kind] : []),...(buyerUserId?[buyerUserId]:[])])
-  return row ? parseGuestRequest(row) : null
+  if (!row) return null
+  const request = parseGuestRequest(row)
+  if (request.kind === 'stay' && 'participant' in request.payload) {
+    const mapped = await queryFirst(db, `SELECT ct.request_id FROM channel_threads ct
+      JOIN product_stay_configs c ON c.organization_id = ct.organization_id AND c.product_id = ct.product_id
+      WHERE ct.request_id = ? AND ct.organization_id = ? AND c.location_id = ?`, [request.id, request.organization_id, request.location_id])
+    if (!mapped) throw new HTTPError({ statusCode: 500, message: 'Channel conversation has no matching home mapping', data: { code: 'CHANNEL_THREAD_MAPPING_INVALID', field: 'request_id' } })
+  }
+  return request
 }
 
 /**
@@ -185,6 +206,7 @@ export async function getThreadOperationalRecord(db: DbClient, requestId: string
     FROM requests r WHERE r.id = ?
   `, [requestId])
   if (request?.uncaptured_checkout === 1) return null
+  if (request?.kind === 'stay' && await queryFirst(db, 'SELECT request_id FROM channel_threads WHERE request_id = ?', [requestId])) return null
   if (request && request.kind !== 'contact') throw new HTTPError({ statusCode: 404, message: 'The conversation has no matching booking or reservation', data: { code: 'REQUEST_OPERATIONAL_RECORD_NOT_FOUND', request_id: requestId } })
   return null
 }
@@ -244,14 +266,22 @@ export function stayThreadQueries(input: { organizationId: string; stayId: strin
   return [{
     query: `UPDATE requests SET location_id = c.location_id,
         payload_json = ${host ? participant : `CASE WHEN ${name} <> '' AND (${email} IS NOT NULL OR ${phone} IS NOT NULL) THEN ${participant} ELSE payload_json END`}
-      FROM ${stay} AND requests.id = st.request_id AND requests.kind = 'stay'`,
+      FROM ${stay} AND requests.id = st.request_id AND requests.kind = 'stay'
+        AND json_type(requests.payload_json, '$.participant') IS NULL`,
+    params: [input.stayId, input.organizationId],
+  }, {
+    query: `UPDATE requests SET location_id = c.location_id,
+        payload_json = json_set(payload_json, '$.guest.name', nullif(${name}, ''), '$.guest.email', ${email}, '$.guest.phone', ${phone})
+      FROM ${stay} AND requests.id = st.request_id AND requests.kind = 'stay'
+        AND json_extract(requests.payload_json, '$.participant.kind') = 'channel'
+        AND EXISTS (SELECT 1 FROM channel_threads t WHERE t.request_id = requests.id AND t.organization_id = st.organization_id AND t.product_id = st.product_id)`,
     params: [input.stayId, input.organizationId],
   }, {
     // A booking the channel brought is new to the host; one the host took waits on its guest.
     query: `INSERT INTO requests (id, kind, organization_id, location_id, user_id, review_id, conversation_state, resolved_at, payload_json, created_at, updated_at)
       SELECT ?, 'stay', st.organization_id, c.location_id, NULL, NULL, ?, NULL,
         json_object('guest', json_object('name', ${name}, 'email', ${email}, 'phone', ${phone})), ?, ?
-      FROM ${stay} AND st.request_id IS NULL AND (${email} IS NOT NULL OR ${phone} IS NOT NULL) AND ${name} <> ''`,
+      FROM ${stay} AND st.request_id IS NULL AND st.owner = 'app' AND (${email} IS NOT NULL OR ${phone} IS NOT NULL) AND ${name} <> ''`,
     params: [id, host ? 'waiting_on_guest' : 'needs_attention', input.now, input.now, input.stayId, input.organizationId],
   }, {
     query: `INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, actor_user_id, channel, payload_json, dedupe_key, sequence, occurred_at, created_at)
@@ -296,25 +326,17 @@ export function stayPreview(record: { check_in_date: string; check_out_date: str
   return `${day(record.check_in_date)} – ${day(record.check_out_date)} · ${record.party_size} ${record.party_size === 1 ? 'guest' : 'guests'}`
 }
 
-export function requestPreview(request: GuestRequest, record: ThreadOperationalRecord | null): string {
-  if (request.kind === 'contact') return request.payload.message.replace(/\s+/g, ' ').trim().slice(0, 160)
-  if (request.kind === 'stay') return record?.check_in_date && record.check_out_date ? stayPreview({ check_in_date: record.check_in_date, check_out_date: record.check_out_date, party_size: record.party_size }) : ''
-  if (request.payload.notes) return request.payload.notes.replace(/\s+/g, ' ').trim().slice(0, 160)
-  // With no operational record there is nothing to summarize, and inventing a
-  // date would make a broken thread look ordinary.
-  if (!record) return ''
-  const local = new Intl.DateTimeFormat('en-US', { timeZone: record.timezone, dateStyle: 'medium', timeStyle: 'short' }).format(new Date(record.starts_at))
-  return `${local} · ${record.party_size}${request.payload.party_size_is_minimum ? '+' : ''} guests`.slice(0, 160)
-}
-
 export async function requestSummary(db: DbClient, request: GuestRequest, knownRecord?: ThreadOperationalRecord | null) {
   const record = knownRecord === undefined ? await getThreadOperationalRecord(db, request.id) : knownRecord
-  const labels = await queryFirst<{ location_title: string | null }>(db, 'SELECT title AS location_title FROM business_locations WHERE id = ?', [request.location_id])
+  // A thread without a location belongs to the business itself; one with a location must find it.
+  const location = request.location_id === null ? null
+    : await queryFirst<{ title: string }>(db, 'SELECT title FROM business_locations WHERE id = ? AND organization_id = ?', [request.location_id, request.organization_id])
+  if (request.location_id !== null && !location) throw new HTTPError({ statusCode: 500, message: 'The conversation location does not exist', data: { code: 'INVALID_GUEST_THREAD', field: 'location_id', request_id: request.id } })
   return {
-    guestName: request.payload.guest.name, guestEmail: request.payload.guest.email, guestPhone: request.payload.guest.phone,
+    guestName: request.payload.guest.name, participantLabel: participantLabel(request), guestEmail: request.payload.guest.email, guestPhone: request.payload.guest.phone,
     organizationId: request.organization_id, locationId: request.location_id,
-    locationTitle: labels?.location_title ?? null, productTitle: record?.product_name ?? null,
-    contextLabel: requestPreview(request, record), createdAt: request.created_at,
+    locationTitle: location?.title ?? null, productTitle: record?.product_name ?? null,
+    createdAt: request.created_at,
     operationalStatus: record?.status ?? null,
   }
 }

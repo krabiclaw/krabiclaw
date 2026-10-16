@@ -1,3 +1,4 @@
+import { HTTPError } from 'nitro'
 import { ARTICLE_COLLECTIONS, collectionArticlePath, isArticleCollection } from '~/utils/article-collections'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { PLATFORM_TEMPLATE } from '~/utils/template-registry'
@@ -626,14 +627,18 @@ export async function buildWorkspaceDocuments(db: DbClient, organizationId?: str
   for (const row of threads ?? []) {
     const organization = byOrganization.get(row.organization_id)
     if (!organization) continue
-    const payload = JSON.parse(row.payload_json) as { guest?: { name?: string; email?: string }; message?: string; notes?: string | null }
-    const guest = payload.guest ?? {}
+    const payload = JSON.parse(row.payload_json) as { participant?: { kind: 'channel'; title: string }; guest: { name: string | null; email: string | null }; message?: string; notes?: string | null }
+    const guest = payload.guest
+    // requests_guest_payload_check: a contact-backed conversation has its guest's
+    // name; a channel conversation is labelled by its provider title.
+    const label = payload.participant ? payload.participant.title : guest.name
+    if (!label?.trim()) throw new HTTPError({ statusCode: 500, message: `Conversation ${row.id} has no participant label`, data: { code: 'REQUEST_PARTICIPANT_INVALID', field: 'guest.name', request_id: row.id } })
     const words = row.kind === 'contact' ? payload.message ?? '' : payload.notes ?? ''
     const about = row.product_name ?? row.location_title ?? ''
     records.push(doc(organization, 'thread', row.id, {
-      title: guest.name?.trim() || guest.email || 'Guest', path: `${base(organization)}/messages/${row.id}`, snippet: words || about,
+      title: label.trim(), path: `${base(organization)}/messages/${row.id}`, snippet: words || about,
       // Name and email find the thread; the phone number stays out of the index.
-      section: 'Messages', icon: 'message-circle', body: joinWords(guest.name, guest.email, row.kind, about, words),
+      section: 'Messages', icon: 'message-circle', body: joinWords(label, guest.name, guest.email, row.kind, about, words),
     }))
   }
 

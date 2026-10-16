@@ -23,11 +23,12 @@ export const NOTIFICATION_CATEGORIES = [
 
 export type NotificationCategory = typeof NOTIFICATION_CATEGORIES[number]
 
-export type NotificationChannel = 'email' | 'whatsapp'
+export type NotificationChannel = 'email' | 'whatsapp' | 'push'
 
 export interface NotificationCategorySetting {
   email: boolean
   whatsapp: boolean
+  push: boolean
 }
 
 export function isNotificationCategory(value: unknown): value is NotificationCategory {
@@ -47,13 +48,13 @@ export function isMandatoryEmailCategory(category: NotificationCategory): boolea
 }
 
 export const NOTIFICATION_CATEGORY_DEFAULTS = {
-  account_security: { email: true, whatsapp: false },
-  reservations_bookings: { email: true, whatsapp: true },
-  guest_messages: { email: true, whatsapp: true },
-  reviews: { email: true, whatsapp: false },
-  review_requests: { email: true, whatsapp: false },
-  organization_and_billing: { email: true, whatsapp: false },
-  product_news: { email: true, whatsapp: false },
+  account_security: { email: true, whatsapp: false, push: false },
+  reservations_bookings: { email: true, whatsapp: true, push: true },
+  guest_messages: { email: true, whatsapp: true, push: true },
+  reviews: { email: true, whatsapp: false, push: false },
+  review_requests: { email: true, whatsapp: false, push: false },
+  organization_and_billing: { email: true, whatsapp: false, push: false },
+  product_news: { email: true, whatsapp: false, push: false },
 } as const satisfies Record<NotificationCategory, NotificationCategorySetting>
 
 export const NOTIFICATION_CATEGORY_LABELS = {
@@ -68,8 +69,9 @@ export const NOTIFICATION_CATEGORY_LABELS = {
 
 /** The state a settings row previews, without restating the channel names twice. */
 export function describeNotificationSetting(setting: NotificationCategorySetting): string {
-  if (setting.email && setting.whatsapp) return 'Email and WhatsApp'
-  if (setting.email) return 'Email'
-  if (setting.whatsapp) return 'WhatsApp'
-  return 'Off'
+  const channels = ([['Email', setting.email], ['WhatsApp', setting.whatsapp], ['Push', setting.push]] as const)
+    .filter(([, enabled]) => enabled)
+    .map(([label]) => label)
+  if (channels.length === 0) return 'Off'
+  return channels.length === 1 ? channels[0]! : `${channels.slice(0, -1).join(', ')} and ${channels.at(-1)}`
 }

@@ -14,11 +14,15 @@ export interface ChannexEnv {
 
 export class ChannexError extends Error {
   readonly status: number
+  readonly statusCode: number
   readonly uncertain: boolean
-  constructor(message: string, status: number, uncertain: boolean) {
+  readonly data: { code: string; field: string; resource?: string; uncertain: boolean }
+  constructor(message: string, status: number, uncertain: boolean, context?: { code: string; field: string; resource?: string }) {
     super(message)
     this.status = status
+    this.statusCode = status
     this.uncertain = uncertain
+    this.data = { ...(context ?? { code: 'CHANNEX_REQUEST_FAILED', field: 'provider_response' }), uncertain }
   }
 }
 
@@ -59,23 +63,23 @@ export async function channexRequest(env: ChannexEnv, path: string, method: 'GET
 }
 
 /** A provider shape error becomes a 502; for a write it is uncertain, because Channex accepted it. */
-function provided<T>(read: () => T, uncertain = false): T {
+function provided<T>(read: () => T, uncertain = false, context: { field: string; resource?: string } = { field: 'response' }): T {
   try {
     return read()
   } catch (error) {
-    if (error instanceof ChannexDataError) throw new ChannexError(`Channex returned an invalid response: ${error.message}`, 502, uncertain)
+    if (error instanceof ChannexDataError) throw new ChannexError(`Channex returned an invalid response: ${error.message}`, 502, uncertain, { code: 'INVALID_PROVIDER_RESPONSE', ...context })
     throw error
   }
 }
 
 export async function channexGet(env: ChannexEnv, path: string, type: string): Promise<Resource> {
   const body = await channexRequest(env, path)
-  return provided(() => resource(body.data, type))
+  return provided(() => resource(body.data, type), false, { field: 'data', resource: type })
 }
 
 export async function channexCreate(env: ChannexEnv, path: string, body: JsonRecord, type: string): Promise<Resource> {
   const result = await channexRequest(env, path, 'POST', body)
-  return provided(() => resource(result.data, type), true)
+  return provided(() => resource(result.data, type), true, { field: 'data', resource: type })
 }
 
 /** Every page of a collection, by Channex's `meta.total`. */
@@ -84,13 +88,13 @@ export async function channexList(env: ChannexEnv, path: string, type: string, f
   for (let page = 1; ; page += 1) {
     const query = new URLSearchParams({ ...filter, 'pagination[page]': String(page), 'pagination[limit]': '100' })
     const body = await channexRequest(env, `${path}?${query}`)
-    if (!Array.isArray(body.data)) throw new ChannexError(`Channex returned no list for ${path}`, 502, false)
-    rows.push(...body.data.map(row => provided(() => resource(row, type))))
+    if (!Array.isArray(body.data)) throw new ChannexError(`Channex returned no list for ${path}`, 502, false, { code: 'INVALID_PROVIDER_RESPONSE', field: 'data', resource: type })
+    rows.push(...body.data.map(row => provided(() => resource(row, type), false, { field: 'data', resource: type })))
     // The Applications API documents an unpaginated collection with no meta.
     if (path === '/applications/installed') return rows
-    const meta = provided(() => object(body.meta, 'pagination meta'))
-    if (typeof meta.total !== 'number' || !Number.isInteger(meta.total) || meta.total < 0) throw new ChannexError(`Channex returned no total for ${path}`, 502, false)
+    const meta = provided(() => object(body.meta, 'pagination meta'), false, { field: 'meta', resource: type })
+    if (typeof meta.total !== 'number' || !Number.isInteger(meta.total) || meta.total < 0) throw new ChannexError(`Channex returned no total for ${path}`, 502, false, { code: 'INVALID_PROVIDER_RESPONSE', field: 'meta.total', resource: type })
     if (rows.length >= meta.total) return rows
-    if (body.data.length === 0) throw new ChannexError(`Channex returned an empty page before the total for ${path}`, 502, false)
+    if (body.data.length === 0) throw new ChannexError(`Channex returned an empty page before the total for ${path}`, 502, false, { code: 'INVALID_PROVIDER_RESPONSE', field: 'data', resource: type })
   }
 }
