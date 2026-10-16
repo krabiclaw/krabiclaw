@@ -1,6 +1,6 @@
 import type { ProductKind } from '~/shared/product-details'
 import { catalogNavigation, locationSurfacePath, productSurfaceOf, presentationForProduct, resolveProductPresentation } from '~/utils/product-presentation'
-import { PUBLIC_CONTENT_SECTION_QUERIES, PUBLIC_CONTENT_SECTIONS, publicContentSectionRows, publicSections, type PublicContentSectionRow } from '~/server/utils/public-shell-query'
+import { PUBLIC_CONTENT_SECTION_QUERIES, PUBLIC_CONTENT_SECTIONS, productCatalogRows, publicContentSectionRows, publicSections, type PublicContentSectionRow } from '~/server/utils/public-shell-query'
 import { publicLocationHomeSlugSql, publicLocationSql } from '~/server/utils/public-locations'
 import type { PublicSiteSection } from '~/utils/public-resource-contracts'
 import { publicTenantPageSql } from '~/server/utils/content/pages'
@@ -276,7 +276,7 @@ export default definePlugin((nitroApp) => {
         .then(entries => new Map(entries)).then(rows => publicContentSectionRows(section => rows.get(section)!)),
     ])
     // The sections the site's navigation offers, from the same flags.
-    const sections = publicSections(organization.vertical, publicProducts, contentRows,
+    const sections = publicSections(organization.vertical, productCatalogRows(publicProducts), contentRows,
       locations.some(location => Number(location.has_reservations) === 1))
 
     entries.push(...template.sitemap.exactPaths

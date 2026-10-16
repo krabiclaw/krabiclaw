@@ -85,17 +85,17 @@ export async function loadPublicShellSource(
   ])
   const shellQueries: BatchQuery[] = []
   const shellIndexes = appendPublicShellQueries(shellQueries, organization.id)
-  // The entitlement, the shell rows and the published catalog depend on the
+  // The entitlement, the shell rows and the bookable experiences depend on the
   // site alone; they were three sequential round trips on every cold shell.
-  const [entitlement, shellResults, products] = await Promise.all([
+  const [entitlement, shellResults, experiences] = await Promise.all([
     assertPublicOrganizationLanguageEntitlement(env, db, organization.id, locale ?? sourceLocale),
     executeBatch(db, shellQueries),
-    listOrganizationProducts(db, { organizationId: organization.id, publishedOnly: true, env }),
+    listOrganizationProducts(db, { organizationId: organization.id, kind: 'experience', publishedOnly: true, env }),
   ])
   options.signal?.throwIfAborted()
   const payload = {
     success: true,
-    ...(await buildPublicShellPayload(db, organization, shellResults, shellIndexes, env, products)),
+    ...(await buildPublicShellPayload(db, organization, shellResults, shellIndexes, env, experiences)),
     count: shellResults[shellIndexes.locations]?.results?.length ?? 0,
     platformMessages: entitlement.platform_messages,
   }

@@ -3,7 +3,7 @@ import type { BatchQuery, DbClient } from '~/server/db'
 import type { PublicBase } from '~/server/utils/public-base'
 import { calculateMapEmbedUrl } from '~/server/utils/google-places'
 import { PUBLIC_LOCATION_SECTIONS, PUBLIC_SITE_SECTIONS, type PublicLocationSection, type PublicShellPayload, type PublicSiteSection } from '~/utils/public-resource-contracts'
-import { listOrganizationProducts } from '~/server/utils/product-management'
+import { listOrganizationProducts, PUBLIC_PRODUCT_SQL } from '~/server/utils/product-management'
 import type { Product } from '~/server/types/products'
 import { productSurfaceOf } from '~/utils/product-presentation'
 import { publicLocationHomeSlugSql, publicLocationSql } from '~/server/utils/public-locations'
@@ -26,6 +26,7 @@ export interface PublicShellQueryIndexes {
   locations: number
   config: number
   content: Record<PublicContentSection, number>
+  catalog: number
   media: number
 }
 
@@ -60,14 +61,37 @@ export function publicContentSectionRows(read: (section: PublicContentSection) =
 }
 
 /**
+ * Which kinds of product the site publishes, and where: one row per kind and
+ * location it is offered at (location_id NULL for none). Experiences are not
+ * read here, because a published experience is on the page only while it can
+ * be booked; the caller reads those through the catalog's readiness check.
+ * Every other kind is publishable only when it can be sold, so publication is
+ * the page's own test. Binds the organization id once.
+ */
+export const PUBLIC_CATALOG_SECTIONS_SQL = `SELECT DISTINCT p.kind, pl.location_id FROM products p
+  JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
+  LEFT JOIN product_locations pl ON pl.product_id = p.id AND pl.organization_id = p.organization_id AND pl.published = 1
+ WHERE p.organization_id = ? AND p.kind <> 'experience' AND ${PUBLIC_PRODUCT_SQL}`
+
+export type PublicCatalogRow = { kind: string; location_id: string | null }
+
+/** The catalog rows of products already read: each kind once, and at each location it is offered at. */
+export function productCatalogRows(products: readonly Product[]): PublicCatalogRow[] {
+  return products.flatMap(product => [
+    { kind: product.kind, location_id: null },
+    ...product.locations.filter(entry => entry.published).map(entry => ({ kind: product.kind, location_id: entry.location_id })),
+  ])
+}
+
+/**
  * The site's sections and each location's, from its published catalog and its
  * content rows. Navigation, sitemap and pages all read these flags.
  */
-export function publicSections(vertical: string | null, products: readonly Product[], contentRows: PublicContentSectionRows, hasReservations: boolean) {
+export function publicSections(vertical: string | null, catalog: readonly PublicCatalogRow[], contentRows: PublicContentSectionRows, hasReservations: boolean) {
   const hasContent = (section: PublicContentSection, locationId: string | null) => contentRows[section].some(row =>
     locationId === null ? Number(row.site) === 1 : row.location_id === locationId)
-  const offersSurface = (surface: string, locationId?: string) => products.some(product => productSurfaceOf(vertical, product) === surface
-    && (locationId === undefined || product.locations.some(entry => entry.location_id === locationId && entry.published)))
+  const offersSurface = (surface: string, locationId?: string) => catalog.some(row => productSurfaceOf(vertical, { kind: row.kind as Product['kind'] }) === surface
+    && (locationId === undefined || row.location_id === locationId))
   return {
     site: Object.fromEntries(PUBLIC_SITE_SECTIONS.map(section => [section,
       section === 'reservations' ? hasReservations
@@ -109,6 +133,7 @@ export function appendPublicShellQueries(
                WHERE s.id = ?
                  AND setting.key IN ('press_email', 'partnerships_email', 'catering_email', 'careers_email')
               `, [organizationId]),
+    catalog: push(PUBLIC_CATALOG_SECTIONS_SQL, [organizationId]),
     content: Object.fromEntries(PUBLIC_CONTENT_SECTIONS.map(section => [section, push(PUBLIC_CONTENT_SECTION_QUERIES[section], [organizationId])])) as Record<PublicContentSection, number>,
     // The organization's own placements and its locations' heroes and cards,
     // in one read: the shell's logo and favicon, and each location's og:image.
@@ -129,8 +154,8 @@ export async function buildPublicShellPayload(
   results: BatchResult[],
   indexes: PublicShellQueryIndexes,
   env?: CloudflareEnv,
-  /** The site's published products, when the caller read them beside the shell rows. */
-  products?: Product[],
+  /** The bookable experiences, when the caller read them beside the shell rows. */
+  experiences?: Product[],
 ): Promise<PublicShellPayload> {
   const rawLocations = (results[indexes.locations]?.results ?? []) as Record<string, unknown>[]
   const placements = (results[indexes.media]?.results ?? []) as Array<PublicMediaPlacement & { owner_type: string; owner_id: string }>
@@ -139,8 +164,9 @@ export async function buildPublicShellPayload(
   const organizationSocialMedia = publicSocialMediaFromPlacements('organization', organizationMedia, organizationMedia)
   // The catalog sections follow the published catalog the section pages list,
   // through the same call, so the navigation cannot offer an empty page.
-  products ??= await listOrganizationProducts(db, { organizationId: organization.id, publishedOnly: true, env })
-  const sections = publicSections(organization.vertical, products,
+  experiences ??= await listOrganizationProducts(db, { organizationId: organization.id, kind: 'experience', publishedOnly: true, env })
+  const sections = publicSections(organization.vertical,
+    [...(results[indexes.catalog]?.results ?? []) as PublicCatalogRow[], ...productCatalogRows(experiences)],
     publicContentSectionRows(section => (results[indexes.content[section]]?.results ?? []) as PublicContentSectionRow[]),
     rawLocations.some(location => Number(location.has_reservations) === 1))
   const locations = rawLocations.map(location => {
