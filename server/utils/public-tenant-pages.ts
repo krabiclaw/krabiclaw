@@ -18,6 +18,7 @@ import {
   projectLocalizedMediaAlt,
   type ExactPublicLocalization,
 } from '~/server/utils/public-localization'
+import { documentOfRootSql } from '~/server/utils/content/documents'
 import { listPublicLocaleRepresentations, resolvePublicDocumentSourcePath } from '~/server/utils/public-locale-representations'
 import { listPublicSocialPosts } from '~/server/utils/post-management'
 import { resolvePublicTemplate } from '~/utils/template-registry'
@@ -248,7 +249,7 @@ async function hydrateBlocks(
     hasReviewSource ? listOrganizationReviews(db, organizationId, { publishedOnly: true }) : [],
     hasPostSource ? queryAll<{ id: string; title: string; slug: string; excerpt: string | null; cover_asset_id: string | null; cover_public_url: string | null; cover_thumbnail_url: string | null; cover_kind: string | null; cover_alt_text: string | null; cover_width: number | null; cover_height: number | null }>(db, `
       SELECT p.id, p.title, p.slug, p.summary AS excerpt, ${COVER_SELECT}
-        FROM content_documents root JOIN content_documents p ON COALESCE(p.root_id,p.id) = root.id AND p.locale = ?
+        FROM content_documents root JOIN content_documents p ON ${documentOfRootSql('p', 'root')} AND p.locale = ?
         ${coverJoinSql('p')}
        WHERE root.kind = 'article' AND root.row_role = 'root' AND p.organization_id = ? AND root.status = 'published' AND root.visibility = 'listed'
        ORDER BY root.published_at IS NULL, root.published_at DESC, p.id DESC

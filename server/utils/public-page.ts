@@ -26,7 +26,7 @@ import { getMediaPlacements } from '~/server/utils/media-placement'
 import type { Collection, PublicProduct } from '~/server/types/products'
 import { COVER_SELECT, attachCoverMedia, coverJoinSql } from "~/server/utils/content/cover";
 import { ARTICLE_CATEGORY_SELECT, articleCategoryJoinSql, attachArticleCategory, localizeArticleCategories } from '~/server/utils/content/article-categories'
-import { getContentBlocksForDocument } from '~/server/utils/content/documents'
+import { documentOfRootSql, getContentBlocksForDocument } from '~/server/utils/content/documents'
 import {
   buildPublicResourceCacheKey,
   getPublicResourceCache,
@@ -443,7 +443,7 @@ async function loadPublicPageSource(
       `SELECT p.id, root.id AS root_id, root.slug AS source_slug, p.title, p.slug, p.summary AS excerpt, ${ARTICLE_CATEGORY_SELECT}, (p.metadata_json ->> '$.nav_title') AS nav_title, p.seo_keywords,
               root.published_at, p.created_at, p.updated_at,
               ${COVER_SELECT}
-       FROM content_documents root JOIN content_documents p ON COALESCE(p.root_id,p.id) = root.id AND p.locale = ?
+       FROM content_documents root JOIN content_documents p ON ${documentOfRootSql('p', 'root')} AND p.locale = ?
        ${coverJoinSql('p')}
        ${articleCategoryJoinSql('root')}
        WHERE ${localizedBlogPostId ? 'p.id' : 'p.slug'} = ? AND p.organization_id = ? AND root.row_role = 'root' AND root.kind = 'article' AND root.status = 'published'
@@ -457,7 +457,7 @@ async function loadPublicPageSource(
       (root.metadata_json ->> '$.answer_author') AS answer_author, (root.metadata_json ->> '$.answer_date') AS answer_date,
       (root.metadata_json ->> '$.is_owner_answer') AS is_owner_answer, (root.metadata_json ->> '$.upvote_count') AS upvote_count,
       p.created_at, p.updated_at FROM content_documents root
-      JOIN content_documents p ON COALESCE(p.root_id,p.id) = root.id AND p.locale = ?
+      JOIN content_documents p ON ${documentOfRootSql('p', 'root')} AND p.locale = ?
       WHERE root.kind = 'qa' AND root.row_role = 'root' AND root.status = 'published' AND root.organization_id = ?
         AND ${locationId ? 'root.location_id = ?' : 'root.scope_path IS NULL'}
       ORDER BY is_owner_answer DESC, upvote_count DESC, root.sort_order, p.created_at`,

@@ -6,6 +6,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { slugifyTitle } from '~/utils/post-slugs'
 import { loadExactPublicLocalizations, type ExactPublicLocalization } from '~/server/utils/public-localization'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
+import { documentOfRootSql } from '~/server/utils/content/documents'
 import { isArticleCollection, type ArticleCollection } from '~/utils/article-collections'
 
 /**
@@ -327,7 +328,7 @@ export async function listPublicArticleCategories(env: CloudflareEnv, db: DbClie
       FROM article_categories c
       LEFT JOIN article_category_articles m ON m.category_id = c.id
       LEFT JOIN content_documents root ON root.id = m.article_id AND root.status = 'published' AND root.visibility = 'listed'
-      LEFT JOIN content_documents p ON COALESCE(p.root_id, p.id) = root.id
+      LEFT JOIN content_documents p ON ${documentOfRootSql('p', 'root')}
      WHERE c.organization_id = ? AND c.collection = ?
      GROUP BY c.id
   `, [organizationId, collection])).map(row => ({ ...mapRow(row), locales: JSON.parse(String(row.locales ?? '[]')) as string[] }))
