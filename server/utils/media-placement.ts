@@ -410,8 +410,8 @@ export async function readProductPhotos(db: DbClient, input: { organizationId: s
 /**
  * Write a product's photos as one ordered list: the first becomes its `image`
  * and the rest its `gallery`, in one batch. `from` is the list the caller read
- * and changed; when the product's photos are no longer that list the write is
- * refused with PHOTOS_CHANGED, so a concurrent change is never overwritten.
+ * and changed; when the product's photos are no longer that list, or change
+ * before the batch commits, the write is refused with PHOTOS_CHANGED.
  */
 export async function arrangeProductPhotos(db: DbClient, input: {
   organizationId: string

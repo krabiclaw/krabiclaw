@@ -16,7 +16,7 @@ import { stayThreadQueries } from '~/server/domain/requests'
 import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planStayMessages } from '~/server/domain/scheduled-guest-messages'
 import { arrangeProductPhotos, readProductPhotos, type MediaPlacementItem } from '~/server/utils/media-placement'
-import { updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
+import { deleteMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
 import { sanitizeFilename, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
 import { MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, sniffMediaMimeType } from '~/server/utils/media-mime'
 import { mediaStillUrl, MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
@@ -473,6 +473,8 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
   const locationId = location.id
   const product = await createProduct(db, {
     organizationId: access.organizationId, actor: { actorId: access.actorId }, idempotencyKey, env,
+    // On the site unpublished, like a product added in the editor, so it can carry photos and a page.
+    publication: { published: false },
     product: {
       kind: 'stay', name: home.name,
       ...(home.base_price_minor === null ? {} : { variants: [{ name: home.name, prices: [{ unit_amount: home.base_price_minor }] }] }),
@@ -520,10 +522,28 @@ export async function addStayHomePhoto(db: DbClient, env: CloudflareEnv & GuestI
     buffer, contentType, filename: sanitizeFilename(file.name),
     fileSize: buffer.byteLength,
   })
-  return await arrangeHomePhotos(db, env, access, principal, home, [...home.photos.map(photo => photo.id), uploaded.assetId])
+  try {
+    return await arrangeHomePhotos(db, env, access, principal, home, [...home.photos.map(photo => photo.id), uploaded.assetId])
+  } catch (error) {
+    // Nobody else knows the new asset: unless the arrangement placed it before
+    // failing, it is deleted rather than left in the library unseen.
+    const placed = (await readProductPhotos(db, { organizationId: access.organizationId, productIds: [home.product_id] })).get(home.product_id)?.some(item => item.asset_id === uploaded.assetId)
+    if (!placed) {
+      try {
+        await deleteMediaAsset(db, env, uploaded.assetId, access.organizationId, access.actorId)
+      } catch (cleanupError) {
+        throw new AggregateError([error, cleanupError], `The photo was not added and its upload ${uploaded.assetId} could not be deleted`, { cause: cleanupError })
+      }
+    }
+    throw error
+  }
 }
 
-/** Put the home's photos in this order; the first is the cover. It must name every photo the home has, once. */
+/**
+ * Put the home's photos in this order; the first is the cover. The order is
+ * the whole list, so it must name every photo the home has, once: a photo
+ * added or removed since the caller read them refuses it.
+ */
 export async function reorderStayHomePhotos(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, productId: string, body: Record<string, unknown>): Promise<StayHome> {
   const home = await managedHome(db, access, productId)
   const unknown = Object.keys(body).find(key => key !== 'photo_ids')
@@ -550,8 +570,9 @@ export async function updateStayHomePhoto(db: DbClient, env: GuestInboxPublicati
   if (alt !== null && (typeof alt !== 'string' || !alt.trim() || alt.trim().length > 500)) {
     fail(422, 'INVALID_PHOTO_FIELD', 'alt_text must contain 1 to 500 characters, or null', 'alt_text')
   }
-  if (!await updateMediaAssetMetadata(db, photoId, access.organizationId, { alt_text: alt === null ? null : (alt as string).trim() })) {
-    fail(409, 'PHOTOS_CHANGED', 'The photo was removed before its description was saved; reload the photos', 'photo_id')
+  const placedOn = { owner_type: 'product', owner_id: productId, slots: ['image', 'gallery'] }
+  if (!await updateMediaAssetMetadata(db, photoId, access.organizationId, { alt_text: alt === null ? null : (alt as string).trim() }, placedOn)) {
+    fail(409, 'PHOTOS_CHANGED', 'The photo was taken off the home before its description was saved; reload the photos', 'photo_id')
   }
   const updated = await readStayHome(db, access, productId)
   await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId, locationId: home.location_id, stayId: null }, { updated_at: new Date().toISOString() })

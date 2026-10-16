@@ -108,8 +108,20 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   expect((await homes.json() as { homes: unknown[] }).homes).toEqual([{
     product_id: productId, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null,
     check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: null, channel: null,
-    check_in_instructions: null,
+    check_in_instructions: null, photos: [],
   }])
+
+  // A home's photos are its product's media; the photo routes refuse what is not a photo before storing anything.
+  const photos = api(`stay-homes/${productId}/photos`)
+  const ordered = await request.put(photos, { headers, data: { photo_ids: [] } })
+  expect(ordered.status(), await ordered.text()).toBe(200)
+  expect((await ordered.json() as { home: { photos: unknown[] } }).home.photos).toEqual([])
+  const notAPhoto = await request.post(photos, { headers, multipart: { image: { name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('not a photo') } } })
+  expect(notAPhoto.status(), await notAPhoto.text()).toBe(415)
+  expect(await notAPhoto.json()).toMatchObject({ data: { code: 'UNSUPPORTED_PHOTO_TYPE', field: 'image' } })
+  const missing = await request.patch(api(`stay-homes/${productId}/photos/absent`), { headers, data: { alt_text: 'The deck at sunset' } })
+  expect(missing.status(), await missing.text()).toBe(404)
+  expect(await missing.json()).toMatchObject({ data: { code: 'PHOTO_NOT_FOUND', field: 'photo_id' } })
 
   const later = [localDay(10), localDay(13)] as const
   const made = await request.post(api('stays'), { headers, data: { product_id: productId, check_in_date: later[0], check_out_date: later[1], adults: 2, guest_name: 'Kai', total_minor: 450_00, idempotency_key: `${slug}-native` } })
