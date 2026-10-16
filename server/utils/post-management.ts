@@ -1,7 +1,7 @@
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { HTTPError } from 'nitro'
-import { createContentDocumentWithBlocks, prepareContentDocumentDeletion, updateContentDocument, type ContentDocumentChanges } from '~/server/utils/content/documents'
+import { createContentDocumentWithBlocks, documentOfRootSql, prepareContentDocumentDeletion, updateContentDocument, type ContentDocumentChanges } from '~/server/utils/content/documents'
 import { parsePostInput, PostValidationError, type PostCallToAction, type PostMediaRef, type PostMutation } from '~/shared/posts'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
@@ -562,7 +562,7 @@ const PUBLIC_POST_SELECT = `SELECT root.id, p.id AS representation_id, COALESCE(
     root.metadata_json AS root_metadata_json, p.metadata_json, root.published_at, root.status, root.visibility,
     root.location_id, bl.title AS location_title, bl.slug AS location_slug
   FROM content_documents root
-  JOIN content_documents p ON COALESCE(p.root_id, p.id) = root.id AND p.locale = ?
+  JOIN content_documents p ON ${documentOfRootSql('p', 'root')} AND p.locale = ?
   LEFT JOIN business_locations bl ON bl.id = root.location_id AND bl.organization_id = root.organization_id AND bl.status = 'active'`
 
 /**

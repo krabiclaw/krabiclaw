@@ -2,17 +2,19 @@ import {HTTPError} from 'nitro'
 import {executeBatch,queryAll,queryFirst,type DbClient} from '~/server/db'
 import {REQUEST_CURRENT_BUYER_SQL} from '~/server/domain/requests'
 import {loadOwnerPictures} from '~/server/notifications/hero'
+import {localDateTimeToInstant} from '~/utils/timezone'
 import {isAccountActivityItem,isBuyerPaymentEntry,type AccountActivityItem,type AccountActivityResponse,type BuyerPaymentEntry} from '~/shared/account-activity'
 
 export async function ownedBuyerRequest(db:DbClient,userId:string,requestId:string) {
- const owned=await queryFirst<{organization_id:string;kind:'booking'|'reservation'}>(db,`SELECT r.organization_id,r.kind FROM requests r WHERE r.id=? AND r.user_id=? AND ${REQUEST_CURRENT_BUYER_SQL} AND (
+ const owned=await queryFirst<{organization_id:string;kind:'booking'|'reservation'|'stay'}>(db,`SELECT r.organization_id,r.kind FROM requests r WHERE r.id=? AND r.user_id=? AND ${REQUEST_CURRENT_BUYER_SQL} AND (
   (r.kind='booking' AND EXISTS(SELECT 1 FROM bookings b WHERE b.request_id=r.id)) OR
-  (r.kind='reservation' AND EXISTS(SELECT 1 FROM reservations v WHERE v.request_id=r.id)))`,[requestId,userId])
+  (r.kind='reservation' AND EXISTS(SELECT 1 FROM reservations v WHERE v.request_id=r.id)) OR
+  (r.kind='stay' AND EXISTS(SELECT 1 FROM stays s WHERE s.request_id=r.id AND s.organization_id=r.organization_id AND s.user_id=r.user_id)))`,[requestId,userId])
  if(!owned)throw new HTTPError({statusCode:404,statusMessage:'Owned booking not found'})
  return owned
 }
 type ActivityRow = {
- kind: 'booking'|'reservation'; id:string; request_id:string|null; operational_id:string; organization_id:string;
+ kind: 'booking'|'reservation'|'stay'; id:string; request_id:string|null; operational_id:string; organization_id:string;
  organization_name:string; organization_slug:string; title:string; status:string;
  starts_at:string; ends_at:string; timezone:string; created_at:string; location_id:string|null;
  location_title:string|null; product_id:string|null; party_size:number
@@ -26,7 +28,15 @@ async function buyerActivityRows(db:DbClient,userId:string) {
    FROM reservations v LEFT JOIN requests r ON r.id=v.request_id JOIN organization o ON o.id=v.organization_id JOIN business_locations l ON l.id=v.location_id AND l.organization_id=v.organization_id WHERE v.user_id=? AND (r.id IS NULL OR (r.organization_id=v.organization_id AND r.kind='reservation' AND r.user_id=? AND ${REQUEST_CURRENT_BUYER_SQL}))`,[userId,userId,userId,userId]),
   queryAll<BuyerPaymentRow>(db,`SELECT p.id,p.organization_id,o.name organization_name,o.slug organization_slug,p.currency,p.captured_amount,p.subject_type,p.subject_id,p.price_snapshot_json,p.state,p.created_at,po.id order_id,r.id hold_request_id,h.starts_at hold_starts_at,h.ends_at hold_ends_at,COALESCE(s.timezone,CASE WHEN h.converted_stay_id IS NULL AND NOT (h.product_id IS NOT NULL AND h.session_id IS NULL) THEN h.timezone END) hold_timezone FROM payments p LEFT JOIN organization o ON o.id=p.organization_id LEFT JOIN payment_orders po ON po.payment_id=p.id AND po.buyer_user_id=p.buyer_user_id AND po.organization_id=p.organization_id LEFT JOIN payment_checkout_holds h ON h.payment_id=p.id AND h.organization_id=p.organization_id AND h.buyer_user_id=p.buyer_user_id LEFT JOIN requests r ON r.id=h.request_id AND r.organization_id=p.organization_id AND r.user_id=p.buyer_user_id AND ${REQUEST_CURRENT_BUYER_SQL} LEFT JOIN product_sessions s ON s.id=h.session_id AND s.organization_id=p.organization_id WHERE p.buyer_user_id=? ORDER BY p.created_at DESC`,[userId]),
  ])
- return {visits,payments}
+ // A stay runs from check-in to checkout at the home's own times, where the home is.
+ const stays=(await queryAll<Omit<ActivityRow,'kind'|'starts_at'|'ends_at'>&{check_in_date:string;check_out_date:string;check_in_time:string;check_out_time:string}>(db,`SELECT COALESCE(r.id,s.id) id,r.id request_id,s.id operational_id,s.organization_id,o.name organization_name,o.slug organization_slug,p.name title,s.status,
+   s.check_in_date,s.check_out_date,c.check_in_time,c.check_out_time,l.timezone,s.created_at,c.location_id,l.title location_title,s.product_id,s.adults+s.children party_size
+  FROM stays s JOIN organization o ON o.id=s.organization_id JOIN product_stay_configs c ON c.organization_id=s.organization_id AND c.product_id=s.product_id
+  JOIN products p ON p.organization_id=s.organization_id AND p.id=s.product_id JOIN business_locations l ON l.organization_id=c.organization_id AND l.id=c.location_id
+  LEFT JOIN requests r ON r.id=s.request_id AND r.organization_id=s.organization_id AND r.kind='stay' AND r.user_id=? AND ${REQUEST_CURRENT_BUYER_SQL}
+  WHERE s.user_id=? AND s.owner='app'`,[userId,userId])).map(({check_in_date,check_out_date,check_in_time,check_out_time,...row}):ActivityRow=>({...row,kind:'stay',
+   starts_at:localDateTimeToInstant(check_in_date,check_in_time,row.timezone,'compatible').toISOString(),ends_at:localDateTimeToInstant(check_out_date,check_out_time,row.timezone,'compatible').toISOString()}))
+ return {visits:[...visits,...stays],payments}
 }
 function visitActivity(row:ActivityRow):AccountActivityItem {
  return {kind:row.kind,id:row.id,requestId:row.request_id,operationalId:row.operational_id,paymentId:null,organizationId:row.organization_id,organizationName:row.organization_name,organizationSlug:row.organization_slug,title:row.title,status:row.status,startsAt:row.starts_at,endsAt:row.ends_at,timeZone:row.timezone,createdAt:row.created_at,imageUrl:null,locationTitle:row.location_title,partySize:row.party_size}

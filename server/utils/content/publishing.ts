@@ -15,6 +15,7 @@ import {
   renderContentBlocksToMarkdown,
   type ContentBlockInput,
   type ContentDocumentRow,
+  documentOfRootSql,
 } from '~/server/utils/content/documents'
 import {
   loadExactPublicLocalizations,
@@ -399,7 +400,7 @@ export async function listPublishedArticles(db: DbClient, env: CloudflareEnv, or
       ${ARTICLE_CATEGORY_SELECT}, p.seo_keywords,
       root.published_at, p.updated_at, root.sort_order, ${COVER_SELECT}
     FROM content_documents root
-    JOIN content_documents p ON COALESCE(p.root_id, p.id) = root.id AND p.locale = ?
+    JOIN content_documents p ON ${documentOfRootSql('p', 'root')} AND p.locale = ?
     ${coverJoinSql('p')}
     ${articleCategoryJoinSql('root')}
     WHERE root.kind = 'article' AND root.row_role = 'root' AND root.status = 'published' AND root.organization_id = ? AND root.visibility = 'listed'

@@ -123,7 +123,7 @@ const { t, locale, localePath } = useI18n()
 const locationsError = computed(() => props.error)
 
 // Every link is to a section the site has something on.
-const catalogLinks = computed(() => catalogNavigation(props.sections))
+const catalogLinks = computed(() => catalogNavigation(props.organization?.vertical, props.sections))
 const discoverLinks = computed(() => [
   { section: 'blog', path: '/blog', labelKey: 'saya.footer.blog' },
   { section: 'reviews', path: '/reviews', labelKey: 'saya.footer.reviews' },

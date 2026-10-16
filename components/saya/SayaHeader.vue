@@ -170,7 +170,7 @@ onUnmounted(() => {
 const restaurantName = computed(() => props.organization?.name?.trim() || '')
 
 // Each section is offered only when the site has something on it.
-const catalogLinks = computed(() => catalogNavigation(props.sections))
+const catalogLinks = computed(() => catalogNavigation(props.organization?.vertical, props.sections))
 // A location that is one home is reached as that home, so the index of
 // locations is offered only when more than one location has a page of its own.
 const showLocations = computed(() => props.locations.filter(location => !location.home_slug).length > 1)

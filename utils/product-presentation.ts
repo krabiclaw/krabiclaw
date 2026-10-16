@@ -55,12 +55,13 @@ export const STAY_PRESENTATION: ProductPresentation = {
 
 /**
  * The catalog sections a site's navigation offers, in order, each only when
- * the site has something on it. Header, footer and sitemap read this one list.
+ * the site has something on it, linked where the site's vertical lists them.
+ * Header, footer and sitemap read this one list.
  */
-export function catalogNavigation(sections: Partial<Record<ProductSurface, boolean>> | null): Array<{ surface: ProductSurface, path: string, labelKey: string }> {
+export function catalogNavigation(vertical: string | null | undefined, sections: Partial<Record<ProductSurface, boolean>> | null): Array<{ surface: ProductSurface, path: string, labelKey: string }> {
   const order: ProductSurface[] = ['menu', 'products', 'stays', 'experiences']
   return order.filter(surface => sections?.[surface] === true)
-    .map(surface => ({ surface, path: presentationForSurface(null, surface).collectionPath, labelKey: `saya.footer.${surface}` }))
+    .map(surface => ({ surface, path: presentationForSurface(vertical, surface).collectionPath, labelKey: `saya.footer.${surface}` }))
 }
 
 /** Where a location's items on one surface are listed. Homes have no branch index; they are listed site-wide. */
@@ -209,7 +210,7 @@ export function photoCategories(
   vertical: string | null | undefined,
   stored: Iterable<string | null | undefined> = [],
 ): Array<{ id: MediaCategory, label: string }> {
-  const forVertical = PHOTO_CATEGORIES_BY_VERTICAL[normalizeVertical(vertical)] ?? PHOTO_CATEGORIES_BY_VERTICAL.service!
+  const forVertical = PHOTO_CATEGORIES_BY_VERTICAL[vertical ? normalizeVertical(vertical) : 'service'] ?? PHOTO_CATEGORIES_BY_VERTICAL.service!
   const ids = [...forVertical]
   // A subject already on an asset is always offered, whatever the vertical: a
   // site that changed vertical, or media added over MCP, must not have pictures
