@@ -46,12 +46,12 @@ Financial approvals are same-origin browser actions, so the script stops before
 publishing until an owner of the organization has done both of these in the
 staging dashboard:
 
-1. **Billing**: choose Commerce for 4 locations (the site's own location and
+1. **Plan** (`/dashboard/saltleaf-stays-demo/payments?tab=plan`): choose Commerce for 4 locations (the site's own location and
    three homes) and pay with Stripe's test card. Commerce grants the `payments`
    entitlement, and its subscription webhook sets up the Metronome billing that
    `readStripeCheckoutSetup` checks. Until then the script stops at the second
    home with `LOCATION_LIMIT`.
-2. **Payments**: connect Stripe and finish the Stripe-hosted onboarding with
+2. **Payouts** (`/dashboard/saltleaf-stays-demo/payments?tab=payouts`): connect Stripe and finish the Stripe-hosted onboarding with
    [Stripe's test values](https://docs.stripe.com/connect/testing). Staging uses
    the Stripe test-mode key, so the account is test-mode. Stripe Tax stays off.
 

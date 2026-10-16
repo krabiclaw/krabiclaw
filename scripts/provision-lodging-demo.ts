@@ -196,7 +196,7 @@ async function main() {
       max_guests: spec.max_guests, min_nights: spec.min_nights, base_price_minor: spec.base_price_minor,
     }, [201, 402])
     if (created.status === 402) {
-      throw new StepError(`Adding ${spec.name} needs a plan that covers four locations (the site's own location and three homes): ${JSON.stringify(created.data)}. Choose Commerce for 4 locations in the dashboard's Billing, then run this again.`)
+      throw new StepError(`Adding ${spec.name} needs a plan that covers four locations (the site's own location and three homes): ${JSON.stringify(created.data)}. Choose Commerce for 4 locations at ${BASE}/dashboard/${DEMO.slug}/payments?tab=plan, then run this again.`)
     }
     homes.set(spec.name, created.data.home)
     console.log(`Added ${spec.name}`)
