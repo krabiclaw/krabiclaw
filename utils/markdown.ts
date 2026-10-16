@@ -1,4 +1,4 @@
-import { marked } from "marked";
+import { marked, type Token, type Tokens } from "marked";
 
 // marked's text renderer HTML-escapes apostrophes/quotes (e.g. "you're"
 // becomes "you&#39;re"). Stripping non-alphanumeric chars without decoding
@@ -62,11 +62,19 @@ export interface MarkdownHeading { id: string; text: string; depth: 2 | 3 }
 export function markdownHeadings(markdown: string, blockIndex: number): MarkdownHeading[] {
   headingSlugCounts = new Map();
   const headings: MarkdownHeading[] = [];
-  marked.walkTokens(marked.lexer(markdown, { gfm: true, breaks: true }), (token) => {
-    if (token.type !== "heading" || (token.depth !== 2 && token.depth !== 3)) return;
-    const html = marked.parseInline(token.text, { gfm: true, breaks: true }) as string;
-    headings.push({ id: `${slugifyHeading(html)}-${blockIndex}`, text: decodeHtmlEntities(html.replace(/<[^>]+>/g, "")), depth: token.depth });
-  });
+  // Only block containers can hold a heading. marked.walkTokens also descends
+  // into every table cell and inline token: 38,000 of them, 1.3 s, for the MCP
+  // tool reference, against 60 ms to render it.
+  const visit = (tokens: Token[]) => {
+    for (const token of tokens) {
+      if (token.type === "heading" && (token.depth === 2 || token.depth === 3)) {
+        const html = marked.parseInline(token.text, { gfm: true, breaks: true }) as string;
+        headings.push({ id: `${slugifyHeading(html)}-${blockIndex}`, text: decodeHtmlEntities(html.replace(/<[^>]+>/g, "")), depth: token.depth });
+      } else if (token.type === "blockquote") visit((token as Tokens.Blockquote).tokens);
+      else if (token.type === "list") for (const item of (token as Tokens.List).items) visit(item.tokens);
+    }
+  };
+  visit(marked.lexer(markdown, { gfm: true, breaks: true }));
   return headings;
 }
 
