@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:7de1e2e466cae21077cdcac1ec425b6fb1191f3e7997d53598e1f4a5384e1fc9",
-  "documentationFingerprint": "sha256:3816cf03d3cdb2042bc52bf9ee1004c4460c7dbd4178e685b363501083821264",
+  "fingerprint": "sha256:0c2bba45f7dcb1d1ccf7fe213fa67928b2bbab78c8ad7fb68a9546f5ed427263",
+  "documentationFingerprint": "sha256:47c031209756a479d15fae6ec0bd71e062b7a4eae7e1429c993983ad924c7aa5",
   "tools": [
     {
       "name": "append_content_block",
@@ -39853,42 +39853,41 @@
           "home": {
             "properties": {
               "address": {
-                "description": "The home's location address.",
+                "description": "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one.",
                 "properties": {
-                  "addressLines": {
-                    "items": {
-                      "type": "string"
-                    },
-                    "type": "array"
-                  },
-                  "administrativeArea": {
+                  "address": {
                     "minLength": 1,
                     "type": "string"
                   },
-                  "languageCode": {
-                    "minLength": 1,
+                  "city": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "country": {
+                    "pattern": "^[A-Z]{2}$",
                     "type": "string"
                   },
-                  "locality": {
-                    "minLength": 1,
-                    "type": "string"
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
-                  "postalCode": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "regionCode": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "sublocality": {
-                    "minLength": 1,
-                    "type": "string"
+                  "zip_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
-                  "regionCode",
-                  "addressLines"
+                  "address",
+                  "city",
+                  "state",
+                  "country",
+                  "zip_code"
                 ],
                 "type": [
                   "object",
@@ -55169,42 +55168,41 @@
           "home": {
             "properties": {
               "address": {
-                "description": "The home's location address.",
+                "description": "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one.",
                 "properties": {
-                  "addressLines": {
-                    "items": {
-                      "type": "string"
-                    },
-                    "type": "array"
-                  },
-                  "administrativeArea": {
+                  "address": {
                     "minLength": 1,
                     "type": "string"
                   },
-                  "languageCode": {
-                    "minLength": 1,
+                  "city": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "country": {
+                    "pattern": "^[A-Z]{2}$",
                     "type": "string"
                   },
-                  "locality": {
-                    "minLength": 1,
-                    "type": "string"
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
-                  "postalCode": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "regionCode": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "sublocality": {
-                    "minLength": 1,
-                    "type": "string"
+                  "zip_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
-                  "regionCode",
-                  "addressLines"
+                  "address",
+                  "city",
+                  "state",
+                  "country",
+                  "zip_code"
                 ],
                 "type": [
                   "object",
@@ -91775,42 +91773,41 @@
           "home": {
             "properties": {
               "address": {
-                "description": "The home's location address.",
+                "description": "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one.",
                 "properties": {
-                  "addressLines": {
-                    "items": {
-                      "type": "string"
-                    },
-                    "type": "array"
-                  },
-                  "administrativeArea": {
+                  "address": {
                     "minLength": 1,
                     "type": "string"
                   },
-                  "languageCode": {
-                    "minLength": 1,
+                  "city": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "country": {
+                    "pattern": "^[A-Z]{2}$",
                     "type": "string"
                   },
-                  "locality": {
-                    "minLength": 1,
-                    "type": "string"
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
-                  "postalCode": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "regionCode": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "sublocality": {
-                    "minLength": 1,
-                    "type": "string"
+                  "zip_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
-                  "regionCode",
-                  "addressLines"
+                  "address",
+                  "city",
+                  "state",
+                  "country",
+                  "zip_code"
                 ],
                 "type": [
                   "object",
@@ -111873,42 +111870,41 @@
           "home": {
             "properties": {
               "address": {
-                "description": "The home's location address.",
+                "description": "The home's address: street, city, state, ISO country and postal code. Null only for a location saved without one.",
                 "properties": {
-                  "addressLines": {
-                    "items": {
-                      "type": "string"
-                    },
-                    "type": "array"
-                  },
-                  "administrativeArea": {
+                  "address": {
                     "minLength": 1,
                     "type": "string"
                   },
-                  "languageCode": {
-                    "minLength": 1,
+                  "city": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "country": {
+                    "pattern": "^[A-Z]{2}$",
                     "type": "string"
                   },
-                  "locality": {
-                    "minLength": 1,
-                    "type": "string"
+                  "state": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   },
-                  "postalCode": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "regionCode": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "sublocality": {
-                    "minLength": 1,
-                    "type": "string"
+                  "zip_code": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
                   }
                 },
                 "required": [
-                  "regionCode",
-                  "addressLines"
+                  "address",
+                  "city",
+                  "state",
+                  "country",
+                  "zip_code"
                 ],
                 "type": [
                   "object",

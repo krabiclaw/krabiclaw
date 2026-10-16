@@ -39,8 +39,11 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   const locations = await call<{ locations: Array<{ id: string; title: string }> }>('list_locations', {})
   const location = locations.data!.locations[0]!
   expect(location).toBeTruthy()
-  const placed = await call<{ location: { address: Record<string, unknown> | null } }>('get_location', { location_id: location.id })
+  const placed = await call<{ location: { address: { regionCode: string; addressLines: string[]; locality?: string; administrativeArea?: string; postalCode?: string } | null } }>('get_location', { location_id: location.id })
   expect(placed.error).toBeNull()
+  // The home reads its location's address in the shape a home is added with.
+  const postal = placed.data!.location.address
+  const homeAddress = postal && { address: postal.addressLines.join(', '), city: postal.locality ?? null, state: postal.administrativeArea ?? null, country: postal.regionCode, zip_code: postal.postalCode ?? null }
 
   // The one Product editor walks a place to stay through its stay settings.
   await page.goto(`/dashboard/${slug}/products/new?kind=stay&location_id=${encodeURIComponent(location.id)}`)
@@ -112,7 +115,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
     check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: null, channel: null,
     check_in_instructions: null, photos: [],
     // Created in the editor with no listing details, at a provisioned location Google never placed, and not yet listed.
-    description: '', published: false, address: placed.data!.location.address, latitude: null, longitude: null,
+    description: '', published: false, address: homeAddress, latitude: null, longitude: null,
     property_type: null, bedrooms: null, beds: null, bathrooms: null, amenities: [], cancellation_policy: null, long_term_cancellation_policy: null,
     check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
   }])

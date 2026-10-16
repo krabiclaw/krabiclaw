@@ -141,7 +141,7 @@ export interface StayHome {
   /** Whether the home is listed on the site: its product's publication there. */
   published: boolean
   /** The home's location: its address and the pin its host placed, each null until set. */
-  address: PostalAddress | null
+  address: StayAddress | null
   latitude: number | null
   longitude: number | null
   property_type: StayPropertyType | null
@@ -176,6 +176,25 @@ export interface StayHome {
    * (the product image, then its gallery), the same pictures its pages show.
    */
   photos: StayPhoto[]
+}
+
+/** A home's address as a home is added with it: street, city, state, ISO country and postal code. */
+export interface StayAddress {
+  address: string
+  city: string | null
+  state: string | null
+  country: string
+  zip_code: string | null
+}
+
+function stayAddress(value: unknown): StayAddress | null {
+  const postal = parsePostalAddress(value)
+  return postal && { address: postal.addressLines.join(', '), city: postal.locality ?? null, state: postal.administrativeArea ?? null, country: postal.regionCode, zip_code: postal.postalCode ?? null }
+}
+
+/** The postal address a location stores for a home's address. */
+function postalAddress(address: Omit<StayAddress, 'city'> & { city: string }): PostalAddress {
+  return { regionCode: address.country, addressLines: [address.address], locality: address.city, ...(address.state ? { administrativeArea: address.state } : {}), ...(address.zip_code ? { postalCode: address.zip_code } : {}) }
 }
 
 /** One thing guests are asked to do before they leave, with the host's details for it. */
@@ -332,7 +351,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       currency: row.default_currency, base_price_minor: base ? base.unit_amount : null, base_price_tax_behavior: base ? base.tax_behavior : null,
       check_in_time: String(row.check_in_time), check_out_time: String(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
       description: String(row.description), published: Number(row.published) === 1,
-      address: parsePostalAddress(row.address), latitude: nullableNumber(row.latitude), longitude: nullableNumber(row.longitude),
+      address: stayAddress(row.address), latitude: nullableNumber(row.latitude), longitude: nullableNumber(row.longitude),
       property_type: nullableText(row.property_type) as StayPropertyType | null,
       bedrooms: nullableNumber(row.bedrooms), beds: nullableNumber(row.beds), bathrooms: nullableNumber(row.bathrooms),
       amenities: JSON.parse(String(row.amenities)) as StayAmenity[],
@@ -442,16 +461,34 @@ export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
   const { text, timezone, time, name, maxGuests, minNights, basePrice } = homeDetails(body)
   const home: NewStayHome = {
     name: name(true)!, timezone: timezone(true)!,
-    address: text('address', 200, true)!, city: text('city', 100, true)!, state: text('state', 100, false),
-    country: text('country', 2, true)!, zip_code: text('zip_code', 32, false),
+    ...homeAddress(body, ''),
     phone: text('phone', 32, false), email: text('email', 254, false),
     check_in_time: time('check_in_time', true)!, check_out_time: time('check_out_time', true)!,
     max_guests: maxGuests(true)!, min_nights: minNights(true)!,
     base_price_minor: basePrice(),
   }
-  if (!/^[A-Z]{2}$/.test(home.country)) fail(422, 'INVALID_DETAIL', 'country must be a two-letter ISO country code', 'country')
   if (home.email !== null && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(home.email)) fail(422, 'INVALID_DETAIL', 'Enter a valid contact email', 'email')
   return home
+}
+
+/** A home's address read from a request; each problem names its field under the prefix. */
+function homeAddress(body: Record<string, unknown>, prefix: string): Pick<NewStayHome, 'address' | 'city' | 'state' | 'country' | 'zip_code'> {
+  const { text } = homeDetails(body)
+  const named = <T>(read: () => T): T => {
+    try { return read() } catch (error) {
+      if (prefix && error instanceof HTTPError && typeof (error.data as { field?: unknown })?.field === 'string') {
+        const data = error.data as { code: string; field: string }
+        fail(error.status, data.code, error.message, `${prefix}${data.field}`)
+      }
+      throw error
+    }
+  }
+  const address = named(() => ({
+    address: text('address', 200, true)!, city: text('city', 100, true)!, state: text('state', 100, false),
+    country: text('country', 2, true)!, zip_code: text('zip_code', 32, false),
+  }))
+  if (!/^[A-Z]{2}$/.test(address.country)) fail(422, 'INVALID_DETAIL', 'country must be a two-letter ISO country code', `${prefix}country`)
+  return address
 }
 
 /** What the home is and offers: product stay settings, checked by the product writer. */
@@ -505,15 +542,14 @@ function arrivalPatch(body: Record<string, unknown>): Record<string, string | nu
 function locationPatch(body: Record<string, unknown>): UpdateLocationInput {
   const patch: UpdateLocationInput = {}
   if ('address' in body) {
-    if (typeof body.address !== 'object' || body.address === null || Array.isArray(body.address)) fail(422, 'INVALID_DETAIL', 'address must be a postal address { regionCode, addressLines, locality, administrativeArea, postalCode }', 'address')
-    patch.address = body.address
+    const value = body.address
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) fail(422, 'INVALID_DETAIL', 'address must be { address, city, state, country, zip_code }', 'address')
+    const unknown = Object.keys(value).find(key => !['address', 'city', 'state', 'country', 'zip_code'].includes(key))
+    if (unknown) fail(422, 'INVALID_DETAIL', `address.${unknown} is not part of an address`, `address.${unknown}`)
+    patch.address = postalAddress(homeAddress(value as Record<string, unknown>, 'address.'))
   }
   if ('latitude' in body) patch.latitude = body.latitude as number | null
   if ('longitude' in body) patch.longitude = body.longitude as number | null
-  if (patch.address !== undefined) {
-    try { parsePostalAddress(patch.address) }
-    catch (error) { fail(422, 'INVALID_DETAIL', error instanceof Error ? error.message : 'address must be a postal address', 'address') }
-  }
   const pin = coordinatesFailure(patch)
   if (pin) fail(422, 'INVALID_DETAIL', pin.error, pin.field)
   return patch
@@ -663,7 +699,7 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
   requireManager(access)
   const located = await createLocation(env, db as D1Database, access.organizationId, {
     title: home.name, timezone: home.timezone, phone: home.phone, email: home.email,
-    address: { regionCode: home.country, addressLines: [home.address], locality: home.city, administrativeArea: home.state ?? undefined, postalCode: home.zip_code ?? undefined },
+    address: postalAddress(home),
   }, access.actorId, { idempotencyKey })
   if (located.status !== 201) locationFailure(located)
   const location = 'location' in located.data ? located.data.location : undefined
