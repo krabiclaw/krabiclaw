@@ -8,7 +8,7 @@ import type { GuestThreadListItemViewModel } from '~/server/domain/guest-threads
 import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayFeedPayload } from '~/shared/dashboard-today'
 import { addLocalDays, localDateAt } from '~/utils/timezone'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
-import { articleFacebookPostPath, blogCreatePath, blogEditorPath, bookingEditorPath, catalogAvailabilityPath, guestConversationPath, insightsPath, locationHoursPath, postCreatePath, postEditorPath, productCreatePath, productEditorPath } from '~/server/utils/dashboard-links'
+import { articleFacebookPostPath, blogEditorPath, bookingEditorPath, guestConversationPath, insightsPath, postEditorPath, productEditorPath } from '~/server/utils/dashboard-links'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { getAnalyticsReport, resolveOrganizationAnalyticsContext } from '~/server/utils/analytics-report'
 import { readIntegration } from '~/server/utils/organization-integrations'
@@ -171,19 +171,5 @@ export async function loadDashboardToday(event: H3Event, input: TodayFeedQuery, 
   const publicationIds = new Set(failures.map(item => item.id.slice('publication:'.length)))
   const selectedOpportunities = [...(performance ? [performance] : []), ...opportunities.filter(item => !publicationIds.has(item.id.slice(item.id.indexOf(':') + 1)))].slice(0, 2)
   const cards = [...attention, ...failures, ...scheduleCards.filter(item => !handledRequests.has(item.id.slice(item.id.indexOf(':') + 1))), ...selectedOpportunities]
-  if (ownerScope && !input.locationId && !selectedOpportunities.some(item => item.id.startsWith('draft:') && item.to.includes('/website/blog/')) && await roleAllows({ ...organization, permissions: { blog: ['create'] } })) cards.push(card({
-    id: 'action:blog', to: blogCreatePath(organization.slug), priority: 'action', eyebrow: 'Quick action', headline: 'Write a blog article', imageIcon: 'i-lucide-notebook-pen' }))
-  if (ownerScope && !selectedOpportunities.some(item => item.id.startsWith('draft:') && item.to.includes('/website/posts/')) && await roleAllows({ ...organization, permissions: { content: ['create'] } })) cards.push(card({
-    id: 'action:event', to: postCreatePath(organization.slug, input.locationId), priority: 'action', eyebrow: 'Quick action', headline: 'Announce an event', imageIcon: 'i-lucide-megaphone', locationId: input.locationId ?? null }))
-  if (ownerScope && await roleAllows({ ...organization, permissions: { products: ['update'] } })) cards.push(card({
-    id: 'action:availability', to: catalogAvailabilityPath(organization.slug, input.locationId), priority: 'action', eyebrow: 'Quick action', headline: 'Mark an item unavailable', imageIcon: 'i-lucide-circle-pause', locationId: input.locationId ?? null }))
-  if (ownerScope && organization.vertical === 'restaurant' && await roleAllows({ ...organization, permissions: { products: ['create'] } })) cards.push(card({
-    id: 'action:seasonal', to: productCreatePath(organization.slug, 'dish', input.locationId), priority: 'action', eyebrow: 'Quick action', headline: 'Add a seasonal menu item', imageIcon: 'i-lucide-utensils', locationId: input.locationId ?? null }))
-  if (ownerScope && organization.vertical !== 'lodging' && locations.length && await roleAllows({ ...organization, permissions: { locations: ['update'] } })) {
-    const location = input.locationId ? await queryFirst<{ slug: string; title: string }>(db, 'SELECT slug,title FROM business_locations WHERE id=? AND organization_id=?', [input.locationId, organization.id]) : null
-    if (input.locationId && !location) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
-    cards.push(card({ id: `action:hours:${input.locationId ?? 'choose'}`, to: locationHoursPath(organization.slug, location?.slug), priority: 'action', eyebrow: 'Quick action',
-      headline: 'Update opening hours', description: location?.title ?? 'Choose the location whose hours are changing.', imageIcon: 'i-lucide-clock', locationId: input.locationId ?? null }))
-  }
   return todayFeedSchema.parse({ cards, availableKinds, locations, resolvedAt })
 }

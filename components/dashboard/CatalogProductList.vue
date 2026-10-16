@@ -37,7 +37,6 @@ import OrganizationLocationSelector, { type OrganizationLocationSelectorItem } f
 import type { Collection, Product } from '~/server/types/products'
 import { PRODUCT_KINDS, type ProductKind } from '~/shared/product-details'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
-import { productAvailabilityPath } from '~/server/utils/dashboard-links'
 
 const props = defineProps<{
   products: Product[]
@@ -56,7 +55,6 @@ const props = defineProps<{
 const route = useRoute()
 const router = useRouter()
 const catalogPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/products`)
-const choosingAvailability = computed(() => route.query.action === 'availability')
 
 // Kind is the product's own, so the filters are kinds, named the same on every
 // template. `item` is the generic kind and reads as Products.
@@ -71,7 +69,7 @@ const activeFilterLabel = computed(() => kind.value === 'all' ? 'Products' : KIN
 
 /** A path in this catalog's scope: the explicit location and kind ride along, nothing else does. */
 function scoped(path: string, query: Record<string, string | undefined> = {}) {
-  return router.resolve({ path, query: { location_id: route.query.location_id, action: choosingAvailability.value ? 'availability' : undefined, ...query } }).fullPath
+  return router.resolve({ path, query: { location_id: route.query.location_id, ...query } }).fullPath
 }
 function filterTo(value: ProductKind | 'all') {
   return scoped(props.path, { kind: value === 'all' ? undefined : value })
@@ -94,8 +92,6 @@ const items = computed<OrganizationLocationSelectorItem[]>(() => rows.value.map(
       return `${location.title}${status.length ? ` (${status.join(', ')})` : ''}`
     })].filter(Boolean).join(' · ') || 'No locations set',
     imageUrl: mediaStillUrl(product.image),
-    to: choosingAvailability.value
-      ? productAvailabilityPath(String(route.params.orgSlug), product.id, typeof route.query.location_id === 'string' ? route.query.location_id : undefined)
-      : scoped(`${catalogPath.value}/${product.id}`),
+    to: scoped(`${catalogPath.value}/${product.id}`),
   })))
 </script>
