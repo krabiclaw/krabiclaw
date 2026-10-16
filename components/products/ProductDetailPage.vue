@@ -522,22 +522,21 @@ const staySpecsSummary = computed(() => {
 
 const stayPropertyTypeLabel = computed(() => {
   const type = props.product.stay?.property_type
-  return type ? STAY_PROPERTY_TYPES[type] : ''
+  return type ? STAY_PROPERTY_TYPES[type].label : ''
 })
 
 const stayCancellationPolicyLabel = computed(() => {
   const p = props.product.stay?.cancellation_policy
-  return p ? `${STAY_CANCELLATION_POLICIES[p]} cancellation policy` : ''
+  return p ? `${STAY_CANCELLATION_POLICIES[p].label} cancellation policy` : ''
 })
 
 const stayAmenitiesList = computed(() => {
   const stay = props.product.stay
   if (!stay) return []
   return stay.amenities.map(code => {
-    const item = STAY_AMENITIES[code]
     return {
       code,
-      label: item?.label || code,
+      label: STAY_AMENITIES[code].label,
       icon: (code.includes('work') ? 'briefcase'
         : code.includes('sparkles') ? 'sparkles'
         : code.includes('home') ? 'home'
