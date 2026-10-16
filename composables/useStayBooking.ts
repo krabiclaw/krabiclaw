@@ -78,14 +78,33 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
 
   /**
    * A day can end the stay that starts at check-in when every night between is
-   * free and the day itself is open to departure. The stay rules beyond that
-   * (minimum and maximum nights) are the server's to state, with the reason.
+   * free, the stay meets the arrival night's minimum and maximum and every
+   * stayed night's minimum-through, and the day itself is open to departure.
+   * The calendar only greys out what the nights already say; the server's quote
+   * still decides, and names its reason when it refuses.
    */
   function canCheckOut(date: string): boolean {
-    if (!checkIn.value || date <= checkIn.value) return false
-    for (let day = checkIn.value; day < date; day = addLocalDays(day, 1)) if (!night(day)?.available) return false
+    const arrival = checkIn.value ? night(checkIn.value) : null
+    if (!checkIn.value || !arrival || date <= checkIn.value) return false
+    let nights = 0
+    let minimum = arrival.min_stay_arrival
+    for (let day = checkIn.value; day < date; day = addLocalDays(day, 1)) {
+      const stayed = night(day)
+      if (!stayed?.available) return false
+      minimum = Math.max(minimum, stayed.min_stay_through ?? 1)
+      nights++
+    }
+    if (nights < minimum || (arrival.max_stay !== null && nights > arrival.max_stay)) return false
     return !night(date)?.closed_to_departure
   }
+
+  /** Nights between check-in and checkout, read from the dates themselves. */
+  const nightCount = computed(() => {
+    if (!checkIn.value || !checkOut.value) return 0
+    let nights = 0
+    for (let day = checkIn.value; day < checkOut.value; day = addLocalDays(day, 1)) nights++
+    return nights
+  })
 
   function selectDay(date: string) {
     bookingError.value = ''
@@ -164,11 +183,20 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     return [...groups].map(([price, count]) => ({ label: t('stay.nightly_line', { price: money(price), nights: nightsLabel(count) }), amount: money(price * count) }))
   })
 
-  function openBooking() {
-    bookingOpen.value = true
-    bookingStep.value = 1
-    if (!calendar.value) void loadCalendar()
+  /**
+   * Choose where the dialog opens. Opening is the modal checkbox's job: the
+   * controls are labels for it, and setting `bookingOpen` here as well raced the
+   * label's own activation and flipped the checkbox shut again.
+   */
+  function openBooking(step: 1 | 2 = quote.value ? 2 : 1) {
+    bookingStep.value = step
   }
+
+  // The nights are read when the dialog opens, however it opened, including
+  // a press made before the page hydrated.
+  watch(bookingOpen, (open) => {
+    if (open && !calendar.value) void loadCalendar()
+  })
 
   async function submitBooking(contact: ContactFormState) {
     if (submitting.value) return
@@ -212,7 +240,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
 
   return {
     bookingOpen, bookingStep, calendar, calendarPending, calendarError, checkIn, checkOut, adults, children, infants, maxGuests,
-    quote, quotePending, bookingError, submitting, breakdown, rangeLabel, guestsLabel,
+    quote, quotePending, bookingError, submitting, breakdown, rangeLabel, guestsLabel, nightCount,
     loadCalendar, night, canCheckIn, canCheckOut, selectDay, clearDates, openBooking, submitBooking, money, nightsLabel, dateLabel,
   }
 }
