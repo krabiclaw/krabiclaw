@@ -14,7 +14,7 @@
     <main>
       <slot />
       <!-- A firm's articles carry its legal disclaimer, under every article and index, wrapped to the full width: the stored text carries line breaks from where it was pasted. -->
-      <p v-if="route.meta.articleCollection && compliance?.disclaimer" class="blawby-container mb-12 whitespace-pre-line text-sm italic text-muted">{{ compliance.disclaimer }}</p>
+      <p v-if="route.meta.articleCollection && compliance?.disclaimer" class="blawby-container mb-12 text-sm italic text-muted">{{ compliance.disclaimer }}</p>
     </main>
     <BlawbyFooter
       :organization="identity"
