@@ -192,6 +192,8 @@ export interface GuestThreadDetailViewModel {
   guestName: string | null
   participantLabel: string
   replyChannel: GuestThreadReplyChannel
+  /** The conversation belongs to a guest account, so a reply reaches its account inbox even without a guest email. */
+  guestAccountLinked: boolean
   guestEmail: string | null
   guestPhone: string | null
   submissionType: GuestThreadSubmissionType

@@ -3,7 +3,7 @@ import { execute, queryAllPages, queryFirst, type DbClient } from '~/server/db'
 import { isValidInstant } from '~/utils/timezone'
 import { guestMessageDueAt, messagingError } from './guest-message-schedule'
 import { templateSchedule, type MessageTemplateRow, type ScheduledGuestMessageRow } from './guest-messaging'
-import { sendScheduledGuestReply, type OperationOutcome } from './guest-threads/operations'
+import { sendScheduledGuestReply, type ReplyOutcome } from './guest-threads/operations'
 import { publishGuestInboxThreadEvent, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { ChannexError } from '~/server/integrations/channex/client'
 
@@ -146,11 +146,11 @@ type SendEnv = Parameters<typeof sendScheduledGuestReply>[1]['env'] & GuestInbox
 type SendFailure = { status: 'failed' | 'needs_review'; reason: string; error_code: string; error_field: string }
 
 /** Every non-sent reply outcome carries its own typed facts; none is generalized here. */
-function sendFailure(outcome: Exclude<OperationOutcome, { ok: true }>): SendFailure {
+function sendFailure(outcome: Exclude<ReplyOutcome, { ok: true }>): SendFailure {
   switch (outcome.reason) {
     case 'thread_not_found': return { status: 'failed', reason: 'The stay’s guest conversation no longer exists.', error_code: 'THREAD_NOT_FOUND', error_field: 'requestId' }
     case 'source_not_found': return { status: 'failed', reason: 'The conversation’s stay no longer exists.', error_code: 'SOURCE_NOT_FOUND', error_field: 'stayId' }
-    case 'no_guest_email': return { status: 'failed', reason: 'The stay has no current guest email to send to.', error_code: 'GUEST_EMAIL_REQUIRED', error_field: 'stay.guestEmail' }
+    case 'guest_invite_required': return { status: 'failed', reason: 'The stay has no guest email and its guest has not joined the conversation through an invite.', error_code: outcome.code, error_field: outcome.field }
     case 'empty_body': return { status: 'failed', reason: 'The scheduled message has no text.', error_code: 'EMPTY_MESSAGE', error_field: 'body' }
     case 'missing_idempotency_key': return { status: 'failed', reason: 'The scheduled send had no idempotency key.', error_code: 'MISSING_IDEMPOTENCY_KEY', error_field: 'idempotencyKey' }
     case 'invalid_photo': return { status: 'failed', reason: outcome.message, error_code: 'INVALID_PHOTO', error_field: 'photos' }

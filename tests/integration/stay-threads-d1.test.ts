@@ -67,12 +67,12 @@ test('a stay opens its guest conversation in the one inbox', async () => {
     })
     assert.deepEqual(await opening(ana.request_id), { actor_kind: 'member', actor_user_id: OWNER, channel: 'system' })
 
-    // A guest reachable by phone alone has a thread too; a reply has no address to go to and says so.
+    // A guest reachable by phone alone has a thread too; until they join it through an invite a reply has nowhere to go and says so.
     const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(30), check_out_date: day(31), adults: 1, guest_name: 'Dee', guest_phone: '+15557770000', total_minor: 15_000 })
     assert.ok(dee.request_id)
     assert.deepEqual(JSON.parse((await thread(dee.request_id))!.payload_json).guest, { name: 'Dee', email: null, phone: '+15557770000' })
     assert.deepEqual(await executeGuestThreadOperation(db, { threadId: dee.request_id, organizationId: ORG, action: 'reply', body: 'Hi', actorUserId: OWNER, idempotencyKey: 'dee-reply', env }),
-      { ok: false, status: 400, reason: 'no_guest_email' })
+      { ok: false, status: 409, reason: 'guest_invite_required', code: 'GUEST_INVITE_REQUIRED', field: 'request_id', message: 'This guest has no email on file. Invite them to the conversation first.' })
 
     // With neither an email nor a phone there is nothing to converse through; adding an email later opens it.
     const bo = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'bo', check_in_date: day(10), check_out_date: day(12), adults: 1, guest_name: 'Bo', total_minor: 30_000 })

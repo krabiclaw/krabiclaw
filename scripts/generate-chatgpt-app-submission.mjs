@@ -36,7 +36,7 @@ const effects = {
   delete_organization_language: 'Deletes a disabled website language and its translations while preserving source content.',
   list_guest_conversations: 'Reads authorized contact, reservation and booking conversations and their inbox state.',
   get_guest_conversation: 'Reads an authorized conversation, its messages, operational record, proposals, attachments and delivery receipts.',
-  reply_to_guest: 'Saves a reply and optional photo in the guest conversation, emails the guest or, for a mapped Airbnb conversation, sends the text through Channex, and updates the inbox state using the supplied retry key.',
+  reply_to_guest: 'Saves a reply and optional photo in the guest conversation, emails the guest or, for a mapped Airbnb conversation, sends the text through Channex; a guest who joined through an invite also sees it in their KrabiClaw inbox. Updates the inbox state using the supplied retry key.',
   set_guest_conversation_archived: 'Changes the selected conversation’s archive state using the supplied retry key; it does not cancel the operational record.',
   create_product_session: 'Adds dated sessions for the offering’s assigned providers using a durable retry key and canonical availability checks.',
   update_product_session: 'Overwrites selected session time, capacity or state using its current revision. Guest commitments prevent incompatible edits.',

@@ -198,6 +198,25 @@ export const guest_thread_deliveries = sqliteTable("guest_thread_deliveries", {
 	check("guest_thread_deliveries_provider_check", sql`(channel = 'email' AND provider IN ('resend', 'log_only')) OR (channel = 'whatsapp' AND provider IN ('meta', 'log_only')) OR (channel = 'airbnb' AND provider = 'channex') OR (channel = 'push' AND provider = 'apns')`),
 ]);
 
+// A host's single-use link that hands one guest conversation to whoever opens it
+// and signs in. Only the token's SHA-256 is stored; a newer link revokes an open one.
+export const guest_thread_invites = sqliteTable("guest_thread_invites", {
+	id: text().primaryKey(),
+	request_id: text().notNull().references(() => requests.id, { onDelete: "cascade" } ),
+	token_hash: text().notNull(),
+	created_by_user_id: text().references(() => user.id, { onDelete: "set null" } ),
+	expires_at: text().notNull(),
+	claimed_at: text(),
+	claimed_user_id: text().references(() => user.id, { onDelete: "set null" } ),
+	revoked_at: text(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+}, (table) => [
+	check("guest_thread_invites_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', expires_at, '+0 days') IS expires_at AND (claimed_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', claimed_at, '+0 days') IS claimed_at) AND (revoked_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', revoked_at, '+0 days') IS revoked_at) AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
+	check("guest_thread_invites_state_check", sql`(claimed_at IS NULL OR revoked_at IS NULL) AND (claimed_user_id IS NULL OR claimed_at IS NOT NULL)`),
+	uniqueIndex("guest_thread_invites_token_hash_unique").on(table.token_hash),
+	uniqueIndex("guest_thread_invites_open_request_unique").on(table.request_id).where(sql`claimed_at IS NULL AND revoked_at IS NULL`),
+]);
+
 
 
 
