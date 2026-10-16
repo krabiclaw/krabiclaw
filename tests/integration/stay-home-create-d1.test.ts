@@ -204,6 +204,11 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.equal((await getProduct(db, ORG, made.product_id)).description, 'A cabin above the canyon.')
     assert.equal((await edit(owner, { published: true })).status, 409)
     assert.equal(((await call(owner, 'GET')).body.homes as Array<{ product_id: string; published: boolean }>).find(home => home.product_id === made.product_id)!.published, false)
+    // Priced, it is listed though the business has no online payments: guests send an enquiry until it does.
+    assert.equal((await edit(owner, { base_price_minor: 210_00 })).status, 200)
+    assert.equal((await edit(owner, { published: true })).status, 200)
+    assert.equal(((await call(owner, 'GET')).body.homes as Array<{ product_id: string; published: boolean }>).find(home => home.product_id === made.product_id)!.published, true)
+    assert.deepEqual(await db.prepare('SELECT published FROM product_publications WHERE product_id = ?').bind(made.product_id).all().then(result => result.results), [{ published: 1 }])
 
     // The plan covers active locations: one taken off the site frees its slot,
     // and putting it back is refused while every slot is in use.

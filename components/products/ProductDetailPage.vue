@@ -114,7 +114,7 @@
               <SayaIcon name="calendar-days" class="size-5 text-default shrink-0 mt-0.5" />
               <div>
                 <p class="font-medium text-default text-sm">{{ stayCancellationPolicyLabel }}</p>
-                <p class="text-xs text-muted">{{ t('stay.charged_in_full') }}</p>
+                <p class="text-xs text-muted">{{ stayCheckoutAvailable ? t('stay.charged_in_full') : t('stay.enquiry_note') }}</p>
               </div>
             </div>
           </div>
@@ -289,7 +289,7 @@
               </SayaButton>
             </div>
 
-            <p v-if="isStay && canBook" class="text-center text-xs text-muted">You won't be charged yet</p>
+            <p v-if="isStay && canBook" class="text-center text-xs text-muted">{{ stayCheckoutAvailable ? 'You won\'t be charged yet' : t('stay.enquiry_note') }}</p>
 
             <dl v-if="isStay && stayBooking.quote.value" class="space-y-3 border-t border-default pt-4 text-sm">
               <div v-for="line in stayBooking.breakdown.value" :key="line.label" class="flex justify-between gap-4">
@@ -497,14 +497,16 @@ const props = defineProps<{
   scopeRequired?: boolean
   locations?: PublicProductLocation[]
   onlineAvailable?: boolean
+  /** A place to stay is paid for on the site once the business's Payments setup is complete; until then it takes enquiries. */
+  stayCheckoutAvailable: boolean
 }>()
 
 const displayTitle = computed(() => props.product.name)
 /** A place to stay is booked by its nights, paid in full; its booking is not a session's. */
 const isStay = computed(() => props.product.kind === 'stay')
-const stayBooking = useStayBooking(() => ({ product: props.product }))
+const stayBooking = useStayBooking(() => ({ product: props.product, checkout: props.stayCheckoutAvailable }))
 const bookingLabel = computed(() => isStay.value
-  ? stayBooking.quote.value ? t('stay.reserve') : t('stay.check_availability')
+  ? stayBooking.quote.value ? props.stayCheckoutAvailable ? t('stay.reserve') : t('stay.send_enquiry') : t('stay.check_availability')
   : props.vertical === 'service'
     ? props.booking?.confirmation_mode === 'review' ? t('booking.request_appointment') : t('booking.book_appointment')
     : t('saya.experience_detail.book_now'))
