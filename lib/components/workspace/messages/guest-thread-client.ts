@@ -103,7 +103,8 @@ export function isThreadDetailResponse(value: unknown): value is { thread: Threa
     && (value.thread.organizationName === null || typeof value.thread.organizationName === 'string')
     && (value.thread.organizationVertical === null || typeof value.thread.organizationVertical === 'string')
     && Array.isArray(value.thread.entries)
-    && value.thread.entries.every(entry => isRecord(entry) && (entry.providerTimestamp === null || typeof entry.providerTimestamp === 'string'))
+    && value.thread.entries.every(entry => isRecord(entry) && (entry.providerTimestamp === null || typeof entry.providerTimestamp === 'string')
+      && (entry.kind !== 'message' || entry.actorKind === 'guest' || (typeof entry.actorLabel === 'string' && Boolean(entry.actorLabel))))
     && Array.isArray(value.thread.availableActions)
     && (value.thread.mailbox === 'current' || value.thread.mailbox === 'past')
     && typeof value.thread.manuallyArchived === 'boolean'

@@ -51,14 +51,18 @@ async function loadReviewsSummary(db: DbClient, organizationIds: readonly string
       ? Math.round((rows.reduce((sum, row) => sum + row.rating, 0) / rows.length) * 100) / 100
       : null,
     distribution,
-    recent: rows.slice(0, 8).map(row => ({
+    recent: rows.slice(0, 8).map(row => {
+      // Every review writer (direct, review request, Google) requires its author.
+      if (!row.author_name?.trim()) throw new HTTPError({ statusCode: 500, message: `Review ${row.id} has no author`, data: { code: 'INVALID_REVIEW', field: 'author_name', review_id: row.id } })
+      return {
       id: row.id,
-      author: row.author_name ?? 'Guest',
+      author: row.author_name,
       rating: row.rating,
       title: row.title,
       content: row.content,
       createdAt: row.created_at,
-    })),
+      }
+    }),
   }
 }
 

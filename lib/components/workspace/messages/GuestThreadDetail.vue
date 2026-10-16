@@ -592,8 +592,9 @@ const stream = computed<StreamItem[]>(() => {
     items.push(item)
   }
 
+  // The decoder guarantees every member and system message carries its actor label.
   const message = (key: string, occurredAt: string, body: string | null, speaker: Speaker, label: string | null, extra: Partial<MessageItem> = {}) => {
-    const who = extra.own ? 'You' : speaker === 'platform' ? 'KrabiClaw' : speaker === 'guest' ? current.participantLabel : label || (speaker === 'system' ? 'System' : 'Team member')
+    const who = extra.own ? 'You' : speaker === 'platform' ? 'KrabiClaw' : speaker === 'guest' ? current.participantLabel : label as string
     const avatar: AvatarProps = speaker === 'platform'
       ? { src: '/platform/krabiclaw-symbol.svg', alt: who }
       : { alt: who }
@@ -624,7 +625,7 @@ const stream = computed<StreamItem[]>(() => {
         providerTimestamp: entry.providerTimestamp,
         ...(mirrored ? { run: `provider:${entry.id}` } : {}),
         unshown: Array.isArray(unshown) ? unshown.filter((name): name is string => typeof name === 'string') : [],
-        ...(member ? { receipt: receiptFor(entry) } : {}),
+        ...(member ? { receipt: receiptFor(entry, current.participantLabel) } : {}),
       })
     } else {
       push(entry.occurredAt, { type: 'event', key, icon: systemEventIcon(entry), label: systemEventLabel(entry) })
@@ -657,14 +658,14 @@ const stream = computed<StreamItem[]>(() => {
 const RECEIPT_RANK = ['pending', 'sending', 'accepted', 'sent', 'delivered', 'read'] as const
 const CHANNEL_LABELS = { email: 'email', whatsapp: 'WhatsApp', airbnb: 'Airbnb', push: 'push notification' } as const
 
-function receiptFor(entry: GuestThreadEntryViewModel): MessageItem['receipt'] {
+function receiptFor(entry: GuestThreadEntryViewModel, participantLabel: string): MessageItem['receipt'] {
   const replies = entry.deliveries.filter(delivery => delivery.purpose === 'member_reply' || delivery.purpose === 'scheduled_message')
   if (!replies.length) return undefined
   const best = replies.find(delivery => delivery.status === 'uncertain') ?? replies.reduce((top, delivery) =>
     RECEIPT_RANK.indexOf(delivery.status as typeof RECEIPT_RANK[number]) > RECEIPT_RANK.indexOf(top.status as typeof RECEIPT_RANK[number]) ? delivery : top)
   const channel = CHANNEL_LABELS[best.channel]
   switch (best.status) {
-    case 'read': return { label: `Read by ${thread.value?.participantLabel ?? 'the guest'}`, failed: false }
+    case 'read': return { label: `Read by ${participantLabel}`, failed: false }
     case 'delivered': return { label: `Delivered on ${channel}`, failed: false }
     case 'accepted': return { label: `Accepted by ${channel}`, failed: false }
     case 'sent': return { label: `Sent by ${channel}`, failed: false }

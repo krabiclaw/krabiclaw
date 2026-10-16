@@ -6,7 +6,7 @@ import { resolveGuestThreadMailbox } from './mailbox'
 import { listThreadEntries, parseEntryPayload, isBuyerVisibleThreadEntry } from './entries'
 import { isDeliverySent, isVisibleDeliveryFailure, listThreadDeliveries } from './deliveries'
 import { listMessagePhotos } from './attachments'
-import type { GuestThreadDetailViewModel, GuestThreadEntryDeliveryViewModel, GuestThreadEntryViewModel } from './types'
+import type { GuestThreadDetailViewModel, GuestThreadEntryDeliveryViewModel, GuestThreadEntryRow, GuestThreadEntryViewModel } from './types'
 import { HTTPError } from 'nitro'
 import { providerTimestamp } from '~/server/integrations/channex/messages'
 
@@ -83,10 +83,7 @@ export async function getGuestThreadDetail(
       actorUserId: audience
         ? entry.actor_kind === 'guest' && entry.channel === 'web' && entry.actor_user_id === audience.buyerUserId ? entry.actor_user_id : null
         : entry.actor_user_id,
-      actorLabel: mirrored && entry.actor_kind === 'system' ? 'Airbnb'
-        : mirrored && entry.actor_kind === 'member' ? 'Property on Airbnb'
-          : entry.event_name === 'thread.scheduled_message' ? 'Scheduled message'
-          : entry.actor_user_id ? actorNames.get(entry.actor_user_id) ?? null : null,
+      actorLabel: actorLabel(entry, mirrored, actorNames),
       channel: entry.channel,
       body: entry.body,
       eventName: entry.event_name,
@@ -168,4 +165,23 @@ export async function getGuestThreadDetail(
     updatedAt: thread.updated_at,
     resolvedAt: audience ? null : thread.resolved_at,
   }
+}
+
+/**
+ * Who wrote a team-side message, from the entry's own facts. A member reply
+ * always records its member; the user FK sets that to null only when the
+ * account is deleted, which is a recorded fact rather than a missing one. A
+ * system message is either a provider message or a scheduled message.
+ */
+function actorLabel(entry: GuestThreadEntryRow, mirrored: boolean, actorNames: Map<string, string>): string | null {
+  if (mirrored) return entry.actor_kind === 'system' ? 'Airbnb' : entry.actor_kind === 'member' ? 'Property on Airbnb' : null
+  if (entry.event_name === 'thread.scheduled_message') return 'Scheduled message'
+  if (entry.actor_user_id) {
+    const name = actorNames.get(entry.actor_user_id)
+    if (!name?.trim()) throw new HTTPError({ statusCode: 500, message: 'The entry actor has no account name', data: { code: 'INVALID_GUEST_THREAD_ENTRY', field: 'actor_user_id', entry_id: entry.id } })
+    return name
+  }
+  if (entry.kind !== 'message' || entry.actor_kind === 'guest') return null
+  if (entry.actor_kind === 'member') return 'Deleted account'
+  throw new HTTPError({ statusCode: 500, message: 'The system message has no recorded source', data: { code: 'INVALID_GUEST_THREAD_ENTRY', field: 'actor_kind', entry_id: entry.id } })
 }

@@ -88,8 +88,9 @@ export interface ProductForm {
   booking_capacity: string
   confirmation_mode: 'instant' | 'review'
   scheduling_mode: 'legacy' | 'provider'
-  assigned_member_id: string
-  assigned_team_id: string
+  /** null: the business schedule rather than a member or team. */
+  assigned_member_id: string | null
+  assigned_team_id: string | null
   online_payment_required: boolean
   /** Held online: booked in the provider's working hours rather than weekly times at a location. */
   held_online: boolean
@@ -364,7 +365,7 @@ const draft = useState<ProductForm>(draftKey, () => ({
   collection_ids: [] as string[],
   bookable: false,
   booking_duration: '',
-  booking_capacity: '', scheduling_mode: 'legacy', assigned_member_id: '', assigned_team_id: '', confirmation_mode: 'instant', online_payment_required: false, held_online: false,
+  booking_capacity: '', scheduling_mode: 'legacy', assigned_member_id: null, assigned_team_id: null, confirmation_mode: 'instant', online_payment_required: false, held_online: false,
   image_asset_id: null as string | null,
   // A new place to stay starts from these settings; an existing one is loaded from its own.
   stay_location_id: '', check_in_time: '15:00', check_out_time: '11:00', max_guests: '', min_nights: '1', stay_team_id: null, stay_member_id: null,
@@ -432,8 +433,8 @@ function loadForm(row: Product) {
   form.booking_duration = row.booking?.duration_minutes === null || row.booking === null ? '' : String(row.booking.duration_minutes)
   form.confirmation_mode = row.booking?.confirmation_mode ?? 'instant'
   form.scheduling_mode = row.booking?.scheduling_mode ?? 'legacy'
-  form.assigned_member_id = row.booking?.assigned_member_id ?? ''
-  form.assigned_team_id = row.booking?.assigned_team_id ?? ''
+  form.assigned_member_id = row.booking ? row.booking.assigned_member_id : null
+  form.assigned_team_id = row.booking ? row.booking.assigned_team_id : null
   form.online_payment_required = row.booking?.online_payment_required ?? false
   form.held_online = row.booking?.held_online ?? false
   form.booking_capacity = row.booking?.default_capacity === null || row.booking === null ? '' : String(row.booking.default_capacity)
@@ -566,11 +567,13 @@ function listSummary(values: readonly string[], empty: string) {
 // Who handles a bookable service's consultations, by name: the same list the
 // assignment concern reads, so it is one request shared by both.
 const { data: schedulingMembers, error: schedulingMembersError } = await useMemberSchedulingList(() => dashboard.organization.value?.id)
+/** The assignee by its loaded name; a read failure, a pending read or an unknown id says so. */
 function assignmentSummary(): string {
-  if (form.assigned_team_id) return schedulingMembers.value?.teams.find(team => team.id === form.assigned_team_id)?.name ?? 'Assigned team'
-  if (!form.assigned_member_id) return 'The business schedule'
+  if (!form.assigned_team_id && !form.assigned_member_id) return 'The business schedule'
   if (schedulingMembersError.value) return 'Team members could not be loaded'
-  return schedulingMembers.value?.members.find(member => member.id === form.assigned_member_id)?.name ?? 'Assigned team member'
+  if (!schedulingMembers.value) return 'Loading team members…'
+  if (form.assigned_team_id) return schedulingMembers.value.teams.find(team => team.id === form.assigned_team_id)?.name ?? 'Assigned team not found in this business'
+  return schedulingMembers.value.members.find(member => member.id === form.assigned_member_id)?.name ?? 'Assigned member not found in this business'
 }
 
 /**
@@ -952,7 +955,7 @@ async function saveBooking(concern: BookingConcern) {
   const body = concern === 'duration' ? { duration_minutes: Number(form.booking_duration) }
     : concern === 'capacity' ? { default_capacity: form.booking_capacity.trim() ? Number(form.booking_capacity) : null }
     : concern === 'confirmation' ? { confirmation_mode: form.confirmation_mode }
-    : concern === 'assignment' ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id || null, assigned_team_id: form.assigned_team_id || null }
+    : concern === 'assignment' ? { scheduling_mode: form.scheduling_mode, assigned_member_id: form.assigned_member_id, assigned_team_id: form.assigned_team_id }
     : concern === 'payment' ? { online_payment_required: form.online_payment_required }
     : concern === 'location' ? { held_online: form.held_online }
     : {}
