@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6ecf2b0d-4b4f-4c9c-8eec-1d36ea196a98",
+  "id": "1ca3a22b-28fe-4976-9fc8-3d505b40cc1f",
   "prevId": "9a55056a-8c04-40b1-9832-d42071ebc92f",
   "tables": {
     "account": {
@@ -16298,6 +16298,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "participants_key": {
+          "name": "participants_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
         "last_message_at": {
           "name": "last_message_at",
           "type": "text",
@@ -16315,6 +16322,14 @@
         }
       },
       "indexes": {
+        "team_threads_participants_unique": {
+          "name": "team_threads_participants_unique",
+          "columns": [
+            "organization_id",
+            "participants_key"
+          ],
+          "isUnique": true
+        },
         "team_threads_org_activity_idx": {
           "name": "team_threads_org_activity_idx",
           "columns": [

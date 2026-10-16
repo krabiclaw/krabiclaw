@@ -70,6 +70,11 @@ test('members talk in team conversations, see unread state and receive recorded 
     const direct = await createTeamThread(env, db, cleaner, { memberIds: ['owner'] })
     assert.equal(direct.created, true)
     assert.deepEqual(await createTeamThread(env, db, owner, { memberIds: ['cleaner'] }), { id: direct.id, created: false })
+    // Two starts of the same new conversation at once make one conversation.
+    const raced = await Promise.all([createTeamThread(env, db, cleaner, { memberIds: ['cook'] }), createTeamThread(env, db, cook, { memberIds: ['cleaner'] })])
+    assert.equal(raced[0].id, raced[1].id)
+    assert.deepEqual(raced.map(result => result.created).sort(), [false, true])
+    assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM team_thread_members WHERE thread_id = ?').bind(raced[0].id).first('n'), 2)
 
     // A stay conversation needs a stay the caller can see: a member sees only the homes they look after.
     await assert.rejects(createTeamThread(env, db, cleaner, { memberIds: ['owner'], stayId: stay.id }), refused(404, 'STAY_NOT_FOUND', 'stayId'))
@@ -115,6 +120,10 @@ test('members talk in team conversations, see unread state and receive recorded 
     await assert.rejects(setNotificationPreference(db, env as never, 'owner', 'team_messages', { email: true, whatsapp: false, push: true }), /push only/)
     const quiet = await sendTeamMessage(env, db, cleaner, direct.id, { body: 'Second', photos: [], idempotencyKey: 'k2', senderName: 'cleaner' })
     assert.deepEqual(quiet.message.deliveries, [])
+    assert.equal(await db.prepare(`SELECT COUNT(*) AS n FROM guest_thread_deliveries d JOIN activity_entries a ON a.id = d.entry_id WHERE a.dedupe_key = ?`)
+      .bind(`team-message:${quiet.message.id}`).first('n'), 0)
+    assert.equal(await db.prepare(`SELECT COUNT(*) AS n FROM guest_thread_deliveries d JOIN activity_entries a ON a.id = d.entry_id WHERE a.dedupe_key = ? AND d.status = 'failed'`)
+      .bind(`team-message:${sent.message.id}`).first('n'), 1)
     await sendTeamMessage(env, db, owner, direct.id, { body: 'Thanks', photos: [], idempotencyKey: 'k3', senderName: 'owner' })
 
     // Newest first, paged back from the oldest loaded message.
@@ -128,7 +137,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     // Someone without a seat cannot read or write it, and does not see it.
     await assert.rejects(listTeamMessages(db, cook, direct.id, {}), refused(404, 'TEAM_THREAD_NOT_FOUND', 'threadId'))
     await assert.rejects(sendTeamMessage(env, db, cook, direct.id, { body: 'hi', photos: [], idempotencyKey: 'cook', senderName: 'cook' }), refused(404, 'TEAM_THREAD_NOT_FOUND', 'threadId'))
-    assert.deepEqual(await listTeamThreads(env, db, cook), [])
+    assert.deepEqual((await listTeamThreads(env, db, cook)).map(thread => thread.id), [raced[0].id])
 
     // Reassigning the home to another member clears it from the first.
     await setMemberHomes(env, db, ownerStays, 'm-cook', [cabin.id])

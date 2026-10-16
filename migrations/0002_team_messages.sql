@@ -35,6 +35,7 @@ CREATE TABLE `team_threads` (
 	`organization_id` text NOT NULL,
 	`stay_id` text,
 	`created_by_user_id` text,
+	`participants_key` text NOT NULL,
 	`last_message_at` text NOT NULL,
 	`created_at` text DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) NOT NULL,
 	FOREIGN KEY (`organization_id`) REFERENCES `organization`(`id`) ON UPDATE no action ON DELETE cascade,
@@ -43,6 +44,7 @@ CREATE TABLE `team_threads` (
 	CONSTRAINT "team_threads_instants_check" CHECK(strftime('%Y-%m-%dT%H:%M:%fZ', last_message_at, '+0 days') IS last_message_at AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at)
 );
 --> statement-breakpoint
+CREATE UNIQUE INDEX `team_threads_participants_unique` ON `team_threads` (`organization_id`,`participants_key`);--> statement-breakpoint
 CREATE INDEX `team_threads_org_activity_idx` ON `team_threads` (`organization_id`,`last_message_at`);--> statement-breakpoint
 CREATE INDEX `team_threads_org_stay_idx` ON `team_threads` (`organization_id`,`stay_id`);--> statement-breakpoint
 CREATE UNIQUE INDEX `team_threads_org_id_unique` ON `team_threads` (`organization_id`,`id`);--> statement-breakpoint

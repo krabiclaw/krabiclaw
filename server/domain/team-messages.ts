@@ -190,8 +190,9 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
 
 /**
  * Start a conversation with other members, optionally about one stay the
- * caller can see. A conversation with exactly these members about the same
- * stay (or about none) is reused rather than duplicated.
+ * caller can see. A conversation started with exactly these members about the
+ * same stay (or about none) is reused rather than duplicated, also when two
+ * starts race.
  */
 export async function createTeamThread(env: TeamEnv, db: DbClient, access: TeamAccess, input: { memberIds: unknown; stayId?: unknown }): Promise<{ id: string; created: boolean }> {
   const { memberIds, stayId } = input
@@ -214,26 +215,24 @@ export async function createTeamThread(env: TeamEnv, db: DbClient, access: TeamA
     }
   }
   const seatIds = [access.memberId, ...others.map(id => byUser.get(id)!.id)]
-  const existing = await queryFirst<{ id: string }>(db, `
-    SELECT t.id FROM team_threads t
-     WHERE t.organization_id = ? AND t.stay_id IS ?
-       AND (SELECT COUNT(*) FROM team_thread_members s WHERE s.organization_id = t.organization_id AND s.thread_id = t.id) = ?
-       AND NOT EXISTS (SELECT 1 FROM team_thread_members s WHERE s.organization_id = t.organization_id AND s.thread_id = t.id
-         AND s.member_id NOT IN (SELECT value FROM json_each(?)))
-     ORDER BY t.created_at, t.id LIMIT 1`, [access.organizationId, stayId ?? null, seatIds.length, d1JsonStringSet(seatIds)])
-  if (existing) return { id: existing.id, created: false }
+  const participantsKey = await creationRequestHash({ stay_id: stayId ?? null, member_ids: [...seatIds].sort() })
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
+  // The unique key makes a repeated or concurrent start find the first conversation.
   await executeBatch(db, [
     {
-      query: 'INSERT INTO team_threads (id, organization_id, stay_id, created_by_user_id, last_message_at, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-      params: [id, access.organizationId, stayId ?? null, access.userId, now, now],
+      query: `INSERT INTO team_threads (id, organization_id, stay_id, created_by_user_id, participants_key, last_message_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+              ON CONFLICT (organization_id, participants_key) DO NOTHING`,
+      params: [id, access.organizationId, stayId ?? null, access.userId, participantsKey, now, now],
     },
     ...seatIds.map(memberId => ({
-      query: 'INSERT INTO team_thread_members (thread_id, organization_id, member_id, last_read_at, created_at) VALUES (?, ?, ?, ?, ?)',
-      params: [id, access.organizationId, memberId, memberId === access.memberId ? now : null, now],
+      query: 'INSERT INTO team_thread_members (thread_id, organization_id, member_id, last_read_at, created_at) SELECT id, organization_id, ?, ?, ? FROM team_threads WHERE id = ?',
+      params: [memberId, memberId === access.memberId ? now : null, now, id],
     })),
   ], { operation: 'Start a team conversation' })
+  const thread = await queryFirst<{ id: string }>(db, 'SELECT id FROM team_threads WHERE organization_id = ? AND participants_key = ?', [access.organizationId, participantsKey])
+  if (!thread) throw new Error(`Team conversation ${participantsKey} was neither created nor found`)
+  if (thread.id !== id) return { id: thread.id, created: false }
   await publishThreadChanged(env, access.organizationId, id, {})
   return { id, created: true }
 }
