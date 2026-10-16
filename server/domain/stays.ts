@@ -717,14 +717,24 @@ export async function releaseUnassignableHomes(env: GuestInboxPublicationEnv, db
     `SELECT product_id, location_id, assigned_member_id FROM product_stay_configs WHERE ${unassignable}`, params)
   if (!homes.length) return
   const now = new Date().toISOString()
-  await executeBatch(db, [{
-    query: `UPDATE product_stay_configs SET assigned_member_id = NULL, updated_at = ?, updated_by = 'system' WHERE ${unassignable}`,
-    params: [now, ...params],
-  }, ...[...new Set(homes.map(home => home.assigned_member_id))].map(memberId => organizationEventQuery({
-    organizationId: input.organizationId, actorType: 'system', eventType: 'stay.homes_assigned', entityType: 'member', entityId: memberId,
-    metadata: { product_ids: [], changed_product_ids: homes.filter(home => home.assigned_member_id === memberId).map(home => home.product_id).sort() },
-  }))], { operation: 'Release homes no current member looks after' })
-  for (const home of homes) {
+  // Each home read above is cleared only while it still names the member read,
+  // in the same transaction as its audit entry, so the entries and
+  // invalidations name exactly the homes released; an assignment written
+  // meanwhile is left to the writer's own re-check.
+  const cleared: typeof homes = []
+  for (let start = 0; start < homes.length; start += 400) {
+    const chunk = homes.slice(start, start + 400)
+    const results = await executeBatch(db, chunk.flatMap(home => [{
+      query: `UPDATE product_stay_configs SET assigned_member_id = NULL, updated_at = ?, updated_by = 'system'
+               WHERE ${unassignable} AND product_id = ? AND assigned_member_id = ?`,
+      params: [now, ...params, home.product_id, home.assigned_member_id],
+    }, organizationEventQuery({
+      organizationId: input.organizationId, actorType: 'system', eventType: 'stay.homes_assigned', entityType: 'member', entityId: home.assigned_member_id,
+      metadata: { product_ids: [], changed_product_ids: [home.product_id] }, onlyIfPreviousChangedOneRow: true,
+    })]), { operation: 'Release homes no current member looks after' })
+    chunk.forEach((home, index) => { if (results[index * 2]?.meta.changes === 1) cleared.push(home) })
+  }
+  for (const home of cleared) {
     await publishStayInvalidation(env, { type: 'stay.changed', organizationId: input.organizationId, productId: home.product_id, locationId: home.location_id, stayId: null }, { updated_at: now })
   }
 }
