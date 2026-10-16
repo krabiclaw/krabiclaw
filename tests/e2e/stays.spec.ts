@@ -1,6 +1,7 @@
-import { expect, test, type APIRequestContext } from '@playwright/test'
+import { expect, test, type APIRequestContext, type WebSocket } from '@playwright/test'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpRequest } from './helpers/mcp'
+import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations'
 
 // A host's place to stay, end to end through the surfaces that own it: the
 // one Product editor creates the home, MCP adds a stay, Today and the stay's
@@ -50,7 +51,8 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   // The index offers the same create action; the leaf's own save commits what it shows.
   await page.locator('#dashboard-panel-product-stay').getByRole('button', { name: 'Create place to stay', exact: true }).click()
   await expect(page).toHaveURL(new RegExp(`/dashboard/${slug}/products/(?!new)[^/?]+`))
-  const productId = new URL(page.url()).pathname.split('/').at(-1)!
+  const productId = new URL(page.url()).pathname.split('/')[4]!
+  expect(productId).toMatch(/^[0-9a-f-]{36}$/)
   const home = await call<{ product: { kind: string; unit_label: string; stay: Record<string, unknown> } }>('get_product', { product_id: productId })
   expect(home.error).toBeNull()
   expect(home.data!.product).toMatchObject({ kind: 'stay', unit_label: 'night', stay: { location_id: location.id, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2 } })
@@ -195,6 +197,19 @@ test('a cleaner sees only assigned-home arrivals and departures on Today and Upc
     expect(deniedLocation.status()).toBe(404)
 
     const cleanerPage = await cleaner.newPage()
+    let deliveringSocket: WebSocket | undefined
+    const liveEvents: DashboardInvalidation[] = []
+    cleanerPage.on('websocket', socket => {
+      socket.on('framereceived', frame => {
+        if (frame.payload === 'pong') return
+        const event: unknown = JSON.parse(String(frame.payload))
+        expect(isDashboardInvalidation(event)).toBe(true)
+        if (isDashboardInvalidation(event)) {
+          liveEvents.push(event)
+          deliveringSocket = socket
+        }
+      })
+    })
     await cleanerPage.setViewportSize({ width: 390, height: 844 })
     expect((await cleanerPage.goto(`/dashboard/${slug}`))?.status()).toBe(200)
     const arrival = cleanerPage.getByTestId('today-card')
@@ -211,6 +226,113 @@ test('a cleaner sees only assigned-home arrivals and departures on Today and Upc
     await expect(departure).toHaveAttribute('href', `${arrivalPath}?range=upcoming`)
     await departure.click()
     await expect(cleanerPage.getByRole('heading', { name: 'Ana Silva', level: 1, exact: true })).toBeVisible()
+
+    // Another device's edit updates the assigned stay without navigation. An
+    // ordered later event proves that the intervening other-home event was filtered.
+    const current = await call<{ stay: { version: number } }>('get_stay', { stay_id: stays[0]!.id })
+    const renamed = await call<{ stay: { version: number } }>('update_stay', { stay_id: stays[0]!.id, expected_version: current.data!.stay.version, guest_name: 'Ana Live' })
+    expect(renamed.error).toBeNull()
+    await expect(cleanerPage.getByRole('heading', { name: 'Ana Live Silva', level: 1, exact: true })).toBeVisible()
+    const privateStay = await call<{ stay: { version: number } }>('get_stay', { stay_id: stays[1]!.id })
+    expect((await call('update_stay', { stay_id: stays[1]!.id, expected_version: privateStay.data!.stay.version, notes: 'Other home only' })).error).toBeNull()
+    const noted = await call<{ stay: { version: number } }>('update_stay', { stay_id: stays[0]!.id, expected_version: renamed.data!.stay.version, notes: 'Visible live note' })
+    expect(noted.error).toBeNull()
+    await expect(cleanerPage.getByText('Visible live note', { exact: true })).toBeVisible()
+    expect(liveEvents.filter(event => 'stayId' in event).map(event => event.stayId)).toEqual([stays[0]!.id, stays[0]!.id])
+
+    // A cookie cache read must not keep this socket authorized after sign-out.
+    expect((await cleaner.request.get('/api/auth/get-session')).status()).toBe(200)
+    const signedInSocket = deliveringSocket
+    expect(signedInSocket).toBeDefined()
+    expect(signedInSocket!.isClosed()).toBe(false)
+    const signedOutClosed = signedInSocket!.waitForEvent('close')
+    const signedOut = await cleaner.request.post('/api/auth/sign-out', { headers, data: {} })
+    expect(signedOut.status(), await signedOut.text()).toBe(200)
+    const revoked = await cleaner.request.get('/api/auth/get-session', { params: { disableCookieCache: 'true' } })
+    expect(revoked.status(), await revoked.text()).toBe(200)
+    expect(await revoked.json()).toBeNull()
+    const beforeRevokedEvent = liveEvents.length
+    const afterSignOut = await call<{ stay: { version: number } }>('update_stay', { stay_id: stays[0]!.id, expected_version: noted.data!.stay.version, notes: 'After session revocation' })
+    expect(afterSignOut.error).toBeNull()
+    await signedOutClosed
+    expect(liveEvents).toHaveLength(beforeRevokedEvent)
+    const unauthenticatedSocket = await cleaner.request.get(api('guest-inbox/socket'))
+    expect(unauthenticatedSocket.status()).toBe(401)
+    expect(await unauthenticatedSocket.json()).toMatchObject({ data: { code: 'UNAUTHORIZED', field: 'session' } })
+
+  } finally {
+    await cleaner.close()
+  }
+})
+
+test('a stay socket in a service organization closes when Better Auth removes its membership', async ({ page, browser, baseURL }) => {
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates local homes and disposable memberships')
+  await loginAs(page.request, baseURL!, 'user-e2e-lodging-host')
+  const headers = authRequestHeaders(baseURL!)
+  const slug = `e2e-stay-live-${crypto.randomUUID().slice(0, 8)}`
+  const created = await page.request.post('/api/auth/organization/create', { headers, data: { name: `Live ${slug}`, slug, default_currency: 'THB', timezone: TIME_ZONE } })
+  expect(created.status(), await created.text()).toBe(200)
+  const organizationId = (await created.json() as { id: string }).id
+  const provisioned = await page.request.post('/api/organizations', { headers, data: { organizationId, name: `Live ${slug}`, subdomain: slug, vertical: 'service', sourceLocale: 'en' } })
+  expect(provisioned.status(), await provisioned.text()).toBe(200)
+  const api = (path: string) => `/api/dashboard/${path}?org=${encodeURIComponent(slug)}`
+  const cleaner = await browser.newContext({ baseURL: baseURL! })
+  try {
+    await loginAs(cleaner.request, baseURL!, 'user-e2e-demo-role-owner')
+    const offered = await page.request.post(`/api/organizations/${organizationId}/invite-links`, { data: { role: 'member' } })
+    expect(offered.status(), await offered.text()).toBe(201)
+    const accepted = await cleaner.request.post(`/api/invite-links/${encodeURIComponent((await offered.json() as { token: string }).token)}/accept`, { data: {} })
+    expect(accepted.status(), await accepted.text()).toBe(200)
+    const memberId = (await accepted.json() as { memberId: string }).memberId
+
+    // The actual canonical home API decides whether this vertical supports a
+    // home; there is no SQL fixture or environment bypass supplying one.
+    const madeHome = await page.request.post(api('stay-homes'), { data: { name: 'Retreat Cabin', timezone: TIME_ZONE, address: '1 Retreat Road', city: 'Krabi', country: 'TH',
+      state: null, zip_code: null, phone: null, email: null, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1,
+      base_price_minor: null, idempotency_key: crypto.randomUUID() } })
+    expect(madeHome.status(), await madeHome.text()).toBe(201)
+    const home = (await madeHome.json() as { home: { product_id: string } }).home
+    const assigned = await page.request.patch(api(`stay-homes/${home.product_id}`), { data: { assigned_member_id: memberId } })
+    expect(assigned.status(), await assigned.text()).toBe(200)
+    const made = await page.request.post(api('stays'), { data: { product_id: home.product_id, check_in_date: localDay(0), check_out_date: localDay(2), adults: 1,
+      guest_name: 'Membership Guest', total_minor: 0, idempotency_key: crypto.randomUUID() } })
+    expect(made.status(), await made.text()).toBe(201)
+    const stay = (await made.json() as { stay: { id: string; version: number } }).stay
+
+    const cleanerPage = await cleaner.newPage()
+    const sockets: WebSocket[] = []
+    const liveEvents: DashboardInvalidation[] = []
+    cleanerPage.on('websocket', socket => {
+      sockets.push(socket)
+      socket.on('framereceived', frame => {
+        if (frame.payload === 'pong') return
+        const event: unknown = JSON.parse(String(frame.payload))
+        expect(isDashboardInvalidation(event)).toBe(true)
+        if (isDashboardInvalidation(event)) liveEvents.push(event)
+      })
+    })
+    const openedRead = cleanerPage.waitForResponse(response => response.request().method() === 'GET'
+      && new URL(response.url()).pathname === `/api/dashboard/stays/${stay.id}`)
+    expect((await cleanerPage.goto(`/dashboard/${slug}/bookings/stay/${stay.id}`))?.status()).toBe(200)
+    await expect(cleanerPage.getByRole('heading', { name: 'Membership Guest', level: 1, exact: true })).toBeVisible()
+    // The real first-open reconciliation read proves the app socket completed
+    // its upgrade before the other device publishes the event under assertion.
+    expect((await openedRead).status()).toBe(200)
+    const renamed = await page.request.patch(api(`stays/${stay.id}`), { data: { expected_version: stay.version, guest_name: 'Membership Live' } })
+    expect(renamed.status(), await renamed.text()).toBe(200)
+    const version = (await renamed.json() as { stay: { version: number } }).stay.version
+    await expect(cleanerPage.getByRole('heading', { name: 'Membership Live', level: 1, exact: true })).toBeVisible()
+    await expect.poll(() => liveEvents.filter(event => event.type === 'stay.changed').length).toBe(1)
+    const socket = sockets.find(socket => !socket.isClosed())
+    expect(socket).toBeDefined()
+    const closed = socket!.waitForEvent('close')
+    const removed = await page.request.post('/api/auth/organization/remove-member', { headers, data: { organizationId, memberIdOrEmail: memberId } })
+    expect(removed.status(), await removed.text()).toBe(200)
+    const beforeRemoval = liveEvents.length
+    const changed = await page.request.patch(api(`stays/${stay.id}`), { data: { expected_version: version, notes: 'After membership removal' } })
+    expect(changed.status(), await changed.text()).toBe(200)
+    await closed
+    expect(liveEvents).toHaveLength(beforeRemoval)
   } finally {
     await cleaner.close()
   }
