@@ -147,7 +147,7 @@ export async function loadSettingsPayload(
     custom_domain_status: updatedOrganization.custom_domain_status,
     name: updatedOrganization.name,
     brand_description: updatedOrganization.brand_description,
-    announcement: updatedOrganization.announcement_json ? JSON.parse(updatedOrganization.announcement_json) : null,
+    announcement: updatedOrganization.announcement_json ? { format: 'modal', ...JSON.parse(updatedOrganization.announcement_json) } : null,
     media: [
       ...(updatedOrganization.announcement_media_id ? [{
         asset_id: updatedOrganization.announcement_media_id,
@@ -308,6 +308,7 @@ async function attemptOrganizationUpdate(
         cta_url: updates.announcement.cta_url?.trim() || null,
         dismissible: updates.announcement.dismissible ?? true,
         enabled: updates.announcement.enabled ?? true,
+        format: updates.announcement.format === 'banner' ? 'banner' : 'modal',
       },
     }
   }
@@ -531,12 +532,15 @@ export async function updateOrganizationSettingsFields(
   }
 
   if (updates.announcement !== undefined && updates.announcement !== null) {
-    const { headline, description, cta_label, cta_url, dismissible, enabled } = updates.announcement
+    const { headline, description, cta_label, cta_url, dismissible, enabled, format } = updates.announcement
     if (enabled !== undefined && typeof enabled !== 'boolean') {
       return { status: 400, data: { error: 'Announcement enabled must be a boolean' } }
     }
     if (dismissible !== undefined && typeof dismissible !== 'boolean') {
       return { status: 400, data: { error: 'Announcement dismissible must be a boolean' } }
+    }
+    if (format !== undefined && format !== null && format !== 'modal' && format !== 'banner') {
+      return { status: 400, data: { error: "Announcement format must be 'modal' or 'banner'" } }
     }
     // A disabled announcement may be saved with a blank headline — the owner is turning it off,
     // not necessarily deleting draft text they intend to re-enable later. It still has to be a

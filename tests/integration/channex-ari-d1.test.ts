@@ -3,7 +3,7 @@ import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
-import { createProduct } from '../../server/utils/product-management.ts'
+import { createProduct, getProduct, reconcileProducts, updateProduct } from '../../server/utils/product-management.ts'
 import { cancelStay, createStay, readStayCalendar, setStayNights, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
 
@@ -15,7 +15,7 @@ import type { CloudflareEnv } from '../../server/utils/auth.ts'
 const ORG = 'org'
 const OWNER = 'owner-user'
 const TZ = 'America/Denver'
-const env = { CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k' }
+const channexEnv = { CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k' }
 const manager: StayAccess = { organizationId: ORG, actorId: OWNER, manage: true }
 
 function day(offset: number): string {
@@ -49,11 +49,13 @@ class FakeChannex {
 async function boot() {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'channex-ari-proof', compatibilityDate: '2024-11-01',
-    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
-    env: { DB: { type: 'd1' } },
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
+    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'channex-ari-proof', exportName: 'Hub' } },
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), ...channexEnv }
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
@@ -62,7 +64,7 @@ async function boot() {
     await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('m-owner', ?, ?, 'owner', 0)").bind(ORG, OWNER).run()
     await db.prepare(`INSERT INTO business_locations (id, organization_id, slug, title, status, timezone, created_at, updated_at)
       VALUES ('site', ?, 'site', 'Site', 'active', ?, '2026-10-15T00:00:00.000Z', '2026-10-15T00:00:00.000Z')`).bind(ORG, TZ).run()
-    const home = async (name: string, price: number | null) => (await createProduct(db, { organizationId: ORG, actor: { actorId: OWNER }, product: {
+    const home = async (name: string, price: number | null) => (await createProduct(db, { env, organizationId: ORG, actor: { actorId: OWNER }, product: {
       kind: 'stay', name, ...(price === null ? {} : { variants: [{ name, prices: [{ unit_amount: price, currency: 'USD' }] }] }),
       stay: { location_id: 'site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: null },
     } })).id
@@ -73,7 +75,7 @@ async function boot() {
       await db.prepare(`INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, property_id, room_type_id, rate_plan_id, import_stage, enabled)
         VALUES (?, ?, 'channex', ?, 'chan-1', ?, ?, ?, 'complete', ?)`).bind(ORG, productId, `listing-${listing}`, `prop-${listing}`, `room-${listing}`, `rate-${listing}`, enabled).run()
     }
-    return { runtime, db, connected, unpriced, local }
+    return { runtime, db, env, connected, unpriced, local }
   } catch (error) {
     await runtime.dispose()
     throw error
@@ -81,7 +83,7 @@ async function boot() {
 }
 
 test('night changes on a connected home reach Channex, and what it took is on each night', async () => {
-  const { runtime, db, connected, unpriced, local } = await boot()
+  const { runtime, db, env, connected, unpriced, local } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch
@@ -131,14 +133,14 @@ test('night changes on a connected home reach Channex, and what it took is on ea
 
     // A new base price on a connected home reaches every night ahead that has no price of its own.
     channex.answer['/availability'] = undefined
-    const repriced = await updateStayHome(env as unknown as CloudflareEnv, db, manager, connected, { base_price_minor: 160_00 })
+    const repriced = await updateStayHome(env, db, manager, connected, { base_price_minor: 160_00 })
     assert.deepEqual([repriced.home.base_price_minor, repriced.channel_push], [160_00, { state: 'pushed', detail: null }])
     const ahead = channex.take()
     assert.deepEqual(ahead.map(request => [request.path, request.values.length]), [['/restrictions', 500], ['/availability', 500]])
     const rates = new Map(ahead[0]!.values.map(value => [value.date, value.rate]))
     assert.deepEqual([rates.get(day(0)), rates.get(day(10)), rates.get(day(499))], ['175.50', '160.00', '160.00'])
     // A rename changes nothing the channel is told.
-    assert.equal((await updateStayHome(env as unknown as CloudflareEnv, db, manager, connected, { name: 'Cabin by the cliff' })).channel_push, null)
+    assert.equal((await updateStayHome(env, db, manager, connected, { name: 'Cabin by the cliff' })).channel_push, null)
     assert.deepEqual(channex.take(), [])
 
     // A connected home with no nightly price is held for review before anything is sent.
@@ -154,6 +156,95 @@ test('night changes on a connected home reach Channex, and what it took is on ea
     assert.deepEqual(offline.home.channel, { provider: 'channex', status: 'disconnected' })
     assert.equal(offline.channel_push, null)
     assert.deepEqual(offline.nights.map(night => night.channel), [null])
+    assert.deepEqual(channex.take(), [])
+  } finally {
+    globalThis.fetch = realFetch
+    await runtime.dispose()
+  }
+})
+
+test('catalog price and minimum-stay writes use the same channel completion and preflight the whole batch', async () => {
+  const { runtime, db, env, connected, unpriced, local } = await boot()
+  const channex = new FakeChannex()
+  const realFetch = globalThis.fetch
+  globalThis.fetch = channex.fetch as typeof fetch
+  try {
+    const before = await getProduct(db, ORG, connected)
+    const variant = before.variants[0]!
+    const price = variant.prices[0]!
+    const patch = { variants: [{ id: variant.id, prices: [{ id: price.id, unit_amount: 170_00 }] }] }
+    const unavailable = { ...env, CHANNEX_BASE_URL: undefined, CHANNEX_API_KEY: undefined }
+    await assert.rejects(updateProduct(db, { env: unavailable, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch }),
+      (error: { status?: number; data?: Record<string, unknown> }) => error.status === 503 && error.data?.code === 'CHANNEL_CONFIGURATION_REQUIRED' && error.data.field === 'CHANNEX_BASE_URL')
+    assert.equal((await getProduct(db, ORG, connected)).variants[0]!.prices[0]!.unit_amount, 150_00)
+    assert.deepEqual(channex.take(), [])
+
+    // An explicit absent-price edit has no pricing SQL, but must still preflight
+    // before any accompanying name or location timezone is changed.
+    await assert.rejects(updateStayHome(unavailable, db, manager, unpriced, { name: 'Must remain Loft', timezone: 'UTC', base_price_minor: null }),
+      (error: { data?: Record<string, unknown> }) => error.data?.code === 'CHANNEL_CONFIGURATION_REQUIRED')
+    assert.equal((await getProduct(db, ORG, unpriced)).name, 'Loft')
+    assert.equal((await readStayCalendar(db, manager, { productId: unpriced, from: day(0), to: day(1) })).home.timezone, TZ)
+    assert.deepEqual(channex.take(), [])
+
+    const update = { env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch, idempotencyKey: 'catalog-price' }
+    const saved = await updateProduct(db, update)
+    assert.deepEqual(saved.channel_push, { state: 'pushed', detail: null })
+    const published = channex.take()
+    assert.deepEqual(published.map(request => [request.path, request.values.length]), [['/restrictions', 500], ['/availability', 500]])
+    assert.deepEqual([published[0]!.values[0]!.date, published[0]!.values[499]!.date], [day(0), day(499)])
+    assert(published[0]!.values.every(value => value.rate === '170.00' && value.min_stay_arrival === 2))
+    assert.equal(Object.hasOwn(await getProduct(db, ORG, connected), 'channel_push'), false, 'a completion receipt is not a stored Product field')
+
+    // A recognized write replay repairs completion without editing the product again.
+    const replay = await updateProduct(db, update)
+    assert.equal(replay.updated_at, saved.updated_at)
+    assert.equal(replay.variants[0]!.prices[0]!.id, price.id)
+    assert.deepEqual(replay.channel_push, { state: 'pushed', detail: null })
+    assert.deepEqual(channex.take().map(request => request.values.length), [500, 500])
+
+    const reconciled = await reconcileProducts(db, { env, organizationId: ORG, actor: { actorId: OWNER }, idempotencyKey: 'catalog-minimum', products: [{
+      product_id: connected, name: 'Cabin', kind: 'stay', stay: { ...saved.stay!, min_nights: 3 },
+      variants: [{ id: variant.id, name: variant.name, prices: [{ id: price.id, unit_amount: 180_00, currency: 'USD' }] }],
+    }] })
+    assert.deepEqual(reconciled[0]!.channel_push, { state: 'pushed', detail: null })
+    const minimum = channex.take()
+    assert.equal(minimum[0]!.values.length, 500)
+    assert(minimum[0]!.values.every(value => value.rate === '180.00' && value.min_stay_arrival === 3))
+    const calendar = await readStayCalendar(db, manager, { productId: connected, from: day(0), to: day(1) })
+    assert.deepEqual(calendar.nights[0]!.channel, { state: 'pushed', detail: null })
+
+    // Every affected home is preflighted before any row in the atomic catalog changes.
+    await assert.rejects(reconcileProducts(db, { env: unavailable, organizationId: ORG, actor: { actorId: OWNER }, idempotencyKey: 'unavailable-batch', products: [
+      { product_id: local, kind: 'stay', name: 'Must remain Barn' },
+      { product_id: connected, kind: 'stay', name: 'Must remain Cabin', stay: { ...saved.stay!, min_nights: 4 } },
+    ] }), (error: { data?: Record<string, unknown> }) => error.data?.code === 'CHANNEL_CONFIGURATION_REQUIRED')
+    assert.equal((await getProduct(db, ORG, local)).name, 'Barn')
+    assert.equal((await getProduct(db, ORG, connected)).stay!.min_nights, 3)
+    assert.deepEqual(channex.take(), [])
+
+    channex.answer['/restrictions'] = () => Response.json({ data: [], meta: { message: 'Success', warnings: [{ rate: ['refused'] }] } })
+    const refused = await updateProduct(db, { env, organizationId: ORG, productId: connected, actor: { actorId: OWNER }, patch: { stay: { min_nights: 4 } } })
+    assert.equal(refused.channel_push?.state, 'needs_review')
+    assert.match(refused.channel_push!.detail!, /Channex rejected part of the update/)
+    assert.equal((await getProduct(db, ORG, connected)).stay!.min_nights, 4)
+    assert.deepEqual(channex.take().map(request => request.path), ['/restrictions'])
+
+    // The native home's combined timezone and base-price edit completes once, after the timezone lands.
+    channex.answer['/restrictions'] = undefined
+    const changed = await updateStayHome(env, db, manager, connected, { timezone: 'Pacific/Kiritimati', base_price_minor: 190_00 })
+    assert.deepEqual(changed.channel_push, { state: 'pushed', detail: null })
+    const once = channex.take()
+    assert.deepEqual(once.map(request => [request.path, request.values.length]), [['/restrictions', 500], ['/availability', 500]])
+    const newToday = new Intl.DateTimeFormat('en-CA', { timeZone: 'Pacific/Kiritimati', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+    assert.equal(once[0]!.values[0]!.date, newToday)
+    assert(once[0]!.values.every(value => value.rate === '190.00'))
+
+    const barn = await getProduct(db, ORG, local)
+    const disconnected = await updateProduct(db, { env, organizationId: ORG, productId: local, actor: { actorId: OWNER }, patch: {
+      variants: [{ id: barn.variants[0]!.id, prices: [{ id: barn.variants[0]!.prices[0]!.id, unit_amount: 95_00 }] }],
+    } })
+    assert.equal(disconnected.channel_push, null)
     assert.deepEqual(channex.take(), [])
   } finally {
     globalThis.fetch = realFetch

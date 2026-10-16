@@ -245,7 +245,6 @@
   "saya.footer.locations_error": "店舗情報を読み込めませんでした。しばらくしてからもう一度お試しください。",
   "saya.footer.menu": "メニュー",
   "saya.footer.our_story": "私たちのストーリー",
-  "saya.footer.powered_by": "Powered by krabiclaw.com",
   "saya.footer.products": "商品",
   "saya.footer.qa": "Q&A",
   "saya.footer.reviews": "レビュー",
@@ -465,5 +464,6 @@
   "booking_policy.cancellation_until_start": "開始時刻まで無料でキャンセルできます。",
   "booking_policy.reschedule_until_start": "開始時刻まで日時を変更できます。",
   "booking_policy.reschedule_allowed": "日時の変更をリクエストできます。",
-  "booking_policy.reschedule_disallowed": "日時の変更はできません。"
+  "booking_policy.reschedule_disallowed": "日時の変更はできません。",
+  "legal.powered_by": "Powered by KrabiClaw"
 }

@@ -37,7 +37,13 @@ async function settlePaymentIntent(db:DbClient,stripe:Stripe,payment:Payment,int
   const snapshot=JSON.parse(payment.price_snapshot_json) as {billing_fx?:unknown}
   const now = new Date().toISOString()
   if (intent.status !== 'succeeded') {
-    if (intent.status === 'canceled') await executeBatch(db,[{query:"UPDATE payments SET state='failed',updated_at=? WHERE id=? AND captured_amount=0",params:[now,payment.id]},{query:"UPDATE payment_checkout_holds SET status='released' WHERE payment_id=? AND status='active'",params:[payment.id]}])
+    if (intent.status === 'processing') {
+      await execute(db,"UPDATE payment_checkout_holds SET expires_at=? WHERE payment_id=? AND status='active'",[new Date(Date.now()+14*86400*1000).toISOString(),payment.id])
+    }
+    // A declined confirmation can accept another method; only cancellation is terminal.
+    if (intent.status === 'canceled') {
+      await executeBatch(db,[{query:"UPDATE payments SET state='failed',updated_at=? WHERE id=? AND captured_amount=0",params:[now,payment.id]},{query:"UPDATE payment_checkout_holds SET status='released' WHERE payment_id=? AND status='active'",params:[payment.id]}])
+    }
     if (intent.status === 'requires_payment_method' && intent.last_payment_error) await notifyPaymentFinancialEvent(db,stripe,env,payment,{kind:'payment_failed',nativeId:intent.id,status:intent.status,amount:intent.amount})
     return
   }

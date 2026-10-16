@@ -80,6 +80,18 @@
         "destructive_justification": "Cancels an existing product booking, releasing capacity once and emailing the guest. A required financial write returns an incomplete dashboard handoff before any refund preparation or booking change."
       }
     },
+    "cancel_scheduled_guest_message": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Cancels one pending scheduled guest message so it is never sent; a message already sending, sent or under review is refused.",
+        "open_world_justification": "Cancels one pending scheduled guest message so it is never sent; a message already sending, sent or under review is refused. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Cancels one pending scheduled guest message so it is never sent; a message already sending, sent or under review is refused."
+      }
+    },
     "cancel_stay": {
       "annotations": {
         "readOnlyHint": false,
@@ -186,6 +198,18 @@
         "read_only_justification": "Creates a location in the selected business using a durable retry key; its details can appear on the live website.",
         "open_world_justification": "Adds location details that can appear on the selected business’s public website.",
         "destructive_justification": "Creates a location in the selected business using a durable retry key; its details can appear on the live website."
+      }
+    },
+    "create_message_template": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Saves a guest reply, optionally scheduled for named homes; planning creates pending scheduled messages for eligible future stays and sends nothing immediately.",
+        "open_world_justification": "A schedule makes the production cron later send this text to eligible guests through each conversation’s email or Airbnb address.",
+        "destructive_justification": "Saves a guest reply, optionally scheduled for named homes; planning creates pending scheduled messages for eligible future stays and sends nothing immediately."
       }
     },
     "create_post": {
@@ -368,6 +392,18 @@
         "destructive_justification": "Removes an asset and its placements, and deletes backing Cloudflare storage when no other asset references it."
       }
     },
+    "delete_message_template": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Deletes a saved guest reply under its version and cancels its pending scheduled messages, keeping earlier delivery records.",
+        "open_world_justification": "Deletes a saved guest reply under its version and cancels its pending scheduled messages, keeping earlier delivery records. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Deletes a saved guest reply under its version and cancels its pending scheduled messages, keeping earlier delivery records."
+      }
+    },
     "delete_organization_language": {
       "annotations": {
         "readOnlyHint": false,
@@ -534,6 +570,18 @@
         "read_only_justification": "Reads an authorized conversation, its messages, operational record, proposals, attachments and delivery receipts.",
         "open_world_justification": "Reads an authorized conversation, its messages, operational record, proposals, attachments and delivery receipts. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
         "destructive_justification": "Reads an authorized conversation, its messages, operational record, proposals, attachments and delivery receipts."
+      }
+    },
+    "get_guest_messaging_context": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads the home, private check-in instructions and optional stay behind one guest conversation.",
+        "open_world_justification": "Reads the home, private check-in instructions and optional stay behind one guest conversation. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads the home, private check-in instructions and optional stay behind one guest conversation."
       }
     },
     "get_location": {
@@ -956,6 +1004,18 @@
         "destructive_justification": "Lists locations accessible in the selected organization."
       }
     },
+    "list_message_templates": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads the selected business’s saved guest replies and their automatic-delivery schedules.",
+        "open_world_justification": "Reads the selected business’s saved guest replies and their automatic-delivery schedules. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads the selected business’s saved guest replies and their automatic-delivery schedules."
+      }
+    },
     "list_organization_locales": {
       "annotations": {
         "readOnlyHint": true,
@@ -1086,6 +1146,18 @@
         "read_only_justification": "Reads authorized reservation inquiries, including guest contact and reservation information.",
         "open_world_justification": "Reads authorized reservation inquiries, including guest contact and reservation information. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
         "destructive_justification": "Reads authorized reservation inquiries, including guest contact and reservation information."
+      }
+    },
+    "list_scheduled_guest_messages": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads scheduled guest-message snapshots with their status and recorded failure reasons; members see only assigned homes.",
+        "open_world_justification": "Reads scheduled guest-message snapshots with their status and recorded failure reasons; members see only assigned homes. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads scheduled guest-message snapshots with their status and recorded failure reasons; members see only assigned homes."
       }
     },
     "list_site_pages": {
@@ -1395,9 +1467,9 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Saves a reply and optional photo in the guest conversation, emails the guest and updates the inbox state using the supplied retry key.",
-        "open_world_justification": "Downloads a supplied host photo when present and emails the reply and attachments to the conversation’s guest.",
-        "destructive_justification": "Saves a reply and optional photo in the guest conversation, emails the guest and updates the inbox state using the supplied retry key."
+        "read_only_justification": "Saves a reply and optional photo in the guest conversation, emails the guest or, for a mapped Airbnb conversation, sends the text through Channex, and updates the inbox state using the supplied retry key.",
+        "open_world_justification": "Downloads a supplied host photo when present and emails the reply and attachments to the conversation’s guest, or sends a text reply to a mapped Airbnb conversation through Channex.",
+        "destructive_justification": "Saves a reply and optional photo in the guest conversation, emails the guest or, for a mapped Airbnb conversation, sends the text through Channex, and updates the inbox state using the supplied retry key."
       }
     },
     "request_product_booking_change": {
@@ -1568,6 +1640,18 @@
         "destructive_justification": "Creates or overwrites the selected product’s publication setting, including removing it from public display."
       }
     },
+    "set_stay_check_in_instructions": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Saves or removes one home’s private check-in instructions; nothing is sent to a guest or published.",
+        "open_world_justification": "Saves or removes one home’s private check-in instructions; nothing is sent to a guest or published. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Saves or removes one home’s private check-in instructions; nothing is sent to a guest or published."
+      }
+    },
     "set_stay_nights": {
       "annotations": {
         "readOnlyHint": false,
@@ -1686,6 +1770,18 @@
         "read_only_justification": "Atomically creates or updates menu dishes, prices, sections and location publication using a durable retry key. Existing sections, items and their positions remain; new entries append in supplied order.",
         "open_world_justification": "Publishes supplied dishes, prices and location offerings on the public menu while preserving omitted items and existing order.",
         "destructive_justification": "Atomically creates or updates menu dishes, prices, sections and location publication using a durable retry key. Existing sections, items and their positions remain; new entries append in supplied order."
+      }
+    },
+    "update_message_template": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Replaces a saved guest reply and its schedule under its version, re-planning only pending scheduled messages; completed, failed and uncertain sends are kept.",
+        "open_world_justification": "A schedule makes the production cron later send this text to eligible guests through each conversation’s email or Airbnb address.",
+        "destructive_justification": "Replaces a saved guest reply and its schedule under its version, re-planning only pending scheduled messages; completed, failed and uncertain sends are kept."
       }
     },
     "update_organization_member_role": {

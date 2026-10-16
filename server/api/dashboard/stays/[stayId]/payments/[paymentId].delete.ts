@@ -8,5 +8,5 @@ import { deleteStayPayment, stayAccessFor } from '~/server/domain/stays'
 export default defineHandler(async (event) => {
   const { env, db, organization } = await getDashboardMemberContext(event, {})
   const access = await stayAccessFor(memberAccessPrincipal(organization, { env, event }))
-  return jsonResponse({ stay: await deleteStayPayment(db, access, getRouterParam(event, 'stayId') ?? '', getRouterParam(event, 'paymentId') ?? '') })
+  return jsonResponse({ stay: await deleteStayPayment(db, env, access, getRouterParam(event, 'stayId') ?? '', getRouterParam(event, 'paymentId') ?? '') })
 })

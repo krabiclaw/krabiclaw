@@ -10,7 +10,7 @@ export const todayCardSchema = z.object({
   bookingKind: z.enum(['reservation', 'booking', 'stay']).nullable(),
   stayId: z.string().nullable(),
   occurrenceAt: z.iso.datetime({ offset: true }).nullable(), timeZone: z.string().nullable(),
-  priority: z.enum(['attention', 'schedule', 'opportunity', 'action']),
+  priority: z.enum(['attention', 'schedule', 'opportunity']),
 })
 export type TodayCard = z.infer<typeof todayCardSchema>
 export const todayFeedSchema = z.object({

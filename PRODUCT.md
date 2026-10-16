@@ -31,6 +31,36 @@ Calendar qualification and scope boundaries are recorded in
 Online payments are delivered by the separate Payments change; Calendar does
 not establish Checkout, refund or buyer-account availability.
 
+## Guest inbox
+
+Contact messages, table reservations, product bookings and stays share one guest
+inbox. A direct stay opens a conversation when the guest has a name and an email
+or phone. An imported Airbnb conversation can be addressed through its channel
+while the guest's contact details are withheld; the provider's conversation title
+is a label, not a verified guest name. A later booking joins that same
+conversation without discarding its recorded history.
+
+Direct replies use email and mapped Airbnb replies use the channel. Delivery
+receipts distinguish provider acceptance from delivery or reading. An attempt
+whose outcome is unknown remains visible and requires review before sending
+again. Provider messages are shown with their recorded time and exact source
+timestamp when that timestamp has no established timezone.
+
+A workspace can save guest replies. A saved reply can also be
+scheduled for named homes: five minutes after a new direct reservation is
+received, or at a local time a number of days before or after check-in or
+check-out in the home's own timezone. Airbnb stays receive check-in and
+check-out messages only, because KrabiClaw cannot tell an imported historical
+reservation from a new one. A scheduled message goes through the
+conversation's own address and records the same delivery receipt as a reply;
+one that fails or whose outcome is unknown stays visible with its reason and is
+never resent automatically. Each home can hold private check-in instructions
+the host chooses when to share.
+
+Workspace members can receive owner notifications as push notifications on the
+KrabiClaw iPhone app, per notification category, alongside email and WhatsApp.
+A push that Apple refuses is recorded as failed.
+
 ## Plans
 
 New subscriptions use `growth` ($49/month or $588/year) and `business` ($99/month);

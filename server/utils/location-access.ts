@@ -79,13 +79,13 @@ async function readMemberOrganizationRow(db: DbClient, env: CloudflareEnv, organ
 export async function requireLocationAccess(event: H3Event, organizationId: string, locationId: string) {
   const env = cloudflareEnv(event)
   const db = env.DB
-  if (!db) throw new HTTPError({ statusCode: 500, message: 'Database not available' })
+  if (!db) throw new HTTPError({ statusCode: 500, message: 'Database not available', data: { code: 'DATABASE_UNAVAILABLE', field: 'DB' } })
 
   const session = await getAuthSession(event, env)
-  if (!session?.user?.id) throw new HTTPError({ statusCode: 401, message: 'Authentication required' })
+  if (!session?.user?.id) throw new HTTPError({ statusCode: 401, message: 'Authentication required', data: { code: 'UNAUTHORIZED', field: 'session' } })
 
   const organization = await loadMemberOrganizationRow(event, db, env, organizationId, session.user.id)
-  if (!organization) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied' })
+  if (!organization) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'organizationId' } })
 
   await assertLocationAccess(db, { ...memberAccessPrincipal(organization.membership, { env, event }), locationId })
 
@@ -97,7 +97,7 @@ export async function requireLocationAccess(event: H3Event, organizationId: stri
   `, [locationId, organization.id])
 
   if (!location) {
-    throw new HTTPError({ statusCode: 404, message: 'Location not found' })
+    throw new HTTPError({ statusCode: 404, message: 'Location not found', data: { code: 'LOCATION_NOT_FOUND', field: 'locationId' } })
   }
 
   return { env, db, session, organization, location }
@@ -110,13 +110,13 @@ export async function requireOrganizationMembership(
 ) {
   const env = cloudflareEnv(event)
   const db = env.DB
-  if (!db) throw new HTTPError({ statusCode: 500, message: 'Database not available' })
+  if (!db) throw new HTTPError({ statusCode: 500, message: 'Database not available', data: { code: 'DATABASE_UNAVAILABLE', field: 'DB' } })
 
   const session = await getAuthSession(event, env)
-  if (!session?.user?.id) throw new HTTPError({ statusCode: 401, message: 'Authentication required' })
+  if (!session?.user?.id) throw new HTTPError({ statusCode: 401, message: 'Authentication required', data: { code: 'UNAUTHORIZED', field: 'session' } })
 
   const organization = await loadMemberOrganizationRow(event, db, env, organizationId, session.user.id)
-  if (!organization) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied' })
+  if (!organization) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'organizationId' } })
 
   return { env, db, session, organization }
 }
@@ -138,7 +138,7 @@ export async function requireRequestedOrganizationWideAccess(event: H3Event, exp
 
   const context = await getDashboardContext(event, { requireOrganization: true })
   if (!context.organization) {
-    throw new HTTPError({ statusCode: 404, message: 'Not found or access denied' })
+    throw new HTTPError({ statusCode: 404, message: 'Not found or access denied', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'organizationId' } })
   }
   await assertOrganizationWideAccess(context.db, memberAccessPrincipal(context.organization, { env: context.env }))
   return {
@@ -159,7 +159,7 @@ export async function requireRequestedLocationAccess(event: H3Event, locationId:
 
   const context = await getDashboardContext(event, { requireOrganization: true })
   if (!context.organization) {
-    throw new HTTPError({ statusCode: 404, message: 'Not found or access denied' })
+    throw new HTTPError({ statusCode: 404, message: 'Not found or access denied', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'organizationId' } })
   }
   await assertLocationAccess(context.db, {
     ...memberAccessPrincipal(context.organization, { env: context.env }),
@@ -170,7 +170,7 @@ export async function requireRequestedLocationAccess(event: H3Event, locationId:
     WHERE id = ? AND organization_id = ?
     LIMIT 1
   `, [locationId, context.organization.id])
-  if (!location) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
+  if (!location) throw new HTTPError({ statusCode: 404, message: 'Location not found', data: { code: 'LOCATION_NOT_FOUND', field: 'locationId' } })
 
   return {
     env: context.env,

@@ -1,18 +1,22 @@
 import { createHash } from 'node:crypto'
+import { HTTPError } from 'nitro'
 import { guestAccountUrl } from '~/shared/guest-account'
 import { formatCalendarDate, formatTime, formatTimestamp, localPartsAt } from '~/utils/timezone'
 import { getGuestRequest, requestSummary, type cancelBookingRequest } from '~/server/domain/requests'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { organizationEventQuery } from '~/server/utils/organization-events'
-import { getEmailDeliveryMode, hashEmail, isReservedTestDomain, sendEmail } from '~/server/utils/email-delivery'
-import { buildWhatsAppTemplatePayload, sendWhatsAppNotification, type WhatsAppTemplate } from '~/server/utils/whatsapp'
+import { getEmailDeliveryMode, hashEmail, sendEmail } from '~/server/utils/email-delivery'
+import { buildWhatsAppTemplatePayload, sendWhatsAppNotification, WhatsAppTemplateRefusal, type WhatsAppTemplate } from '~/server/utils/whatsapp'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { getWhatsAppDeliveryMode } from '~/server/utils/whatsapp-delivery'
 import { buildReplyToAddress } from '~/server/utils/submission-messages'
 import { listOrganizationNotificationMembers } from '~/server/utils/member-access'
 import { wantsNotification } from '~/server/domain/notification-preferences'
+import { listUserDevices, retireDevice, type UserDevice } from '~/server/domain/devices'
+import { sendApnsAlert, type ApnsAlert, type ApnsEnv, type ApnsSendResult } from '~/server/utils/apns'
+import { isRecord } from '~/server/utils/type-guards'
 import { buildUnsubscribeUrls } from '~/server/utils/unsubscribe'
-import type { NotificationCategory } from '~/shared/notification-categories'
+import type { NotificationCategory, NotificationChannel } from '~/shared/notification-categories'
 import { renderNotificationEmail } from '~/server/emails/render'
 import { toWhatsAppVars } from '~/server/notifications/whatsapp-mapping'
 import { NOTIFICATION_CATALOG } from '~/server/notifications/catalog'
@@ -39,7 +43,7 @@ import {
   reviewReceivedMessage,
 } from '~/server/notifications/events'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { createCanonicalNotification } from '~/server/utils/notification-center'
+import { createCanonicalNotification, type NotificationSeverity } from '~/server/utils/notification-center'
 import { buildOwnerThreadInboxUrl, getPlatformDomain, platformOrigin, resolveDashboardSlugs } from '~/server/utils/dashboard-notification-links'
 import { reviewEditorPath } from '~/server/utils/dashboard-links'
 import { createDeliveryReceipt, isDeliverySent, recordDeliveryOutcome } from '~/server/domain/guest-threads/deliveries'
@@ -58,14 +62,13 @@ const SUBJECT_LABELS: Record<string, string> = {
   careers: 'Careers',
 }
 
-type NotificationChannel = 'email' | 'whatsapp'
-
-interface NotificationEnv extends CloudflareEnv {
+interface NotificationEnv extends CloudflareEnv, ApnsEnv {
   RESEND_API_KEY?: string
   WHATSAPP_PHONE_NUMBER_ID?: string
   WHATSAPP_ACCESS_TOKEN?: string
   EMAIL_FROM?: string
   EMAIL_DELIVERY_MODE?: string
+  WHATSAPP_DELIVERY_MODE?: string
   NUXT_PUBLIC_PLATFORM_DOMAIN?: string
   EMAIL_REPLY_SECRET?: string
   GUEST_INBOX_HUBS?: DurableObjectNamespace
@@ -181,7 +184,8 @@ interface GuestThreadReplyNotificationInput extends OrganizationContext {
   sourceEntryId: string
   submissionType: 'contact' | 'reservation' | 'booking' | 'stay'
   submissionId: string
-  guestName: string
+  /** Who the conversation is with: the contact's recorded name, or the channel's title for a channel thread. */
+  participantLabel: string
   guestEmail?: string | null
   guestPhone?: string | null
   inboundChannel: 'email' | 'whatsapp' | 'web'
@@ -292,13 +296,16 @@ export interface OwnerRecipient {
   unsubscribeUrl: string | null
   /** The RFC 8058 endpoint a mail client POSTs to. */
   unsubscribeOneClickUrl: string | null
+  /** The person's signed-in app devices, empty when they switched push off for the category. */
+  pushDevices: UserDevice[]
 }
 
 /**
  * Who actually receives this alert, on which channel.
  *
- * Both channels resolve from Better Auth membership and each person's own
- * `user_notification_preferences`. WhatsApp used to resolve from a number typed
+ * Every channel resolves from Better Auth membership and each person's own
+ * `user_notification_preferences`; push reaches the devices that person's own
+ * signed-in app sessions registered. WhatsApp used to resolve from a number typed
  * into a location or organization settings field instead, which made "who gets
  * told" answerable two ways: a tenant could configure a number no account held,
  * and the send was refused to a console line no tenant could read. A number is
@@ -321,11 +328,13 @@ async function resolveOwnerRecipients(
     hasOrganizationEntitlement(env, opts.organizationId, 'messaging'),
   ])
   const recipients = await Promise.all(members.map(async (member) => {
-    const [wantsEmail, wantsWhatsApp] = await Promise.all([
+    const [wantsEmail, wantsWhatsApp, pushDevices] = await Promise.all([
       wantsNotification(db, member.userId, opts.category, 'email'),
       messagingEnabled && member.phone ? wantsNotification(db, member.userId, opts.category, 'whatsapp') : Promise.resolve(false),
+      wantsNotification(db, member.userId, opts.category, 'push')
+        .then(wantsPush => wantsPush ? listUserDevices(db, member.userId) : []),
     ])
-    if (!wantsEmail && !wantsWhatsApp) return null
+    if (!wantsEmail && !wantsWhatsApp && pushDevices.length === 0) return null
     const unsubscribe = await buildUnsubscribeUrls(env, { userId: member.userId, category: opts.category })
     return {
       userId: member.userId,
@@ -333,6 +342,7 @@ async function resolveOwnerRecipients(
       phone: wantsWhatsApp ? member.phone : null,
       unsubscribeUrl: unsubscribe?.pageUrl ?? null,
       unsubscribeOneClickUrl: unsubscribe?.oneClickUrl ?? null,
+      pushDevices,
     }
   }))
   return recipients.filter((recipient): recipient is OwnerRecipient => recipient !== null)
@@ -355,9 +365,9 @@ async function sendEmailNotification(
     delivery?: ThreadDeliveryContext | null
   }
 ): Promise<void> {
-  const provider = getEmailDeliveryMode(env) === 'provider' && !isReservedTestDomain(opts.to)
-    ? 'resend'
-    : 'log_only'
+  // In provider mode a reserved test address is refused by sendEmail, and the
+  // refusal is this Resend delivery's recorded outcome.
+  const provider = getEmailDeliveryMode(env) === 'provider' ? 'resend' : 'log_only'
   const deliveryContext = opts.delivery
   const delivery = deliveryContext
     ? await createDeliveryReceipt(db, {
@@ -403,6 +413,7 @@ async function sendEmailNotification(
   }
   // A failed send is raised, so the caller accounts for it rather than
   // answering as though the email went out.
+  if (delivery) throw new RecordedDeliveryFailure(`Email delivery failed: ${result.error}`)
   throw new Error(`Email delivery failed: ${result.error}`)
 }
 
@@ -438,6 +449,83 @@ async function sendWhatsAppThreadNotification(
   return result.success
 }
 
+/**
+ * One APNs alert to one device, recorded on that device's own delivery.
+ *
+ * Every outcome is written before it is raised: missing APNs configuration, a
+ * request that never reached Apple, and Apple's own status and reason. A token
+ * Apple reports retired is removed, and its delivery still records the failure.
+ */
+async function sendPushThreadNotification(
+  env: NotificationEnv,
+  db: DbClient,
+  opts: { userId: string; device: UserDevice; alert: ApnsAlert; delivery: ThreadDeliveryContext },
+): Promise<void> {
+  const delivery = await createDeliveryReceipt(db, {
+    entryId: opts.delivery.entryId,
+    channel: 'push',
+    provider: 'apns',
+    purpose: opts.delivery.purpose,
+    idempotencyKey: opts.delivery.idempotencyKey,
+  })
+  if (isDeliverySent(delivery)) return
+
+  const apnsId = crypto.randomUUID()
+  const record = async (outcome: { status: 'sent'; providerMessageId: string } | { status: 'failed'; error: string }) => {
+    await recordDeliveryOutcome(db, { deliveryId: delivery.id, ...outcome })
+    if (opts.delivery.threadId) await publishGuestInboxThreadEvent(env, db, { threadId: opts.delivery.threadId, type: 'delivery.changed' })
+  }
+  let result: ApnsSendResult
+  try {
+    result = await sendApnsAlert(env, { deviceToken: opts.device.token, environment: opts.device.environment, apnsId, alert: opts.alert })
+  } catch (error) {
+    const code = HTTPError.isError(error) && isRecord(error.data) && typeof error.data.code === 'string' ? `${error.data.code}: ` : ''
+    await record({ status: 'failed', error: `${code}${error instanceof Error ? error.message : String(error)}` })
+    throw new RecordedDeliveryFailure(`Push delivery failed: ${code}${error instanceof Error ? error.message : String(error)}`, { cause: error })
+  }
+  if (result.status === 'sent') {
+    await record({ status: 'sent', providerMessageId: apnsId })
+    return
+  }
+  if (result.tokenRetired) await retireDevice(db, { userId: opts.userId, ...opts.device })
+  await record({ status: 'failed', error: result.tokenRetired ? `${result.error}; device token removed` : result.error })
+  throw new RecordedDeliveryFailure(`Push delivery failed: ${result.error}`)
+}
+
+/** One owner alert to each of the recipient's devices, under the same event as their email and WhatsApp. */
+function ownerPushSends(
+  env: NotificationEnv,
+  db: DbClient,
+  recipient: OwnerRecipient,
+  input: {
+    organizationId: string
+    notificationId: string
+    context: DeliveryAnchor
+    template: string
+    eventKey?: string
+    message: NotificationMessage
+  },
+): Array<Promise<void>> {
+  return recipient.pushDevices.map(device => sendPushThreadNotification(env, db, {
+    userId: recipient.userId,
+    device,
+    delivery: threadDelivery(input.context, 'owner_alert', 'push', input.template, device.token, input.eventKey),
+    alert: {
+      title: input.message.title,
+      body: input.message.preheader,
+      threadId: input.context.guestThreadId,
+      // Every push names what it opens: a guest conversation, or the in-app notification.
+      data: {
+        organizationId: input.organizationId,
+        userId: recipient.userId,
+        ...(input.context.guestThreadId
+          ? { kind: 'guest', threadId: input.context.guestThreadId }
+          : { kind: 'notification', notificationId: input.notificationId }),
+      },
+    },
+  }))
+}
+
 async function getOpeningThreadContext(
   db: DbClient,
   submissionType: 'contact' | 'reservation' | 'booking',
@@ -450,8 +538,11 @@ async function getOpeningThreadContext(
   return { guestThreadId: thread.id, sourceEntryId: entry.id }
 }
 
+type DeliveryAnchor = { guestThreadId: string | null; sourceEntryId: string }
+function threadDelivery(context: DeliveryAnchor, purpose: GuestThreadDeliveryPurpose, channel: NotificationChannel, template: string, recipient: string, eventKey?: string): ThreadDeliveryContext
+function threadDelivery(context: DeliveryAnchor | null, purpose: GuestThreadDeliveryPurpose, channel: NotificationChannel, template: string, recipient: string, eventKey?: string): ThreadDeliveryContext | null
 function threadDelivery(
-  context: { guestThreadId: string | null; sourceEntryId: string } | null,
+  context: DeliveryAnchor | null,
   purpose: GuestThreadDeliveryPurpose,
   channel: NotificationChannel,
   template: string,
@@ -508,6 +599,25 @@ export function raiseSettledFailures(
   results: readonly PromiseSettledResult<unknown>[],
   tasks: readonly string[] = ['notifyOwner', 'sendEmailNotification'],
 ): void {
+  raiseFailures(label, context, results.map((result, index) => ({ result, task: tasks[index] ?? String(index) })))
+}
+
+/** A send whose failure is already written on its delivery row, where the thread shows it. */
+export class RecordedDeliveryFailure extends Error {}
+
+/**
+ * The owner's alerts for something a guest did. A send that failed is recorded
+ * on its delivery row and shown on the thread, and it does not fail what the
+ * guest did: the reservation, booking or reply stands. Anything not recorded —
+ * the alert could not even be prepared — is raised.
+ */
+function raiseUnrecordedOwnerAlertFailures(label: string, context: string, sends: Array<{ result: PromiseSettledResult<unknown>; task: string }>): void {
+  raiseFailures(label, context, sends.filter(({ result }) => !(result.status === 'rejected' && result.reason instanceof RecordedDeliveryFailure)))
+}
+
+function raiseFailures(label: string, context: string, sends: Array<{ result: PromiseSettledResult<unknown>; task: string }>): void {
+  const results = sends.map(send => send.result)
+  const tasks = sends.map(send => send.task)
   const failed = results.flatMap((result, index) =>
     result.status === 'rejected' ? [{ task: tasks[index] ?? String(index), reason: result.reason }] : [])
   if (failed.length === 0) return
@@ -527,7 +637,7 @@ async function messageHero(db: DbClient, organizationId: string, owner: { type: 
   return (await loadOwnerPictures(db, organizationId, ownerType, [ownerId])).get(ownerId) ?? null
 }
 
-async function notifyOwner(
+export async function notifyOwner(
   env: NotificationEnv,
   db: DbClient,
   opts: OrganizationContext & {
@@ -553,6 +663,10 @@ async function notifyOwner(
     deliveryEventKey?: string
     /** Team members told alongside the owners and the booking's assignee, such as the one a booking moved away from. */
     memberIds?: string[]
+    /** The in-app notification's own text and tone, for an event that states them rather than listing its facts. */
+    notification?: { message: string; severity: NotificationSeverity }
+    /** KrabiClaw operator addresses copied on operational mail: routing, not a person's preference, so no opt-out link. */
+    operatorEmails?: string[]
   }
 ) {
   const threadContext = opts.notificationSource
@@ -569,7 +683,8 @@ async function notifyOwner(
     sourceEntryId: threadContext?.sourceEntryId ?? null,
     idempotencyKey: threadContext ? `notification:${threadContext.sourceEntryId}:${opts.template}` : opts.idempotencyKey,
     title: opts.title,
-    message: opts.message.facts.map(fact => `${fact.label}: ${fact.value}`).join('\n'),
+    message: opts.notification?.message ?? opts.message.facts.map(fact => `${fact.label}: ${fact.value}`).join('\n'),
+    ...(opts.notification ? { severity: opts.notification.severity } : {}),
     threadId: threadContext?.guestThreadId ?? null,
     deepLink: opts.payload.deep_link || null,
   })
@@ -636,7 +751,7 @@ async function notifyOwner(
       sends.push((async () => {
         if (delivery) {
           if (!await sendWhatsAppThreadNotification(env, db, { ...sendOptions, delivery })) {
-            throw new Error(`WhatsApp owner alert was not delivered for organization ${opts.organizationId}`)
+            throw new RecordedDeliveryFailure(`WhatsApp owner alert was not delivered for organization ${opts.organizationId}`)
           }
           return
         }
@@ -646,10 +761,33 @@ async function notifyOwner(
         }
       })())
     }
+    sends.push(...ownerPushSends(env, db, recipient, {
+      organizationId: opts.organizationId,
+      notificationId,
+      context: deliveryContext,
+      template: opts.template,
+      eventKey: opts.deliveryEventKey,
+      message,
+    }))
     return sends
   }))
-  raiseSettledFailures('notifyOwner', `organization ${opts.organizationId}`, results,
-    results.map(() => 'ownerAlert'))
+  const memberEmails = new Set(recipients.map(recipient => recipient.email?.toLowerCase()))
+  const operatorEmails = [...new Set(opts.operatorEmails ?? [])].filter(to => !memberEmails.has(to.toLowerCase()))
+  const operatorResults = await Promise.allSettled(operatorEmails.map(async (to) => {
+    const rendered = await renderNotificationEmail(message, {
+      platformDomain: getPlatformDomain(env),
+      preferencesUrl: `https://${getPlatformDomain(env)}/dashboard/account/profile/notifications`,
+      unsubscribeUrl: null,
+    })
+    await sendEmailNotification(env, db, {
+      ...opts,
+      to,
+      email: { subject: sanitizeEmailHeaderValue(message.title), html: rendered.html, text: rendered.text },
+      delivery: threadDelivery(deliveryContext, 'owner_alert', 'email', opts.template, to, opts.deliveryEventKey),
+    })
+  }))
+  raiseUnrecordedOwnerAlertFailures('notifyOwner', `organization ${opts.organizationId}`, [
+    ...results.map(result => ({ result, task: 'ownerAlert' })), ...operatorResults.map(result => ({ result, task: 'operatorCopy' }))])
 }
 
 /** Financial status mail shares the canonical notification and delivery ledger. */
@@ -1246,7 +1384,6 @@ export async function notifyBookingChangeOwner(
   env: NotificationEnv,
   db: DbClient,
   opts: OrganizationContext & {
-    locationId: string
     threadId: string
     submissionType: 'reservation' | 'booking'
     submissionId: string
@@ -1315,7 +1452,7 @@ export async function notifyBookingReassigned(
   db: DbClient,
   opts: { organizationId: string; bookingId: string; previousMemberId: string | null; memberId: string; sourceEntryId: string },
 ) {
-  const row = await queryFirst<{ request_id: string; location_id: string | null; title: string; starts_at: string; timezone: string; party_size: number; guest_name: string | null; organization_name: string }>(db, `
+  const row = await queryFirst<{ request_id: string | null; location_id: string | null; title: string; starts_at: string; timezone: string; party_size: number; guest_name: string | null; organization_name: string }>(db, `
     SELECT b.request_id, r.location_id, p.name title, s.starts_at, s.timezone, b.party_size, json_extract(r.payload_json,'$.guest.name') guest_name, o.name organization_name
     FROM bookings b JOIN product_sessions s ON s.id=b.product_session_id AND s.organization_id=b.organization_id
       JOIN products p ON p.id=b.product_id AND p.organization_id=b.organization_id
@@ -1323,6 +1460,8 @@ export async function notifyBookingReassigned(
       LEFT JOIN requests r ON r.id=b.request_id AND r.organization_id=b.organization_id
     WHERE b.id=? AND b.organization_id=?`, [opts.bookingId, opts.organizationId])
   if (!row) throw new Error(`Booking ${opts.bookingId} disappeared before its reassignment was announced`)
+  // A booking's conversation is contact-backed, so its guest name is recorded; only a missing conversation leaves it absent.
+  if (row.request_id === null || row.guest_name === null) throw new HTTPError({ statusCode: 500, message: 'The reassigned booking has no guest conversation', data: { code: 'INVALID_GUEST_THREAD', field: 'request_id', booking_id: opts.bookingId } })
   const memberName = async (memberId: string) => (await queryFirst<{ name: string }>(db, `SELECT COALESCE(NULLIF(ms.public_name,''), u.name, u.email) name FROM member m JOIN user u ON u.id=m.userId
     LEFT JOIN member_scheduling ms ON ms.member_id=m.id WHERE m.id=? AND m.organizationId=?`, [memberId, opts.organizationId]))?.name ?? null
   const toName = await memberName(opts.memberId)
@@ -1330,7 +1469,7 @@ export async function notifyBookingReassigned(
   const fromName = opts.previousMemberId ? await memberName(opts.previousMemberId) : null
   const replyUrl = await buildOwnerThreadInboxUrl(env, db, { organizationId: opts.organizationId, locationId: row.location_id, threadId: row.request_id })
   const message = bookingReassignedMessage({
-    guestName: row.guest_name ?? 'Guest',
+    guestName: row.guest_name,
     productTitle: row.title,
     date: new Intl.DateTimeFormat('en-US', { timeZone: row.timezone, dateStyle: 'medium' }).format(new Date(row.starts_at)),
     time: new Intl.DateTimeFormat('en-US', { timeZone: row.timezone, timeStyle: 'short' }).format(new Date(row.starts_at)),
@@ -1369,16 +1508,16 @@ export async function notifyGuestThreadReply(
     request_id: opts.threadId,
     submission_type: opts.submissionType,
     submission_id: opts.submissionId,
-    guest_name: opts.guestName,
+    participant_label: opts.participantLabel,
     inbound_channel: opts.inboundChannel,
     message_preview: opts.messagePreview.slice(0, 200),
     deep_link: replyUrl ?? '',
   }
 
-  const title = `New guest reply from ${opts.guestName}`
+  const title = `New guest reply from ${opts.participantLabel}`
 
   const template = `submission_reply_${opts.inboundChannel}`
-  await createCanonicalNotification(db, {
+  const guestReplyNotificationId = await createCanonicalNotification(db, {
     publishEnv: env,
     scope: 'organization',
     template,
@@ -1395,7 +1534,7 @@ export async function notifyGuestThreadReply(
 
   const ownerMessage = {
     ...guestReplyMessage({
-      guestName: opts.guestName,
+      guestName: opts.participantLabel,
       guestEmail: opts.guestEmail ?? null,
       inboundChannel: opts.inboundChannel,
       messagePreview: opts.messagePreview,
@@ -1450,14 +1589,20 @@ export async function notifyGuestThreadReply(
           vars: toWhatsAppVars(ownerMessage, 'guest_thread_reply_whatsapp').vars,
           delivery,
         })) {
-          throw new Error(`WhatsApp guest-reply alert was not delivered for thread ${opts.threadId}`)
+          throw new RecordedDeliveryFailure(`WhatsApp guest-reply alert was not delivered for thread ${opts.threadId}`)
         }
       })())
     }
+    sends.push(...ownerPushSends(env, db, recipient, {
+      organizationId: opts.organizationId,
+      notificationId: guestReplyNotificationId,
+      context: threadContext,
+      template: 'guest_thread_reply_push',
+      message: ownerMessage,
+    }))
     return sends
   }))
-  raiseSettledFailures('notifyGuestThreadReply', `thread ${opts.threadId}`, results,
-    results.map(() => 'ownerAlert'))
+  raiseUnrecordedOwnerAlertFailures('notifyGuestThreadReply', `thread ${opts.threadId}`, results.map(result => ({ result, task: 'ownerAlert' })))
 }
 
 export interface OrganizationInvitationInput {
@@ -1563,14 +1708,18 @@ export async function renderNotificationCatalog(origin: string): Promise<Catalog
     let whatsapp: CatalogPreviewEntry['whatsapp'] = null
     if (entry.whatsappTemplate) {
       const { vars } = toWhatsAppVars(entry.message, entry.whatsappTemplate)
-      const payload = buildWhatsAppTemplatePayload(entry.whatsappTemplate, vars)
-      whatsapp = {
-        template: entry.whatsappTemplate,
-        text: payload.components
+      // A sample missing a fact the template's slot needs is refused at send,
+      // and the preview shows that refusal rather than a message it would not send.
+      let text: string
+      try {
+        text = buildWhatsAppTemplatePayload(entry.whatsappTemplate, vars).components
           .flatMap(component => component.parameters.map(parameter => parameter.text))
-          .filter(Boolean)
-          .join('\n'),
+          .join('\n')
+      } catch (error) {
+        if (!(error instanceof WhatsAppTemplateRefusal)) throw error
+        text = `Not sent — ${error.message}`
       }
+      whatsapp = { template: entry.whatsappTemplate, text }
     }
 
     return {

@@ -40,6 +40,10 @@ zone_name = "krabiclaw.com"
 [vars]
 # Sign in with Apple audience: the native app's bundle id.
 APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
+# APNs token authentication (APNS_PRIVATE_KEY is a secret: yarn wrangler secret put APNS_PRIVATE_KEY).
+APNS_KEY_ID = "M6MMSR6BM3"
+APNS_TEAM_ID = "WDXU8XZ7J6"
+APNS_BUNDLE_ID = "com.krabiclaw.app"
 CF_SAAS_CNAME_TARGET = "customers.krabiclaw.com"
 BETTER_AUTH_URL = "https://krabiclaw.com"
 NUXT_PUBLIC_PLATFORM_DOMAIN = "https://krabiclaw.com"
@@ -51,10 +55,12 @@ NUXT_PUBLIC_WHATSAPP_NUMBER = "16197200000"
 MEDIA_BASE_URL = "https://media.krabiclaw.com"
 AI_SEARCH_NAMESPACE = "default"
 AI_SEARCH_INSTANCE_ID = "krabiclaw-platform-knowledge"
-# Production is the only environment that should send real email/WhatsApp — made explicit
-# here rather than relying on getEmailDeliveryMode/getWhatsAppDeliveryMode's default, since
-# that default now fails closed (log_only) precisely so a missing var elsewhere never sends real messages.
+# Production is the only environment that should send real email/WhatsApp. Every environment
+# states EMAIL_DELIVERY_MODE explicitly: a missing or invalid value fails email delivery
+# (EMAIL_DELIVERY_MODE_REQUIRED / INVALID_EMAIL_DELIVERY_MODE), and WHATSAPP_DELIVERY_MODE
+# likewise. EMAIL_FROM is the required sender; there is no default From address.
 EMAIL_DELIVERY_MODE = "provider"
+EMAIL_FROM = "KrabiClaw <hello@krabiclaw.com>"
 WHATSAPP_DELIVERY_MODE = "provider"
 # Startup workflow debugging: detailed MCP inputs/results expire after seven days.
 MCP_DIAGNOSTICS_ENABLED = "true"
@@ -87,8 +93,8 @@ MCP_DIAGNOSTICS_ENABLED = "true"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-production-v18"
-database_id = "8d953c89-a6cd-4ade-b7c4-1eb6d372adbd"
+database_name = "krabiclaw-production-v19"
+database_id = "3baf9b09-2c05-4ed8-8944-cafe9e84c9e3"
 migrations_dir = "migrations"
 remote = false
 
@@ -147,6 +153,10 @@ enabled = true
 [env.dev.vars]
 # Sign in with Apple audience: the native app's bundle id.
 APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
+# APNs token authentication (APNS_PRIVATE_KEY is a secret: yarn wrangler secret put APNS_PRIVATE_KEY).
+APNS_KEY_ID = "M6MMSR6BM3"
+APNS_TEAM_ID = "WDXU8XZ7J6"
+APNS_BUNDLE_ID = "com.krabiclaw.app"
 CF_SAAS_CNAME_TARGET = "customers.krabiclaw.com"
 BETTER_AUTH_URL = "https://krabiclaw.com"
 NUXT_PUBLIC_PLATFORM_DOMAIN = "https://krabiclaw.com"
@@ -157,12 +167,13 @@ NUXT_PUBLIC_HELP_URL = "https://krabiclaw.com/help"
 NUXT_PUBLIC_WHATSAPP_NUMBER = "16197200000"
 MEDIA_BASE_URL = "https://media.krabiclaw.com"
 EMAIL_DELIVERY_MODE = "provider"
+EMAIL_FROM = "KrabiClaw <hello@krabiclaw.com>"
 WHATSAPP_DELIVERY_MODE = "provider"
 
 [[env.dev.d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-production-v18"
-database_id = "8d953c89-a6cd-4ade-b7c4-1eb6d372adbd"
+database_name = "krabiclaw-production-v19"
+database_id = "3baf9b09-2c05-4ed8-8944-cafe9e84c9e3"
 migrations_dir = "migrations"
 remote = false
 
@@ -209,6 +220,10 @@ CHANNEX_BASE_URL = "https://staging.channex.io/api/v1"
 LODGING_API_URL = "https://bookyboo-api-development.paulchrisluke.workers.dev"
 # Sign in with Apple audience: the native app's bundle id.
 APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
+# APNs token authentication (APNS_PRIVATE_KEY is a secret: yarn wrangler secret put APNS_PRIVATE_KEY).
+APNS_KEY_ID = "M6MMSR6BM3"
+APNS_TEAM_ID = "WDXU8XZ7J6"
+APNS_BUNDLE_ID = "com.krabiclaw.app"
 CF_SAAS_CNAME_TARGET = "customers.krabiclaw.com"
 BETTER_AUTH_URL = "https://staging.krabiclaw.com"
 NUXT_PUBLIC_PLATFORM_DOMAIN = "https://staging.krabiclaw.com"
@@ -222,14 +237,15 @@ NUXT_PUBLIC_WHATSAPP_NUMBER = "16197200000"
 # reconciling would rewrite production's tags. Production leaves this unset.
 ZARAZ_ANALYTICS = "absent"
 EMAIL_DELIVERY_MODE = "log_only"
+EMAIL_FROM = "KrabiClaw <hello@krabiclaw.com>"
 WHATSAPP_DELIVERY_MODE = "log_only"
 E2E_ALLOW_DEV_ROUTES = "true"
 # E2E_DEV_ROUTE_SECRET is pushed via `wrangler secret put` in ci.yml, not a plaintext var here.
 
 [[env.staging.d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-staging-v18"
-database_id = "872459c4-70e4-4d2a-907c-d5a2951efd9b"
+database_name = "krabiclaw-staging-v19"
+database_id = "036d7910-66a9-4343-9ae4-47398dd3c653"
 migrations_dir = "migrations"
 remote = false
 
@@ -280,6 +296,10 @@ crons = []
 [env.e2e.vars]
 # Sign in with Apple audience: the native app's bundle id.
 APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
+# APNs token authentication (APNS_PRIVATE_KEY is a secret: yarn wrangler secret put APNS_PRIVATE_KEY).
+APNS_KEY_ID = "M6MMSR6BM3"
+APNS_TEAM_ID = "WDXU8XZ7J6"
+APNS_BUNDLE_ID = "com.krabiclaw.app"
 CF_SAAS_CNAME_TARGET = "customers.krabiclaw.com"
 BETTER_AUTH_URL = "http://localhost:3000"
 NUXT_PUBLIC_PLATFORM_DOMAIN = "http://localhost:3000"
@@ -291,12 +311,13 @@ NUXT_PUBLIC_WHATSAPP_NUMBER = "16197200000"
 MEDIA_BASE_URL = "http://localhost:3000/__media"
 ZARAZ_ANALYTICS = "absent"
 EMAIL_DELIVERY_MODE = "log_only"
+EMAIL_FROM = "KrabiClaw <hello@krabiclaw.com>"
 WHATSAPP_DELIVERY_MODE = "log_only"
 
 [[env.e2e.d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-production-v18"
-database_id = "8d953c89-a6cd-4ade-b7c4-1eb6d372adbd"
+database_name = "krabiclaw-production-v19"
+database_id = "3baf9b09-2c05-4ed8-8944-cafe9e84c9e3"
 migrations_dir = "migrations"
 remote = false
 

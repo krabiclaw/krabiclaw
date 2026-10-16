@@ -21,6 +21,7 @@
       </UFormField>
       <UFormField v-else-if="concern === 'assignment'" name="scheduling_mode" label="Who guests meet">
         <p v-if="membersError" role="alert" class="mb-3 text-error">Team members could not be loaded.</p>
+        <p v-else-if="membersStatus !== 'success'" class="mb-3 text-muted">Loading team members…</p>
         <URadioGroup v-else v-model="assignedMember" :items="memberOptions" variant="card" class="w-full" />
       </UFormField>
       <UFormField v-else-if="concern === 'payment'" name="online_payment_required">
@@ -64,15 +65,20 @@ const paymentEntitled = computed(() => {
   return getPlanEntitlements(plan).payments === true
 })
 const { data: members, error: membersError, status: membersStatus } = await useMemberSchedulingList(() => dashboard.organization.value?.id)
+// The business schedule is its own choice, held as no member and no team.
+const BUSINESS_SCHEDULE = 'business-schedule'
 const assignedMember = computed({
-  get: () => p.form.assigned_team_id ? `team:${p.form.assigned_team_id}` : p.form.assigned_member_id ? `member:${p.form.assigned_member_id}` : '',
-  set: (value: string | null) => {
-    p.form.assigned_team_id = value?.startsWith('team:') ? value.slice(5) : ''
-    p.form.assigned_member_id = value?.startsWith('member:') ? value.slice(7) : ''
-    p.form.scheduling_mode = value ? 'provider' : 'legacy'
+  get: () => p.form.assigned_team_id ? `team:${p.form.assigned_team_id}` : p.form.assigned_member_id ? `member:${p.form.assigned_member_id}` : BUSINESS_SCHEDULE,
+  set: (value: string) => {
+    p.form.assigned_team_id = value.startsWith('team:') ? value.slice(5) : null
+    p.form.assigned_member_id = value.startsWith('member:') ? value.slice(7) : null
+    p.form.scheduling_mode = value === BUSINESS_SCHEDULE ? 'legacy' : 'provider'
   },
 })
-const memberOptions = computed(() => [{ label: 'Use the business schedule', value: '' }, ...(members.value?.teams.map(team => ({ label: `Any available member of ${team.name}`, value: `team:${team.id}` })) ?? []), ...(members.value?.members.map(member => ({ label: member.name, value: `member:${member.id}` })) ?? [])])
+// Offered only once the list has loaded; see the template's loading and error states.
+const memberOptions = computed(() => members.value ? [{ label: 'Use the business schedule', value: BUSINESS_SCHEDULE },
+  ...members.value.teams.map(team => ({ label: `Any available member of ${team.name}`, value: `team:${team.id}` })),
+  ...members.value.members.map(member => ({ label: member.name, value: `member:${member.id}` }))] : [])
 const setting = computed(() => settings[concern.value as keyof typeof settings] ?? { title: '', lead: '' })
 watchEffect(() => {
   if (level.mode.value === 'yield') return

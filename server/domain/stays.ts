@@ -4,14 +4,17 @@ import { assertRoleAllows, assignedHomeSql, roleAllows, type MemberAccessPrincip
 import { organizationEventQuery } from '~/server/utils/organization-events'
 import { createLocation, updateLocation } from '~/server/utils/location-management'
 import { createProduct, getProduct, updateProduct } from '~/server/utils/product-management'
-import type { UpdateProductInput } from '~/server/types/products'
+import type { Product, UpdateProductInput } from '~/server/types/products'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { selectPrice, type Price } from '~/shared/prices'
 import type { ChannexEnv } from '~/server/integrations/channex/client'
-import { pushStayNights, requireChannelPush, type ChannelPush } from '~/server/integrations/channex/ari'
+import { pushStayNights, requireChannelPush } from '~/server/integrations/channex/ari'
+import type { ChannelPush } from '~/shared/channel-push'
 import { isValidTimezone } from '~/utils/timezone'
 import { stayThreadQueries } from '~/server/domain/requests'
+import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
+import { planHomeMessages, planStayMessages } from '~/server/domain/scheduled-guest-messages'
 
 /**
  * Places to stay: the one implementation of stays, nights and offline
@@ -26,6 +29,7 @@ import { stayThreadQueries } from '~/server/domain/requests'
 
 /** Who is asking: managers act on every home; assigned members read the homes they look after. */
 export type StayAccess = { organizationId: string; actorId: string } & ({ manage: true } | { manage: false; userId: string })
+type StayMutationEnv = ChannexEnv & GuestInboxPublicationEnv
 
 /** Resolve a member's stay access from their Better Auth role: operations update manages, operations assigned reads assigned homes. */
 export async function stayAccessFor(principal: MemberAccessPrincipal): Promise<StayAccess> {
@@ -106,6 +110,7 @@ export interface StayHome {
   check_out_time: string
   max_guests: number
   min_nights: number
+  check_in_instructions: string | null
   /** The member (member.id) and the team who look after the home; assigned members see its stays. */
   assigned_member_id: string | null
   assigned_team_id: string | null
@@ -209,7 +214,7 @@ function requireManager(access: StayAccess): asserts access is StayAccess & { ma
 async function stayHomes(db: DbClient, access: StayAccess, productId: string | null): Promise<StayHome[]> {
   const scope = visibleHomes(access)
   const rows = await queryAll<Record<string, unknown>>(db, `
-    SELECT p.id AS product_id, p.name, c.location_id, l.timezone, o.default_currency, c.check_in_time, c.check_out_time, c.max_guests, c.min_nights,
+    SELECT p.id AS product_id, p.name, c.location_id, l.timezone, o.default_currency, c.check_in_time, c.check_out_time, c.max_guests, c.min_nights, c.check_in_instructions,
            c.assigned_member_id, c.assigned_team_id, m.enabled AS channel_enabled, m.import_stage AS channel_stage
       FROM product_stay_configs c
       JOIN products p ON p.organization_id = c.organization_id AND p.id = c.product_id
@@ -233,11 +238,12 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
       product_id: String(row.product_id), name: String(row.name), location_id: String(row.location_id), timezone: String(row.timezone),
       currency: row.default_currency, base_price_minor: base ? base.unit_amount : null,
       check_in_time: String(row.check_in_time), check_out_time: String(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
+      check_in_instructions: row.check_in_instructions === null ? null : String(row.check_in_instructions),
       assigned_member_id: row.assigned_member_id === null ? null : String(row.assigned_member_id),
       assigned_team_id: row.assigned_team_id === null ? null : String(row.assigned_team_id),
       channel: row.channel_stage === null ? null : {
         provider: 'channex',
-        status: Number(row.channel_enabled) === 1 ? 'connected' : row.channel_stage === 'reservations' || row.channel_stage === 'complete' ? 'disconnected' : 'importing',
+        status: Number(row.channel_enabled) === 1 ? 'connected' : row.channel_stage === 'reservations' || row.channel_stage === 'messages' || row.channel_stage === 'complete' ? 'disconnected' : 'importing',
       },
     }
   })
@@ -329,8 +335,7 @@ export function stayHomeInput(body: Record<string, unknown>): NewStayHome {
   return home
 }
 
-const EDITABLE_HOME_FIELDS = ['name', 'timezone', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'base_price_minor', 'assigned_member_id', 'assigned_team_id'] as const
-const NIGHTS_AHEAD = MAX_CALENDAR_DAYS
+const EDITABLE_HOME_FIELDS = ['name', 'timezone', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'check_in_instructions', 'base_price_minor', 'assigned_member_id', 'assigned_team_id'] as const
 
 /**
  * Change a home's details. Fields left out keep their value. Its time zone is
@@ -361,6 +366,12 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
   if (guests !== null) stay.max_guests = guests
   const nights = minNights(false)
   if (nights !== null) stay.min_nights = nights
+  if ('check_in_instructions' in body) {
+    const instructions = body.check_in_instructions
+    if (instructions !== null && (typeof instructions !== 'string' || !instructions.trim() || instructions.trim().length > 5000)) {
+      fail(422, 'INVALID_DETAIL', 'check_in_instructions must contain 1 to 5000 characters, or null', 'check_in_instructions')
+    }
+  }
   for (const [key, table, column] of [['assigned_member_id', 'member', 'organizationId'], ['assigned_team_id', 'team', 'organizationId']] as const) {
     if (!(key in body)) continue
     const value = body[key]
@@ -384,19 +395,34 @@ export async function updateStayHome(env: CloudflareEnv, db: DbClient, access: S
     else if (base) patch.variants = [{ id: variant.id, prices_mode: 'replace', prices: variant.prices.filter(other => other.id !== base.id).map(other => ({ id: other.id })) }]
   }
   const pushes = pricing || nights !== null
-  if (pushes) await requireChannelPush(db, env, access.organizationId, productId)
-
-  if (Object.keys(patch).length) await updateProduct(db, { organizationId: access.organizationId, productId, patch, actor: { actorId: access.actorId }, env })
+  // Clearing an already absent base price still asks for channel completion,
+  // but creates no product pricing patch for updateProduct to preflight.
+  if (pushes && patch.variants === undefined && patch.stay?.min_nights === undefined) await requireChannelPush(db, env, access.organizationId, productId)
+  if (Object.keys(patch).length) await updateProduct(db, { organizationId: access.organizationId, productId, patch, actor: { actorId: access.actorId }, env, deferStayNightPush: true })
   // The product's checks are the ones a valid request can still fail, so it is written first.
   if (zone !== null && zone !== home.timezone) {
     const moved = await updateLocation(db as D1Database, access.organizationId, home.location_id, { timezone: zone }, access.actorId, env)
     if (moved.status !== 200) locationFailure(moved)
   }
+  const instructionsAt = 'check_in_instructions' in body ? new Date().toISOString() : null
+  if (instructionsAt !== null) {
+    const results = await executeBatch(db, [{
+      query: 'UPDATE product_stay_configs SET check_in_instructions = ?, updated_at = ?, updated_by = ? WHERE organization_id = ? AND product_id = ?',
+      params: [body.check_in_instructions === null ? null : (body.check_in_instructions as string).trim(), instructionsAt, access.actorId, access.organizationId, productId],
+    }, organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.instructions_updated', entityType: 'stay_home', entityId: productId, onlyIfPreviousChangedOneRow: true })], { operation: 'Update home check-in instructions' })
+    if (results[0]?.meta.changes !== 1) fail(409, 'HOME_CHANGED', 'The home changed before its check-in instructions were saved; reload it', 'product_id')
+  }
+  const product = pushes ? await getProduct(db, access.organizationId, productId) : null
+  const channelPush = product ? await pushStayHomeNights(db, env, access, product) : null
   const updated = await readStayHome(db, access, productId)
-  if (!pushes || updated.channel?.status !== 'connected') return { home: updated, channel_push: null }
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: updated.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
-  const until = new Date(Date.parse(`${today}T00:00:00Z`) + NIGHTS_AHEAD * 86_400_000).toISOString().slice(0, 10)
-  return { home: updated, channel_push: await pushNights(db, env, access, productId, [[today, until]]) }
+  if (zone !== null && zone !== home.timezone) await planHomeMessages(db, access.organizationId, home.location_id)
+  if (product && channelPush !== null) {
+    await publishStayInvalidation(env, { type: 'nights.changed', organizationId: access.organizationId, productId, locationId: updated.location_id, stayId: null }, { updated_at: product.updated_at })
+  }
+  if (instructionsAt !== null) {
+    await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId, locationId: updated.location_id, stayId: null }, { updated_at: instructionsAt })
+  }
+  return { home: updated, channel_push: channelPush }
 }
 
 /**
@@ -416,7 +442,7 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
   if (!location || typeof location.id !== 'string' || !location.id.trim()) fail(502, 'INVALID_LOCATION_RESPONSE', 'Location creation did not return the location id', 'data.location.id')
   const locationId = location.id
   const product = await createProduct(db, {
-    organizationId: access.organizationId, actor: { actorId: access.actorId }, idempotencyKey,
+    organizationId: access.organizationId, actor: { actorId: access.actorId }, idempotencyKey, env,
     product: {
       kind: 'stay', name: home.name,
       ...(home.base_price_minor === null ? {} : { variants: [{ name: home.name, prices: [{ unit_amount: home.base_price_minor }] }] }),
@@ -511,6 +537,21 @@ async function pushNights(db: DbClient, env: ChannexEnv, access: StayAccess, pro
   return outcome
 }
 
+/** A base price or minimum stay changes the same 500 future nights on every write surface. */
+export async function pushStayHomeNights(db: DbClient, env: ChannexEnv, access: StayAccess, product: Pick<Product, 'id' | 'updated_at'>): Promise<ChannelPush | null> {
+  const productId = product.id
+  try {
+    const home = await readStayHome(db, access, productId)
+    if (home.channel?.status !== 'connected') return null
+    const today = new Intl.DateTimeFormat('en-CA', { timeZone: home.timezone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+    const until = new Date(Date.parse(`${today}T00:00:00Z`) + MAX_CALENDAR_DAYS * 86_400_000).toISOString().slice(0, 10)
+    return await pushNights(db, env, access, productId, [[today, until]])
+  } catch (cause) {
+    throw new HTTPError({ statusCode: 503, message: 'The home was saved, but its channel update did not complete. Reload its calendar before retrying.',
+      data: { code: 'CHANNEL_PUSH_FAILED', field: 'channel_push', committed: true, product_id: productId, updated_at: product.updated_at }, cause })
+  }
+}
+
 /**
  * Make a stay's night claims match its row as committed: release the nights it
  * no longer holds, then claim the ones it lacks. Both read the dates and status
@@ -585,7 +626,7 @@ function stayFields(input: Record<string, unknown>, home: StayHome): StayFields 
  * offers guests and channels; a stay the host enters is the host's own
  * decision, so those rules do not refuse it. Only another stay does.
  */
-export async function createStay(db: DbClient, env: ChannexEnv, access: StayAccess, input: Record<string, unknown> & { product_id: string; idempotency_key: string }): Promise<StayDetail & { channel_push: ChannelPush | null }> {
+export async function createStay(db: DbClient, env: StayMutationEnv, access: StayAccess, input: Record<string, unknown> & { product_id: string; idempotency_key: string }): Promise<StayDetail & { channel_push: ChannelPush | null }> {
   requireManager(access)
   const key = typeof input.idempotency_key === 'string' ? input.idempotency_key.trim() : ''
   if (!key || key.length > 200) fail(422, 'INVALID_STAY_FIELD', 'idempotency_key must be 1 to 200 characters', 'idempotency_key')
@@ -601,7 +642,12 @@ export async function createStay(db: DbClient, env: ChannexEnv, access: StayAcce
     return getStay(db, access, existing.id)
   }
   // A replay pushes again, so retrying a create whose push did not land repairs it.
-  const pushed = async (stay: StayDetail) => ({ ...stay, channel_push: await pushNights(db, env, access, stay.product_id, [[stay.check_in_date, stay.check_out_date]]) })
+  const pushed = async (stay: StayDetail) => {
+    await planStayMessages(db, access.organizationId, stay.id)
+    const channelPush = await pushNights(db, env, access, stay.product_id, [[stay.check_in_date, stay.check_out_date]])
+    await publishStayChange(env, db, access.organizationId, stay, true)
+    return { ...await getStay(db, access, stay.id), channel_push: channelPush }
+  }
   const earlier = await replay()
   if (earlier) return pushed(earlier)
   const id = crypto.randomUUID()
@@ -610,10 +656,10 @@ export async function createStay(db: DbClient, env: ChannexEnv, access: StayAcce
     await executeBatch(db, [
       {
         query: `INSERT INTO stays (id, organization_id, product_id, channel, owner, status, check_in_date, check_out_date, arrival_time, adults, children, infants,
-                  guest_name, guest_surname, guest_email, guest_phone, total_minor, currency, notes, idempotency_key, created_at, updated_at, created_by, updated_by)
-                VALUES (?, ?, ?, 'direct', 'app', 'confirmed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                  guest_name, guest_surname, guest_email, guest_phone, total_minor, currency, notes, idempotency_key, booking_received_at, created_at, updated_at, created_by, updated_by)
+                VALUES (?, ?, ?, 'direct', 'app', 'confirmed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         params: [id, access.organizationId, home.product_id, fields.check_in_date, fields.check_out_date, fields.arrival_time, fields.adults, fields.children, fields.infants,
-          fields.guest_name, fields.guest_surname, fields.guest_email, fields.guest_phone, fields.total_minor, home.currency, fields.notes, key, now, now, access.actorId, access.actorId],
+          fields.guest_name, fields.guest_surname, fields.guest_email, fields.guest_phone, fields.total_minor, home.currency, fields.notes, key, now, now, now, access.actorId, access.actorId],
       },
       ...reconcileNightsQueries(access.organizationId, id),
       ...stayThreadQueries({ organizationId: access.organizationId, stayId: id, now, openedBy: { userId: access.actorId } }),
@@ -644,7 +690,7 @@ function versionChanged(results: unknown): boolean {
   return (results as Array<{ meta?: { changes?: number } }>)[0]?.meta?.changes === 1
 }
 
-export async function updateStay(db: DbClient, env: ChannexEnv, access: StayAccess, stayId: string, input: Record<string, unknown> & { expected_version: unknown }): Promise<StayDetail & { channel_push: ChannelPush | null }> {
+export async function updateStay(db: DbClient, env: StayMutationEnv, access: StayAccess, stayId: string, input: Record<string, unknown> & { expected_version: unknown }): Promise<StayDetail & { channel_push: ChannelPush | null }> {
   const current = await requireAppStay(db, access, stayId, input.expected_version)
   const home = await readStayHome(db, access, current.product_id)
   const fields = stayFields({ ...current, ...input }, home)
@@ -673,14 +719,17 @@ export async function updateStay(db: DbClient, env: ChannexEnv, access: StayAcce
     throw error
   }
   if (!versionChanged(results)) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
+  await planStayMessages(db, access.organizationId, stayId)
   const stay = await getStay(db, access, stayId)
   // The nights it released and the nights it now holds.
   const ranges = [[current.check_in_date, current.check_out_date], [stay.check_in_date, stay.check_out_date]] as const
   const changed = current.check_in_date === stay.check_in_date && current.check_out_date === stay.check_out_date ? [] : ranges
-  return { ...stay, channel_push: await pushNights(db, env, access, stay.product_id, changed) }
+  const channelPush = await pushNights(db, env, access, stay.product_id, changed)
+  await publishStayChange(env, db, access.organizationId, stay, changed.length > 0)
+  return { ...await getStay(db, access, stayId), channel_push: channelPush }
 }
 
-export async function cancelStay(db: DbClient, env: ChannexEnv, access: StayAccess, stayId: string, input: { expected_version: unknown; reason?: unknown }): Promise<StayDetail & { channel_push: ChannelPush | null }> {
+export async function cancelStay(db: DbClient, env: StayMutationEnv, access: StayAccess, stayId: string, input: { expected_version: unknown; reason?: unknown }): Promise<StayDetail & { channel_push: ChannelPush | null }> {
   const current = await requireAppStay(db, access, stayId, input.expected_version)
   const reason = optionalText(input.reason, 'reason', 500)
   await requireChannelPush(db, env, access.organizationId, current.product_id)
@@ -696,11 +745,14 @@ export async function cancelStay(db: DbClient, env: ChannexEnv, access: StayAcce
     ...reconcileNightsQueries(access.organizationId, stayId),
   ], { operation: 'Cancel stay' })
   if (!versionChanged(results)) fail(409, 'STAY_VERSION_CONFLICT', 'This stay changed since you opened it; reload it and try again', 'expected_version')
-  return { ...await getStay(db, access, stayId), channel_push: await pushNights(db, env, access, current.product_id, [[current.check_in_date, current.check_out_date]]) }
+  await planStayMessages(db, access.organizationId, stayId)
+  const channelPush = await pushNights(db, env, access, current.product_id, [[current.check_in_date, current.check_out_date]])
+  await publishStayChange(env, db, access.organizationId, await getStay(db, access, stayId), true)
+  return { ...await getStay(db, access, stayId), channel_push: channelPush }
 }
 
 /** Record money the host received (or, negative, refunded) outside Stripe for a stay they took. */
-export async function recordStayPayment(db: DbClient, access: StayAccess, stayId: string, input: Record<string, unknown>): Promise<StayDetail> {
+export async function recordStayPayment(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, stayId: string, input: Record<string, unknown>): Promise<StayDetail> {
   requireManager(access)
   const stay = await getStay(db, access, stayId)
   if (stay.owner !== 'app') fail(409, 'STAY_NOT_EDITABLE', 'This stay is paid through its channel')
@@ -716,6 +768,7 @@ export async function recordStayPayment(db: DbClient, access: StayAccess, stayId
       'SELECT stay_id, amount_minor, method, paid_on FROM stay_payments WHERE organization_id = ? AND idempotency_key = ?', [access.organizationId, key])
     if (!existing) return null
     if (existing.stay_id !== stayId || existing.amount_minor !== amountMinor || existing.method !== input.method || existing.paid_on !== paidOn) fail(409, 'IDEMPOTENCY_CONFLICT', 'This idempotency_key was already used for a different payment', 'idempotency_key')
+    await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, locationId: stay.location_id, productId: stay.product_id, stayId }, { version: stay.version })
     return getStay(db, access, stayId)
   }
   const earlier = await replay()
@@ -738,10 +791,11 @@ export async function recordStayPayment(db: DbClient, access: StayAccess, stayId
     }
     throw error
   }
+  await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, locationId: stay.location_id, productId: stay.product_id, stayId }, { version: stay.version })
   return getStay(db, access, stayId)
 }
 
-export async function deleteStayPayment(db: DbClient, access: StayAccess, stayId: string, paymentId: string): Promise<StayDetail> {
+export async function deleteStayPayment(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, stayId: string, paymentId: string): Promise<StayDetail> {
   requireManager(access)
   const stay = await getStay(db, access, stayId)
   if (!stay.payments.some(payment => payment.id === paymentId)) fail(404, 'PAYMENT_NOT_FOUND', 'That payment is not on this stay')
@@ -749,6 +803,7 @@ export async function deleteStayPayment(db: DbClient, access: StayAccess, stayId
     { query: 'DELETE FROM stay_payments WHERE organization_id = ? AND stay_id = ? AND id = ?', params: [access.organizationId, stayId, paymentId] },
     organizationEventQuery({ organizationId: access.organizationId, locationId: stay.location_id, actorId: access.actorId, eventType: 'stay.payment_deleted', entityType: 'stay', entityId: stayId, metadata: { payment_id: paymentId }, onlyIfPreviousChangedOneRow: true }),
   ], { operation: 'Delete stay payment' })
+  await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, locationId: stay.location_id, productId: stay.product_id, stayId }, { version: stay.version })
   return getStay(db, access, stayId)
 }
 
@@ -757,7 +812,7 @@ export async function deleteStayPayment(db: DbClient, access: StayAccess, stayId
  * night's current value; `price_minor: null` returns a night to the base
  * price. `reset: true` removes every override in the range instead.
  */
-export async function setStayNights(db: DbClient, env: ChannexEnv, access: StayAccess, input: Record<string, unknown> & { product_id: string; from: unknown; to: unknown }): Promise<{ home: StayHome; nights: StayNight[]; stays: Stay[]; channel_push: ChannelPush | null }> {
+export async function setStayNights(db: DbClient, env: StayMutationEnv, access: StayAccess, input: Record<string, unknown> & { product_id: string; from: unknown; to: unknown }): Promise<{ home: StayHome; nights: StayNight[]; stays: Stay[]; channel_push: ChannelPush | null }> {
   requireManager(access)
   const { from, to } = range(input, MAX_CALENDAR_DAYS)
   const home = await readStayHome(db, access, input.product_id)
@@ -789,6 +844,7 @@ export async function setStayNights(db: DbClient, env: ChannexEnv, access: StayA
     organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.nights_changed', entityType: 'product', entityId: home.product_id, metadata: { from, to, reset, fields: columns.join(',') } }),
   ], { operation: 'Set stay nights' })
   const channelPush = await pushNights(db, env, access, home.product_id, [[from, to]])
+  await publishStayInvalidation(env, { type: 'nights.changed', organizationId: access.organizationId, locationId: home.location_id, productId: home.product_id, stayId: null }, { updated_at: now })
   return { ...await readStayCalendar(db, access, { productId: home.product_id, from, to }), channel_push: channelPush }
 }
 
@@ -808,7 +864,7 @@ export interface ImportedNight {
  * replacing any earlier import and never a night the host set themselves.
  * One statement, so the calendar lands whole or not at all.
  */
-export async function importStayNights(db: DbClient, access: StayAccess, productId: string, nights: readonly ImportedNight[]): Promise<void> {
+export async function importStayNights(db: DbClient, env: GuestInboxPublicationEnv, access: StayAccess, productId: string, nights: readonly ImportedNight[]): Promise<void> {
   requireManager(access)
   const home = await readStayHome(db, access, productId)
   if (!nights.length) return
@@ -831,6 +887,7 @@ export async function importStayNights(db: DbClient, access: StayAccess, product
     },
     organizationEventQuery({ organizationId: access.organizationId, locationId: home.location_id, actorId: access.actorId, eventType: 'stay.nights_imported', entityType: 'product', entityId: home.product_id, metadata: { from: nights[0]!.date, to: nights.at(-1)!.date, nights: nights.length } }),
   ], { operation: 'Import stay nights' })
+  await publishStayInvalidation(env, { type: 'nights.changed', organizationId: access.organizationId, locationId: home.location_id, productId: home.product_id, stayId: null }, { updated_at: now })
 }
 
 /** A channel's booking as its current state reads, ready to land as a stay. */
@@ -862,20 +919,79 @@ export interface ChannelBooking {
  * already stored changes nothing, so repeated and out-of-order deliveries are
  * harmless. Returns the stay as stored.
  */
-export async function applyChannelBooking(db: DbClient, organizationId: string, productId: string, booking: ChannelBooking): Promise<Stay & { applied: boolean }> {
+export async function applyChannelBooking(db: DbClient, env: GuestInboxPublicationEnv, organizationId: string, productId: string, booking: ChannelBooking): Promise<Stay & { applied: boolean }> {
   date(booking.check_in_date, 'check_in_date')
   date(booking.check_out_date, 'check_out_date')
   if (booking.check_out_date <= booking.check_in_date) throw new Error(`Channel booking ${booking.external_booking_id} ends before it starts`)
   if (booking.adults < 1) throw new Error(`Channel booking ${booking.external_booking_id} has no adult guest`)
   if (!/^[A-Z]{3}$/.test(booking.currency)) throw new Error(`Channel booking ${booking.external_booking_id} has an invalid currency`)
-  const existing = await queryFirst<{ id: string; provider_updated_at: string | null }>(db,
-    'SELECT id, provider_updated_at FROM stays WHERE provider = ? AND external_booking_id = ?', [booking.provider, booking.external_booking_id])
+  const currentChannelStay = () => queryFirst<{ id: string; provider_updated_at: string | null; revision_id: string | null }>(db,
+    'SELECT id, provider_updated_at, revision_id FROM stays WHERE provider = ? AND external_booking_id = ?', [booking.provider, booking.external_booking_id])
+  const existing = await currentChannelStay()
+  const conversation = await queryFirst<{ organization_id: string; product_id: string; request_id: string }>(db,
+    'SELECT organization_id, product_id, request_id FROM channel_threads WHERE provider = ? AND external_booking_id = ?', [booking.provider, booking.external_booking_id])
+  if (conversation && (conversation.organization_id !== organizationId || conversation.product_id !== productId)) {
+    throw new HTTPError({ statusCode: 409, message: 'The provider booking and conversation belong to different homes', data: { code: 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', field: 'external_booking_id' } })
+  }
+  if (conversation && existing && await queryFirst(db, 'SELECT id FROM stays WHERE id = ? AND request_id IS NOT NULL AND request_id <> ?', [existing.id, conversation.request_id])) {
+    throw new HTTPError({ statusCode: 409, message: 'The inquiry and stay already have separate conversations; review both timelines', data: { code: 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', field: 'request_id' } })
+  }
+  const revisionKey = `channel-revision:${JSON.stringify([organizationId, booking.provider, booking.external_booking_id, booking.revision_id])}`
+  const publish = async (stored: Stay, currentRevisionId: string | null) => {
+    if (currentRevisionId === null) throw new HTTPError({ statusCode: 503, message: 'The saved channel stay has no current revision identity', data: { code: 'CHANNEL_REVISION_ID_REQUIRED', field: 'revision_id', committed: true, stay_id: stored.id, product_id: stored.product_id, version: stored.version } })
+    const receipt = await queryFirst<Record<string, unknown>>(db, `SELECT
+      json_extract(payload_json, '$.entityId') AS stay_id,
+      json_extract(payload_json, '$.metadata.provider') AS provider,
+      json_extract(payload_json, '$.metadata.external_booking_id') AS external_booking_id,
+      json_extract(payload_json, '$.metadata.revision_id') AS revision_id,
+      json_extract(payload_json, '$.metadata.provider_updated_at') AS provider_updated_at,
+      json_extract(payload_json, '$.metadata.product_id') AS product_id,
+      json_extract(payload_json, '$.metadata.location_id') AS location_id,
+      json_extract(payload_json, '$.metadata.previous_product_id') AS previous_product_id,
+      json_extract(payload_json, '$.metadata.previous_location_id') AS previous_location_id,
+      json_type(payload_json, '$.metadata.previous_product_id') AS previous_product_type,
+      json_type(payload_json, '$.metadata.previous_location_id') AS previous_location_type
+      FROM activity_entries WHERE organization_id = ? AND kind = 'audit' AND dedupe_key = ?`, [organizationId, revisionKey])
+    if (receipt) {
+      const scope = (product: unknown, location: unknown) => typeof product === 'string' && Boolean(product) && typeof location === 'string' && Boolean(location)
+      if (receipt.stay_id !== stored.id || receipt.provider !== booking.provider || receipt.external_booking_id !== booking.external_booking_id || receipt.revision_id !== booking.revision_id || receipt.provider_updated_at !== booking.provider_updated_at
+        || !scope(receipt.product_id, receipt.location_id)
+        || !((receipt.previous_product_id === null && receipt.previous_location_id === null && receipt.previous_product_type === 'null' && receipt.previous_location_type === 'null') || scope(receipt.previous_product_id, receipt.previous_location_id))) {
+        throw new HTTPError({ statusCode: 500, message: 'The channel revision audit has invalid affected home identities', data: { code: 'CHANNEL_REVISION_AUDIT_INVALID', field: 'revision_id', revision_id: booking.revision_id, stay_id: stored.id } })
+      }
+      const published = new Set([stored.product_id])
+      for (const [product, location] of [[receipt.previous_product_id, receipt.previous_location_id], [receipt.product_id, receipt.location_id]]) {
+        if (typeof product !== 'string' || typeof location !== 'string' || published.has(product)) continue
+        published.add(product)
+        const affected = { organizationId, locationId: location, productId: product, stayId: stored.id }
+        await publishStayInvalidation(env, { ...affected, type: 'stay.changed' }, { version: stored.version })
+        await publishStayInvalidation(env, { ...affected, type: 'nights.changed' }, { version: stored.version })
+      }
+    } else if (currentRevisionId === booking.revision_id) {
+      throw new HTTPError({ statusCode: 503, message: 'The saved channel revision has no audit identifying its affected homes', data: { code: 'CHANNEL_REVISION_AUDIT_REQUIRED', field: 'revision_id', committed: true, revision_id: booking.revision_id, stay_id: stored.id, product_id: stored.product_id, version: stored.version } })
+    }
+    await publishStayChange(env, db, organizationId, stored, true)
+  }
   if (existing && existing.provider_updated_at !== null && existing.provider_updated_at >= booking.provider_updated_at) {
-    return { ...(await storedStay(db, organizationId, existing.id)), applied: false }
+    await planStayMessages(db, organizationId, existing.id)
+    const stored = await storedStay(db, organizationId, existing.id)
+    await publish(stored, existing.revision_id)
+    return { ...await storedStay(db, organizationId, existing.id), applied: false }
   }
   const id = existing?.id ?? crypto.randomUUID()
+  const previous = existing ? await storedStay(db, organizationId, existing.id) : null
+  const home = await queryFirst<{ location_id: string }>(db, 'SELECT location_id FROM product_stay_configs WHERE organization_id = ? AND product_id = ?', [organizationId, productId])
+  if (!home) fail(404, 'STAY_HOME_NOT_FOUND', 'The channel booking home was not found', 'product_id')
   const now = new Date().toISOString()
   const write = (overbooked: 0 | 1): BatchQuery[] => [{
+    // The claims' composite FK names the stay's home. Release a real move's
+    // old claims before changing that home, under the same upsert guard. The
+    // entire batch rolls back if its new claims or any later write fails.
+    query: `DELETE FROM stay_nights WHERE organization_id = ? AND stay_id = ? AND product_id <> ?
+      AND EXISTS (SELECT 1 FROM stays st WHERE st.organization_id = ? AND st.id = ? AND st.product_id = ?
+        AND (st.provider_updated_at IS NULL OR st.provider_updated_at < ?))`,
+    params: [organizationId, id, productId, organizationId, existing?.id ?? null, previous?.product_id ?? null, booking.provider_updated_at],
+  }, {
     query: `INSERT INTO stays (id, organization_id, product_id, channel, owner, status, overbooked, check_in_date, check_out_date, adults, children, infants,
               guest_name, guest_surname, guest_email, guest_phone, total_minor, currency, provider, external_booking_id, channel_booking_id, revision_id,
               provider_updated_at, cancelled_at, created_at, updated_at, created_by, updated_by)
@@ -888,24 +1004,66 @@ export async function applyChannelBooking(db: DbClient, organizationId: string, 
               revision_id = excluded.revision_id, provider_updated_at = excluded.provider_updated_at,
               cancelled_at = CASE WHEN excluded.status = 'cancelled' THEN COALESCE(stays.cancelled_at, excluded.cancelled_at) ELSE NULL END,
               version = stays.version + 1, updated_at = excluded.updated_at, updated_by = excluded.updated_by
-            WHERE stays.organization_id = excluded.organization_id AND (stays.provider_updated_at IS NULL OR stays.provider_updated_at < excluded.provider_updated_at)`,
+            WHERE stays.organization_id = excluded.organization_id AND stays.id = ? AND stays.product_id = ?
+              AND (stays.provider_updated_at IS NULL OR stays.provider_updated_at < excluded.provider_updated_at)`,
     params: [id, organizationId, productId, booking.channel, booking.cancelled ? 'cancelled' : 'confirmed', overbooked, booking.check_in_date, booking.check_out_date,
       booking.adults, booking.children, booking.infants, booking.guest_name, booking.guest_surname, booking.guest_email, booking.guest_phone,
       booking.total_minor, booking.currency, booking.provider, booking.external_booking_id, booking.channel_booking_id, booking.revision_id,
-      booking.provider_updated_at, booking.cancelled ? now : null, now, now, 'channex', 'channex'],
+      booking.provider_updated_at, booking.cancelled ? now : null, now, now, 'channex', 'channex', existing?.id ?? null, previous?.product_id ?? null],
   },
+  organizationEventQuery({ organizationId, locationId: home.location_id, actorId: null, eventType: existing ? 'stay.updated' : 'stay.created', entityType: 'stay', entityId: id,
+    dedupeKey: revisionKey, onlyIfPreviousChangedOneRow: true, metadata: { channel: booking.channel, overbooked: overbooked === 1,
+      provider: booking.provider, external_booking_id: booking.external_booking_id, revision_id: booking.revision_id, provider_updated_at: booking.provider_updated_at,
+      previous_product_id: previous?.product_id ?? null, previous_location_id: previous?.location_id ?? null, product_id: productId, location_id: home.location_id } }),
   ...reconcileNightsQueries(organizationId, id),
+  {
+    query: `UPDATE stays SET request_id = t.request_id FROM channel_threads t
+      WHERE stays.id = ? AND stays.organization_id = ? AND stays.product_id = ?
+        AND t.provider = stays.provider AND t.external_booking_id = stays.external_booking_id
+        AND t.organization_id = stays.organization_id AND t.product_id = stays.product_id
+        AND (stays.request_id IS NULL OR stays.request_id = t.request_id)`,
+    params: [id, organizationId, productId],
+  },
   ...stayThreadQueries({ organizationId, stayId: id, now, openedBy: 'channel' }),
-  organizationEventQuery({ organizationId, actorId: null, eventType: existing ? 'stay.updated' : 'stay.created', entityType: 'stay', entityId: id, metadata: { channel: booking.channel, overbooked: overbooked === 1 } }),
   ]
+  let writes: Awaited<ReturnType<typeof executeBatch>>
   try {
-    await executeBatch(db, write(0), { operation: 'Apply channel booking' })
+    writes = await executeBatch(db, write(0), { operation: 'Apply channel booking' })
   } catch (error) {
     if (!isNightConflict(error)) throw error
     // Rule 1: another stay holds one of these nights. The channel stay still lands, flagged and holding none.
-    await executeBatch(db, write(1), { operation: 'Apply overbooked channel booking' })
+    writes = await executeBatch(db, write(1), { operation: 'Apply overbooked channel booking' })
   }
-  return { ...(await storedStay(db, organizationId, id)), applied: true }
+  const changed = writes[1]?.meta.changes
+  if (changed !== 0 && changed !== 1) fail(500, 'CHANNEL_REVISION_WRITE_RESULT_REQUIRED', 'The channel revision write did not report its affected row count', 'changes')
+  const current = await currentChannelStay()
+  if (!current) fail(500, 'CHANNEL_STAY_NOT_READABLE', 'The saved channel booking could not be read', 'external_booking_id')
+  const stored = await storedStay(db, organizationId, current.id)
+  if (changed === 0 && (current.provider_updated_at === null || current.provider_updated_at < booking.provider_updated_at)) {
+    throw new HTTPError({ statusCode: 409, message: 'The channel booking home changed concurrently. Retry this revision from the feed.', data: { code: 'CHANNEL_REVISION_CONFLICT', field: 'revision_id', revision_id: booking.revision_id, stay_id: stored.id, version: stored.version } })
+  }
+  const linked = await queryFirst<{ request_id: string | null; mapped_request_id: string | null }>(db, `SELECT s.request_id, t.request_id AS mapped_request_id FROM stays s
+    LEFT JOIN channel_threads t ON t.provider = s.provider AND t.external_booking_id = s.external_booking_id WHERE s.id = ?`, [stored.id])
+  if (linked?.mapped_request_id && linked.request_id !== linked.mapped_request_id) {
+    throw new HTTPError({ statusCode: 409, message: 'The stay conversation changed during association', data: { code: 'CHANNEL_THREAD_ASSOCIATION_CONFLICT', field: 'request_id' } })
+  }
+  await planStayMessages(db, organizationId, stored.id)
+  await publish(stored, current.revision_id)
+  return { ...await storedStay(db, organizationId, stored.id), applied: changed === 1 }
+}
+
+async function publishStayChange(env: GuestInboxPublicationEnv, db: DbClient, organizationId: string, stay: Stay, nightsChanged: boolean): Promise<void> {
+  const input = { organizationId, locationId: stay.location_id, productId: stay.product_id, stayId: stay.id }
+  await publishStayInvalidation(env, { ...input, type: 'stay.changed' }, { version: stay.version })
+  if (nightsChanged) await publishStayInvalidation(env, { ...input, type: 'nights.changed' }, { version: stay.version })
+  if (stay.request_id !== null) {
+    try {
+      await publishGuestInboxThreadEvent(env, db, { threadId: stay.request_id, type: 'thread.changed' })
+    } catch (cause) {
+      throw new HTTPError({ statusCode: 503, message: 'The stay was saved, but its conversation update could not be published. Reload before retrying.',
+        data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, stay_id: stay.id, product_id: stay.product_id, version: stay.version, request_id: stay.request_id }, cause })
+    }
+  }
 }
 
 async function storedStay(db: DbClient, organizationId: string, stayId: string): Promise<Stay> {

@@ -38,6 +38,8 @@ class FakeChannex {
   availability: Record<string, number> = {}
   restrictions: Record<string, Record<string, unknown>> = {}
   token = ''
+  messagesProperty: string | null = null
+  failMessages = false
 
   fetch = async (input: string | URL | Request, init: RequestInit = {}): Promise<Response> => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url)
@@ -90,6 +92,12 @@ class FakeChannex {
     if (method === 'PUT' && path === '/channels/chan-1') { this.channel.properties = body!.channel.properties; return json({ data: {} }) }
     if (method === 'DELETE' && path === '/properties/setup-1') return json({ meta: { message: 'Success' } })
     if (method === 'POST' && path === '/channels/chan-1/activate') { this.channel.active = true; return json({ meta: { message: 'Success' } }) }
+    if (method === 'GET' && path === '/applications/installed') return json({ data: this.messagesProperty === null ? [] : [{ id: 'messages-app', type: 'application_installation', attributes: { id: 'messages-app', property_id: this.messagesProperty, application_code: 'channex_messages' } }] })
+    if (method === 'POST' && path === '/applications/install') {
+      this.messagesProperty = (JSON.parse(String(init.body)) as { application_installation: { property_id: string } }).application_installation.property_id
+      return json({ data: { id: 'messages-app', type: 'application_installation', attributes: { id: 'messages-app', property_id: this.messagesProperty, application_code: 'channex_messages' } } })
+    }
+    if (method === 'GET' && path === '/message_threads') return this.failMessages ? new Response('Provider message read unavailable', { status: 503 }) : json({ data: [], meta: { total: 0 } })
     if (method === 'POST' && path === '/channels/chan-1/execute/load_future_reservations') return json({ meta: { message: 'Success' } })
     return new Response(`unexpected ${method} ${path}`, { status: 404 })
   }
@@ -101,26 +109,28 @@ class FakeChannex {
 async function boot() {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'airbnb-import-proof', compatibilityDate: '2024-11-01',
-    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
-    env: { DB: { type: 'd1' } },
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
+    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'airbnb-import-proof', exportName: 'Hub' } },
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
+    const env = await runtime.getBindings<CloudflareEnv>()
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Org', 'org', 'org', '{}', 'saya-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', ?)`).bind(ORG, TZ).run()
     await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Owner', 'owner@example.test', 1, 0, 0)").bind(OWNER).run()
     await db.prepare("INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES ('m-owner', ?, ?, 'owner', 0)").bind(ORG, OWNER).run()
-    return { runtime, db }
+    return { runtime, db, env }
   } catch (error) {
     await runtime.dispose()
     throw error
   }
 }
 
-async function connected(db: D1Database, channex: FakeChannex) {
-  const connection = new AirbnbConnection(db, { DB: db, CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test', GOOGLE_CLIENT_ID: 'test-google-client', GOOGLE_CLIENT_SECRET: 'test-google-secret', APPLE_APP_BUNDLE_ID: 'com.krabiclaw.app' } as unknown as CloudflareEnv, ORG, OWNER)
+async function connected(db: D1Database, env: CloudflareEnv, channex: FakeChannex) {
+  const connection = new AirbnbConnection(db, { ...env, DB: db, CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k', STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test', GOOGLE_CLIENT_ID: 'test-google-client', GOOGLE_CLIENT_SECRET: 'test-google-secret', APPLE_APP_BUNDLE_ID: 'com.krabiclaw.app' } as unknown as CloudflareEnv, ORG, OWNER)
   await connection.start()
   await connection.complete(channex.token, 'chan-1')
   return connection
@@ -129,12 +139,12 @@ async function connected(db: D1Database, channex: FakeChannex) {
 const form = { missingDetails: { childBeds: '1', infantCots: '0' }, checkInTime: '15:00', checkOutTime: '11:00' }
 
 test('a listing imports through every stage into a home Channex and KrabiClaw agree on', { timeout: 120_000 }, async () => {
-  const { runtime, db } = await boot()
+  const { runtime, db, env } = await boot()
   const channex = new FakeChannex()
   const realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch
   try {
-    const connection = await connected(db, channex)
+    const connection = await connected(db, env, channex)
     const details = await connection.details(LISTING)
     assert.deepEqual(details.missingFields, ['childBeds', 'infantCots'])
 
@@ -160,9 +170,17 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
       channex.ratePlan = mapping?.rate_plan_id ?? ''
       const result = await connection.advance(productId)
       stages.push(result.stage)
+      if (result.stage === 'messages') {
+        channex.failMessages = true
+        await assert.rejects(connection.advance(productId), /503/)
+        assert.equal(await db.prepare('SELECT import_stage FROM product_channel_mappings WHERE product_id = ?').bind(productId).first('import_stage'), 'messages')
+        assert.equal(channex.seen.filter(request => request.path === '/channels/chan-1/execute/load_future_reservations').length, 1)
+        channex.failMessages = false
+      }
       if (result.stage === 'complete') break
     }
-    assert.deepEqual(stages, ['room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'complete'])
+    assert.deepEqual(stages, ['room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'messages', 'complete'])
+    assert.equal(channex.seen.filter(request => request.path === '/channels/chan-1/execute/load_future_reservations').length, 1)
     const mapping = await db.prepare('SELECT property_id, room_type_id, rate_plan_id, enabled, import_property, import_calendar FROM product_channel_mappings WHERE product_id = ?').bind(productId).first<Record<string, unknown>>()
     assert.ok(mapping!.property_id && mapping!.room_type_id && mapping!.rate_plan_id)
     assert.deepEqual([mapping!.enabled, mapping!.import_property, mapping!.import_calendar], [1, null, null])
@@ -180,13 +198,13 @@ test('a listing imports through every stage into a home Channex and KrabiClaw ag
 })
 
 test('a listing priced in another currency stops before anything is created', { timeout: 120_000 }, async () => {
-  const { runtime, db } = await boot()
+  const { runtime, db, env } = await boot()
   const channex = new FakeChannex()
   channex.currency = 'EUR'
   const realFetch = globalThis.fetch
   globalThis.fetch = channex.fetch as typeof fetch
   try {
-    const connection = await connected(db, channex)
+    const connection = await connected(db, env, channex)
     await assert.rejects(connection.prepare(LISTING, form), (error: unknown) => (error as { data?: { code?: string } }).data?.code === 'CURRENCY_MISMATCH')
     for (const table of ['business_locations', 'products', 'product_nights', 'product_channel_mappings']) {
       assert.equal((await db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first<{ n: number }>())!.n, 0, table)

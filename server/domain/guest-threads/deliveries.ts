@@ -253,5 +253,5 @@ export async function listThreadDeliveries(db: DbClient, threadId: string): Prom
 
 /** A failure worth showing in the thread. */
 export function isVisibleDeliveryFailure(delivery: GuestThreadDeliveryRow): boolean {
-  return delivery.status === 'failed'
+  return delivery.status === 'failed' || delivery.status === 'uncertain'
 }

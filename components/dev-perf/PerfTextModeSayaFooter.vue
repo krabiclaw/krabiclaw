@@ -12,7 +12,6 @@
         </main>
         <LazySayaFooter
           :organization="null"
-          :is-platform="false"
           :locations="[]"
           :error="null"
           :has-products="false"

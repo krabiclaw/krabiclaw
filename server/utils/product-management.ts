@@ -10,6 +10,9 @@ import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-reso
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, type TenantPageEditorInput } from '~/server/utils/content/pages'
 import { loadOrganizationTemplate } from '~/server/utils/content/publishing'
+import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
+import { requireChannelPush } from '~/server/integrations/channex/ari'
+import type { ChannelPush } from '~/shared/channel-push'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
@@ -514,6 +517,9 @@ export function resolveVariantPrice(variant: ProductVariant, selection: PriceSel
 // ---------------------------------------------------------------------------
 
 interface Actor { actorId: string }
+
+/** A write receipt, never a field on a stored or read Product. */
+export type ProductMutation = Product & { channel_push: ChannelPush | null }
 
 export function slugCandidate(base: string, attempt: number): string {
   const normalized = base.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, PRODUCT_LIMITS.slug)
@@ -1058,6 +1064,17 @@ function productPageInput(product: Pick<CreateProductInput, 'kind' | 'name' | 'd
     : undefined)
 }
 
+export async function publishStayProducts(env: CloudflareEnv, products: readonly Product[]): Promise<void> {
+  for (const product of products) {
+    if (product.kind !== 'stay') continue
+    if (!product.stay) throw new HTTPError({ statusCode: 500, message: 'The place to stay has no home configuration', data: { code: 'STAY_HOME_CONFIGURATION_REQUIRED', field: 'stay' } })
+    const input = { organizationId: product.organization_id, productId: product.id, locationId: product.stay.location_id, stayId: null }
+    await publishStayInvalidation(env, { ...input, type: 'stay.changed' }, { updated_at: product.updated_at })
+    await publishStayInvalidation(env, { ...input, type: 'nights.changed' }, { updated_at: product.updated_at })
+  }
+}
+
+
 /**
  * Create one product, and — when the caller asks — the source page it owns,
  * in one batch: the product, its default variant, its publication, the page
@@ -1068,11 +1085,12 @@ function productPageInput(product: Pick<CreateProductInput, 'kind' | 'name' | 'd
  * unique key, so a lost response or a concurrent duplicate never makes a
  * second product. The same key with a different request conflicts.
  */
+
 export async function createProduct(db: DbClient, input: {
   organizationId: string
   product: CreateProductInput
   actor: Actor
-  env?: CloudflareEnv
+  env: CloudflareEnv
   /** Publish it on `organizationId` in the same batch — see planProductCreateWrites. */
   publication?: { published: boolean }
   /**
@@ -1086,7 +1104,7 @@ export async function createProduct(db: DbClient, input: {
 }): Promise<Product> {
   const key = input.idempotencyKey?.trim()
   if (input.idempotencyKey !== undefined && (!key || key.length > 200)) invalid('idempotency_key must be 1 to 200 characters')
-  const env = input.env ?? input.page?.env ?? input.booking?.env
+  const env = input.env
   const pageInput = productPageInput(input.product, env, input.page)
   const product = input.product
   const dedupeKey = key ? creationDedupeKey('product', input.organizationId, key) : null
@@ -1100,6 +1118,7 @@ export async function createProduct(db: DbClient, input: {
     if (!existing) throw new HTTPError({ statusCode: 410, statusMessage: 'The product this idempotency_key created has been deleted; it is not created again' })
     const created = await getProduct(db, input.organizationId, record.entityId)
     if (created.page && pageInput) await refreshTenantPageCard(db, pageInput.env, { variantId: created.page.id, path: created.page.path }, input.actor.actorId)
+    await publishStayProducts(env, [created])
     return created
   }
   const earlier = await replay()
@@ -1149,7 +1168,9 @@ export async function createProduct(db: DbClient, input: {
   // after, and a failure there is reported as itself; a retry under the same
   // key returns this product rather than making another.
   if (page && pageInput) await refreshTenantPageCard(db, pageInput.env, page, input.actor.actorId)
-  return getProduct(db, input.organizationId, planned.id)
+  const created = await getProduct(db, input.organizationId, planned.id)
+  await publishStayProducts(env, [created])
+  return created
 }
 
 /**
@@ -1285,12 +1306,13 @@ async function replayCatalogWrite(db: DbClient, organizationId: string, dedupeKe
 }
 
 export async function createProductsBatch(db: DbClient, input: {
-  organizationId: string; products: CreateProductInput[]; actor: Actor; env?: CloudflareEnv; publication?: { published: boolean }; idempotencyKey?: string
+  organizationId: string; products: CreateProductInput[]; actor: Actor; env: CloudflareEnv; publication?: { published: boolean }; idempotencyKey?: string
 }): Promise<Product[]> {
   const complete = async (products: Product[]): Promise<Product[]> => {
     for (const product of products) if (product.page) {
-      await refreshTenantPageCard(db, input.env ?? invalid('The service page requires the organization environment'), { variantId: product.page.id, path: product.page.path }, input.actor.actorId)
+      await refreshTenantPageCard(db, input.env, { variantId: product.page.id, path: product.page.path }, input.actor.actorId)
     }
+    await publishStayProducts(input.env, products)
     return products
   }
   const dedupeKey = input.idempotencyKey ? `catalog-create:${input.organizationId}:${input.idempotencyKey}` : null
@@ -1530,10 +1552,24 @@ export async function updateProduct(db: DbClient, input: {
   productId: string
   patch: UpdateProductInput
   actor: Actor
-  env?: CloudflareEnv
+  env: CloudflareEnv
   booking?: { data: ProductBookingSetupInput; env: CloudflareEnv }
   idempotencyKey?: string
-}): Promise<Product> {
+  /** updateStayHome completes once after its optional location timezone write. */
+  deferStayNightPush?: true
+}): Promise<ProductMutation> {
+  const env = input.env
+  const reprice = input.patch.variants !== undefined || input.patch.stay?.min_nights !== undefined
+  const complete = async (product: Product): Promise<ProductMutation> => {
+    let channelPush: ChannelPush | null = null
+    if (product.kind === 'stay' && reprice && !input.deferStayNightPush) {
+      if (!env) throw new HTTPError({ statusCode: 503, message: 'The saved home requires its organization environment to update the channel', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', committed: true, product_id: product.id, updated_at: product.updated_at } })
+      const { pushStayHomeNights } = await import('~/server/domain/stays')
+      channelPush = await pushStayHomeNights(db, env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product)
+    }
+    await publishStayProducts(env, [product])
+    return { ...product, channel_push: channelPush }
+  }
   const dedupeKey = input.idempotencyKey ? `product-update:${input.organizationId}:${input.productId}:${input.idempotencyKey}` : null
   const requestHash = dedupeKey ? await creationRequestHash({ patch: input.patch, booking: input.booking?.data ?? null }) : null
   const replay = async () => {
@@ -1544,15 +1580,19 @@ export async function updateProduct(db: DbClient, input: {
     return getProduct(db, input.organizationId, input.productId)
   }
   const earlier = await replay()
-  if (earlier) return earlier
+  if (earlier) return complete(earlier)
   if (input.booking && !dedupeKey) invalid('An idempotency key is required when configuring bookable sessions')
   const current = await getProduct(db, input.organizationId, input.productId)
   const now = new Date().toISOString()
   const { writes, keptVariants, product: planned } = await planProductUpdate(db, {
     organizationId: input.organizationId, current, patch: input.patch, actor: input.actor, now,
-    env: input.env ?? input.booking?.env, booking: input.booking?.data,
+    env: input.env, booking: input.booking?.data,
     cacheInvalidations: await productCacheInvalidations(db, input.organizationId, input.productId, 'product_updated'),
   })
+  if (current.kind === 'stay' && reprice) {
+    if (!env) throw new HTTPError({ statusCode: 503, message: 'The home change requires the organization environment', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', product_id: current.id } })
+    await requireChannelPush(db, env, input.organizationId, current.id)
+  }
 
   if (input.booking) {
     await assertBookableOffering(db, input.organizationId, planned, input.booking.data.location_id)
@@ -1588,12 +1628,13 @@ export async function updateProduct(db: DbClient, input: {
     if (raced.length === 0) throw error
     conflict(`${raced.join(', ')} was booked while you were editing, so nothing was changed. Turn it off instead of removing it.`)
   })
-  return getProduct(db, input.organizationId, input.productId)
+  return complete(await getProduct(db, input.organizationId, input.productId))
 }
 
 export async function deleteProduct(db: DbClient, input: {
-  organizationId: string; productId: string
+  organizationId: string; productId: string; env: CloudflareEnv
 }): Promise<void> {
+  const product = await getProduct(db, input.organizationId, input.productId)
   const bound = await queryAll<{ id: string; updated_at: string }>(db, `
     SELECT id, updated_at FROM content_documents WHERE organization_id = ? AND product_id = ? AND kind='page' AND row_role='root'
   `, [input.organizationId, input.productId])
@@ -1610,20 +1651,31 @@ export async function deleteProduct(db: DbClient, input: {
   if (await queryFirst(db, "SELECT 1 FROM payment_checkout_holds WHERE organization_id=? AND product_id=? AND status='active' AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') LIMIT 1", [input.organizationId, input.productId])) {
     conflict('This product has an active checkout. Turn it off instead of deleting it.')
   }
+  // A home's provider conversations and saved-reply schedules name it; deleting
+  // it would orphan their history and schedules.
+  if (await queryFirst(db, 'SELECT 1 FROM channel_threads WHERE organization_id = ? AND product_id = ? LIMIT 1', [input.organizationId, input.productId])) {
+    conflict('This home has guest conversations from its channel. Turn it off instead of deleting it.')
+  }
+  if (await queryFirst(db, "SELECT 1 FROM message_templates t, json_each(t.schedule_json, '$.productIds') home WHERE t.organization_id = ? AND t.schedule_json IS NOT NULL AND home.value = ? LIMIT 1", [input.organizationId, input.productId])) {
+    conflict('A saved reply schedules messages for this home. Remove the home from that schedule before deleting it.')
+  }
   const pages = await Promise.all(bound.map(page => prepareTenantPageDelete(db, page.id, { scope: { organizationId: input.organizationId }, expectedUpdatedAt: page.updated_at })))
   const invalidations = await productCacheInvalidations(db, input.organizationId, input.productId, 'product_deleted')
   await executeBatch(db, [
     { query: `UPDATE products SET updated_at=NULL WHERE organization_id=? AND id=? AND (EXISTS(SELECT 1 FROM bookings WHERE organization_id=? AND product_id=?)
       OR EXISTS(SELECT 1 FROM stays WHERE organization_id=? AND product_id=?)
-      OR EXISTS(SELECT 1 FROM payment_checkout_holds WHERE organization_id=? AND product_id=? AND status='active' AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')))`, params: [input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId] },
+      OR EXISTS(SELECT 1 FROM channel_threads WHERE organization_id=? AND product_id=?)
+      OR EXISTS(SELECT 1 FROM message_templates t, json_each(t.schedule_json, '$.productIds') home WHERE t.organization_id=? AND t.schedule_json IS NOT NULL AND home.value=?)
+      OR EXISTS(SELECT 1 FROM payment_checkout_holds WHERE organization_id=? AND product_id=? AND status='active' AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')))`, params: [input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId, input.organizationId, input.productId] },
     ...pages.flatMap(page => page.queries),
     ...resourceLocalizationDeletionQueries('product', { query: 'SELECT ?', params: [input.productId] }),
     ...invalidations,
     { query: 'DELETE FROM products WHERE organization_id = ? AND id = ?', params: [input.organizationId, input.productId] },
   ], { operation: 'Delete product' }).catch(error => {
-    if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) conflict('This product received a booking, stay or checkout while you were deleting it. Turn it off instead of deleting it.')
+    if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) conflict('This product received a booking, stay, guest conversation, schedule or checkout while you were deleting it. Turn it off instead of deleting it.')
     throw error
   })
+  await publishStayProducts(input.env, [product])
 }
 
 /**
@@ -2057,13 +2109,31 @@ async function planProductReconciliation(db: DbClient, input: {
 }
 
 export async function reconcileProducts(db: DbClient, input: {
-  organizationId: string; products: ReconcileProductInput[]; actor: Actor; env?: CloudflareEnv; deactivateMissing?: boolean; idempotencyKey?: string
-}): Promise<Product[]> {
+  organizationId: string; products: ReconcileProductInput[]; actor: Actor; env: CloudflareEnv; deactivateMissing?: boolean; idempotencyKey?: string
+}): Promise<ProductMutation[]> {
+  if (!Array.isArray(input.products)) throw new HTTPError({ statusCode: 400, message: 'products must be an array', data: { code: 'INVALID_PRODUCT_FIELD', field: 'products' } })
+  input.products.forEach((product, index) => {
+    if (typeof product !== 'object' || product === null || Array.isArray(product)) throw new HTTPError({ statusCode: 400, message: `products[${index}] must be an object`, data: { code: 'INVALID_PRODUCT_FIELD', field: `products[${index}]` } })
+  })
+  const reprice = new Set(input.products.flatMap(product => product.product_id && (product.variants !== undefined || product.stay?.min_nights !== undefined) ? [product.product_id] : []))
+  const complete = async (products: Product[]): Promise<ProductMutation[]> => {
+    const results: ProductMutation[] = []
+    for (const product of products) {
+      let channelPush: ChannelPush | null = null
+      if (product.kind === 'stay' && reprice.has(product.id)) {
+        if (!input.env) throw new HTTPError({ statusCode: 503, message: 'The saved home requires its organization environment to update the channel', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', committed: true, product_id: product.id, updated_at: product.updated_at } })
+        const { pushStayHomeNights } = await import('~/server/domain/stays')
+        channelPush = await pushStayHomeNights(db, input.env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product)
+      }
+      results.push({ ...product, channel_push: channelPush })
+    }
+    await publishStayProducts(input.env, products)
+    return results
+  }
   const dedupeKey = input.idempotencyKey ? `catalog-reconcile:${input.organizationId}:${input.idempotencyKey}` : null
   const requestHash = dedupeKey ? await creationRequestHash({ products: input.products, deactivateMissing: input.deactivateMissing ?? false }) : null
   const replay = await replayCatalogWrite(db, input.organizationId, dedupeKey, requestHash)
-  if (replay) return replay
-  if (!Array.isArray(input.products)) invalid('products must be an array')
+  if (replay) return complete(replay)
   const products = input.products.map(product => ({
     ...product,
     ...(product.variants === undefined ? {} : {
@@ -2071,7 +2141,12 @@ export async function reconcileProducts(db: DbClient, input: {
       variants: product.variants.map(variant => ({ ...variant, ...(variant.prices === undefined ? {} : { prices_mode: 'replace' as const }) })),
     }),
   }))
-  const { touched, perProduct, now } = await planProductReconciliation(db, { ...input, products })
+  const { touched, perProduct, now, products: planned } = await planProductReconciliation(db, { ...input, products })
+  for (const product of planned) {
+    if (product.kind !== 'stay' || !reprice.has(product.id)) continue
+    if (!input.env) throw new HTTPError({ statusCode: 503, message: 'The home change requires the organization environment', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', product_id: product.id } })
+    await requireChannelPush(db, input.env, input.organizationId, product.id)
+  }
   const missing = input.deactivateMissing ? await queryAll<{ id: string }>(db, `SELECT id FROM products WHERE organization_id=? AND active=1 AND id NOT IN (SELECT value FROM json_each(?)) AND EXISTS (SELECT 1 FROM product_publications pub WHERE pub.product_id=products.id AND pub.organization_id=?)`, [input.organizationId, d1JsonArray(touched), input.organizationId]) : []
   const answered = [...touched, ...missing.map(product => product.id)]
   const writes = perProduct.flat()
@@ -2082,12 +2157,12 @@ export async function reconcileProducts(db: DbClient, input: {
     const stale = /NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))
     if (stale || isUniqueDedupeConflict(error)) {
       const concurrent = await replayCatalogWrite(db, input.organizationId, dedupeKey, requestHash)
-      if (concurrent) return concurrent
+      if (concurrent) return complete(concurrent)
     }
     if (stale) throw new HTTPError({ statusCode: 409, statusMessage: 'The catalog or its availability changed while you were editing. Nothing was changed; read its current state and retry.', data: { code: 'PRODUCT_UPDATE_CONFLICT' }, cause: error })
     throw error
   }
-  return readProductBatch(db, input.organizationId, answered)
+  return complete(await readProductBatch(db, input.organizationId, answered))
 }
 
 

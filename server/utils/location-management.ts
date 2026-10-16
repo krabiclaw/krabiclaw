@@ -2,7 +2,7 @@ import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { parseOpeningHours, parseSpecialHours, type OpeningHours, type SpecialHours } from '~/shared/reservation-hours'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from "~/server/utils/organization-events";
 import { HTTPError } from 'nitro'
-import { executeBatch, queryFirst, type BatchQuery } from "~/server/db";
+import { executeBatch, queryAll, queryFirst, type BatchQuery } from "~/server/db";
 import { isValidTimezone, normalizeTimezone } from "~/utils/timezone";
 import type { CloudflareEnv } from "~/server/utils/auth";
 import { refreshSocialCard } from '~/server/utils/social-card'
@@ -11,6 +11,7 @@ import { prepareContentDocumentDeletion } from '~/server/utils/content/documents
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { organizationLocations } from '~/server/utils/billing'
 import { additionalLocationPrice, INCLUDED_LOCATIONS, isKnownRecurringPlan } from '~/shared/billing-model'
+import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 
 type SetupEnv = CloudflareEnv;
 
@@ -409,7 +410,7 @@ export async function updateLocation(
   locationIdOrSlug: string,
   input: UpdateLocationInput,
   userId: string,
-  env?: CloudflareEnv,
+  env: CloudflareEnv,
   writeGuard?: BatchQuery,
 ) {
   const existing = await loadLocation(db, organizationId, locationIdOrSlug);
@@ -417,6 +418,16 @@ export async function updateLocation(
     return { status: 404, data: { error: "Location not found.", code: 'LOCATION_NOT_FOUND', field: 'location_id' } };
   }
   const locationId = existing.id;
+  const publishHomes = async (updatedAt: unknown) => {
+    const homes = await queryAll<{ product_id: string }>(db, 'SELECT product_id FROM product_stay_configs WHERE organization_id = ? AND location_id = ?', [organizationId, locationId]);
+    if (!homes.length) return;
+    if (typeof updatedAt !== 'string' || !updatedAt) throw new HTTPError({ statusCode: 500, message: 'The saved home location has no update timestamp', data: { code: 'LOCATION_NOT_READABLE', field: 'location.updated_at', committed: true, location_id: locationId } });
+    for (const home of homes) {
+      const input = { organizationId, productId: home.product_id, locationId, stayId: null };
+      await publishStayInvalidation(env, { ...input, type: 'stay.changed' }, { updated_at: updatedAt });
+      await publishStayInvalidation(env, { ...input, type: 'nights.changed' }, { updated_at: updatedAt });
+    }
+  };
   // What the location's card draws: its title, its description and the
   // locality in its address. Hours, phone and the rest cannot change it.
   const cardInputChanged = input.title !== undefined || input.seo_title !== undefined
@@ -618,7 +629,8 @@ export async function updateLocation(
     }
 
     if (updated) {
-      if (env && cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId })
+      if (cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId })
+      await publishHomes(updated.location?.updated_at);
       return { status: 200, data: { success: true, location: updated.location } };
     }
 
@@ -635,7 +647,8 @@ export async function updateLocation(
   if (!(await runUpdate(params))) return stale;
   const location = await loadLocation(db, organizationId, locationId);
   if (!location) throw new HTTPError({ statusCode: 500, statusMessage: 'Updated location could not be read back', data: { code: 'LOCATION_NOT_READABLE', field: 'location.id' } });
-  if (env && cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId })
+  if (cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId })
+  await publishHomes(location.updated_at);
   return { status: 200, data: { success: true, location } };
 }
 

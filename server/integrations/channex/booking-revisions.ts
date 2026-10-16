@@ -4,6 +4,7 @@ import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
 import { describeErrorForTelemetry } from '~/shared/error-telemetry'
 import { channexGet, channexList, channexRequest, type ChannexEnv } from './client'
 import { ChannexDataError, integer, nullableString, object, string } from './data'
+import type { GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 
 /**
  * Airbnb bookings arriving through Channex. A revision names a booking that
@@ -70,7 +71,7 @@ async function currentBooking(env: ChannexEnv, bookingId: string, propertyId: st
 }
 
 /** One revision: read, land, acknowledge. Throws on anything short of the acknowledgement. */
-export async function applyBookingRevision(db: DbClient, env: ChannexEnv, revisionId: string): Promise<RevisionOutcome> {
+export async function applyBookingRevision(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv, revisionId: string): Promise<RevisionOutcome> {
   let mapping: Mapping | null = null
   try {
     const revision = await channexGet(env, `/booking_revisions/${encodeURIComponent(revisionId)}`, 'booking_revision')
@@ -83,7 +84,7 @@ export async function applyBookingRevision(db: DbClient, env: ChannexEnv, revisi
       return { status: 'ignored_disconnected' }
     }
     const booking = await currentBooking(env, string(revision.attributes.booking_id, 'booking_id'), propertyId, { id: revision.id, insertedAt: string(revision.attributes.inserted_at, 'revision inserted_at') })
-    const stay = await applyChannelBooking(db, mapping.organization_id, mapping.product_id, booking)
+    const stay = await applyChannelBooking(db, env, mapping.organization_id, mapping.product_id, booking)
     // The outcome is recorded before the acknowledgement: once Channex drops the
     // revision from its feed it cannot be recovered from there. The row reads
     // `applied` until the acknowledgement is confirmed.
@@ -102,7 +103,7 @@ export async function applyBookingRevision(db: DbClient, env: ChannexEnv, revisi
  * webhook that never arrived or failed. Every revision is tried; the run fails
  * naming the ones that did not land.
  */
-export async function runRevisionFeed(db: DbClient, env: ChannexEnv): Promise<{ acknowledged: number; ignored: number }> {
+export async function runRevisionFeed(db: DbClient, env: ChannexEnv & GuestInboxPublicationEnv): Promise<{ acknowledged: number; ignored: number }> {
   const revisions = await channexList(env, '/booking_revisions/feed', 'booking_revision', { 'order[inserted_at]': 'asc' })
   let acknowledged = 0
   let ignored = 0

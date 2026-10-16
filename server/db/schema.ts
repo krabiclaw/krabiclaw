@@ -116,7 +116,19 @@ export const requests = sqliteTable("requests", {
 	check("requests_instants_check", sql`(resolved_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', resolved_at, '+0 days') IS resolved_at) AND (archived_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', archived_at, '+0 days') IS archived_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
  foreignKey({ columns: [table.organization_id, table.location_id], foreignColumns: [business_locations.organization_id, business_locations.id], name: "requests_location_scope_fk" }),
  check("requests_payload_check", sql`json_valid(payload_json) AND json_type(payload_json) = 'object'`),
- check("requests_guest_payload_check", sql`(json_type(payload_json, '$.guest.name') IS 'text' AND (json_type(payload_json, '$.guest.email') IS 'text' OR (kind = 'stay' AND json_type(payload_json, '$.guest.email') IS 'null')) AND (json_type(payload_json, '$.guest.phone') IS 'text' OR json_type(payload_json, '$.guest.phone') IS 'null') AND (json_type(payload_json, '$.guest.email') IS 'text' OR json_type(payload_json, '$.guest.phone') IS 'text'))`),
+	check("requests_guest_payload_check", sql`(
+    (json_type(payload_json, '$.participant') IS NULL AND json_type(payload_json, '$.guest.name') IS 'text'
+      AND (json_type(payload_json, '$.guest.email') IS 'text' OR (kind = 'stay' AND json_type(payload_json, '$.guest.email') IS 'null'))
+      AND (json_type(payload_json, '$.guest.phone') IS 'text' OR json_type(payload_json, '$.guest.phone') IS 'null')
+      AND (json_type(payload_json, '$.guest.email') IS 'text' OR json_type(payload_json, '$.guest.phone') IS 'text'))
+    OR (kind = 'stay' AND json_type(payload_json, '$.participant') IS 'object'
+      AND json_extract(payload_json, '$.participant.kind') IS 'channel'
+      AND json_type(payload_json, '$.participant.title') IS 'text' AND trim(json_extract(payload_json, '$.participant.title')) <> ''
+      AND json_type(payload_json, '$.guest') IS 'object'
+      AND (json_type(payload_json, '$.guest.name') IS 'text' OR json_type(payload_json, '$.guest.name') IS 'null')
+      AND (json_type(payload_json, '$.guest.email') IS 'text' OR json_type(payload_json, '$.guest.email') IS 'null')
+      AND (json_type(payload_json, '$.guest.phone') IS 'text' OR json_type(payload_json, '$.guest.phone') IS 'null'))
+  )`),
  check("requests_message_payload_check", sql`kind <> 'contact' OR json_type(payload_json, '$.message') IS 'text'`),
  check("requests_scope_check", sql`organization_id IS NOT NULL`),
  check("requests_state_check", sql`conversation_state IS NOT NULL`),
@@ -144,7 +156,7 @@ export const activity_entries = sqliteTable("activity_entries", {
  actor_kind: text({ enum: ["guest", "member", "system", "cloudflare"] }).notNull(),
  actor_user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
  target_user_id: text().references((): AnySQLiteColumn => user.id, { onDelete: "set null" }),
- channel: text({ enum: ["web", "email", "whatsapp", "system"] }),
+ channel: text({ enum: ["web", "email", "whatsapp", "airbnb", "system"] }),
  body: text(),
  event_name: text(),
  payload_json: text().default("{}").notNull(),
@@ -183,7 +195,7 @@ export const guest_thread_deliveries = sqliteTable("guest_thread_deliveries", {
 	check("guest_thread_deliveries_instants_check", sql`(created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
 	uniqueIndex("guest_thread_deliveries_provider_message_unique").on(table.provider, table.provider_message_id).where(sql`provider_message_id IS NOT NULL`),
 	index("guest_thread_deliveries_entry_status_idx").on(table.entry_id, table.status),
-	check("guest_thread_deliveries_provider_check", sql`(channel = 'email' AND provider IN ('resend', 'log_only')) OR (channel = 'whatsapp' AND provider IN ('meta', 'log_only'))`),
+	check("guest_thread_deliveries_provider_check", sql`(channel = 'email' AND provider IN ('resend', 'log_only')) OR (channel = 'whatsapp' AND provider IN ('meta', 'log_only')) OR (channel = 'airbnb' AND provider = 'channex') OR (channel = 'push' AND provider = 'apns')`),
 ]);
 
 
@@ -1078,6 +1090,7 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	check_out_time: text().notNull(),
 	max_guests: integer().notNull(),
 	min_nights: integer().default(1).notNull(),
+	check_in_instructions: text(),
 	assigned_member_id: text(),
 	assigned_team_id: text().references(() => team.id, { onDelete: "set null" }),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
@@ -1093,6 +1106,29 @@ export const product_stay_configs = sqliteTable("product_stay_configs", {
 	check("product_stay_configs_times_check", sql`check_in_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_in_time < '24:00' AND check_out_time GLOB '[0-2][0-9]:[0-5][0-9]' AND check_out_time < '24:00'`),
 	check("product_stay_configs_guests_check", sql`max_guests >= 1`),
 	check("product_stay_configs_min_nights_check", sql`min_nights >= 1`),
+	check("product_stay_configs_instructions_check", sql`check_in_instructions IS NULL OR (length(trim(check_in_instructions)) BETWEEN 1 AND 5000)`),
+]);
+
+// Workspace-owned reply text, optionally scheduled for explicitly named homes.
+// A schedule's activation time is a local receipt baseline, never a provider
+// creation timestamp. Edits increase version so stale planners cannot win.
+export const message_templates = sqliteTable("message_templates", {
+	id: text().primaryKey(),
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	title: text().notNull(),
+	body: text().notNull(),
+	schedule_json: text(),
+	schedule_enabled_at: text(),
+	version: integer().notNull(),
+	created_at: text().notNull(),
+	updated_at: text().notNull(),
+}, (table) => [
+	unique("message_templates_org_id_unique").on(table.organization_id, table.id),
+	index("message_templates_org_updated_idx").on(table.organization_id, table.updated_at, table.id),
+	check("message_templates_text_check", sql`length(trim(title)) BETWEEN 1 AND 100 AND length(trim(body)) BETWEEN 1 AND 5000`),
+	check("message_templates_version_check", sql`version >= 1`),
+	check("message_templates_schedule_check", sql`(schedule_json IS NULL AND schedule_enabled_at IS NULL) OR (schedule_json IS NOT NULL AND schedule_enabled_at IS NOT NULL AND json_valid(schedule_json) AND json_type(schedule_json) IS 'object' AND json_type(schedule_json, '$.productIds') IS 'array' AND json_array_length(schedule_json, '$.productIds') BETWEEN 1 AND 100 AND ((json_extract(schedule_json, '$.trigger') = 'booking_received' AND json_extract(schedule_json, '$.delayMinutes') = 5) OR (json_extract(schedule_json, '$.trigger') IN ('check_in', 'check_out') AND json_type(schedule_json, '$.offsetDays') IS 'integer' AND json_extract(schedule_json, '$.offsetDays') BETWEEN -7 AND 7 AND json_extract(schedule_json, '$.localTime') GLOB '[0-2][0-9]:[0-5][0-9]' AND json_extract(schedule_json, '$.localTime') < '24:00'))) IS TRUE`),
+	check("message_templates_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (schedule_enabled_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', schedule_enabled_at, '+0 days') IS schedule_enabled_at)`),
 ]);
 
 // Row meaning: the host (or an imported channel calendar) set this night apart
@@ -1181,6 +1217,7 @@ export const stays = sqliteTable("stays", {
 	revision_id: text(),
 	provider_updated_at: text(),
 	idempotency_key: text(),
+	booking_received_at: text(),
 	cancelled_at: text(),
 	cancellation_reason: text(),
 	version: integer().default(1).notNull(),
@@ -1208,6 +1245,7 @@ export const stays = sqliteTable("stays", {
 	check("stays_money_check", sql`total_minor >= 0 AND length(currency) = 3 AND currency = upper(currency)`),
 	check("stays_provider_check", sql`provider IS NULL OR provider = 'channex'`),
 	check("stays_version_check", sql`version >= 1`),
+	check("stays_booking_received_at_check", sql`booking_received_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', booking_received_at, '+0 days') IS booking_received_at`),
 	check("stays_instants_check", sql`(cancelled_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', cancelled_at, '+0 days') IS cancelled_at) AND (created_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at) AND (updated_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at)`),
 ]);
 
@@ -1256,6 +1294,47 @@ export const stay_payments = sqliteTable("stay_payments", {
 	check("stay_payments_created_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
 ]);
 
+// One plan snapshot per actual stay and template. The outbound activity entry
+// links to the canonical guest_thread_deliveries receipt; provider IDs and send
+// outcomes are never copied into a second receipt ledger here.
+export const scheduled_guest_messages = sqliteTable("scheduled_guest_messages", {
+	id: text().primaryKey(),
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	product_id: text().notNull(),
+	stay_id: text().notNull(),
+	request_id: text(),
+	template_id: text(),
+	template_title: text().notNull(),
+	template_version: integer().notNull(),
+	stay_version: integer().notNull(),
+	body: text().notNull(),
+	due_at: text(),
+	timezone: text().notNull(),
+	status: text().$type<'pending' | 'sending' | 'sent' | 'failed' | 'needs_review' | 'cancelled' | 'skipped'>().notNull(),
+	reason: text(),
+	error_code: text(),
+	error_field: text(),
+	entry_id: text().references(() => activity_entries.id, { onDelete: "no action" }),
+	started_at: text(),
+	sent_at: text(),
+	created_at: text().notNull(),
+	updated_at: text().notNull(),
+}, (table) => [
+	foreignKey({ columns: [table.organization_id, table.product_id, table.stay_id], foreignColumns: [stays.organization_id, stays.product_id, stays.id], name: "scheduled_guest_messages_stay_scope_fk" }).onDelete("cascade"),
+	foreignKey({ columns: [table.organization_id, table.request_id], foreignColumns: [requests.organization_id, requests.id], name: "scheduled_guest_messages_request_scope_fk" }).onDelete("no action"),
+	foreignKey({ columns: [table.organization_id, table.template_id], foreignColumns: [message_templates.organization_id, message_templates.id], name: "scheduled_guest_messages_template_scope_fk" }).onDelete("no action"),
+	uniqueIndex("scheduled_guest_messages_template_stay_unique").on(table.template_id, table.stay_id),
+	index("scheduled_guest_messages_due_idx").on(table.status, table.due_at),
+	index("scheduled_guest_messages_org_created_idx").on(table.organization_id, table.created_at, table.id),
+	check("scheduled_guest_messages_status_check", sql`status IN ('pending', 'sending', 'sent', 'failed', 'needs_review', 'cancelled', 'skipped')`),
+	check("scheduled_guest_messages_due_check", sql`due_at IS NOT NULL OR status IN ('failed', 'skipped')`),
+	check("scheduled_guest_messages_error_check", sql`status NOT IN ('failed', 'needs_review') OR (length(trim(reason)) > 0 AND length(trim(error_code)) > 0 AND length(trim(error_field)) > 0)`),
+	check("scheduled_guest_messages_sent_check", sql`status <> 'sent' OR (entry_id IS NOT NULL AND sent_at IS NOT NULL)`),
+	check("scheduled_guest_messages_sending_check", sql`status <> 'sending' OR started_at IS NOT NULL`),
+	check("scheduled_guest_messages_text_check", sql`length(trim(template_title)) BETWEEN 1 AND 100 AND length(trim(body)) BETWEEN 1 AND 5000 AND template_version >= 1 AND stay_version >= 1`),
+	check("scheduled_guest_messages_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (due_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', due_at, '+0 days') IS due_at) AND (started_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', started_at, '+0 days') IS started_at) AND (sent_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', sent_at, '+0 days') IS sent_at)`),
+]);
+
 // A place to stay as Channex and Airbnb know it, and how far its import got.
 // The Airbnb listing and channel are known from the start; the Channex
 // property, room type and rate plan are filled in as the import creates them,
@@ -1272,7 +1351,7 @@ export const product_channel_mappings = sqliteTable("product_channel_mappings", 
 	property_id: text(),
 	room_type_id: text(),
 	rate_plan_id: text(),
-	import_stage: text().$type<'property' | 'room' | 'rate' | 'inventory' | 'verify_inventory' | 'mapping' | 'activate' | 'reservations' | 'complete'>().notNull(),
+	import_stage: text().$type<'property' | 'room' | 'rate' | 'inventory' | 'verify_inventory' | 'mapping' | 'activate' | 'reservations' | 'messages' | 'complete'>().notNull(),
 	import_property: text(),
 	import_calendar: text(),
 	enabled: integer({ mode: "boolean" }).default(false).notNull(),
@@ -1287,11 +1366,11 @@ export const product_channel_mappings = sqliteTable("product_channel_mappings", 
 	uniqueIndex("product_channel_mappings_rate_plan_unique").on(table.provider, table.rate_plan_id).where(sql`rate_plan_id IS NOT NULL`),
 	index("product_channel_mappings_org_idx").on(table.organization_id),
 	check("product_channel_mappings_provider_check", sql`provider = 'channex'`),
-	check("product_channel_mappings_stage_check", sql`import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'complete')`),
+	check("product_channel_mappings_stage_check", sql`import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'messages', 'complete')`),
 	check("product_channel_mappings_ids_check", sql`(import_stage = 'property' OR property_id IS NOT NULL) AND (import_stage IN ('property', 'room') OR room_type_id IS NOT NULL) AND (import_stage IN ('property', 'room', 'rate') OR rate_plan_id IS NOT NULL)`),
 	check("product_channel_mappings_calendar_check", sql`import_calendar IS NULL OR (json_valid(import_calendar) AND json_type(import_calendar) = 'array')`),
 	check("product_channel_mappings_property_json_check", sql`import_property IS NULL OR (json_valid(import_property) AND json_type(import_property) = 'object')`),
-	check("product_channel_mappings_enabled_check", sql`enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('reservations', 'complete'))`),
+	check("product_channel_mappings_enabled_check", sql`enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('reservations', 'messages', 'complete'))`),
 	check("product_channel_mappings_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 ]);
 
@@ -1545,6 +1624,31 @@ export const oauthAccessToken = sqliteTable("oauthAccessToken", {
 	revoked: integer({ mode: "timestamp" }),
 	confirmation: text(),
 });
+
+// The provider address of one conversation in the canonical requests/activity ledger.
+// A channel inquiry has no stay yet; external_booking_id records a later provider
+// association without inventing an operational booking or guest contact.
+export const channel_threads = sqliteTable("channel_threads", {
+	provider: text().$type<'channex'>().notNull(),
+	external_thread_id: text().notNull(),
+	organization_id: text().notNull(),
+	product_id: text().notNull(),
+	request_id: text().notNull(),
+	external_booking_id: text(),
+	provider_updated_at: text().notNull(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+}, table => [
+	primaryKey({ columns: [table.provider, table.external_thread_id], name: "channel_threads_pk" }),
+	foreignKey({ columns: [table.organization_id, table.request_id], foreignColumns: [requests.organization_id, requests.id], name: "channel_threads_request_scope_fk" }).onDelete("cascade"),
+	foreignKey({ columns: [table.organization_id, table.product_id], foreignColumns: [product_stay_configs.organization_id, product_stay_configs.product_id], name: "channel_threads_home_scope_fk" }).onDelete("no action"),
+	foreignKey({ columns: [table.product_id, table.provider], foreignColumns: [product_channel_mappings.product_id, product_channel_mappings.provider], name: "channel_threads_mapping_fk" }).onDelete("no action"),
+	uniqueIndex("channel_threads_request_unique").on(table.request_id),
+	uniqueIndex("channel_threads_booking_unique").on(table.provider, table.external_booking_id).where(sql`external_booking_id IS NOT NULL`),
+	index("channel_threads_org_idx").on(table.organization_id),
+	check("channel_threads_provider_check", sql`provider = 'channex'`),
+	check("channel_threads_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
+]);
 
 export const oauthClient = sqliteTable("oauthClient", {
 	id: text().primaryKey(),
@@ -1908,6 +2012,22 @@ export const session = sqliteTable("session", {
 	userId: text().notNull().references(() => user.id, { onDelete: "cascade" } ),
 }, (table) => [
 	index("session_userId_idx").on(table.userId),
+]);
+
+export const device_tokens = sqliteTable("device_tokens", {
+	token: text().primaryKey(),
+	user_id: text().notNull().references(() => user.id, { onDelete: "cascade" }),
+	session_id: text().notNull().references(() => session.id, { onDelete: "cascade" }),
+	environment: text().$type<'sandbox' | 'production'>().notNull(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+}, (table) => [
+	index("device_tokens_user_idx").on(table.user_id),
+	index("device_tokens_session_idx").on(table.session_id),
+	check("device_tokens_token_check", sql`length(token) > 0 AND length(token) % 2 = 0 AND token NOT GLOB '*[^0123456789abcdef]*'`),
+	check("device_tokens_environment_check", sql`environment IN ('sandbox', 'production')`),
+	check("device_tokens_created_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
+	check("device_tokens_updated_at_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at`),
 ]);
 
 
@@ -2552,6 +2672,9 @@ export const analytics_summaries = sqliteTable("analytics_summaries", {
 // wants WhatsApp; isAuthorizedWhatsAppRecipient still decides whether that
 // number may receive the message at all.
 //
+// `push_enabled` reaches every APNs device token the person registered from a
+// signed-in KrabiClaw app session (device_tokens).
+//
 // account_security email is not stored here as a switchable value: the API
 // refuses to disable it, because losing a password reset locks a person out of
 // their own account.
@@ -2560,6 +2683,7 @@ export const user_notification_preferences = sqliteTable("user_notification_pref
 	category: text().$type<NotificationCategory>().notNull(),
 	email_enabled: integer({ mode: "boolean" }).notNull(),
 	whatsapp_enabled: integer({ mode: "boolean" }).notNull(),
+	push_enabled: integer({ mode: "boolean" }).notNull(),
 	updated_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
 	primaryKey({ columns: [table.user_id, table.category] }),

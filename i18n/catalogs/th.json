@@ -245,7 +245,6 @@
   "saya.footer.locations_error": "ไม่สามารถโหลดข้อมูลสาขาได้ กรุณาลองใหม่อีกครั้ง",
   "saya.footer.menu": "เมนู",
   "saya.footer.our_story": "เรื่องราวของเรา",
-  "saya.footer.powered_by": "ขับเคลื่อนโดย krabiclaw.com",
   "saya.footer.products": "สินค้า",
   "saya.footer.qa": "ถาม-ตอบ",
   "saya.footer.reviews": "รีวิว",
@@ -465,5 +464,6 @@
   "booking_policy.cancellation_until_start": "ยกเลิกได้ฟรีก่อนเวลาเริ่ม",
   "booking_policy.reschedule_until_start": "เปลี่ยนเวลาได้ก่อนเวลาเริ่ม",
   "booking_policy.reschedule_allowed": "สามารถขอเปลี่ยนเวลาได้",
-  "booking_policy.reschedule_disallowed": "ไม่สามารถเปลี่ยนเวลาได้"
+  "booking_policy.reschedule_disallowed": "ไม่สามารถเปลี่ยนเวลาได้",
+  "legal.powered_by": "ขับเคลื่อนโดย KrabiClaw"
 }

@@ -7,6 +7,8 @@ import { isValidTimezone } from '~/utils/timezone'
 import { channexCreate, channexGet, channexRequest, ChannexError } from './client'
 import { ChannexDataError, object, relationship, string, type JsonRecord, type Resource } from './data'
 import { CALENDAR_NIGHTS, DETAIL_FIELDS, PROPERTY_TYPES, listingCalendar, listingDetails, type DetailField, type ListingDetails, type ListingNight } from './airbnb-listing'
+import { installChannexMessages } from './messages'
+import { backfillChannexMessages } from '~/server/domain/guest-threads/channel-messages'
 
 /**
  * An organization's Airbnb account, connected through Channex: start a
@@ -37,7 +39,7 @@ interface ConnectionRow {
   connected_at: string | null
 }
 
-export const IMPORT_STAGES = ['property', 'room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'complete'] as const
+export const IMPORT_STAGES = ['property', 'room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'messages', 'complete'] as const
 export type ImportStage = typeof IMPORT_STAGES[number]
 
 export interface AirbnbListing {
@@ -373,7 +375,7 @@ export class AirbnbConnection {
       // The nights land before the mapping: until the mapping exists a retry
       // runs this whole step again (the location and product replay by their
       // idempotency key, the nights upsert), so no import is left without its calendar.
-      await importStayNights(this.db, this.manager(), home.product_id, provided(() => calendar.map(night => importedNight(night, organization.default_currency))))
+      await importStayNights(this.db, this.env, this.manager(), home.product_id, provided(() => calendar.map(night => importedNight(night, organization.default_currency))))
       await execute(this.db, `INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, import_stage, import_property, import_calendar)
         VALUES (?, ?, 'channex', ?, ?, 'property', ?, ?) ON CONFLICT (product_id, provider) DO NOTHING`,
       [this.organizationId, home.product_id, listingId, channelId, JSON.stringify(property), JSON.stringify(calendar)])
@@ -508,6 +510,14 @@ export class AirbnbConnection {
         case 'reservations': {
           await wrote('load_airbnb_reservations')
           await channexRequest(this.env, `${path}/execute/load_future_reservations`, 'POST', { listing_id: mapping.listing_id })
+          await save({ import_stage: 'messages' })
+          break
+        }
+        case 'messages': {
+          await wrote('install_messages')
+          await installChannexMessages(this.env, string(mapping.property_id, 'property_id'))
+          await wrote(null)
+          await backfillChannexMessages(this.db, this.env, string(mapping.property_id, 'property_id'), this.organizationId)
           await save({ import_stage: 'complete', import_property: null, import_calendar: null })
           break
         }
@@ -516,6 +526,19 @@ export class AirbnbConnection {
       }
       await wrote(null)
       return { product_id: productId, stage: mapping.import_stage, waiting: false }
+    })
+  }
+
+  /** Existing imports use the same connection lock and installation review policy. */
+  async syncMessages(productId: string): Promise<{ threads: number }> {
+    return this.locked(async (row) => {
+      if (row.status !== 'connected' || !row.channel_id) fail(409, 'NOT_CONNECTED', 'Connect Airbnb before importing conversations')
+      const mapping = await queryFirst<MappingRow>(this.db, "SELECT * FROM product_channel_mappings WHERE organization_id = ? AND product_id = ? AND provider = 'channex'", [this.organizationId, productId])
+      if (!mapping || mapping.enabled !== 1 || mapping.channel_id !== row.channel_id || !mapping.property_id) fail(409, 'CHANNEL_PROPERTY_NOT_READY', 'Connect this home before importing conversations')
+      await this.save(row, { pending_step: 'install_messages' })
+      await installChannexMessages(this.env, mapping.property_id)
+      await this.save(row, { pending_step: null })
+      return backfillChannexMessages(this.db, this.env, mapping.property_id, this.organizationId)
     })
   }
 

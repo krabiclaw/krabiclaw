@@ -40,7 +40,7 @@ const ORGANIZATION_MEDIA_ITEM_SCHEMA = {
 
 const ANNOUNCEMENT_SCHEMA = {
   type: ['object', 'null'],
-  description: 'The universal announcement modal shown to visitors on the public website, available to every theme. An image, when set, is a separate organization media placement (slot "announcement"), not a field here.',
+  description: 'The universal announcement banner or modal shown to visitors on the public website, available to every theme. An image, when set, is a separate organization media placement (slot "announcement"), not a field here.',
   properties: {
     headline: { type: 'string', description: 'Required in every write, even an empty string when disabling without discarding it.' },
     description: { type: ['string', 'null'] },
@@ -48,6 +48,7 @@ const ANNOUNCEMENT_SCHEMA = {
     cta_url: { type: ['string', 'null'], description: 'Button destination, http or https. Requires cta_label and vice versa.' },
     dismissible: { type: 'boolean', description: 'Whether a visitor who closes it will not be shown it again on that device.' },
     enabled: { type: 'boolean', description: 'Whether the announcement is currently shown. false keeps the saved content without showing it.' },
+    format: { type: 'string', enum: ['modal', 'banner'], description: 'Display style: modal popup dialog or top banner bar (default modal).' },
   },
 } as const
 
@@ -262,7 +263,7 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'update_organization_settings',
-      description: "Change the selected site’s brand, description, website font, colors, contact email, default currency, visitor announcement popup or Live/Draft status. Only supplied settings change. An announcement replaces all its fields, and null removes it. Logos and announcement images are separate media placements; this tool does not change them. Returns the updated settings. Published website settings change immediately; this does not create a short post, blog article or social publication.",
+      description: "Change the selected site’s brand, description, website font, colors, contact email, default currency, visitor announcement banner/popup or Live/Draft status. Only supplied settings change. An announcement replaces all its fields, and null removes it. Logos and announcement images are separate media placements; this tool does not change them. Returns the updated settings. Published website settings change immediately; this does not create a short post, blog article or social publication.",
       domain: 'organizations',
       minimumRole: 'admin',
       inputSchema: {

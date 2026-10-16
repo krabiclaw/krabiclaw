@@ -506,3 +506,50 @@ test('a v17 export transfers into the v18 baseline, which admits a stay conversa
     rmSync(directory, { recursive: true, force: true })
   }
 })
+
+test('a v18 export preserves its conversations and receipts unchanged in the channel-participant baseline', async () => {
+  const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
+  const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-v18-transfer-'))
+  try {
+    const sourcePath = join(directory, 'v18.sqlite')
+    const source = new Database(sourcePath)
+    const files = JSON.parse(readFileSync('migrations-history/v18/meta/_journal.json', 'utf8')).entries.map((entry: { tag: string }) => `${entry.tag}.sql`) as string[]
+    for (const file of files) source.exec(readFileSync(`migrations-history/v18/${file}`, 'utf8'))
+    source.exec(`CREATE TABLE d1_migrations(id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE, applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL);
+      ${files.map(file => `INSERT INTO d1_migrations (name) VALUES ('${file}');`).join('\n')}`)
+    source.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES ('org', 'Org', 'org', 'org', 'USD', 'America/Denver')").run()
+    source.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', 'org', 'en', 1, 'published')").run()
+    source.prepare(`INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json)
+      VALUES ('history', 'stay', 'org', 'needs_attention', '{"guest":{"name":"Recorded guest","email":null,"phone":"+15550000000"}}')`).run()
+    source.prepare(`INSERT INTO activity_entries (id, request_id, kind, scope_kind, actor_kind, channel, body, dedupe_key, sequence, occurred_at)
+      VALUES ('message', 'history', 'message', 'request', 'guest', 'whatsapp', 'Recorded message', 'message-id', 1, '2026-10-16T00:00:00.000Z')`).run()
+    source.prepare(`INSERT INTO guest_thread_deliveries (id, entry_id, channel, provider, purpose, status, provider_message_id)
+      VALUES ('receipt', 'message', 'email', 'resend', 'owner_alert', 'accepted', 'actual-provider-id')`).run()
+    const channel = JSON.stringify({ participant: { kind: 'channel', title: 'Provider conversation title' }, guest: { name: null, email: null, phone: null } })
+    assert.throws(() => source.prepare("INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json) VALUES ('channel', 'stay', 'org', 'needs_attention', ?)").run(channel), /requests_guest_payload_check/)
+    source.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES ('person', 'Person', 'person@example.test', 1, 0, 0)").run()
+    source.prepare("INSERT INTO user_notification_preferences (user_id, category, email_enabled, whatsapp_enabled) VALUES ('person', 'guest_messages', 0, 1), ('person', 'reviews', 1, 0)").run()
+    const before = ['requests', 'activity_entries', 'guest_thread_deliveries'].map(table => source.prepare(`SELECT * FROM ${table}`).all())
+    source.close()
+    const targetPath = join(directory, 'v19.sqlite')
+    const manifest = await transferDatabaseExport(sourcePath, targetPath, { payloadPath: join(directory, 'payload.sql') })
+    // Only the push switch, which no v18 preference had, is derived: each category's product default.
+    assert.deepEqual(manifest.transforms, [{ name: 'notification_preferences_push_default', changes: 2 }])
+    const target = new Database(targetPath)
+    try {
+      assert.deepEqual(target.pragma('foreign_key_check'), [])
+      assert.deepEqual(['requests', 'activity_entries', 'guest_thread_deliveries'].map(table => target.prepare(`SELECT * FROM ${table}`).all()), before)
+      assert.equal(target.prepare('SELECT count(*) AS n FROM channel_threads').get()!.n, 0)
+      assert.deepEqual(target.prepare('SELECT category, email_enabled, whatsapp_enabled, push_enabled FROM user_notification_preferences ORDER BY category').all(),
+        [{ category: 'guest_messages', email_enabled: 0, whatsapp_enabled: 1, push_enabled: 1 }, { category: 'reviews', email_enabled: 1, whatsapp_enabled: 0, push_enabled: 0 }])
+      target.prepare("INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json) VALUES ('channel', 'stay', 'org', 'needs_attention', ?)").run(channel)
+      for (const guest of [undefined, {}, { name: null, email: null }, { name: null, phone: null }, { email: null, phone: null }]) {
+        assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json) VALUES ('missing-guest', 'stay', 'org', 'needs_attention', ?)")
+          .run(JSON.stringify({ participant: { kind: 'channel', title: 'Actual title' }, ...(guest === undefined ? {} : { guest }) })), /requests_guest_payload_check/)
+      }
+      assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json) VALUES ('invalid', 'stay', 'org', 'needs_attention', ?)")
+        .run(JSON.stringify({ participant: { kind: 'channel', title: '' }, guest: { name: null, email: null, phone: null } })), /requests_guest_payload_check/)
+      assert.throws(() => target.prepare("INSERT INTO requests (id, kind, organization_id, conversation_state, payload_json) VALUES ('contact', 'contact', 'org', 'needs_attention', ?)").run(channel), /requests_guest_payload_check/)
+    } finally { target.close() }
+  } finally { rmSync(directory, { recursive: true, force: true }) }
+})

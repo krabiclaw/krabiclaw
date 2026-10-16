@@ -10,7 +10,7 @@
     @cancel="p.revert"
     @save="p.save"
   >
-    <div v-if="p.isNew.value || p.product.value" class="space-y-6">
+    <div v-if="p.isNew.value || (p.product.value && !p.loadError.value)" class="space-y-6">
       <!-- A place to stay is at one location for good: its address, time zone and team. -->
       <UFormField label="Location" :description="p.isNew.value ? 'Where guests stay. This cannot be changed later.' : 'A place to stay keeps its location.'" required>
         <p v-if="p.organizationLocationsError.value" role="alert" class="text-error">{{ p.organizationLocationsError.value }}</p>
@@ -31,8 +31,15 @@
         </UFormField>
       </div>
       <UFormField label="Looked after by" description="Members of this team see this place’s stays and turnovers.">
-        <p v-if="membersError" role="alert" class="text-error">Teams could not be loaded.</p>
-        <USelect v-else v-model="p.form.stay_team_id" :items="teamItems" class="w-full" />
+        <UAlert
+          v-if="membersError"
+          color="error"
+          variant="soft"
+          :description="getErrorMessage(membersError, 'Teams could not be loaded.')"
+          :actions="[{ label: 'Try again', color: 'neutral', variant: 'soft', onClick: () => refreshMembers() }]"
+        />
+        <USelect v-else-if="teamItems" v-model="teamSelection" :items="teamItems" class="w-full" />
+        <p v-else class="text-muted">Loading teams…</p>
       </UFormField>
     </div>
   </DashboardLeafPanel>
@@ -40,11 +47,20 @@
 
 <script setup lang="ts">
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
+import { getErrorMessage } from '~/utils/errors'
 
 definePageMeta({ layout: 'dashboard' })
 const p = inject(productEditorKey)!
-const dashboard = useDashboardOrganization()
-const { data: members, error: membersError } = await useMemberSchedulingList(() => dashboard.organization.value?.id)
+const { data: members, error: membersError, refresh: refreshMembers } = await useMemberSchedulingList(() => p.organizationId)
 const locationItems = computed(() => p.organizationLocations.value.map(location => ({ label: location.title, value: location.id })))
-const teamItems = computed(() => [{ label: 'Owners and admins only', value: '' }, ...(members.value?.teams.map(team => ({ label: team.name, value: team.id })) ?? [])])
+/** The select's own value for no team: a select item cannot be empty, and the form holds null. */
+const UNASSIGNED = 'unassigned'
+const teamSelection = computed({
+  get: () => p.form.stay_team_id ?? UNASSIGNED,
+  set: (value: string) => { p.form.stay_team_id = value === UNASSIGNED ? null : value },
+})
+// Null until the organization's teams have been read; an organization with no teams offers only owners and admins.
+const teamItems = computed(() => members.value
+  ? [{ label: 'Owners and admins only', value: UNASSIGNED }, ...members.value.teams.map(team => ({ label: team.name, value: team.id }))]
+  : null)
 </script>

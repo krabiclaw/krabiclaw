@@ -54,6 +54,15 @@
         {{ t(`legal.${policy}`) }}
       </NuxtLink>
       <ZarazConsentButton />
+      <a
+        v-if="poweredByUrl"
+        :href="poweredByUrl"
+        target="_blank"
+        rel="noopener"
+        class="no-underline transition hover:opacity-70"
+      >
+        {{ t('legal.powered_by') }}
+      </a>
       <slot />
     </div>
   </div>
@@ -77,4 +86,12 @@ const policies = organization?.policies ?? []
 const { value: theme, setPreference } = usePlatformTheme()
 const isDark = computed(() => theme.value === 'dark')
 const year = new Date().getFullYear()
+// Every tenant site credits KrabiClaw, tagged so the platform's own analytics
+// can attribute the visit to the site and theme that sent it.
+const platformOrigin = useRuntimeConfig().public.siteUrl
+const requestHost = useRequestURL().host
+const themeSlug = organization?.template.slug
+const poweredByUrl = themeSlug && themeSlug !== 'platform'
+  ? `${platformOrigin}/?${new URLSearchParams({ utm_source: requestHost, utm_medium: 'referral', utm_campaign: 'powered_by', utm_content: themeSlug })}`
+  : null
 </script>

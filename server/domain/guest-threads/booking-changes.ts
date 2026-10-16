@@ -89,7 +89,8 @@ type Source = z.infer<typeof sourceSchema> & { updatedAt: string }
 type ChangeEnv = CloudflareEnv
 
 async function sourceSummary(db: DbClient, thread: GuestThreadRow) {
-  return requestSummary(db, thread)
+  if (thread.kind !== 'booking' && thread.kind !== 'reservation') throw new HTTPError({ statusCode: 400, message: 'This conversation has no changeable booking or reservation', data: { code: 'BOOKING_CHANGE_UNSUPPORTED', field: 'kind' } })
+  return { ...await requestSummary(db, thread), guestName: thread.payload.guest.name }
 }
 
 function localLabel(instant: string, timezone: string): string {
@@ -305,7 +306,6 @@ async function deliverEmail(db: DbClient, env: ChangeEnv, thread: GuestThreadRow
   if (sent.status === 'failed') throw new HTTPError({ statusCode: 502, message: sent.error || 'Guest email could not be sent' })
   await notifyBookingChangeOwner(env, db, {
     organizationId: thread.organization_id, organizationName: guest.fromName,
-    locationId: (status === 'accepted' && proposal.after.kind === 'reservation' ? proposal.after.locationId : proposal.before.locationId) ?? '',
     threadId: thread.id, submissionType: thread.kind === 'reservation' ? 'reservation' : 'booking', submissionId: thread.id, sourceEntryId: entryId,
     guestName: summary.guestName, guestEmail: summary.guestEmail, status, noun,
     whenLabel: proposal.afterLabel, whenDate: proposal.afterDate ?? null, whenTime: proposal.afterTime ?? null,

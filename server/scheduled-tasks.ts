@@ -23,12 +23,13 @@ export type ScheduledTaskName =
   | 'stripe-fee-report-request'
   | 'marketing-ad-spend-daily'
   | 'channex-revision-feed'
+  | 'scheduled-guest-messages'
 
 type TaskLoader = () => Promise<{ default: ScheduledTaskDefinition }>
 
 /** The single source of truth for cron-to-task dispatch in Nitro's scheduled hook. */
 export const SCHEDULED_TASKS: Readonly<Record<string, readonly ScheduledTaskName[]>> = {
-  '*/5 * * * *': ['google-calendar-sync', 'social-card-backfill', 'sessions-materialize', 'article-broadcast-send'],
+  '*/5 * * * *': ['google-calendar-sync', 'social-card-backfill', 'sessions-materialize', 'article-broadcast-send', 'scheduled-guest-messages'],
   '*/2 * * * *': ['public-resource-cache-invalidation'],
   '*/10 * * * *': ['domain-reconciliation', 'zaraz-analytics-reconciliation', 'channex-revision-feed'],
   '0 3 * * *': ['domain-reconciliation-daily', 'analytics-aggregate-daily', 'stripe-ga4-intent-retention', 'stripe-fee-report-request', 'marketing-ad-spend-daily'],
@@ -39,6 +40,7 @@ export const SCHEDULED_TASKS: Readonly<Record<string, readonly ScheduledTaskName
 const TASK_LOADERS: Readonly<Record<ScheduledTaskName, TaskLoader>> = {
   'google-calendar-sync': async () => import('./tasks/google-calendar-sync'),
   'channex-revision-feed': async () => import('./tasks/channex-revision-feed'),
+  'scheduled-guest-messages': async () => import('./tasks/scheduled-guest-messages'),
   'social-card-backfill': async () => import('./tasks/social-card-backfill'),
   'social-card-cleanup': async () => import('./tasks/social-card-cleanup'),
   'public-resource-cache-invalidation': async () => import('./tasks/public-resource-cache-invalidation'),

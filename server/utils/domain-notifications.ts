@@ -1,23 +1,10 @@
-import { renderNotificationEmail } from '~/server/emails/render'
 import { domainUpdateMessage } from '~/server/notifications/events'
-import { toWhatsAppVars } from '~/server/notifications/whatsapp-mapping'
 import type { DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { sendEmail } from '~/server/utils/email-delivery'
-import { listOrganizationNotificationMembers } from '~/server/utils/member-access'
-import { wantsNotification } from '~/server/domain/notification-preferences'
-import { buildUnsubscribeUrls } from '~/server/utils/unsubscribe'
-import { createCanonicalNotification } from '~/server/utils/notification-center'
-import { hasOrganizationEntitlement } from '~/server/utils/billing'
-import { sendWhatsAppNotification } from '~/server/utils/whatsapp'
+import { notifyOwner } from '~/server/utils/notifications'
 
 interface DomainNotificationEnv extends CloudflareEnv {
   PLATFORM_OWNER_EMAILS?: string
-  RESEND_API_KEY?: string
-  WHATSAPP_PHONE_NUMBER_ID?: string
-  WHATSAPP_ACCESS_TOKEN?: string
-  EMAIL_DELIVERY_MODE?: string
-  NUXT_PUBLIC_PLATFORM_DOMAIN?: string
 }
 
 interface DomainNotificationInput {
@@ -45,81 +32,26 @@ function safeDashboardUrl(raw: string): string {
   return encodeURI(parsed.toString())
 }
 
+/**
+ * A domain lifecycle change, told as an owner alert: every member who wants
+ * organization-and-billing messages hears on each channel they chose, and the
+ * platform operator addresses are copied by email. Every send is a recorded
+ * delivery on the in-app notification.
+ */
 export async function notifyDomainLifecycle(
   env: DomainNotificationEnv,
   db: DbClient,
   opts: DomainNotificationInput,
 ) {
   const dashboardUrl = safeDashboardUrl(opts.dashboardUrl)
-  await createCanonicalNotification(db, {
-    publishEnv: env,
-    scope: 'organization',
-    severity: opts.status === 'active' ? 'success' : 'warning',
+  await notifyOwner(env, db, {
     organizationId: opts.organizationId,
-    title: opts.title,
-    message: opts.message,
-    deepLink: dashboardUrl,
     template: 'domain_update',
+    title: opts.title,
+    payload: { deep_link: dashboardUrl },
+    message: domainUpdateMessage({ headline: opts.title, message: opts.message, domain: opts.domain, status: opts.status, dashboardUrl }),
+    whatsappTemplate: 'domain_update',
+    notification: { message: opts.message, severity: opts.status === 'active' ? 'success' : 'warning' },
+    operatorEmails: platformOperatorEmails(env),
   })
-
-  const configuredPlatformDomain = env.NUXT_PUBLIC_PLATFORM_DOMAIN?.trim()
-  if (!configuredPlatformDomain) throw new Error('NUXT_PUBLIC_PLATFORM_DOMAIN is required')
-  const platformDomain = configuredPlatformDomain.replace(/^https?:\/\//, '').replace(/\/$/, '')
-  const message = domainUpdateMessage({
-    headline: opts.title,
-    message: opts.message,
-    domain: opts.domain,
-    status: opts.status,
-    dashboardUrl,
-  })
-  // Each member is asked whether they want site-and-billing mail; the platform
-  // support addresses are operational routing, not a person's preference, so
-  // they are always copied and carry no unsubscribe link.
-  const members = await listOrganizationNotificationMembers(env, opts.organizationId)
-  const memberRecipients = (await Promise.all(members.map(async (member) => {
-    if (!await wantsNotification(db, member.userId, 'organization_and_billing', 'email')) return null
-    const unsubscribe = await buildUnsubscribeUrls(env, { userId: member.userId, category: 'organization_and_billing' })
-    return { to: member.email, unsubscribeUrl: unsubscribe?.pageUrl ?? null, unsubscribeOneClickUrl: unsubscribe?.oneClickUrl ?? null }
-  }))).filter((recipient): recipient is { to: string; unsubscribeUrl: string | null; unsubscribeOneClickUrl: string | null } => recipient !== null)
-  const memberAddresses = new Set(memberRecipients.map(recipient => recipient.to))
-  const recipients: Array<{ to: string; unsubscribeUrl: string | null; unsubscribeOneClickUrl: string | null }> = [
-    ...memberRecipients,
-    ...[...new Set(platformOperatorEmails(env))]
-      .filter(address => !memberAddresses.has(address))
-      .map(to => ({ to, unsubscribeUrl: null, unsubscribeOneClickUrl: null })),
-  ]
-  const emailResults = await Promise.all(recipients.map(async recipient => sendEmail(env, {
-    to: recipient.to,
-    subject: opts.title,
-    ...(await renderNotificationEmail(message, {
-      platformDomain,
-      preferencesUrl: `https://${platformDomain}/dashboard/account/profile/notifications`,
-      unsubscribeUrl: recipient.unsubscribeUrl,
-    })),
-    unsubscribeOneClickUrl: recipient.unsubscribeOneClickUrl,
-  })))
-  const failedEmails = emailResults.filter(result => result.status !== 'sent')
-
-  // Same recipients, same preferences, the other channel. This used to send to
-  // the organization's configured number, asking neither whose account it was
-  // nor whether that person wanted site-and-billing messages.
-  const messagingEnabled = await hasOrganizationEntitlement(env, opts.organizationId, 'messaging')
-  const whatsappResults = await Promise.all(members.map(async (member) => {
-    if (!messagingEnabled || !member.phone) return null
-    if (!await wantsNotification(db, member.userId, 'organization_and_billing', 'whatsapp')) return null
-    return await sendWhatsAppNotification(env, {
-      organizationId: opts.organizationId,
-      toPhone: member.phone,
-      template: 'domain_update',
-      vars: toWhatsAppVars(message, 'domain_update').vars,
-    })
-  }))
-  const failedWhatsApp = whatsappResults.filter(result => result && !result.success)
-  const failures = [
-    ...failedEmails.map(result => `email: ${result.error ?? result.status}`),
-    ...failedWhatsApp.map(result => `whatsapp: ${result && !result.success ? result.error : 'unknown'}`),
-  ]
-  if (failures.length) {
-    throw new Error(`Domain notification was not delivered for organization ${opts.organizationId} — ${failures.join('; ')}`)
-  }
 }

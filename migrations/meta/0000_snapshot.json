@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7f8b38e4-f29c-442e-a21d-9241c27d0f78",
+  "id": "56916581-9e7f-4741-9a07-5df729d2d509",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "tables": {
     "account": {
@@ -1963,6 +1963,168 @@
         }
       }
     },
+    "channel_threads": {
+      "name": "channel_threads",
+      "columns": {
+        "provider": {
+          "name": "provider",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "external_thread_id": {
+          "name": "external_thread_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "external_booking_id": {
+          "name": "external_booking_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "provider_updated_at": {
+          "name": "provider_updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        }
+      },
+      "indexes": {
+        "channel_threads_request_unique": {
+          "name": "channel_threads_request_unique",
+          "columns": [
+            "request_id"
+          ],
+          "isUnique": true
+        },
+        "channel_threads_booking_unique": {
+          "name": "channel_threads_booking_unique",
+          "columns": [
+            "provider",
+            "external_booking_id"
+          ],
+          "isUnique": true,
+          "where": "external_booking_id IS NOT NULL"
+        },
+        "channel_threads_org_idx": {
+          "name": "channel_threads_org_idx",
+          "columns": [
+            "organization_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "channel_threads_request_scope_fk": {
+          "name": "channel_threads_request_scope_fk",
+          "tableFrom": "channel_threads",
+          "tableTo": "requests",
+          "columnsFrom": [
+            "organization_id",
+            "request_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "channel_threads_home_scope_fk": {
+          "name": "channel_threads_home_scope_fk",
+          "tableFrom": "channel_threads",
+          "tableTo": "product_stay_configs",
+          "columnsFrom": [
+            "organization_id",
+            "product_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "product_id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "channel_threads_mapping_fk": {
+          "name": "channel_threads_mapping_fk",
+          "tableFrom": "channel_threads",
+          "tableTo": "product_channel_mappings",
+          "columnsFrom": [
+            "product_id",
+            "provider"
+          ],
+          "columnsTo": [
+            "product_id",
+            "provider"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {
+        "channel_threads_pk": {
+          "columns": [
+            "provider",
+            "external_thread_id"
+          ],
+          "name": "channel_threads_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "channel_threads_provider_check": {
+          "name": "channel_threads_provider_check",
+          "value": "provider = 'channex'"
+        },
+        "channel_threads_instants_check": {
+          "name": "channel_threads_instants_check",
+          "value": "strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at"
+        }
+      }
+    },
     "channex_connections": {
       "name": "channex_connections",
       "columns": {
@@ -3085,6 +3247,119 @@
         }
       }
     },
+    "device_tokens": {
+      "name": "device_tokens",
+      "columns": {
+        "token": {
+          "name": "token",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "session_id": {
+          "name": "session_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "environment": {
+          "name": "environment",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))"
+        }
+      },
+      "indexes": {
+        "device_tokens_user_idx": {
+          "name": "device_tokens_user_idx",
+          "columns": [
+            "user_id"
+          ],
+          "isUnique": false
+        },
+        "device_tokens_session_idx": {
+          "name": "device_tokens_session_idx",
+          "columns": [
+            "session_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "device_tokens_user_id_user_id_fk": {
+          "name": "device_tokens_user_id_user_id_fk",
+          "tableFrom": "device_tokens",
+          "tableTo": "user",
+          "columnsFrom": [
+            "user_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "device_tokens_session_id_session_id_fk": {
+          "name": "device_tokens_session_id_session_id_fk",
+          "tableFrom": "device_tokens",
+          "tableTo": "session",
+          "columnsFrom": [
+            "session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "device_tokens_token_check": {
+          "name": "device_tokens_token_check",
+          "value": "length(token) > 0 AND length(token) % 2 = 0 AND token NOT GLOB '*[^0123456789abcdef]*'"
+        },
+        "device_tokens_environment_check": {
+          "name": "device_tokens_environment_check",
+          "value": "environment IN ('sandbox', 'production')"
+        },
+        "device_tokens_created_at_check": {
+          "name": "device_tokens_created_at_check",
+          "value": "strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at"
+        },
+        "device_tokens_updated_at_check": {
+          "name": "device_tokens_updated_at_check",
+          "value": "strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at"
+        }
+      }
+    },
     "google_calendar_cleanup_jobs": {
       "name": "google_calendar_cleanup_jobs",
       "columns": {
@@ -3586,7 +3861,7 @@
         },
         "guest_thread_deliveries_provider_check": {
           "name": "guest_thread_deliveries_provider_check",
-          "value": "(channel = 'email' AND provider IN ('resend', 'log_only')) OR (channel = 'whatsapp' AND provider IN ('meta', 'log_only'))"
+          "value": "(channel = 'email' AND provider IN ('resend', 'log_only')) OR (channel = 'whatsapp' AND provider IN ('meta', 'log_only')) OR (channel = 'airbnb' AND provider = 'channex') OR (channel = 'push' AND provider = 'apns')"
         }
       }
     },
@@ -5200,6 +5475,128 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {}
+    },
+    "message_templates": {
+      "name": "message_templates",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "title": {
+          "name": "title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "schedule_json": {
+          "name": "schedule_json",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "schedule_enabled_at": {
+          "name": "schedule_enabled_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "version": {
+          "name": "version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "message_templates_org_updated_idx": {
+          "name": "message_templates_org_updated_idx",
+          "columns": [
+            "organization_id",
+            "updated_at",
+            "id"
+          ],
+          "isUnique": false
+        },
+        "message_templates_org_id_unique": {
+          "name": "message_templates_org_id_unique",
+          "columns": [
+            "organization_id",
+            "id"
+          ],
+          "isUnique": true
+        }
+      },
+      "foreignKeys": {
+        "message_templates_organization_id_organization_id_fk": {
+          "name": "message_templates_organization_id_organization_id_fk",
+          "tableFrom": "message_templates",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "message_templates_text_check": {
+          "name": "message_templates_text_check",
+          "value": "length(trim(title)) BETWEEN 1 AND 100 AND length(trim(body)) BETWEEN 1 AND 5000"
+        },
+        "message_templates_version_check": {
+          "name": "message_templates_version_check",
+          "value": "version >= 1"
+        },
+        "message_templates_schedule_check": {
+          "name": "message_templates_schedule_check",
+          "value": "(schedule_json IS NULL AND schedule_enabled_at IS NULL) OR (schedule_json IS NOT NULL AND schedule_enabled_at IS NOT NULL AND json_valid(schedule_json) AND json_type(schedule_json) IS 'object' AND json_type(schedule_json, '$.productIds') IS 'array' AND json_array_length(schedule_json, '$.productIds') BETWEEN 1 AND 100 AND ((json_extract(schedule_json, '$.trigger') = 'booking_received' AND json_extract(schedule_json, '$.delayMinutes') = 5) OR (json_extract(schedule_json, '$.trigger') IN ('check_in', 'check_out') AND json_type(schedule_json, '$.offsetDays') IS 'integer' AND json_extract(schedule_json, '$.offsetDays') BETWEEN -7 AND 7 AND json_extract(schedule_json, '$.localTime') GLOB '[0-2][0-9]:[0-5][0-9]' AND json_extract(schedule_json, '$.localTime') < '24:00'))) IS TRUE"
+        },
+        "message_templates_instants_check": {
+          "name": "message_templates_instants_check",
+          "value": "strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (schedule_enabled_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', schedule_enabled_at, '+0 days') IS schedule_enabled_at)"
+        }
+      }
     },
     "oauthAccessToken": {
       "name": "oauthAccessToken",
@@ -10310,7 +10707,7 @@
         },
         "product_channel_mappings_stage_check": {
           "name": "product_channel_mappings_stage_check",
-          "value": "import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'complete')"
+          "value": "import_stage IN ('property', 'room', 'rate', 'inventory', 'verify_inventory', 'mapping', 'activate', 'reservations', 'messages', 'complete')"
         },
         "product_channel_mappings_ids_check": {
           "name": "product_channel_mappings_ids_check",
@@ -10326,7 +10723,7 @@
         },
         "product_channel_mappings_enabled_check": {
           "name": "product_channel_mappings_enabled_check",
-          "value": "enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('reservations', 'complete'))"
+          "value": "enabled IN (0, 1) AND (enabled = 0 OR import_stage IN ('reservations', 'messages', 'complete'))"
         },
         "product_channel_mappings_instants_check": {
           "name": "product_channel_mappings_instants_check",
@@ -11384,6 +11781,13 @@
           "autoincrement": false,
           "default": 1
         },
+        "check_in_instructions": {
+          "name": "check_in_instructions",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "assigned_member_id": {
           "name": "assigned_member_id",
           "type": "text",
@@ -11532,6 +11936,10 @@
         "product_stay_configs_min_nights_check": {
           "name": "product_stay_configs_min_nights_check",
           "value": "min_nights >= 1"
+        },
+        "product_stay_configs_instructions_check": {
+          "name": "product_stay_configs_instructions_check",
+          "value": "check_in_instructions IS NULL OR (length(trim(check_in_instructions)) BETWEEN 1 AND 5000)"
         }
       }
     },
@@ -12476,7 +12884,7 @@
         },
         "requests_guest_payload_check": {
           "name": "requests_guest_payload_check",
-          "value": "(json_type(payload_json, '$.guest.name') IS 'text' AND (json_type(payload_json, '$.guest.email') IS 'text' OR (kind = 'stay' AND json_type(payload_json, '$.guest.email') IS 'null')) AND (json_type(payload_json, '$.guest.phone') IS 'text' OR json_type(payload_json, '$.guest.phone') IS 'null') AND (json_type(payload_json, '$.guest.email') IS 'text' OR json_type(payload_json, '$.guest.phone') IS 'text'))"
+          "value": "(\n    (json_type(payload_json, '$.participant') IS NULL AND json_type(payload_json, '$.guest.name') IS 'text'\n      AND (json_type(payload_json, '$.guest.email') IS 'text' OR (kind = 'stay' AND json_type(payload_json, '$.guest.email') IS 'null'))\n      AND (json_type(payload_json, '$.guest.phone') IS 'text' OR json_type(payload_json, '$.guest.phone') IS 'null')\n      AND (json_type(payload_json, '$.guest.email') IS 'text' OR json_type(payload_json, '$.guest.phone') IS 'text'))\n    OR (kind = 'stay' AND json_type(payload_json, '$.participant') IS 'object'\n      AND json_extract(payload_json, '$.participant.kind') IS 'channel'\n      AND json_type(payload_json, '$.participant.title') IS 'text' AND trim(json_extract(payload_json, '$.participant.title')) <> ''\n      AND json_type(payload_json, '$.guest') IS 'object'\n      AND (json_type(payload_json, '$.guest.name') IS 'text' OR json_type(payload_json, '$.guest.name') IS 'null')\n      AND (json_type(payload_json, '$.guest.email') IS 'text' OR json_type(payload_json, '$.guest.email') IS 'null')\n      AND (json_type(payload_json, '$.guest.phone') IS 'text' OR json_type(payload_json, '$.guest.phone') IS 'null'))\n  )"
         },
         "requests_message_payload_check": {
           "name": "requests_message_payload_check",
@@ -13496,6 +13904,292 @@
         }
       }
     },
+    "scheduled_guest_messages": {
+      "name": "scheduled_guest_messages",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "organization_id": {
+          "name": "organization_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "product_id": {
+          "name": "product_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "stay_id": {
+          "name": "stay_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "request_id": {
+          "name": "request_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "template_id": {
+          "name": "template_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "template_title": {
+          "name": "template_title",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "template_version": {
+          "name": "template_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "stay_version": {
+          "name": "stay_version",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "body": {
+          "name": "body",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "due_at": {
+          "name": "due_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "timezone": {
+          "name": "timezone",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "status": {
+          "name": "status",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "reason": {
+          "name": "reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error_code": {
+          "name": "error_code",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "error_field": {
+          "name": "error_field",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "entry_id": {
+          "name": "entry_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "started_at": {
+          "name": "started_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "sent_at": {
+          "name": "sent_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "scheduled_guest_messages_template_stay_unique": {
+          "name": "scheduled_guest_messages_template_stay_unique",
+          "columns": [
+            "template_id",
+            "stay_id"
+          ],
+          "isUnique": true
+        },
+        "scheduled_guest_messages_due_idx": {
+          "name": "scheduled_guest_messages_due_idx",
+          "columns": [
+            "status",
+            "due_at"
+          ],
+          "isUnique": false
+        },
+        "scheduled_guest_messages_org_created_idx": {
+          "name": "scheduled_guest_messages_org_created_idx",
+          "columns": [
+            "organization_id",
+            "created_at",
+            "id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {
+        "scheduled_guest_messages_organization_id_organization_id_fk": {
+          "name": "scheduled_guest_messages_organization_id_organization_id_fk",
+          "tableFrom": "scheduled_guest_messages",
+          "tableTo": "organization",
+          "columnsFrom": [
+            "organization_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "scheduled_guest_messages_entry_id_activity_entries_id_fk": {
+          "name": "scheduled_guest_messages_entry_id_activity_entries_id_fk",
+          "tableFrom": "scheduled_guest_messages",
+          "tableTo": "activity_entries",
+          "columnsFrom": [
+            "entry_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "scheduled_guest_messages_stay_scope_fk": {
+          "name": "scheduled_guest_messages_stay_scope_fk",
+          "tableFrom": "scheduled_guest_messages",
+          "tableTo": "stays",
+          "columnsFrom": [
+            "organization_id",
+            "product_id",
+            "stay_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "product_id",
+            "id"
+          ],
+          "onDelete": "cascade",
+          "onUpdate": "no action"
+        },
+        "scheduled_guest_messages_request_scope_fk": {
+          "name": "scheduled_guest_messages_request_scope_fk",
+          "tableFrom": "scheduled_guest_messages",
+          "tableTo": "requests",
+          "columnsFrom": [
+            "organization_id",
+            "request_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "scheduled_guest_messages_template_scope_fk": {
+          "name": "scheduled_guest_messages_template_scope_fk",
+          "tableFrom": "scheduled_guest_messages",
+          "tableTo": "message_templates",
+          "columnsFrom": [
+            "organization_id",
+            "template_id"
+          ],
+          "columnsTo": [
+            "organization_id",
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        }
+      },
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "scheduled_guest_messages_status_check": {
+          "name": "scheduled_guest_messages_status_check",
+          "value": "status IN ('pending', 'sending', 'sent', 'failed', 'needs_review', 'cancelled', 'skipped')"
+        },
+        "scheduled_guest_messages_due_check": {
+          "name": "scheduled_guest_messages_due_check",
+          "value": "due_at IS NOT NULL OR status IN ('failed', 'skipped')"
+        },
+        "scheduled_guest_messages_error_check": {
+          "name": "scheduled_guest_messages_error_check",
+          "value": "status NOT IN ('failed', 'needs_review') OR (length(trim(reason)) > 0 AND length(trim(error_code)) > 0 AND length(trim(error_field)) > 0)"
+        },
+        "scheduled_guest_messages_sent_check": {
+          "name": "scheduled_guest_messages_sent_check",
+          "value": "status <> 'sent' OR (entry_id IS NOT NULL AND sent_at IS NOT NULL)"
+        },
+        "scheduled_guest_messages_sending_check": {
+          "name": "scheduled_guest_messages_sending_check",
+          "value": "status <> 'sending' OR started_at IS NOT NULL"
+        },
+        "scheduled_guest_messages_text_check": {
+          "name": "scheduled_guest_messages_text_check",
+          "value": "length(trim(template_title)) BETWEEN 1 AND 100 AND length(trim(body)) BETWEEN 1 AND 5000 AND template_version >= 1 AND stay_version >= 1"
+        },
+        "scheduled_guest_messages_instants_check": {
+          "name": "scheduled_guest_messages_instants_check",
+          "value": "strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at AND strftime('%Y-%m-%dT%H:%M:%fZ', updated_at, '+0 days') IS updated_at AND (due_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', due_at, '+0 days') IS due_at) AND (started_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', started_at, '+0 days') IS started_at) AND (sent_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', sent_at, '+0 days') IS sent_at)"
+        }
+      }
+    },
     "session": {
       "name": "session",
       "columns": {
@@ -14064,6 +14758,13 @@
           "notNull": false,
           "autoincrement": false
         },
+        "booking_received_at": {
+          "name": "booking_received_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
         "cancelled_at": {
           "name": "cancelled_at",
           "type": "text",
@@ -14282,6 +14983,10 @@
         "stays_version_check": {
           "name": "stays_version_check",
           "value": "version >= 1"
+        },
+        "stays_booking_received_at_check": {
+          "name": "stays_booking_received_at_check",
+          "value": "booking_received_at IS NULL OR strftime('%Y-%m-%dT%H:%M:%fZ', booking_received_at, '+0 days') IS booking_received_at"
         },
         "stays_instants_check": {
           "name": "stays_instants_check",
@@ -15496,6 +16201,13 @@
         },
         "whatsapp_enabled": {
           "name": "whatsapp_enabled",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "push_enabled": {
+          "name": "push_enabled",
           "type": "integer",
           "primaryKey": false,
           "notNull": true,

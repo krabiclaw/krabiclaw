@@ -16,6 +16,7 @@
          appear later in the same render caused a hydration child-count mismatch. -->
     <div id="saya-portal-root" />
 
+    <AnnouncementBanner />
     <SayaHeader
       :organization="shellOrganization"
       :locations="locations"
@@ -28,7 +29,6 @@
     </main>
     <LazySayaFooter
       :organization="shellOrganization"
-      :is-platform="isPlatform"
       :locations="footerLocations"
       :error="bootstrapError"
       :has-products="shell.hasProducts.value"
@@ -76,8 +76,6 @@ const shell = useOrganizationShellState()
 // a direct menu/contact visit serializes its header and footer with the shell.
 if (import.meta.server) await shell.ready
 const { locations, error: bootstrapError, organization: shellOrganization } = shell
-const { template } = useTenantOrganization().organization
-const isPlatform = template.slug === 'platform'
 const { fontPreset, paletteStyle } = usePublicSiteBrand()
 
 // A page under /locations/<slug> is about exactly one location: the location

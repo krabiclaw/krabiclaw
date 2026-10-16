@@ -25,6 +25,8 @@ const ORG = '/dashboard/ember-slice-demo'
 const WIDE = { width: 1440, height: 900 }
 const NARROW = { width: 900, height: 900 }
 const PHONE = { width: 390, height: 844 }
+// A short phone, so the demo owner's real Today cards overflow and the scroll end is measurable.
+const SHORT_PHONE = { width: 390, height: 600 }
 
 /** The panes on screen, left to right, by the id each DashboardIndexPanel/LeafPanel is given. */
 async function visiblePanes(page: Page): Promise<string[]> {
@@ -272,7 +274,7 @@ test.describe('dashboard pane hierarchy', () => {
     }
     const before = await read()
     const category = 'reviews'
-    const wanted = { email: !before[category].email, whatsapp: !before[category].whatsapp }
+    const wanted = { email: !before[category].email, whatsapp: !before[category].whatsapp, push: !before[category].push }
     const path = `/dashboard/account/profile/notifications/${category}`
     const leaf = page.locator('#dashboard-panel-account-notification-category')
     const save = leaf.getByRole('button', { name: 'Save', exact: true })
@@ -299,6 +301,18 @@ test.describe('dashboard pane hierarchy', () => {
       await save.click()
       const whatsappResponse = await whatsappSaved
       expect(whatsappResponse.status(), await whatsappResponse.text()).toBe(200)
+      expect(await read()).toEqual({ ...before, [category]: { ...before[category], email: wanted.email, whatsapp: wanted.whatsapp } })
+      await expect(save).toBeDisabled()
+
+      await page.reload()
+      await waitForNuxtHydration(page)
+      await expect(leaf.getByRole('switch', { name: 'WhatsApp', exact: true })).toHaveAttribute('aria-checked', String(wanted.whatsapp))
+      await leaf.getByRole('switch', { name: 'Push notifications', exact: true }).click()
+      await expect(save).toBeEnabled()
+      const pushSaved = page.waitForResponse(response => new URL(response.url()).pathname === '/api/user/notification-preferences' && response.request().method() === 'PATCH')
+      await save.click()
+      const pushResponse = await pushSaved
+      expect(pushResponse.status(), await pushResponse.text()).toBe(200)
       expect(await read()).toEqual({ ...before, [category]: wanted })
       await expect(save).toBeDisabled()
     } finally {
@@ -308,6 +322,7 @@ test.describe('dashboard pane hierarchy', () => {
       await open(page, path)
       await expect(leaf.getByRole('switch', { name: 'Email', exact: true })).toHaveAttribute('aria-checked', String(before[category].email))
       await expect(leaf.getByRole('switch', { name: 'WhatsApp', exact: true })).toHaveAttribute('aria-checked', String(before[category].whatsapp))
+      await expect(leaf.getByRole('switch', { name: 'Push notifications', exact: true })).toHaveAttribute('aria-checked', String(before[category].push))
       await expect(save).toBeDisabled()
     }
   })
@@ -727,12 +742,13 @@ test.describe('dashboard pane hierarchy', () => {
     expect(feedRead.status(), await feedRead.text()).toBe(200)
     const feed = await feedRead.json() as TodayFeedPayload
     expect(feed.cards.length, 'The demo owner has real Today cards').toBeGreaterThan(0)
-    await page.setViewportSize(PHONE)
+    await page.setViewportSize(SHORT_PHONE)
     await open(page, `${ORG}?locationId=loc-demo`)
     const panel = page.locator('#dashboard-panel-org-today')
     const body = panel.locator(':scope > [data-slot="body"]')
     const cards = panel.getByTestId('today-card')
     await expect(cards.first()).toBeVisible()
+    expect(await body.evaluate(element => element.scrollHeight > element.clientHeight), 'Today overflows the phone, so it has a scroll end to measure').toBe(true)
     await expect(page.getByTestId('dashboard-mobile-nav')).toBeVisible()
     const bodyBox = await body.boundingBox()
     expect(bodyBox).not.toBeNull()

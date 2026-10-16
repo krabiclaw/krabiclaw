@@ -15,7 +15,6 @@ export const ALL_VERTICALS: OrganizationVertical[] = ["restaurant", "experience"
 type LocaleCode = "en" | "th" | "ja" | "vi";
 
 type VerticalCopy = {
-  poweredByTagline: string
   aboutImageAlt: string
   ctaTitle: string
   ctaRoute: string
@@ -113,7 +112,6 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
   vi: {},
   en: {
     restaurant: {
-      poweredByTagline: "restaurant sites that run themselves",
       aboutImageAlt: "About our restaurant",
       ctaTitle: "Come dine with us.",
       ctaRoute: "/reservations",
@@ -215,7 +213,6 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
       cancelLabel: (_word: string) => `Cancel ${_word}`,
     },
     experience: {
-      poweredByTagline: "experience booking sites that run themselves",
       aboutImageAlt: "About our studio",
       ctaTitle: "Book a class.",
       ctaRoute: "/experiences",
@@ -319,7 +316,6 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
   },
   th: {
     restaurant: {
-      poweredByTagline: "เว็บไซต์ร้านอาหารที่ดูแลตัวเองได้",
       aboutImageAlt: "เกี่ยวกับร้านอาหารของเรา",
       ctaTitle: "มากินด้วยกัน",
       ctaRoute: "/reservations",
@@ -421,7 +417,6 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
       cancelLabel: (_word: string) => `ยกเลิก${_word}`,
     },
     experience: {
-      poweredByTagline: "เว็บไซต์จองประสบการณ์ที่ดูแลตัวเองได้",
       aboutImageAlt: "เกี่ยวกับสตูดิโอของเรา",
       ctaTitle: "จองคลาส",
       ctaRoute: "/experiences",
@@ -527,7 +522,6 @@ const registry: Record<LocaleCode, Partial<Record<OrganizationVertical, Vertical
 
 registry.en.service = {
   ...(registry.en.experience ?? registry.en.restaurant!),
-  poweredByTagline: "professional-service sites that stay current",
   aboutImageAlt: "About our organization",
   ctaTitle: "Talk with our team.",
   ctaRoute: "",
@@ -606,7 +600,6 @@ registry.en.service = {
 
 registry.th.service = {
   ...registry.th.experience!,
-  poweredByTagline: "เว็บไซต์ธุรกิจบริการมืออาชีพที่อัปเดตอยู่เสมอ",
   aboutImageAlt: "เกี่ยวกับองค์กรของเรา",
   ctaTitle: "พูดคุยกับทีมของเรา",
   ctaRoute: "",
@@ -666,7 +659,6 @@ registry.th.service = {
 // Japanese has complete copy for every supported vertical. Shared wording is
 // composed within Japanese; no English registry entry supplies Japanese text.
 registry.ja.restaurant = {
-  poweredByTagline: "自動で運営できる飲食店のウェブサイト",
   aboutImageAlt: "当店について",
   ctaTitle: "お食事にいらっしゃいませんか。",
   ctaRoute: "/reservations",
@@ -762,7 +754,6 @@ registry.ja.restaurant = {
 
 registry.ja.experience = {
   ...registry.ja.restaurant,
-  poweredByTagline: "自動で運営できる体験予約のウェブサイト",
   aboutImageAlt: "スタジオについて",
   ctaTitle: "クラスを予約する。",
   ctaRoute: "/experiences",
@@ -796,7 +787,6 @@ registry.ja.experience = {
 
 registry.ja.service = {
   ...registry.ja.experience,
-  poweredByTagline: "常に最新の情報を届ける専門サービスのウェブサイト",
   aboutImageAlt: "私たちの組織について",
   ctaTitle: "私たちにご相談ください。",
   ctaRoute: "",
@@ -850,7 +840,6 @@ registry.ja.service = {
 // Vietnamese has complete copy for every supported vertical, composed the same
 // way as Japanese: each vertical overrides the one before it.
 registry.vi.restaurant = {
-  poweredByTagline: "Website nhà hàng tự vận hành",
   aboutImageAlt: "Về nhà hàng của chúng tôi",
   ctaTitle: "Hãy đến dùng bữa cùng chúng tôi.",
   ctaRoute: "/reservations",
@@ -946,7 +935,6 @@ registry.vi.restaurant = {
 
 registry.vi.experience = {
   ...registry.vi.restaurant,
-  poweredByTagline: "Website đặt trải nghiệm tự vận hành",
   aboutImageAlt: "Về studio của chúng tôi",
   ctaTitle: "Đặt một lớp học.",
   ctaRoute: "/experiences",
@@ -983,7 +971,6 @@ registry.vi.experience = {
 
 registry.vi.service = {
   ...registry.vi.experience,
-  poweredByTagline: "Website dịch vụ chuyên nghiệp luôn cập nhật",
   aboutImageAlt: "Về tổ chức của chúng tôi",
   ctaTitle: "Hãy trao đổi với chúng tôi.",
   ctaRoute: "",
@@ -1044,7 +1031,6 @@ registry.vi.service = {
 // stay hidden (empty routes); the locations below are the business's address.
 registry.en.lodging = {
   ...registry.en.experience!,
-  poweredByTagline: "vacation rental sites that run themselves",
   aboutImageAlt: "About our place",
   ctaTitle: "Stay with us.",
   ctaRoute: "",
@@ -1081,7 +1067,6 @@ registry.en.lodging = {
 
 registry.th.lodging = {
   ...registry.th.experience!,
-  poweredByTagline: "เว็บไซต์บ้านพักให้เช่าที่ดูแลตัวเองได้",
   aboutImageAlt: "เกี่ยวกับที่พักของเรา",
   ctaTitle: "มาพักกับเรา",
   ctaRoute: "",
@@ -1118,7 +1103,6 @@ registry.th.lodging = {
 
 registry.ja.lodging = {
   ...registry.ja.experience!,
-  poweredByTagline: "自動で運営できる貸別荘のウェブサイト",
   aboutImageAlt: "私たちの宿について",
   ctaTitle: "私たちの宿に泊まる。",
   ctaRoute: "",
@@ -1155,7 +1139,6 @@ registry.ja.lodging = {
 
 registry.vi.lodging = {
   ...registry.vi.experience!,
-  poweredByTagline: "Website cho thuê nhà nghỉ dưỡng tự vận hành",
   aboutImageAlt: "Về chỗ nghỉ của chúng tôi",
   ctaTitle: "Hãy đến nghỉ cùng chúng tôi.",
   ctaRoute: "",

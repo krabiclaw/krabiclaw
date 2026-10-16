@@ -41,14 +41,11 @@ export default defineHandler(async (event) => {
   const entry = await appendEntry(db, {
     threadId: thread.id, kind: 'message', actorKind: 'guest', channel: 'whatsapp', body: text, dedupeKey: `whatsapp:${messageId}`, })
   await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id, { conversationState: 'needs_attention' })
-
-  const source = thread
-  if (source) {
-    const summary = await requestSummary(db, source)
-    await notifyGuestThreadReply(env, db, {
-      organizationId: match.organizationId, locationId: summary.locationId, threadId: thread.id, sourceEntryId: entry.id, submissionType: match.submissionType, submissionId: match.submissionId, guestName: summary.guestName, guestEmail: summary.guestEmail, guestPhone: summary.guestPhone, inboundChannel: 'whatsapp', messagePreview: text, })
-  }
   await publishGuestInboxThreadEvent(env, db, { threadId: thread.id, type: 'entry.appended' })
+
+  const summary = await requestSummary(db, thread)
+  await notifyGuestThreadReply(env, db, {
+    organizationId: match.organizationId, locationId: summary.locationId, threadId: thread.id, sourceEntryId: entry.id, submissionType: match.submissionType, submissionId: match.submissionId, participantLabel: summary.participantLabel, guestEmail: summary.guestEmail, guestPhone: summary.guestPhone, inboundChannel: 'whatsapp', messagePreview: text, })
 
   return jsonResponse({ received: true, match, messageId })
 })

@@ -126,11 +126,10 @@ An undated task states its status rather than inventing an appointment time.
 
 Owner/admin cards order outstanding decisions, replies and current failures
 before scheduled activity, then at most two factual performance or content
-opportunities, then relevant quick actions. Assigned service members see only
+opportunities. Assigned service members see only
 their own authorized appointments and related work. Lodging members see only
 the arrivals and departures at homes assigned to them through Better Auth
-members or teams. Quick actions are not outstanding work and do not contribute
-to its count.
+members or teams.
 
 The card is an entrance to its data owner, never a second editor or task
 database. A reply opens its conversation; a decision opens its booking; a
@@ -138,11 +137,6 @@ missing photo opens that Product's photo; a draft opens its article or post.
 An article-to-Facebook suggestion opens the canonical short Post creation
 flow with that article prepared, then the existing publishing controls for
 review. A performance card retains its exact reporting dates in Insights.
-An action needing an item or location asks for that target explicitly and
-preserves it into the existing editor. Catalog's `action=availability` mode
-selects an item and opens its availability concern.
-Locations' `action=hours` mode similarly chooses the location before opening
-its dated-hours editor and guest-visible reason.
 
 Current domain state determines whether work remains outstanding. Reading a
 notification does not complete it; several notifications for one concern make
@@ -186,7 +180,6 @@ in `?location_id=` and narrows the authorized catalog without changing it.
 | A section | `O/products/menu/:collectionId?location_id=` | its items, in order |
 | Experiences | `O/products/experiences` | a focused view of experiences, using the same offering list |
 | Services | `O/products/services` | a focused view of services, using the same offering list |
-| Select an offering | `O/products/all?action=availability` | the contextual selection for an availability action |
 
 **A menu belongs to a location.** With one location the Menu opens on it and
 names it. With several, a location must be chosen before its sections can be
