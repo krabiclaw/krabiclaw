@@ -33,7 +33,7 @@ export async function usePublicAnnouncement() {
   if (isPublicSurface && !announcement.value) {
     const { data, error } = await useAsyncData(
       `public-announcement:${organizationId}`,
-      () => loadPublicResourcePayload<{ announcement: unknown }>({
+      () => loadPublicResourcePayload<{ announcement: PublicAnnouncement | null }>({
         organizationId,
         resourceKind: 'config',
         url: '/api/public/config',
@@ -41,23 +41,22 @@ export async function usePublicAnnouncement() {
         query: {},
         requestEvent,
         failureMessage: 'Public site configuration failed',
-        validate: (value): value is { announcement: unknown } => isRecord(value),
+        validate: (value): value is { announcement: PublicAnnouncement | null } =>
+          isRecord(value) && ('announcement' in value) && (value.announcement === null || isPublicAnnouncement(value.announcement)),
       }),
       { server: true },
     )
     if (error.value) throw createError(error.value)
-    const loaded = data.value?.announcement
-    if (loaded != null) {
-      if (!isPublicAnnouncement(loaded)) throw createError({ statusCode: 500, statusMessage: 'The site announcement is invalid' })
-      announcement.value = loaded
-    } else {
-      announcement.value = null
-    }
+    announcement.value = data.value?.announcement ?? null
   }
 
-  const storageKey = computed(() => announcement.value
-    ? `announcement-dismissed:${organizationId}:${JSON.stringify(announcement.value)}`
-    : null)
+  const storageKey = computed(() => {
+    if (!announcement.value) return null
+    if (announcement.value.format === 'banner') {
+      return `announcement-dismissed:${organizationId}:banner:${announcement.value.headline}:${announcement.value.description ?? ''}`
+    }
+    return `announcement-dismissed:${organizationId}:${announcement.value.headline}:${announcement.value.description ?? ''}`
+  })
 
   return {
     organizationId,

@@ -66,7 +66,7 @@ export interface OrganizationSettingsResponse {
   status: OrganizationStatus
   name?: string | null
   brand_description?: string | null
-  announcement: { headline: string; description: string | null; cta_label: string | null; cta_url: string | null; dismissible: boolean; enabled: boolean } | null
+  announcement: { headline: string; description: string | null; cta_label: string | null; cta_url: string | null; dismissible: boolean; enabled: boolean; format?: 'modal' | 'banner' | null } | null
   media?: Array<{ asset_id: string; slot: string; public_url?: string | null; presentation?: LogoPresentation | null }>
   contact_email?: string | null
   palette: SitePalette | null

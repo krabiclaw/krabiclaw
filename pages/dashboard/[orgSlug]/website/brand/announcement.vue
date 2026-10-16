@@ -23,7 +23,7 @@ const groups = computed<EditorNavigationGroup[]>(() => {
   const form = editor.form
   const button = [form.announcementCtaLabel, form.announcementCtaUrl].filter(value => value.trim()).join(' · ')
   const visibilitySummary = form.announcementEnabled
-    ? (form.announcementFormat === 'banner' ? (form.announcementDismissible ? 'Banner' : 'Persisted banner') : 'Popup')
+    ? (form.announcementFormat === 'banner' ? (form.announcementDismissible ? 'Banner' : 'Permanent banner') : 'Popup')
     : 'Off'
   return [
     { id: 'visibility', items: [{ id: 'visibility', label: 'Show announcement', summary: visibilitySummary, to: to('visibility') }] },

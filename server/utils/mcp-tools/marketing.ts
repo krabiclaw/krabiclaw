@@ -348,7 +348,7 @@ export async function handleMarketingTools(ctx: McpExecutorContext): Promise<unk
         cta_url: optionalString(announcementInput, 'cta_url') ?? targetUrl,
         dismissible: announcementInput.dismissible !== false,
         enabled: announcementInput.enabled !== false,
-        format: optionalString(announcementInput, 'format') === 'banner' ? 'banner' : 'modal',
+        format: (optionalString(announcementInput, 'format') === 'banner' ? 'banner' : 'modal') as 'modal' | 'banner',
       }
 
       await updateOrganizationSettingsFields(
