@@ -123,6 +123,7 @@ export interface MediaPlacementInsertInput {
 
 const OWNER_TABLES = {
   organization: 'organization', business_location: 'business_locations', product: 'products',
+  collection: 'collections',
   content_document: 'content_documents', review: 'reviews',
   review_request: 'review_requests',
   content_block: 'content_blocks',
@@ -160,7 +161,7 @@ export function mediaPlacementOwnerQuery(input: {
   }
   const table = OWNER_TABLES[input.ownerType]
   const location = input.ownerType === 'business_location' ? 'id'
-    : ['review', 'review_request'].includes(input.ownerType) ? 'location_id' : 'NULL'
+    : ['review', 'review_request', 'collection'].includes(input.ownerType) ? 'location_id' : 'NULL'
   return {
     query: `SELECT ${location} AS location_id FROM ${table} WHERE id = ? AND ${input.ownerType === 'organization' ? 'id' : 'organization_id'} = ?`, params,
   }

@@ -14,15 +14,15 @@
         <p class="mt-4 text-3xl font-semibold text-highlighted">{{ paymentMoney(detail.amount, detail.currency) }}</p>
       </div>
 
-      <section class="rounded-3xl p-6 shadow-sm ring ring-default">
+      <UCard as="section" variant="subtle">
         <dl class="divide-y divide-default">
           <div class="py-4 first:pt-0"><dt class="text-base font-semibold text-highlighted">{{ payoutStatusLabel(detail.status) }}</dt><dd class="mt-1 text-base text-muted">{{ payoutDate(detail.arrivalDate, { month: 'long', day: 'numeric', year: 'numeric' }) }}</dd></div>
           <div v-if="detail.bank" class="py-4"><dt class="text-base font-semibold text-highlighted">Bank account</dt><dd class="mt-1 text-base text-muted">{{ detail.bank.bankName ?? 'Bank account' }}, ••••{{ detail.bank.last4 }} ({{ detail.currency }})</dd></div>
           <div class="py-4 last:pb-0"><dt class="text-base font-semibold text-highlighted">Payout ID</dt><dd class="mt-1 break-all text-base text-muted">{{ detail.id }}</dd></div>
         </dl>
-      </section>
+      </UCard>
 
-      <section v-for="item in detail.items" :key="item.paymentId" class="mt-6 rounded-3xl p-6 text-center shadow-sm ring ring-default">
+      <UCard v-for="item in detail.items" :key="item.paymentId" as="section" variant="subtle" class="mt-6" :ui="{ body: 'text-center' }">
         <span class="mx-auto flex size-20 items-center justify-center overflow-hidden rounded-full bg-elevated">
           <img v-if="item.imageUrl" :src="item.imageUrl" alt="" class="size-full object-cover">
           <UIcon v-else name="i-lucide-package" class="size-8 text-dimmed" />
@@ -33,7 +33,7 @@
           <div class="flex items-center justify-between gap-4 py-4"><div><dt class="text-base font-semibold text-highlighted">Payment</dt><dd class="mt-1 break-all text-sm text-muted">{{ item.paymentId }}</dd></div><UButton label="Details" color="neutral" variant="soft" :to="`/dashboard/${route.params.orgSlug}/earnings/transactions/${encodeURIComponent(item.paymentId)}`" /></div>
           <div class="flex items-center justify-between gap-4 py-4"><dt class="text-base font-semibold text-highlighted">Total ({{ item.currency }})</dt><dd class="text-base font-semibold text-highlighted">{{ paymentMoney(item.amount, item.currency) }}</dd></div>
         </dl>
-      </section>
+      </UCard>
       <p v-if="!detail.items.length" class="mt-6 text-center text-sm text-muted">Stripe did not list any payments in this payout.</p>
     </template>
     <PaymentsHelp class="mt-8" />

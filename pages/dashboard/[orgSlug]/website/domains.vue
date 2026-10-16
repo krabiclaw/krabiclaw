@@ -2,7 +2,7 @@
   <!-- A row of Website settings, so it closes back to it like its siblings; adding a domain is its own action, not a Save. -->
   <DashboardLeafPanel id="organization-domains" title="Domains" :footer="false">
     <template #right>
-      <UButton icon="i-lucide-plus" size="sm" @click="openAddModal">Add domain</UButton>
+      <UButton icon="i-lucide-plus" @click="openAddModal">Add domain</UButton>
     </template>
 
     <div class="space-y-4">

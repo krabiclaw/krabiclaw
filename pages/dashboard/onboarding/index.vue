@@ -1,7 +1,7 @@
 <template>
   <div class="flex min-h-0 flex-col gap-8 py-6" :data-onboarding-hydrated="hydrated ? 'true' : 'false'">
     <div>
-      <h1 class="text-3xl font-extrabold leading-tight tracking-tight text-highlighted">
+      <h1 :class="dashboardTitleClass">
         It's easy to get started on KrabiClaw
       </h1>
     </div>
@@ -32,6 +32,7 @@
 <script setup lang="ts">
 
 definePageMeta({ layout: 'dashboard' })
+import { dashboardTitleClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import { onboardingStepPath, useOnboardingState, useOnboardingSteps } from '~/composables/useOnboardingFlow'
 
 const router = useRouter()

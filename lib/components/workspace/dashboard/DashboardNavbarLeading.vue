@@ -1,13 +1,13 @@
 <template>
+  <!-- Airbnb's Back: a round button on the gutter, the same as every action. -->
   <UButton
     v-if="level.to.value"
     icon="i-lucide-arrow-left"
     aria-label="Back"
     color="neutral"
-    variant="ghost"
-    size="sm"
+    variant="soft"
     square
-    class="min-w-0 shrink-0"
+    class="size-10 shrink-0 justify-center rounded-full"
     data-testid="dashboard-navbar-back"
     :to="level.to.value"
   />

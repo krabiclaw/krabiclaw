@@ -170,9 +170,10 @@ const collectionObject = {
   properties: {
     id: { type: 'string' }, organization_id: { type: 'string' }, location_id: { type: ['string', 'null'] },
     name: { type: 'string' }, slug: { type: 'string' }, description: { type: ['string', 'null'] },
+    image: { ...resolvedMediaAssetObject, type: ['object', 'null'], description: 'The section\'s own photo; set it with set_media owner_type collection, slot image.' },
     sort_order: { type: 'integer' },
   },
-  required: ['id', 'organization_id', 'location_id', 'name', 'slug', 'description', 'sort_order'],
+  required: ['id', 'organization_id', 'location_id', 'name', 'slug', 'description', 'image', 'sort_order'],
 } as const
 
 const bookingPolicyFields = {

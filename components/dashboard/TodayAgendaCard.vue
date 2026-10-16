@@ -1,10 +1,13 @@
 <template>
-  <NuxtLink
+  <UCard
+    :as="NuxtLink"
     :to="item.to"
+    variant="subtle"
     data-testid="today-card"
     :data-card-id="item.id"
     :data-card-priority="item.priority"
-    class="group flex min-h-36 items-center justify-between gap-4 rounded-2xl bg-elevated/50 px-5 py-5 shadow-sm ring ring-default transition-colors hover:bg-elevated focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary sm:min-h-40 sm:gap-6 sm:px-7 sm:py-6"
+    class="group block transition-colors hover:bg-elevated focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
+    :ui="{ body: 'flex min-h-36 items-center justify-between gap-4 sm:min-h-40 sm:gap-6' }"
   >
     <div class="min-w-0 flex-1">
       <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold text-highlighted">
@@ -32,10 +35,11 @@
         <UIcon v-else-if="item.badgeIcon" :name="item.badgeIcon" class="size-4 text-muted sm:size-5" />
       </div>
     </div>
-  </NuxtLink>
+  </UCard>
 </template>
 
 <script setup lang="ts">
+import { NuxtLink } from '#components'
 import type { TodayCard } from '~/shared/dashboard-today'
 
 defineProps<{

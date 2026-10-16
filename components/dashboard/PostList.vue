@@ -3,7 +3,6 @@
     <DashboardListEditor
       v-model:editing="editing"
       title="Posts"
-      description="Short posts: news, photos, events and offers, in your own words."
       :items="listItems"
       :error="loadError"
       empty-title="No posts yet"
@@ -14,7 +13,7 @@
       @remove="removePost"
     >
       <template #filters>
-        <UTabs v-model="activeTab" :items="postTabs" :content="false" aria-label="Post status" />
+        <DashboardFilterPills id="post-filter" v-model="activeTab" label="Post status" :items="postTabs" />
       </template>
 
       <template #item="{ item }">
@@ -69,7 +68,7 @@ const postTabs = [
   { value: 'published', label: 'Live' },
   { value: 'draft', label: 'Drafts' },
 ]
-const activeTab = ref<string | number>('all')
+const activeTab = ref('all')
 const editing = ref(false)
 const removingId = ref<string | null>(null)
 

@@ -91,8 +91,13 @@ export default defineAppConfig({
         help: 'text-sm text-muted'
       }
     },
+    // One card and one empty state across the dashboard: the padding and the
+    // corner are these, never a page's own.
     card: {
       slots: { root: 'rounded-2xl', body: 'p-6 sm:p-6' }
+    },
+    empty: {
+      slots: { root: 'rounded-2xl' }
     },
     // The navbar keeps Nuxt UI's `px-4 sm:px-6`, the panel body's and footer's
     // gutter, so the top nav (which uses the same) and every pane start on one line.

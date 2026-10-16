@@ -8,7 +8,7 @@
       this row holds the filters, with search at its end. Search is the
       dashboard's one search, opened from here the way it opens from the Menu.
     -->
-    <header class="shrink-0 px-4 py-3">
+    <header class="shrink-0 py-3" :class="dashboardGutterClass">
       <!--
         Airbnb's own control: the kind is a dropdown labelled by what is
         selected, and Unread sits beside it as a toggle. Both are 40px pills.
@@ -54,29 +54,13 @@
     </header>
 
     <!-- Updates: what the platform told this account or business, under the same pills. -->
-    <NotificationList v-if="updatesView" :personal-scope="personalScope" class="min-h-0 flex-1 overflow-y-auto px-4 pb-4" />
-    <div v-else class="min-h-0 flex-1 overflow-y-auto">
-      <UAlert
-        v-if="realtimeFailed"
-        color="warning"
-        variant="soft"
-        icon="i-lucide-wifi-off"
-        title="Live updates are unavailable"
-        description="This list may be out of date until the dashboard reconnects."
-        class="m-3"
-      >
-        <template #actions>
-          <UButton color="warning" variant="soft" size="xs" :loading="pending" @click="refreshThreads">
-            Refresh
-          </UButton>
-        </template>
-      </UAlert>
-
+    <NotificationList v-if="updatesView" :personal-scope="personalScope" class="min-h-0 flex-1 overflow-y-auto pb-4" :class="dashboardGutterClass" />
+    <div v-else class="min-h-0 flex-1 overflow-y-auto" :class="dashboardGutterClass">
       <UAlert
         v-if="mailboxError"
         color="error"
         variant="soft"
-        class="m-3"
+        class="mb-3"
         title="The conversation could not be moved"
         :description="mailboxError"
         close
@@ -87,7 +71,7 @@
         v-if="threadsError || nextPageError"
         color="error"
         variant="soft"
-        class="m-3"
+        class="mb-3"
         title="Messages could not be loaded"
         :description="getErrorMessage(threadsError || nextPageError, 'Guest thread request failed')"
       />
@@ -111,7 +95,7 @@
         <div
           v-for="thread in threads"
           :key="thread.id"
-          class="group relative mx-3"
+          class="group relative -mx-3"
           :data-thread-row="thread.id"
         >
           <NuxtLink
@@ -191,7 +175,7 @@
         </div>
       </TransitionGroup>
 
-      <div v-if="data?.pagination.hasMore" class="flex justify-center px-4 py-3">
+      <div v-if="data?.pagination.hasMore" class="flex justify-center py-3">
         <UButton color="neutral" variant="ghost" :loading="loadingMore" :disabled="pending" @click="loadMore">Load more conversations</UButton>
       </div>
 
@@ -203,14 +187,14 @@
       <NuxtLink
         v-if="data && (pastOnly || threads.length > 0)"
         :to="{ path: listRoute, query: pastOnly ? withoutArchived : { ...route.query, archived: '' } }"
-        class="flex items-center justify-between gap-3 px-4 py-4 text-sm font-medium text-default transition hover:bg-elevated/60"
+        class="-mx-4 flex items-center justify-between gap-3 px-4 py-4 text-sm font-medium text-default transition hover:bg-elevated/60 sm:-mx-6 sm:px-6"
         :class="threads.length ? 'mt-2 border-t border-default' : ''"
       >
         <span>{{ pastOnly ? 'Current conversations' : 'Past conversations' }}</span>
         <UIcon name="i-lucide-chevron-right" class="size-4 shrink-0 text-muted" />
       </NuxtLink>
 
-      <div v-if="data && threads.length === 0" class="px-6 py-14 text-center">
+      <div v-if="data && threads.length === 0" class="py-14 text-center">
         <p class="text-base font-medium text-highlighted">{{ emptyTitle }}</p>
         <p class="mt-1 text-sm text-muted">{{ emptyDescription }}</p>
         <UButton
@@ -243,6 +227,7 @@ import { resolveCmsCapabilities, type ProductFeature } from '~/config/cms-regist
 import { resolvePublicTemplate } from '~/utils/template-registry'
 import { normalizeVertical, type OrganizationVertical } from '~/utils/vertical-copy'
 import { useDashboardInvalidations } from '~/composables/useDashboardInvalidations'
+import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
 /*
   The thread list, and only the list. A thread opens as this level's detail
@@ -309,7 +294,6 @@ const filtersApplied = computed(() => Boolean(route.query.query || route.query.f
 const listHydrated = ref(false)
 
 const realtime = useDashboardInvalidations()
-const realtimeFailed = computed(() => !props.personalScope && realtime.status.value === 'failed')
 
 onMounted(() => {
   listHydrated.value = true

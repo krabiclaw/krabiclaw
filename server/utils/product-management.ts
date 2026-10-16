@@ -7,6 +7,7 @@ import { d1JsonArray, executeBatch, queryAll, queryFirst, type BatchQuery, type 
 import { MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
+import { buildDeleteOwnerPlacementsQuery, readMediaPlacements } from '~/server/utils/media-asset-manager'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, type TenantPageEditorInput } from '~/server/utils/content/pages'
@@ -1942,16 +1943,19 @@ export async function removeProductLocation(db: DbClient, input: {
 // Collections
 // ---------------------------------------------------------------------------
 
-function mapCollectionRow(row: Row): Collection {
-  return {
+/** Sections as the API returns them, each with its own picture read in one query. */
+async function mapCollectionRows(db: DbClient, organizationId: string, rows: Row[]): Promise<Collection[]> {
+  const images = await readMediaPlacements(db, { organizationId, ownerType: 'collection', ownerIds: rows.map(row => String(row.id)), slot: 'image' })
+  return rows.map(row => ({
     id: String(row.id), organization_id: String(row.organization_id),
     location_id: row.location_id === null ? null : String(row.location_id),
     name: String(row.name), slug: String(row.slug),
     description: row.description === null ? null : String(row.description),
+    image: images.get(String(row.id))?.[0] ?? null,
     sort_order: Number(row.sort_order),
     created_at: String(row.created_at), updated_at: String(row.updated_at),
     created_by: String(row.created_by), updated_by: String(row.updated_by),
-  }
+  }))
 }
 
 export async function listCollections(db: DbClient, input: {
@@ -1965,7 +1969,7 @@ export async function listCollections(db: DbClient, input: {
         WHERE cp.collection_id = collections.id AND cp.organization_id = collections.organization_id AND (${ASSIGNED_SERVICE_SQL}))` : ''}
     ORDER BY sort_order, name, id
   `, [input.organizationId, input.locationId === undefined ? 0 : 1, input.locationId ?? null, ...(input.assignedUserId ? [input.assignedUserId, input.assignedUserId] : [])])
-  return rows.map(mapCollectionRow)
+  return mapCollectionRows(db, input.organizationId, rows)
 }
 
 export async function createCollection(db: DbClient, input: {
@@ -1983,7 +1987,7 @@ export async function createCollection(db: DbClient, input: {
       input.collection.sort_order ?? 0, now, now, input.actor.actorId, input.actor.actorId],
   }, publicResourceCacheInvalidationQuery(input.organizationId, 'collection_created')], { operation: 'Create collection' })
   const row = await queryFirst<Row>(db, 'SELECT * FROM collections WHERE organization_id = ? AND id = ?', [input.organizationId, id])
-  return mapCollectionRow(row!)
+  return (await mapCollectionRows(db, input.organizationId, [row!]))[0]!
 }
 
 async function uniqueCollectionSlug(db: DbClient, organizationId: string, locationId: string | null, base: string): Promise<string> {
@@ -2014,15 +2018,16 @@ export async function updateCollection(db: DbClient, input: {
     ],
   }, publicResourceCacheInvalidationQuery(String(existing.organization_id), 'collection_updated')], { operation: 'Update collection' })
   const row = await queryFirst<Row>(db, 'SELECT * FROM collections WHERE organization_id = ? AND id = ?', [input.organizationId, input.collectionId])
-  return mapCollectionRow(row!)
+  return (await mapCollectionRows(db, input.organizationId, [row!]))[0]!
 }
 
 export async function deleteCollection(db: DbClient, input: { organizationId: string; collectionId: string }): Promise<void> {
   const existing = await queryFirst<{ organization_id: string }>(db, 'SELECT organization_id FROM collections WHERE organization_id = ? AND id = ?', [input.organizationId, input.collectionId])
   if (!existing) notFound('Collection not found')
   // Membership cascades; the products themselves are untouched. Deleting a
-  // grouping is not deleting what was grouped.
+  // grouping is not deleting what was grouped. Its own picture goes with it.
   await executeBatch(db, [
+    buildDeleteOwnerPlacementsQuery({ ownerType: 'collection', ownerId: input.collectionId, organizationId: input.organizationId }),
     { query: 'DELETE FROM collections WHERE organization_id = ? AND id = ?', params: [input.organizationId, input.collectionId] },
     publicResourceCacheInvalidationQuery(existing.organization_id, 'collection_deleted'),
   ], { operation: 'Delete collection' })

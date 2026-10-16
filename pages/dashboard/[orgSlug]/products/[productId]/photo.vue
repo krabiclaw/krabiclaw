@@ -18,7 +18,7 @@
         :model-value="p.form.image_asset_id"
         :preview-url="p.product.value?.image?.public_url ?? null"
         :preview-alt="p.product.value?.image?.alt_text || p.form.name"
-        :title="`${p.presentation.value.itemLabel} photo`"
+        :title="`${p.itemLabel.value} photo`"
         testid="product-photo"
         @update:model-value="p.setPrimaryImage"
       />

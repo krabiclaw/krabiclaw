@@ -45,7 +45,7 @@
     </div>
 
     <template v-if="rows.length" #footer>
-      <div class="flex items-center justify-between gap-4 px-4 py-3 sm:px-6">
+      <div class="flex items-center justify-between gap-4">
         <p class="text-lg font-semibold text-highlighted">{{ total }}</p>
         <UButton label="Export CSV" size="lg" @click="exportCsv" />
       </div>

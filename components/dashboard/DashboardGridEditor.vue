@@ -1,5 +1,5 @@
 <template>
-  <section class="space-y-6">
+  <section>
     <!-- The same rule as DashboardListEditor: the panel's navbar carries the grid's controls. -->
     <header>
       <Teleport :to="actionsTarget ? `#${actionsTarget}` : undefined" :disabled="!actionsTarget" defer>
@@ -10,7 +10,6 @@
             label="Manage"
             color="neutral"
             variant="soft"
-            size="sm"
             data-testid="grid-editor-manage"
             @click="openSelection"
           />
@@ -19,7 +18,6 @@
             :aria-label="addLabel"
             color="neutral"
             variant="soft"
-            size="sm"
             square
             data-testid="grid-editor-add"
             @click="$emit('add')"
@@ -27,10 +25,11 @@
         </div>
       </Teleport>
 
-      <p v-if="description" class="text-sm text-muted">{{ description }}</p>
     </header>
 
-    <slot name="filters" />
+    <div v-if="$slots.filters" class="mb-8">
+      <slot name="filters" />
+    </div>
 
     <UAlert
       v-if="error"
@@ -40,14 +39,7 @@
       :description="error"
     />
 
-    <div
-      v-else-if="!items.length"
-      class="rounded-xl border border-dashed border-default px-6 py-16 text-center"
-      data-testid="grid-editor-empty"
-    >
-      <UIcon :name="emptyIcon" class="mx-auto size-10 text-muted" />
-      <p class="mt-4 text-sm font-medium text-highlighted">{{ emptyTitle }}</p>
-    </div>
+    <UEmpty v-else-if="!items.length" :icon="emptyIcon" :title="emptyTitle" data-testid="grid-editor-empty" />
 
     <div v-else :class="gridClass">
       <button
@@ -73,7 +65,7 @@
       class="fixed inset-0 z-50 flex flex-col bg-default"
       data-testid="grid-editor-takeover"
     >
-      <header class="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-default px-4 py-3">
+      <header class="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-default py-3" :class="dashboardGutterClass">
         <!--
           One bar, two sets of controls. With nothing picked it is a way out; with
           a selection it becomes what you can do to it. A second bar sliding in
@@ -118,7 +110,7 @@
         </template>
       </header>
 
-      <div class="min-h-0 flex-1 overflow-y-auto p-4">
+      <div class="min-h-0 flex-1 overflow-y-auto py-4" :class="dashboardGutterClass">
         <div :class="gridClass">
           <button
             v-for="item in items"
@@ -149,14 +141,13 @@
 // Generic for the same reason the list editor is: a page hangs its own record on
 // the item and reads it off the `#tile` slot, instead of looking it back up by id
 // for every field the tile renders.
-import { dashboardPanelActionsKey } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
+import { dashboardGutterClass, dashboardPanelActionsKey } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 // The navbar slot of the index panel this grid is mounted in, if any.
 const actionsTarget = inject(dashboardPanelActionsKey, null)
 
 const props = defineProps<{
   items: T[]
   title: string
-  description?: string
   emptyTitle: string
   emptyIcon: string
   /** Names the add control for screen readers, e.g. "Add photos". */

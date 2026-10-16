@@ -1,38 +1,22 @@
 <template>
   <div class="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
-    <UAlert
-      v-if="realtimeFailed"
-      color="warning"
-      variant="soft"
-      icon="i-lucide-wifi-off"
-      title="Live updates are unavailable"
-      description="This conversation may be out of date until the dashboard reconnects."
-      class="m-3"
-    >
-      <template #actions>
-        <UButton color="warning" variant="soft" size="xs" :loading="pending" @click="refreshThreadState">
-          Refresh
-        </UButton>
-      </template>
-    </UAlert>
-
     <!-- A request that failed, or a conversation that is gone, is a state this
          surface shows rather than a blank column. -->
-    <UAlert
-      v-if="!thread && !pending"
-      class="m-3"
-      color="error"
-      variant="soft"
-      :title="isNotFoundError(error) ? 'This conversation is no longer available' : 'Conversation could not be loaded'"
-      :description="isNotFoundError(error) ? 'It may have been deleted, or the link is from another business.' : getErrorMessage(error, 'Guest thread request failed')"
-    />
+    <div v-if="!thread && !pending" class="pt-3" :class="dashboardGutterClass">
+      <UAlert
+        color="error"
+        variant="soft"
+        :title="isNotFoundError(error) ? 'This conversation is no longer available' : 'Conversation could not be loaded'"
+        :description="isNotFoundError(error) ? 'It may have been deleted, or the link is from another business.' : getErrorMessage(error, 'Guest thread request failed')"
+      />
+    </div>
 
     <template v-else-if="thread">
       <!-- Positioned so UChatMessages' jump-to-latest button sits over the
            stream rather than scrolling away with it. -->
       <div class="relative flex min-h-0 flex-1 flex-col">
         <div ref="scroller" class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          <UChatMessages :auto-scroll="{ size: 'sm' }" :ui="{ root: 'gap-0 px-4 py-4 sm:px-6' }">
+          <UChatMessages :auto-scroll="{ size: 'sm' }" :ui="{ root: ['gap-0 py-4', dashboardGutterClass] }">
             <!-- What is already here appears at once; what arrives while the
                  thread is open rises into place. -->
             <TransitionGroup
@@ -144,7 +128,7 @@
         </div>
       </div>
 
-      <div class="shrink-0 px-4 pb-4 pt-2 sm:px-6">
+      <div class="shrink-0 pb-4 pt-2" :class="dashboardGutterClass">
         <TransitionGroup
           tag="div"
           class="space-y-2"
@@ -309,6 +293,7 @@ import { isThreadDetailResponse, threadRecordTitle, type ThreadDetail } from '~/
 import type { GuestThreadDeliveryFailureViewModel, GuestThreadEntryViewModel } from '~/server/domain/guest-threads/types'
 import { useDashboardInvalidations } from '~/composables/useDashboardInvalidations'
 import { authClient } from '~/lib/auth-client'
+import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
 /*
   One guest thread: the conversation and its composer. The list is a separate
@@ -320,7 +305,6 @@ const props = withDefaults(defineProps<{ threadId: string; personalScope?:boolea
 const dashboard = useDashboardOrganization()
 const dashboardApi = useDashboardApi(useDashboardRouteScope())
 const realtime = useDashboardInvalidations()
-const realtimeFailed = computed(() => !props.personalScope && realtime.status.value === 'failed')
 const { locale } = useI18n()
 const session = authClient.useSession()
 

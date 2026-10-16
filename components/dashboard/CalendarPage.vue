@@ -9,22 +9,7 @@
     :id="personalScope ? 'account-calendar' : 'org-calendar'"
     title="Calendar"
     column="wide"
-    :navbar-ui="personalScope ? undefined : { title: 'sr-only', center: 'flex min-w-0 flex-1 items-center' }"
   >
-    <!-- Which location the calendar is: Airbnb names the listing in its header, and tapping it switches. An account has no branch to choose. -->
-    <template v-if="!personalScope" #center>
-      <UDropdownMenu :items="locationItems" :content="{ align: 'start' }" :ui="{ content: 'w-64' }">
-        <UButton
-          :label="chosenLocationTitle"
-          trailing-icon="i-lucide-chevron-down"
-          color="neutral"
-          variant="ghost"
-          class="max-w-[16rem] font-semibold"
-          :ui="{ label: 'truncate' }"
-          aria-label="Choose a location"
-        />
-      </UDropdownMenu>
-    </template>
     <template #right>
       <div class="flex items-center gap-1">
         <UButton
@@ -32,22 +17,20 @@
           label="Select dates"
           color="neutral"
           variant="outline"
-          size="sm"
           class="mr-1"
           @click="startSelecting"
         />
         <AgendaFilters v-if="!personalScope" :kinds="availableKinds" :organization-id="organizationId" />
         <!-- List, Month, Year behind one icon, as Airbnb's view menu. -->
         <UDropdownMenu :items="viewItems" :content="{ align: 'end' }" :ui="{ content: 'w-44' }">
-          <UButton :icon="VIEWS[view].icon" color="neutral" variant="ghost" size="sm" square :aria-label="`View: ${VIEWS[view].label}`" />
+          <UButton :icon="VIEWS[view].icon" color="neutral" variant="soft" square :aria-label="`View: ${VIEWS[view].label}`" />
         </UDropdownMenu>
         <!-- The gear opens this location's reservation settings, as Airbnb's opens the listing's. -->
         <UButton
           v-if="!personalScope && chosenLocation"
           icon="i-lucide-settings"
           color="neutral"
-          variant="ghost"
-          size="sm"
+          variant="soft"
           square
           aria-label="Settings"
           :to="{ path: `${level.path.value}/settings`, query: route.query }"
@@ -56,6 +39,10 @@
     </template>
 
     <div>
+      <!-- Which location the calendar is, the same pill Catalog narrows by. An account has no branch to choose. -->
+      <div v-if="!personalScope" class="mb-8 flex">
+        <DashboardLocationFilter v-model="filters.locationId" :items="locationItems" />
+      </div>
       <UAlert
         v-if="locationError"
         class="mb-6"
@@ -161,7 +148,7 @@
                 class="mx-auto flex size-7 items-center justify-center rounded-full text-sm font-medium"
                 :class="dayKey === todayKey ? 'bg-primary font-semibold text-inverted' : isUnavailableKey(dayKey) ? 'text-muted line-through' : 'text-highlighted'"
               >{{ Number(dayKey.slice(-2)) }}</span>
-              <span class="block text-[11px] text-muted">{{ formatCalendarDate(dayKey, 'en', { weekday: 'short' }) }}</span>
+              <span class="block text-xs text-muted">{{ formatCalendarDate(dayKey, 'en', { weekday: 'short' }) }}</span>
             </NuxtLink>
             <div class="min-w-0">
               <AgendaRow v-for="item in itemsOn(dayKey)" :key="item.id" :item="item" :to="personalScope ? undefined : `${level.path.value}/${dayKey}/${item.kind}/${encodeURIComponent(item.stayId ?? item.id.slice(item.kind.length + 1))}`" />
@@ -212,7 +199,7 @@
     </div>
 
     <template v-if="selecting" #footer>
-      <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
+      <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="min-w-0">
           <p class="text-sm font-medium text-highlighted">{{ selectionLabel }}</p>
           <p class="text-xs text-muted">{{ selectionHint }}</p>
@@ -300,14 +287,7 @@ const viewItems = computed(() => [
     onSelect: () => { view.value = key },
   })),
 ])
-const locationItems = computed(() => [locationOptions.value.map(option => ({
-  label: option.label,
-  ...(option.imageUrl ? { avatar: { src: option.imageUrl } } : option.value !== AGENDA_FILTER_ALL ? { icon: 'i-lucide-map-pin' } : {}),
-  type: 'checkbox' as const,
-  checked: filters.locationId === option.value,
-  onSelect: () => { filters.locationId = option.value },
-}))])
-const chosenLocationTitle = computed(() => locations.value.find(location => location.id === filters.locationId)?.title ?? 'All locations')
+const locationItems = computed(() => locationOptions.value.map(option => ({ label: option.label, value: option.value, ...(option.imageUrl ? { avatar: { src: option.imageUrl } } : {}) })))
 
 type MonthBlock = { key: string; items: AgendaItem[] } & (
   | { status: 'loading' | 'ready' }

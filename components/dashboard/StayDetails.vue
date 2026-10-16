@@ -1,8 +1,9 @@
 <template>
   <!-- One stay at a place to stay: who is coming, when, and what the host has collected. -->
-  <DashboardIndexPanel id="stay-details" :title="title">
+  <!-- Inside the guest thread's leaf, which owns the column, it is the body alone. -->
+  <component :is="embedded ? 'div' : DashboardIndexPanel" v-bind="embedded ? {} : { id: 'stay-details', title, column: 'leaf' }">
     <UAlert v-if="error" color="error" variant="soft" title="This stay could not be loaded" :description="getErrorMessage(error, 'Stay request failed')" />
-    <div v-else-if="stay" class="mx-auto w-full" :class="dashboardColumnWidths.leaf">
+    <div v-else-if="stay">
       <UAlert v-if="actionError" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" :description="actionError" />
       <!-- A channel stay overlapping another is the host's to resolve; it never resolves itself. -->
       <UAlert
@@ -14,9 +15,9 @@
         :description="`${channelName} confirmed this stay on nights another stay holds. Cancel this stay on ${channelName}, or cancel the other stay where it was booked.`"
       />
       <UAlert v-if="guest.state === 'missing'" class="mb-5" color="error" variant="soft" icon="i-lucide-circle-alert" title="Guest name missing" description="This stay was made in KrabiClaw, which requires a guest name, but it has none." />
-      <h1 v-if="guest.state === 'named'" class="text-[32px] font-semibold leading-tight text-highlighted">{{ guest.name }}</h1>
-      <h1 v-else-if="guest.state === 'not-provided'" class="text-[32px] font-semibold leading-tight text-muted">Name not provided by {{ channelName }}</h1>
-      <h1 v-else-if="guest.state === 'missing'" class="text-[32px] font-semibold leading-tight text-error">Guest name missing</h1>
+      <h2 v-if="guest.state === 'named'" class="text-2xl font-semibold text-highlighted">{{ guest.name }}</h2>
+      <h2 v-else-if="guest.state === 'not-provided'" class="text-2xl font-semibold text-muted">Name not provided by {{ channelName }}</h2>
+      <h2 v-else-if="guest.state === 'missing'" class="text-2xl font-semibold text-error">Guest name missing</h2>
       <p class="mt-1 text-base text-muted">{{ stayDates }} · {{ partyLabel }}</p>
       <UBadge class="mt-3" :color="stay.status === 'cancelled' ? 'neutral' : 'success'" variant="soft" :label="statusLabel" />
 
@@ -28,7 +29,7 @@
       </dl>
 
       <template v-if="stay.owner === 'app'">
-        <h2 class="mt-8 text-lg font-semibold text-highlighted">Payments</h2>
+        <h2 class="mt-8 text-xl font-semibold text-highlighted">Payments</h2>
         <p class="mt-1 text-sm text-muted">Money you received outside KrabiClaw. Recording it moves no money.</p>
         <ul v-if="stay.payments.length" class="mt-4 divide-y divide-default border-y border-default">
           <li v-for="payment in stay.payments" :key="payment.id" class="flex items-center gap-4 py-3">
@@ -62,12 +63,11 @@
       </template>
       <p v-else class="mt-8 text-base text-muted">{{ channelName }} collected payment for this stay. Change or cancel it on {{ channelName }}.</p>
     </div>
-  </DashboardIndexPanel>
+  </component>
 </template>
 
 <script setup lang="ts">
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
-import { dashboardColumnWidths } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import type { StayDetail, StayPaymentMethod } from '~/server/domain/stays'
 import { isCurrencyCode } from '~/shared/currencies'
@@ -75,7 +75,11 @@ import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
 import { formatCalendarDate, localDateAt } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
 
-const props = defineProps<{ stayId: string }>()
+const props = defineProps<{
+  stayId: string
+  /** Mounted inside the guest thread's leaf, which already owns the column and its padding. */
+  embedded?: boolean
+}>()
 const dashboardApi = useDashboardApi()
 const realtime = useDashboardInvalidations()
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)

@@ -5,10 +5,10 @@
   -->
   <DashboardLeafPanel
     id="organization-links-item"
-    :title="isNew ? 'New link' : record?.label || 'Link'"
+    :title="isNew ? newLink.title : record?.label || 'Link'"
     :saving="editor.saving.value"
     :disabled="!form.label.trim() || !form.destination.trim()"
-    :save-label="isNew ? 'Create link' : undefined"
+    :save-label="isNew ? newLink.action : undefined"
     :error="editor.loadError.value ?? editor.errorMessage.value"
     @cancel="loadDraft"
     @save="commit"
@@ -52,6 +52,7 @@ const level = useRouteLevel()
 
 const itemId = computed(() => String(route.params.itemId))
 const isNew = computed(() => itemId.value === 'new')
+const newLink = newRecordLabels('link')
 const record = computed(() => editor.items.value.find(item => item.id === itemId.value) ?? null)
 // A link that is not in the page is not a page of its own (DESIGN.md).
 watchEffect(() => {

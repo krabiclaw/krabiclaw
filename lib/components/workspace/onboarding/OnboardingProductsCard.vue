@@ -1,10 +1,12 @@
 <template>
   <div class="flex flex-col gap-4">
     <ul v-if="state.products.length" class="flex flex-col gap-2">
-      <li
+      <UCard
         v-for="(product, index) in state.products"
         :key="index"
-        class="flex items-center gap-3 rounded-xl border border-default px-4 py-3"
+        as="li"
+        variant="subtle"
+        :ui="{ body: 'flex items-center gap-3' }"
       >
         <span class="min-w-0 flex-1">
           <span class="block truncate font-medium text-highlighted">{{ product.name }}</span>
@@ -20,10 +22,10 @@
           :aria-label="`Remove ${product.name}`"
           @click="state.products.splice(index, 1)"
         />
-      </li>
+      </UCard>
     </ul>
 
-    <div class="flex flex-col gap-3 rounded-xl border border-dashed border-default p-4">
+    <UCard variant="subtle" :ui="{ body: 'flex flex-col gap-3' }">
       <p class="text-sm text-toned">{{ copy.prompt }}</p>
       <div class="flex flex-col gap-3 sm:flex-row">
         <UFormField :label="copy.nameLabel" class="flex-1">
@@ -37,7 +39,7 @@
         <UInput v-model="draftCategory" class="w-full" :placeholder="copy.categoryPlaceholder" @keydown.enter.prevent="add" />
       </UFormField>
       <UButton class="self-start" :disabled="!canAdd" :label="copy.addLabel" @click="add" />
-    </div>
+    </UCard>
 
     <p class="text-sm text-muted">{{ copy.enough }}</p>
   </div>

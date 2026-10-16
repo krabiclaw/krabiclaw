@@ -3,7 +3,7 @@
     The page: its rows are its sections list and the fields a page has of its
     own. Each is a level below this one; the shell reads which is open.
   -->
-  <DashboardIndexPanel id="organization-page" :title="isNew ? 'New page' : draft.title || 'Page'" :auto-open="navigationGroups[0]?.items.find(item => item.to)?.to ?? null">
+  <DashboardIndexPanel id="organization-page" :title="isNew ? newTitle : draft.title || 'Page'" :auto-open="navigationGroups[0]?.items.find(item => item.to)?.to ?? null" :create="firstStep">
     <UAlert
       v-if="loadError"
       color="error"
@@ -13,10 +13,7 @@
       :description="loadError"
     />
     <template v-else>
-      <div v-if="isNew" class="mb-6 flex justify-end">
-        <UButton :label="createActionLabel" :loading="saving" @click="startOrCreate" />
-      </div>
-      <div v-else class="mb-6 flex flex-wrap items-center justify-end gap-2">
+      <div v-if="!isNew" class="mb-6 flex flex-wrap items-center justify-end gap-2">
         <UButton
           color="neutral"
           variant="outline"
@@ -192,7 +189,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
   ]
 })
 
-const { createActionLabel, saveLabel, saveDisabled, save: saveOpenSection, startOrCreate } = useCreateWalk({
+const { title: newTitle, firstStep, saveLabel, saveDisabled, save: saveOpenSection } = useCreateWalk({
   recordPath,
   isNew,
   openKey,

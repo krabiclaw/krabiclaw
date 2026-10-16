@@ -12,17 +12,26 @@ export function useDashboardInlineFooters() {
 }
 
 /**
+ * Whether the window is at or above one of the theme's breakpoints, read from
+ * the same `--breakpoint-*` the `md:` and `lg:` variants compile from, so
+ * script and CSS cannot disagree about where a width begins.
+ */
+export function useDashboardBreakpoint(name: 'md' | 'lg') {
+  return useMediaQuery(() => {
+    const breakpoint = getComputedStyle(document.documentElement).getPropertyValue(`--breakpoint-${name}`).trim()
+    if (!breakpoint) throw createError({ statusCode: 500, statusMessage: `Dashboard breakpoint ${name} is not configured.`, fatal: true })
+    return `(min-width: ${breakpoint})`
+  })
+}
+
+/**
  * Whether there is a second column. Tailwind's `lg`, the one width at which an
  * index and its open child sit side by side and an index opens its first child
  * on arrival rather than sitting beside an empty pane. One reading, shared by
  * the two shells, so the redirect and the layout cannot disagree.
  */
 export function useDashboardPane() {
-  return useMediaQuery(() => {
-    const breakpoint = getComputedStyle(document.documentElement).getPropertyValue('--breakpoint-lg').trim()
-    if (!breakpoint) throw createError({ statusCode: 500, statusMessage: 'Dashboard pane breakpoint is not configured.', fatal: true })
-    return `(min-width: ${breakpoint})`
-  })
+  return useDashboardBreakpoint('lg')
 }
 
 export function useDashboardMenu() {

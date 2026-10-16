@@ -9,14 +9,17 @@
     <UAlert v-if="cardsError" color="error" variant="soft" :title="cardsError" data-testid="dashboard-menu-error" />
 
     <div v-if="cards.length" class="grid grid-cols-2 gap-4">
-      <NuxtLink
+      <UCard
         v-for="card in cards"
         :key="card.testId"
+        :as="NuxtLink"
         :to="card.to"
-        class="flex aspect-square flex-col rounded-2xl border border-default bg-elevated p-5 transition-colors hover:bg-accented"
+        variant="subtle"
+        class="flex aspect-square flex-col transition-colors hover:bg-elevated"
+        :ui="{ body: 'flex flex-1 flex-col' }"
         :data-testid="card.testId"
       >
-        <p class="text-[15px] font-semibold text-highlighted">{{ card.label }}</p>
+        <p class="text-base font-semibold text-highlighted">{{ card.label }}</p>
         <p class="mt-1 text-sm text-muted">{{ card.subline }}</p>
         <p v-if="card.figure" class="mt-auto text-4xl font-semibold tracking-tight text-highlighted">{{ card.figure }}</p>
         <!-- Airbnb stacks the listings' photos in the card's corner; the organization's places, or the account's past visits. -->
@@ -25,7 +28,7 @@
           <span v-if="card.photos.length > 3" class="-ml-3 flex size-12 items-center justify-center rounded-xl border-2 border-elevated bg-default text-sm font-semibold text-highlighted">+{{ card.photos.length - 3 }}</span>
         </span>
         <UIcon v-else :name="card.icon" class="mt-auto size-7 text-muted" />
-      </NuxtLink>
+      </UCard>
     </div>
 
     <EditorNavigationList :groups="groups" :active-item="activeItem" @act="onAct" />
@@ -33,6 +36,7 @@
 </template>
 
 <script setup lang="ts">
+import { NuxtLink } from '#components'
 import EditorNavigationList from '~/components/dashboard/EditorNavigationList.vue'
 import { authClient } from '~/lib/auth-client'
 import { earningsFigure, isEarningsSummary, type EarningsSummary } from '~/shared/earnings-display'

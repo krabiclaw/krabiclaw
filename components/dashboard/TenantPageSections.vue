@@ -9,7 +9,6 @@
     <DashboardListEditor
       v-model:editing="editing"
       title="Sections"
-      description="What this page shows, in the order it shows it."
       :items="listItems"
       empty-title="No sections yet"
       empty-icon="i-lucide-layout-list"

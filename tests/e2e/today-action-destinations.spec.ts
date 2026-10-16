@@ -71,9 +71,11 @@ test('an article created from a direct action prepares a Facebook draft without 
     const caption = page.locator('#dashboard-panel-post-body')
     await expect(caption.getByRole('textbox', { name: 'Caption', exact: true })).toHaveValue(`${title}\n\n${excerpt}`)
     await caption.getByRole('textbox', { name: 'Caption', exact: true }).fill('Discard this unsaved caption')
+    // Cancelling a step leaves the making and discards its draft; the action opens it fresh.
     await caption.getByRole('button', { name: 'Cancel', exact: true }).click()
-    await expect(page).toHaveURL(`/dashboard/${orgSlug}/website/posts/new?article_id=${articleId}&channel=facebook`)
-    await page.locator('#dashboard-panel-post').getByRole('link', { name: new RegExp(`Caption.*${title}`) }).click()
+    await expect(page).toHaveURL(`/dashboard/${orgSlug}/website/posts?article_id=${articleId}&channel=facebook`)
+    expect((await page.goto(articleFacebookPostPath(orgSlug, articleId)))?.status()).toBe(200)
+    await waitForNuxtHydration(page)
     await expect(caption.getByRole('textbox', { name: 'Caption', exact: true })).toHaveValue(`${title}\n\n${excerpt}`)
     expect(postWrites).toEqual([])
     const postCreated = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/posts` && response.request().method() === 'POST')

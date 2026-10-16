@@ -52,6 +52,8 @@ export interface Collection {
   name: string
   slug: string
   description: string | null
+  /** The section's own picture, its `image` placement; null when it has none, never another owner's. */
+  image: ResolvedMediaAsset | null
   sort_order: number
   created_at: string
   updated_at: string

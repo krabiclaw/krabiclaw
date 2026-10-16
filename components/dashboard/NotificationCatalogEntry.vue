@@ -17,15 +17,15 @@
     <section v-if="entry.whatsapp" class="space-y-2">
       <h2 class="text-sm font-semibold uppercase tracking-wide text-dimmed">WhatsApp</h2>
       <p class="text-sm text-muted">Approved template: <code>{{ entry.whatsapp.template }}</code></p>
-      <div class="rounded-xl border border-default bg-elevated p-4 text-sm whitespace-pre-line">{{ entry.whatsapp.text }}</div>
+      <UCard variant="subtle" :ui="{ body: 'text-sm whitespace-pre-line' }">{{ entry.whatsapp.text }}</UCard>
       <p class="text-xs text-dimmed">
         These are the template's filled slots, not our own wording — Meta renders its approved copy around them.
       </p>
     </section>
 
-    <section v-else class="rounded-xl border border-default p-4 text-sm text-muted">
+    <UCard v-else as="section" variant="subtle" :ui="{ body: 'text-sm text-muted' }">
       Email only. A guest has no account and no number we may message unprompted.
-    </section>
+    </UCard>
   </div>
 </template>
 

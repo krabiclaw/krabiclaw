@@ -3,7 +3,6 @@
   <DashboardListEditor
     v-model:editing="editing"
     title="Sections"
-    :description="description"
     :items="listItems"
     :error="loadError"
     :read-only="readOnly"
@@ -56,7 +55,6 @@ const organizationId = await useDashboardOrganizationId()
 const props = defineProps<{
   /** The location these sections belong to, or null for the ones every location shares. */
   scope: string | null
-  description?: string
   /** Read beside an editable scope; reordered and added to only where it is that scope. */
   readOnly?: boolean
 }>()
@@ -64,8 +62,8 @@ const props = defineProps<{
 const locationId = useLocationScope()
 const menuPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/products/menu`)
 
-// The cover is the first Product in the collection that has a photo, which is
-// how the collection reads on the public site too.
+// The cover is the section's own photo; until it has one, the first item in it
+// with a photo stands for it.
 interface CollectionRow extends Collection {
   product_count: number
   cover: ResolvedMediaAsset | null
@@ -93,7 +91,7 @@ const catalogRows = computed<CollectionRow[]>(() => {
   }
   return catalog.collections.value.filter(row => row.location_id === props.scope).map((row) => {
     const products = members.get(row.id) ?? []
-    return { ...row, product_count: products.length, cover: covers.get(row.id) ?? null, products }
+    return { ...row, product_count: products.length, cover: row.image ?? covers.get(row.id) ?? null, products }
   })
 })
 

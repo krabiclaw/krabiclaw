@@ -1,12 +1,12 @@
 <template>
   <!-- One product: its rows are the things it holds, each a leaf below this level. -->
-  <DashboardIndexPanel id="product" :title="form.name || presentation.itemLabel" :auto-open="autoOpenTarget">
+  <DashboardIndexPanel id="product" :title="pageTitle" :auto-open="autoOpenTarget" :create="firstStep">
     <template v-if="product" #right>
       <DashboardResourceLocalization
       :organization-id="organizationId"
       resource-type="product"
       :resource-id="productId"
-      :resource-label="presentation.itemLabel.toLowerCase()"
+      :resource-label="itemLabel.toLowerCase()"
       :fields="productLocalizationFields"
       :load-values="loadProductLocalization"
       :save-values="saveProductLocalization"
@@ -19,15 +19,10 @@
       color="error"
       variant="soft"
       icon="i-lucide-triangle-alert"
-      :title="`${presentation.itemLabel} could not be loaded`"
+      :title="`${itemLabel} could not be loaded`"
       :description="loadError"
     />
-    <template v-else>
-      <div v-if="isNew" class="mb-6 flex justify-end">
-        <UButton :label="createActionLabel" :loading="saving" @click="startOrCreate" />
-      </div>
-      <EditorNavigationList :groups="navigationGroups" :active-item="level.child.value" />
-    </template>
+    <EditorNavigationList v-else :groups="navigationGroups" :active-item="level.child.value" />
   </DashboardIndexPanel>
 </template>
 
@@ -112,7 +107,7 @@ export interface ProductForm {
 export interface ProductEditor {
   form: ProductForm
   product: ComputedRef<Product | null>
-  presentation: ComputedRef<{ itemLabel: string }>
+  itemLabel: ComputedRef<string>
   currency: string
   organizationId: string
   /** The location this editor is scoped to by its URL, or null for the whole organization. */
@@ -178,7 +173,7 @@ import { majorAmountToMinor, minorAmountToMajor, selectPrice, type Price } from 
 import { formatProductMoney } from '~/utils/product-money'
 import { isChannelPush } from '~/shared/channel-push'
 import type { ProductMutation } from '~/server/utils/product-management'
-import { presentationForProduct, requireProductPresentation } from '~/utils/product-presentation'
+import { presentationForProduct } from '~/utils/product-presentation'
 import { MINUTE_TIME_PATTERN } from '~/utils/timezone'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 
@@ -213,11 +208,14 @@ const location = computed(() => organizationLocations.value.find(entry => entry.
 
 const vertical = dashboard.organization.value?.vertical
 if (!vertical) throw createError({ statusCode: 500, statusMessage: 'Organization vertical is not configured' })
-// The words follow the product: a class is an experience whatever the site
-// sells otherwise. Until the row has loaded, and for a product being created,
-// the screen speaks the vertical's own surface — it is not yet known to be
-// anything else.
-const presentation = computed(() => (product.value ? presentationForProduct(vertical, product.value, dashboard.organization.value?.theme_id) : requireProductPresentation(vertical, dashboard.organization.value?.theme_id)))
+// The words follow the product's kind: a class is an experience whatever the
+// site sells otherwise. Until a kind is loaded or chosen there are no words for
+// it, and the screen says only that it is a product.
+const presentation = computed(() => {
+  const kind = product.value?.kind ?? form.kind
+  return kind ? presentationForProduct(vertical, { kind: assertProductKind(kind) }, dashboard.organization.value?.theme_id) : null
+})
+const itemLabel = computed(() => presentation.value?.itemLabel ?? 'Product')
 const rawCurrency = dashboard.organization.value?.default_currency
 if (!isCurrencyCode(rawCurrency)) throw createError({ statusCode: 500, statusMessage: 'Unsupported organization currency' })
 const currency = rawCurrency
@@ -238,7 +236,11 @@ const sectionLabels: Record<SectionKey, string> = {
   'booking': 'Scheduling',
   'locations': 'Locations',
   'stay': 'Stay settings',
-  get collections() { return product.value?.kind === 'dish' ? 'Menu sections' : presentation.value.collectionGroupLabelPlural },
+  // Only a product with a kind has collections to choose.
+  get collections() {
+    if (!presentation.value) throw new Error('A product has no collections before its kind is chosen')
+    return product.value?.kind === 'dish' ? 'Menu sections' : presentation.value.collectionGroupLabelPlural
+  },
 }
 
 const detailKey = computed(() => level.child.value)
@@ -288,7 +290,7 @@ const collections = computed(() => loaded.value?.collections ?? [])
 // A product that is not there is not a page. A request that failed is a state
 // this level shows, because the product may well still exist.
 watchEffect(() => {
-  if (loadFailure.value && isNotFoundError(loadFailure.value)) showError(createError({ statusCode: 404, statusMessage: `${presentation.value.itemLabel} not found` }))
+  if (loadFailure.value && isNotFoundError(loadFailure.value)) showError(createError({ statusCode: 404, statusMessage: `${itemLabel.value} not found` }))
 })
 /**
  * A place to stay always has its stay settings. Missing or malformed ones are a
@@ -309,7 +311,7 @@ const stayConfigError = computed(() => {
   return invalid.length ? `This place to stay has invalid stay settings: ${invalid.join(', ')}.` : null
 })
 const loadError = computed(() => (loadFailure.value && !isNotFoundError(loadFailure.value)
-  ? getErrorMessage(loadFailure.value, `Failed to load this ${presentation.value.itemLabel.toLowerCase()}`)
+  ? getErrorMessage(loadFailure.value, `Failed to load this ${itemLabel.value.toLowerCase()}`)
   : stayConfigError.value))
 
 /**
@@ -816,19 +818,21 @@ function payload() {
   }
 }
 
-const { createActionLabel, saveLabel: createSaveLabel, saveDisabled, save: saveCurrentEditor, startOrCreate } = useCreateWalk({
+const { title: newTitle, firstStep, saveLabel: createSaveLabel, saveDisabled, save: saveCurrentEditor } = useCreateWalk({
   recordPath: itemPath,
   isNew,
   openKey: editorKey,
   labels: sectionLabels,
   order: () => form.kind === 'stay' ? ['kind', 'name', 'stay'] : ['kind', 'name'],
   missing: key => key === 'name' ? !form.name.trim() : key === 'stay' ? stayIncomplete() : !form.kind,
-  noun: () => form.kind ? presentationForProduct(vertical, { kind: assertProductKind(form.kind) }, dashboard.organization.value?.theme_id).itemLabel.toLowerCase() : 'product',
+  noun: () => itemLabel.value.toLowerCase(),
   saving,
   // A product that could not be read has no draft worth writing over it.
   existingBlocked: () => !product.value || Boolean(loadError.value) || !sectionValid.value,
   commit,
 })
+
+const pageTitle = computed(() => isNew.value ? newTitle.value : form.name || itemLabel.value)
 
 // Saving content and publishing the listing are separate owner decisions.
 const saveLabel = computed(() => createSaveLabel.value ?? 'Save')
@@ -896,7 +900,7 @@ async function commit(bookingConcern?: BookingConcern) {
     if (bookingConcern !== undefined) await reloadSchedule()
     await (closeTo.value ? navigateTo(closeTo.value) : level.close())
   } catch (error) {
-    saveError.value = getErrorMessage(error, `Failed to save ${presentation.value.itemLabel.toLowerCase()}`)
+    saveError.value = getErrorMessage(error, `Failed to save ${itemLabel.value.toLowerCase()}`)
   } finally {
     saving.value = false
   }
@@ -1169,7 +1173,7 @@ async function loadProductLocalization(locale: string): Promise<Record<string, u
 
 async function saveProductLocalization(locale: string, submitted: Record<string, unknown>): Promise<void> {
   const row = product.value
-  if (!row) throw new Error(`The ${presentation.value.itemLabel.toLowerCase()} is unavailable.`)
+  if (!row) throw new Error(`The ${itemLabel.value.toLowerCase()} is unavailable.`)
   const values: Record<string, unknown> = {}
   for (const key of ['name', 'description']) {
     if (Object.hasOwn(submitted, key)) values[key] = submitted[key]
@@ -1186,11 +1190,11 @@ async function saveProductLocalization(locale: string, submitted: Record<string,
   })
 }
 
-useSeoMeta({ title: () => `${form.name || presentation.value.itemLabel} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${pageTitle.value} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
 provide(productEditorKey, {
   form,
   product,
-  presentation,
+  itemLabel,
   currency,
   organizationId,
   locationId,
