@@ -141,6 +141,14 @@ export interface CloudflareEnv {
   STRIPE_SECRET_KEY?: string
   STRIPE_WEBHOOK_SECRET?: string
   STRIPE_CONNECT_WEBHOOK_SECRET?: string
+  STRIPE_PAYMENTS_WEBHOOK_SECRET?: string
+  STRIPE_PAYMENTS_METHOD_CONFIGURATION?: string
+  NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY?: string
+  STRIPE_TEST_SECRET_KEY?: string
+  STRIPE_TEST_PUBLISHABLE_KEY?: string
+  STRIPE_TEST_PAYMENTS_METHOD_CONFIGURATION?: string
+  STRIPE_TEST_CONNECT_WEBHOOK_SECRET?: string
+  STRIPE_TEST_PAYMENTS_WEBHOOK_SECRET?: string
   GA4_API_SECRET?: string
   GOOGLE_ADS_DEVELOPER_TOKEN?: string
   AI_SEARCH?: AiSearchNamespace
@@ -530,7 +538,7 @@ function buildAuth(env: CloudflareEnv) {
         delete: {
           before: async (user) => {
             // A deleted account's Customer at every business it paid goes with it, and the cards saved there.
-            await deleteBuyerCustomers(db, stripeClient, user.id)
+            await deleteBuyerCustomers(db, env, user.id)
             await execute(db, "DELETE FROM activity_entries WHERE kind='notification' AND scope_kind='global' AND target_user_id=?", [user.id])
             // The account's member rows cascade away with it; the homes they
             // looked after are released last, since an assignment names a member

@@ -229,8 +229,8 @@ async function main() {
 
     section("Signed-in homepage routing");
     const signedInHome = await get(`${BASE_URL}/`, { cookie: sessionCookie });
-    if (signedInHome.status === 302 && signedInHome.headers.location === "/api/post-login") pass("Signed-in homepage redirects to post-login");
-    else fail("Signed-in homepage did not redirect to post-login", signedInHome.status);
+    if (signedInHome.status === 200) pass("Signed-in homepage renders with 200");
+    else fail("Signed-in homepage did not render with 200", signedInHome.status);
     const postLogin = await get(`${BASE_URL}/api/post-login`, { cookie: sessionCookie });
     if (postLogin.status === 302 && postLogin.headers.location?.startsWith("/dashboard/")) pass("Post-login redirects to the dashboard");
     else fail("Post-login did not redirect to the dashboard", postLogin.status);

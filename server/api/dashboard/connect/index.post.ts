@@ -4,12 +4,12 @@ import { requireFinancialBrowserOrigin } from '~/server/utils/financial-browser'
 import { getDashboardContext } from '~/server/utils/dashboard-context'
 import { assertRoleAllows } from '~/server/utils/member-access'
 import { jsonResponse } from '~/server/utils/api-response'
-import { createStripeClient } from '~/server/utils/stripe-client'
 import {
   buildStripeConnectOnboardingUrls,
   createStripeConnectOnboardingLink,
   ensureStripeConnectedAccount,
-  stripeLivemodeFromKey,
+  organizationPaymentsLivemode,
+  paymentsStripe,
 } from '~/server/utils/stripe-connect'
 
 export default defineHandler(async (event) => {
@@ -17,7 +17,7 @@ export default defineHandler(async (event) => {
   const { env, db, session, organization } = await getDashboardContext(event, {})
   // Connecting the merchant account requires an explicit financial integration grant.
   await assertRoleAllows({ organizationId: organization.id, role: organization.role, permissions: { payments: ['integration'] } })
-  if (!env.STRIPE_SECRET_KEY || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) {
+  if (!env.NUXT_PUBLIC_PLATFORM_DOMAIN) {
     throw new HTTPError({ statusCode: 503, statusMessage: 'Stripe Connect is not configured' })
   }
 
@@ -26,7 +26,8 @@ export default defineHandler(async (event) => {
     throw new HTTPError({ statusCode: 409, statusMessage: 'Your account needs an email address before Stripe onboarding' })
   }
 
-  const stripe = createStripeClient(env.STRIPE_SECRET_KEY, 'payments')
+  const livemode = organizationPaymentsLivemode(env, organization)
+  const stripe = paymentsStripe(env, livemode)
   const body = await readBody(event) as { country?: unknown } | undefined
   const country = typeof body?.country === 'string' && /^[A-Z]{2}$/.test(body.country) ? body.country : null
   try {
@@ -34,7 +35,7 @@ export default defineHandler(async (event) => {
       organizationId: organization.id,
       organizationName: organization.name,
       contactEmail: userEmail,
-      livemode: stripeLivemodeFromKey(env.STRIPE_SECRET_KEY),
+      livemode,
       country,
     })
     if (!account.stripeAccountId) throw new Error('Stripe connected account ID is missing after creation')

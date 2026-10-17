@@ -10,7 +10,7 @@ import { execute, executeBatch, queryAll, queryFirst, type DbClient, type BatchQ
 import { assertPriceShape, PRICE_TAX_BEHAVIORS, selectPrice, type Price } from '~/shared/prices'
 import { isRecord } from '~/server/utils/type-guards'
 import { sessionAllocationPredicate } from '~/server/utils/availability'
-import { requireStripeCheckoutAcceptance, type StripeConnectedAccount } from '~/server/utils/stripe-connect'
+import { paymentsStripe, requireStripeCheckoutAcceptance, type StripeConnectedAccount } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { tokenHash } from './buyer'
 import { connectedBuyerCustomer } from '~/server/utils/billing-customer'
@@ -59,7 +59,7 @@ export function isStayPurchase(value: unknown): value is StayPurchase {
 export interface PaymentReview { payment_method_id: string; subtotal: number; surcharge: number; total: number; reviewed_at: string }
 export interface PaymentHandoff { payment_id: string; pay_path: string; purchase_claim: string; expires_at: string }
 /** Stripe's PaymentIntent owns payment; one atomic batch owns the guest request, expiring capacity hold and immutable purchase. */
-export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: CloudflareEnv, input: CheckoutInput, retry = false) {
+export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, input: CheckoutInput, retry = false) {
   if (!Number.isSafeInteger(input.quantity) || input.quantity < 1 || input.quantity > 99 || !input.idempotencyKey.trim() || input.idempotencyKey.trim().length > 200) throw new HTTPError({ statusCode: 400, statusMessage: 'A quantity of 1–99 and an idempotency key of 1–200 characters are required' })
   const origin = new URL(input.returnOrigin)
   if (origin.protocol !== 'https:' || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) throw new Error('Payments return origin must be an HTTPS origin')
@@ -160,12 +160,13 @@ export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: C
     reservation = { ...reservationPolicySummarySource(policy), location_id: input.locationId, starts_at: input.startsAt, ends_at: input.endsAt, timezone: input.timezone, party_size: input.quantity, policy_updated_at: policy.updated_at }
   }
   if (!previous) {
-    const acceptance = await requireStripeCheckoutAcceptance(db, stripe, env, input.organizationId)
+    const acceptance = await requireStripeCheckoutAcceptance(db, env, input.organizationId)
     connected = acceptance.connected
     methodConfigurationId = acceptance.methodConfigurationId
     automaticTax = acceptance.automaticTax
   }
   if(!price || !connected?.stripeAccountId || automaticTax === undefined || !methodConfigurationId)throw new Error('Immutable checkout price or connected account is missing')
+  const stripe = paymentsStripe(env, connected.livemode)
   // Stripe Tax calculated the hosted Checkout's tax. The on-site payment does not run Stripe Tax calculations yet, so a business registered for it is refused rather than charged without tax.
   if (automaticTax) throw new HTTPError({ statusCode: 409, statusMessage: 'This business collects tax through Stripe Tax, which online payments on the site do not calculate yet', data: { code: 'stripe_tax_unsupported' } })
   const amount = price.unit_amount*purchaseQuantity
@@ -221,7 +222,7 @@ export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: C
     ],{operation:'Reserve payment checkout'})
     } catch(error) {
       const raced=await queryFirst(db,'SELECT id FROM payment_attempts WHERE idempotency_key=?',[key])
-      if(raced && !retry) return await createPaymentCheckout(db,stripe,env,input,true)
+      if(raced && !retry) return await createPaymentCheckout(db,env,input,true)
       if (input.subjectType === 'stay' && isStayNightConflict(error)) throw new HTTPError({ statusCode: 409, statusMessage: 'Some of these nights are no longer available', data: { code: 'STAY_NIGHTS_UNAVAILABLE', field: 'check_in_date' }, cause: error })
       throw error
     }

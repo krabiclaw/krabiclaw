@@ -89,7 +89,7 @@
             <div class="flex items-start justify-between gap-4">
               <div>
                 <h2 class="text-xl font-semibold text-default sm:text-2xl">
-                  {{ stayPropertyTypeLabel ? `${stayPropertyTypeLabel} in ${location?.title || organizationName}` : displayTitle }}
+                  {{ stayPropertyTypeLabel ? `${stayPropertyTypeLabel} in ${stayPlaceName}` : displayTitle }}
                 </h2>
                 <p class="mt-1 text-sm text-muted">
                   {{ staySpecsSummary }}
@@ -456,7 +456,7 @@ import { extractDietarySchemaUrls, type ProductCollectionSibling } from '~/utils
 import type { ProductDetailValue } from '~/shared/product-details'
 import { EXPERIENCE_ATTRIBUTE_HANDLES, productDetailFields, productDetailKey, PRICING_NOTE_HANDLE } from '~/shared/product-details'
 import type { PublicProductBooking, PublicProductLocation, PublicProductReview, PublicProductSession } from '~/server/utils/public-products'
-import { formatPostalAddress, schemaPostalAddress } from '~/utils/postal-address'
+import { addressPlaceName, formatPostalAddress, schemaPostalAddress } from '~/utils/postal-address'
 import { formatTime } from '~/utils/timezone'
 import SayaReviewCard from '~/components/saya/SayaReviewCard.vue'
 import BookingModal from '~/components/booking/BookingModal.vue'
@@ -788,6 +788,8 @@ const thingsToKnow = computed(() => visibleDetails.value.filter((detail) => {
 }))
 
 const addressLine = computed(() => formatPostalAddress(props.location?.address ?? null))
+// A home is named by its town, as Airbnb's "Villa in Ao Nang"; its location's title is the home's own name.
+const stayPlaceName = computed(() => addressPlaceName(props.location?.address ?? null) || props.location?.title || props.organizationName)
 // A map from the coordinates the branch already has; no key, no second source.
 const mapEmbedUrl = computed(() => (props.location && props.location.latitude !== null && props.location.longitude !== null
   ? `https://www.google.com/maps?q=${props.location.latitude},${props.location.longitude}&output=embed`

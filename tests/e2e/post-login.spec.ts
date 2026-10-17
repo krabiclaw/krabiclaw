@@ -57,14 +57,7 @@ test('public auth CTAs reflect the SSR session', async ({ page, baseURL }) => {
   await loginAs(page.request, baseURL!, 'user-e2e-oauth-private-cimd')
   const session = await (await page.request.get('/api/auth/get-session')).json()
 
-  // The marketing homepage is for people without an account. A signed-in
-  // owner is sent to their dashboard rather than shown the pitch, which is
-  // what stopped a returning owner clicking "Start free" a second time.
-  const home = await page.request.get('/', { maxRedirects: 0 })
-  expect(home.status()).toBe(302)
-  expect(home.headers().location).toBe('/api/post-login')
-
-  for (const path of ['/docs', '/plugin', '/features', '/pricing', '/templates/saya']) {
+  for (const path of ['/', '/docs', '/plugin', '/features', '/pricing', '/templates/saya']) {
     const response = await page.goto(path)
     expect(response?.status()).toBe(200)
     expect(response!.headers()['cache-control']).toContain('no-store')

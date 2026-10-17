@@ -2,8 +2,7 @@ import type Stripe from 'stripe'
 import { HTTPError } from 'nitro'
 import { execute, executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { assertRoleAllows } from '~/server/utils/member-access'
-import { getStripeConnectedAccount, stripeLivemodeFromKey } from '~/server/utils/stripe-connect'
-import { createStripeClient } from '~/server/utils/stripe-client'
+import { getStripeConnectedAccount, paymentsStripe } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { notifyPaymentFinancialEvent } from './notifications'
 import { readPaymentOrder } from './orders'
@@ -74,9 +73,7 @@ export async function paymentPayouts(db: DbClient, env: CloudflareEnv, principal
   await authorizePayments(principal, 'payouts')
   const account = await getStripeConnectedAccount(db, principal.organizationId)
   if (!account?.stripeAccountId) return { organization_id: principal.organizationId, configured: false, balance: null, payouts: [], next_cursor: null, source: 'Stripe account not connected', refreshed_at: null }
-  if (!env.STRIPE_SECRET_KEY) throw new HTTPError({ statusCode: 503, statusMessage: 'Stripe is not configured' })
-  if (account.livemode !== stripeLivemodeFromKey(env.STRIPE_SECRET_KEY)) throw new HTTPError({ statusCode: 409, statusMessage: 'Connected Stripe account mode does not match configuration' })
-  const stripe = createStripeClient(env.STRIPE_SECRET_KEY, 'payments'), options = { stripeAccount: account.stripeAccountId }
+  const stripe = paymentsStripe(env, account.livemode), options = { stripeAccount: account.stripeAccountId }
   const [balance, payouts] = await Promise.all([stripe.balance.retrieve({}, options), stripe.payouts.list({ limit: 50, ...(after ? { starting_after: after } : {}) }, options)])
   if (balance.livemode !== account.livemode || payouts.data.some(row => row.livemode !== account.livemode)) throw new Error('Stripe payout mode does not match connected account')
   const nextCursor = payouts.has_more ? payouts.data.at(-1)?.id : null
@@ -161,7 +158,7 @@ export async function executeRefund(db: DbClient, stripe: Stripe, payment: Payme
 export async function reconcileRefundState(db:DbClient,stripe:Stripe,payment:Payment,source:string|Stripe.Refund,env:CloudflareEnv) {
  const refund=typeof source==='string'?await stripe.refunds.retrieve(source,{}, {stripeAccount:payment.stripe_account_id}):source
  const intentId=typeof refund.payment_intent==='string'?refund.payment_intent:refund.payment_intent?.id
- if(!env.STRIPE_SECRET_KEY||stripeLivemodeFromKey(env.STRIPE_SECRET_KEY)!==Boolean(payment.livemode)||(typeof source==='string'&&refund.id!==source)||refund.currency.toUpperCase()!==payment.currency||intentId!==payment.stripe_payment_intent_id)throw new Error('Native refund identity does not match payment')
+ if((typeof source==='string'&&refund.id!==source)||refund.currency.toUpperCase()!==payment.currency||intentId!==payment.stripe_payment_intent_id)throw new Error('Native refund identity does not match payment')
  assertMinorAmount(refund.amount)
  const kind=refund.status==='pending'||refund.status==='requires_action'?'refund_pending':refund.status==='succeeded'?'refund_succeeded':refund.status==='failed'?'refund_failed':refund.status==='canceled'?'refund_canceled':null
  if(!kind)throw new Error('Native refund status is missing or unsupported')

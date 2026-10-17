@@ -19,7 +19,6 @@ import { getSourceLocale } from '~/server/utils/organization-locales'
 import { assertExactCanonicalLocale, assertPublicOrganizationLanguageEntitlement } from '~/server/utils/localization'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 import { createPaymentCheckout } from '~/server/domain/payments/checkout'
-import { createStripeClient } from '~/server/utils/stripe-client'
 import { isRecord } from '~/server/utils/type-guards'
 import { ensureInteractionUser, type CloudflareEnv } from '~/server/utils/auth'
 import { DEFAULT_EMAIL_DAILY_LIMIT as EMAIL_DAILY_LIMIT, DEFAULT_IP_HOURLY_LIMIT as IP_HOURLY_LIMIT, getClientIp, hashClientIp, hashIdentifier, incrementHourlyRateLimit } from '~/server/utils/hourly-rate-limit'
@@ -149,7 +148,7 @@ export async function createTableReservation(event: H3Event, input: {
       || typeof snapshot.reservation.starts_at !== 'string' || typeof snapshot.reservation.ends_at !== 'string' || typeof snapshot.reservation.timezone !== 'string') throw new Error('Saved reservation checkout has invalid occurrence details')
     if (input.financialWritesAllowed === false) throw new HTTPError({ statusCode: 409, message: 'Continue this reservation through the business’s payment workflow', data: { code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(organization.slug)}/calendar/settings/availability/deposit?locationId=${encodeURIComponent(resolvedLocationId)}` } })
     if (!env.STRIPE_SECRET_KEY || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) return creationResult({ error: 'Payments provider configuration is incomplete', code: 'payments_unavailable' }, { status: 503 })
-    const checkout = await createPaymentCheckout(db, createStripeClient(env.STRIPE_SECRET_KEY, 'payments'), env, {
+    const checkout = await createPaymentCheckout(db, env, {
       subjectType: 'reservation', organizationId, buyerUserId: operator ? null : await ensureInteractionUser(event, env), locationId: resolvedLocationId,
       startsAt: snapshot.reservation.starts_at, endsAt: snapshot.reservation.ends_at, timezone: snapshot.reservation.timezone,
       requestId: id, requestFingerprint: fingerprint, quantity: partySize, idempotencyKey, returnOrigin: env.NUXT_PUBLIC_PLATFORM_DOMAIN, following: () => [],
@@ -213,7 +212,7 @@ export async function createTableReservation(event: H3Event, input: {
   if (requiresDeposit) {
     if (!env.STRIPE_SECRET_KEY || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) return creationResult({ error: 'Payments provider configuration is incomplete', code: 'payments_unavailable' }, { status: 503 })
     if (!slot) throw new Error('Reservation checkout has no selected time')
-    const checkout = await createPaymentCheckout(db, createStripeClient(env.STRIPE_SECRET_KEY, 'payments'), env, {
+    const checkout = await createPaymentCheckout(db, env, {
       subjectType: 'reservation', organizationId, buyerUserId: userId, locationId: resolvedLocationId, startsAt: slot.starts_at,
       endsAt: new Date(Date.parse(slot.starts_at) + policy.duration_minutes! * 60_000).toISOString(), timezone: availability.timezone,
       requestId: id, requestFingerprint: fingerprint, quantity: partySize, idempotencyKey, returnOrigin: env.NUXT_PUBLIC_PLATFORM_DOMAIN,
