@@ -15,6 +15,6 @@ export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
   if (!env.DB) return jsonResponse({ error: 'Database not available' }, { status: 500 })
   const keys = paymentsStripeKeys(env, Boolean((await requirePayment(env.DB, organizationId, paymentId)).livemode))
-  if (!keys) return jsonResponse({ error: 'Stripe is not configured' }, { status: 503 })
-  return jsonResponse(await paymentHandoff(env.DB, createStripeClient(keys.secretKey, 'payments'), keys.publishableKey ?? '', organizationId, paymentId, claim), { headers: { 'cache-control': 'private, no-store' } })
+  if (!keys?.publishableKey) return jsonResponse({ error: 'Stripe is not configured' }, { status: 503 })
+  return jsonResponse(await paymentHandoff(env.DB, createStripeClient(keys.secretKey, 'payments'), keys.publishableKey, organizationId, paymentId, claim), { headers: { 'cache-control': 'private, no-store' } })
 })

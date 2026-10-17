@@ -213,7 +213,7 @@ export async function readStripeCheckoutSetup(db: DbClient, organizationId: stri
   if (!entitled) missing.push('payments.entitlement')
   const livemode = env.STRIPE_SECRET_KEY ? organizationPaymentsLivemode(env, organization) : null
   const keys = livemode === null ? null : paymentsStripeKeys(env, livemode)
-  if (!keys?.methodConfiguration || !env.NUXT_PUBLIC_PLATFORM_DOMAIN || !env.METRONOME_API_KEY || !env.METRONOME_RATE_CARD_ID) missing.push('payments.configuration')
+  if (!keys?.methodConfiguration || !keys.publishableKey || !env.NUXT_PUBLIC_PLATFORM_DOMAIN || !env.METRONOME_API_KEY || !env.METRONOME_RATE_CARD_ID) missing.push('payments.configuration')
   if (organization.billing_status !== 'active' || !organization.billing_customer || !organization.customer || !organization.contract || organization.currency !== 'USD' || !organization.start || !Number.isFinite(Date.parse(organization.start)) || Date.parse(organization.start) > Date.now()) missing.push('payments.billing')
   if (organization.servicing) missing.push('payments.servicing')
   if (!connected?.stripeAccountId) missing.push('payments.account')

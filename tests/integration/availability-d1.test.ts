@@ -249,7 +249,7 @@ test('the occurrence key is the intended local start, not the actual instant', (
 test('required online collection needs Payments setup as well as entitlement, while disabling remains available', { timeout: 120_000 }, async () => {
   const { runtime, db } = await boot()
   const scope = { organizationId: ORG, productId: PRODUCT, actorId: ACTOR }
-  const env = { DB: db, STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', STRIPE_PAYMENTS_METHOD_CONFIGURATION: 'pmc_local_proof', METRONOME_API_KEY: 'local-proof-no-provider-call', METRONOME_RATE_CARD_ID: 'local-proof-rate-card', BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test' } as CloudflareEnv
+  const env = { DB: db, STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', STRIPE_PAYMENTS_METHOD_CONFIGURATION: 'pmc_local_proof', NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: 'pk_test_local_proof', METRONOME_API_KEY: 'local-proof-no-provider-call', METRONOME_RATE_CARD_ID: 'local-proof-rate-card', BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://krabiclaw.test' } as CloudflareEnv
   try {
     const before = await db.prepare('SELECT online_payment_required, updated_at FROM product_booking_configs WHERE product_id = ?').bind(PRODUCT).first()
     const invalidations = await db.prepare('SELECT COUNT(*) FROM public_resource_cache_invalidations').first('COUNT(*)')

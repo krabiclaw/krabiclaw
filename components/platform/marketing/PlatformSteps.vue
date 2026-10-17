@@ -23,7 +23,7 @@
               <span v-else class="kc-steps__label">{{ step.title }}</span>
             </li>
           </ol>
-          <NuxtLink v-if="ctaLabel && ctaUrl" :to="route(ctaUrl)" class="kc-steps__cta">{{ ctaLabel }}</NuxtLink>
+          <PlatformAccountCta v-if="ctaLabel && ctaUrl" :label="ctaLabel" :to="route(ctaUrl)" class="kc-steps__cta" />
         </div>
       </div>
     </div>
