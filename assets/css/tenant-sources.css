@@ -1,6 +1,7 @@
 /* Tenant routes and components scanned for Tailwind classes */
 @source "../../pages/**/*.vue";
 @source "../../layouts/tenant.vue";
+@source "../../components/*.vue";
 @source "../../components/tenant";
 @source "../../components/tenant-pages";
 @source "../../components/ui";

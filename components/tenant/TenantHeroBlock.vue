@@ -134,12 +134,16 @@
 <script setup lang="ts">
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
+import type { BlawbyDocumentPayload } from '~/utils/blawby-document-contract'
 import { blockText, blockMedia, blockRecords } from '~/utils/tenant-page-block-data'
 import { cfImageSrcset } from '~/utils/cf-image'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 const route = useRoute()
+const { localePath, t } = useI18n()
 const { organization } = useTenantOrganization()
+const document = inject<Ref<BlawbyDocumentPayload> | null>('blawby-document', null)
+const shell = computed(() => document?.value?.shell ?? null)
 const organizationName = computed(() => organization.name || '')
 const businessTitle = computed(() => organization.name || '')
 
@@ -182,7 +186,18 @@ const overviewActions = computed(() => {
 })
 
 // Schedule support
-const nativeSchedule = computed(() => false)
-const scheduleDestination = computed(() => ctaUrl.value || '/contact')
-const scheduleLabel = computed(() => ctaLabel.value || 'Schedule Consultation')
+const nativeSchedule = computed(() => Boolean(shell.value?.canSchedule && shell.value.consultation.mode === 'native'))
+const scheduleDestination = computed(() => {
+  if (!shell.value) {
+    if (!ctaUrl.value) return localePath('/contact')
+    return ctaUrl.value.startsWith('/') ? localePath(ctaUrl.value) : ctaUrl.value
+  }
+  if (!shell.value.canSchedule) return localePath('/contact')
+  if (shell.value.consultation.mode === 'native') return '#consultations'
+  return shell.value.consultation.external_url || localePath('/contact')
+})
+const scheduleLabel = computed(() => {
+  if (shell.value && !shell.value.canSchedule) return t('site_pages.contact')
+  return ctaLabel.value || shell.value?.consultation.cta_label || t('site_pages.schedule')
+})
 </script>

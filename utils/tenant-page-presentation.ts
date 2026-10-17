@@ -92,5 +92,8 @@ export function tenantPageBlockPresentation(
   template: PublicTemplateSlug,
   type: TenantPageBlockType,
 ): BlockPresentation | null {
+  if (template === 'platform') {
+    return PRESENTATIONS[`platform:${type}`] ?? null
+  }
   return PRESENTATIONS[`${template}:${type}`] ?? PRESENTATIONS[`tenant:${type}`] ?? null
 }

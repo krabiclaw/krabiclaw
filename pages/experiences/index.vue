@@ -1,7 +1,7 @@
 <template>
   <NuxtLayout :name="template.layout">
     <TenantPublicPage v-if="isPlatform" path="/experiences" />
-    <LazySayaExperienceCatalog v-else />
+    <TenantExperienceCatalog v-else />
   </NuxtLayout>
 </template>
 

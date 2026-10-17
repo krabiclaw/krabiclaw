@@ -5,11 +5,12 @@
       <h2 class="tenant-display-md text-highlighted">{{ heading }}</h2>
     </div>
     <div :class="['grid gap-8', items.length > 1 ? 'md:grid-cols-2' : '']">
-      <NuxtLink
+      <component
+        :is="item.url ? NuxtLink : 'div'"
         v-for="(item, index) in items"
         :key="item.id"
         :ref="(el: Element | { $el?: Element } | null) => { const node = el && ('$el' in el ? el.$el : el); locCardRefs[index] = (node as HTMLElement) ?? null }"
-        :to="localePath(item.url)"
+        :to="item.url ? localePath(item.url) : undefined"
         class="group block overflow-hidden rounded-2xl border border-default bg-elevated text-default no-underline transition hover:border-muted shadow-sm"
       >
         <div class="aspect-video overflow-hidden bg-muted">
@@ -40,11 +41,12 @@
             {{ item.city }}
           </div>
           <div class="tenant-display tenant-italic text-3xl font-bold text-highlighted leading-none">{{ item.title }}</div>
-          <div class="mt-6 border-t border-default pt-5">
+          <div v-if="item.address" class="mt-3 text-sm leading-relaxed text-muted">{{ item.address }}</div>
+          <div v-if="item.url" class="mt-6 border-t border-default pt-5">
             <span class="tenant-eyebrow text-primary">{{ visitLocationCta }}</span>
           </div>
         </div>
-      </NuxtLink>
+      </component>
     </div>
   </AppSection>
 </template>
@@ -57,6 +59,8 @@ import { blockText, blockRecords } from '~/utils/tenant-page-block-data'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 import { getVerticalCopy } from '~/utils/vertical-copy'
 
+import { NuxtLink } from '#components'
+
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 const { localePath, locale, t } = useI18n()
 const { organization } = useTenantOrganization()
@@ -68,6 +72,7 @@ const items = computed(() => blockRecords(props.block.data.items).map((item) => 
     id: blockText(item.id),
     title: blockText(item.title),
     city: blockText(item.city),
+    address: blockText(item.address),
     url: blockText(item.url),
     media: media
       ? {
@@ -78,7 +83,7 @@ const items = computed(() => blockRecords(props.block.data.items).map((item) => 
         }
       : null,
   }
-}).filter(item => item.id && item.title && item.url))
+}).filter(item => item.id && item.title))
 
 const heading = computed(() => blockText(props.block.data.title) || homeCopy.value.locationGroupLine(items.value.length) || t('saya.home.locations_heading'))
 const kicker = computed(() => blockText(props.block.data.description) || homeCopy.value.findUsKicker)

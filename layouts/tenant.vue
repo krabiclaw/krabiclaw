@@ -21,10 +21,11 @@
     <TenantHeader
       :organization="tenantChromeOrganization"
       :locations="locations"
-      :sections="shell.sections.value"
+      :sections="shellSections"
       :consultation="blawbyConsultation"
       :can-schedule="blawbyCanSchedule"
       :page-links="blawbyPageLinks"
+      :is-blawby="isBlawby"
     />
 
     <main class="grow" :data-route-shell="route.path">
@@ -39,9 +40,10 @@
       :organization="tenantChromeOrganization"
       :locations="footerLocations"
       :error="bootstrapError"
-      :sections="shell.sections.value"
+      :sections="shellSections"
       :compliance="blawbyCompliance"
       :page-links="blawbyPageLinks"
+      :is-blawby="isBlawby"
     />
   </div>
 </template>
@@ -115,9 +117,12 @@ useHead(() => {
 if (import.meta.dev && !isBlawby.value) useDebugLCP()
 
 // ── Universal Shell State ─────────────────────────────────────
-const shell = useOrganizationShellState()
-if (import.meta.server && !isBlawby.value) await shell.ready
-const { locations, error: bootstrapError, organization: shellOrganization } = shell
+const shell = isBlawby.value ? null : useOrganizationShellState()
+if (import.meta.server && shell) await shell.ready
+const locations = computed(() => shell?.locations.value ?? [])
+const bootstrapError = computed(() => shell?.error.value ?? null)
+const shellOrganization = computed(() => shell?.organization.value ?? null)
+const shellSections = computed(() => shell?.sections.value ?? null)
 
 const tenantChromeOrganization = computed(() => {
   if (blawbyIdentity.value) {

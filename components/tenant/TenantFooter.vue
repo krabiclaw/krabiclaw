@@ -26,37 +26,39 @@
           </ul>
         </div>
 
-        <!-- Locations grid (if locations exist) -->
-        <div
-          v-if="locations.length"
-          :class="[
-            'grid gap-8',
-            locations.length > 2 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'
-          ]"
-        >
-          <div v-for="loc in locations" :key="loc.id">
-            <div class="tenant-display text-lg font-bold text-highlighted leading-snug">{{ loc.title }}</div>
-            <div class="mt-2 text-sm leading-relaxed text-muted">{{ formatLocAddress(loc) }}</div>
-            <div v-if="loc.phone" class="mt-1 text-sm text-muted">{{ loc.phone }}</div>
-            <div v-if="loc.hoursToday" class="mt-1 text-xs text-highlighted/60">{{ loc.hoursToday }}</div>
-            <NuxtLink
-              :to="localePath(publicLocationPath(loc))"
-              class="mt-3 inline-block border-b border-current pb-0.5 text-xs uppercase tracking-widest text-highlighted transition hover:opacity-70"
-            >
-              {{ t('saya.footer.visit_page') }}
-            </NuxtLink>
+        <div class="space-y-12">
+          <!-- Locations grid (if locations exist) -->
+          <div
+            v-if="locations.length"
+            :class="[
+              'grid gap-8',
+              locations.length > 2 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'
+            ]"
+          >
+            <div v-for="loc in locations" :key="loc.id">
+              <div class="tenant-display text-lg font-bold text-highlighted leading-snug">{{ loc.title }}</div>
+              <div class="mt-2 text-sm leading-relaxed text-muted">{{ formatLocAddress(loc) }}</div>
+              <div v-if="loc.phone" class="mt-1 text-sm text-muted">{{ loc.phone }}</div>
+              <div v-if="loc.hoursToday" class="mt-1 text-xs text-highlighted/60">{{ loc.hoursToday }}</div>
+              <NuxtLink
+                :to="localePath(publicLocationPath(loc))"
+                class="mt-3 inline-block border-b border-current pb-0.5 text-xs uppercase tracking-widest text-highlighted transition hover:opacity-70"
+              >
+                {{ t('saya.footer.visit_page') }}
+              </NuxtLink>
+            </div>
           </div>
-        </div>
 
-        <!-- Custom footer page links (if services/pages groups exist) -->
-        <div v-else-if="footerGroups.some(g => g.items.length)" class="grid grid-cols-2 gap-8 md:grid-cols-4">
-          <div v-for="group in footerGroups" :key="group.label" v-show="group.items.length">
-            <h3 class="text-sm font-semibold leading-6 text-highlighted">{{ group.label }}</h3>
-            <ul class="mt-4 space-y-3" role="list">
-              <li v-for="item in group.items" :key="item.id">
-                <NuxtLink :to="localePath(item.path)" class="text-sm text-muted no-underline transition hover:text-highlighted">{{ item.title }}</NuxtLink>
-              </li>
-            </ul>
+          <!-- Custom footer page links (if services/pages groups exist) -->
+          <div v-if="footerGroups.some(g => g.items.length)" class="grid grid-cols-2 gap-8 md:grid-cols-4">
+            <div v-for="group in footerGroups" :key="group.label" v-show="group.items.length">
+              <h3 class="text-sm font-semibold leading-6 text-highlighted">{{ group.label }}</h3>
+              <ul class="mt-4 space-y-3" role="list">
+                <li v-for="item in group.items" :key="item.id">
+                  <NuxtLink :to="localePath(item.path)" class="text-sm text-muted no-underline transition hover:text-highlighted">{{ item.title }}</NuxtLink>
+                </li>
+              </ul>
+            </div>
           </div>
         </div>
       </div>
@@ -130,10 +132,12 @@ function linksFor(paths: string[]) {
   })
 }
 
+const serviceLinks = computed(() => props.pageLinks.filter(item => item.path.startsWith('/services/') || item.path === '/experiences'))
 const footerGroups = computed(() => [
-  { label: t('blawby.footer.practice_areas'), items: linksFor(['/services', '/experiences', '/pricing']) },
-  { label: t('blawby.footer.firm'), items: linksFor(['/about', '/contact', '/blog', '/donate']) },
-  { label: t('blawby.footer.legal'), items: linksFor(['/disclaimer', '/privacy', '/terms']) },
+  { label: t('blawby.footer.services'), items: serviceLinks.value.length ? serviceLinks.value : linksFor(['/services', '/experiences', '/pricing']) },
+  { label: t('blawby.footer.support'), items: linksFor(['/schedule', '/contact', '/pricing']) },
+  { label: t('blawby.footer.company'), items: linksFor(['/about', '/donate', '/blog']) },
+  { label: t('blawby.footer.legal'), items: linksFor(['/third-party-notices', '/disclaimer', '/policies/privacy', '/privacy', '/policies/terms', '/terms']) },
 ])
 
 function formatLocAddress(loc: ApiRecord): string {
