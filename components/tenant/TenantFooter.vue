@@ -7,15 +7,17 @@
         <div class="space-y-8">
           <NuxtLink v-if="brandName" :to="localePath('/')" class="inline-flex no-underline" :aria-label="`${brandName} home`">
             <SiteLogo :alt="brandName" size="lg" loading="lazy">
-              <span class="tenant-display text-2xl font-bold text-highlighted">{{ brandName }}</span>
+              <span class="blawby-display text-2xl text-highlighted">{{ brandName }}</span>
             </SiteLogo>
           </NuxtLink>
-          <p v-if="description" class="blawby-footer-copy max-w-xl text-sm leading-6 text-muted">
-            {{ description }}
-          </p>
+          <TenantRichText
+            v-if="description"
+            :content="description"
+            class="blawby-footer-copy max-w-xl text-sm leading-6 text-muted"
+          />
           <ul v-if="documents.length" class="flex flex-wrap gap-x-4 gap-y-2 text-sm" role="list">
             <li v-for="document in documents" :key="document.asset_id">
-              <a :href="document.public_url!" class="text-sm text-muted underline hover:text-highlighted" target="_blank" rel="noopener">
+              <a :href="document.public_url!" class="blawby-footer-link" target="_blank" rel="noopener">
                 {{ document.alt_text || document.file_name || t('blawby.footer.document') }}
               </a>
             </li>
@@ -27,7 +29,7 @@
             <h3 class="text-sm font-semibold leading-6 text-highlighted">{{ group.label }}</h3>
             <ul class="mt-6 space-y-4" role="list">
               <li v-for="item in group.items" :key="item.id">
-                <NuxtLink :to="localePath(item.path)" class="text-sm leading-6 text-muted no-underline transition hover:text-highlighted">{{ item.title }}</NuxtLink>
+                <NuxtLink :to="localePath(item.path)" class="blawby-footer-link text-sm leading-6 no-underline">{{ item.title }}</NuxtLink>
               </li>
             </ul>
           </div>
@@ -87,7 +89,12 @@
       </div>
 
       <!-- Navigation links: Experience, Discover, Connect -->
-      <div class="grid gap-8 border-b border-default py-12 sm:grid-cols-3">
+      <div
+        :class="[
+          'grid gap-8 border-b border-default py-12',
+          discoverLinks.length ? 'sm:grid-cols-3' : 'sm:grid-cols-2'
+        ]"
+      >
         <div>
           <h4 class="tenant-eyebrow mb-5 text-dimmed">{{ t('saya.footer.heading_experience') }}</h4>
           <ul class="space-y-3 text-sm">
@@ -138,6 +145,7 @@ import type { PublicShellPayload } from '~/utils/public-resource-contracts'
 import { catalogNavigation } from '~/utils/product-presentation'
 import { getActiveSpecialClosure } from '~/utils/formatters'
 import { getTodayHoursLabel, type OpeningHours, type SpecialHours } from '~/shared/reservation-hours'
+import { formatPostalAddress, type PostalAddress } from '~/utils/postal-address'
 
 const props = withDefaults(defineProps<{
   organization: ApiRecord | null
@@ -203,13 +211,20 @@ const footerGroups = computed(() => [
 ])
 
 function formatLocAddress(loc: ApiRecord): string {
-  const address = loc.address as { street?: string; city?: string; region?: string; postal_code?: string } | undefined
-  if (!address) return ''
-  const parts = [address.street, address.city, address.region, address.postal_code].filter(Boolean)
-  return parts.join(', ')
+  return formatPostalAddress((loc.address as PostalAddress) ?? null)
 }
 
 function publicLocationPath(loc: ApiRecord): string {
   return `/locations/${loc.slug || loc.id}`
 }
 </script>
+
+<style scoped>
+.blawby-footer-link {
+  color: var(--ui-text-muted);
+}
+
+.blawby-footer-link:hover {
+  color: var(--ui-text-highlighted);
+}
+</style>

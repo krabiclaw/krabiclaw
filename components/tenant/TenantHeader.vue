@@ -125,12 +125,12 @@
         </div>
 
         <div class="flex min-w-0 items-center gap-x-3 font-semibold uppercase">
-          <div class="hidden items-center whitespace-nowrap text-[var(--blawby-primary,var(--ui-text-highlighted))] lg:flex">
+          <div class="hidden items-center whitespace-nowrap text-[var(--blawby-primary)] lg:flex">
             <NuxtLink
               v-for="item in serviceNavItems"
               :key="item.path"
               :to="localePath(item.path)"
-              class="inline-block rounded-lg px-2.5 py-1 text-sm no-underline transition hover:text-[var(--blawby-accent-strong,var(--ui-primary))]"
+              class="inline-block rounded-lg px-2 py-1 text-sm no-underline transition hover:text-[var(--blawby-accent-strong)]"
             >
               {{ item.title }}
             </NuxtLink>
@@ -148,37 +148,38 @@
           </TenantButton>
 
           <details ref="mobileNavDetails" class="relative -mr-1 shrink-0 lg:hidden" @toggle="syncMobileNavState">
-          <summary
-            class="inline-flex size-8 list-none items-center justify-center rounded-full text-muted transition hover:bg-muted hover:text-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden"
-            :aria-label="mobileMenuOpen ? t('blawby.navigation.close') : t('blawby.navigation.toggle')"
-          >
-            <svg class="size-4 overflow-visible stroke-current" viewBox="0 0 14 14" fill="none" stroke-width="2" stroke-linecap="round" aria-hidden="true">
-              <path :class="mobileMenuOpen ? 'scale-90 opacity-0' : ''" class="origin-center transition" d="M0 1H14M0 7H14M0 13H14" />
-              <path :class="mobileMenuOpen ? '' : 'scale-90 opacity-0'" class="origin-center transition" d="M2 2L12 12M12 2L2 12" />
-            </svg>
-          </summary>
-          <div class="absolute right-0 top-full mt-3 max-h-[calc(100vh-5rem)] w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-default bg-elevated p-4 text-base normal-case text-default shadow-xl ring-1 ring-default">
-            <PlatformCommandSearchTrigger
-              v-if="articleNav?.search"
-              :surface="articleNav.search.surface"
-              :variant="articleNav.search.variant"
-              :label="articleSearchLabel"
-              :aria-label="articleSearchLabel"
-              class="mb-3 text-sm"
-              @click="closeMobileNav"
-            />
-            <ArticleSidebar v-if="articleNav" :nav="articleNav" class="mb-3 border-b border-default pb-3" @navigate="closeMobileNav" />
-            <NuxtLink
-              v-for="item in serviceNavItems"
-              :key="item.path"
-              :to="localePath(item.path)"
-              class="block w-full rounded-lg px-2 py-1.5 text-muted no-underline transition hover:bg-muted hover:text-default"
-              @click="closeMobileNav"
+            <summary
+              class="relative z-10 flex size-8 list-none items-center justify-center text-[var(--blawby-primary)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--blawby-primary)] [&::-webkit-details-marker]:hidden"
+              :aria-label="t('blawby.navigation.toggle')"
+              :aria-expanded="mobileMenuOpen"
             >
-              {{ item.title }}
-            </NuxtLink>
-          </div>
-        </details>
+              <svg class="size-4 overflow-visible stroke-current" viewBox="0 0 14 14" fill="none" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+                <path :class="mobileMenuOpen ? 'scale-90 opacity-0' : ''" class="origin-center transition" d="M0 1H14M0 7H14M0 13H14" />
+                <path :class="mobileMenuOpen ? '' : 'scale-90 opacity-0'" class="origin-center transition" d="M2 2L12 12M12 2L2 12" />
+              </svg>
+            </summary>
+            <div class="absolute right-0 top-full mt-4 max-h-[calc(100vh-6rem)] w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl bg-elevated p-4 text-lg normal-case text-[var(--blawby-primary)] shadow-xl ring-1 ring-default">
+              <PlatformCommandSearchTrigger
+                v-if="articleNav?.search"
+                :surface="articleNav.search.surface"
+                :variant="articleNav.search.variant"
+                :label="articleSearchLabel"
+                :aria-label="articleSearchLabel"
+                class="mb-3 text-base"
+                @click="closeMobileNav"
+              />
+              <ArticleSidebar v-if="articleNav" :nav="articleNav" class="mb-3 border-b border-default pb-3" @navigate="closeMobileNav" />
+              <NuxtLink
+                v-for="item in serviceNavItems"
+                :key="item.path"
+                :to="localePath(item.path)"
+                class="block w-full p-2 no-underline hover:text-[var(--blawby-accent-strong)]"
+                @click="closeMobileNav"
+              >
+                {{ item.title }}
+              </NuxtLink>
+            </div>
+          </details>
       </div>
       </nav>
     </div>

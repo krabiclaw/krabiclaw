@@ -6,11 +6,11 @@
     data-saya-critical-hero
     data-blawby-critical-hero
     :data-has-background="backgroundSrc ? 'true' : undefined"
-    class="relative isolate min-h-160 overflow-hidden flex items-center bg-zinc-900"
+    :class="isBlawby ? 'relative overflow-hidden bg-[var(--blawby-primary-dark)]' : 'relative isolate min-h-160 overflow-hidden flex items-center bg-zinc-900'"
     data-parity-section="hero"
   >
     <!-- Background media layer -->
-    <div data-tenant-critical-hero-media data-saya-critical-hero-media class="absolute inset-0 opacity-50">
+    <template v-if="isBlawby">
       <video
         v-if="background?.kind === 'video'"
         :src="background.public_url!"
@@ -22,10 +22,7 @@
       <img
         v-else-if="backgroundSrc"
         :src="backgroundSrc"
-        :srcset="backgroundSrcset ?? undefined"
-        sizes="100vw"
         alt=""
-        aria-hidden="true"
         width="1920"
         height="1080"
         fetchpriority="high"
@@ -33,25 +30,51 @@
         decoding="async"
         class="absolute inset-0 size-full object-cover object-center"
       >
-      <div
-        v-else
-        aria-hidden="true"
-        class="absolute inset-0 flex items-center justify-center bg-[linear-gradient(135deg,var(--ui-primary)_0%,color-mix(in_srgb,var(--ui-primary)_60%,black)_100%)]"
-      >
-        <TenantIcon name="sparkles" class="size-24 text-white/25" />
+    </template>
+    <template v-else>
+      <div data-tenant-critical-hero-media data-saya-critical-hero-media class="absolute inset-0 opacity-50">
+        <video
+          v-if="background?.kind === 'video'"
+          :src="background.public_url!"
+          :poster="background.thumbnail_url ?? undefined"
+          autoplay muted loop playsinline
+          aria-hidden="true"
+          class="absolute inset-0 size-full object-cover object-center"
+        />
+        <img
+          v-else-if="backgroundSrc"
+          :src="backgroundSrc"
+          :srcset="backgroundSrcset ?? undefined"
+          sizes="100vw"
+          alt=""
+          aria-hidden="true"
+          width="1920"
+          height="1080"
+          fetchpriority="high"
+          loading="eager"
+          decoding="async"
+          class="absolute inset-0 size-full object-cover object-center"
+        >
+        <div
+          v-else
+          aria-hidden="true"
+          class="absolute inset-0 flex items-center justify-center bg-[linear-gradient(135deg,var(--ui-primary)_0%,color-mix(in_srgb,var(--ui-primary)_60%,black)_100%)]"
+        >
+          <TenantIcon name="sparkles" class="size-24 text-white/25" />
+        </div>
       </div>
-    </div>
-    <div data-saya-critical-hero-overlay class="absolute inset-0" style="background: linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.3) 100%)" />
+      <div data-saya-critical-hero-overlay class="absolute inset-0" style="background: linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.3) 100%)" />
+    </template>
 
     <div
       v-if="isBlawby || splitTitle.accent"
       data-tenant-critical-hero-content
       data-blawby-critical-hero-content
-      class="tenant-container relative z-10 w-full pb-36 pt-16 text-left min-[1920px]:pb-48 min-[1920px]:pt-24 min-[2560px]:pb-64 min-[2560px]:pt-32"
+      class="blawby-container relative pb-36 pt-16 text-left min-[1920px]:pb-48 min-[1920px]:pt-24 min-[2560px]:pb-64 min-[2560px]:pt-32"
     >
       <div data-blawby-critical-hero-columns class="flex flex-wrap gap-x-6 min-[1920px]:gap-x-12 min-[2560px]:gap-x-16">
         <div data-blawby-critical-hero-copy class="w-full lg:w-3/5">
-          <h1 class="max-w-4xl whitespace-pre-line tenant-display text-5xl font-medium text-white sm:text-7xl min-[1920px]:max-w-6xl min-[1920px]:text-8xl min-[2560px]:max-w-7xl min-[2560px]:text-9xl">
+          <h1 class="max-w-4xl whitespace-pre-line blawby-display text-5xl font-medium text-white sm:text-7xl min-[1920px]:max-w-6xl min-[1920px]:text-8xl min-[2560px]:max-w-7xl min-[2560px]:text-9xl">
             {{ splitTitle.before }}<span v-if="splitTitle.accent" class="relative whitespace-nowrap text-[var(--blawby-accent,var(--ui-primary))]">{{ splitTitle.accent }}</span>{{ splitTitle.after }}
           </h1>
           <p v-if="description" class="mt-6 max-w-2xl text-lg text-white min-[1920px]:max-w-3xl min-[1920px]:text-xl min-[2560px]:max-w-4xl min-[2560px]:text-2xl">
@@ -60,7 +83,7 @@
         </div>
         <div data-blawby-critical-hero-actions class="w-full lg:w-2/5">
           <div class="mt-10 flex justify-start gap-x-6 min-[1920px]:mt-16 min-[2560px]:mt-20">
-            <TenantButton v-if="ctaUrl && ctaLabel" :to="ctaUrl" size="lg" class="gap-2">
+            <TenantButton v-if="ctaUrl && ctaLabel" :to="ctaUrl" class="gap-2">
               <svg class="size-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7.5 4.5h9A4.5 4.5 0 0 1 21 9v3a4.5 4.5 0 0 1-4.5 4.5h-4.86L7.2 20.2a.75.75 0 0 1-1.2-.6v-3.35A4.5 4.5 0 0 1 3 12V9a4.5 4.5 0 0 1 4.5-4.5Z" /></svg>
               {{ ctaLabel }}
             </TenantButton>

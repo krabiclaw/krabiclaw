@@ -1,6 +1,6 @@
 <template>
   <section class="relative pb-14 pt-14 sm:pb-20 sm:pt-14 lg:pb-14" :data-parity-section="paritySection">
-    <div class="tenant-container relative z-20">
+    <div :class="isService ? 'blawby-container' : 'tenant-container'" class="relative z-20">
       <TenantSectionHeading
         v-if="title || description"
         :title="title"

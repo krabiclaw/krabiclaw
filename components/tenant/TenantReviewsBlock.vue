@@ -4,7 +4,7 @@
     :class="isService ? 'bg-[var(--blawby-accent-200,var(--ui-bg-muted))] py-20 sm:py-32' : 'mx-auto max-w-7xl px-4 py-20 sm:px-6 lg:px-8'"
     data-parity-section="reviews"
   >
-    <div :class="isService ? 'tenant-container' : undefined">
+    <div :class="isService ? 'blawby-container' : undefined">
       <div :class="isService ? 'mx-auto max-w-2xl md:text-center' : 'mb-12 max-w-2xl'">
         <p v-if="kicker && !isService" class="tenant-kicker mb-4">{{ kicker }}</p>
         <template v-if="ratingSummary && !isService">
@@ -17,8 +17,8 @@
           </h2>
           <p class="mt-4 text-sm text-muted">{{ homeCopy.guestReviewsLabel }}</p>
         </template>
-        <h2 v-else-if="isService" class="tenant-display text-3xl font-bold text-[var(--blawby-primary,var(--ui-text-highlighted))] sm:text-4xl">
-          {{ splitTitle.before }}<span v-if="splitTitle.accent" class="text-[var(--blawby-accent-strong,var(--ui-primary))]">{{ splitTitle.accent }}</span>{{ splitTitle.after }}
+        <h2 v-else-if="isService" class="blawby-display text-3xl font-bold text-[var(--blawby-primary)] sm:text-4xl">
+          {{ splitTitle.before }}<span v-if="splitTitle.accent" class="text-[var(--blawby-accent-strong)]">{{ splitTitle.accent }}</span>{{ splitTitle.after }}
         </h2>
         <h2 v-else class="tenant-display-md text-highlighted">
           {{ heading || t('saya.reviews.heading') }}
@@ -37,11 +37,11 @@
                     <path d="M14 10H4v14h8c0 6-2 10-7 14l4 4c8-6 11-13 11-23V10h-6Zm24 0H28v14h8c0 6-2 10-7 14l4 4c8-6 11-13 11-23V10h-6Z" />
                   </svg>
                   <blockquote class="relative">
-                    <p class="text-lg text-[var(--blawby-primary,var(--ui-text-highlighted))]">{{ review.content }}</p>
+                    <p class="text-lg text-[var(--blawby-primary)]">{{ review.content }}</p>
                   </blockquote>
                   <figcaption class="relative mt-6 flex items-center justify-between border-t border-default pt-6">
                     <div>
-                      <p class="tenant-display text-base font-bold text-[var(--blawby-primary,var(--ui-text-highlighted))]">{{ review.author_name }}</p>
+                      <p class="blawby-display text-base font-bold text-[var(--blawby-primary)]">{{ review.author_name }}</p>
                       <p v-if="review.title" class="mt-1 text-sm text-muted">{{ review.title }}</p>
                     </div>
                     <div v-if="portrait(review)" class="overflow-hidden rounded-full bg-muted">

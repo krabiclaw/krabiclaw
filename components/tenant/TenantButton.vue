@@ -5,6 +5,8 @@
     :type="type"
     :disabled="disabled || loading"
     :class="classes"
+    :data-blawby-critical-button="isBlawby ? '' : undefined"
+    data-tenant-button
     @click="handleClick"
   >
     <TenantIcon v-if="loading" name="arrow-path" class="size-4 animate-spin" />
@@ -18,6 +20,8 @@
     role="button"
     :tabindex="disabled || loading ? -1 : 0"
     :class="classes"
+    :data-blawby-critical-button="isBlawby ? '' : undefined"
+    data-tenant-button
     @keydown.enter.prevent="activateControl"
     @keydown.space.prevent="activateControl"
     @click="handleClick"
@@ -37,6 +41,8 @@
     :class="classes"
     :aria-disabled="disabled || loading || undefined"
     :tabindex="disabled || loading ? -1 : undefined"
+    :data-blawby-critical-button="isBlawby ? '' : undefined"
+    data-tenant-button
     @click="handleClick"
   >
     <TenantIcon v-if="loading" name="arrow-path" class="size-4 animate-spin" />
@@ -47,6 +53,7 @@
 
 <script setup lang="ts">
 import { NuxtLink } from '#components'
+import type { TenantContext } from '~/composables/useTenantOrganization'
 
 defineOptions({ inheritAttrs: false })
 
@@ -77,6 +84,12 @@ const props = withDefaults(defineProps<{
   block: false,
 })
 
+const tenantContext = useState<TenantContext | null>('tenant-context', () => null)
+const isBlawby = computed(() => {
+  const org = tenantContext.value?.organization
+  return org?.template?.slug === 'blawby' || org?.vertical === 'service'
+})
+
 const emit = defineEmits<{
   click: [event: Event]
 }>()
@@ -95,13 +108,19 @@ function activateControl(event: KeyboardEvent) {
   }
 }
 
-const sizeClasses = {
+const sayaSizeClasses = {
   sm: 'px-4 py-2 text-xs',
   md: 'px-6 py-3 text-sm min-[1920px]:px-4 min-[1920px]:py-4 min-[1920px]:text-base min-[2560px]:px-5 min-[2560px]:py-5 min-[2560px]:text-lg',
   lg: 'px-6 py-3.5 text-base min-[1920px]:px-6 min-[1920px]:py-5 min-[2560px]:px-8 min-[2560px]:py-6',
 }
 
-const variantClasses = {
+const blawbySizeClasses = {
+  sm: 'px-4 py-2 text-xs',
+  md: 'px-4 py-3 text-sm min-[1920px]:px-4 min-[1920px]:py-4 min-[1920px]:text-base min-[2560px]:px-5 min-[2560px]:py-5 min-[2560px]:text-lg',
+  lg: 'px-8 py-4 text-lg min-[1920px]:px-4 min-[1920px]:py-4 min-[1920px]:text-base min-[2560px]:px-5 min-[2560px]:py-5 min-[2560px]:text-lg',
+}
+
+const sayaVariantClasses = {
   primary: {
     solid: 'bg-primary text-on-primary hover:opacity-90',
     soft: 'bg-primary/10 text-primary hover:bg-primary/15',
@@ -116,10 +135,27 @@ const variantClasses = {
   },
 }
 
+const blawbyVariantClasses = {
+  primary: {
+    solid: 'bg-[var(--site-accent)] text-[var(--site-on-accent)] hover:bg-[var(--blawby-accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--blawby-accent)] focus-visible:ring-offset-2',
+    soft: 'bg-[var(--blawby-accent-100)] text-[var(--blawby-primary)] hover:bg-[var(--blawby-accent-200)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--blawby-accent)] focus-visible:ring-offset-2',
+    outline: 'bg-[var(--blawby-accent-100)] text-[var(--blawby-primary)] hover:bg-[var(--blawby-accent-200)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--blawby-accent)] focus-visible:ring-offset-2',
+    ghost: 'bg-transparent text-[var(--blawby-primary)] hover:bg-[var(--blawby-accent-100)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--blawby-accent)] focus-visible:ring-offset-2',
+  },
+  error: {
+    solid: 'bg-red-600 text-white hover:opacity-90',
+    soft: 'bg-red-600/10 text-red-600 hover:bg-red-600/15',
+    outline: 'border border-red-600 bg-transparent text-red-600 hover:bg-red-600/10',
+    ghost: 'bg-transparent text-red-600 hover:bg-red-600/10',
+  },
+}
+
 const classes = computed(() => [
-  'inline-flex items-center justify-center gap-2 rounded-lg font-medium no-underline transition disabled:opacity-60 disabled:pointer-events-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-  sizeClasses[props.size],
-  variantClasses[props.color][props.variant],
+  isBlawby.value
+    ? 'inline-flex items-center justify-center gap-2 rounded-lg font-semibold uppercase no-underline transition disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--blawby-accent)] focus-visible:ring-offset-2'
+    : 'inline-flex items-center justify-center gap-2 rounded-full font-medium no-underline transition disabled:opacity-60 disabled:pointer-events-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
+  isBlawby.value ? blawbySizeClasses[props.size] : sayaSizeClasses[props.size],
+  isBlawby.value ? blawbyVariantClasses[props.color][props.variant] : sayaVariantClasses[props.color][props.variant],
   props.block && 'w-full',
 ])
 
