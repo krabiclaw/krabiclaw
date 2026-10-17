@@ -722,8 +722,8 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
             {
               id: 'property-type',
               label: 'Property type',
-              summary: form.stay_property_type && STAY_PROPERTY_TYPES[form.stay_property_type]
-                ? `${STAY_PROPERTY_TYPES[form.stay_property_type].label}${form.stay_property_type_group && STAY_PROPERTY_TYPE_GROUPS[form.stay_property_type_group] ? ` · ${STAY_PROPERTY_TYPE_GROUPS[form.stay_property_type_group].label}` : ''}`
+              summary: form.stay_property_type
+                ? `${STAY_PROPERTY_TYPES[form.stay_property_type].label}${form.stay_property_type_group ? ` · ${STAY_PROPERTY_TYPE_GROUPS[form.stay_property_type_group].label}` : ''}`
                 : 'Choose property type',
               placeholder: !form.stay_property_type,
               to: sectionPath('property-type'),
@@ -747,7 +747,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
             {
               id: 'cancellation',
               label: 'Cancellation policy',
-              summary: form.stay_cancellation_policy && STAY_CANCELLATION_POLICIES[form.stay_cancellation_policy]
+              summary: form.stay_cancellation_policy
                 ? STAY_CANCELLATION_POLICIES[form.stay_cancellation_policy].label
                 : 'No policy set',
               placeholder: !form.stay_cancellation_policy,
@@ -904,9 +904,10 @@ function payload() {
     details: form.details,
     active: form.active,
     // Stay settings are restated only when they are what is being saved, so a
-    // description save never writes back settings someone else changed.
-    ...(form.kind === 'stay' && (isNew.value || ['stay', 'property-type', 'rooms', 'amenities', 'cancellation'].includes(editorKey.value)) ? { stay: {
-      ...(isNew.value ? { location_id: form.stay_location_id } : {}),
+    // description save never writes back settings someone else changed, and
+    // each leaf updates only the stay fields it owns.
+    ...(form.kind === 'stay' && isNew.value ? { stay: {
+      location_id: form.stay_location_id,
       check_in_time: form.check_in_time,
       check_out_time: form.check_out_time,
       max_guests: Number(form.max_guests),
@@ -919,6 +920,30 @@ function payload() {
       beds: String(form.stay_beds ?? '').trim() && !Number.isNaN(Number(form.stay_beds)) ? Number(form.stay_beds) : null,
       bathrooms: String(form.stay_bathrooms ?? '').trim() && !Number.isNaN(Number(form.stay_bathrooms)) ? Number(form.stay_bathrooms) : null,
       amenities: form.stay_amenities,
+      cancellation_policy: form.stay_cancellation_policy || null,
+      long_term_cancellation_policy: form.stay_long_term_cancellation_policy || null,
+    } } : {}),
+    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'stay' ? { stay: {
+      check_in_time: form.check_in_time,
+      check_out_time: form.check_out_time,
+      max_guests: Number(form.max_guests),
+      min_nights: Number(form.min_nights),
+      assigned_member_id: form.stay_member_id,
+      assigned_team_id: form.stay_team_id,
+    } } : {}),
+    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'property-type' ? { stay: {
+      property_type_group: form.stay_property_type_group || null,
+      property_type: form.stay_property_type || null,
+    } } : {}),
+    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'rooms' ? { stay: {
+      bedrooms: String(form.stay_bedrooms ?? '').trim() && !Number.isNaN(Number(form.stay_bedrooms)) ? Number(form.stay_bedrooms) : null,
+      beds: String(form.stay_beds ?? '').trim() && !Number.isNaN(Number(form.stay_beds)) ? Number(form.stay_beds) : null,
+      bathrooms: String(form.stay_bathrooms ?? '').trim() && !Number.isNaN(Number(form.stay_bathrooms)) ? Number(form.stay_bathrooms) : null,
+    } } : {}),
+    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'amenities' ? { stay: {
+      amenities: form.stay_amenities,
+    } } : {}),
+    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'cancellation' ? { stay: {
       cancellation_policy: form.stay_cancellation_policy || null,
       long_term_cancellation_policy: form.stay_long_term_cancellation_policy || null,
     } } : {}),

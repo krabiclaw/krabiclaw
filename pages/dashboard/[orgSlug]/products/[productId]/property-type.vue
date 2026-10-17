@@ -75,13 +75,13 @@ const selectedGroup = computed({
 
 const typeItems = computed(() => {
   const group = p.form.stay_property_type_group
-  if (!group || !STAY_PROPERTY_TYPE_GROUPS[group]) return []
+  if (!group) return []
   return STAY_PROPERTY_TYPE_GROUPS[group].types.map((typeKey) => {
     const info = STAY_PROPERTY_TYPES[typeKey]
     return {
       value: typeKey,
-      label: info?.label ?? typeKey,
-      description: info?.description ?? '',
+      label: info.label,
+      description: info.description,
     }
   })
 })
