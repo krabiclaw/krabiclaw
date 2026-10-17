@@ -31,8 +31,9 @@ import type { ComputedRef, InjectionKey, Ref } from 'vue'
 import type { Collection, Product } from '~/server/types/products'
 import type { DashboardLocation } from '~/composables/useDashboardOrganization'
 import type { GalleryMediaItem } from '~/components/dashboard/DashboardMediaGalleryField.vue'
+import type { StayAmenity, StayCancellationPolicy, StayLongTermCancellationPolicy, StayPropertyType, StayPropertyTypeGroup } from '~/shared/stay-listing'
 
-export const SECTION_KEYS = ['photo', 'kind', 'name', 'price', 'description', 'page', 'options', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections', 'stay'] as const
+export const SECTION_KEYS = ['photo', 'kind', 'name', 'price', 'description', 'page', 'options', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections', 'stay', 'property-type', 'rooms', 'amenities', 'cancellation'] as const
 export type SectionKey = typeof SECTION_KEYS[number]
 export type BookingConcern = 'enabled' | 'duration' | 'capacity' | 'confirmation' | 'payment' | 'location' | 'assignment' | number
 
@@ -101,6 +102,14 @@ export interface ProductForm {
   stay_team_id: string | null
   /** Kept as loaded: this editor assigns a team, and saving never clears a member set elsewhere. */
   stay_member_id: string | null
+  stay_property_type_group: StayPropertyTypeGroup | null
+  stay_property_type: StayPropertyType | null
+  stay_bedrooms: string
+  stay_beds: string
+  stay_bathrooms: string
+  stay_amenities: StayAmenity[]
+  stay_cancellation_policy: StayCancellationPolicy | null
+  stay_long_term_cancellation_policy: StayLongTermCancellationPolicy | null
 }
 
 /** The product's draft and what its leaves show or do beside their one field. */
