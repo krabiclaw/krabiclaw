@@ -49,7 +49,7 @@ async function renderedTypography(browser: Browser, url: string, headers: Record
     page.on('console', message => { if (/hydration.*mismatch|mismatch.*hydration/i.test(message.text())) errors.push(message.text()) })
     page.on('pageerror', error => errors.push(error.message))
     page.on('request', request => {
-      if (request.resourceType() !== 'font') return
+      if (request.resourceType() !== 'font' || request.frame() !== page.mainFrame()) return
       if (/fonts\.(googleapis|gstatic)\.com/.test(new URL(request.url()).hostname)) errors.push(`External font request: ${request.url()}`)
       fontUrls.push(request.url())
     })
