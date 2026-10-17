@@ -584,9 +584,12 @@ const sectionValid = computed(() => {
     return Boolean(form.stay_property_type && form.stay_property_type_group && isStayPropertyType(form.stay_property_type_group, form.stay_property_type))
   }
   if (editorKey.value === 'rooms') {
-    const b = form.stay_bedrooms.trim() ? Number(form.stay_bedrooms) : null
-    const beds = form.stay_beds.trim() ? Number(form.stay_beds) : null
-    const ba = form.stay_bathrooms.trim() ? Number(form.stay_bathrooms) : null
+    const bedroomsStr = String(form.stay_bedrooms ?? '').trim()
+    const bedsStr = String(form.stay_beds ?? '').trim()
+    const bathroomsStr = String(form.stay_bathrooms ?? '').trim()
+    const b = bedroomsStr ? Number(bedroomsStr) : null
+    const beds = bedsStr ? Number(bedsStr) : null
+    const ba = bathroomsStr ? Number(bathroomsStr) : null
     const invalidBedrooms = b !== null && (!Number.isInteger(b) || b < 0 || b > 50)
     const invalidBeds = beds !== null && (!Number.isInteger(beds) || beds < 1 || beds > 50)
     const invalidBaths = ba !== null && (ba < 0 || ba > 50 || (ba * 2) % 1 !== 0)
@@ -612,9 +615,12 @@ function staySummary(): string {
 }
 function roomsSummary(): string {
   const parts: string[] = []
-  if (form.stay_bedrooms.trim()) parts.push(form.stay_bedrooms === '0' ? 'Studio' : `${form.stay_bedrooms} ${Number(form.stay_bedrooms) === 1 ? 'bedroom' : 'bedrooms'}`)
-  if (form.stay_beds.trim()) parts.push(`${form.stay_beds} ${Number(form.stay_beds) === 1 ? 'bed' : 'beds'}`)
-  if (form.stay_bathrooms.trim()) parts.push(`${form.stay_bathrooms} ${Number(form.stay_bathrooms) === 1 ? 'bath' : 'baths'}`)
+  const bedroomsStr = String(form.stay_bedrooms ?? '').trim()
+  const bedsStr = String(form.stay_beds ?? '').trim()
+  const bathroomsStr = String(form.stay_bathrooms ?? '').trim()
+  if (bedroomsStr) parts.push(bedroomsStr === '0' ? 'Studio' : `${bedroomsStr} ${Number(bedroomsStr) === 1 ? 'bedroom' : 'bedrooms'}`)
+  if (bedsStr) parts.push(`${bedsStr} ${Number(bedsStr) === 1 ? 'bed' : 'beds'}`)
+  if (bathroomsStr) parts.push(`${bathroomsStr} ${Number(bathroomsStr) === 1 ? 'bath' : 'baths'}`)
   return parts.length ? parts.join(' · ') : 'None set'
 }
 // A walk opened from a location's catalog creates the place to stay there.
@@ -909,9 +915,9 @@ function payload() {
       assigned_team_id: form.stay_team_id,
       property_type_group: form.stay_property_type_group || null,
       property_type: form.stay_property_type || null,
-      bedrooms: form.stay_bedrooms.trim() && !Number.isNaN(Number(form.stay_bedrooms)) ? Number(form.stay_bedrooms) : null,
-      beds: form.stay_beds.trim() && !Number.isNaN(Number(form.stay_beds)) ? Number(form.stay_beds) : null,
-      bathrooms: form.stay_bathrooms.trim() && !Number.isNaN(Number(form.stay_bathrooms)) ? Number(form.stay_bathrooms) : null,
+      bedrooms: String(form.stay_bedrooms ?? '').trim() && !Number.isNaN(Number(form.stay_bedrooms)) ? Number(form.stay_bedrooms) : null,
+      beds: String(form.stay_beds ?? '').trim() && !Number.isNaN(Number(form.stay_beds)) ? Number(form.stay_beds) : null,
+      bathrooms: String(form.stay_bathrooms ?? '').trim() && !Number.isNaN(Number(form.stay_bathrooms)) ? Number(form.stay_bathrooms) : null,
       amenities: form.stay_amenities,
       cancellation_policy: form.stay_cancellation_policy || null,
       long_term_cancellation_policy: form.stay_long_term_cancellation_policy || null,

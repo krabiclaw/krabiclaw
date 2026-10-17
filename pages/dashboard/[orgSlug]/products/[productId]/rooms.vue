@@ -14,37 +14,40 @@
       <div class="grid gap-6 sm:grid-cols-3">
         <UFormField label="Bedrooms" description="0 for a studio">
           <UInput
-            v-model="p.form.stay_bedrooms"
+            :model-value="p.form.stay_bedrooms"
             type="number"
             min="0"
             max="50"
             step="1"
             placeholder="e.g. 2"
             class="w-full"
+            @update:model-value="p.form.stay_bedrooms = $event === null || $event === undefined ? '' : String($event)"
           />
         </UFormField>
 
         <UFormField label="Beds">
           <UInput
-            v-model="p.form.stay_beds"
+            :model-value="p.form.stay_beds"
             type="number"
             min="1"
             max="50"
             step="1"
             placeholder="e.g. 3"
             class="w-full"
+            @update:model-value="p.form.stay_beds = $event === null || $event === undefined ? '' : String($event)"
           />
         </UFormField>
 
         <UFormField label="Bathrooms" description="Supports half baths">
           <UInput
-            v-model="p.form.stay_bathrooms"
+            :model-value="p.form.stay_bathrooms"
             type="number"
             min="0"
             max="50"
             step="0.5"
             placeholder="e.g. 1.5"
             class="w-full"
+            @update:model-value="p.form.stay_bathrooms = $event === null || $event === undefined ? '' : String($event)"
           />
         </UFormField>
       </div>
