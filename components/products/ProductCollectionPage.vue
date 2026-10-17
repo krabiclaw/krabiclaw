@@ -1,7 +1,7 @@
 <template>
   <div class="min-h-screen bg-default text-default">
     <template v-if="isMenu">
-      <SayaSubNav
+      <TenantSubNav
         v-if="currentLocation"
         :location-slug="currentLocation.slug"
         active="menu"
@@ -29,7 +29,7 @@
             :to="localePath(productLocationCollectionPath(vertical, location.slug))"
             class="inline-flex items-center gap-2 rounded-full border border-default px-5 py-2.5 text-sm text-muted no-underline transition hover:bg-muted hover:text-default"
           >
-            <SayaIcon name="map-pin" class="size-3.5 opacity-70" />
+            <TenantIcon name="map-pin" class="size-3.5 opacity-70" />
             {{ location.title }}
           </NuxtLink>
         </div>
@@ -37,7 +37,7 @@
     </template>
 
     <template v-else>
-      <SayaSubNav
+      <TenantSubNav
         v-if="currentLocation && subNavTab"
         :location-slug="currentLocation.slug"
         :active="subNavTab"
@@ -54,7 +54,7 @@
             :to="localePath(`/locations/${encodeURIComponent(location.slug)}/${presentation.locationCollectionSegment}`)"
             class="inline-flex items-center gap-2 rounded-full border border-default px-5 py-2.5 text-sm text-muted no-underline transition hover:bg-muted hover:text-default"
           >
-            <SayaIcon name="map-pin" class="size-3.5 opacity-70" />
+            <TenantIcon name="map-pin" class="size-3.5 opacity-70" />
             {{ location.title }}
           </NuxtLink>
         </div>
@@ -71,7 +71,7 @@
     </div>
 
     <div v-else-if="isMenu">
-      <SayaFilterTabs
+      <TenantFilterTabs
         v-model="activeCategory"
         :tabs="categoryTabs"
         :enable-scroll-detection="true"
@@ -105,9 +105,9 @@
                 :to="productHref(product, group.location_id)!"
                 class="shrink-0"
               >
-                <SayaMenuItemPreview :item="previewItem(product)" />
+                <TenantMenuItemPreview :item="previewItem(product)" />
               </NuxtLink>
-              <SayaMenuItemPreview
+              <TenantMenuItemPreview
                 v-else-if="product.image"
                 :item="previewItem(product)"
                 disabled
@@ -127,7 +127,7 @@
                     <span v-if="product.details.featured === true" class="inline-flex shrink-0 items-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
                       {{ t('saya.posts.featured') }}
                     </span>
-                    <SayaBadgeUnavailable
+                    <TenantBadgeUnavailable
                       v-if="!isAvailable(product, group.location_id)"
                       :text="t('saya.menu_page.unavailable')"
                     />
@@ -195,14 +195,14 @@
                     aria-hidden="true"
                   >
                     <span class="flex size-12 items-center justify-center rounded-full bg-black/55 text-white">
-                      <SayaIcon name="play" class="ml-0.5 size-5" />
+                      <TenantIcon name="play" class="ml-0.5 size-5" />
                     </span>
                   </span>
                 </template>
                 <div v-else class="flex h-full items-center justify-center">
-                  <SayaIcon name="sparkles" class="size-12 text-dimmed" />
+                  <TenantIcon name="sparkles" class="size-12 text-dimmed" />
                 </div>
-                <SayaBadgeUnavailable
+                <TenantBadgeUnavailable
                   v-if="!isAvailable(product, group.location_id)"
                   overlay
                   :text="t('saya.menu_page.unavailable')"
@@ -216,12 +216,12 @@
 
                 <div class="mt-4 flex flex-wrap gap-x-5 gap-y-1.5 text-xs text-muted">
                   <span v-if="priceLabel(product, group.location_id)" class="flex items-center gap-1">
-                    <SayaIcon name="banknotes" class="size-3.5" />
+                    <TenantIcon name="banknotes" class="size-3.5" />
                     {{ product.stay ? t('stay.price_per_night', { price: priceLabel(product, group.location_id) }) : priceLabel(product, group.location_id) }}
                   </span>
                   <template v-if="product.stay">
                     <span class="flex items-center gap-1">
-                      <SayaIcon name="user-group" class="size-3.5" />
+                      <TenantIcon name="user-group" class="size-3.5" />
                       {{ t('stay.sleeps', { count: product.stay.max_guests }) }}
                     </span>
                     <span v-if="product.stay.bedrooms !== null">{{ t('stay.bedrooms', { count: product.stay.bedrooms }) }}</span>
@@ -229,18 +229,18 @@
                     <span v-if="product.stay.bathrooms !== null">{{ t('stay.bathrooms', { count: product.stay.bathrooms }) }}</span>
                   </template>
                   <span v-if="product.booking?.duration_minutes" class="flex items-center gap-1">
-                    <SayaIcon name="clock" class="size-3.5" />
+                    <TenantIcon name="clock" class="size-3.5" />
                     {{ durationLabel(product.booking.duration_minutes) }}
                   </span>
                   <span v-if="product.booking?.default_capacity" class="flex items-center gap-1">
-                    <SayaIcon name="user-group" class="size-3.5" />
+                    <TenantIcon name="user-group" class="size-3.5" />
                     {{ product.booking.default_capacity }} {{ verticalCopy.guestsMaxLabel }}
                   </span>
                 </div>
 
                 <div v-if="productHref(product, group.location_id)" class="mt-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-primary">
                   {{ product.stay ? t(productCtaKey(product.kind)) : verticalCopy.viewExperienceCta }}
-                  <SayaIcon name="arrow-right" class="size-3.5 transition-transform group-hover:translate-x-1" />
+                  <TenantIcon name="arrow-right" class="size-3.5 transition-transform group-hover:translate-x-1" />
                 </div>
               </div>
             </component>

@@ -10,7 +10,7 @@
 
     <template v-else-if="location">
       <!-- Sub-nav (Level 2) -->
-      <SayaSubNav 
+      <TenantSubNav 
         :location-slug="slug" 
         active="reviews" 
       />
@@ -37,7 +37,7 @@
               {{ aggregate?.rating ? Number(aggregate.rating).toFixed(1) : '—' }}
             </div>
             <div class="mt-3 flex gap-1">
-              <SayaIcon
+              <TenantIcon
                 v-for="s in 5"
                 :key="s"
                 name="star"
@@ -55,7 +55,7 @@
             <div v-for="star in [5, 4, 3, 2, 1]" :key="star" class="grid grid-cols-[40px_1fr_36px] items-center gap-4">
               <div class="flex items-center gap-1 text-sm text-muted">
                 {{ star }}
-                <SayaIcon name="star" solid class="size-3 text-primary" />
+                <TenantIcon name="star" solid class="size-3 text-primary" />
               </div>
               <div class="h-2 overflow-hidden rounded-full bg-muted">
                 <div
@@ -70,7 +70,7 @@
       </section>
 
       <!-- Filter chips — only shown when there are reviews to filter -->
-      <SayaFilterTabs
+      <TenantFilterTabs
         v-if="reviews.length > 0"
         v-model="activeFilter"
         :tabs="filters"
@@ -78,14 +78,14 @@
         <template #extra>
           <span class="ml-auto text-[10px] tabular-nums text-muted/50">{{ filtered.length }}</span>
         </template>
-      </SayaFilterTabs>
+      </TenantFilterTabs>
 
       <!-- Review list -->
       <section class="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:px-8">
         <!-- Aggregate-only: verified Google rating exists, but no individual review rows yet -->
         <div v-if="reviews.length === 0 && aggregate?.rating" class="flex flex-col items-center justify-center rounded-3xl border border-dashed border-default py-20 text-center">
           <div class="flex gap-1 text-primary" aria-hidden="true">
-            <SayaIcon v-for="s in 5" :key="s" name="star" solid class="size-5" :class="s <= Math.round(aggregate.rating) ? 'text-primary' : 'text-muted'" />
+            <TenantIcon v-for="s in 5" :key="s" name="star" solid class="size-5" :class="s <= Math.round(aggregate.rating) ? 'text-primary' : 'text-muted'" />
           </div>
           <div class="mt-4 saya-display saya-italic text-3xl text-default">
             {{ t('saya.reviews_page.aggregate_only_title', { rating: Number(aggregate.rating).toFixed(1), count: aggregate.review_count ?? 0 }) }}
@@ -96,7 +96,7 @@
         <!-- True empty: no reviews, no verified aggregate -->
         <div v-else-if="reviews.length === 0" class="flex flex-col items-center justify-center rounded-3xl border border-dashed border-default py-20 text-center">
           <div class="flex size-14 items-center justify-center rounded-full bg-elevated text-muted">
-            <SayaIcon name="star" class="size-7" />
+            <TenantIcon name="star" class="size-7" />
           </div>
           <div class="mt-6 saya-display saya-italic text-3xl text-default">{{ t('saya.reviews_page.no_reviews_title') }}</div>
           <p class="mt-2 max-w-sm text-sm text-muted">{{ t('saya.reviews_page.no_reviews_desc') }}</p>
@@ -115,7 +115,7 @@
         </div>
 
         <div v-else class="flex flex-col gap-8">
-          <SayaReviewCard v-for="review in filtered" :key="review.id" :review="review" />
+          <TenantReviewCard v-for="review in filtered" :key="review.id" :review="review" />
         </div>
       </section>
     </template>

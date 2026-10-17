@@ -10,7 +10,7 @@
 
     <template v-else-if="location">
       <!-- Sub-nav (Level 2) -->
-      <SayaSubNav
+      <TenantSubNav
         :location-slug="slug"
         active="overview"
       />
@@ -38,7 +38,7 @@
           class="absolute inset-0 flex items-center justify-center bg-[linear-gradient(135deg,var(--ui-primary)_0%,color-mix(in_srgb,var(--ui-primary)_60%,black)_100%)]"
           aria-hidden="true"
         >
-          <SayaIcon :name="locationHeroIcon" class="size-24 text-white/25" />
+          <TenantIcon :name="locationHeroIcon" class="size-24 text-white/25" />
         </div>
         <div class="absolute inset-0" style="background: linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.3) 100%)" />
         <div class="relative flex min-h-160 items-end">
@@ -78,14 +78,14 @@
               <span v-else>{{ t('saya.location.contact_us_for_hours') }}</span>
             </div>
             <div class="mt-10 flex flex-wrap gap-3">
-              <SayaButton
+              <TenantButton
                 v-if="primaryCtaPath"
                 :to="localePath(primaryCtaPath)"
                 size="lg"
                 class="bg-white! text-black! hover:bg-zinc-100!"
               >
                 {{ primaryCtaLabel }}
-              </SayaButton>
+              </TenantButton>
               <NuxtLink
                 v-if="secondaryCtaPath"
                 :to="localePath(secondaryCtaPath)"
@@ -159,7 +159,7 @@
         </div>
       </section>
 
-      <LazySayaFeaturedContent
+      <LazyTenantFeaturedContent
         v-for="group in collectionProductGroups"
         :key="group.surface"
         :data="{
@@ -174,7 +174,7 @@
       <template v-if="locationPosts.length">
         <SocialPosts :posts="locationPosts" />
         <div class="pb-20 text-center">
-          <SayaButton :to="localePath(`/locations/${slug}/posts`)" variant="outline">{{ t('saya.posts.view_all') }}</SayaButton>
+          <TenantButton :to="localePath(`/locations/${slug}/posts`)" variant="outline">{{ t('saya.posts.view_all') }}</TenantButton>
         </div>
       </template>
 
@@ -184,13 +184,13 @@
           <div class="mb-16 max-w-2xl">
             <p class="saya-kicker mb-6">{{ t('saya.reviews.subtitle') }}</p>
             <h2 class="saya-display-md flex items-center gap-3 text-default">
-              <SayaIcon name="star" solid class="size-8 text-primary" aria-hidden="true" />
+              <TenantIcon name="star" solid class="size-8 text-primary" aria-hidden="true" />
               {{ location.rating ? Number(location.rating).toFixed(1) : '—' }}
               <span v-if="location.review_count" class="text-muted">· {{ t('saya.reviews_page.based_on', { count: location.review_count }) }}</span>
             </h2>
           </div>
           <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            <SayaReviewCard
+            <TenantReviewCard
               v-for="review in reviewsPreview"
               :key="review.id"
              
@@ -251,9 +251,9 @@
         <div class="flex flex-wrap items-center justify-between gap-8">
           <h2 class="saya-display-md saya-italic text-default">{{ t('saya.location.see_you_soon') }}</h2>
           <div class="flex flex-wrap gap-3">
-            <SayaButton v-if="primaryCtaPath" :to="localePath(primaryCtaPath)" size="lg">
+            <TenantButton v-if="primaryCtaPath" :to="localePath(primaryCtaPath)" size="lg">
               {{ primaryCtaLabel }}
-            </SayaButton>
+            </TenantButton>
             <NuxtLink
               :to="localePath(`/locations/${slug}/contact`)"
               class="inline-flex items-center rounded-full border border-default px-6 py-2.5 text-xs font-medium uppercase tracking-widest text-default transition hover:bg-muted"
@@ -268,9 +268,9 @@
 
     <!-- Not found -->
     <div v-else class="mx-auto max-w-xl px-4 py-24 text-center">
-      <SayaIcon name="map-pin" class="mx-auto mb-4 size-12 text-muted" />
+      <TenantIcon name="map-pin" class="mx-auto mb-4 size-12 text-muted" />
       <h1 class="saya-display-sm text-default">{{ t('saya.location.not_found') }}</h1>
-      <SayaButton :to="localePath('/locations')" class="mt-8">{{ t('saya.location.view_all_locations') }}</SayaButton>
+      <TenantButton :to="localePath('/locations')" class="mt-8">{{ t('saya.location.view_all_locations') }}</TenantButton>
     </div>
   </div>
 </template>

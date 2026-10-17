@@ -3,7 +3,7 @@
 
     <template v-if="location">
       <!-- Sub-nav (Level 2) -->
-      <SayaSubNav 
+      <TenantSubNav 
         :location-slug="slug" 
         active="qa" 
       />
@@ -28,7 +28,7 @@
     <section class="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:px-8">
       <div v-if="sorted.length === 0" class="flex flex-col items-center justify-center rounded-3xl border border-dashed border-default bg-muted/30 py-20 text-center">
         <div class="flex size-14 items-center justify-center rounded-full bg-elevated/50 text-muted shadow-sm">
-          <SayaIcon name="question-mark-circle" class="size-7" />
+          <TenantIcon name="question-mark-circle" class="size-7" />
         </div>
         <h3 class="mt-6 saya-display saya-italic text-3xl text-default">{{ t('saya.qa_page.no_questions_title') }}</h3>
         <p class="mt-2 max-w-sm text-sm text-muted">{{ t('saya.qa_page.no_questions_desc') }}</p>
@@ -52,7 +52,7 @@
                 <template v-if="q.upvote_count > 0">
                   <span>·</span>
                   <span class="inline-flex items-center gap-1">
-                    <SayaIcon name="hand-thumb-up" class="size-3" />
+                    <TenantIcon name="hand-thumb-up" class="size-3" />
                     {{ q.upvote_count }} {{ t('saya.qa_page.helpful') }}
                   </span>
                 </template>
@@ -84,7 +84,7 @@
 
           <!-- Awaiting answer -->
           <div v-else class="ml-13 mt-4 flex items-center gap-2 text-xs text-muted">
-            <SayaIcon name="clock" class="size-3.5 opacity-50" />
+            <TenantIcon name="clock" class="size-3.5 opacity-50" />
             {{ t('saya.qa_page.awaiting_answer') }}
           </div>
         </article>

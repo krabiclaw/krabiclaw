@@ -2,7 +2,7 @@
   <NuxtLayout :name="template.layout">
   <div class="min-h-screen bg-default text-default">
     <div v-if="pending" class="flex min-h-screen items-center justify-center">
-      <SayaIcon name="arrow-path" class="size-12 animate-spin text-muted" />
+      <TenantIcon name="arrow-path" class="size-12 animate-spin text-muted" />
     </div>
     <BookingConfirmation
       v-else-if="confirmation"
@@ -24,24 +24,24 @@
         {{ receiptDescription }}
       </template>
       <template #actions>
-        <SayaButton v-if="confirmation.status !== 'cancelled'" variant="soft" @click="share">
-          <SayaIcon name="share" class="mr-1.5 size-4" />
+        <TenantButton v-if="confirmation.status !== 'cancelled'" variant="soft" @click="share">
+          <TenantIcon name="share" class="mr-1.5 size-4" />
           {{ t(justCopied ? 'social_posts.link_copied' : 'social_posts.share') }}
-        </SayaButton>
-        <SayaButton v-if="confirmation.contactPhone" :href="`tel:${confirmation.contactPhone.replace(/\s/g, '')}`" variant="outline">
+        </TenantButton>
+        <TenantButton v-if="confirmation.contactPhone" :href="`tel:${confirmation.contactPhone.replace(/\s/g, '')}`" variant="outline">
           {{ copy.callUsLabel(confirmation.contactPhone) }}
-        </SayaButton>
-        <SayaButton v-if="confirmation.cancelUrl" :to="confirmation.cancelUrl" color="error" variant="ghost">
+        </TenantButton>
+        <TenantButton v-if="confirmation.cancelUrl" :to="confirmation.cancelUrl" color="error" variant="ghost">
           {{ t('saya.experience_cancel.title') }}
-        </SayaButton>
+        </TenantButton>
       </template>
     </BookingConfirmation>
 
     <div v-else class="mx-auto max-w-xl px-4 pt-24 pb-24 text-center sm:px-6 lg:px-8">
-      <SayaIcon name="exclamation-triangle" class="mx-auto size-12 text-error" />
+      <TenantIcon name="exclamation-triangle" class="mx-auto size-12 text-error" />
       <h2 class="mt-6 text-xl font-bold">{{ t(loadError ? 'booking.receipt_failed' : 'booking.receipt_missing') }}</h2>
       <p class="mt-2 text-muted">{{ loadError ?? t('booking.receipt_missing_description') }}</p>
-      <SayaButton :to="browseHref" variant="soft" class="mt-10">{{ browseLabel }}</SayaButton>
+      <TenantButton :to="browseHref" variant="soft" class="mt-10">{{ browseLabel }}</TenantButton>
     </div>
   </div>
   </NuxtLayout>

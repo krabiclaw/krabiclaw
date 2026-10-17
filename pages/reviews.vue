@@ -30,7 +30,7 @@
           :to="localePath(`/locations/${loc.slug}/reviews`)"
           class="inline-flex items-center gap-2 rounded-full border border-default px-5 py-2.5 text-sm text-muted no-underline transition hover:bg-muted hover:text-default"
         >
-          <SayaIcon name="map-pin" class="size-3.5 opacity-70" />
+          <TenantIcon name="map-pin" class="size-3.5 opacity-70" />
           {{ loc.title }}
         </NuxtLink>
       </div>
@@ -38,7 +38,7 @@
 
     <section class="mx-auto max-w-7xl px-4 pb-16 sm:px-6 lg:px-8">
       <div v-if="visibleReviews.length" class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        <SayaReviewCard
+        <TenantReviewCard
           v-for="review in visibleReviews"
           :key="review.id"
           :review="review"

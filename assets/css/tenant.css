@@ -1,0 +1,199 @@
+/* Canonical Tenant Design Tokens — KrabiClaw Design System */
+
+:root {
+  --tenant-surface-dark:    #09090b;
+  --tenant-on-surface-dark: #fafafa;
+  /* Compatibility aliases */
+  --saya-surface-dark:      var(--tenant-surface-dark);
+  --saya-on-surface-dark:   var(--tenant-on-surface-dark);
+}
+
+.tenant-theme,
+.saya-theme,
+.blawby-theme {
+  font-family: var(--font-sans);
+  --ui-radius: 0.375rem;
+
+  --tenant-bg:              var(--site-ground, var(--ui-bg));
+  --tenant-surface:         var(--site-surface, var(--ui-bg-elevated));
+  --tenant-ink:             var(--site-text, var(--ui-text));
+  --tenant-primary:         var(--site-action, var(--primary));
+  --tenant-primary-dark:    color-mix(in oklab, var(--tenant-primary) 60%, black);
+  --tenant-primary-100:     color-mix(in oklab, var(--tenant-primary) 6%, var(--site-ground, #fff));
+  --tenant-primary-200:     color-mix(in oklab, var(--tenant-primary) 30%, var(--site-ground, #fff));
+  --tenant-primary-800:     color-mix(in oklab, var(--tenant-primary) 85%, black);
+  --tenant-accent:          var(--site-accent, var(--tenant-primary));
+  --tenant-accent-100:      color-mix(in oklab, var(--tenant-accent) 10%, var(--site-ground, #fff));
+  --tenant-accent-200:      color-mix(in oklab, var(--tenant-accent) 18%, var(--site-ground, #fff));
+  --tenant-accent-strong:   color-mix(in oklab, var(--tenant-accent) 80%, black);
+
+  /* Compatibility aliases */
+  --blawby-bg:              var(--tenant-bg);
+  --blawby-surface:         var(--tenant-surface);
+  --blawby-ink:             var(--tenant-ink);
+  --blawby-primary:         var(--tenant-primary);
+  --blawby-primary-dark:    var(--tenant-primary-dark);
+  --blawby-primary-100:     var(--tenant-primary-100);
+  --blawby-primary-200:     var(--tenant-primary-200);
+  --blawby-primary-800:     var(--tenant-primary-800);
+  --blawby-accent:          var(--tenant-accent);
+  --blawby-accent-100:      var(--tenant-accent-100);
+  --blawby-accent-200:      var(--tenant-accent-200);
+  --blawby-accent-strong:   var(--tenant-accent-strong);
+}
+
+.dark .tenant-theme,
+.dark .saya-theme,
+.dark .blawby-theme {
+  --tenant-primary:         var(--site-text);
+  --tenant-primary-dark:    color-mix(in oklab, var(--site-action-light, var(--primary)) 60%, black);
+  --tenant-primary-800:     color-mix(in oklab, var(--site-action-light, var(--primary)) 85%, black);
+  --tenant-accent-strong:   color-mix(in oklab, var(--tenant-accent) 80%, white);
+  --tenant-primary-100:     color-mix(in oklab, var(--site-surface) 60%, var(--site-ground));
+  --tenant-accent-100:      color-mix(in oklab, var(--site-surface) 45%, var(--site-ground));
+  --tenant-accent-200:      color-mix(in oklab, var(--site-text) 7%, var(--site-surface));
+
+  --blawby-primary:         var(--tenant-primary);
+  --blawby-primary-dark:    var(--tenant-primary-dark);
+  --blawby-primary-800:     var(--tenant-primary-800);
+  --blawby-accent-strong:   var(--tenant-accent-strong);
+  --blawby-primary-100:     var(--tenant-primary-100);
+  --blawby-accent-100:      var(--tenant-accent-100);
+  --blawby-accent-200:      var(--tenant-accent-200);
+}
+
+/* Container */
+.tenant-container,
+.blawby-container {
+  margin-inline: auto;
+  max-width: 80rem;
+  padding-inline: 1rem;
+  width: 100%;
+}
+
+@media (min-width: 640px) {
+  .tenant-container,
+  .blawby-container {
+    padding-inline: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .tenant-container,
+  .blawby-container {
+    padding-inline: 2rem;
+  }
+}
+
+@media (min-width: 1920px) {
+  .tenant-container,
+  .blawby-container {
+    max-width: 88rem;
+    padding-inline: 3rem;
+  }
+}
+
+@media (min-width: 2560px) {
+  .tenant-container,
+  .blawby-container {
+    max-width: 96rem;
+    padding-inline: 4rem;
+  }
+}
+
+/* Typography */
+.tenant-display,
+.blawby-display,
+.saya-display {
+  font-family: var(--font-heading);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.15;
+}
+
+.tenant-display-lg,
+.saya-display-lg {
+  font-family: var(--font-heading);
+  font-size: clamp(56px, 7.5vw, 104px);
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  line-height: 1.02;
+  text-wrap: balance;
+}
+
+.tenant-display-md,
+.saya-display-md {
+  font-family: var(--font-heading);
+  font-size: clamp(40px, 5vw, 64px);
+  font-weight: 400;
+  letter-spacing: -0.015em;
+  line-height: 1.05;
+  text-wrap: balance;
+}
+
+.tenant-display-sm,
+.saya-display-sm {
+  font-family: var(--font-heading);
+  font-size: clamp(28px, 3.5vw, 40px);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.1;
+  text-wrap: balance;
+}
+
+.tenant-italic,
+.saya-italic { font-style: italic; }
+
+.tenant-eyebrow,
+.saya-eyebrow {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.32em;
+  text-transform: uppercase;
+}
+
+.tenant-kicker,
+.saya-kicker {
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.4em;
+  text-transform: uppercase;
+  color: var(--ui-primary);
+}
+
+.tenant-body,
+.saya-body { font-size: 16px; line-height: 1.65; }
+
+.tenant-body-lg,
+.saya-body-lg { font-size: 18px; line-height: 1.6; }
+
+/* Menu dotted leader line */
+.tenant-dotted-leader,
+.saya-dotted-leader {
+  flex: 1;
+  border-bottom: 1px dotted var(--ui-text);
+  transform: translateY(-4px);
+  margin: 0 8px;
+  min-width: 16px;
+}
+
+/* Photo masonry gallery */
+.tenant-masonry,
+.saya-masonry {
+  columns: 3;
+  column-gap: 16px;
+}
+.tenant-masonry > *,
+.saya-masonry > * {
+  break-inside: avoid;
+  margin-bottom: 16px;
+}
+
+@media (max-width: 768px) {
+  .tenant-masonry,
+  .saya-masonry { columns: 2; }
+}
+@media (max-width: 480px) {
+  .tenant-masonry,
+  .saya-masonry { columns: 1; }
+}

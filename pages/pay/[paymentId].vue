@@ -153,7 +153,7 @@
             <!-- Property / Service Header -->
             <div class="flex gap-4 items-center">
               <div class="size-20 shrink-0 rounded-xl bg-muted border border-default flex items-center justify-center overflow-hidden">
-                <SayaIcon v-if="handoff.stay" name="home" class="size-8 text-dimmed" />
+                <TenantIcon v-if="handoff.stay" name="home" class="size-8 text-dimmed" />
                 <PlatformIcon v-else name="calendar" class="size-8 text-dimmed" />
               </div>
               <div class="min-w-0 flex-1">

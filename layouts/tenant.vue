@@ -18,50 +18,38 @@
 
     <AnnouncementBanner />
 
-    <BlawbyHeader
-      v-if="isBlawby && blawbyIdentity && blawbyConsultation"
-      :organization="blawbyIdentity"
+    <TenantHeader
+      :organization="blawbyIdentity || shellOrganization"
+      :locations="locations"
+      :sections="shell.sections.value"
       :consultation="blawbyConsultation"
       :can-schedule="blawbyCanSchedule"
       :page-links="blawbyPageLinks"
-    />
-    <SayaHeader
-      v-else
-      :organization="shellOrganization"
-      :locations="locations"
-      :sections="shell.sections.value"
     />
 
     <main class="grow" :data-route-shell="route.path">
       <slot />
       <!-- A firm's articles carry its legal disclaimer, under every article and index -->
-      <p v-if="route.meta.articleCollection && blawbyCompliance?.disclaimer" class="blawby-container mb-12 text-sm italic text-muted">
+      <p v-if="route.meta.articleCollection && blawbyCompliance?.disclaimer" class="tenant-container mb-12 text-sm italic text-muted">
         {{ blawbyCompliance.disclaimer }}
       </p>
     </main>
 
-    <BlawbyFooter
-      v-if="isBlawby && blawbyIdentity"
-      :organization="blawbyIdentity"
-      :compliance="blawbyCompliance"
-      :page-links="blawbyPageLinks"
-    />
-    <LazySayaFooter
-      v-else
-      :organization="shellOrganization"
+    <TenantFooter
+      :organization="blawbyIdentity || shellOrganization"
       :locations="footerLocations"
       :error="bootstrapError"
       :sections="shell.sections.value"
+      :compliance="blawbyCompliance"
+      :page-links="blawbyPageLinks"
     />
   </div>
 </template>
 
 <script setup lang="ts">
 import type { Ref } from 'vue'
-import sayaCriticalCss from '~/assets/css/saya-critical.css?raw'
-import blawbyCriticalCss from '~/assets/css/blawby-critical.css?raw'
-import '~/assets/css/saya-entry.css'
-import '~/assets/css/blawby-entry.css'
+import tenantCriticalCss from '~/assets/css/tenant-critical.css?raw'
+import '~/assets/css/tenant-entry.css'
 import type { PublicBlawbyRouteData } from '~/types/blawby'
 import type { BlawbyDocumentPayload } from '~/utils/blawby-document-contract'
 
@@ -106,24 +94,18 @@ const blawbyCompliance = computed(() => blawbyDocument?.value?.shell.compliance 
 const blawbyPageLinks = computed(() => blawbyDocument?.value?.shell.pageLinks ?? [])
 
 useHead(() => {
-  const surfaceHref = isBlawby.value ? '/_nuxt/surfaces/blawby.css' : '/_nuxt/surfaces/saya.css'
-  const criticalCss = isBlawby.value ? blawbyCriticalCss : sayaCriticalCss
-  const stylesheetKey = isBlawby.value
-    ? (isHome.value ? 'blawby-home-stylesheet' : 'blawby-surface-stylesheet')
-    : (isHome.value ? 'saya-home-stylesheet' : 'saya-surface-stylesheet')
-
   return {
     htmlAttrs: { lang: activeLocale.value },
     link: [
       { rel: 'preconnect', href: 'https://imagedelivery.net' },
       { rel: 'preconnect', href: 'https://media.krabiclaw.com' },
       ...(import.meta.dev ? [] : [{
-        key: stylesheetKey,
+        key: 'tenant-surface-stylesheet',
         rel: 'stylesheet' as const,
-        href: surfaceHref,
+        href: '/_nuxt/surfaces/tenant.css',
       }]),
     ],
-    style: isHome.value ? [{ innerHTML: criticalCss, tagPriority: 'critical' }] : [],
+    style: isHome.value ? [{ innerHTML: tenantCriticalCss, tagPriority: 'critical' }] : [],
     meta: isBlawby.value && blawbyDocument?.value?.shell.searchConsoleVerification
       ? [{ name: 'google-site-verification', content: blawbyDocument.value.shell.searchConsoleVerification }]
       : [],
@@ -132,7 +114,7 @@ useHead(() => {
 
 if (import.meta.dev && !isBlawby.value) useDebugLCP()
 
-// ── Saya / Universal Shell State ─────────────────────────────
+// ── Universal Shell State ─────────────────────────────────────
 const shell = useOrganizationShellState()
 if (import.meta.server && !isBlawby.value) await shell.ready
 const { locations, error: bootstrapError, organization: shellOrganization } = shell

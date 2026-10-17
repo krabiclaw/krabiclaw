@@ -1,7 +1,7 @@
 <template>
   <div class="rounded-xl overflow-hidden" data-media-gallery>
     <div v-if="items.length === 0" class="flex aspect-4/3 items-center justify-center bg-muted">
-      <SayaIcon :name="emptyIcon" class="size-16 text-dimmed" />
+      <TenantIcon :name="emptyIcon" class="size-16 text-dimmed" />
     </div>
 
     <button
@@ -43,7 +43,7 @@
         aria-hidden="true"
       >
         <span class="flex size-14 items-center justify-center rounded-full bg-black/45 backdrop-blur-sm">
-          <SayaIcon name="play" class="ml-0.5 size-6" />
+          <TenantIcon name="play" class="ml-0.5 size-6" />
         </span>
       </span>
     </button>
@@ -108,7 +108,7 @@
               aria-hidden="true"
             >
               <span class="flex size-12 items-center justify-center rounded-full bg-black/45 backdrop-blur-sm">
-                <SayaIcon name="play" class="ml-0.5 size-5" />
+                <TenantIcon name="play" class="ml-0.5 size-5" />
               </span>
             </span>
           </button>
@@ -120,7 +120,7 @@
           class="absolute bottom-4 right-4 z-10 inline-flex items-center gap-2 rounded-lg border border-black/80 bg-white/95 px-3.5 py-1.5 text-xs font-semibold text-gray-900 shadow-sm backdrop-blur-sm transition hover:bg-white hover:scale-[1.02] active:scale-[0.98]"
           @click="openLightbox(0)"
         >
-          <SayaIcon name="squares-2x2" class="size-3.5" />
+          <TenantIcon name="squares-2x2" class="size-3.5" />
           Show all {{ items.length }} photos
         </button>
       </div>
@@ -172,7 +172,7 @@
             aria-hidden="true"
           >
             <span class="flex size-12 items-center justify-center rounded-full bg-black/45 backdrop-blur-sm">
-              <SayaIcon name="play" class="ml-0.5 size-5" />
+              <TenantIcon name="play" class="ml-0.5 size-5" />
             </span>
           </span>
         </button>
@@ -183,7 +183,7 @@
           class="absolute bottom-4 right-4 z-10 inline-flex items-center gap-2 rounded-lg border border-black/80 bg-white/95 px-3.5 py-1.5 text-xs font-semibold text-gray-900 shadow-sm backdrop-blur-sm transition hover:bg-white hover:scale-[1.02] active:scale-[0.98]"
           @click="openLightbox(0)"
         >
-          <SayaIcon name="squares-2x2" class="size-3.5" />
+          <TenantIcon name="squares-2x2" class="size-3.5" />
           Show all {{ items.length }} photos
         </button>
       </div>
@@ -198,7 +198,7 @@
 </template>
 
 <script setup lang="ts">
-import type { SayaIconName } from '~/components/saya/SayaIcon.vue'
+import type { TenantIconName } from '~/components/tenant/TenantIcon.vue'
 interface GalleryItem {
   url: string
   kind?: 'image' | 'video' | 'file'
@@ -211,7 +211,7 @@ interface GalleryItem {
 const props = withDefaults(defineProps<{
   items: GalleryItem[]
   title: string
-  emptyIcon?: SayaIconName
+  emptyIcon?: TenantIconName
 }>(), {
   emptyIcon: 'sparkles',
 })

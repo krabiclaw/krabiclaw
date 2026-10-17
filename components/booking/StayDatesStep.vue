@@ -17,11 +17,11 @@
       <template v-else-if="calendar">
         <div class="mb-3 flex items-center justify-between">
           <button type="button" class="flex size-9 items-center justify-center rounded-full border border-default disabled:opacity-30" :disabled="monthOffset === 0" :aria-label="t('stay.previous_month')" @click="monthOffset--">
-            <SayaIcon name="chevron-left" class="size-4" />
+            <TenantIcon name="chevron-left" class="size-4" />
           </button>
           <span class="saya-display text-lg">{{ monthLabel }}</span>
           <button type="button" class="flex size-9 items-center justify-center rounded-full border border-default disabled:opacity-30" :disabled="monthOffset >= lastMonthOffset" :aria-label="t('stay.next_month')" @click="monthOffset++">
-            <SayaIcon name="chevron-right" class="size-4" />
+            <TenantIcon name="chevron-right" class="size-4" />
           </button>
         </div>
         <div class="grid grid-cols-7 justify-items-center gap-y-1">
@@ -58,11 +58,11 @@
           </div>
           <div class="flex shrink-0 items-center gap-3">
             <button type="button" class="flex size-8 items-center justify-center rounded-full border border-default disabled:opacity-30" :disabled="row.value.value <= row.min" :aria-label="`${row.label} −`" @click="row.value.value--">
-              <SayaIcon name="minus" class="size-3.5" />
+              <TenantIcon name="minus" class="size-3.5" />
             </button>
             <span class="min-w-6 text-center tabular-nums">{{ row.value.value }}</span>
             <button type="button" class="flex size-8 items-center justify-center rounded-full border border-default disabled:opacity-30" :disabled="row.value.value >= row.max" :aria-label="`${row.label} +`" @click="row.value.value++">
-              <SayaIcon name="plus" class="size-3.5" />
+              <TenantIcon name="plus" class="size-3.5" />
             </button>
           </div>
         </div>
@@ -87,8 +87,8 @@
         <div v-if="quote" class="saya-display saya-italic truncate text-lg">{{ rangeLabel }}</div>
         <div class="mt-0.5 text-xs text-muted">{{ quote ? `${nightsLabel(quote.nights)} · ${guestsLabel}` : checkout ? t('stay.charged_in_full') : t('stay.enquiry_note') }}</div>
       </div>
-      <SayaButton v-if="checkout" size="lg" class="shrink-0" :disabled="!quote || quotePending" @click="$emit('next')">{{ t('stay.reserve') }}</SayaButton>
-      <SayaButton v-else size="lg" class="shrink-0" :to="enquiryPath">{{ t('stay.send_enquiry') }}</SayaButton>
+      <TenantButton v-if="checkout" size="lg" class="shrink-0" :disabled="!quote || quotePending" @click="$emit('next')">{{ t('stay.reserve') }}</TenantButton>
+      <TenantButton v-else size="lg" class="shrink-0" :to="enquiryPath">{{ t('stay.send_enquiry') }}</TenantButton>
     </div>
   </div>
 </template>

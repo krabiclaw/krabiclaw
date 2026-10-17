@@ -14,7 +14,7 @@
         <h1 class="text-2xl font-semibold">Review not found</h1>
       </div>
 
-      <SayaReviewCard v-else :review="review" class="mt-12">
+      <TenantReviewCard v-else :review="review" class="mt-12">
         <div v-if="mediaItems.length" class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
           <button
             v-for="(item, index) in mediaItems"
@@ -28,14 +28,14 @@
         </div>
 
         <div class="mt-6 flex flex-wrap items-center gap-3">
-          <SayaButton variant="soft" @click="markHelpful">
+          <TenantButton variant="soft" @click="markHelpful">
             Helpful / {{ helpfulCount }}
-          </SayaButton>
-          <SayaButton variant="outline" @click="shareReview">
+          </TenantButton>
+          <TenantButton variant="outline" @click="shareReview">
             Share
-          </SayaButton>
+          </TenantButton>
         </div>
-      </SayaReviewCard>
+      </TenantReviewCard>
     </section>
 
     <MediaLightbox v-model:open="lightboxOpen" v-model:index="lightboxIndex" :items="lightboxItems" :title="review?.title || 'Review media'" />

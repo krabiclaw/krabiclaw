@@ -3,7 +3,7 @@
 
     <template v-if="location">
       <!-- Sub-nav (Level 2) -->
-      <SayaSubNav
+      <TenantSubNav
         :location-slug="slug"
         active="posts"
       />

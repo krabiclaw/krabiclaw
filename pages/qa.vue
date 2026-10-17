@@ -13,12 +13,12 @@
           :to="localePath(`/locations/${loc.slug}/qa`)"
           class="inline-flex items-center gap-2 rounded-full border border-default px-5 py-2.5 text-sm text-muted no-underline transition hover:bg-muted hover:text-default"
         >
-          <SayaIcon name="map-pin" class="size-3.5 opacity-70" />
+          <TenantIcon name="map-pin" class="size-3.5 opacity-70" />
           {{ loc.title }}
         </NuxtLink>
       </div>
     </header>
-    <LazySayaQA :qa="qaList" :show-title="false" />
+    <LazyTenantQA :qa="qaList" :show-title="false" />
   </div>
 </template>
 
