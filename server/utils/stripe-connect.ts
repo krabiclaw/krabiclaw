@@ -379,14 +379,8 @@ export async function requireStripeCheckoutAcceptance(db: DbClient, env: Cloudfl
   if (configurations.has_more) throw new HTTPError({ statusCode: 409, statusMessage: 'Connected checkout configuration needs bounded operator review', data: handoff })
   const matching = configurations.data.filter(configuration => configuration.parent === keys.methodConfiguration || configuration.id === keys.methodConfiguration)
   if (matching.length !== 1 || !matching[0]!.active) throw new HTTPError({ statusCode: 409, statusMessage: 'One active connected payment configuration inheriting the Payments parent is required', data: handoff })
+  // Which methods the business offers is its Stripe payment method configuration's to decide.
   const methods = matching[0]!
-  for (const [name, value] of Object.entries(methods)) {
-    if (value && typeof value === 'object' && 'available' in value && 'display_preference' in value && value.available
-      && value.display_preference && typeof value.display_preference === 'object' && 'value' in value.display_preference
-      && value.display_preference.value === 'on' && !['card', 'link', 'apple_pay', 'google_pay', 'us_bank_account'].includes(name)) {
-      throw new HTTPError({ statusCode: 409, statusMessage: `Disable delayed or unsupported checkout method ${name} before accepting booked payments`, data: handoff })
-    }
-  }
   const [taxSettings, registrations] = await Promise.all([
     stripe.tax.settings.retrieve({}, { stripeAccount: account.id }),
     stripe.tax.registrations.list({ status: 'active', limit: 1 }, { stripeAccount: account.id }),
@@ -418,9 +412,6 @@ export async function ensureStripeConnectedAccount(
     country: string | null
   },
 ): Promise<StripeConnectedAccount> {
-  if (!input.country && !(await getStripeConnectedAccount(db, input.organizationId))?.stripeAccountId) {
-    throw new HTTPError({ statusCode: 400, statusMessage: 'Choose the country where your business is established before starting Stripe setup' })
-  }
   const reservation = await reserveStripeConnectedAccount(db, input)
   if (reservation.stripeAccountId) return await refreshStripeConnectedAccount(db, stripe, reservation)
 
@@ -430,7 +421,8 @@ export async function ensureStripeConnectedAccount(
       contact_email: input.contactEmail,
       display_name: input.organizationName,
       dashboard: 'express',
-      identity: { country: input.country! },
+      // Stripe requires the country for a merchant account and says so when it is missing or unsupported.
+      ...(input.country ? { identity: { country: input.country } } : {}),
       configuration: { merchant: { capabilities: { card_payments: { requested: true } } } },
       defaults: {
         responsibilities: { fees_collector: 'application', losses_collector: 'stripe' },

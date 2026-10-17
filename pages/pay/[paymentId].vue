@@ -234,6 +234,7 @@ const working = ref(false)
 const actionError = ref('')
 const review = ref<Review | null>(null)
 let stripe: Stripe | null = null
+let mounting = false
 let elements: StripeElements | null = null
 let paymentElement: StripePaymentElement | null = null
 
@@ -247,13 +248,15 @@ const methodLabel = computed(() => {
 
 // Stripe's Payment Element on the business's own account, in deferred mode: the
 // method is created first so the server can price it before anything is confirmed.
-watch(handoff, async (value) => {
-  if (!value || value.state !== 'open' || import.meta.server) return
+// It mounts once both the open handoff and its container exist: the container
+// renders only after the load status settles, which is after the data arrives.
+watch([handoff, mount], async ([value, container]) => {
+  if (!value || value.state !== 'open' || !container || mounting || import.meta.server) return
+  mounting = true
   if (value.review) review.value = null // A stored review is re-read only through its method; the buyer reviews again here.
-  await nextTick()
   try {
     stripe = await loadStripe(value.publishable_key, { stripeAccount: value.stripe_account_id })
-    if (!stripe || !mount.value) throw new Error('Stripe could not be loaded')
+    if (!stripe) throw new Error('Stripe could not be loaded')
     elements = stripe.elements({
       mode: 'payment', amount: value.subtotal, currency: value.currency.toLowerCase(),
       paymentMethodTypes: value.payment_method_types,
@@ -265,7 +268,7 @@ watch(handoff, async (value) => {
     paymentElement = elements.create('payment', { layout: 'tabs' })
     paymentElement.on('ready', () => { ready.value = true })
     paymentElement.on('change', () => { if (review.value) review.value = null })
-    paymentElement.mount(mount.value)
+    paymentElement.mount(container)
   } catch (cause) {
     actionError.value = getErrorMessage(cause, t('payment.unavailable'))
   }

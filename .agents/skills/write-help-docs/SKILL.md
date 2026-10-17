@@ -25,6 +25,24 @@ paths. Use customer-friendly phrasing consistent with the actual policy. Keep
 provider research in operator documentation; customer help should explain what
 to do on the customer's own site without depending on a provider article.
 
+## Dashboard deep links in copy
+
+When guiding the reader to a dashboard screen or settings tab in Markdown copy,
+link directly to the screen using the org-agnostic `/dashboard/app/{subpath}`
+route convention:
+- Products & Menu: `/dashboard/app/products` or `/dashboard/app/products/menu`
+- Website Branding: `/dashboard/app/website/brand`
+- Website Pages: `/dashboard/app/website/pages`
+- Custom Domains: `/dashboard/app/website/domains`
+- Payments & Stripe: `/dashboard/app/payments`
+- Team Members: `/dashboard/app/team`
+- Account Settings: `/dashboard/account/profile`
+
+Never hardcode a specific organization slug or site ID in customer documentation
+links. The `/dashboard/app/...` route automatically resolves the reading owner's
+active organization, prompts login if signed out, and preserves their return
+destination.
+
 ## Required live screenshots
 
 For each workflow section where seeing the controls helps the reader, capture

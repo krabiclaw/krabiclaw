@@ -78,7 +78,7 @@ export const BLOG_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'create_blog_post',
-      description: "Create a draft blog or documentation article with ordered content_blocks. It stays private until published. A category in the selected collection is required for publication. Use a new idempotency_key for each article; retrying the same key returns the same article. The preview_url allows draft review.",
+      description: "Create a draft blog or documentation article with ordered content_blocks. It stays private until published. A category in the selected collection is required for publication. Use a new idempotency_key for each article; retrying the same key returns the same article. The preview_url allows draft review. When linking to dashboard settings in markdown copy, use /dashboard/app/<path> (e.g. /dashboard/app/products) so the link dynamically resolves to the reader's active organization.",
       domain: 'blog',
       minimumRole: 'admin',
       inputSchema: {
@@ -96,7 +96,7 @@ export const BLOG_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'update_blog_post',
-      description: "Edit the selected blog or documentation article. Only supplied metadata changes; content_blocks replaces the entire body and requires expected_updated_at from the latest read. Stale tokens conflict. Changes to a published article are public immediately.",
+      description: "Edit the selected blog or documentation article. Only supplied metadata changes; content_blocks replaces the entire body and requires expected_updated_at from the latest read. Stale tokens conflict. Changes to a published article are public immediately. When linking to dashboard settings in markdown copy, use /dashboard/app/<path> (e.g. /dashboard/app/products) so the link dynamically resolves to the reader's active organization.",
       domain: 'blog',
       minimumRole: 'admin',
       inputSchema: {

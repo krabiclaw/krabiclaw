@@ -52,7 +52,7 @@
 
 <script setup lang="ts">
 import { authClient } from '~/lib/auth-client'
-import { buildPostLoginUrl } from '~/shared/auth/return-target'
+import { buildPostLoginUrl, validatedInternalPath } from '~/shared/auth/return-target'
 import { isNewSalePlan } from '~/shared/billing-model'
 
 // No organization scope yet, so no dashboard chrome and no scoped context.
@@ -73,9 +73,10 @@ const organizations = computed(() => organizationList.value ?? [])
 const failure = ref<string | null>(null)
 const entering = ref<string | null>(null)
 
-// The plan rides through the chooser so the billing destination stays decided
+// The plan and redirect ride through the chooser so the destination stays decided
 // in one place — `/api/post-login` — rather than being rebuilt here.
 const plan = computed(() => isNewSalePlan(route.query.plan) ? route.query.plan : undefined)
+const redirect = computed(() => validatedInternalPath(route.query.redirect))
 
 async function enter(organization: { id: string }) {
   if (entering.value) return
@@ -95,6 +96,9 @@ async function enter(organization: { id: string }) {
     return
   }
   await session.value.refetch()
-  await navigateTo(buildPostLoginUrl(plan.value ? { plan: plan.value } : {}), { external: true })
+  await navigateTo(buildPostLoginUrl({
+    plan: plan.value,
+    redirect: redirect.value,
+  }), { external: true })
 }
 </script>
