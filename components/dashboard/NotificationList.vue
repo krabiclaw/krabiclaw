@@ -49,8 +49,8 @@
           @click="openNotification(notification)"
         >
           <!-- Unread indicator dot on the left of the row -->
-          <div class="flex h-12 w-2 shrink-0 items-center justify-center" aria-hidden="true">
-            <span v-if="!notification.read_at" class="size-2 rounded-full bg-primary" aria-label="Unread" />
+          <div class="flex h-12 w-2 shrink-0 items-center justify-center">
+            <span v-if="!notification.read_at" class="size-2 rounded-full bg-primary"><span class="sr-only">Unread</span></span>
           </div>
           <span class="flex size-12 shrink-0 items-center justify-center rounded-full bg-elevated">
             <UIcon :name="iconFor(notification.template)" class="size-5" :class="notification.read_at ? 'text-muted' : 'text-highlighted'" />
