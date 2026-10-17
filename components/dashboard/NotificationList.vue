@@ -45,9 +45,13 @@
           :key="notification.id"
           :data-testid="`notification-${notification.id}`"
           type="button"
-          class="flex w-full items-start gap-4 py-5 text-left transition-colors hover:bg-elevated/60"
+          class="flex w-full items-start gap-3 py-5 text-left transition-colors hover:bg-elevated/60"
           @click="openNotification(notification)"
         >
+          <!-- Unread indicator dot on the left of the row -->
+          <div class="flex h-12 w-2 shrink-0 items-center justify-center" aria-hidden="true">
+            <span v-if="!notification.read_at" class="size-2 rounded-full bg-primary" aria-label="Unread" />
+          </div>
           <span class="flex size-12 shrink-0 items-center justify-center rounded-full bg-elevated">
             <UIcon :name="iconFor(notification.template)" class="size-5" :class="notification.read_at ? 'text-muted' : 'text-highlighted'" />
           </span>
@@ -56,7 +60,6 @@
             <span v-if="notification.message" class="mt-0.5 line-clamp-2 block text-sm text-muted">{{ notification.message }}</span>
             <span class="mt-1 block text-sm text-dimmed">{{ formatRelativeTime(notification.created_at) }}</span>
           </span>
-          <span v-if="!notification.read_at" class="mt-2 size-2 shrink-0 rounded-full bg-primary" aria-label="Unread" />
         </button>
       </div>
     </div>

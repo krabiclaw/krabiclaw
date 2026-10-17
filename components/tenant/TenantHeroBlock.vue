@@ -43,7 +43,39 @@
     </div>
     <div data-saya-critical-hero-overlay class="absolute inset-0" style="background: linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.3) 100%)" />
 
-    <div data-tenant-critical-hero-content data-saya-critical-hero-content data-blawby-critical-hero-content class="tenant-container relative z-10 w-full py-36 text-left">
+    <div
+      v-if="isBlawby || splitTitle.accent"
+      data-tenant-critical-hero-content
+      data-blawby-critical-hero-content
+      class="tenant-container relative z-10 w-full pb-36 pt-16 text-left min-[1920px]:pb-48 min-[1920px]:pt-24 min-[2560px]:pb-64 min-[2560px]:pt-32"
+    >
+      <div data-blawby-critical-hero-columns class="flex flex-wrap gap-x-6 min-[1920px]:gap-x-12 min-[2560px]:gap-x-16">
+        <div data-blawby-critical-hero-copy class="w-full lg:w-3/5">
+          <h1 class="max-w-4xl whitespace-pre-line tenant-display text-5xl font-medium text-white sm:text-7xl min-[1920px]:max-w-6xl min-[1920px]:text-8xl min-[2560px]:max-w-7xl min-[2560px]:text-9xl">
+            {{ splitTitle.before }}<span v-if="splitTitle.accent" class="relative whitespace-nowrap text-[var(--blawby-accent,var(--ui-primary))]">{{ splitTitle.accent }}</span>{{ splitTitle.after }}
+          </h1>
+          <p v-if="description" class="mt-6 max-w-2xl text-lg text-white min-[1920px]:max-w-3xl min-[1920px]:text-xl min-[2560px]:max-w-4xl min-[2560px]:text-2xl">
+            {{ description }}
+          </p>
+        </div>
+        <div data-blawby-critical-hero-actions class="w-full lg:w-2/5">
+          <div class="mt-10 flex justify-start gap-x-6 min-[1920px]:mt-16 min-[2560px]:mt-20">
+            <TenantButton v-if="ctaUrl && ctaLabel" :to="ctaUrl" size="lg" class="gap-2">
+              <svg class="size-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7.5 4.5h9A4.5 4.5 0 0 1 21 9v3a4.5 4.5 0 0 1-4.5 4.5h-4.86L7.2 20.2a.75.75 0 0 1-1.2-.6v-3.35A4.5 4.5 0 0 1 3 12V9a4.5 4.5 0 0 1 4.5-4.5Z" /></svg>
+              {{ ctaLabel }}
+            </TenantButton>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Narrative full-bleed hero for Saya -->
+    <div
+      v-else
+      data-tenant-critical-hero-content
+      data-saya-critical-hero-content
+      class="tenant-container relative z-10 w-full py-36 text-left"
+    >
       <p v-if="eyebrow" data-field="hero.eyebrow" data-saya-critical-eyebrow class="tenant-eyebrow mb-6 text-white/70">
         {{ eyebrow }}
       </p>
@@ -70,9 +102,14 @@
     <section class="relative isolate overflow-hidden bg-[var(--tenant-primary-dark,var(--blawby-primary-dark,#1e293b))]" data-parity-section="schedule-hero">
       <div class="tenant-container relative z-20 text-center" :class="nativeSchedule ? 'py-12 sm:py-16' : 'py-24 sm:py-32 lg:py-40'">
         <div class="mx-auto max-w-4xl">
-          <p class="font-bold uppercase text-primary">{{ organizationName }}</p>
+          <p class="font-bold uppercase text-[var(--blawby-accent,var(--ui-primary))]">{{ organizationName }}</p>
           <h1 class="tenant-display mt-3 text-4xl font-medium text-white sm:text-5xl">
-            {{ title }}
+            <template v-if="splitTitle.accent">
+              {{ splitTitle.before }}<span class="text-[var(--blawby-accent,var(--ui-primary))]">{{ splitTitle.accent }}</span>{{ splitTitle.after }}
+            </template>
+            <template v-else>
+              {{ title }}
+            </template>
           </h1>
           <p v-if="description" class="mt-6 text-lg leading-8 text-gray-300 sm:text-xl">{{ description }}</p>
           <TenantButton v-if="!nativeSchedule && scheduleDestination" :to="scheduleDestination" size="lg" class="mt-10">
@@ -109,20 +146,38 @@
   </section>
 
   <!-- Default Page Hero -->
-  <section v-else class="relative overflow-hidden py-16" data-parity-section="page-hero">
+  <section
+    v-else
+    :style="backgroundStyle"
+    class="relative overflow-hidden py-16"
+    data-parity-section="page-hero"
+  >
     <div class="tenant-container relative">
       <div class="mx-auto max-w-4xl text-center">
         <p v-if="eyebrow" class="mb-4 text-sm font-semibold uppercase text-primary">
           {{ eyebrow }}
         </p>
-        <h1 v-if="title" class="tenant-display text-3xl font-bold sm:text-4xl text-highlighted">
-          {{ title }}
+        <h1 v-if="titleWords.length" :aria-label="title" class="tenant-display text-3xl font-bold sm:text-4xl text-highlighted">
+          <template v-if="isBlawby">
+            <template v-for="(word, index) in titleWords" :key="`${word}-${index}`">
+              <span :class="index === 1 || index === 2 ? 'text-[var(--blawby-accent-strong,var(--ui-primary))]' : 'text-highlighted'">{{ word + (index < titleWords.length - 1 ? ' ' : '') }}</span>
+            </template>
+          </template>
+          <template v-else>
+            {{ title }}
+          </template>
         </h1>
-        <p v-if="description" class="mt-6 text-lg leading-8 text-muted">
+        <div v-if="isBlawby && descriptionParts.length" class="mt-6 text-left text-lg leading-8 text-muted">
+          <div v-for="(part, index) in descriptionParts" :key="index" class="flex items-start gap-3">
+            <p class="prose prose-lg max-w-none text-muted">{{ part }}</p>
+          </div>
+        </div>
+        <p v-else-if="description" class="mt-6 text-lg leading-8 text-muted">
           {{ description }}
         </p>
         <div v-if="ctaUrl && ctaLabel" class="mt-10">
-          <TenantButton :to="ctaUrl">
+          <TenantButton :to="ctaUrl" class="gap-2">
+            <svg v-if="isBlawby" class="-ml-0.5 mr-2 size-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7.5 4.5h9A4.5 4.5 0 0 1 21 9v3a4.5 4.5 0 0 1-4.5 4.5h-4.86L7.2 20.2a.75.75 0 0 1-1.2-.6v-3.35A4.5 4.5 0 0 1 3 12V9a4.5 4.5 0 0 1 4.5-4.5Z" /></svg>
             {{ ctaLabel }}
           </TenantButton>
         </div>
@@ -136,6 +191,8 @@ import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import { blockText, blockMedia, blockRecords, isInternalRoute } from '~/utils/tenant-page-block-data'
 import { cfImageSrcset } from '~/utils/cf-image'
+import { blawbySplitAccent, blawbyShieldVariant, blawbySurface } from '~/types/blawby'
+import OnlineConsultationBooking from '~/components/booking/OnlineConsultationBooking.vue'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 const route = useRoute()
@@ -144,6 +201,7 @@ const { organization } = useTenantOrganization()
 const { consultation, canSchedule } = useOrganizationShellState()
 const organizationName = computed(() => organization.name || '')
 const businessTitle = computed(() => organization.name || '')
+const isBlawby = computed(() => organization.template?.slug === 'blawby' || organization.vertical === 'service')
 
 const isHome = computed(() => props.page.path === '/' || route.path === '/')
 const isSchedule = computed(() => props.page.recipe === 'schedule' || route.path === '/schedule')
@@ -162,6 +220,15 @@ const secondaryUrl = computed(() => {
   const url = blockText(props.block?.data?.secondary_url)
   return url && isInternalRoute(url) ? localePath(url) : (url || '')
 })
+
+const splitTitle = computed(() => blawbySplitAccent(title.value, blockText(props.block?.data?.accent)))
+const titleWords = computed(() => title.value.trim().split(/\s+/).filter(Boolean))
+const descriptionParts = computed(() => (description.value ?? '')
+  .split(/\n\s*\n/)
+  .map(part => part.trim())
+  .filter(Boolean))
+const variant = computed(() => blawbyShieldVariant(props.page.path))
+const backgroundStyle = computed(() => isBlawby.value ? { backgroundColor: blawbySurface(variant.value) } : undefined)
 
 const mediaList = computed(() => props.block ? blockMedia(props.block, 'media') : (props.page.media || []))
 const background = computed(() => mediaList.value[0] ?? null)

@@ -313,10 +313,13 @@ const subline = computed(() => {
   const who = props.personalScope ? booking.value.organizationName : purchase ? booking.value.guestName : booking.value.resourceTitle
   return [when, who].filter(Boolean).join(' · ')
 })
-// The picture the panel leads with: the hero of the location this was booked at.
-const bookingImageUrl = computed(() => booking.value
-  ? booking.value.locations.find(location => location.id === booking.value!.locationId)?.imageUrl ?? null
-  : null)
+// The picture the panel leads with: the resource's photo, or the hero of the location this was booked at.
+const bookingImageUrl = computed(() => {
+  if (!booking.value) return null
+  return booking.value.resourceImageUrl
+    || booking.value.locations.find(location => location.id === booking.value!.locationId)?.imageUrl
+    || null
+})
 // Airbnb's host-side stay page titles the party, not the listing: "Chris's
 // group of 2". A single guest is just their name.
 const partyTitle = computed(() => {
