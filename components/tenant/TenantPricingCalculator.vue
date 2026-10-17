@@ -6,20 +6,20 @@
     <div class="grid grid-cols-1 gap-10 lg:grid-cols-2">
       <div class="space-y-6">
         <fieldset>
-          <legend class="mb-2 flex w-full items-baseline justify-between gap-4 text-sm font-semibold text-highlighted">
+          <legend class="mb-2 flex w-full items-baseline justify-between gap-4 text-sm font-semibold text-[var(--blawby-primary,var(--ui-text-highlighted))]">
             <span>Household Size</span><span class="text-xs font-normal text-muted">Includes you + dependents</span>
           </legend>
           <div class="grid grid-cols-4 gap-2 sm:grid-cols-8">
             <label v-for="size in 8" :key="size" class="cursor-pointer">
               <input v-model.number="householdSize" type="radio" name="household-size" :value="size" class="peer sr-only">
-              <span class="flex aspect-square items-center justify-center rounded-lg text-lg font-semibold ring-1 ring-default transition peer-checked:bg-primary peer-checked:text-on-primary peer-checked:ring-primary peer-focus-visible:ring-2 peer-focus-visible:ring-primary">{{ size }}</span>
+              <span class="flex aspect-square items-center justify-center rounded-lg text-lg font-semibold ring-1 ring-default transition peer-checked:bg-[var(--blawby-accent,var(--ui-primary))] peer-checked:text-on-primary peer-checked:ring-[var(--blawby-accent,var(--ui-primary))] peer-focus-visible:ring-2 peer-focus-visible:ring-primary">{{ size }}</span>
             </label>
           </div>
         </fieldset>
 
         <div>
           <div class="mb-2 flex items-baseline justify-between gap-4">
-            <label for="tenant-income" class="text-sm font-semibold text-highlighted">Household Income</label>
+            <label for="tenant-income" class="text-sm font-semibold text-[var(--blawby-primary,var(--ui-text-highlighted))]">Household Income</label>
             <div class="flex rounded-md bg-muted p-1 text-xs font-medium" aria-label="Income period">
               <button v-for="option in ['annual', 'monthly'] as const" :key="option" type="button" class="rounded px-2 py-1 capitalize cursor-pointer" :class="period === option ? 'bg-elevated text-highlighted shadow' : 'text-muted'" @click="period = option">{{ option }}</button>
             </div>
@@ -32,13 +32,13 @@
         </div>
       </div>
 
-      <div class="flex flex-col justify-center rounded-xl border border-muted bg-muted p-6">
-        <h4 class="mb-1 text-lg font-semibold text-highlighted">Estimated Hourly Rate</h4>
+      <div class="flex flex-col justify-center rounded-xl border border-muted bg-[var(--blawby-primary-100,var(--ui-bg-muted))] p-6">
+        <h4 class="mb-1 text-lg font-semibold text-[var(--blawby-primary,var(--ui-text-highlighted))]">Estimated Hourly Rate</h4>
         <p v-if="!income" class="mb-6 text-sm italic text-muted">Enter income to see your specific rate</p>
         <div class="space-y-4">
           <div class="flex items-center justify-between text-sm"><span class="text-muted">Standard Rate</span><span class="font-medium">${{ result.standardRate }}/hr</span></div>
           <div class="flex items-center justify-between text-sm"><span class="text-muted">Discount<span v-if="result.percentage"> ({{ result.percentage }}%)</span></span><span class="font-medium" :class="result.percentage ? 'text-success' : ''">{{ result.percentage ? `-$${result.standardRate - result.rate}/hr` : 'None' }}</span></div>
-          <div class="border-t border-default pt-4"><div class="flex items-center justify-between"><span class="text-xl font-bold text-highlighted">Your Rate</span><span class="text-3xl font-bold text-primary">${{ result.rate }}/hr</span></div></div>
+          <div class="border-t border-default pt-4"><div class="flex items-center justify-between"><span class="text-xl font-bold text-[var(--blawby-primary,var(--ui-text-highlighted))]">Your Rate</span><span class="text-3xl font-bold text-[var(--blawby-accent-strong,var(--ui-primary))]">${{ result.rate }}/hr</span></div></div>
         </div>
       </div>
     </div>

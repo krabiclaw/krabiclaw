@@ -155,32 +155,34 @@
   <section
     v-else
     :style="backgroundStyle"
-    class="relative overflow-hidden py-16"
+    class="relative overflow-hidden"
+    :class="isBlawby ? '' : 'py-16'"
     data-parity-section="page-hero"
   >
-    <div class="tenant-container relative">
-      <div class="mx-auto max-w-4xl text-center">
-        <p v-if="eyebrow" class="mb-4 text-sm font-semibold uppercase text-primary">
-          {{ eyebrow }}
-        </p>
-        <h1 v-if="titleWords.length" :aria-label="title" class="tenant-display text-3xl font-bold sm:text-4xl text-highlighted">
-          <template v-if="isBlawby">
-            <template v-for="(word, index) in titleWords" :key="`${word}-${index}`">
-              <span :class="index === 1 || index === 2 ? 'text-[var(--blawby-accent-strong,var(--ui-primary))]' : 'text-highlighted'">{{ word + (index < titleWords.length - 1 ? ' ' : '') }}</span>
+    <div :class="isBlawby ? 'blawby-container relative' : 'tenant-container relative'">
+      <div :class="isBlawby ? 'px-6 pb-4 pt-16 lg:px-8' : ''">
+        <div class="mx-auto max-w-4xl text-center">
+          <p v-if="eyebrow" class="mb-4 text-sm font-semibold uppercase" :class="isBlawby ? 'text-[var(--blawby-accent-strong)]' : 'text-primary'">
+            {{ eyebrow }}
+          </p>
+          <h1 v-if="titleWords.length" :aria-label="title" :class="isBlawby ? 'blawby-display text-3xl font-bold sm:text-4xl' : 'tenant-display text-3xl font-bold sm:text-4xl text-highlighted'">
+            <template v-if="isBlawby">
+              <template v-for="(word, index) in titleWords" :key="`${word}-${index}`">
+                <span :class="index === 1 || index === 2 ? 'text-[var(--blawby-accent-strong)]' : 'text-[var(--blawby-primary)]'">{{ word + (index < titleWords.length - 1 ? ' ' : '') }}</span>
+              </template>
             </template>
-          </template>
-          <template v-else>
-            {{ title }}
-          </template>
-        </h1>
-        <div v-if="isBlawby && descriptionParts.length" class="mt-6 text-left text-lg leading-8 text-muted">
-          <div v-for="(part, index) in descriptionParts" :key="index" class="flex items-start gap-3">
-            <p class="prose prose-lg max-w-none text-muted">{{ part }}</p>
+            <template v-else>
+              {{ title }}
+            </template>
+          </h1>
+          <div v-if="isBlawby && descriptionParts.length" class="mt-6 text-left text-lg leading-8 text-[var(--blawby-primary)]">
+            <div v-for="(part, index) in descriptionParts" :key="index" class="flex items-start gap-3">
+              <TenantRichText :content="part" unstyled class="blawby-page-hero-copy contents prose prose-lg max-w-none" />
+            </div>
           </div>
-        </div>
-        <p v-else-if="description" class="mt-6 text-lg leading-8 text-muted">
-          {{ description }}
-        </p>
+          <p v-else-if="description" class="mt-6 text-lg leading-8 text-muted">
+            {{ description }}
+          </p>
         <div v-if="ctaUrl && ctaLabel" class="mt-10">
           <TenantButton :to="ctaUrl" class="gap-2">
             <svg v-if="isBlawby" class="-ml-0.5 mr-2 size-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7.5 4.5h9A4.5 4.5 0 0 1 21 9v3a4.5 4.5 0 0 1-4.5 4.5h-4.86L7.2 20.2a.75.75 0 0 1-1.2-.6v-3.35A4.5 4.5 0 0 1 3 12V9a4.5 4.5 0 0 1 4.5-4.5Z" /></svg>
