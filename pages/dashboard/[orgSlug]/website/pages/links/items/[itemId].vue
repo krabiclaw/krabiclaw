@@ -32,7 +32,7 @@
       <UFormField label="Destination" required>
         <UInput v-model="form.destination" placeholder="/reservations or https://example.com" maxlength="2048" class="w-full" />
       </UFormField>
-      <UFormField label="Status" description="A hidden link stays on the page's list and off the public page.">
+      <UFormField label="Status">
         <USelect v-model="form.status" :items="LINK_STATUS_OPTIONS" class="w-full" />
       </UFormField>
     </div>

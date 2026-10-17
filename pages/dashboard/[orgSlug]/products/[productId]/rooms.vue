@@ -12,7 +12,7 @@
   >
     <div v-if="p.isNew.value || p.product.value" class="space-y-6">
       <div class="grid gap-6 sm:grid-cols-3">
-        <UFormField label="Bedrooms" description="0 for a studio">
+        <UFormField label="Bedrooms">
           <UInput
             :model-value="p.form.stay_bedrooms"
             type="number"
@@ -38,7 +38,7 @@
           />
         </UFormField>
 
-        <UFormField label="Bathrooms" description="Supports half baths">
+        <UFormField label="Bathrooms">
           <UInput
             :model-value="p.form.stay_bathrooms"
             type="number"

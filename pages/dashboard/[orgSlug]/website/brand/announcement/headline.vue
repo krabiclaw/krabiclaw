@@ -8,9 +8,8 @@
     @cancel="editor.revert"
     @save="editor.save"
   >
-    <UFormField label="Headline">
-      <UInput v-model="editor.form.announcementHeadline" maxlength="120" autofocus class="w-full" />
-    </UFormField>
+    <p class="mb-2 text-sm font-semibold text-muted">{{ charactersRemaining }}/120 available</p>
+    <UInput v-model="editor.form.announcementHeadline" aria-label="Headline" maxlength="120" autofocus class="w-full" />
   </DashboardLeafPanel>
 </template>
 
@@ -20,4 +19,5 @@ import { organizationSettingsEditorKey } from '~/lib/components/workspace/settin
 definePageMeta({ layout: 'dashboard' })
 
 const editor = inject(organizationSettingsEditorKey)!
+const charactersRemaining = computed(() => 120 - (editor.form.announcementHeadline?.length ?? 0))
 </script>
