@@ -214,7 +214,9 @@ export async function readStripeCheckoutSetup(db: DbClient, organizationId: stri
   const livemode = env.STRIPE_SECRET_KEY ? organizationPaymentsLivemode(env, organization) : null
   const keys = livemode === null ? null : paymentsStripeKeys(env, livemode)
   if (!keys?.methodConfiguration || !keys.publishableKey || !env.NUXT_PUBLIC_PLATFORM_DOMAIN || !env.METRONOME_API_KEY || !env.METRONOME_RATE_CARD_ID) missing.push('payments.configuration')
-  if (organization.billing_status !== 'active' || !organization.billing_customer || !organization.customer || !organization.contract || organization.currency !== 'USD' || !organization.start || !Number.isFinite(Date.parse(organization.start)) || Date.parse(organization.start) > Date.now()) missing.push('payments.billing')
+  // Payments fees are billed only in the platform's mode; a demo's test-mode payments carry none.
+  const billed = livemode === null || livemode === stripeLivemodeFromKey(env.STRIPE_SECRET_KEY!)
+  if (billed && (organization.billing_status !== 'active' || !organization.billing_customer || !organization.customer || !organization.contract || organization.currency !== 'USD' || !organization.start || !Number.isFinite(Date.parse(organization.start)) || Date.parse(organization.start) > Date.now())) missing.push('payments.billing')
   if (organization.servicing) missing.push('payments.servicing')
   if (!connected?.stripeAccountId) missing.push('payments.account')
   else if (connected.status !== 'ready' || connected.cardPaymentsStatus !== 'active' || !connected.stripeRefreshedAt) missing.push('payments.account_ready')
@@ -365,8 +367,8 @@ export async function requireStripeCheckoutAcceptance(db: DbClient, env: Cloudfl
     statusCode: setup.missing.includes('payments.configuration') ? 503 : setup.missing.includes('payments.entitlement') ? 403 : 409,
     statusMessage: 'Complete the business’s Payments setup before accepting online payments', data: handoff,
   })
-  const billing = await paymentsBillingPricing(db, env, organizationId)
-  if (!billing.contract || !billing.pricing) throw new HTTPError({ statusCode: 409, statusMessage: 'Complete Payments billing setup before accepting online payments', data: handoff })
+  const billing = setup.livemode === platformLivemode(env) ? await paymentsBillingPricing(db, env, organizationId) : null
+  if (billing && (!billing.contract || !billing.pricing)) throw new HTTPError({ statusCode: 409, statusMessage: 'Complete Payments billing setup before accepting online payments', data: handoff })
   const saved = setup.connected!
   const keys = paymentsStripeKeys(env, setup.livemode!)!
   const stripe = createStripeClient(keys.secretKey, 'payments')

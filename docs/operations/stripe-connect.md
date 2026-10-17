@@ -58,9 +58,10 @@ values. Staging is already in test mode and needs none of these:
   events listed in `.env.example`.
 
 Test-mode destinations receive every test connected account's events,
-including staging's; both handlers ignore accounts they do not manage. A
-test-mode capture on a live platform records no Payments usage, so it is never
-billed.
+including staging's; both handlers ignore accounts they do not manage. Payments
+fees are billed only in the platform's mode: a demo organization on a live
+platform needs no Payments fees contract or card, and its test-mode captures
+record no usage.
 
 ## Release order
 
