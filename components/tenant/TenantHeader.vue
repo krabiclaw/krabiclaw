@@ -5,7 +5,8 @@
     data-tenant-critical-header
     data-saya-critical-header
     data-blawby-critical-header
-    class="sticky top-0 z-50 border-b border-default bg-elevated/90 backdrop-blur-md"
+    class="sticky top-0 z-50 border-b border-default"
+    :class="isService ? 'bg-elevated' : 'bg-elevated/90 backdrop-blur-md'"
   >
     <!-- Hospitality / Saya Header: 3-column grid (Left logo monogram, center nav, right CTA) -->
     <div
@@ -107,46 +108,46 @@
       </div>
     </div>
 
-    <!-- Professional Services / Blawby Header: Flex (Left logo text, right nav + CTA) -->
+    <!-- Professional Services / Blawby Header: blawby-container with py-2 flex items-center justify-between -->
     <div
       v-else
-      class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8"
+      class="blawby-container"
     >
-      <div class="flex shrink-0 items-center">
-        <NuxtLink :to="localePath('/')" class="no-underline flex items-center gap-3" :aria-label="`${brandName} home`">
-          <SiteLogo :alt="brandName" size="sm" loading="eager">
-            <span class="tenant-display truncate text-lg font-bold text-[var(--blawby-primary,var(--ui-text-highlighted))] sm:text-xl">
-              {{ brandName }}
-            </span>
-          </SiteLogo>
-        </NuxtLink>
-      </div>
-
-      <div class="flex min-w-0 items-center gap-x-3 font-semibold uppercase">
-        <nav class="hidden items-center whitespace-nowrap text-[var(--blawby-primary,var(--ui-text-highlighted))] lg:flex" :aria-label="navAriaLabel">
-          <NuxtLink
-            v-for="item in headerItems"
-            :key="item.id"
-            :to="localePath(item.path)"
-            class="inline-block rounded-lg px-2.5 py-1 text-sm no-underline transition hover:text-[var(--blawby-accent-strong,var(--ui-primary))]"
-          >
-            {{ item.title }}
+      <nav class="relative z-50 flex items-center justify-between gap-4 py-2" :aria-label="navAriaLabel">
+        <div class="flex shrink-0 items-center">
+          <NuxtLink :to="localePath('/')" class="no-underline" :aria-label="`${brandName} home`">
+            <SiteLogo :alt="brandName" size="lg" loading="eager">
+              <span class="blawby-display truncate text-lg text-[var(--blawby-primary)] sm:text-xl">
+                {{ brandName }}
+              </span>
+            </SiteLogo>
           </NuxtLink>
-        </nav>
+        </div>
 
-        <TenantButton
-          v-if="canSchedule && consultation?.schedule_path && headerCtaLabel"
-          :to="localePath(consultation.schedule_path)"
-          size="sm"
-          @click="trackConsultation"
-        >
-          <svg class="-ml-0.5 mr-1.5 size-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M7.5 4.5h9A4.5 4.5 0 0 1 21 9v3a4.5 4.5 0 0 1-4.5 4.5h-4.86L7.2 20.2a.75.75 0 0 1-1.2-.6v-3.35A4.5 4.5 0 0 1 3 12V9a4.5 4.5 0 0 1 4.5-4.5Z" />
-          </svg>
-          <span>{{ headerCtaLabel }}</span>
-        </TenantButton>
+        <div class="flex min-w-0 items-center gap-x-3 font-semibold uppercase">
+          <div class="hidden items-center whitespace-nowrap text-[var(--blawby-primary,var(--ui-text-highlighted))] lg:flex">
+            <NuxtLink
+              v-for="item in headerItems"
+              :key="item.id"
+              :to="localePath(item.path)"
+              class="inline-block rounded-lg px-2.5 py-1 text-sm no-underline transition hover:text-[var(--blawby-accent-strong,var(--ui-primary))]"
+            >
+              {{ item.title }}
+            </NuxtLink>
+          </div>
 
-        <details ref="mobileNavDetails" class="relative shrink-0 lg:hidden" @toggle="syncMobileNavState">
+          <TenantButton
+            v-if="canSchedule && consultation?.schedule_path && headerCtaLabel"
+            :to="localePath(consultation.schedule_path)"
+            @click="trackConsultation"
+          >
+            <svg class="-ml-0.5 mr-2 size-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M7.5 4.5h9A4.5 4.5 0 0 1 21 9v3a4.5 4.5 0 0 1-4.5 4.5h-4.86L7.2 20.2a.75.75 0 0 1-1.2-.6v-3.35A4.5 4.5 0 0 1 3 12V9a4.5 4.5 0 0 1 4.5-4.5Z" />
+            </svg>
+            <span>{{ headerCtaLabel }}</span>
+          </TenantButton>
+
+          <details ref="mobileNavDetails" class="relative -mr-1 shrink-0 lg:hidden" @toggle="syncMobileNavState">
           <summary
             class="inline-flex size-8 list-none items-center justify-center rounded-full text-muted transition hover:bg-muted hover:text-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden"
             :aria-label="mobileMenuOpen ? t('blawby.navigation.close') : t('blawby.navigation.toggle')"
@@ -179,6 +180,7 @@
           </div>
         </details>
       </div>
+      </nav>
     </div>
   </header>
 </template>

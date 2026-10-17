@@ -100,10 +100,10 @@
   <!-- Schedule Hero -->
   <template v-else-if="isSchedule">
     <section class="relative isolate overflow-hidden bg-[var(--tenant-primary-dark,var(--blawby-primary-dark,#1e293b))]" data-parity-section="schedule-hero">
-      <div class="tenant-container relative z-20 text-center" :class="nativeSchedule ? 'py-12 sm:py-16' : 'py-24 sm:py-32 lg:py-40'">
-        <div class="mx-auto max-w-4xl">
+      <div class="blawby-container relative z-20 text-center" :class="nativeSchedule ? 'py-12 sm:py-16' : 'py-24 sm:py-32 lg:py-40 min-[1920px]:py-48 min-[2560px]:py-64'">
+        <div class="mx-auto max-w-4xl min-[1920px]:max-w-6xl min-[2560px]:max-w-7xl">
           <p class="font-bold uppercase text-[var(--blawby-accent,var(--ui-primary))]">{{ organizationName }}</p>
-          <h1 class="tenant-display mt-3 text-4xl font-medium text-white sm:text-5xl">
+          <h1 v-if="splitTitle.before || splitTitle.accent || title" class="tenant-display font-medium text-white" :class="nativeSchedule ? 'mt-3 text-4xl sm:text-5xl' : 'text-5xl sm:text-7xl min-[1920px]:text-8xl min-[2560px]:text-9xl'">
             <template v-if="splitTitle.accent">
               {{ splitTitle.before }}<span class="text-[var(--blawby-accent,var(--ui-primary))]">{{ splitTitle.accent }}</span>{{ splitTitle.after }}
             </template>
@@ -111,10 +111,13 @@
               {{ title }}
             </template>
           </h1>
-          <p v-if="description" class="mt-6 text-lg leading-8 text-gray-300 sm:text-xl">{{ description }}</p>
-          <TenantButton v-if="!nativeSchedule && scheduleDestination" :to="scheduleDestination" size="lg" class="mt-10">
+          <p v-for="(part, idx) in scheduleSubtitleParts" :key="idx" class="mt-6 text-lg leading-8 text-gray-300 sm:text-xl min-[1920px]:text-2xl">{{ part }}</p>
+          <p v-if="schedulePriceLine && !nativeSchedule" class="mt-6 text-lg font-bold text-[var(--blawby-accent,var(--ui-primary))] sm:text-xl min-[1920px]:text-2xl">{{ schedulePriceLine }}</p>
+          <TenantButton v-if="!nativeSchedule && scheduleDestination" :to="scheduleDestination" class="mt-10 w-full px-8 py-4 text-lg min-[1920px]:px-4 min-[1920px]:py-4 min-[1920px]:text-base min-[2560px]:px-5 min-[2560px]:py-5 min-[2560px]:text-lg">
+            <svg class="-ml-0.5 mr-2 size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 2v4m8-4v4M3 10h18" /><rect x="3" y="4" width="18" height="18" rx="2" /></svg>
             {{ scheduleLabel }}
           </TenantButton>
+          <p v-if="scheduleNotice" class="mt-6 text-sm leading-6 text-gray-300">{{ scheduleNotice }}</p>
         </div>
       </div>
     </section>
@@ -271,6 +274,15 @@ const overviewActions = computed(() => {
 
 // Schedule support
 const nativeSchedule = computed(() => Boolean(canSchedule.value && consultation.value?.mode === 'native'))
+const scheduleBookingPrompt = computed(() => props.page.blocks?.find(item => item.type === 'booking_cta')?.data)
+const schedulePriceLine = computed(() => blockText(scheduleBookingPrompt.value?.price_line))
+const scheduleNotice = computed(() => blockText(scheduleBookingPrompt.value?.notice))
+const scheduleSubtitle = computed(() => subtitle.value || description.value)
+const scheduleSubtitleParts = computed(() => (scheduleSubtitle.value ?? '')
+  .split(/\n\s*\n/)
+  .map(part => part.trim())
+  .filter(Boolean))
+
 const scheduleDestination = computed(() => {
   if (!consultation.value) {
     if (!ctaUrl.value) return localePath('/contact')
