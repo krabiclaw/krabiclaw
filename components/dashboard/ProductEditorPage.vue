@@ -616,9 +616,13 @@ function staySummary(): string {
   return `${place} · Check-in ${form.check_in_time}, checkout ${form.check_out_time} · Sleeps ${form.max_guests}`
 }
 function stayTeamSummary(): string {
-  if (!form.stay_team_id) return 'Owners and admins only'
   if (schedulingMembersError.value) return 'Teams could not be loaded'
   if (!schedulingMembers.value) return 'Loading team…'
+  if (form.stay_member_id) {
+    const member = schedulingMembers.value.members.find(candidate => candidate.id === form.stay_member_id)
+    return member?.name?.trim() || 'Assigned team member'
+  }
+  if (!form.stay_team_id) return 'Owners and admins only'
   return schedulingMembers.value.teams.find(candidate => candidate.id === form.stay_team_id)?.name ?? 'Assigned team not found in this business'
 }
 function roomsSummary(): string {

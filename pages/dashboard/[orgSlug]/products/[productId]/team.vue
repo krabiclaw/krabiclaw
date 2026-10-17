@@ -19,9 +19,9 @@
         :actions="[{ label: 'Try again', color: 'neutral', variant: 'soft', onClick: () => refreshMembers() }]"
       />
       <URadioGroup
-        v-else-if="teamOptions.length"
-        v-model="teamSelection"
-        :items="teamOptions"
+        v-else-if="options.length"
+        v-model="selection"
+        :items="options"
         variant="card"
         class="w-full"
       />
@@ -41,28 +41,43 @@ const { data: members, error: membersError, refresh: refreshMembers } = await us
 
 const UNASSIGNED = 'unassigned'
 
-const teamSelection = computed({
-  get: () => p.form.stay_team_id ?? UNASSIGNED,
+const selection = computed({
+  get: () => {
+    if (p.form.stay_team_id) return `team:${p.form.stay_team_id}`
+    if (p.form.stay_member_id) return `member:${p.form.stay_member_id}`
+    return UNASSIGNED
+  },
   set: (value: string) => {
-    const unassigned = value === UNASSIGNED
-    p.form.stay_team_id = unassigned ? null : value
-    if (unassigned) p.form.stay_member_id = null
+    p.form.stay_team_id = value.startsWith('team:') ? value.slice(5) : null
+    p.form.stay_member_id = value.startsWith('member:') ? value.slice(7) : null
   },
 })
 
-const teamOptions = computed(() => {
+const options = computed(() => {
   if (!members.value) return []
-  return [
+  const items = [
     {
       value: UNASSIGNED,
       label: 'Owners and admins only',
       description: 'All organization owners and admins manage stays and turnovers for this home.',
     },
     ...members.value.teams.map(team => ({
-      value: team.id,
+      value: `team:${team.id}`,
       label: team.name,
       description: `Members of ${team.name} see this place’s stays and turnovers.`,
     })),
   ]
+  if (p.form.stay_member_id) {
+    const member = members.value.members.find(m => m.id === p.form.stay_member_id)
+    if (member) {
+      const name = member.name?.trim() || 'Assigned team member'
+      items.push({
+        value: `member:${member.id}`,
+        label: name,
+        description: `${name} looks after this place’s stays and turnovers.`,
+      })
+    }
+  }
+  return items
 })
 </script>
