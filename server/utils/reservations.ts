@@ -5,7 +5,6 @@ import { generateReservationTimes, parseOpeningHours, parseSpecialHours, locatio
 import { RESERVATION_CAPACITY_CONSUMING_SQL } from '~/shared/bookings'
 import { isValidTimezone, localDateTimeToInstant } from '~/utils/timezone'
 import { requireStripeCheckoutAcceptance } from '~/server/utils/stripe-connect'
-import { createStripeClient } from '~/server/utils/stripe-client'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
@@ -225,7 +224,7 @@ export async function upsertLocationReservationConfig(db: DbClient, input: {
   if (missing.length) throw new HTTPError({ statusCode: 409, message: 'Reservation setup is incomplete', data: { code: 'RESERVATION_SETUP_INCOMPLETE', missing } })
   if (merged.deposit_required) {
     if (!input.env.STRIPE_SECRET_KEY) throw new HTTPError({ statusCode: 503, message: 'Payments provider configuration is incomplete' })
-    await requireStripeCheckoutAcceptance(db, createStripeClient(input.env.STRIPE_SECRET_KEY, 'payments'), input.env, input.organizationId)
+    await requireStripeCheckoutAcceptance(db, input.env, input.organizationId)
   }
   const results = await executeBatch(db, [{
     query: `

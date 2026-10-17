@@ -22,7 +22,6 @@ import { DEFAULT_EMAIL_DAILY_LIMIT as EMAIL_DAILY_LIMIT, DEFAULT_IP_HOURLY_LIMIT
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { HTTPError, type H3Event } from 'nitro'
 import { createPaymentCheckout } from '~/server/domain/payments/checkout'
-import { createStripeClient } from '~/server/utils/stripe-client'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { isRecord } from '~/server/utils/type-guards'
 import { pushStayHoldNights, quoteStay, readPublicStayHome, type StayQuote } from '~/server/domain/stays'
@@ -168,7 +167,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     }
     if (context.financialWritesAllowed === false) throw new HTTPError({ statusCode: 409, statusMessage: 'Continue this purchase through the business’s payment workflow', data: { code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(organization.slug)}/products/${encodeURIComponent(snapshot.product_id)}/booking` } })
     if (!env.STRIPE_SECRET_KEY || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) return creationResult({ error: 'Payments provider configuration is incomplete', code: 'payments_unavailable' }, { status: 503 })
-    const checkout = await createPaymentCheckout(db, createStripeClient(env.STRIPE_SECRET_KEY, 'payments'), env, {
+    const checkout = await createPaymentCheckout(db, env, {
       subjectType: 'booking', organizationId, buyerUserId: operator ? null : await ensureInteractionUser(event, env), productId: snapshot.product_id, variantId: snapshot.variant_id,
       sessionId, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize,
       idempotencyKey, returnOrigin: env.NUXT_PUBLIC_PLATFORM_DOMAIN, following: () => [],
@@ -271,7 +270,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     const checkoutKey = idempotencyKey
     // Contact stays on the guest thread. A checkout thread waits on the guest;
     // authenticated capture alone creates its operational Booking and activity.
-    const checkout = await createPaymentCheckout(db, createStripeClient(env.STRIPE_SECRET_KEY, 'payments'), env, {
+    const checkout = await createPaymentCheckout(db, env, {
       subjectType: 'booking', organizationId, buyerUserId: userId, productId: product.id, variantId: productVariantId,
       sessionId: session.id, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize, idempotencyKey: checkoutKey,
       returnOrigin: env.NUXT_PUBLIC_PLATFORM_DOMAIN,
@@ -440,7 +439,7 @@ export async function createStayBooking(event: H3Event, context: { organizationI
   const stay = quoted
     ? { product_id: quoted.product_id, check_in_date: quoted.check_in_date, check_out_date: quoted.check_out_date, adults: quoted.adults, children: quoted.children, infants: quoted.infants }
     : { product_id: home.product_id, check_in_date: String(request.check_in_date), check_out_date: String(request.check_out_date), adults: Number(request.adults), children: Number(request.children), infants: Number(request.infants) }
-  const checkout = await createPaymentCheckout(db, createStripeClient(env.STRIPE_SECRET_KEY, 'payments'), env, {
+  const checkout = await createPaymentCheckout(db, env, {
     subjectType: 'stay', organizationId, buyerUserId: await ensureInteractionUser(event, env), requestId: null, requestFingerprint: fingerprint,
     quantity: stay.adults + stay.children, idempotencyKey, returnOrigin: env.NUXT_PUBLIC_PLATFORM_DOMAIN, following: () => [],
     stay, guest, quote,

@@ -1,9 +1,8 @@
-import { defineHandler, HTTPError } from 'nitro'
+import { defineHandler } from 'nitro'
 import { getDashboardContext } from '~/server/utils/dashboard-context'
 import { assertRoleAllows } from '~/server/utils/member-access'
 import { jsonResponse } from '~/server/utils/api-response'
-import { getStripeConnectedAccount } from '~/server/utils/stripe-connect'
-import { createStripeClient } from '~/server/utils/stripe-client'
+import { getStripeConnectedAccount, organizationPaymentsLivemode, paymentsStripe } from '~/server/utils/stripe-connect'
 
 /** The payout method as Airbnb shows it: the bank on file and when Stripe sends, read live from the connected account. */
 export interface ConnectPayoutMethod {
@@ -21,12 +20,11 @@ export default defineHandler(async (event) => {
   const account = await getStripeConnectedAccount(db, organization.id)
   let countries: string[] = []
   if (!account?.stripeAccountId) {
-    if (!env.STRIPE_SECRET_KEY) throw new HTTPError({ statusCode: 503, statusMessage: 'Stripe Connect is not configured' })
-    countries = (await createStripeClient(env.STRIPE_SECRET_KEY, 'payments').countrySpecs.list({ limit: 100 }).autoPagingToArray({ limit: 250 })).map(country => country.id)
+    countries = (await paymentsStripe(env, organizationPaymentsLivemode(env, organization)).countrySpecs.list({ limit: 100 }).autoPagingToArray({ limit: 250 })).map(country => country.id)
   }
   let payout: ConnectPayoutMethod | null = null
-  if (account?.stripeAccountId && account.status === 'ready' && env.STRIPE_SECRET_KEY) {
-    const stripe = createStripeClient(env.STRIPE_SECRET_KEY, 'payments')
+  if (account?.stripeAccountId && account.status === 'ready') {
+    const stripe = paymentsStripe(env, account.livemode)
     const [banks, settings] = await Promise.all([
       stripe.accounts.listExternalAccounts(account.stripeAccountId, { object: 'bank_account', limit: 10 }),
       stripe.accounts.retrieve(account.stripeAccountId),

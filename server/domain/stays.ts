@@ -7,7 +7,7 @@ import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { visitRefundQueries } from '~/server/domain/payments/visit-refund'
 import { bookedPolicyFor, LONG_TERM_STAY_NIGHTS, stayCancellationRefund, type StayBookedPolicy, type StayCancellationInput } from '~/shared/stay-cancellation'
 import { executeRefund, requirePayment, type Payment } from '~/server/domain/payments'
-import { createStripeClient } from '~/server/utils/stripe-client'
+import { paymentsStripe } from '~/server/utils/stripe-connect'
 import { isRecord } from '~/server/utils/type-guards'
 import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
 import { createProduct, getProduct, setProductPublication, updateProduct } from '~/server/utils/product-management'
@@ -1306,8 +1306,8 @@ export async function cancelStayAsGuest(db: DbClient, env: StayMutationEnv & Clo
   }
   const refund = await queryFirst<{ amount: number | null; status: string; stripe_refund_id: string | null }>(db, 'SELECT amount, status, stripe_refund_id FROM payment_refunds WHERE payment_id = ? AND idempotency_key = ?', [payment.id, key])
   if (refund && !refund.stripe_refund_id) {
-    if (!env.STRIPE_SECRET_KEY) throw new Error('Stripe is not configured')
-    await executeRefund(db, createStripeClient(env.STRIPE_SECRET_KEY, 'payments'), await requirePayment(db, organizationId, payment.id), refund.amount, key, 'requested_by_customer', buyerUserId, env)
+    const refunded = await requirePayment(db, organizationId, payment.id)
+    await executeRefund(db, paymentsStripe(env, Boolean(refunded.livemode)), refunded, refund.amount, key, 'requested_by_customer', buyerUserId, env)
   }
   return { stay: await storedStay(db, organizationId, stayId), refund_minor: refund ? refund.amount ?? payment.captured_amount - payment.refunded_amount : 0 }
 }

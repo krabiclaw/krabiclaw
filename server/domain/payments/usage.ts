@@ -8,7 +8,7 @@ import type {FinancialPrincipal} from './index'
 import {validatePaymentsRateCard} from './rate-card'
 import {tokenHash} from './buyer'
 import {describeErrorForTelemetry} from '~/shared/error-telemetry'
-import {stripeLivemodeFromKey} from '~/server/utils/stripe-connect'
+import {organizationPaymentsLivemode,platformLivemode,stripeLivemodeFromKey} from '~/server/utils/stripe-connect'
 import {recordPaymentsVolumeBilled} from '~/server/domain/booking-analytics'
 import { readPaymentsBillingBasis } from './fx'
 
@@ -178,9 +178,10 @@ export async function setUpPaymentsBillingForSubscriptionEvent(db:DbClient,strip
  if(object.object==='checkout.session'&&object.mode!=='subscription')return
  const customerId=typeof object.customer==='string'?object.customer:object.customer?.id
  if(!customerId)return
- const organizations=await queryAll<{id:string}>(db,'SELECT id FROM organization WHERE "stripeCustomerId"=?',[customerId])
+ const organizations=await queryAll<{id:string;subdomain:string|null}>(db,'SELECT id,subdomain FROM organization WHERE "stripeCustomerId"=?',[customerId])
  if(organizations.length>1)throw new Error('Stripe customer belongs to more than one organization')
- if(organizations[0]&&await hasOrganizationEntitlement(env,organizations[0].id,'payments'))await setUpPaymentsBilling(db,stripe,env,organizations[0].id)
+ // A demo's payments run in test mode on a live platform and carry no fees to bill.
+ if(organizations[0]&&organizationPaymentsLivemode(env,organizations[0])===platformLivemode(env)&&await hasOrganizationEntitlement(env,organizations[0].id,'payments'))await setUpPaymentsBilling(db,stripe,env,organizations[0].id)
 }
 export async function paymentsBillingPricing(db:DbClient,env:CloudflareEnv,organizationId:string) {
  const account=await queryFirst<BillingAccount>(db,'SELECT * FROM payment_billing_accounts WHERE organization_id=?',[organizationId])

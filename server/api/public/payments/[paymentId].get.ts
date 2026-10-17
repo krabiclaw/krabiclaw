@@ -1,8 +1,9 @@
 import { defineHandler } from 'nitro'
 import { getQuery, getRouterParam } from 'nitro/h3'
-import { useRuntimeConfig } from 'nitro/runtime-config'
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { createStripeClient } from '~/server/utils/stripe-client'
+import { paymentsStripeKeys } from '~/server/utils/stripe-connect'
+import { requirePayment } from '~/server/domain/payments'
 import { paymentHandoff } from '~/server/domain/payments/intent'
 
 /** The pay page: what it is for, what it costs, and the Stripe context its Payment Element mounts in. */
@@ -13,7 +14,7 @@ export default defineHandler(async (event) => {
   if (!organizationId || !paymentId || typeof claim !== 'string') return jsonResponse({ error: 'Payment not found' }, { status: 404 })
   const env = cloudflareEnv(event)
   if (!env.DB) return jsonResponse({ error: 'Database not available' }, { status: 500 })
-  if (!env.STRIPE_SECRET_KEY) return jsonResponse({ error: 'Stripe is not configured' }, { status: 503 })
-  const publishableKey = String(useRuntimeConfig().public.stripePublishableKey ?? '')
-  return jsonResponse(await paymentHandoff(env.DB, createStripeClient(env.STRIPE_SECRET_KEY, 'payments'), publishableKey, organizationId, paymentId, claim), { headers: { 'cache-control': 'private, no-store' } })
+  const keys = paymentsStripeKeys(env, Boolean((await requirePayment(env.DB, organizationId, paymentId)).livemode))
+  if (!keys?.publishableKey) return jsonResponse({ error: 'Stripe is not configured' }, { status: 503 })
+  return jsonResponse(await paymentHandoff(env.DB, createStripeClient(keys.secretKey, 'payments'), keys.publishableKey, organizationId, paymentId, claim), { headers: { 'cache-control': 'private, no-store' } })
 })

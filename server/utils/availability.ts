@@ -137,9 +137,8 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
   if (patch.online_payment_required === true) {
     if (!input.env) throw new HTTPError({ statusCode: 403, statusMessage: 'Payments entitlement cannot be checked without the configured environment' })
     const { requireStripeCheckoutAcceptance } = await import('~/server/utils/stripe-connect')
-    const { createStripeClient } = await import('~/server/utils/stripe-client')
     if (!input.env.STRIPE_SECRET_KEY) throw new HTTPError({ statusCode: 503, statusMessage: 'Stripe is not configured' })
-    await requireStripeCheckoutAcceptance(db, createStripeClient(input.env.STRIPE_SECRET_KEY), input.env, input.organizationId)
+    await requireStripeCheckoutAcceptance(db, input.env, input.organizationId)
   }
   if (patch.held_online !== undefined && typeof patch.held_online !== 'boolean') badRequest('held_online must be boolean')
   const current = await queryFirst<Omit<ProductBookingConfigRecord, 'online_payment_required' | 'held_online'> & { online_payment_required: number; held_online: number; updated_at: string }>(db, 'SELECT product_id,organization_id,duration_minutes,default_capacity,confirmation_mode,online_payment_required,held_online,scheduling_mode,assigned_member_id,assigned_team_id,updated_at FROM product_booking_configs WHERE organization_id = ? AND product_id = ?', [input.organizationId, input.productId])

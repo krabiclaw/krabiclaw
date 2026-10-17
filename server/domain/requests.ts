@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { HTTPError } from 'nitro'
 import { guestReservationRefundQueries } from '~/server/domain/payments/visit-refund'
 import { executeRefund, requirePayment } from '~/server/domain/payments'
-import { createStripeClient } from '~/server/utils/stripe-client'
+import { paymentsStripe } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { recordBookingCancelled } from '~/server/domain/booking-analytics'
 import { executeBatch, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -375,8 +375,8 @@ export async function cancelBookingRequest(db: DbClient, input: {
         JOIN payments p ON p.id=r.payment_id WHERE p.organization_id=? AND p.subject_type='reservation' AND p.subject_id=?
           AND r.idempotency_key='guest-cancelled-reservation:'||p.subject_id`, [input.organizationId, cancelled.id])
       if (refund) {
-        if (!input.env.STRIPE_SECRET_KEY) throw new Error('Stripe is not configured')
-        await executeRefund(db, createStripeClient(input.env.STRIPE_SECRET_KEY, 'payments'), await requirePayment(db, input.organizationId, refund.payment_id), null, refund.idempotency_key, 'requested_by_customer', input.buyerUserId ?? null, input.env)
+        const payment = await requirePayment(db, input.organizationId, refund.payment_id)
+        await executeRefund(db, paymentsStripe(input.env, Boolean(payment.livemode)), payment, null, refund.idempotency_key, 'requested_by_customer', input.buyerUserId ?? null, input.env)
       }
     }
     return { request, record: cancelled, wasConfirmed: before === 'confirmed', changed }
