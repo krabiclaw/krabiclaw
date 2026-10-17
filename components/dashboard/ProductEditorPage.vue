@@ -35,7 +35,7 @@ import type { GalleryMediaItem } from '~/components/dashboard/DashboardMediaGall
 
 export const SECTION_KEYS = [
   'photo', 'kind', 'name', 'price', 'description', 'page', 'options', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections',
-  'stay', 'property-type', 'rooms', 'amenities', 'cancellation',
+  'stay', 'property-type', 'rooms', 'amenities', 'cancellation', 'team',
 ] as const
 export type SectionKey = typeof SECTION_KEYS[number]
 export type BookingConcern = 'enabled' | 'duration' | 'capacity' | 'confirmation' | 'payment' | 'location' | 'assignment' | number
@@ -258,6 +258,7 @@ const sectionLabels: Record<SectionKey, string> = {
   'rooms': 'Rooms and beds',
   'amenities': 'Amenities',
   'cancellation': 'Cancellation policy',
+  'team': 'Looked after by',
   // Only a product with a kind has collections to choose.
   get collections() {
     if (!presentation.value) throw new Error('A product has no collections before its kind is chosen')
@@ -595,6 +596,7 @@ const sectionValid = computed(() => {
     const invalidBaths = ba !== null && (ba < 0 || ba > 50 || (ba * 2) % 1 !== 0)
     return !invalidBedrooms && !invalidBeds && !invalidBaths
   }
+  if (editorKey.value === 'team') return true
   if (editorKey.value === 'options') {
     return form.options.every(option => option.name.trim() && option.values.length > 0)
   }
@@ -612,6 +614,12 @@ function staySummary(): string {
   const place = organizationLocations.value.find(entry => entry.id === form.stay_location_id)?.title
   if (!place) return 'Choose where it is'
   return `${place} · Check-in ${form.check_in_time}, checkout ${form.check_out_time} · Sleeps ${form.max_guests}`
+}
+function stayTeamSummary(): string {
+  if (!form.stay_team_id) return 'Owners and admins only'
+  if (schedulingMembersError.value) return 'Teams could not be loaded'
+  if (!schedulingMembers.value) return 'Loading team…'
+  return schedulingMembers.value.teams.find(candidate => candidate.id === form.stay_team_id)?.name ?? 'Assigned team not found in this business'
 }
 function roomsSummary(): string {
   const parts: string[] = []
@@ -754,6 +762,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
               to: sectionPath('cancellation'),
             },
             { id: 'stay', label: 'Stay settings', summary: staySummary(), to: sectionPath('stay') },
+            { id: 'team', label: 'Looked after by', summary: stayTeamSummary(), to: sectionPath('team') },
           ]
         : []),
       // The person a service's consultations are booked with: the existing
@@ -788,7 +797,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
  * beside this index. A row that leads into a level of its own — Bookings,
  * Variants — would open that level too and push this index off the screen.
  */
-const LEAF_SECTIONS: readonly string[] = ['photo', 'name', 'description', 'price', 'kind', 'order-url', 'property-type', 'rooms', 'amenities', 'cancellation', 'stay']
+const LEAF_SECTIONS: readonly string[] = ['photo', 'name', 'description', 'price', 'kind', 'order-url', 'property-type', 'rooms', 'amenities', 'cancellation', 'stay', 'team']
 const autoOpenTarget = computed(() => navigationGroups.value[0]?.items.find(item => LEAF_SECTIONS.includes(item.id) && item.to === sectionPath(item.id))?.to ?? null)
 
 // A service leads with what is changed most: who handles it, what it costs,
@@ -928,6 +937,8 @@ function payload() {
       check_out_time: form.check_out_time,
       max_guests: Number(form.max_guests),
       min_nights: Number(form.min_nights),
+    } } : {}),
+    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'team' ? { stay: {
       assigned_member_id: form.stay_member_id,
       assigned_team_id: form.stay_team_id,
     } } : {}),
