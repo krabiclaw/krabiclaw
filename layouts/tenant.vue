@@ -19,7 +19,7 @@
     <AnnouncementBanner />
 
     <TenantHeader
-      :organization="blawbyIdentity || shellOrganization"
+      :organization="tenantChromeOrganization"
       :locations="locations"
       :sections="shell.sections.value"
       :consultation="blawbyConsultation"
@@ -36,7 +36,7 @@
     </main>
 
     <TenantFooter
-      :organization="blawbyIdentity || shellOrganization"
+      :organization="tenantChromeOrganization"
       :locations="footerLocations"
       :error="bootstrapError"
       :sections="shell.sections.value"
@@ -118,6 +118,16 @@ if (import.meta.dev && !isBlawby.value) useDebugLCP()
 const shell = useOrganizationShellState()
 if (import.meta.server && !isBlawby.value) await shell.ready
 const { locations, error: bootstrapError, organization: shellOrganization } = shell
+
+const tenantChromeOrganization = computed(() => {
+  if (blawbyIdentity.value) {
+    return {
+      ...blawbyIdentity.value,
+      vertical: organization.vertical,
+    }
+  }
+  return shellOrganization.value
+})
 
 const scopedLocationSlug = computed(() => {
   const path = route.path

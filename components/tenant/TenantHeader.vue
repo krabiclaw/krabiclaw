@@ -218,7 +218,9 @@ onUnmounted(() => {
 })
 
 // Navigation & Actions
-const verticalCopy = computed(() => getVerticalCopy(props.organization?.vertical as string | undefined, locale.value))
+const verticalCopy = computed(() => (props.organization?.vertical
+  ? getVerticalCopy(props.organization.vertical as string, locale.value)
+  : { ctaRoute: '', reserveCta: '' }))
 const headerCtaLabel = computed(() => props.consultation?.cta_label)
 const headerOrder = ['/services', '/experiences', '/pricing', '/about', '/contact', '/blog', '/donate']
 const headerItems = computed(() => {
@@ -229,7 +231,9 @@ const headerItems = computed(() => {
   })
 })
 
-const catalogLinks = computed(() => catalogNavigation(props.organization?.vertical as string | undefined, props.sections))
+const catalogLinks = computed(() => (props.organization?.vertical
+  ? catalogNavigation(props.organization.vertical as string, props.sections)
+  : []))
 const showLocations = computed(() => (props.locations || []).filter(location => !location.home_slug).length > 1)
 
 const primaryCtaPath = computed(() => {
