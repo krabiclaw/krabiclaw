@@ -8,6 +8,11 @@ test('signed-out dashboard deep links preserve their destination through login',
 
   expect(response.status()).toBe(302)
   expect(response.headers().location).toBe(`/login?redirect=${encodeURIComponent(target)}`)
+
+  const appTarget = '/dashboard/app/products/menu?tab=specials'
+  const appResponse = await request.get(appTarget, { maxRedirects: 0 })
+  expect(appResponse.status()).toBe(302)
+  expect(appResponse.headers().location).toBe(`/login?redirect=${encodeURIComponent(appTarget)}`)
 })
 
 test('a verified user without an organization starts onboarding and can explicitly visit their profile', async ({ request, baseURL }) => {
@@ -16,6 +21,10 @@ test('a verified user without an organization starts onboarding and can explicit
   const destination = await request.get('/api/post-login', { maxRedirects: 0 })
   expect(destination.status()).toBe(302)
   expect(destination.headers().location).toBe('/dashboard/onboarding')
+
+  const appDestination = await request.get('/api/post-login?redirect=/dashboard/app/products', { maxRedirects: 0 })
+  expect(appDestination.status()).toBe(302)
+  expect(appDestination.headers().location).toBe('/dashboard/onboarding')
 
   const profile = await request.get('/api/post-login?redirect=/dashboard/account/profile', { maxRedirects: 0 })
   expect(profile.status()).toBe(302)

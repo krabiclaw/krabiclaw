@@ -7,7 +7,7 @@ import { getAuthSession } from '~/server/utils/auth'
 import { resolvePostLoginRoute } from '~/server/utils/post-login-routing'
 import { activateSessionOrganization } from '~/server/utils/session-organization'
 import { isNewSalePlan } from '~/shared/billing-model'
-import { buildLoginUrl, buildPostLoginUrl, validatedInternalPath } from '~/shared/auth/return-target'
+import { buildLoginUrl, buildPostLoginUrl, isDashboardAppPath, resolveDashboardAppTarget, validatedInternalPath } from '~/shared/auth/return-target'
 
 export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
@@ -18,10 +18,14 @@ export default defineHandler(async (event) => {
     throw new HTTPError({ statusCode: 400, message: 'Unknown checkout plan' })
   }
   const session = await getAuthSession(event, env)
-  if (!session?.user?.id) return redirect(plan ? buildLoginUrl({ redirect: buildPostLoginUrl({ plan }) }) : '/login', 302)
-
   const redirectTarget = validatedInternalPath(getQuery(event).redirect)
-  if (redirectTarget) return redirect(redirectTarget, 302)
+
+  if (!session?.user?.id) {
+    const returnTarget = redirectTarget ?? (plan ? buildPostLoginUrl({ plan }) : undefined)
+    return redirect(buildLoginUrl(returnTarget ? { redirect: returnTarget } : {}), 302)
+  }
+
+  if (redirectTarget && !isDashboardAppPath(redirectTarget)) return redirect(redirectTarget, 302)
 
   if (!db) {
     throw new HTTPError({ statusCode: 503, message: 'Database not available' })
@@ -48,10 +52,27 @@ export default defineHandler(async (event) => {
       // The chooser carries the plan and returns through here, so the billing
       // destination is decided in exactly one place.
       if (route.kind === 'choose') {
-        return redirect(`${route.destination}?plan=${encodeURIComponent(plan)}`, 302)
+        const chooseParams = new URLSearchParams()
+        chooseParams.set('plan', plan)
+        if (redirectTarget) chooseParams.set('redirect', redirectTarget)
+        return redirect(`${route.destination}?${chooseParams}`, 302)
       }
       return redirect(`${route.destination}/payments?tab=plan&plan=${encodeURIComponent(plan)}`, 302)
     }
+
+    if (route.kind === 'onboard') {
+      return redirect(route.destination, 302)
+    }
+
+    if (route.kind === 'choose') {
+      const chooseRedirect = redirectTarget ? `?redirect=${encodeURIComponent(redirectTarget)}` : ''
+      return redirect(`${route.destination}${chooseRedirect}`, 302)
+    }
+
+    if (redirectTarget && isDashboardAppPath(redirectTarget)) {
+      return redirect(resolveDashboardAppTarget(route.destination, redirectTarget), 302)
+    }
+
     return redirect(route.destination, 302)
   } catch (error) {
     if (error instanceof HTTPError) throw error
