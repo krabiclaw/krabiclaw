@@ -50,7 +50,7 @@ export const publicTemplateRegistry: Record<PublicTemplateSlug, PublicTemplateDe
   saya: {
     slug: 'saya',
     themeId: 'saya-theme-v1',
-    layout: 'saya',
+    layout: 'tenant',
     verticals: ['restaurant', 'experience', 'lodging'],
     serviceRoutes: {
       offeringsIndex: null,
@@ -78,7 +78,7 @@ export const publicTemplateRegistry: Record<PublicTemplateSlug, PublicTemplateDe
   blawby: {
     slug: 'blawby',
     themeId: 'blawby-theme-v1',
-    layout: 'blawby',
+    layout: 'tenant',
     verticals: ['service'],
     serviceRoutes: {
       offeringsIndex: '/services',

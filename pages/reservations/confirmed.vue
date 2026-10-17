@@ -60,7 +60,7 @@ import { formatTimestamp } from '~/utils/timezone'
 import { resolveProductPresentation } from '~/utils/product-presentation'
 import type { RenderedBookingPolicySummaryItem } from '~/server/utils/reservations'
 
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const { organization } = useTenantOrganization()
 const { id: organizationId } = organization

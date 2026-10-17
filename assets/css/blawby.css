@@ -84,7 +84,8 @@
   --ui-text-inverted:     var(--site-text);
 }
 
-.blawby-container {
+.blawby-container,
+.tenant-container {
   margin-inline: auto;
   max-width: 80rem;
   padding-inline: 1rem;
@@ -92,26 +93,30 @@
 }
 
 @media (min-width: 640px) {
-  .blawby-container {
+  .blawby-container,
+  .tenant-container {
     padding-inline: 1.5rem;
   }
 }
 
 @media (min-width: 1024px) {
-  .blawby-container {
+  .blawby-container,
+  .tenant-container {
     padding-inline: 2rem;
   }
 }
 
 @media (min-width: 1920px) {
-  .blawby-container {
+  .blawby-container,
+  .tenant-container {
     max-width: 88rem;
     padding-inline: 3rem;
   }
 }
 
 @media (min-width: 2560px) {
-  .blawby-container {
+  .blawby-container,
+  .tenant-container {
     max-width: 96rem;
     padding-inline: 4rem;
   }

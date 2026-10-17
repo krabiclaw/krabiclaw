@@ -7,7 +7,7 @@ import ProductDetailPage from '~/components/products/ProductDetailPage.vue'
 import { presentationForSurface } from '~/utils/product-presentation'
 import { composeProductSeoDescription } from '~/utils/product-seo'
 
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 const resolved = await usePublicProductDetail('menu')
 const organizationId = resolved.organizationId
 const detail = computed(() => {

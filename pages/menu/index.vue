@@ -7,9 +7,8 @@ import ProductCollectionPage from '~/components/products/ProductCollectionPage.v
 import { isCurrencyCode } from '~/shared/currencies'
 import { presentationForSurface } from '~/utils/product-presentation'
 
-definePageMeta({ layout: 'saya' })
-const { template, social_image: organizationSocialImage } = useTenantOrganization().organization
-if (template.slug === 'blawby') throw createError({ statusCode: 404 })
+definePageMeta({ layout: 'tenant' })
+const { social_image: organizationSocialImage } = useTenantOrganization().organization
 const { products, collections, locations, config, organization, sections } = await usePublicPageData({ lazy: false })
 // A section with nothing on it is not a page; the navigation hides it by the same flag.
 if (sections.value?.menu === false) throw createError({ statusCode: 404 })

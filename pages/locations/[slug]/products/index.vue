@@ -7,9 +7,7 @@ import ProductCollectionPage from '~/components/products/ProductCollectionPage.v
 import { isCurrencyCode } from '~/shared/currencies'
 import { presentationForSurface, productSurfaceOf } from '~/utils/product-presentation'
 
-definePageMeta({ layout: 'saya' })
-const { template } = useTenantOrganization().organization
-if (template.slug === 'blawby') throw createError({ statusCode: 404 })
+definePageMeta({ layout: 'tenant' })
 const { products, collections, locations, location, config, organization, data: pagePayload } = await usePublicPageData({ lazy: false })
 // What the merchant sells over the counter. A dish, an Experience and a home
 // each have their own surface, so none is listed twice.

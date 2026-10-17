@@ -177,7 +177,7 @@ import { sanitizeHtmlForSsr } from '~/utils/markdown'
 
 const DOMPurify = import.meta.client ? await loadDomPurify() : { sanitize: sanitizeHtmlForSsr }
 
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const { locale, localePath, t } = useI18n()
 

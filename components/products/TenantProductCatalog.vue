@@ -7,8 +7,7 @@ import ProductCollectionPage from '~/components/products/ProductCollectionPage.v
 import { isCurrencyCode } from '~/shared/currencies'
 import { presentationForSurface, productSurfaceOf } from '~/utils/product-presentation'
 
-const { template, social_image: socialImage } = useTenantOrganization().organization
-if (template.slug === 'blawby') throw createError({ statusCode: 404 })
+const { social_image: socialImage } = useTenantOrganization().organization
 const { t } = useI18n()
 const { products, collections, locations, config, organization, data: pagePayload } = await usePublicPageData({ lazy: false })
 // What the merchant sells over the counter. A dish, an Experience and a home

@@ -170,7 +170,7 @@ function formatTitleItalics(text: string | null | undefined): string {
   return text.replace(/\*(.*?)\*/g, '<em class="saya-italic">$1</em>')
 }
 
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 // The tenant is the organization; `site` is only the shape this composable
 // still returns it under.

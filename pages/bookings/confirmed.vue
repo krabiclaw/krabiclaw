@@ -71,14 +71,17 @@ const presentation = computed(() => confirmation.value?.productKind ? presentati
 // booking names one, otherwise the site's.
 const browseHref = computed(() => {
   if (!presentation.value) return localePath('/')
-  if (confirmation.value?.productKind === 'experience') return localePath(presentation.value.collectionPath)
-  if (template.slug === 'blawby' && !confirmation.value?.locationId) return localePath('/schedule')
+  if (!confirmation.value?.locationId && (template.slug === 'blawby' || confirmation.value?.productKind === 'service')) return localePath('/schedule')
   const locationSlug = confirmation.value?.locationSlug
   return localePath(locationSlug
     ? `/locations/${locationSlug}/${presentation.value.locationCollectionSegment}`
     : presentation.value.collectionPath)
 })
-const browseLabel = computed(() => confirmation.value?.productKind === 'experience' ? t('saya.header.experiences') : template.slug === 'blawby' && !confirmation.value?.locationId ? t('site_pages.schedule') : copy.value.reservationExploreLabel)
+const browseLabel = computed(() => confirmation.value?.productKind === 'experience'
+  ? t('saya.header.experiences')
+  : !confirmation.value?.locationId && (template.slug === 'blawby' || confirmation.value?.productKind === 'service')
+    ? t('site_pages.schedule')
+    : copy.value.reservationExploreLabel)
 const receiptTitle = computed(() => t(confirmation.value?.status === 'cancelled' ? 'saya.experience_cancel.cancelled_title' : confirmation.value?.status === 'pending' ? 'booking.request_received' : 'booking.confirmed'))
 const receiptDescription = computed(() => confirmation.value?.status === 'cancelled'
   ? t('saya.experience_cancel.cancelled_desc', { date: readableDate.value })

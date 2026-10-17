@@ -44,7 +44,7 @@
 
 <script setup lang="ts">
 const { localePath } = useI18n()
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const route = useRoute()
 const requestEvent = useRequestEvent()

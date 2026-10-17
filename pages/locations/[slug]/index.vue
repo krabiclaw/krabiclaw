@@ -292,7 +292,7 @@ import { sanitizeHtmlForSsr } from '~/utils/markdown'
 const DOMPurify = import.meta.client ? await loadDomPurify() : { sanitize: sanitizeHtmlForSsr }
 
 const { resolveMedia } = useMedia()
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const route = useRoute()
 const { organization } = useTenantOrganization()

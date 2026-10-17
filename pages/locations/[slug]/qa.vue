@@ -94,7 +94,7 @@
 </template>
 
 <script setup lang="ts">
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const { localePath, t } = useI18n()
 

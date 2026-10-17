@@ -71,7 +71,7 @@
 
 <script setup lang="ts">
 const { localePath, t } = useI18n()
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const route = useRoute()
 const { organization } = useTenantOrganization()

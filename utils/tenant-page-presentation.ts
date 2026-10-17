@@ -131,6 +131,27 @@ const PRESENTATIONS: Readonly<Record<string, BlockPresentation>> = {
   'saya:booking_cta': SayaCTA,
   'saya:contact_cta': SayaCTA,
   'saya:social_posts': feedOrBlock(SocialPosts),
+
+  // Canonical tenant presentations available across all tenant templates.
+  'tenant:hero': SayaHeroBlock,
+  'tenant:product_grid': SayaProductGridBlock,
+  'tenant:location_grid': SayaLocationsGrid,
+  'tenant:feature_grid': BlawbyFeatureCards,
+  'tenant:team_grid': BlawbyTeamSection,
+  'tenant:stat_grid': BlawbyImpactSection,
+  'tenant:page_grid': BlawbyServicesSection,
+  'tenant:media_text': SayaBrandStory,
+  'tenant:faq': BlawbyFaqSection,
+  'tenant:testimonial_grid': SayaReviewsBlock,
+  'tenant:cta': SayaCTA,
+  'tenant:booking_cta': SayaCTA,
+  'tenant:contact_cta': SayaCTA,
+  'tenant:divider': BlawbyShieldDivider,
+  'tenant:donation_choices': BlawbyDonationChoices,
+  'tenant:video_feature': BlawbyVideoFeature,
+  'tenant:button_group': BlawbyButtonRow,
+  'tenant:contact_form': BlawbyContactForm,
+  'tenant:social_posts': feedOrBlock(SocialPosts),
 }
 
 /** The component this template draws this block with, or null for the default. */
@@ -138,5 +159,5 @@ export function tenantPageBlockPresentation(
   template: PublicTemplateSlug,
   type: TenantPageBlockType,
 ): BlockPresentation | null {
-  return PRESENTATIONS[`${template}:${type}`] ?? null
+  return PRESENTATIONS[`${template}:${type}`] ?? PRESENTATIONS[`tenant:${type}`] ?? null
 }

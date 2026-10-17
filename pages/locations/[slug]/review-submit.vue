@@ -121,7 +121,7 @@ import { REVIEW_VIDEO_MAX_BYTES, REVIEW_VIDEO_MAX_LABEL } from '~/config/media-l
 
 const { localePath } = useI18n()
 
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const route = useRoute()
 const slug = computed(() => String(route.params.slug))

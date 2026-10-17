@@ -64,7 +64,7 @@
 </template>
 
 <script setup>
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const { organization } = useTenantOrganization()
 const { localePath, t } = useI18n()

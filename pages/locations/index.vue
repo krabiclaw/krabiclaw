@@ -106,7 +106,7 @@ import { getTodayHoursLabel } from '~/shared/reservation-hours'
 import { addressPlaceName, formatPostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { publicLocationPath } from '~/utils/product-presentation'
 
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const { organization } = useTenantOrganization()
 const session = authClient.useSession()

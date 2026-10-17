@@ -40,11 +40,10 @@ const { localePath, t } = useI18n()
 const title = computed(() => blockText(props.block.data.title))
 const description = computed(() => blockTextOrNull(props.block.data.description))
 const document = inject<Ref<BlawbyDocumentPayload> | null>('blawby-document', null)
-if (!document) throw createError({ statusCode: 500, statusMessage: 'Scheduling context is unavailable' })
-const targetsSchedule = computed(() => blockText(props.block.data.url) === document.value.shell.consultation.schedule_path)
+const targetsSchedule = computed(() => Boolean(document?.value && blockText(props.block.data.url) === document.value.shell.consultation.schedule_path))
 const destination = computed(() => {
   const url = blockText(props.block.data.url)
-  if (targetsSchedule.value) {
+  if (targetsSchedule.value && document?.value) {
     if (props.page.recipe === 'schedule') {
       if (!document.value.shell.canSchedule) return localePath('/contact')
       if (document.value.shell.consultation.mode === 'native') return '#consultations'
@@ -54,14 +53,14 @@ const destination = computed(() => {
   }
   return url ? (isInternalRoute(url) ? localePath(url) : url) : ''
 })
-const label = computed(() => targetsSchedule.value && props.page.recipe === 'schedule' && !document.value.shell.canSchedule ? t('site_pages.contact') : blockText(props.block.data.label))
+const label = computed(() => targetsSchedule.value && props.page.recipe === 'schedule' && document?.value && !document.value.shell.canSchedule ? t('site_pages.contact') : blockText(props.block.data.label))
 const priceLine = computed(() => blockTextOrNull(props.block.data.price_line))
 const notice = computed(() => blockTextOrNull(props.block.data.notice))
 const backgroundUrl = computed(() => blockMedia(props.block, 'background')[0]?.public_url ?? null)
 const featuredUrl = computed(() => blockMedia(props.block, 'featured')[0]?.public_url ?? null)
 
 const emit = defineEmits<{ click: [] }>()
-const { trackConsultationClick } = useOrganizationConversionTracking(() => document.value.shell.consultation)
+const { trackConsultationClick } = useOrganizationConversionTracking(() => document?.value?.shell.consultation)
 function trackClick() {
   trackConsultationClick(props.page.recipe ?? 'page', props.page.path, destination.value, props.page.page_id)
   emit('click')
