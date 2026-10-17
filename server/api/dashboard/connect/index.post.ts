@@ -29,7 +29,7 @@ export default defineHandler(async (event) => {
   const livemode = organizationPaymentsLivemode(env, organization)
   const stripe = paymentsStripe(env, livemode)
   const body = await readBody(event) as { country?: unknown } | undefined
-  const country = typeof body?.country === 'string' && /^[A-Z]{2}$/.test(body.country) ? body.country : null
+  const country = typeof body?.country === 'string' ? body.country : null
   try {
     const account = await ensureStripeConnectedAccount(db, stripe, {
       organizationId: organization.id,
