@@ -29,10 +29,14 @@
 <script lang="ts">
 import type { ComputedRef, InjectionKey, Ref } from 'vue'
 import type { Collection, Product } from '~/server/types/products'
+import type { StayAmenity, StayCancellationPolicy, StayLongTermCancellationPolicy, StayPropertyType, StayPropertyTypeGroup } from '~/shared/stay-listing'
 import type { DashboardLocation } from '~/composables/useDashboardOrganization'
 import type { GalleryMediaItem } from '~/components/dashboard/DashboardMediaGalleryField.vue'
 
-export const SECTION_KEYS = ['photo', 'kind', 'name', 'price', 'description', 'page', 'options', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections', 'stay'] as const
+export const SECTION_KEYS = [
+  'photo', 'kind', 'name', 'price', 'description', 'page', 'options', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections',
+  'stay', 'property-type', 'rooms', 'amenities', 'cancellation',
+] as const
 export type SectionKey = typeof SECTION_KEYS[number]
 export type BookingConcern = 'enabled' | 'duration' | 'capacity' | 'confirmation' | 'payment' | 'location' | 'assignment' | number
 
@@ -101,6 +105,14 @@ export interface ProductForm {
   stay_team_id: string | null
   /** Kept as loaded: this editor assigns a team, and saving never clears a member set elsewhere. */
   stay_member_id: string | null
+  stay_property_type_group: StayPropertyTypeGroup | null
+  stay_property_type: StayPropertyType | null
+  stay_bedrooms: string
+  stay_beds: string
+  stay_bathrooms: string
+  stay_amenities: StayAmenity[]
+  stay_cancellation_policy: StayCancellationPolicy | null
+  stay_long_term_cancellation_policy: StayLongTermCancellationPolicy | null
 }
 
 /** The product's draft and what its leaves show or do beside their one field. */
@@ -176,6 +188,12 @@ import type { ProductMutation } from '~/server/utils/product-management'
 import { presentationForProduct } from '~/utils/product-presentation'
 import { MINUTE_TIME_PATTERN } from '~/utils/timezone'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
+import {
+  STAY_PROPERTY_TYPES,
+  STAY_PROPERTY_TYPE_GROUPS,
+  STAY_CANCELLATION_POLICIES,
+  isStayPropertyType,
+} from '~/shared/stay-listing'
 
 const route = useRoute()
 const router = useRouter()
@@ -236,6 +254,10 @@ const sectionLabels: Record<SectionKey, string> = {
   'booking': 'Scheduling',
   'locations': 'Locations',
   'stay': 'Stay settings',
+  'property-type': 'Property type',
+  'rooms': 'Rooms and beds',
+  'amenities': 'Amenities',
+  'cancellation': 'Cancellation policy',
   // Only a product with a kind has collections to choose.
   get collections() {
     if (!presentation.value) throw new Error('A product has no collections before its kind is chosen')
@@ -378,6 +400,8 @@ const draft = useState<ProductForm>(draftKey, () => ({
   image_asset_id: null as string | null,
   // A new place to stay starts from these settings; an existing one is loaded from its own.
   stay_location_id: '', check_in_time: '15:00', check_out_time: '11:00', max_guests: '', min_nights: '1', stay_team_id: null, stay_member_id: null,
+  stay_property_type_group: null, stay_property_type: null, stay_bedrooms: '', stay_beds: '', stay_bathrooms: '',
+  stay_amenities: [] as StayAmenity[], stay_cancellation_policy: null, stay_long_term_cancellation_policy: null,
 }))
 const form = reactive(draft.value)
 // One key per product being created, kept across the walk's leaves and retries.
@@ -453,6 +477,14 @@ function loadForm(row: Product) {
   form.min_nights = stay ? String(stay.min_nights) : ''
   form.stay_team_id = stay ? stay.assigned_team_id : null
   form.stay_member_id = stay ? stay.assigned_member_id : null
+  form.stay_property_type_group = stay ? stay.property_type_group : null
+  form.stay_property_type = stay ? stay.property_type : null
+  form.stay_bedrooms = stay && stay.bedrooms !== null ? String(stay.bedrooms) : ''
+  form.stay_beds = stay && stay.beds !== null ? String(stay.beds) : ''
+  form.stay_bathrooms = stay && stay.bathrooms !== null ? String(stay.bathrooms) : ''
+  form.stay_amenities = stay ? [...stay.amenities] : []
+  form.stay_cancellation_policy = stay ? stay.cancellation_policy : null
+  form.stay_long_term_cancellation_policy = stay ? stay.long_term_cancellation_policy : null
   loadedCatalogShape.value = catalogShapeOf()
 }
 
@@ -547,6 +579,22 @@ const sectionValid = computed(() => {
   if (editorKey.value === 'kind') return PRODUCT_KINDS.includes(form.kind as ProductKind)
   if (editorKey.value === 'name') return Boolean(form.name.trim())
   if (editorKey.value === 'stay') return !stayIncomplete()
+  if (editorKey.value === 'property-type') {
+    if (!form.stay_property_type && !form.stay_property_type_group) return true
+    return Boolean(form.stay_property_type && form.stay_property_type_group && isStayPropertyType(form.stay_property_type_group, form.stay_property_type))
+  }
+  if (editorKey.value === 'rooms') {
+    const bedroomsStr = String(form.stay_bedrooms ?? '').trim()
+    const bedsStr = String(form.stay_beds ?? '').trim()
+    const bathroomsStr = String(form.stay_bathrooms ?? '').trim()
+    const b = bedroomsStr ? Number(bedroomsStr) : null
+    const beds = bedsStr ? Number(bedsStr) : null
+    const ba = bathroomsStr ? Number(bathroomsStr) : null
+    const invalidBedrooms = b !== null && (!Number.isInteger(b) || b < 0 || b > 50)
+    const invalidBeds = beds !== null && (!Number.isInteger(beds) || beds < 1 || beds > 50)
+    const invalidBaths = ba !== null && (ba < 0 || ba > 50 || (ba * 2) % 1 !== 0)
+    return !invalidBedrooms && !invalidBeds && !invalidBaths
+  }
   if (editorKey.value === 'options') {
     return form.options.every(option => option.name.trim() && option.values.length > 0)
   }
@@ -564,6 +612,16 @@ function staySummary(): string {
   const place = organizationLocations.value.find(entry => entry.id === form.stay_location_id)?.title
   if (!place) return 'Choose where it is'
   return `${place} · Check-in ${form.check_in_time}, checkout ${form.check_out_time} · Sleeps ${form.max_guests}`
+}
+function roomsSummary(): string {
+  const parts: string[] = []
+  const bedroomsStr = String(form.stay_bedrooms ?? '').trim()
+  const bedsStr = String(form.stay_beds ?? '').trim()
+  const bathroomsStr = String(form.stay_bathrooms ?? '').trim()
+  if (bedroomsStr) parts.push(bedroomsStr === '0' ? 'Studio' : `${bedroomsStr} ${Number(bedroomsStr) === 1 ? 'bedroom' : 'bedrooms'}`)
+  if (bedsStr) parts.push(`${bedsStr} ${Number(bedsStr) === 1 ? 'bed' : 'beds'}`)
+  if (bathroomsStr) parts.push(`${bathroomsStr} ${Number(bathroomsStr) === 1 ? 'bath' : 'baths'}`)
+  return parts.length ? parts.join(' · ') : 'None set'
 }
 // A walk opened from a location's catalog creates the place to stay there.
 if (isNew.value && !form.stay_location_id && locationId.value) form.stay_location_id = locationId.value
@@ -659,7 +717,45 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       { id: 'price', label: form.kind === 'service' ? 'Consultation pricing' : form.kind === 'stay' ? 'Nightly price' : 'Price', summary: priceSummary(), placeholder: priceSummary() === 'No price set', to: pricePath.value },
       // A place to stay is at its one location under its stay settings; nights and
       // stays are on the Calendar, not scheduled sessions.
-      ...(form.kind === 'stay' ? [{ id: 'stay', label: 'Stay settings', summary: staySummary(), to: sectionPath('stay') }] : []),
+      ...(form.kind === 'stay'
+        ? [
+            {
+              id: 'property-type',
+              label: 'Property type',
+              summary: form.stay_property_type
+                ? `${STAY_PROPERTY_TYPES[form.stay_property_type].label}${form.stay_property_type_group ? ` · ${STAY_PROPERTY_TYPE_GROUPS[form.stay_property_type_group].label}` : ''}`
+                : 'Choose property type',
+              placeholder: !form.stay_property_type,
+              to: sectionPath('property-type'),
+            },
+            {
+              id: 'rooms',
+              label: 'Rooms and beds',
+              summary: roomsSummary(),
+              placeholder: !form.stay_bedrooms && !form.stay_beds && !form.stay_bathrooms,
+              to: sectionPath('rooms'),
+            },
+            {
+              id: 'amenities',
+              label: 'Amenities',
+              summary: form.stay_amenities.length
+                ? `${form.stay_amenities.length} ${form.stay_amenities.length === 1 ? 'amenity' : 'amenities'}`
+                : 'No amenities selected',
+              placeholder: !form.stay_amenities.length,
+              to: sectionPath('amenities'),
+            },
+            {
+              id: 'cancellation',
+              label: 'Cancellation policy',
+              summary: form.stay_cancellation_policy
+                ? STAY_CANCELLATION_POLICIES[form.stay_cancellation_policy].label
+                : 'No policy set',
+              placeholder: !form.stay_cancellation_policy,
+              to: sectionPath('cancellation'),
+            },
+            { id: 'stay', label: 'Stay settings', summary: staySummary(), to: sectionPath('stay') },
+          ]
+        : []),
       // The person a service's consultations are booked with: the existing
       // assignment concern, reached from the overview. It belongs to bookings,
       // so until the service takes bookings the row leads there first.
@@ -692,7 +788,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
  * beside this index. A row that leads into a level of its own — Bookings,
  * Variants — would open that level too and push this index off the screen.
  */
-const LEAF_SECTIONS: readonly string[] = ['photo', 'name', 'description', 'price', 'kind', 'order-url']
+const LEAF_SECTIONS: readonly string[] = ['photo', 'name', 'description', 'price', 'kind', 'order-url', 'property-type', 'rooms', 'amenities', 'cancellation', 'stay']
 const autoOpenTarget = computed(() => navigationGroups.value[0]?.items.find(item => LEAF_SECTIONS.includes(item.id) && item.to === sectionPath(item.id))?.to ?? null)
 
 // A service leads with what is changed most: who handles it, what it costs,
@@ -808,12 +904,48 @@ function payload() {
     details: form.details,
     active: form.active,
     // Stay settings are restated only when they are what is being saved, so a
-    // description save never writes back settings someone else changed.
-    ...(form.kind === 'stay' && (isNew.value || editorKey.value === 'stay') ? { stay: {
-      ...(isNew.value ? { location_id: form.stay_location_id } : {}),
-      check_in_time: form.check_in_time, check_out_time: form.check_out_time,
-      max_guests: Number(form.max_guests), min_nights: Number(form.min_nights),
-      assigned_member_id: form.stay_member_id, assigned_team_id: form.stay_team_id,
+    // description save never writes back settings someone else changed, and
+    // each leaf updates only the stay fields it owns.
+    ...(form.kind === 'stay' && isNew.value ? { stay: {
+      location_id: form.stay_location_id,
+      check_in_time: form.check_in_time,
+      check_out_time: form.check_out_time,
+      max_guests: Number(form.max_guests),
+      min_nights: Number(form.min_nights),
+      assigned_member_id: form.stay_member_id,
+      assigned_team_id: form.stay_team_id,
+      property_type_group: form.stay_property_type_group || null,
+      property_type: form.stay_property_type || null,
+      bedrooms: String(form.stay_bedrooms ?? '').trim() && !Number.isNaN(Number(form.stay_bedrooms)) ? Number(form.stay_bedrooms) : null,
+      beds: String(form.stay_beds ?? '').trim() && !Number.isNaN(Number(form.stay_beds)) ? Number(form.stay_beds) : null,
+      bathrooms: String(form.stay_bathrooms ?? '').trim() && !Number.isNaN(Number(form.stay_bathrooms)) ? Number(form.stay_bathrooms) : null,
+      amenities: form.stay_amenities,
+      cancellation_policy: form.stay_cancellation_policy || null,
+      long_term_cancellation_policy: form.stay_long_term_cancellation_policy || null,
+    } } : {}),
+    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'stay' ? { stay: {
+      check_in_time: form.check_in_time,
+      check_out_time: form.check_out_time,
+      max_guests: Number(form.max_guests),
+      min_nights: Number(form.min_nights),
+      assigned_member_id: form.stay_member_id,
+      assigned_team_id: form.stay_team_id,
+    } } : {}),
+    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'property-type' ? { stay: {
+      property_type_group: form.stay_property_type_group || null,
+      property_type: form.stay_property_type || null,
+    } } : {}),
+    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'rooms' ? { stay: {
+      bedrooms: String(form.stay_bedrooms ?? '').trim() && !Number.isNaN(Number(form.stay_bedrooms)) ? Number(form.stay_bedrooms) : null,
+      beds: String(form.stay_beds ?? '').trim() && !Number.isNaN(Number(form.stay_beds)) ? Number(form.stay_beds) : null,
+      bathrooms: String(form.stay_bathrooms ?? '').trim() && !Number.isNaN(Number(form.stay_bathrooms)) ? Number(form.stay_bathrooms) : null,
+    } } : {}),
+    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'amenities' ? { stay: {
+      amenities: form.stay_amenities,
+    } } : {}),
+    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'cancellation' ? { stay: {
+      cancellation_policy: form.stay_cancellation_policy || null,
+      long_term_cancellation_policy: form.stay_long_term_cancellation_policy || null,
     } } : {}),
   }
 }
