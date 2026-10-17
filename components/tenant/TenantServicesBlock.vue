@@ -8,9 +8,18 @@
         :description="description"
         centered
       />
-      <TenantPageGrid :items="items" :image-slot="imageSlot" class="mt-16" />
+      <TenantPageGrid :items="items" :image-slot="imageSlot" class="mt-20" />
     </div>
-    <img v-if="decorationUrl" :src="decorationUrl" alt="" width="1920" height="400" loading="lazy" class="absolute bottom-0 w-full object-contain object-center opacity-40">
+    <img
+      v-if="decorationUrl"
+      :src="decorationUrl"
+      alt=""
+      width="1920"
+      height="400"
+      loading="lazy"
+      class="absolute bottom-0 w-full object-contain object-center"
+      :class="isService ? undefined : 'opacity-40'"
+    >
   </section>
 </template>
 
@@ -20,6 +29,9 @@ import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import { blockText, blockRecords, blockMedia } from '~/utils/tenant-page-block-data'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
+const { organization } = useTenantOrganization()
+
+const isService = computed(() => organization.template?.slug === 'blawby' || organization.vertical === 'service')
 
 const decorationUrl = computed(() => blockMedia(props.block, 'decoration')[0]?.public_url ?? null)
 

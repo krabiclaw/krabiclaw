@@ -42,6 +42,22 @@
   --blawby-accent-strong:   var(--tenant-accent-strong);
 }
 
+.blawby-theme {
+  --header-overlap:        3rem;
+  --blawby-border:         var(--ui-border);
+
+  /* Blawby headings take the action color, and its tints come from it. */
+  --ui-text-highlighted:   var(--site-action);
+  --ui-bg-muted:           var(--blawby-primary-100);
+  --ui-bg-accented:        var(--blawby-accent-100);
+  --ui-bg-inverted:        var(--blawby-primary-dark);
+  --ui-border-muted:       var(--blawby-primary-100);
+  --ui-border-accented:    var(--blawby-primary-200);
+  --ui-border-inverted:    var(--blawby-primary-dark);
+  --ui-text-inverted:      var(--site-surface);
+  --ui-radius:             0.5rem;
+}
+
 .dark .tenant-theme,
 .dark .saya-theme,
 .dark .blawby-theme {
@@ -60,6 +76,53 @@
   --blawby-primary-100:     var(--tenant-primary-100);
   --blawby-accent-100:      var(--tenant-accent-100);
   --blawby-accent-200:      var(--tenant-accent-200);
+}
+
+.dark .blawby-theme {
+  --blawby-primary:         var(--site-text);
+  --ui-text-highlighted:    var(--site-text);
+  --blawby-primary-dark:    color-mix(in oklab, var(--site-action-light) 60%, black);
+  --blawby-primary-800:     color-mix(in oklab, var(--site-action-light) 85%, black);
+  --blawby-accent-strong:   color-mix(in oklab, var(--site-accent) 80%, white);
+  --blawby-primary-100:     color-mix(in oklab, var(--site-surface) 60%, var(--site-ground));
+  --blawby-accent-100:      color-mix(in oklab, var(--site-surface) 45%, var(--site-ground));
+  --blawby-accent-200:      color-mix(in oklab, var(--site-text) 7%, var(--site-surface));
+  --ui-text-inverted:       var(--site-text);
+}
+
+.blawby-shell .prose :where(h1, h2, h3, h4) {
+  font-family: var(--font-heading);
+}
+
+.blawby-shell .prose.blawby-policy-prose :where(h1, h2, h3, h4) {
+  font-family: var(--font-sans);
+}
+
+.blawby-faq-answer p,
+.blawby-faq-answer li {
+  color: var(--blawby-primary) !important;
+  font-size: 0.875rem !important;
+  line-height: 1.5rem !important;
+}
+
+.blawby-faq-answer p,
+.blawby-faq-answer ul {
+  margin-block: 0.25rem !important;
+}
+
+.blawby-faq-answer li {
+  margin-block: 0 !important;
+}
+
+.blawby-footer-copy :where(.prose, p, a) {
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+
+.blawby-footer-copy a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 /* Container */

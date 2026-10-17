@@ -106,6 +106,22 @@
               rowActions(thread).length ? 'pr-12' : '',
             ]"
           >
+            <!-- Unread indicator dot on the left of the row -->
+            <div class="flex h-14 w-2 shrink-0 items-center justify-center">
+              <Transition
+                enter-from-class="scale-0"
+                enter-active-class="transition-transform duration-200 ease-out motion-reduce:transition-none"
+                leave-to-class="scale-0"
+                leave-active-class="transition-transform duration-150 motion-reduce:transition-none"
+              >
+                <span
+                  v-if="thread.unread"
+                  class="size-2 rounded-full bg-primary"
+                  :aria-label="`${threadName(thread)}: unread`"
+                />
+              </Transition>
+            </div>
+
             <!-- The picture leads: the location's hero, or the business's logo for
                  a thread that came to the business itself. A place with neither
                  keeps the same footprint so the rows do not reflow between them. -->
@@ -137,19 +153,6 @@
               </div>
               <p class="mt-0.5 line-clamp-2 text-sm leading-snug text-muted">{{ thread.preview?.text || 'New conversation' }}</p>
             </div>
-
-            <Transition
-              enter-from-class="scale-0"
-              enter-active-class="transition-transform duration-200 ease-out motion-reduce:transition-none"
-              leave-to-class="scale-0"
-              leave-active-class="transition-transform duration-150 motion-reduce:transition-none"
-            >
-              <span
-                v-if="thread.unread"
-                class="mt-2 block size-2.5 shrink-0 rounded-full bg-primary"
-                :aria-label="`${threadName(thread)}: unread`"
-              />
-            </Transition>
           </NuxtLink>
 
           <!--

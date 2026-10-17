@@ -5,40 +5,29 @@
     data-tenant-critical-header
     data-saya-critical-header
     data-blawby-critical-header
-    class="sticky top-0 z-50 border-b border-default bg-elevated/90 backdrop-blur-md"
+    class="sticky top-0 z-50 border-b border-default"
+    :class="isService ? 'bg-elevated' : 'bg-elevated/90 backdrop-blur-md'"
   >
+    <!-- Hospitality / Saya Header: 3-column grid (Left logo monogram, center nav, right CTA) -->
     <div
+      v-if="!isService"
       data-tenant-critical-header-inner
       data-saya-critical-header-inner
-      class="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8"
+      class="mx-auto grid h-16 max-w-7xl grid-cols-3 items-center px-4 sm:px-6 lg:px-8"
     >
-      <!-- Brand logo / monogram / name -->
-      <div class="flex shrink-0 items-center">
-        <NuxtLink :to="localePath('/')" data-saya-critical-logo-link class="no-underline flex items-center gap-3" :aria-label="`${brandName} home`">
+      <!-- Brand logo monogram -->
+      <div class="flex items-center">
+        <NuxtLink :to="localePath('/')" data-saya-critical-logo-link class="block no-underline leading-none" :aria-label="`${brandName} home`">
           <SiteLogo :alt="brandName" size="sm" loading="eager">
             <div class="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-base font-bold text-on-primary">
               {{ brandName ? brandName.charAt(0).toUpperCase() : 'K' }}
             </div>
           </SiteLogo>
-          <span v-if="brandName" class="tenant-display truncate text-lg font-bold text-highlighted sm:text-xl">
-            {{ brandName }}
-          </span>
         </NuxtLink>
       </div>
 
-      <!-- Desktop nav -->
-      <nav data-tenant-critical-nav data-saya-critical-nav class="hidden items-center gap-1 font-semibold uppercase lg:flex" :aria-label="navAriaLabel">
-        <!-- Page links (if authored page links exist) -->
-        <NuxtLink
-          v-for="item in headerItems"
-          :key="item.id"
-          :to="localePath(item.path)"
-          class="rounded-lg px-3 py-2 text-sm text-muted no-underline transition hover:text-highlighted"
-        >
-          {{ item.title }}
-        </NuxtLink>
-
-        <!-- Catalog navigation links (menu, experiences, products) -->
+      <!-- Desktop nav (centered) -->
+      <nav data-tenant-critical-nav data-saya-critical-nav class="hidden items-center justify-center gap-1 font-semibold uppercase lg:flex" :aria-label="navAriaLabel">
         <NuxtLink
           v-for="item in catalogLinks"
           :key="item.surface"
@@ -48,7 +37,6 @@
           {{ t(item.labelKey) }}
         </NuxtLink>
 
-        <!-- Reservations link -->
         <NuxtLink
           v-if="sections?.reservations"
           :to="localePath('/reservations')"
@@ -57,7 +45,6 @@
           {{ t('saya.header.reservations') }}
         </NuxtLink>
 
-        <!-- Locations link -->
         <NuxtLink
           v-if="showLocations"
           :to="localePath('/locations')"
@@ -67,28 +54,16 @@
         </NuxtLink>
       </nav>
 
-      <!-- Actions: CTA & Mobile Hamburger -->
-      <div class="flex items-center gap-2">
-        <TenantButton
-          v-if="canSchedule && consultation?.schedule_path && headerCtaLabel"
-          :to="localePath(consultation.schedule_path)"
-          size="sm"
-          data-saya-critical-cta
-          @click="trackConsultation"
-        >
-          <svg class="-ml-0.5 mr-1.5 size-4" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-            <path d="M7.5 4.5h9A4.5 4.5 0 0 1 21 9v3a4.5 4.5 0 0 1-4.5 4.5h-4.86L7.2 20.2a.75.75 0 0 1-1.2-.6v-3.35A4.5 4.5 0 0 1 3 12V9a4.5 4.5 0 0 1 4.5-4.5Z" />
-          </svg>
-          <span>{{ headerCtaLabel }}</span>
-        </TenantButton>
-        <TenantButton
-          v-else-if="primaryCtaPath && primaryCtaLabel"
+      <!-- Actions (right) -->
+      <div class="flex items-center justify-end gap-2 col-start-3">
+        <NuxtLink
+          v-if="primaryCtaPath && primaryCtaLabel"
           :to="localePath(primaryCtaPath)"
-          size="sm"
           data-saya-critical-cta
+          class="inline-flex items-center justify-center rounded-full bg-primary px-3 py-1.5 text-xs sm:text-sm font-medium text-on-primary no-underline transition hover:opacity-90"
         >
           {{ primaryCtaLabel }}
-        </TenantButton>
+        </NuxtLink>
 
         <!-- Mobile menu toggle -->
         <details ref="mobileNavDetails" class="relative lg:hidden" @toggle="syncMobileNavState">
@@ -103,60 +78,109 @@
             </svg>
           </summary>
           <div class="absolute right-0 top-full mt-3 max-h-[calc(100vh-5rem)] w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-default bg-elevated p-4 text-base normal-case text-default shadow-xl ring-1 ring-default">
-            <!-- Article search trigger & sidebar if inside article -->
             <PlatformCommandSearchTrigger
               v-if="articleNav?.search"
               :surface="articleNav.search.surface"
               :variant="articleNav.search.variant"
               :label="articleSearchLabel"
               :aria-label="articleSearchLabel"
-              class="mb-3 text-base"
+              class="mb-3 text-sm"
               @click="closeMobileNav"
             />
             <ArticleSidebar v-if="articleNav" :nav="articleNav" class="mb-3 border-b border-default pb-3" @navigate="closeMobileNav" />
+            <nav class="grid gap-1" :aria-label="t('saya.header.mobile_nav_aria')">
+              <NuxtLink v-for="item in catalogLinks" :key="item.surface" :to="localePath(item.path)" class="rounded-full px-4 py-2.5 text-sm font-semibold text-default hover:bg-muted" @click="closeMobileNav">
+                {{ t(item.labelKey) }}
+              </NuxtLink>
+              <NuxtLink v-if="showLocations" :to="localePath('/locations')" class="rounded-full px-4 py-2.5 text-sm text-default hover:bg-muted" @click="closeMobileNav">
+                {{ t('saya.header.locations') }}
+              </NuxtLink>
+              <div class="my-1 border-t border-default" />
+              <NuxtLink v-if="sections?.reservations" :to="localePath('/reservations')" class="rounded-full px-4 py-2.5 text-sm text-default hover:bg-muted" @click="closeMobileNav">
+                {{ t('saya.header.reservations') }}
+              </NuxtLink>
+              <NuxtLink :to="localePath('/contact')" class="rounded-full px-4 py-2.5 text-sm text-default hover:bg-muted" @click="closeMobileNav">
+                {{ t('saya.header.contact') }}
+              </NuxtLink>
+            </nav>
+          </div>
+        </details>
+      </div>
+    </div>
 
-            <!-- Page links -->
+    <!-- Professional Services / Blawby Header: blawby-container with py-2 flex items-center justify-between -->
+    <div
+      v-else
+      class="blawby-container"
+    >
+      <nav class="relative z-50 flex items-center justify-between gap-4 py-2" :aria-label="navAriaLabel">
+        <div class="flex shrink-0 items-center">
+          <NuxtLink :to="localePath('/')" class="no-underline" :aria-label="`${brandName} home`">
+            <SiteLogo :alt="brandName" size="lg" loading="eager">
+              <span class="blawby-display truncate text-lg text-[var(--blawby-primary)] sm:text-xl">
+                {{ brandName }}
+              </span>
+            </SiteLogo>
+          </NuxtLink>
+        </div>
+
+        <div class="flex min-w-0 items-center gap-x-3 font-semibold uppercase">
+          <div class="hidden items-center whitespace-nowrap text-[var(--blawby-primary,var(--ui-text-highlighted))] lg:flex">
             <NuxtLink
-              v-for="item in headerItems"
-              :key="item.id"
+              v-for="item in serviceNavItems"
+              :key="item.path"
+              :to="localePath(item.path)"
+              class="inline-block rounded-lg px-2.5 py-1 text-sm no-underline transition hover:text-[var(--blawby-accent-strong,var(--ui-primary))]"
+            >
+              {{ item.title }}
+            </NuxtLink>
+          </div>
+
+          <TenantButton
+            v-if="canSchedule && consultation?.schedule_path && headerCtaLabel"
+            :to="localePath(consultation.schedule_path)"
+            @click="trackConsultation"
+          >
+            <svg class="-ml-0.5 mr-2 size-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M7.5 4.5h9A4.5 4.5 0 0 1 21 9v3a4.5 4.5 0 0 1-4.5 4.5h-4.86L7.2 20.2a.75.75 0 0 1-1.2-.6v-3.35A4.5 4.5 0 0 1 3 12V9a4.5 4.5 0 0 1 4.5-4.5Z" />
+            </svg>
+            <span>{{ headerCtaLabel }}</span>
+          </TenantButton>
+
+          <details ref="mobileNavDetails" class="relative -mr-1 shrink-0 lg:hidden" @toggle="syncMobileNavState">
+          <summary
+            class="inline-flex size-8 list-none items-center justify-center rounded-full text-muted transition hover:bg-muted hover:text-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden"
+            :aria-label="mobileMenuOpen ? t('blawby.navigation.close') : t('blawby.navigation.toggle')"
+          >
+            <svg class="size-4 overflow-visible stroke-current" viewBox="0 0 14 14" fill="none" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+              <path :class="mobileMenuOpen ? 'scale-90 opacity-0' : ''" class="origin-center transition" d="M0 1H14M0 7H14M0 13H14" />
+              <path :class="mobileMenuOpen ? '' : 'scale-90 opacity-0'" class="origin-center transition" d="M2 2L12 12M12 2L2 12" />
+            </svg>
+          </summary>
+          <div class="absolute right-0 top-full mt-3 max-h-[calc(100vh-5rem)] w-[min(20rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-default bg-elevated p-4 text-base normal-case text-default shadow-xl ring-1 ring-default">
+            <PlatformCommandSearchTrigger
+              v-if="articleNav?.search"
+              :surface="articleNav.search.surface"
+              :variant="articleNav.search.variant"
+              :label="articleSearchLabel"
+              :aria-label="articleSearchLabel"
+              class="mb-3 text-sm"
+              @click="closeMobileNav"
+            />
+            <ArticleSidebar v-if="articleNav" :nav="articleNav" class="mb-3 border-b border-default pb-3" @navigate="closeMobileNav" />
+            <NuxtLink
+              v-for="item in serviceNavItems"
+              :key="item.path"
               :to="localePath(item.path)"
               class="block w-full rounded-lg px-2 py-1.5 text-muted no-underline transition hover:bg-muted hover:text-default"
               @click="closeMobileNav"
             >
               {{ item.title }}
             </NuxtLink>
-
-            <!-- Catalog links -->
-            <NuxtLink
-              v-for="item in catalogLinks"
-              :key="item.surface"
-              :to="localePath(item.path)"
-              class="block w-full rounded-lg px-2 py-1.5 text-muted no-underline transition hover:bg-muted hover:text-default"
-              @click="closeMobileNav"
-            >
-              {{ t(item.labelKey) }}
-            </NuxtLink>
-
-            <NuxtLink
-              v-if="sections?.reservations"
-              :to="localePath('/reservations')"
-              class="block w-full rounded-lg px-2 py-1.5 text-muted no-underline transition hover:bg-muted hover:text-default"
-              @click="closeMobileNav"
-            >
-              {{ t('saya.header.reservations') }}
-            </NuxtLink>
-
-            <NuxtLink
-              v-if="showLocations"
-              :to="localePath('/locations')"
-              class="block w-full rounded-lg px-2 py-1.5 text-muted no-underline transition hover:bg-muted hover:text-default"
-              @click="closeMobileNav"
-            >
-              {{ t('saya.header.locations') }}
-            </NuxtLink>
           </div>
         </details>
       </div>
+      </nav>
     </div>
   </header>
 </template>
@@ -194,6 +218,7 @@ const { trackConsultationClick } = useOrganizationConversionTracking(() => props
 
 const brandName = computed(() => (props.organization?.name as string)?.trim() || '')
 const phone = computed(() => (props.organization?.phone as string) || null)
+const isService = computed(() => props.organization?.vertical === 'service' || Boolean(props.consultation?.mode) || props.pageLinks.some(l => l.path === '/services'))
 
 // Header height CSS variable sync
 const headerRef = shallowRef<Element | null>(null)
@@ -235,6 +260,15 @@ const headerItems = computed(() => {
 const catalogLinks = computed(() => (props.organization?.vertical
   ? catalogNavigation(props.organization.vertical as string, props.sections)
   : []))
+const serviceNavItems = computed(() => {
+  const authoredPaths = new Set(headerItems.value.map(item => item.path))
+  return [
+    ...catalogLinks.value
+      .filter(item => !authoredPaths.has(item.path))
+      .map(item => ({ path: item.path, title: t(item.labelKey) })),
+    ...headerItems.value,
+  ]
+})
 const showLocations = computed(() => (props.locations || []).filter(location => !location.home_slug).length > 1)
 
 const primaryCtaPath = computed(() => {
