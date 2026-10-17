@@ -11,10 +11,28 @@ export const DASHBOARD_DESTINATIONS = {
   'organization.settings': 'menu',
   'location.overview': 'locations/:locationSlug',
   'location.settings': 'locations/:locationSlug/settings',
+  products: 'products',
+  'products.menu': 'products/menu',
+  'website.brand': 'website/brand',
+  'website.pages': 'website/pages',
+  'website.blog': 'website/blog',
+  team: 'team',
+  payments: 'payments',
   support: 'support',
 } as const
 
 export type DashboardDestination = keyof typeof DASHBOARD_DESTINATIONS
+
+/**
+ * Canonical deep-link path under `/dashboard/app` for public documentation,
+ * marketing links, or notifications that should resolve to the reader's active
+ * organization.
+ */
+export function appDashboardPath(destination?: string): string {
+  if (!destination) return '/dashboard/app'
+  const clean = destination.replace(/^\/+/, '')
+  return clean ? `/dashboard/app/${clean}` : '/dashboard/app'
+}
 
 export interface DashboardLinkOrgContext {
   env: { NUXT_PUBLIC_PLATFORM_DOMAIN?: string }

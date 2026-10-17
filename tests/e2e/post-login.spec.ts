@@ -8,6 +8,11 @@ test('signed-out dashboard deep links preserve their destination through login',
 
   expect(response.status()).toBe(302)
   expect(response.headers().location).toBe(`/login?redirect=${encodeURIComponent(target)}`)
+
+  const appTarget = '/dashboard/app/products/menu?tab=specials'
+  const appResponse = await request.get(appTarget, { maxRedirects: 0 })
+  expect(appResponse.status()).toBe(302)
+  expect(appResponse.headers().location).toBe(`/login?redirect=${encodeURIComponent(appTarget)}`)
 })
 
 test('a verified user without an organization starts onboarding and can explicitly visit their profile', async ({ request, baseURL }) => {
@@ -17,9 +22,26 @@ test('a verified user without an organization starts onboarding and can explicit
   expect(destination.status()).toBe(302)
   expect(destination.headers().location).toBe('/dashboard/onboarding')
 
+  const appDestination = await request.get('/api/post-login?redirect=/dashboard/app/products', { maxRedirects: 0 })
+  expect(appDestination.status()).toBe(302)
+  expect(appDestination.headers().location).toBe('/dashboard/onboarding')
+
   const profile = await request.get('/api/post-login?redirect=/dashboard/account/profile', { maxRedirects: 0 })
   expect(profile.status()).toBe(302)
   expect(profile.headers().location).toBe('/dashboard/account/profile')
+})
+
+test('a signed-in owner resolves dashboard deep links with their query string even when a plan is supplied', async ({ request, baseURL }) => {
+  await loginAs(request, baseURL!, 'user-e2e-demo-owner')
+
+  const target = '/dashboard/app/products/menu?tab=specials&source=notification'
+  for (const plan of [undefined, 'growth']) {
+    const params = new URLSearchParams({ redirect: target })
+    if (plan) params.set('plan', plan)
+    const appDestination = await request.get(`/api/post-login?${params}`, { maxRedirects: 0 })
+    expect(appDestination.status()).toBe(302)
+    expect(appDestination.headers().location).toBe('/dashboard/ember-slice-demo/products/menu?tab=specials&source=notification')
+  }
 })
 
 // One journey, run once. The route matrix, the redirects and the SSR HTML do
