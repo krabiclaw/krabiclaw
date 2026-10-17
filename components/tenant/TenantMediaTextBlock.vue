@@ -69,7 +69,6 @@ import { blockText, blockTextOrNull, blockRecords, blockMedia } from '~/utils/te
 import ContentVideoEmbed from '~/components/content/ContentVideoEmbed.vue'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
-const { organization } = useTenantOrganization()
 
 const title = computed(() => blockText(props.block.data.title))
 const accent = computed(() => blockTextOrNull(props.block.data.accent))

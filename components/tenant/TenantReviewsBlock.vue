@@ -47,8 +47,7 @@ import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import { blockText, blockRecords } from '~/utils/tenant-page-block-data'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
-const { localePath, locale, t } = useI18n()
-const { organization } = useTenantOrganization()
+const { localePath, t } = useI18n()
 const { locations, googleMaps } = useOrganizationShellState()
 
 const heading = computed(() => blockText(props.block.data.title))

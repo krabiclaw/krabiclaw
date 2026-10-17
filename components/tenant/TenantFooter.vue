@@ -94,7 +94,7 @@
 </template>
 
 <script setup lang="ts">
-import type { PublicBlawbyIdentity, PublicBlawbyPageLink, PublicCompliance } from '~/types/blawby'
+import type { PublicBlawbyPageLink, PublicCompliance } from '~/types/blawby'
 import type { PublicShellPayload } from '~/utils/public-resource-contracts'
 import { catalogNavigation } from '~/utils/product-presentation'
 

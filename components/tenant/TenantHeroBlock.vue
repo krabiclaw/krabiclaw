@@ -133,9 +133,9 @@
 
 <script setup lang="ts">
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
-import type { TenantPageBlock, TenantPageMedia } from '~/utils/tenant-page-blocks'
+import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import { blockText, blockMedia, blockRecords } from '~/utils/tenant-page-block-data'
-import { cfImageVariant, cfImageSrcset } from '~/utils/cf-image'
+import { cfImageSrcset } from '~/utils/cf-image'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 const route = useRoute()

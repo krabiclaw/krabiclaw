@@ -94,7 +94,6 @@ import type { TenantPageBlock, TenantPageMedia } from '~/utils/tenant-page-block
 import { blockText, blockRecords } from '~/utils/tenant-page-block-data'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
-const { t } = useI18n()
 
 const heading = computed(() => blockText(props.block.data.title))
 const kicker = computed(() => blockText(props.block.data.description))

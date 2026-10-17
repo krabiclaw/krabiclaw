@@ -38,7 +38,7 @@ import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import type { BlawbyDocumentPayload } from '~/utils/blawby-document-contract'
 
-const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
+defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 
 const { id: organizationId } = useTenantOrganization().organization
 const { locale, localePath } = useI18n()
