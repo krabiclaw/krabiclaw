@@ -127,8 +127,8 @@
         <div class="flex min-w-0 items-center gap-x-3 font-semibold uppercase">
           <div class="hidden items-center whitespace-nowrap text-[var(--blawby-primary,var(--ui-text-highlighted))] lg:flex">
             <NuxtLink
-              v-for="item in headerItems"
-              :key="item.id"
+              v-for="item in serviceNavItems"
+              :key="item.path"
               :to="localePath(item.path)"
               class="inline-block rounded-lg px-2.5 py-1 text-sm no-underline transition hover:text-[var(--blawby-accent-strong,var(--ui-primary))]"
             >
@@ -169,8 +169,8 @@
             />
             <ArticleSidebar v-if="articleNav" :nav="articleNav" class="mb-3 border-b border-default pb-3" @navigate="closeMobileNav" />
             <NuxtLink
-              v-for="item in headerItems"
-              :key="item.id"
+              v-for="item in serviceNavItems"
+              :key="item.path"
               :to="localePath(item.path)"
               class="block w-full rounded-lg px-2 py-1.5 text-muted no-underline transition hover:bg-muted hover:text-default"
               @click="closeMobileNav"
@@ -260,6 +260,15 @@ const headerItems = computed(() => {
 const catalogLinks = computed(() => (props.organization?.vertical
   ? catalogNavigation(props.organization.vertical as string, props.sections)
   : []))
+const serviceNavItems = computed(() => {
+  const authoredPaths = new Set(headerItems.value.map(item => item.path))
+  return [
+    ...catalogLinks.value
+      .filter(item => !authoredPaths.has(item.path))
+      .map(item => ({ path: item.path, title: t(item.labelKey) })),
+    ...headerItems.value,
+  ]
+})
 const showLocations = computed(() => (props.locations || []).filter(location => !location.home_slug).length > 1)
 
 const primaryCtaPath = computed(() => {
