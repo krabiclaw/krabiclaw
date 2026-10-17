@@ -85,6 +85,11 @@ const PRESENTATIONS: Readonly<Record<string, BlockPresentation>> = {
   'tenant:button_group': TenantButtonGroupBlock,
   'tenant:contact_form': TenantContactFormBlock,
   'tenant:social_posts': feedOrBlock(SocialPosts),
+
+  // Blawby / professional services specialization: location and product grids
+  // render as practice-area / service style cards using TenantServicesBlock.
+  'blawby:location_grid': TenantServicesBlock,
+  'blawby:product_grid': TenantServicesBlock,
 }
 
 /** The component this template draws this block with, or null for the default. */

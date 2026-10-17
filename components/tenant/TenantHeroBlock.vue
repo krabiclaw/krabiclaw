@@ -134,10 +134,13 @@
           {{ title }}
         </h1>
         <div v-if="overviewProse" class="mt-6">
-          <TenantRichText :content="overviewProse" unstyled class="prose mx-auto mt-6 max-w-2xl text-left text-lg text-default" />
+          <TenantRichText :content="overviewProse" unstyled class="prose mx-auto mt-6 max-w-2xl text-left text-lg text-default" :class="isBlawby ? 'blawby-page-hero-copy' : undefined" />
         </div>
         <div v-if="overviewActions.length" class="mt-10 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
-          <TenantButton v-for="action in overviewActions" :key="action.url" :to="action.url">
+          <TenantButton v-for="action in overviewActions" :key="action.url" :to="action.url" class="gap-2">
+            <svg v-if="isBlawby" class="-ml-0.5 mr-2 size-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M7.5 4.5h9A4.5 4.5 0 0 1 21 9v3a4.5 4.5 0 0 1-4.5 4.5h-4.86L7.2 20.2a.75.75 0 0 1-1.2-.6v-3.35A4.5 4.5 0 0 1 3 12V9a4.5 4.5 0 0 1 4.5-4.5Z" />
+            </svg>
             {{ action.label }}
           </TenantButton>
         </div>
@@ -247,8 +250,18 @@ const gallery = computed(() => {
   }))
 })
 const activeMedia = ref(0)
-const overviewProse = computed(() => blockText(props.block?.data?.body) || '')
+const overviewProse = computed(() => {
+  const absorbedId = blawbyHeroProseBlockId(props.page)
+  const absorbed = absorbedId ? props.page.blocks.find(item => item.id === absorbedId) : null
+  return (absorbed ? (blockText(absorbed.data.markdown) || blockText(absorbed.data.body)) : null) || description.value
+})
 const overviewActions = computed(() => {
+  const direct = [
+    { label: ctaLabel.value, url: ctaUrl.value },
+    { label: secondaryLabel.value, url: secondaryUrl.value },
+  ].filter((action): action is { label: string; url: string } => Boolean(action.label && action.url))
+  if (direct.length) return direct
+
   const items = blockRecords(props.block?.data?.actions)
   return items.map(item => ({
     label: blockText(item.label),
