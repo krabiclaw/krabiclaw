@@ -4,6 +4,8 @@ import type Stripe from 'stripe'
 import { execute, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
+import { createStripeClient } from '~/server/utils/stripe-client'
+import { isDemoOrganization } from '~/shared/demo'
 
 export type StripeConnectStatus =
   | 'creating'
@@ -109,6 +111,38 @@ export function stripeLivemodeFromKey(secretKey: string): boolean {
   throw new Error('Stripe key mode cannot be determined')
 }
 
+/** The platform's own mode, set by its key. Platform billing and usage only ever run in this mode. */
+export function platformLivemode(env: CloudflareEnv): boolean {
+  if (!env.STRIPE_SECRET_KEY) throw new HTTPError({ statusCode: 503, statusMessage: 'Stripe is not configured' })
+  return stripeLivemodeFromKey(env.STRIPE_SECRET_KEY)
+}
+
+/** A demo organization takes payments in Stripe test mode; every other business in the platform's mode. */
+export function organizationPaymentsLivemode(env: CloudflareEnv, organization: { subdomain?: string | null }): boolean {
+  return isDemoOrganization(organization) ? false : platformLivemode(env)
+}
+
+/**
+ * The tenant-payments Stripe keys for one mode, or null when that mode is not
+ * configured. The platform mode uses the platform's keys; a live platform also
+ * holds the same Stripe account's test-mode keys (STRIPE_TEST_*) for demo
+ * organizations.
+ */
+export function paymentsStripeKeys(env: CloudflareEnv, livemode: boolean) {
+  if (!env.STRIPE_SECRET_KEY) return null
+  const keys = livemode === stripeLivemodeFromKey(env.STRIPE_SECRET_KEY)
+    ? { secretKey: env.STRIPE_SECRET_KEY, publishableKey: env.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY, methodConfiguration: env.STRIPE_PAYMENTS_METHOD_CONFIGURATION, connectWebhookSecret: env.STRIPE_CONNECT_WEBHOOK_SECRET, paymentsWebhookSecret: env.STRIPE_PAYMENTS_WEBHOOK_SECRET }
+    : { secretKey: env.STRIPE_TEST_SECRET_KEY, publishableKey: env.STRIPE_TEST_PUBLISHABLE_KEY, methodConfiguration: env.STRIPE_TEST_PAYMENTS_METHOD_CONFIGURATION, connectWebhookSecret: env.STRIPE_TEST_CONNECT_WEBHOOK_SECRET, paymentsWebhookSecret: env.STRIPE_TEST_PAYMENTS_WEBHOOK_SECRET }
+  if (!keys.secretKey || stripeLivemodeFromKey(keys.secretKey) !== livemode) return null
+  return { ...keys, secretKey: keys.secretKey }
+}
+
+export function paymentsStripe(env: CloudflareEnv, livemode: boolean): Stripe {
+  const keys = paymentsStripeKeys(env, livemode)
+  if (!keys) throw new HTTPError({ statusCode: 503, statusMessage: `Stripe ${livemode ? 'live' : 'test'} mode is not configured` })
+  return createStripeClient(keys.secretKey, 'payments')
+}
+
 export function buildStripeConnectOnboardingUrls(
   platformOrigin: string,
   organizationSlug: string,
@@ -166,8 +200,8 @@ export async function getStripeConnectedAccount(
 export async function readStripeCheckoutSetup(db: DbClient, organizationId: string, env: CloudflareEnv) {
   const [connected, organization, entitled] = await Promise.all([
     getStripeConnectedAccount(db, organizationId),
-    queryFirst<{ slug: string; billing_status: string | null; billing_customer: string | null; customer: string | null; contract: string | null; currency: string | null; start: string | null; servicing: number }>(db, `
-      SELECT o.slug, b.status AS billing_status, b.stripe_billing_customer_id AS billing_customer,
+    queryFirst<{ slug: string; subdomain: string | null; billing_status: string | null; billing_customer: string | null; customer: string | null; contract: string | null; currency: string | null; start: string | null; servicing: number }>(db, `
+      SELECT o.slug, o.subdomain, b.status AS billing_status, b.stripe_billing_customer_id AS billing_customer,
              b.metronome_customer_id AS customer, b.metronome_contract_id AS contract, b.currency, b.contract_start_at AS start,
              EXISTS(SELECT 1 FROM payment_servicing_tenants WHERE organization_id=o.id) AS servicing
         FROM organization o LEFT JOIN payment_billing_accounts b ON b.organization_id=o.id WHERE o.id=?
@@ -177,13 +211,15 @@ export async function readStripeCheckoutSetup(db: DbClient, organizationId: stri
   if (!organization) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
   const missing: string[] = []
   if (!entitled) missing.push('payments.entitlement')
-  if (!env.STRIPE_SECRET_KEY || !env.STRIPE_PAYMENTS_METHOD_CONFIGURATION || !env.NUXT_PUBLIC_PLATFORM_DOMAIN || !env.METRONOME_API_KEY || !env.METRONOME_RATE_CARD_ID) missing.push('payments.configuration')
+  const livemode = env.STRIPE_SECRET_KEY ? organizationPaymentsLivemode(env, organization) : null
+  const keys = livemode === null ? null : paymentsStripeKeys(env, livemode)
+  if (!keys?.methodConfiguration || !env.NUXT_PUBLIC_PLATFORM_DOMAIN || !env.METRONOME_API_KEY || !env.METRONOME_RATE_CARD_ID) missing.push('payments.configuration')
   if (organization.billing_status !== 'active' || !organization.billing_customer || !organization.customer || !organization.contract || organization.currency !== 'USD' || !organization.start || !Number.isFinite(Date.parse(organization.start)) || Date.parse(organization.start) > Date.now()) missing.push('payments.billing')
   if (organization.servicing) missing.push('payments.servicing')
   if (!connected?.stripeAccountId) missing.push('payments.account')
   else if (connected.status !== 'ready' || connected.cardPaymentsStatus !== 'active' || !connected.stripeRefreshedAt) missing.push('payments.account_ready')
-  if (connected && env.STRIPE_SECRET_KEY && connected.livemode !== stripeLivemodeFromKey(env.STRIPE_SECRET_KEY)) missing.push('payments.account_mode')
-  return { connected, slug: organization.slug, missing }
+  if (connected && livemode !== null && connected.livemode !== livemode) missing.push('payments.account_mode')
+  return { connected, slug: organization.slug, missing, livemode }
 }
 
 export async function getStripeConnectedAccountByStripeId(
@@ -321,7 +357,7 @@ const STRIPE_CONNECT_ACCOUNT_INCLUDE: Stripe.V2.Core.AccountRetrieveParams.Inclu
 ]
 
 /** The configured native Stripe account and methods must accept a paid booking before it is offered. */
-export async function requireStripeCheckoutAcceptance(db: DbClient, stripe: Stripe, env: CloudflareEnv, organizationId: string) {
+export async function requireStripeCheckoutAcceptance(db: DbClient, env: CloudflareEnv, organizationId: string) {
   const setup = await readStripeCheckoutSetup(db, organizationId, env)
   const handoff = { code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(setup.slug)}/payments`, missing: setup.missing }
   // Native retrieval below can resolve a capability event not yet projected.
@@ -332,12 +368,14 @@ export async function requireStripeCheckoutAcceptance(db: DbClient, stripe: Stri
   const billing = await paymentsBillingPricing(db, env, organizationId)
   if (!billing.contract || !billing.pricing) throw new HTTPError({ statusCode: 409, statusMessage: 'Complete Payments billing setup before accepting online payments', data: handoff })
   const saved = setup.connected!
+  const keys = paymentsStripeKeys(env, setup.livemode!)!
+  const stripe = createStripeClient(keys.secretKey, 'payments')
   const account = await stripe.v2.core.accounts.retrieve(saved.stripeAccountId!, { include: STRIPE_CONNECT_ACCOUNT_INCLUDE })
   const connected = await projectStripeConnectedAccount(db, accountProjection(saved, account))
-  if (connected.status !== 'ready' || account.livemode !== stripeLivemodeFromKey(env.STRIPE_SECRET_KEY!)) throw new HTTPError({ statusCode: 409, statusMessage: 'Complete the business’s Stripe account setup before requiring online collection', data: handoff })
+  if (connected.status !== 'ready' || account.livemode !== saved.livemode) throw new HTTPError({ statusCode: 409, statusMessage: 'Complete the business’s Stripe account setup before requiring online collection', data: handoff })
   const configurations = await stripe.paymentMethodConfigurations.list({ limit: 100 }, { stripeAccount: account.id })
   if (configurations.has_more) throw new HTTPError({ statusCode: 409, statusMessage: 'Connected checkout configuration needs bounded operator review', data: handoff })
-  const matching = configurations.data.filter(configuration => configuration.parent === env.STRIPE_PAYMENTS_METHOD_CONFIGURATION || configuration.id === env.STRIPE_PAYMENTS_METHOD_CONFIGURATION)
+  const matching = configurations.data.filter(configuration => configuration.parent === keys.methodConfiguration || configuration.id === keys.methodConfiguration)
   if (matching.length !== 1 || !matching[0]!.active) throw new HTTPError({ statusCode: 409, statusMessage: 'One active connected payment configuration inheriting the Payments parent is required', data: handoff })
   const methods = matching[0]!
   for (const [name, value] of Object.entries(methods)) {

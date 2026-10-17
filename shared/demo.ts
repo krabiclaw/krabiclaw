@@ -4,9 +4,10 @@
  * Demo organizations are synthetic showcase businesses, not real ones: the
  * "Ember & Slice" restaurant (production, copied to staging by snapshot) and
  * the "Saltleaf Stays" lodging demo that scripts/provision-lodging-demo.ts
- * creates on staging. Their data is non-customer demo data, only platform
- * admins change their site settings and languages, and they are never crawled
- * or indexed.
+ * creates. Their data is non-customer demo data, only platform admins change
+ * their site settings and languages, they are never crawled or indexed, and
+ * their payments run in Stripe test mode, on production too, so a visitor can
+ * pay with a test card and nothing is charged.
  *
  * They are named by subdomain, not id: the lodging demo is re-created after
  * each staging database epoch and Better Auth gives it a new id each time.

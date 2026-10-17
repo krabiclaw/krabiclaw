@@ -2,8 +2,7 @@ import type Stripe from 'stripe'
 import { HTTPError } from 'nitro'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { loadOwnerPictures } from '~/server/notifications/hero'
-import { getStripeConnectedAccount, stripeLivemodeFromKey } from '~/server/utils/stripe-connect'
-import { createStripeClient } from '~/server/utils/stripe-client'
+import { getStripeConnectedAccount, paymentsStripe } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { authorizePayments, type FinancialPrincipal, type Payment } from './index'
 
@@ -107,9 +106,7 @@ export interface PayoutDetail {
 export async function connectedStripe(db: DbClient, env: CloudflareEnv, organizationId: string) {
   const account = await getStripeConnectedAccount(db, organizationId)
   if (!account?.stripeAccountId) throw new HTTPError({ statusCode: 404, statusMessage: 'Stripe account not connected' })
-  if (!env.STRIPE_SECRET_KEY) throw new HTTPError({ statusCode: 503, statusMessage: 'Stripe is not configured' })
-  if (account.livemode !== stripeLivemodeFromKey(env.STRIPE_SECRET_KEY)) throw new HTTPError({ statusCode: 409, statusMessage: 'Connected Stripe account mode does not match configuration' })
-  return { stripe: createStripeClient(env.STRIPE_SECRET_KEY, 'payments'), options: { stripeAccount: account.stripeAccountId } }
+  return { stripe: paymentsStripe(env, account.livemode), options: { stripeAccount: account.stripeAccountId } }
 }
 
 /**

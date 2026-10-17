@@ -34,6 +34,34 @@ The Stripe key must be able to create and retrieve Accounts v2, create Account
 Links v2, retrieve Events v2, and list Country Specs. Keep test and live
 destinations, keys, and signing secrets paired with their matching environment.
 
+## Demo organizations take test-mode payments
+
+A demo organization (`shared/demo.ts`) connects its Stripe account in test
+mode on every platform, so its site can be booked and paid with Stripe's test
+cards while production charges real money everywhere else. The mode is chosen
+by `organizationPaymentsLivemode` and is fixed when the account is reserved;
+every later Stripe call for that account or its payments uses the keys for the
+account's own mode (`paymentsStripe`).
+
+A live platform therefore also holds the same Stripe account's test-mode
+values. Staging is already in test mode and needs none of these:
+
+- `STRIPE_TEST_SECRET_KEY`, `STRIPE_TEST_PUBLISHABLE_KEY` and
+  `STRIPE_TEST_PAYMENTS_METHOD_CONFIGURATION` — the test-mode counterparts of
+  the platform values.
+- `STRIPE_TEST_CONNECT_WEBHOOK_SECRET` — a test-mode thin-event destination at
+  `https://<environment-host>/api/stripe/connect/webhook?mode=test`, with the
+  event types above.
+- `STRIPE_TEST_PAYMENTS_WEBHOOK_SECRET` — a test-mode connected-account
+  snapshot destination at
+  `https://<environment-host>/api/stripe/payments/webhook?mode=test`, with the
+  events listed in `.env.example`.
+
+Test-mode destinations receive every test connected account's events,
+including staging's; both handlers ignore accounts they do not manage. A
+test-mode capture on a live platform records no Payments usage, so it is never
+billed.
+
 ## Release order
 
 Follow [release-and-outage-prevention.md](release-and-outage-prevention.md) and
