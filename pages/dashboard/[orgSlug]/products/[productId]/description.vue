@@ -9,9 +9,10 @@
     @cancel="p.revert"
     @save="p.save"
   >
-    <UFormField v-if="p.isNew.value || p.product.value" label="Description">
-      <UTextarea v-model="p.form.description" :rows="10" autofocus class="w-full" />
-    </UFormField>
+    <template v-if="p.isNew.value || p.product.value">
+      <p class="mb-2 text-sm font-semibold text-muted">{{ charactersRemaining }}/10000 available</p>
+      <UTextarea v-model="p.form.description" aria-label="Description" :rows="10" maxlength="10000" autofocus class="w-full" />
+    </template>
   </DashboardLeafPanel>
 </template>
 
@@ -21,4 +22,5 @@ import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 definePageMeta({ layout: 'dashboard' })
 
 const p = inject(productEditorKey)!
+const charactersRemaining = computed(() => 10000 - (p.form.description?.length ?? 0))
 </script>

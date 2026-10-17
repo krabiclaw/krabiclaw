@@ -8,9 +8,8 @@
     @cancel="editor.revert"
     @save="editor.save"
   >
-    <UFormField label="Description (optional)">
-      <UTextarea v-model="editor.form.announcementDescription" :rows="4" maxlength="500" autofocus class="w-full" />
-    </UFormField>
+    <p class="mb-2 text-sm font-semibold text-muted">{{ charactersRemaining }}/500 available</p>
+    <UTextarea v-model="editor.form.announcementDescription" aria-label="Description" :rows="4" maxlength="500" autofocus class="w-full" />
   </DashboardLeafPanel>
 </template>
 
@@ -20,4 +19,5 @@ import { organizationSettingsEditorKey } from '~/lib/components/workspace/settin
 definePageMeta({ layout: 'dashboard' })
 
 const editor = inject(organizationSettingsEditorKey)!
+const charactersRemaining = computed(() => 500 - (editor.form.announcementDescription?.length ?? 0))
 </script>

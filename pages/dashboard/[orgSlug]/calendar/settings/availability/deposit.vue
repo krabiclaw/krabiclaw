@@ -3,13 +3,13 @@
     <USwitch v-model="editor.reservationForm.value.deposit_required" label="Require a deposit" />
     <template v-if="editor.reservationForm.value.deposit_required && currency">
       <UFormField label="Currency"><USelect :model-value="currency" :items="CURRENCY_OPTIONS" @update:model-value="editor.reservationForm.value.deposit_currency = $event; editor.reservationForm.value.deposit_amount = null" /></UFormField>
-      <UFormField label="Total per reservation" :description="currency">
+      <UFormField :label="`Total per reservation (${currency})`">
         <UInputNumber v-model="amount" :min="0" :step="10 ** -currencyFractionDigits(currency)" />
       </UFormField>
       <UFormField label="Tax">
         <URadioGroup :model-value="editor.reservationForm.value.deposit_tax_behavior ?? undefined" @update:model-value="editor.reservationForm.value.deposit_tax_behavior = $event as 'inclusive' | 'exclusive'" :items="[{ value: 'inclusive', label: 'Included in the amount' }, { value: 'exclusive', label: 'Added at checkout' }]" />
       </UFormField>
-      <UFormField label="Minimum party size" description="Leave empty to require a deposit for every reservation.">
+      <UFormField label="Minimum party size" hint="Optional">
         <UInputNumber v-model="editor.reservationForm.value.deposit_trigger_party_size" :min="1" />
       </UFormField>
       <NuxtLink :to="paymentsPath">Payments settings</NuxtLink>

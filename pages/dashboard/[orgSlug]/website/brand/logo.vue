@@ -38,7 +38,7 @@
               />
             </div>
           </UFormField>
-          <UFormField v-if="editor.form[logo.presentationKey].shape !== 'original'" label="Focus" description="Click the part of the logo the crop should keep in view.">
+          <UFormField v-if="editor.form[logo.presentationKey].shape !== 'original'" label="Focus">
             <button
               type="button"
               class="relative block w-full max-w-xs overflow-hidden rounded-lg border border-default bg-muted"

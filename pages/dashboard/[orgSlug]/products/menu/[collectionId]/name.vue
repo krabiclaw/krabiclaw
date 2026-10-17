@@ -9,9 +9,8 @@
     @cancel="c.revert"
     @save="c.save"
   >
-    <UFormField label="Name" required>
-      <UInput v-model="c.form.name" placeholder="Starters" autofocus class="w-full" />
-    </UFormField>
+    <p class="mb-2 text-sm font-semibold text-muted">{{ charactersRemaining }}/120 available</p>
+    <UInput v-model="c.form.name" aria-label="Name" placeholder="Starters" maxlength="120" autofocus class="w-full" />
     <DashboardResourceLocalization
       v-if="!c.isNew.value && c.hasRecord.value"
       class="mt-6"
@@ -32,4 +31,5 @@ import { collectionEditorKey } from '../[collectionId].vue'
 definePageMeta({ layout: 'dashboard' })
 
 const c = inject(collectionEditorKey)!
+const charactersRemaining = computed(() => 120 - (c.form.name?.length ?? 0))
 </script>

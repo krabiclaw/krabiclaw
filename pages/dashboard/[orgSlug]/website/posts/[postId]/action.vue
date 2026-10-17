@@ -2,6 +2,7 @@
   <DashboardLeafPanel
     id="post-action"
     :title="post.sectionLabels.value.action"
+    lead="An optional button under the post. Facebook, Instagram and Discord get it as a line under the caption."
     :saving="post.editor.saving.value"
     :disabled="post.saveDisabled.value"
     :save-label="post.saveLabel.value"
@@ -10,11 +11,10 @@
     @save="post.save"
   >
     <div class="space-y-6">
-      <p class="text-base text-muted">An optional button under the post, in your words. Facebook, Instagram and Discord get it as a line under the caption; Instagram shows it as text.</p>
-      <UFormField label="Button label">
+      <UFormField label="Button label" hint="Optional">
         <UInput :model-value="action.label" placeholder="Book a table" class="w-full" :maxlength="60" @update:model-value="write('label', String($event))" />
       </UFormField>
-      <UFormField label="Where it goes" description="A web address, or tel: and a phone number.">
+      <UFormField label="Where it goes" hint="Optional">
         <UInput :model-value="action.url" placeholder="https:// or tel:+66…" class="w-full" @update:model-value="write('url', String($event))" />
       </UFormField>
     </div>

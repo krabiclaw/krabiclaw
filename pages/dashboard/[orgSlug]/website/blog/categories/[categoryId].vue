@@ -22,11 +22,11 @@
       <UFormField name="name" label="Name" required>
         <UInput v-model="name" autofocus class="w-full" />
       </UFormField>
-      <UFormField name="description" label="Description" help="Shown on the category's page and used as its search description.">
+      <UFormField name="description" label="Description">
         <UTextarea v-model="description" :rows="4" autoresize class="w-full" />
       </UFormField>
       <!-- Where it sits: under another category of the collection, or at the top. Its page's address does not change. -->
-      <UFormField name="parent" label="Parent" help="Categories nest up to three levels deep.">
+      <UFormField name="parent" label="Parent">
         <USelect v-model.nullable="parent" :items="parentOptions" value-key="value" class="w-full" />
       </UFormField>
     </UForm>
