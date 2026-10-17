@@ -63,8 +63,8 @@
         </div>
       </div>
 
-      <!-- Navigation links (catalog / experiences / reservations / posts) -->
-      <div v-if="catalogLinks.length || sections?.reservations || sections?.photos || sections?.posts" class="grid gap-8 border-b border-default py-8 sm:grid-cols-3">
+      <!-- Navigation links (catalog / experiences / reservations / posts / connect) -->
+      <div v-if="catalogLinks.length || sections?.reservations || sections?.photos || sections?.posts || (locations.length && !footerGroups.some(g => g.items.length))" class="grid gap-8 border-b border-default py-8 sm:grid-cols-3">
         <div v-if="catalogLinks.length">
           <h4 class="mb-4 text-xs font-semibold uppercase tracking-widest text-dimmed">{{ t('saya.footer.heading_experience') }}</h4>
           <ul class="space-y-2 text-sm">
@@ -84,6 +84,17 @@
             </li>
             <li v-if="sections?.posts">
               <NuxtLink :to="localePath('/posts')" class="text-muted no-underline transition hover:text-highlighted">{{ t('saya.footer.posts') }}</NuxtLink>
+            </li>
+          </ul>
+        </div>
+        <div v-if="!footerGroups.some(g => g.items.length)">
+          <h4 class="mb-4 text-xs font-semibold uppercase tracking-widest text-dimmed">{{ t('saya.footer.heading_connect') }}</h4>
+          <ul class="space-y-2 text-sm">
+            <li v-if="showLocations">
+              <NuxtLink :to="localePath('/locations')" class="text-muted no-underline transition hover:text-highlighted">{{ t('saya.footer.all_locations') }}</NuxtLink>
+            </li>
+            <li>
+              <NuxtLink :to="localePath('/contact')" class="text-muted no-underline transition hover:text-highlighted">{{ t('saya.footer.contact_us') }}</NuxtLink>
             </li>
           </ul>
         </div>
@@ -123,6 +134,7 @@ const documents = computed(() => props.compliance?.media.filter(item => item.slo
 const catalogLinks = computed(() => (props.organization?.vertical
   ? catalogNavigation(props.organization.vertical as string, props.sections)
   : []))
+const showLocations = computed(() => (props.locations || []).some(location => !location.home_slug))
 
 function linksFor(paths: string[]) {
   const byPath = new Map(props.pageLinks.map(item => [item.path, item]))

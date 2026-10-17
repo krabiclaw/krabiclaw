@@ -61,11 +61,13 @@ const homeCopy = computed(() => ({
 // Authored reviews from block items
 const authoredReviews = computed(() => blockRecords(props.block.data.items).map(item => {
   const mediaRecords = blockRecords(item.media)
+  const rawRating = item.rating !== undefined && item.rating !== null && item.rating !== '' ? Number(item.rating) : null
+  const rating = rawRating !== null && !Number.isNaN(rawRating) && rawRating > 0 ? rawRating : null
   return {
     id: blockText(item.id) || blockText(item.title),
     author_name: blockText(item.title) || blockText(item.author_name),
     content: blockText(item.content) || blockText(item.description) || blockText(item.body),
-    rating: Number(blockText(item.rating)) || 5,
+    rating,
     title: blockText(item.title),
     location_title: blockText(item.location_title) || null,
     media: mediaRecords.map(m => ({
@@ -92,7 +94,7 @@ const shellReviews = computed(() => profile.value.reviews.map(r => ({
   id: r.id,
   author_name: r.author_name,
   content: r.content,
-  rating: r.rating || 5,
+  rating: typeof r.rating === 'number' && r.rating > 0 ? r.rating : null,
   location_title: r.location_title,
 })))
 

@@ -32,8 +32,8 @@
     v-bind="$attrs"
     :href="isExternal ? targetUrl : undefined"
     :to="isExternal ? undefined : targetUrl"
-    :target="isExternal ? '_blank' : target"
-    :rel="isExternal ? 'noopener noreferrer' : rel"
+    :target="computedTarget"
+    :rel="computedRel"
     :class="classes"
     :aria-disabled="disabled || loading || undefined"
     :tabindex="disabled || loading ? -1 : undefined"
@@ -83,7 +83,10 @@ const emit = defineEmits<{
 
 const targetUrl = computed(() => props.to || props.href || '')
 const isButton = computed(() => props.as === 'button' || (!targetUrl.value && !props.controlId))
-const isExternal = computed(() => !isButton.value && (/^https?:\/\//i.test(targetUrl.value) || targetUrl.value.startsWith('mailto:') || targetUrl.value.startsWith('tel:')))
+const isHttp = computed(() => /^https?:\/\//i.test(targetUrl.value))
+const isExternal = computed(() => !isButton.value && (isHttp.value || targetUrl.value.startsWith('mailto:') || targetUrl.value.startsWith('tel:')))
+const computedTarget = computed(() => props.target || (isHttp.value ? '_blank' : undefined))
+const computedRel = computed(() => props.rel || (isHttp.value ? 'noopener noreferrer' : undefined))
 const linkTag = computed(() => (isExternal.value ? 'a' : NuxtLink))
 
 function activateControl(event: KeyboardEvent) {

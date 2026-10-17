@@ -65,10 +65,11 @@
 <script setup lang="ts">
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
-import { blockText, blockTextOrNull, blockRecords, blockMedia } from '~/utils/tenant-page-block-data'
+import { blockText, blockTextOrNull, blockRecords, blockMedia, isInternalRoute } from '~/utils/tenant-page-block-data'
 import ContentVideoEmbed from '~/components/content/ContentVideoEmbed.vue'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
+const { localePath } = useI18n()
 
 const title = computed(() => blockText(props.block.data.title))
 const accent = computed(() => blockTextOrNull(props.block.data.accent))
@@ -76,7 +77,10 @@ const kicker = computed(() => blockText(props.block.data.eyebrow) || blockText(p
 const body = computed(() => blockText(props.block.data.body) || blockText(props.block.data.description))
 const videoTitle = computed(() => blockTextOrNull(props.block.data.video_title))
 const linkLabel = computed(() => blockText(props.block.data.label))
-const linkUrl = computed(() => blockText(props.block.data.url))
+const linkUrl = computed(() => {
+  const url = blockText(props.block.data.url)
+  return url && isInternalRoute(url) ? localePath(url) : url
+})
 
 const asset = computed(() => blockMedia(props.block, 'media')[0] ?? null)
 const image = computed(() => asset.value?.public_url ?? '')

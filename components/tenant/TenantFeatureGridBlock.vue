@@ -91,14 +91,18 @@
 <script setup lang="ts">
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock, TenantPageMedia } from '~/utils/tenant-page-blocks'
-import { blockText, blockRecords } from '~/utils/tenant-page-block-data'
+import { blockText, blockRecords, isInternalRoute } from '~/utils/tenant-page-block-data'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
+const { localePath } = useI18n()
 
 const heading = computed(() => blockText(props.block.data.title))
 const kicker = computed(() => blockText(props.block.data.description))
 const ctaLabel = computed(() => blockText(props.block.data.cta_label))
-const ctaUrl = computed(() => blockText(props.block.data.cta_url))
+const ctaUrl = computed(() => {
+  const url = blockText(props.block.data.cta_url)
+  return url && isInternalRoute(url) ? localePath(url) : url
+})
 
 const isPricing = computed(() => props.page.recipe === 'pricing' || props.page.path === '/pricing')
 const isArticles = computed(() => blockText(props.block.data.source) === 'organization_posts' || props.page.recipe === 'blog')

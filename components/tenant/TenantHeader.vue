@@ -178,19 +178,17 @@ const props = withDefaults(defineProps<{
   consultation?: PublicConsultationSettings | null
   canSchedule?: boolean
   pageLinks?: PublicBlawbyPageLink[]
-  isBlawby?: boolean
 }>(), {
   locations: () => [],
   sections: null,
   consultation: null,
   canSchedule: false,
   pageLinks: () => [],
-  isBlawby: false,
 })
 
 const route = useRoute()
 const { locale, localePath, t } = useI18n()
-const navAriaLabel = computed(() => props.isBlawby ? t('blawby.navigation.main') : t('saya.header.nav_aria'))
+const navAriaLabel = computed(() => t('saya.header.nav_aria'))
 
 const { trackConsultationClick } = useOrganizationConversionTracking(() => props.consultation)
 

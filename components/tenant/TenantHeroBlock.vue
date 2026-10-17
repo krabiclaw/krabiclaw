@@ -135,7 +135,7 @@
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import type { BlawbyDocumentPayload } from '~/utils/blawby-document-contract'
-import { blockText, blockMedia, blockRecords } from '~/utils/tenant-page-block-data'
+import { blockText, blockMedia, blockRecords, isInternalRoute } from '~/utils/tenant-page-block-data'
 import { cfImageSrcset } from '~/utils/cf-image'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
@@ -155,9 +155,15 @@ const subtitle = computed(() => blockText(props.block?.data?.subtitle) || '')
 const eyebrow = computed(() => blockText(props.block?.data?.eyebrow) || '')
 const description = computed(() => blockText(props.block?.data?.description) || props.page.summary || '')
 const ctaLabel = computed(() => blockText(props.block?.data?.cta_label) || '')
-const ctaUrl = computed(() => blockText(props.block?.data?.cta_url) || '')
+const ctaUrl = computed(() => {
+  const url = blockText(props.block?.data?.cta_url)
+  return url && isInternalRoute(url) ? localePath(url) : (url || '')
+})
 const secondaryLabel = computed(() => blockText(props.block?.data?.secondary_label) || '')
-const secondaryUrl = computed(() => blockText(props.block?.data?.secondary_url) || '')
+const secondaryUrl = computed(() => {
+  const url = blockText(props.block?.data?.secondary_url)
+  return url && isInternalRoute(url) ? localePath(url) : (url || '')
+})
 
 const mediaList = computed(() => props.block ? blockMedia(props.block, 'media') : (props.page.media || []))
 const background = computed(() => mediaList.value[0] ?? null)

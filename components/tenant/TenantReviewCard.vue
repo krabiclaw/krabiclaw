@@ -10,7 +10,7 @@
       </div>
     </div>
 
-    <div class="mt-4 flex items-center gap-2">
+    <div v-if="typeof review.rating === 'number' && review.rating > 0" class="mt-4 flex items-center gap-2">
       <div class="flex gap-0.5" role="img" :aria-label="t('saya.reviews.stars_aria', { rating: review.rating })">
         <TenantIcon
           v-for="s in 5"
@@ -23,6 +23,9 @@
         />
       </div>
       <span v-if="dateLabel" class="text-xs text-muted">{{ dateLabel }}</span>
+    </div>
+    <div v-else-if="dateLabel" class="mt-4 flex items-center gap-2">
+      <span class="text-xs text-muted">{{ dateLabel }}</span>
     </div>
 
     <p v-if="review.title" class="tenant-display tenant-italic mt-4 text-2xl leading-tight text-default">{{ review.title }}</p>
@@ -47,7 +50,7 @@ const props = defineProps<{
   review: {
     id: string | number
     author_name: string | null
-    rating: number
+    rating?: number | null
     content: string | null
     title?: string | null
     source?: string | null

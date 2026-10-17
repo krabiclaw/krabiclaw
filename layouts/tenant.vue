@@ -25,7 +25,6 @@
       :consultation="blawbyConsultation"
       :can-schedule="blawbyCanSchedule"
       :page-links="blawbyPageLinks"
-      :is-blawby="isBlawby"
     />
 
     <main class="grow" :data-route-shell="route.path">
@@ -43,7 +42,6 @@
       :sections="shellSections"
       :compliance="blawbyCompliance"
       :page-links="blawbyPageLinks"
-      :is-blawby="isBlawby"
     />
   </div>
 </template>

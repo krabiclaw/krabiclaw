@@ -50,7 +50,8 @@ const form = reactive({ name: '', email: '', subject: 'general', message: '', co
 const { mirrorSubmission, pageEventId } = useOrganizationConversionTracking(consultation)
 
 async function submitContact() {
-  if (!organizationId || submitting.value) return
+  if (submitting.value) return
+  if (!organizationId) throw new Error('Contact form rendered without an organization')
   submitting.value = true
   submitMessage.value = ''
   try {
