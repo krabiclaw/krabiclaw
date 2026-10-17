@@ -1,11 +1,15 @@
 #!/usr/bin/env node
-// Creates, or resets, the staging lodging demo: "Saltleaf Stays", a fictional
-// vacation-rental business with four homes booked directly on its Saya site.
+// Creates, or resets, the lodging demo: "Saltleaf Stays", a vacation-rental
+// business with four homes on its Saya site.
 //
-//   node --env-file=<file with KRABICLAW_DEV_EMAIL and KRABICLAW_DEV_PASSWORD> \
-//     --experimental-strip-types scripts/provision-lodging-demo.ts --staging
+//   node --env-file=.env --experimental-strip-types scripts/provision-lodging-demo.ts --staging
+//   node --env-file=.env --experimental-strip-types scripts/provision-lodging-demo.ts --production
 //
-// It signs in as the staging development owner and uses the same endpoints the
+// Staging signs in as the development owner (KRABICLAW_DEV_EMAIL and
+// KRABICLAW_DEV_PASSWORD) and books stays through test-mode Stripe Connect.
+// Production signs in as the app-review account (CANARY_LOGIN_EMAIL and
+// CANARY_LOGIN_PASSWORD); with no online payments there its homes take
+// enquiries. Either way it uses the same endpoints the
 // dashboard and the native app use, so every write goes through the canonical
 // domain code. Re-running it is the reset: the homes get their details, prices
 // and blocked nights back, and the stays booked on them are cancelled. The
@@ -14,11 +18,11 @@
 // checkout holds need nothing: the calendar reads them as free and the next
 // hold on those nights clears them.
 //
-// Payments setup is the owner's, in a browser, because financial approvals are
+// Billing is the owner's, in a browser, because financial approvals are
 // same-origin browser actions: the Commerce plan for four locations (the four
-// homes) and the
-// test-mode Stripe Connect onboarding (docs/operations/lodging-demo.md). Until
-// both are done the script stops before publishing, naming what is missing.
+// homes) on both, and on staging the test-mode Stripe Connect onboarding
+// (docs/operations/lodging-demo.md). Until the plan covers four locations the
+// script stops before adding the next home, naming what is missing.
 
 import { parseArgs } from 'node:util'
 import type { StayPropertyType, StayPropertyTypeGroup } from '../shared/stay-listing.ts'
@@ -82,7 +86,7 @@ const HOMES: DemoHome[] = [
     base_price_minor: 12_000,
     weekend_price_minor: 14_500,
     holiday_price_minor: 17_500,
-    description: 'A bright studio for two a short walk from the beach, with a queen bed, a kitchenette, fast Wi-Fi and a desk. Fictional demo listing.',
+    description: 'A bright studio for two a short walk from the beach, with a queen bed, a kitchenette, fast Wi-Fi and a desk.',
     property_type_group: 'apartments', property_type: 'apartment',
     bedrooms: 0,
     beds: 1,
@@ -109,7 +113,7 @@ const HOMES: DemoHome[] = [
     base_price_minor: 18_500,
     weekend_price_minor: 22_000,
     holiday_price_minor: 26_500,
-    description: 'Three bedrooms around a private saltwater pool, ten minutes on foot from Ao Nang beach. Fictional demo listing.',
+    description: 'Three bedrooms around a private saltwater pool, ten minutes on foot from Ao Nang beach.',
     property_type_group: 'houses', property_type: 'house',
     bedrooms: 3,
     beds: 4,
@@ -136,7 +140,7 @@ const HOMES: DemoHome[] = [
     base_price_minor: 9_500,
     weekend_price_minor: 11_500,
     holiday_price_minor: 14_000,
-    description: 'A one-bedroom loft with a desk, fast Wi-Fi and a balcony over the rice fields, a short ride from Batu Bolong beach. Fictional demo listing.',
+    description: 'A one-bedroom loft with a desk, fast Wi-Fi and a balcony over the rice fields, a short ride from Batu Bolong beach.',
     property_type_group: 'apartments', property_type: 'apartment',
     bedrooms: 1,
     beds: 1,
@@ -163,7 +167,7 @@ const HOMES: DemoHome[] = [
     base_price_minor: 14_000,
     weekend_price_minor: 16_500,
     holiday_price_minor: 21_000,
-    description: 'Two bedrooms and a plunge pool under the palms, with bikes for the ride to the beach. Fictional demo listing.',
+    description: 'Two bedrooms and a plunge pool under the palms, with bikes for the ride to the beach.',
     property_type_group: 'secondary_units', property_type: 'guesthouse',
     bedrooms: 2,
     beds: 2,
@@ -182,12 +186,15 @@ const WEEKEND_WEEKS = 26
 
 class StepError extends Error {}
 
-const { values } = parseArgs({ options: { staging: { type: 'boolean' } }, strict: true })
-if (!values.staging) throw new StepError('Pass --staging: the lodging demo exists only on staging.')
-const BASE = 'https://staging.krabiclaw.com'
-const email = process.env.KRABICLAW_DEV_EMAIL
-const password = process.env.KRABICLAW_DEV_PASSWORD
-if (!email || !password) throw new StepError('Set KRABICLAW_DEV_EMAIL and KRABICLAW_DEV_PASSWORD to the staging development owner.')
+const { values } = parseArgs({ options: { staging: { type: 'boolean' }, production: { type: 'boolean' } }, strict: true })
+if (values.staging === values.production) throw new StepError('Pass exactly one of --staging or --production.')
+const TARGET = values.production
+  ? { base: 'https://krabiclaw.com', site: `https://${DEMO.slug}.krabiclaw.com`, email: 'CANARY_LOGIN_EMAIL', password: 'CANARY_LOGIN_PASSWORD', owner: 'the production app-review account' }
+  : { base: 'https://staging.krabiclaw.com', site: `https://${DEMO.slug}-staging.krabiclaw.com`, email: 'KRABICLAW_DEV_EMAIL', password: 'KRABICLAW_DEV_PASSWORD', owner: 'the staging development owner' }
+const BASE = TARGET.base
+const email = process.env[TARGET.email]
+const password = process.env[TARGET.password]
+if (!email || !password) throw new StepError(`Set ${TARGET.email} and ${TARGET.password} to ${TARGET.owner}.`)
 
 const cookies = new Map<string, string>()
 
@@ -260,6 +267,8 @@ async function main() {
     await call('PATCH', `/api/dashboard/locations/${location.id}?${q}`, { status: 'inactive' })
     console.log(`Set ${location.title} inactive: it holds no home`)
   }
+  // A plan short of four locations stops new homes; the ones that exist still get their details.
+  let planShort: { name: string; refusal: unknown } | null = null
   for (const spec of HOMES) {
     if (homes.has(spec.name)) continue
     const created = await call<{ home: Home }>('POST', `/api/dashboard/stay-homes?${q}`, {
@@ -269,14 +278,16 @@ async function main() {
       max_guests: spec.max_guests, min_nights: spec.min_nights, base_price_minor: spec.base_price_minor,
     }, [201, 402])
     if (created.status === 402) {
-      throw new StepError(`Adding ${spec.name} needs a plan that covers four locations (the four homes): ${JSON.stringify(created.data)}. Choose Commerce for 4 locations at ${BASE}/dashboard/${DEMO.slug}/payments?tab=plan, then run this again.`)
+      planShort = { name: spec.name, refusal: created.data }
+      break
     }
     homes.set(spec.name, created.data.home)
     console.log(`Added ${spec.name}`)
   }
 
   for (const spec of HOMES) {
-    const home = homes.get(spec.name)!
+    const home = homes.get(spec.name)
+    if (!home) continue
     await call('PATCH', `/api/dashboard/stay-homes/${home.product_id}?${q}`, {
       description: spec.description, timezone: spec.timezone, check_in_time: spec.check_in_time, check_out_time: spec.check_out_time,
       max_guests: spec.max_guests, min_nights: spec.min_nights, base_price_minor: spec.base_price_minor,
@@ -325,6 +336,9 @@ async function main() {
     console.log(`Reset ${spec.name}: ${start} to ${end}, weekends ${spec.weekend_price_minor / 100}, holidays ${spec.holiday_price_minor / 100}, ${spec.blocked.length} blocked run(s)`)
   }
 
+  if (planShort) {
+    throw new StepError(`Adding ${planShort.name} needs a plan that covers four locations (the four homes): ${JSON.stringify(planShort.refusal)}. Choose Commerce for 4 locations at ${BASE}/dashboard/${DEMO.slug}/payments?tab=plan, then run this again.`)
+  }
   const unpublished: Array<{ name: string; missing: unknown }> = []
   for (const spec of HOMES) {
     const home = homes.get(spec.name)!
@@ -334,7 +348,7 @@ async function main() {
   if (unpublished.length) {
     throw new StepError(`Homes are ready but not published, because online payments are not ready: ${JSON.stringify(unpublished[0]!.missing)}. Finish Payments setup (docs/operations/lodging-demo.md), then run this again.`)
   }
-  console.log(`Published ${HOMES.length} homes. Site: https://${DEMO.slug}-staging.krabiclaw.com`)
+  console.log(`Published ${HOMES.length} homes. Site: ${TARGET.site}`)
 }
 
 try {
