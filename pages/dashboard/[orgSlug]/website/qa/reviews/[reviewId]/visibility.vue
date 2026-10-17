@@ -1,8 +1,8 @@
 <template>
   <DashboardLeafPanel
     id="review-visibility"
-    title="Visibility"
-    lead="A published review appears on your site. An archived review is hidden from it."
+    title="Status"
+    lead="A published review appears on your site. A draft review is hidden."
     :saving="editor.saving.value"
     :disabled="editor.saveDisabled.value"
     :error="editor.errorMessage.value"
@@ -20,7 +20,7 @@ definePageMeta({ layout: 'dashboard' })
 
 const REVIEW_VISIBILITY_ITEMS = [
   { label: 'Published', value: 'approved', description: 'Shown on your site.' },
-  { label: 'Archived', value: 'rejected', description: 'Hidden from your site.' },
+  { label: 'Draft', value: 'rejected', description: 'Hidden from your site.' },
 ]
 
 const editor = inject(reviewEditorKey)!

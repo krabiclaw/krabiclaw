@@ -592,7 +592,7 @@ test.describe('stateless MCP server', () => {
       createdId = (await created.json()).id
       expect(createdId).toBeTruthy()
       await expect(page).toHaveURL(url => url.pathname === `/dashboard/${encodeURIComponent(slug)}/website/qa/${createdId}` && url.searchParams.get('page_path') === pagePath)
-      await expect(page.getByRole('link', { name: 'Visibility Published', exact: true })).toBeVisible()
+      await expect(page.getByRole('link', { name: 'Status Published', exact: true })).toBeVisible()
       await page.getByRole('link', { name: /^Answer / }).click()
       await expect(page).toHaveURL(url => url.pathname.endsWith(`/qa/${createdId}/answer`) && url.searchParams.get('page_path') === pagePath)
       await page.getByRole('textbox', { name: 'Answer', exact: true }).fill(answer)

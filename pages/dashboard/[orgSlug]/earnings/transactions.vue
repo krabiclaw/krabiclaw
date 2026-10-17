@@ -7,15 +7,15 @@
   -->
   <DashboardIndexPanel id="earnings-transactions" title="Transactions" column="reading">
     <div>
-      <div class="flex flex-wrap items-center gap-2">
+      <div class="mb-8 flex flex-wrap items-center gap-2">
         <UDropdownMenu :items="monthItems" :content="{ align: 'start' }" :ui="{ content: 'w-56' }">
-          <UButton :label="periodLabel" trailing-icon="i-lucide-chevron-down" color="neutral" :variant="from ? 'solid' : 'soft'" class="rounded-full" />
+          <UButton :label="periodLabel" trailing-icon="i-lucide-chevron-down" color="neutral" :variant="from ? 'solid' : 'outline'" class="h-10 rounded-full px-4 text-sm font-normal" />
         </UDropdownMenu>
         <UDropdownMenu v-if="locations.length > 1" :items="locationItems" :content="{ align: 'start' }" :ui="{ content: 'w-64' }">
-          <UButton :label="locationLabel" trailing-icon="i-lucide-chevron-down" color="neutral" :variant="locationId ? 'solid' : 'soft'" class="rounded-full" />
+          <UButton :label="locationLabel" trailing-icon="i-lucide-chevron-down" color="neutral" :variant="locationId ? 'solid' : 'outline'" class="h-10 rounded-full px-4 text-sm font-normal" />
         </UDropdownMenu>
         <UDropdownMenu :items="typeItems" :content="{ align: 'start' }" :ui="{ content: 'w-56' }">
-          <UButton :label="typeLabel" trailing-icon="i-lucide-chevron-down" color="neutral" :variant="earningsType ? 'solid' : 'soft'" class="rounded-full" />
+          <UButton :label="typeLabel" trailing-icon="i-lucide-chevron-down" color="neutral" :variant="earningsType ? 'solid' : 'outline'" class="h-10 rounded-full px-4 text-sm font-normal" />
         </UDropdownMenu>
       </div>
 

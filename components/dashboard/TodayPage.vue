@@ -4,27 +4,21 @@
     title="Today"
     column="wide"
   >
-    <!--
-      The title is announced but not drawn: the pills say which range is on
-      screen, and a "Today" heading beside a "Today" pill reads as two
-      different controls.
-    -->
-    <template #center>
-        <div class="mx-auto flex items-center gap-2">
-          <UTabs
-            v-model="rangeModel"
-            :items="ranges"
-            :content="false"
-            size="xl"
-            aria-label="Today and Upcoming"
-          />
-  
-          <!-- An account has one agenda and nothing to narrow it by. -->
-          <AgendaFilters v-if="!personalScope" :locations="todayData?.locations ?? []" :kinds="todayData?.availableKinds ?? []" :organization-id="schedulingOrganizationId" />
-        </div>
+    <template #right>
+      <!-- An account has one agenda and nothing to narrow it by. -->
+      <AgendaFilters v-if="!personalScope" :locations="todayData?.locations ?? []" :kinds="todayData?.availableKinds ?? []" :organization-id="schedulingOrganizationId" />
     </template>
 
     <div>
+      <DashboardFilterPills
+        id="today-range"
+        v-model="rangeModel"
+        label="Agenda view"
+        :items="ranges"
+        role="tablist"
+        class="mb-8"
+      />
+
       <UAlert
         v-if="activeError"
         class="mb-6"
@@ -38,9 +32,9 @@
         </template>
       </UAlert>
 
-      <h1 class="text-center" :class="dashboardTitleClass">
+      <h2 class="text-base font-semibold text-highlighted">
         {{ heading }}
-      </h1>
+      </h2>
 
       <div v-if="visibleItems.length" class="mt-6 space-y-4">
         <TodayAgendaCard
@@ -80,7 +74,6 @@
 
 <script setup lang="ts">
 import { localDateAt } from '~/utils/timezone'
-import { dashboardTitleClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import AgendaFilters from './AgendaFilters.vue'
 import TodayAgendaCard from './TodayAgendaCard.vue'
 import { bookingCountLabel, resolveAggregateBookingPresentation } from '~/utils/booking-presentation'
@@ -120,7 +113,7 @@ const { data: todayData, pending, error: todayError, refresh: refreshToday } = a
   }),
 )
 
-const rangeModel = computed<string | number>({
+const rangeModel = computed<string>({
   get: () => activeRange.value,
   set: value => { activeRange.value = value === 'upcoming' ? 'upcoming' : 'today' },
 })

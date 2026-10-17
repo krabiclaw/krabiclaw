@@ -27,7 +27,6 @@ import { publicApiRequest, isRecord } from '~/utils/api-clients'
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
 import { normalizeTenantPagePath } from '~/utils/tenant-page-blocks'
-import type { BlawbyDocumentPayload } from '~/utils/blawby-document-contract'
 
 const props = defineProps<{ path: string; locale?: string | null }>()
 const { previewAuthorized, organization } = useTenantOrganization()
@@ -61,16 +60,8 @@ const isPageResponse = (value: unknown): value is { success: true; page: PublicT
   isRecord(value) && value.success === true && isRecord(value.page) && typeof value.page.path === 'string' && Array.isArray(value.page.blocks)
 
 const requestEvent = useRequestEvent()
-const blawbyDocument = inject<Ref<BlawbyDocumentPayload> | null>('blawby-document', null)
+const { consultation } = useOrganizationShellState()
 const { data, error, status, execute } = await useAsyncData(key, async () => {
-  if (template.slug === 'blawby') {
-    const page = blawbyDocument?.value.route.page
-    if (!page || page.locale !== activeLocale.value
-      || resolveTenantLocalePath(page.path, [activeLocale.value]).sourcePath !== pagePath.value) {
-      throw createError({ statusCode: 500, statusMessage: 'Blawby layout did not provide the requested page' })
-    }
-    return { success: true as const, page }
-  }
   if (import.meta.server) {
     if (!requestEvent) throw createError({ statusCode: 500, statusMessage: 'Request context unavailable' })
     const [{ cloudflareEnv }, { getPublicTenantPageForPath }] = await Promise.all([
@@ -134,7 +125,7 @@ const secondaryAction = computed(() => {
 // authored scheduling links; unavailable products keep the site's scheduling URL.
 function serviceContent(canBook: boolean): PublicTenantPage {
   if (!page.value) throw createError({ statusCode: 500, statusMessage: 'Service document was not returned' })
-  const schedulePath = blawbyDocument?.value.shell.consultation.schedule_path
+  const schedulePath = consultation.value?.schedule_path
   return { ...page.value, blocks: page.value.blocks.filter(block => block.type !== 'hero').map(block => {
     const data = { ...block.data }
     if (canBook && (block.type === 'booking_cta' || block.type === 'contact_cta' || block.type === 'cta') && schedulePath && data.url === schedulePath) data.url = '#consultations'

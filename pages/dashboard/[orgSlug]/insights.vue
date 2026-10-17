@@ -9,23 +9,32 @@
         :description="loadError"
         :actions="[{ label: 'Try again', onClick: () => refresh() }]"
       />
-      <UTabs
+      <DashboardFilterPills
+        id="insights-channel"
         v-model="tab"
+        label="Analytics view"
         :items="tabItems"
-        :content="false"
-        class="w-full"
+        role="tablist"
+        class="mb-8"
       />
 
       <div v-if="tab === 'views' || tab === 'instagram'" class="flex flex-wrap items-center justify-end gap-4">
         <p v-if="tab === 'views' && analytics" class="mr-auto text-sm text-muted" data-testid="insights-period">
           <time :datetime="analytics.period.startDate">{{ formatDate(analytics.period.startDate) }}</time> – <time :datetime="analytics.period.endDate">{{ formatDate(analytics.period.endDate) }}</time>
         </p>
-        <div class="inline-flex gap-0.5 rounded-lg bg-elevated p-0.5" role="group" aria-label="Date range">
-          <button v-for="days in [7, 30]" :key="days" type="button"
-            :aria-pressed="activeDays === days" :disabled="loading || !analytics"
-            class="rounded-md px-3 py-1 text-sm transition-colors disabled:opacity-50"
-            :class="activeDays === days ? 'bg-accented text-highlighted' : 'text-muted hover:text-highlighted'"
-            @click="applyPreset(days)">{{ days }}d</button>
+        <div class="flex items-center gap-2" role="group" aria-label="Date range">
+          <UButton
+            v-for="days in [7, 30]"
+            :key="days"
+            :label="`${days}d`"
+            color="neutral"
+            :variant="activeDays === days ? 'solid' : 'outline'"
+            class="h-10 rounded-full px-4 text-sm font-normal"
+            :aria-pressed="activeDays === days"
+            :disabled="loading || !analytics"
+            :data-testid="`insights-range-${days}d`"
+            @click="applyPreset(days)"
+          />
         </div>
       </div>
 

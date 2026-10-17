@@ -22,16 +22,16 @@
       :organization="tenantChromeOrganization"
       :locations="locations"
       :sections="shellSections"
-      :consultation="blawbyConsultation"
-      :can-schedule="blawbyCanSchedule"
-      :page-links="blawbyPageLinks"
+      :consultation="shellConsultation"
+      :can-schedule="shellCanSchedule"
+      :page-links="shellPageLinks"
     />
 
     <main class="grow" :data-route-shell="route.path">
       <slot />
       <!-- A firm's articles carry its legal disclaimer, under every article and index -->
-      <p v-if="route.meta.articleCollection && blawbyCompliance?.disclaimer" class="tenant-container mb-12 text-sm italic text-muted">
-        {{ blawbyCompliance.disclaimer }}
+      <p v-if="route.meta.articleCollection && shellCompliance?.disclaimer" class="tenant-container mb-12 text-sm italic text-muted">
+        {{ shellCompliance.disclaimer }}
       </p>
     </main>
 
@@ -40,18 +40,15 @@
       :locations="footerLocations"
       :error="bootstrapError"
       :sections="shellSections"
-      :compliance="blawbyCompliance"
-      :page-links="blawbyPageLinks"
+      :compliance="shellCompliance"
+      :page-links="shellPageLinks"
     />
   </div>
 </template>
 
 <script setup lang="ts">
-import type { Ref } from 'vue'
 import tenantCriticalCss from '~/assets/css/tenant-critical.css?raw'
 import '~/assets/css/tenant-entry.css'
-import type { PublicBlawbyRouteData } from '~/types/blawby'
-import type { BlawbyDocumentPayload } from '~/utils/blawby-document-contract'
 
 const route = useRoute()
 const hydrated = ref(false)
@@ -62,36 +59,36 @@ const { template } = organization
 const isBlawby = computed(() => template.slug === 'blawby')
 
 const { locale: i18nLocale } = useI18n()
-const publicLocale = useState<string>('public-locale', () => i18nLocale.value || 'en')
-const activeLocale = computed(() => isBlawby.value ? publicLocale.value : (i18nLocale.value || 'en'))
+const activeLocale = computed(() => i18nLocale.value || 'en')
 
 const isHome = computed(() => route.path === '/'
   || (activeLocale.value !== 'en' && route.path === `/${activeLocale.value}`)
-  || (isBlawby.value && /^\/preview\/(?:site|draft)\/[^/]+\/?$/.test(route.path)))
+  || (/^\/preview\/(?:site|draft)\/[^/]+\/?$/.test(route.path)))
 
 const { fontPreset, paletteStyle } = usePublicSiteBrand()
 
-// ── Blawby Shell State ───────────────────────────────────────
-let blawbyDocument: Ref<BlawbyDocumentPayload> | null = null
-if (isBlawby.value) {
-  const blawbyRoutePath = computed(() => resolveTenantLocalePath(
-    route.path,
-    publicLocale.value === 'en' ? [] : [publicLocale.value],
-  ).sourcePath)
-  const target = resolveBlawbyRouteTarget(blawbyRoutePath.value)
-  const { data: document } = await useBlawbyDocument(target.recipe, target.slug)
-  if (target.recipe !== 'links' && target.recipe !== 'experiences') {
-    useState<PublicBlawbyRouteData['localeRepresentations']>('public-locale-representations', () => []).value = document.value.route.localeRepresentations
-  }
-  provide('blawby-document', document)
-  blawbyDocument = document
-}
+// ── Universal Shell State ─────────────────────────────────────
+const shell = useOrganizationShellState()
+if (import.meta.server) await shell.ready
+const locations = computed(() => shell.locations.value)
+const bootstrapError = computed(() => shell.error.value)
+const shellOrganization = computed(() => shell.organization.value)
+const shellSections = computed(() => shell.sections.value)
+const shellConsultation = computed(() => shell.consultation.value)
+const shellCanSchedule = computed(() => shell.canSchedule.value)
+const shellCompliance = computed(() => shell.compliance.value)
+const shellPageLinks = computed(() => shell.pageLinks.value)
+const shellSearchConsoleVerification = computed(() => shell.searchConsoleVerification.value)
 
-const blawbyIdentity = computed(() => blawbyDocument?.value?.shell.identity ?? null)
-const blawbyConsultation = computed(() => blawbyDocument?.value?.shell.consultation ?? null)
-const blawbyCanSchedule = computed(() => blawbyDocument?.value?.shell.canSchedule ?? false)
-const blawbyCompliance = computed(() => blawbyDocument?.value?.shell.compliance ?? null)
-const blawbyPageLinks = computed(() => blawbyDocument?.value?.shell.pageLinks ?? [])
+const tenantChromeOrganization = computed(() => {
+  if (shellOrganization.value) {
+    return {
+      ...shellOrganization.value,
+      vertical: organization.vertical,
+    }
+  }
+  return null
+})
 
 useHead(() => {
   return {
@@ -106,31 +103,13 @@ useHead(() => {
       }]),
     ],
     style: isHome.value ? [{ innerHTML: tenantCriticalCss, tagPriority: 'critical' }] : [],
-    meta: isBlawby.value && blawbyDocument?.value?.shell.searchConsoleVerification
-      ? [{ name: 'google-site-verification', content: blawbyDocument.value.shell.searchConsoleVerification }]
+    meta: shellSearchConsoleVerification.value
+      ? [{ name: 'google-site-verification', content: shellSearchConsoleVerification.value }]
       : [],
   }
 })
 
-if (import.meta.dev && !isBlawby.value) useDebugLCP()
-
-// ── Universal Shell State ─────────────────────────────────────
-const shell = isBlawby.value ? null : useOrganizationShellState()
-if (import.meta.server && shell) await shell.ready
-const locations = computed(() => shell?.locations.value ?? [])
-const bootstrapError = computed(() => shell?.error.value ?? null)
-const shellOrganization = computed(() => shell?.organization.value ?? null)
-const shellSections = computed(() => shell?.sections.value ?? null)
-
-const tenantChromeOrganization = computed(() => {
-  if (blawbyIdentity.value) {
-    return {
-      ...blawbyIdentity.value,
-      vertical: organization.vertical,
-    }
-  }
-  return shellOrganization.value
-})
+if (import.meta.dev) useDebugLCP()
 
 const scopedLocationSlug = computed(() => {
   const path = route.path

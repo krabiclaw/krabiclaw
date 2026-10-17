@@ -285,14 +285,11 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
         address_visibility: { type: 'string', enum: ['visible', 'hidden'], description: 'Show or hide office addresses on service websites.' },
         default_currency: { type: 'string', enum: [...SUPPORTED_CURRENCIES], description: 'ISO 4217 code. Existing prices keep their stored currency and amount; nothing is converted.' },
         timezone: { ...timezoneSchema, description: 'The business\'s reporting timezone: the day boundaries of its analytics. Bookings keep their location\'s or provider\'s timezone.' },
-        status: { type: 'string', enum: ['active', 'inactive'], description: 'Website status: active is Live (public and indexable), inactive is Draft (preview only). A suspended website cannot be changed.' },
+        status: { type: 'string', enum: ['published', 'draft', 'active', 'inactive'], description: 'Website status: published/active is Live (public and indexable), draft/inactive is Draft (preview only). A suspended website cannot be changed.' },
         press_email: { type: 'string' },
         partnerships_email: { type: 'string' },
         catering_email: { type: 'string' },
         careers_email: { type: 'string' },
-        seo_title: { type: ['string', 'null'], description: 'Optional site-wide default SEO title override for the homepage and any page without its own override. Falls back to name if unset.' },
-        seo_description: { type: ['string', 'null'], description: 'Optional site-wide default SEO description override. Falls back to brand_description if unset.' },
-        canonical_url: { type: ['string', 'null'], description: 'Optional site-wide canonical URL override for the homepage.' },
       },
       outputSchema: {
         type: 'object',
@@ -427,6 +424,11 @@ export async function handleOrganizationsTools(ctx: McpExecutorContext): Promise
         string,
         unknown
       >;
+      if (updates.status === 'published') {
+        updates.status = 'active';
+      } else if (updates.status === 'draft') {
+        updates.status = 'inactive';
+      }
       if (updates.palette && typeof updates.palette === 'object') updates.palette = resolvePaletteColorNames(updates.palette as SitePalettePatch);
       const result = await updateOrganizationSettingsFields(
         organization.db,

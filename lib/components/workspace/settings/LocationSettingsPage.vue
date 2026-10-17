@@ -59,7 +59,7 @@ export interface BusinessLocation {
  * rest are the gear's.
  */
 export const HUB_KEYS = ['name', 'description', 'hours', 'address', 'contact', 'reservations'] as const
-export const SETTINGS_KEYS = ['status', 'slug'] as const
+export const SETTINGS_KEYS = ['status'] as const
 export type LocationEditorKey = typeof HUB_KEYS[number] | typeof SETTINGS_KEYS[number]
 
 /** `/locations/new`: the location record before it exists. */
@@ -262,13 +262,11 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     detailsForm.status = loc.status
     }
 
-  const slugSummary = computed(() => location.value?.slug?.trim() || 'Not set')
-  const statusSummary = computed(() => location.value?.status === 'active' ? 'Active' : 'Hidden from the public site')
+  const statusSummary = computed(() => location.value?.status === 'active' ? 'Published' : 'Draft')
   const navigationGroups = computed(() => [{
     id: 'settings',
     items: [
       { id: 'status', label: 'Status', summary: statusSummary.value, to: `${settingsBase.value}/status` },
-      { id: 'slug', label: 'Link', summary: slugSummary.value, to: `${settingsBase.value}/slug` },
       { id: 'languages', label: 'Languages', summary: 'Translate the name, description and address', to: `${settingsBase.value}?editMode=translations` },
     ],
   }])
@@ -281,7 +279,6 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   function editorSignature(key: string | null): string {
     switch (key) {
       case 'name': return JSON.stringify(detailsForm.title)
-      case 'slug': return JSON.stringify(detailsForm.slug)
       case 'address': return JSON.stringify([detailsForm.addressLines, detailsForm.regionCode, detailsForm.locality, detailsForm.sublocality, detailsForm.administrativeArea, detailsForm.postalCode])
       case 'contact': return JSON.stringify([detailsForm.phone, detailsForm.email])
       case 'status': return JSON.stringify(detailsForm.status)
@@ -293,7 +290,6 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   }
   const validationMessage = computed(() => {
     if (key === 'name' && !detailsForm.title.trim()) return 'Enter a location name.'
-    if (key === 'slug' && !detailsForm.slug.trim()) return 'Enter a location slug.'
     if (key === 'contact') {
       if (detailsForm.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(detailsForm.email)) return 'Enter a valid email address.'
     }
@@ -394,10 +390,6 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     }
     if (key === 'name') {
       await patchLocation({ title: detailsForm.title.trim() })
-      return
-    }
-    if (key === 'slug') {
-      await patchLocation({ slug: detailsForm.slug.trim() })
       return
     }
     if (key === 'address') {

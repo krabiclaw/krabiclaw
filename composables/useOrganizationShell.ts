@@ -59,6 +59,11 @@ export const useOrganizationShellState = () => {
   const googleMaps = computed(() => data.value?.googleMaps ?? null);
   // Before the shell loads no section is known to have anything on it.
   const sections = computed(() => data.value?.sections ?? null);
+  const consultation = computed(() => data.value?.consultation ?? null);
+  const canSchedule = computed(() => data.value?.canSchedule ?? false);
+  const compliance = computed(() => data.value?.compliance ?? null);
+  const pageLinks = computed(() => data.value?.pageLinks ?? []);
+  const searchConsoleVerification = computed(() => data.value?.searchConsoleVerification ?? null);
   const platformMessages = useState<Record<string, string> | null>('platform-locale-messages', () => null)
   watch(
     () => data.value?.platformMessages,
@@ -71,6 +76,11 @@ export const useOrganizationShellState = () => {
     organization: shellOrganization,
     googleMaps,
     sections,
+    consultation,
+    canSchedule,
+    compliance,
+    pageLinks,
+    searchConsoleVerification,
     data,
     pending,
     error,

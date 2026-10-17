@@ -175,7 +175,7 @@ const nameCharactersRemaining = computed(() => 50 - form.name.length)
 const descriptionCharactersRemaining = computed(() => 500 - form.brand_description.length)
 
 function explicitSummary(value: string | null | undefined, empty = 'Not set') { return value?.trim() || empty }
-const STATUS_LABELS: Record<OrganizationStatus, string> = { active: 'Live', inactive: 'Draft', suspended: 'Suspended' }
+const STATUS_LABELS: Record<OrganizationStatus, string> = { active: 'Published', inactive: 'Draft', suspended: 'Suspended' }
 const domainSummary = computed(() => dashboard.organization.value?.custom_domain || dashboard.organization.value?.public_url || 'Not connected')
 const CONSULTATION_MODE_SUMMARIES = { native: 'Online service selector', external_url: 'External scheduler', native_disabled: 'Selector hidden' } as const
 const brandItems = computed<EditorNavigationItem[]>(() => [
@@ -206,7 +206,6 @@ const settingsItems = computed<EditorNavigationItem[]>(() => [
   { id: 'domains', label: 'Domains', summary: domainSummary.value, icon: 'i-lucide-globe-2', to: `${settingsPath.value}/domains` },
   { id: 'localization', label: 'Languages', summary: 'Languages the site is published in', icon: 'i-lucide-languages', to: `${settingsPath.value}/localization` },
   { id: 'currency', label: 'Currency', summary: explicitSummary(loadedSettings.value?.default_currency), icon: 'i-lucide-coins', to: `${settingsPath.value}/currency` },
-  { id: 'search', label: 'Search appearance', summary: explicitSummary(loadedSettings.value?.seo_title), icon: 'i-lucide-search', to: `${settingsPath.value}/search` },
   ...(loadedSettings.value?.consultation_mode
     ? [{ id: 'booking', label: 'Schedule page', summary: CONSULTATION_MODE_SUMMARIES[loadedSettings.value.consultation_mode], icon: 'i-lucide-calendar-check', to: `${settingsPath.value}/booking` }]
     : []),

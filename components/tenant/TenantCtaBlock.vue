@@ -23,7 +23,6 @@
 <script setup lang="ts">
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
-import type { BlawbyDocumentPayload } from '~/utils/blawby-document-contract'
 import { blockText, blockTextOrNull, blockMedia, isInternalRoute } from '~/utils/tenant-page-block-data'
 
 const props = defineProps<{
@@ -32,32 +31,32 @@ const props = defineProps<{
 }>()
 
 const { localePath, t } = useI18n()
+const { consultation, canSchedule } = useOrganizationShellState()
 const title = computed(() => blockText(props.block.data.title))
 const description = computed(() => blockTextOrNull(props.block.data.description))
-const document = inject<Ref<BlawbyDocumentPayload> | null>('blawby-document', null)
-const targetsSchedule = computed(() => Boolean(document?.value && blockText(props.block.data.url) === document.value.shell.consultation.schedule_path))
+const targetsSchedule = computed(() => Boolean(consultation.value && blockText(props.block.data.url) === consultation.value.schedule_path))
 
 const destination = computed(() => {
   const url = blockText(props.block.data.url)
-  if (targetsSchedule.value && document?.value) {
+  if (targetsSchedule.value && consultation.value) {
     if (props.page.recipe === 'schedule') {
-      if (!document.value.shell.canSchedule) return localePath('/contact')
-      if (document.value.shell.consultation.mode === 'native') return '#consultations'
-      return document.value.shell.consultation.external_url!
+      if (!canSchedule.value) return localePath('/contact')
+      if (consultation.value.mode === 'native') return '#consultations'
+      return consultation.value.external_url!
     }
-    if (!document.value.shell.canSchedule) return ''
+    if (!canSchedule.value) return ''
   }
   return url ? (isInternalRoute(url) ? localePath(url) : url) : ''
 })
 
-const label = computed(() => targetsSchedule.value && props.page.recipe === 'schedule' && document?.value && !document.value.shell.canSchedule ? t('site_pages.contact') : blockText(props.block.data.label))
+const label = computed(() => targetsSchedule.value && props.page.recipe === 'schedule' && consultation.value && !canSchedule.value ? t('site_pages.contact') : blockText(props.block.data.label))
 const priceLine = computed(() => blockTextOrNull(props.block.data.price_line))
 const notice = computed(() => blockTextOrNull(props.block.data.notice))
 const backgroundUrl = computed(() => blockMedia(props.block, 'background')[0]?.public_url ?? null)
 const featuredUrl = computed(() => blockMedia(props.block, 'featured')[0]?.public_url ?? null)
 
 const emit = defineEmits<{ click: [] }>()
-const { trackConsultationClick } = useOrganizationConversionTracking(() => document?.value?.shell.consultation)
+const { trackConsultationClick } = useOrganizationConversionTracking(consultation)
 
 function trackClick() {
   if (destination.value) {

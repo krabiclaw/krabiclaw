@@ -95,7 +95,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => [
   {
     id: 'review',
     items: [
-      { id: 'visibility', label: 'Visibility', summary: REVIEW_STATUS_LABELS[form.status], icon: 'i-lucide-eye', to: router.resolve({ path: `${recordPath.value}/visibility`, query: route.query }).fullPath },
+      { id: 'visibility', label: 'Status', summary: REVIEW_STATUS_LABELS[form.status], icon: 'i-lucide-activity', to: router.resolve({ path: `${recordPath.value}/visibility`, query: route.query }).fullPath },
     ],
   },
 ])
