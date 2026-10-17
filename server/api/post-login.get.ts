@@ -45,7 +45,7 @@ export default defineHandler(async (event) => {
       await activateSessionOrganization(event, env, route.organizationId)
     }
 
-    if (plan) {
+    if (plan && !redirectTarget) {
       if (route.kind === 'onboard') {
         throw new HTTPError({ statusCode: 409, message: 'An organization is required before choosing a billing plan' })
       }
@@ -54,7 +54,6 @@ export default defineHandler(async (event) => {
       if (route.kind === 'choose') {
         const chooseParams = new URLSearchParams()
         chooseParams.set('plan', plan)
-        if (redirectTarget) chooseParams.set('redirect', redirectTarget)
         return redirect(`${route.destination}?${chooseParams}`, 302)
       }
       return redirect(`${route.destination}/payments?tab=plan&plan=${encodeURIComponent(plan)}`, 302)

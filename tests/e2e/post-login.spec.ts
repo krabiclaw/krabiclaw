@@ -31,6 +31,19 @@ test('a verified user without an organization starts onboarding and can explicit
   expect(profile.headers().location).toBe('/dashboard/account/profile')
 })
 
+test('a signed-in owner resolves dashboard deep links with their query string even when a plan is supplied', async ({ request, baseURL }) => {
+  await loginAs(request, baseURL!, 'user-e2e-demo-owner')
+
+  const target = '/dashboard/app/products/menu?tab=specials&source=notification'
+  for (const plan of [undefined, 'growth']) {
+    const params = new URLSearchParams({ redirect: target })
+    if (plan) params.set('plan', plan)
+    const appDestination = await request.get(`/api/post-login?${params}`, { maxRedirects: 0 })
+    expect(appDestination.status()).toBe(302)
+    expect(appDestination.headers().location).toBe('/dashboard/ember-slice-demo/products/menu?tab=specials&source=notification')
+  }
+})
+
 // One journey, run once. The route matrix, the redirects and the SSR HTML do
 // not change with viewport width; only the header does, so the narrow pass is
 // the header checks that actually differ rather than a second full traversal.
