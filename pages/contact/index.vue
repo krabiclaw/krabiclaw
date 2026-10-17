@@ -1,6 +1,6 @@
 <template>
   <NuxtLayout :name="template.layout">
-    <BlawbyContact v-if="template.slug === 'blawby'" />
+    <TenantContact v-if="template.slug === 'blawby'" />
 
     <!-- Brand contact page (tenant sites only — the platform marketing contact page was retired in favor of /help) -->
     <div v-else>
@@ -36,7 +36,7 @@
               </div>
 
               <div class="grid gap-6 sm:grid-cols-2">
-                <SayaFormField
+                <TenantFormField
                   v-slot="{ id, describedBy, invalid }"
                   :label="t('saya.contact_page.your_name')"
                   name="name"
@@ -44,8 +44,8 @@
                   :error="tenantFieldError('name')"
                 >
                   <input :id="id" v-model="tenantForm.name" type="text" :class="inputClass" :aria-describedby="describedBy" :aria-invalid="invalid" />
-                </SayaFormField>
-                <SayaFormField
+                </TenantFormField>
+                <TenantFormField
                   v-slot="{ id, describedBy, invalid }"
                   :label="t('saya.contact_page.email')"
                   name="email"
@@ -53,10 +53,10 @@
                   :error="tenantFieldError('email')"
                 >
                   <input :id="id" v-model="tenantForm.email" type="email" :class="inputClass" :aria-describedby="describedBy" :aria-invalid="invalid" />
-                </SayaFormField>
+                </TenantFormField>
               </div>
 
-              <SayaFormField :label="t('saya.contact_page.what_about')" name="subject">
+              <TenantFormField :label="t('saya.contact_page.what_about')" name="subject">
                 <div class="mt-2 flex flex-wrap gap-2">
                   <button
                     v-for="opt in subjectOptions"
@@ -73,9 +73,9 @@
                     {{ opt.label }}
                   </button>
                 </div>
-              </SayaFormField>
+              </TenantFormField>
 
-              <SayaFormField
+              <TenantFormField
                 v-slot="{ id, describedBy, invalid }"
                 :label="t('saya.contact_page.your_message')"
                 name="message"
@@ -83,11 +83,11 @@
                 :error="tenantFieldError('message')"
               >
                 <textarea :id="id" v-model="tenantForm.message" rows="6" :class="inputClass" :aria-describedby="describedBy" :aria-invalid="invalid" />
-              </SayaFormField>
+              </TenantFormField>
 
-              <SayaButton type="submit" :loading="tenantSubmitting" :disabled="isDraftPreview">
+              <TenantButton type="submit" :loading="tenantSubmitting" :disabled="isDraftPreview">
                 {{ t('saya.contact_page.send_message') }}
-              </SayaButton>
+              </TenantButton>
             </form>
           </section>
 

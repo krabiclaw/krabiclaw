@@ -6,7 +6,7 @@
     collapses, the list moves into that header's menu: one navigation, not a
     second drawer beside the hamburger.
   -->
-  <NuxtLayout :name="template.slug">
+  <NuxtLayout :name="template.layout">
     <div class="mx-auto px-5 py-8 sm:px-8 lg:px-10" :class="[split.grid, isDocs ? 'docs-shell max-w-360' : 'max-w-7xl']">
       <aside class="hidden" :class="split.aside">
         <!-- Desktop search leads the sidebar; collapsed, it leads the header's menu. -->

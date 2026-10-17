@@ -54,7 +54,7 @@
               class="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
             >
             <div v-else class="flex h-full w-full items-center justify-center">
-              <SayaIcon name="map-pin" class="size-10 text-muted" />
+              <TenantIcon name="map-pin" class="size-10 text-muted" />
             </div>
           </div>
 
@@ -87,13 +87,13 @@
       <!-- Empty state -->
       <div v-else>
         <div class="border border-dashed border-default px-8 py-16 text-center">
-          <SayaIcon name="map-pin" class="mx-auto size-10 text-muted" />
+          <TenantIcon name="map-pin" class="mx-auto size-10 text-muted" />
           <p class="mt-4 text-sm text-muted">{{ locale === 'en' ? 'No locations are published yet.' : t('saya.common.temporarily_unavailable') }}</p>
         </div>
         <div v-if="isAuthenticated" class="mt-8 text-center">
-          <SayaButton to="/dashboard">
+          <TenantButton to="/dashboard">
             {{ locationsCopy.connectGoogleLocationsCta }}
-          </SayaButton>
+          </TenantButton>
         </div>
       </div>
     </div>
@@ -106,7 +106,7 @@ import { getTodayHoursLabel } from '~/shared/reservation-hours'
 import { addressPlaceName, formatPostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { publicLocationPath } from '~/utils/product-presentation'
 
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const { organization } = useTenantOrganization()
 const session = authClient.useSession()

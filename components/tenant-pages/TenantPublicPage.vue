@@ -9,7 +9,7 @@
   <template v-if="page">
     <ProductDetailPage v-if="linkedOffer" :key="`${linkedOffer.product.id}:${linkedOffer.location?.id ?? 'online'}:${Boolean(linkedOffer.scopeRequired)}`" :organization-id="organizationId" :organization-name="linkedOffer.brandName" :vertical="linkedOffer.product.kind === 'service' ? 'service' : linkedOffer.vertical" :product="linkedOffer.product" :booking="linkedOffer.booking" :location="linkedOffer.location" :locations="linkedOffer.locations" :online-available="linkedOffer.onlineAvailable" :scope-required="linkedOffer.scopeRequired" :currency="linkedOffer.currency" :page-document="page" :collection-name="linkedOffer.collectionName" :presentation="presentationForProduct(linkedOffer.vertical, linkedOffer.product, organization.theme_id)" :reviews="linkedOffer.reviews" :sessions="linkedOffer.sessions" :collection-siblings="linkedOffer.collectionSiblings" :stay-checkout-available="linkedOffer.stayCheckoutAvailable">
       <template #actions>
-        <BlawbyButton v-if="secondaryAction" class="mt-5" variant="outline" :to="secondaryAction.url">{{ secondaryAction.label }}</BlawbyButton>
+        <TenantButton v-if="secondaryAction" class="mt-5" variant="outline" :to="secondaryAction.url">{{ secondaryAction.label }}</TenantButton>
       </template>
       <template #content="{ canBook }">
         <TenantPageRenderer :page="serviceContent(canBook)" />

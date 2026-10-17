@@ -4,7 +4,7 @@
 
     <template v-if="location">
       <!-- Sub-nav (Level 2) -->
-      <SayaSubNav 
+      <TenantSubNav 
         :location-slug="slug" 
         active="photos" 
       />
@@ -25,7 +25,7 @@
 
 
     <!-- Category filter tabs -->
-    <SayaFilterTabs
+    <TenantFilterTabs
       v-model="activeCategory"
       :tabs="cats"
     />
@@ -71,7 +71,7 @@
 
 <script setup lang="ts">
 const { localePath, t } = useI18n()
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const route = useRoute()
 const { organization } = useTenantOrganization()

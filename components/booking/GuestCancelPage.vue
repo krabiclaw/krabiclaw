@@ -6,7 +6,7 @@
 
     <div class="mx-auto max-w-xl px-4 pb-24 text-center">
       <template v-if="pending">
-        <SayaIcon name="arrow-path" class="mx-auto size-12 animate-spin text-muted" />
+        <TenantIcon name="arrow-path" class="mx-auto size-12 animate-spin text-muted" />
         <p class="mt-4 text-muted">{{ copy('checking') }}</p>
       </template>
 
@@ -14,7 +14,7 @@
         <div v-if="!cancelled" class="rounded-3xl border border-default bg-elevated p-12 shadow-sm">
           <div class="mb-6 flex justify-center">
             <div class="flex size-16 items-center justify-center rounded-full bg-red-500/10 text-red-500">
-              <SayaIcon name="calendar-days" class="size-10" />
+              <TenantIcon name="calendar-days" class="size-10" />
             </div>
           </div>
           <h2 class="saya-display saya-italic text-3xl">{{ copy('cancel_visit') }}</h2>
@@ -27,34 +27,34 @@
           </div>
           <p v-if="cancelError" class="mt-4 text-sm text-error">{{ cancelError }}</p>
           <div class="mt-10 flex flex-col gap-3">
-            <SayaButton color="error" size="lg" block :loading="loading" @click="handleCancel">
+            <TenantButton color="error" size="lg" block :loading="loading" @click="handleCancel">
               {{ copy('confirm') }}
-            </SayaButton>
-            <SayaButton :to="localePath('/')" variant="ghost" size="lg" block>{{ copy('keep') }}</SayaButton>
+            </TenantButton>
+            <TenantButton :to="localePath('/')" variant="ghost" size="lg" block>{{ copy('keep') }}</TenantButton>
           </div>
         </div>
 
         <div v-else class="rounded-3xl border border-default bg-muted/20 p-12">
           <div class="mb-6 flex justify-center">
             <div class="flex size-16 items-center justify-center rounded-full bg-zinc-500/10 text-zinc-500">
-              <SayaIcon name="check-circle" class="size-10" />
+              <TenantIcon name="check-circle" class="size-10" />
             </div>
           </div>
           <h2 class="saya-display saya-italic text-3xl">{{ copy('cancelled_title') }}</h2>
           <p class="mt-4 text-muted">{{ t(`saya.${keyPrefix}.cancelled_desc`, { date: readableDate }) }}</p>
           <p v-if="cancelError" class="mt-4 text-sm text-error">{{ cancelError }}</p>
           <div class="mt-10">
-            <SayaButton v-if="booking.can_retry_cancellation && !cancellationSubmitted" class="mb-3" size="lg" block :loading="loading" @click="handleCancel">{{ t('saya.reservation_cancel.retry_refund') }}</SayaButton>
-            <SayaButton :to="localePath('/')" variant="soft">{{ copy('back_home') }}</SayaButton>
+            <TenantButton v-if="booking.can_retry_cancellation && !cancellationSubmitted" class="mb-3" size="lg" block :loading="loading" @click="handleCancel">{{ t('saya.reservation_cancel.retry_refund') }}</TenantButton>
+            <TenantButton :to="localePath('/')" variant="soft">{{ copy('back_home') }}</TenantButton>
           </div>
         </div>
       </template>
 
       <div v-else class="rounded-3xl border border-default bg-muted/20 p-12">
-        <SayaIcon name="exclamation-triangle" class="mx-auto size-12 text-error" />
+        <TenantIcon name="exclamation-triangle" class="mx-auto size-12 text-error" />
         <h2 class="mt-6 text-xl font-bold">{{ copy('invalid_link') }}</h2>
         <p class="mt-2 text-muted">{{ copy('invalid_link_desc') }}</p>
-        <SayaButton :to="startOverHref" variant="soft" class="mt-10">{{ copy('make_new') }}</SayaButton>
+        <TenantButton :to="startOverHref" variant="soft" class="mt-10">{{ copy('make_new') }}</TenantButton>
       </div>
     </div>
   </div>

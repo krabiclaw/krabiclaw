@@ -6,12 +6,12 @@
     </p>
     <div class="dev-perf-shell-frame saya-theme">
       <UTheme :ui="{}">
-        <LazySayaHeader :organization="null" :locations="[]" :sections="null" />
+        <LazyTenantHeader :organization="null" :locations="[]" :sections="null" />
         <main class="dev-perf-shell-body">
           <h3>Static body</h3>
           <p>No production tenant page content is rendered here.</p>
         </main>
-        <LazySayaFooter
+        <LazyTenantFooter
           :organization="null"
           :locations="[]"
           :locales="[]"

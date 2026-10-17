@@ -86,9 +86,9 @@
 
     <!-- Continue button -->
     <div class="pt-6">
-      <SayaButton size="lg" block :disabled="!modelValue" @click="$emit('next')">
+      <TenantButton size="lg" block :disabled="!modelValue" @click="$emit('next')">
         {{ t('saya.experience_detail.continue') }}
-      </SayaButton>
+      </TenantButton>
     </div>
   </div>
 </template>

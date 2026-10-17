@@ -10,7 +10,7 @@
           <h3>Static body</h3>
           <p>The Saya footer is the variable.</p>
         </main>
-        <LazySayaFooter
+        <LazyTenantFooter
           :organization="null"
           :locations="[]"
           :error="null"

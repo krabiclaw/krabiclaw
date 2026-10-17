@@ -16,13 +16,13 @@
         <p class="font-semibold leading-tight text-default">{{ isStay ? t('stay.price_per_night', { price: priceLabel }) : priceLabel }}</p>
         <p v-if="isStay && stayBooking.quote.value" class="text-xs text-muted">{{ stayBooking.rangeLabel.value }}</p>
       </div>
-      <SayaButton v-if="canOrderExternally" class="shrink-0" :href="product.order_url!" target="_blank" rel="noopener noreferrer" @click="recordExternalOrderClick">{{ externalActionLabel }}</SayaButton>
-      <SayaButton v-else-if="canEnquire" class="shrink-0" :to="enquiryPath">
+      <TenantButton v-if="canOrderExternally" class="shrink-0" :href="product.order_url!" target="_blank" rel="noopener noreferrer" @click="recordExternalOrderClick">{{ externalActionLabel }}</TenantButton>
+      <TenantButton v-else-if="canEnquire" class="shrink-0" :to="enquiryPath">
         {{ t('saya.experience_detail.enquire') }}
-      </SayaButton>
-      <SayaButton v-else class="shrink-0" control-id="product-booking-toggle" @click="openBooking">
+      </TenantButton>
+      <TenantButton v-else class="shrink-0" control-id="product-booking-toggle" @click="openBooking">
         {{ bookingLabel }}
-      </SayaButton>
+      </TenantButton>
     </div>
 
     <article :class="booking || isStay ? 'mx-auto max-w-7xl px-4 pb-28 sm:px-6 lg:px-8 lg:pb-20' : 'mx-auto max-w-7xl px-4 pb-20 sm:px-6 lg:px-8'">
@@ -38,7 +38,7 @@
           <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
             <template v-if="averageRating">
               <span class="inline-flex items-center gap-1 font-semibold text-default">
-                <SayaIcon name="star" solid class="size-4" />{{ averageRating }}
+                <TenantIcon name="star" solid class="size-4" />{{ averageRating }}
               </span>
               <span aria-hidden="true">·</span>
               <span class="underline">{{ reviewCountLabel }}</span>
@@ -59,7 +59,7 @@
           <div class="mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-sm text-muted">
               <template v-if="averageRating">
                 <span class="inline-flex items-center gap-1 font-medium text-default">
-                  <SayaIcon name="star" solid class="size-4" />{{ averageRating }}
+                  <TenantIcon name="star" solid class="size-4" />{{ averageRating }}
                 </span>
                 <span aria-hidden="true">·</span>
                 <span>{{ reviewCountLabel }}</span>
@@ -73,7 +73,7 @@
               :key="fact.label"
               class="inline-flex items-center gap-1.5 rounded-full border border-default bg-elevated px-3 py-1 text-xs font-medium text-muted"
             >
-              <SayaIcon :name="fact.icon" class="size-3.5" />
+              <TenantIcon :name="fact.icon" class="size-3.5" />
               {{ fact.label }}
             </span>
           </div>
@@ -104,14 +104,14 @@
           <!-- Key highlights for Stays -->
           <div v-if="isStay && !compact" class="border-t border-default py-6 space-y-4">
             <div class="flex items-start gap-4">
-              <SayaIcon name="clock" class="size-5 text-default shrink-0 mt-0.5" />
+              <TenantIcon name="clock" class="size-5 text-default shrink-0 mt-0.5" />
               <div>
                 <p class="font-medium text-default text-sm">{{ t('stay.check_in_after', { time: formatTime(product.stay!.check_in_time, locale) }) }}</p>
                 <p class="text-xs text-muted">{{ t('stay.check_out_before', { time: formatTime(product.stay!.check_out_time, locale) }) }}</p>
               </div>
             </div>
             <div v-if="stayCancellationPolicyLabel" class="flex items-start gap-4">
-              <SayaIcon name="calendar-days" class="size-5 text-default shrink-0 mt-0.5" />
+              <TenantIcon name="calendar-days" class="size-5 text-default shrink-0 mt-0.5" />
               <div>
                 <p class="font-medium text-default text-sm">{{ stayCancellationPolicyLabel }}</p>
                 <p class="text-xs text-muted">{{ stayCheckoutAvailable ? t('stay.charged_in_full') : t('stay.enquiry_note') }}</p>
@@ -129,7 +129,7 @@
             <h2 class="saya-display text-2xl text-default sm:text-3xl">What this place offers</h2>
             <div class="mt-5 grid grid-cols-2 gap-4">
               <div v-for="amenity in stayAmenitiesList" :key="amenity.code" class="flex items-center gap-3">
-                <SayaIcon :name="amenity.icon" class="size-5 shrink-0 text-muted" />
+                <TenantIcon :name="amenity.icon" class="size-5 shrink-0 text-muted" />
                 <span class="text-sm text-default">{{ amenity.label }}</span>
               </div>
             </div>
@@ -147,9 +147,9 @@
           <section v-if="canBook && !enquiryOnly && !isStay" :id="compact ? undefined : 'consultations'" class="border-t border-default pt-8 scroll-mt-32">
             <div class="flex flex-wrap items-baseline justify-between gap-4">
               <h2 class="saya-display text-2xl text-default sm:text-3xl">{{ t('saya.experience_detail.upcoming_availability') }}</h2>
-              <SayaButton v-if="upcomingSessions.length" variant="ghost" control-id="product-booking-toggle" @click="openBooking">
+              <TenantButton v-if="upcomingSessions.length" variant="ghost" control-id="product-booking-toggle" @click="openBooking">
                 {{ t('saya.experience_detail.see_all_dates') }} →
-              </SayaButton>
+              </TenantButton>
             </div>
             <!-- Sessions win over the spinner: the page is served with them, so
                  a refresh in flight never blanks dates a reader can already see.
@@ -166,9 +166,9 @@
                     <template v-if="session.remaining !== null && vertical !== 'service'"> · {{ t('saya.experience_detail.left', { count: session.remaining }) }}</template>
                   </p>
                 </div>
-                <SayaButton control-id="product-booking-toggle" @click="openBookingAt(session)">
+                <TenantButton control-id="product-booking-toggle" @click="openBookingAt(session)">
                   {{ vertical === 'service' ? t('saya.experience_detail.select_time') : t('saya.experience_detail.book') }}
-                </SayaButton>
+                </TenantButton>
               </li>
             </ul>
             <p v-else-if="sessionsPending" class="mt-4 text-sm text-muted">{{ t('saya.experience_detail.processing') }}</p>
@@ -180,7 +180,7 @@
               <h2 class="saya-display text-2xl text-default sm:text-3xl">{{ t('saya.experience_detail.included') }}</h2>
               <ul class="mt-4 space-y-2">
                 <li v-for="item in includedItems" :key="item" class="flex items-start gap-2 text-sm leading-6 text-muted">
-                  <SayaIcon name="check-circle" class="mt-1 size-4 shrink-0 text-primary" />{{ item }}
+                  <TenantIcon name="check-circle" class="mt-1 size-4 shrink-0 text-primary" />{{ item }}
                 </li>
               </ul>
             </div>
@@ -188,7 +188,7 @@
               <h2 class="saya-display text-2xl text-default sm:text-3xl">{{ t('saya.experience_detail.what_to_bring') }}</h2>
               <ul class="mt-4 space-y-2">
                 <li v-for="item in whatToBring" :key="item" class="flex items-start gap-2 text-sm leading-6 text-muted">
-                  <SayaIcon name="shopping-bag" class="mt-1 size-4 shrink-0 text-primary" />{{ item }}
+                  <TenantIcon name="shopping-bag" class="mt-1 size-4 shrink-0 text-primary" />{{ item }}
                 </li>
               </ul>
             </div>
@@ -198,7 +198,7 @@
             <h2 class="saya-display text-2xl text-default sm:text-3xl">{{ isStay ? t('stay.where_youll_be') : t('saya.experience_detail.where_youll_meet') }}</h2>
             <div class="mt-5 overflow-hidden rounded-xl border border-default bg-elevated">
               <div class="flex items-start gap-4 p-6">
-                <SayaIcon name="map-pin" class="mt-0.5 size-5 shrink-0 text-primary" />
+                <TenantIcon name="map-pin" class="mt-0.5 size-5 shrink-0 text-primary" />
                 <div class="min-w-0">
                   <p class="font-semibold text-default">{{ location?.title ?? organizationName }}</p>
                   <p v-if="addressLine" class="mt-1 text-sm text-muted">{{ addressLine }}</p>
@@ -212,7 +212,7 @@
                     class="mt-2 inline-flex items-center gap-1 text-xs text-primary hover:underline"
                   >
                     {{ t('saya.experience_detail.open_in_maps') }}
-                    <SayaIcon name="arrow-top-right-on-square" class="size-3" />
+                    <TenantIcon name="arrow-top-right-on-square" class="size-3" />
                   </a>
                 </div>
               </div>
@@ -254,7 +254,7 @@
                 <p v-if="!enquiryOnly && vertical !== 'service' && !isStay" class="mt-1 text-sm text-muted">{{ t('saya.experience_detail.per_person') }}</p>
               </div>
               <div v-if="isStay && averageRating" class="flex items-center gap-1 text-xs font-semibold text-default">
-                <SayaIcon name="star" solid class="size-3.5" />
+                <TenantIcon name="star" solid class="size-3.5" />
                 <span>{{ averageRating }}</span>
                 <span class="text-muted font-normal">({{ reviews.length }})</span>
               </div>
@@ -280,13 +280,13 @@
             </div>
 
             <div class="pt-1">
-              <SayaButton v-if="canOrderExternally" block :href="product.order_url!" target="_blank" rel="noopener noreferrer" @click="recordExternalOrderClick">{{ externalActionLabel }}</SayaButton>
-              <SayaButton v-else-if="canEnquire" block :to="enquiryPath">
+              <TenantButton v-if="canOrderExternally" block :href="product.order_url!" target="_blank" rel="noopener noreferrer" @click="recordExternalOrderClick">{{ externalActionLabel }}</TenantButton>
+              <TenantButton v-else-if="canEnquire" block :to="enquiryPath">
                 {{ t('saya.experience_detail.enquire') }}
-              </SayaButton>
-              <SayaButton v-else block size="lg" control-id="product-booking-toggle" class="w-full font-semibold" @click="openBooking">
+              </TenantButton>
+              <TenantButton v-else block size="lg" control-id="product-booking-toggle" class="w-full font-semibold" @click="openBooking">
                 {{ bookingLabel }}
-              </SayaButton>
+              </TenantButton>
             </div>
 
             <p v-if="isStay && canBook" class="text-center text-xs text-muted">{{ stayCheckoutAvailable ? 'You won\'t be charged yet' : t('stay.enquiry_note') }}</p>
@@ -308,13 +308,13 @@
                 :key="fact.label"
                 class="inline-flex items-center gap-1.5 rounded-full border border-default bg-default px-3 py-1 text-xs font-medium text-muted"
               >
-                <SayaIcon :name="fact.icon" class="size-3.5" />
+                <TenantIcon :name="fact.icon" class="size-3.5" />
                 {{ fact.label }}
               </span>
             </div>
             <p v-if="vertical === 'service' && !isStay && !product.order_url" class="text-sm text-muted">{{ booking?.confirmation_mode === 'review' ? t('booking.review_notice') : t('booking.instant_notice') }}</p>
             <p v-if="nextSession" class="inline-flex items-center gap-2 text-sm text-muted">
-              <SayaIcon name="calendar-days" class="size-4" />
+              <TenantIcon name="calendar-days" class="size-4" />
               {{ sessionDayLabel(nextSession) }} · {{ sessionTimeLabel(nextSession) }}
             </p>
             <p v-if="!canBook && !canEnquire && !canOrderExternally" class="rounded-lg bg-default px-4 py-3 text-center text-sm font-semibold text-muted">
@@ -346,14 +346,14 @@
             <p v-if="product.description" class="mt-6 text-base sm:text-lg leading-relaxed text-muted">{{ product.description }}</p>
             <p v-if="!isAvailable" class="mt-6 font-semibold text-muted">{{ t('saya.common.temporarily_unavailable') }}</p>
             <div class="mt-8 flex flex-wrap items-center gap-5">
-              <SayaButton v-if="canEnquire" :to="enquiryPath">{{ t('saya.experience_detail.enquire') }}</SayaButton>
-              <SayaButton
+              <TenantButton v-if="canEnquire" :to="enquiryPath">{{ t('saya.experience_detail.enquire') }}</TenantButton>
+              <TenantButton
                 v-if="canOrderExternally"
                 :href="product.order_url!"
                 target="_blank"
                 rel="noopener noreferrer"
                 @click="recordExternalOrderClick"
-              >{{ externalActionLabel }}</SayaButton>
+              >{{ externalActionLabel }}</TenantButton>
               <NuxtLink
                 :to="localePath(presentation.collectionPath)"
                 class="border-b border-default pb-0.5 text-xs font-bold uppercase tracking-widest text-default no-underline transition hover:opacity-60"
@@ -428,11 +428,11 @@
         <div class="flex flex-wrap items-baseline gap-3">
           <h2 class="saya-display saya-italic text-3xl sm:text-4xl">{{ t('saya.footer.reviews') }}</h2>
           <span v-if="averageRating" class="inline-flex items-center gap-1 text-sm text-muted">
-            <SayaIcon name="star" solid class="size-4 text-default" />{{ averageRating }} · {{ reviewCountLabel }}
+            <TenantIcon name="star" solid class="size-4 text-default" />{{ averageRating }} · {{ reviewCountLabel }}
           </span>
         </div>
         <div class="mt-6 grid gap-6 sm:grid-cols-2">
-          <SayaReviewCard v-for="review in reviews" :key="review.id" :review="review" />
+          <TenantReviewCard v-for="review in reviews" :key="review.id" :review="review" />
         </div>
       </section>
     </article>
@@ -442,7 +442,7 @@
 </template>
 
 <script setup lang="ts">
-import type { SayaIconName } from '~/components/saya/SayaIcon.vue'
+import type { TenantIconName } from '~/components/tenant/TenantIcon.vue'
 import WhoYouMeet from '~/components/booking/WhoYouMeet.vue'
 import type { ProductPresentation, PublicProduct } from '~/server/types/products'
 import { useSchemaOrg } from '#imports'
@@ -458,7 +458,7 @@ import { EXPERIENCE_ATTRIBUTE_HANDLES, productDetailFields, productDetailKey, PR
 import type { PublicProductBooking, PublicProductLocation, PublicProductReview, PublicProductSession } from '~/server/utils/public-products'
 import { addressPlaceName, formatPostalAddress, schemaPostalAddress } from '~/utils/postal-address'
 import { formatTime } from '~/utils/timezone'
-import SayaReviewCard from '~/components/saya/SayaReviewCard.vue'
+import TenantReviewCard from '~/components/tenant/TenantReviewCard.vue'
 import BookingModal from '~/components/booking/BookingModal.vue'
 import ProductBookingSteps from '~/components/booking/ProductBookingSteps.vue'
 import StayBookingSteps from '~/components/booking/StayBookingSteps.vue'
@@ -542,7 +542,7 @@ const stayAmenitiesList = computed(() => {
       icon: (code.includes('work') ? 'briefcase'
         : code.includes('sparkles') ? 'sparkles'
         : code.includes('home') ? 'home'
-        : 'check-circle') as SayaIconName,
+        : 'check-circle') as TenantIconName,
     }
   })
 })

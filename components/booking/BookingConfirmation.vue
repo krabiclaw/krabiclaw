@@ -48,7 +48,7 @@
           <!-- eslint-disable-next-line vue/no-v-html -->
           <div v-html="nextStepsNotesHtml" />
         </div>
-        <SayaButton v-if="ctaLabel && ctaTo" :to="ctaTo" block class="mt-7">{{ ctaLabel }}</SayaButton>
+        <TenantButton v-if="ctaLabel && ctaTo" :to="ctaTo" block class="mt-7">{{ ctaLabel }}</TenantButton>
       </aside>
 
       <GuestAccountPrompt :email="guestEmail" />

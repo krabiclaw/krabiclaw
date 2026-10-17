@@ -9,8 +9,8 @@
       <h1 class="blawby-display mt-8 text-4xl font-bold text-[var(--blawby-primary)]">Message received</h1>
       <p class="mx-auto mt-4 max-w-xl leading-8 text-muted">Thank you for contacting us. Our team will review your message and reply as soon as possible.</p>
       <div class="mt-10 flex flex-wrap justify-center gap-3">
-        <BlawbyButton to="/">Back home</BlawbyButton>
-        <BlawbyButton to="/contact" variant="outline">Send another message</BlawbyButton>
+        <TenantButton to="/">Back home</TenantButton>
+        <TenantButton to="/contact" variant="outline">Send another message</TenantButton>
       </div>
       <GuestAccountPrompt class="mx-auto mt-12 max-w-xl" />
     </section>
@@ -20,7 +20,7 @@
         <div class="rounded-3xl border border-default bg-elevated p-10 text-center shadow-sm sm:p-12">
           <div class="mb-8 flex justify-center">
             <div class="flex size-20 items-center justify-center rounded-full bg-primary/10">
-              <SayaIcon name="check-circle" class="size-12 text-primary" />
+              <TenantIcon name="check-circle" class="size-12 text-primary" />
             </div>
           </div>
 
@@ -28,8 +28,8 @@
           <p class="mt-4 text-muted">{{ t('saya.contact_page.reply_within') }}</p>
 
           <div class="mt-8 flex flex-col gap-3">
-            <SayaButton to="/" variant="soft">{{ t('saya.contact_page.back_home') }}</SayaButton>
-            <SayaButton to="/contact" variant="ghost" size="md">{{ t('saya.contact_page.send_another') }}</SayaButton>
+            <TenantButton to="/" variant="soft">{{ t('saya.contact_page.back_home') }}</TenantButton>
+            <TenantButton to="/contact" variant="ghost" size="md">{{ t('saya.contact_page.send_another') }}</TenantButton>
           </div>
         </div>
         <GuestAccountPrompt class="mt-8" />

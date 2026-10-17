@@ -8,7 +8,7 @@
     </template>
 
     <template v-else-if="location">
-      <SayaSubNav :location-slug="slug" active="contact" />
+      <TenantSubNav :location-slug="slug" active="contact" />
 
       <!-- Page header -->
       <header class="mx-auto max-w-7xl px-4 pt-14 pb-10 sm:px-6 lg:px-8">
@@ -77,7 +77,7 @@
               referrerpolicy="no-referrer-when-downgrade"
             />
             <div v-else class="flex h-full w-full flex-col items-center justify-center gap-3">
-              <SayaIcon name="map-pin" class="size-8 text-muted" />
+              <TenantIcon name="map-pin" class="size-8 text-muted" />
               <span class="text-sm text-muted">{{ t('saya.location.map_synced') }}</span>
             </div>
           </div>
@@ -94,7 +94,7 @@
               rel="noopener noreferrer"
               class="inline-flex items-center gap-2 rounded-full bg-inverted px-4 py-2 text-[11px] font-medium uppercase tracking-widest text-inverted no-underline transition hover:opacity-80"
             >
-              <SayaIcon name="map-pin" class="size-3.5" />
+              <TenantIcon name="map-pin" class="size-3.5" />
               {{ t('saya.location.get_directions') }}
             </a>
             <a
@@ -148,7 +148,7 @@
       <section class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-8 px-4 py-24 sm:px-6 lg:px-8">
         <h3 class="saya-display-md saya-italic text-default">{{ t('saya.location.see_you_soon') }}</h3>
         <div class="flex flex-wrap gap-3">
-          <SayaButton v-if="locationCopy.ctaRoute" :to="localePath(locationCopy.ctaRoute)" size="lg">{{ locationCopy.reserveCta }}</SayaButton>
+          <TenantButton v-if="locationCopy.ctaRoute" :to="localePath(locationCopy.ctaRoute)" size="lg">{{ locationCopy.reserveCta }}</TenantButton>
           <a
             v-if="location.phone"
             :href="`tel:${location.phone}`"
@@ -161,9 +161,9 @@
     </template>
 
     <div v-else class="mx-auto max-w-xl px-4 py-24 text-center">
-      <SayaIcon name="map-pin" class="mx-auto mb-4 size-12 text-muted" />
+      <TenantIcon name="map-pin" class="mx-auto mb-4 size-12 text-muted" />
       <h1 class="saya-display-sm text-default">{{ t('saya.location.not_found') }}</h1>
-      <SayaButton to="/locations" class="mt-8">{{ t('saya.location.view_all_locations') }}</SayaButton>
+      <TenantButton to="/locations" class="mt-8">{{ t('saya.location.view_all_locations') }}</TenantButton>
     </div>
   </div>
 </template>
@@ -177,7 +177,7 @@ import { sanitizeHtmlForSsr } from '~/utils/markdown'
 
 const DOMPurify = import.meta.client ? await loadDomPurify() : { sanitize: sanitizeHtmlForSsr }
 
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const { locale, localePath, t } = useI18n()
 

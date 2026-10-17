@@ -1,5 +1,5 @@
 <template>
-  <NuxtLayout :name="isPlatform ? 'platform' : 'saya'">
+  <NuxtLayout :name="isPlatform ? 'platform' : 'tenant'">
     <TenantPublicPage v-if="isPlatform" path="/products" />
     <TenantProductCatalog v-else />
   </NuxtLayout>
