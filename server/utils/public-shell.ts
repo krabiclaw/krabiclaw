@@ -4,11 +4,14 @@ import { oncePerRequest } from '~/server/utils/request-scope'
 import type { H3Event } from 'nitro';
 import {  setHeader } from 'nitro/h3';
 import { cloudflareEnv } from '~/server/utils/api-response'
-import { executeBatch, queryAll, type BatchQuery } from '~/server/db'
+import { executeBatch, queryAll, queryFirst, type BatchQuery } from '~/server/db'
 import { buildPublicResourceCacheKey, getPublicResourceCache, putPublicResourceCache } from '~/server/utils/public-resource-cache'
 import { loadPublicBase } from '~/server/utils/public-base'
 import { appendPublicShellQueries, buildPublicShellPayload } from '~/server/utils/public-shell-query'
 import { listOrganizationProducts } from '~/server/utils/product-management'
+import { getOptionalPublicConsultationSettings, getPublicCompliance } from '~/server/utils/professional-services'
+import { listPublishedTenantPagePaths } from '~/server/utils/content/pages'
+import { platformLocale } from '~/shared/platform-locales'
 import { previewSecretOf, resolvePreviewAuthorization } from '~/server/utils/preview-token'
 import { isNonProductionHost } from '~/server/utils/tenant-hosts'
 import { recordRequestPhase } from '~/server/utils/request-metrics'
@@ -87,15 +90,54 @@ export async function loadPublicShellSource(
   const shellIndexes = appendPublicShellQueries(shellQueries, organization.id)
   // The entitlement, the shell rows and the bookable experiences depend on the
   // site alone; they were three sequential round trips on every cold shell.
-  const [entitlement, shellResults, experiences] = await Promise.all([
+  const [
+    entitlement,
+    shellResults,
+    experiences,
+    sourceConsultation,
+    sourceCompliance,
+    publishedPages,
+    verification,
+  ] = await Promise.all([
     assertPublicOrganizationLanguageEntitlement(env, db, organization.id, locale ?? sourceLocale),
     executeBatch(db, shellQueries),
     listOrganizationProducts(db, { organizationId: organization.id, kind: 'experience', publishedOnly: true, env }),
+    getOptionalPublicConsultationSettings(db, organization.id),
+    getPublicCompliance(db, organization.id),
+    listPublishedTenantPagePaths(db, organization.id, locale ?? sourceLocale),
+    queryFirst<{ token: string | null }>(db, `
+      SELECT (SELECT i.verification_token FROM organization_integrations i WHERE i.organization_id = organization.id AND i.provider = 'google_search_console') AS token
+        FROM organization WHERE id = ? LIMIT 1
+    `, [organization.id]),
   ])
   options.signal?.throwIfAborted()
+
+  let canSchedule = false
+  if (sourceConsultation?.mode === 'native') {
+    const services = await listOrganizationProducts(db, { organizationId: organization.id, kind: 'service', publishedOnly: true, bookableOnly: true, env })
+    canSchedule = services.length > 0
+  } else if (sourceConsultation?.mode === 'external_url') {
+    canSchedule = Boolean(sourceConsultation.external_url)
+  }
+
+  const pageLinks = publishedPages
+    .filter(page => page.path !== '/schedule' || canSchedule)
+    .map(page => ({ id: page.id, path: page.path, title: page.title }))
+
+  if (experiences.length && !pageLinks.some(page => page.path === '/experiences')) {
+    const title = platformLocale(locale ?? sourceLocale)?.messages['saya.footer.experiences'] || 'Experiences'
+    pageLinks.push({ id: 'experiences', path: '/experiences', title })
+  }
+
   const payload = {
     success: true,
-    ...(await buildPublicShellPayload(db, organization, shellResults, shellIndexes, env, experiences)),
+    ...(await buildPublicShellPayload(db, organization, shellResults, shellIndexes, env, experiences, {
+      consultation: sourceConsultation,
+      canSchedule,
+      compliance: sourceCompliance,
+      pageLinks,
+      searchConsoleVerification: verification?.token ?? organization.search_console_verification ?? null,
+    })),
     count: shellResults[shellIndexes.locations]?.results?.length ?? 0,
     platformMessages: entitlement.platform_messages,
   }
@@ -139,6 +181,28 @@ export async function loadPublicShellSource(
       } : {}),
     }
     payload.count = payload.locations.length
+    if (organizationLocalization?.values.consultation && payload.consultation) {
+      const consultationValues = organizationLocalization.values.consultation as { cta_label?: unknown }
+      if (typeof consultationValues.cta_label === 'string') {
+        payload.consultation = {
+          ...payload.consultation,
+          cta_label: consultationValues.cta_label,
+        }
+      }
+    }
+    if (organizationLocalization?.values.compliance && payload.compliance) {
+      const complianceValues = organizationLocalization.values.compliance as {
+        entity_name?: unknown
+        disclaimer?: unknown
+        footer_disclaimer?: unknown
+      }
+      payload.compliance = {
+        ...payload.compliance,
+        entity_name: typeof complianceValues.entity_name === 'string' ? complianceValues.entity_name : payload.compliance.entity_name,
+        disclaimer: typeof complianceValues.disclaimer === 'string' ? complianceValues.disclaimer : payload.compliance.disclaimer,
+        footer_disclaimer: typeof complianceValues.footer_disclaimer === 'string' ? complianceValues.footer_disclaimer : payload.compliance.footer_disclaimer,
+      }
+    }
   }
   if (useCache && cache) {
     await putPublicResourceCache(cache, cacheKey, JSON.stringify(payload))

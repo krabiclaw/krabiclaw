@@ -8,7 +8,6 @@ import {
 } from '~/utils/social-metadata'
 import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
 import type { TenantPageHowToData } from '~/utils/tenant-page-blocks'
-import type { BlawbyDocumentPayload } from '~/utils/blawby-document-contract'
 import { markdownToPlainText } from '~/utils/markdown'
 import { isDemoHost, isDemoOrganization } from '~/shared/demo'
 
@@ -87,7 +86,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
   const config = useRuntimeConfig()
   const requestURL = useRequestURL()
   const { organization, previewAuthorized } = useTenantOrganization()
-  const blawbyDocument = inject<Ref<BlawbyDocumentPayload> | null>('blawby-document', null)
+  const shell = organization.template.slug === 'platform' ? null : useOrganizationShellState()
   const publicLocale = useState<string>('public-locale', () => 'en')
   const localeRepresentations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
 
@@ -239,8 +238,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
     }
 
     if (value.professionalService) {
-      if (!blawbyDocument) throw createError({ statusCode: 500, statusMessage: 'Blawby layout did not provide the site document' })
-      const compliance = blawbyDocument.value.shell.compliance
+      const compliance = shell?.compliance.value
       organizationNode['@type'] = ['Organization', compliance?.entity_type ?? 'ProfessionalService']
       if (compliance) {
         Object.assign(organizationNode, {
@@ -303,8 +301,8 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
         }))
         if (actions.length) webpageNode.potentialAction = actions
       }
-      if (recipe === 'schedule' && blawbyDocument.value.shell.canSchedule) {
-        const consultation = blawbyDocument.value.shell.consultation
+      if (recipe === 'schedule' && shell?.canSchedule.value && shell.consultation.value) {
+        const consultation = shell.consultation.value
         webpageNode.potentialAction = {
           '@type': 'ScheduleAction',
           target: consultation.mode === 'external_url' ? consultation.external_url : url,

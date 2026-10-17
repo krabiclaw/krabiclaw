@@ -103,7 +103,7 @@ export async function setPublicConsultationMode(db: DbClient, organizationId: st
   return { ...settings, mode, external_url: external }
 }
 
-export async function getPublicConsultationSettings(db: DbClient, organizationId: string): Promise<PublicConsultationSettings> {
+export async function getOptionalPublicConsultationSettings(db: DbClient, organizationId: string): Promise<PublicConsultationSettings | null> {
   const row = await queryFirst<{ consultation_settings_json: string }>(db, `
     SELECT consultation_settings_json
       FROM organization
@@ -111,7 +111,7 @@ export async function getPublicConsultationSettings(db: DbClient, organizationId
      LIMIT 1
   `, [organizationId])
 
-  if (!row) throw new HTTPError({ statusCode: 500, statusMessage: 'Professional-service consultation settings are missing', data: { code: 'CONSULTATION_SETTINGS_MISSING' } })
+  if (!row) return null
   let settings: z.output<typeof consultationSettingsSchema>
   try {
     settings = consultationSettingsSchema.parse(JSON.parse(row.consultation_settings_json) as unknown)
@@ -119,6 +119,12 @@ export async function getPublicConsultationSettings(db: DbClient, organizationId
     throw new HTTPError({ statusCode: 500, statusMessage: 'Stored professional-service consultation settings are invalid', data: { code: 'INVALID_STORED_CONTENT' }, cause: error })
   }
   const { metadata_json: _metadata, ...consultation } = settings
+  return consultation
+}
+
+export async function getPublicConsultationSettings(db: DbClient, organizationId: string): Promise<PublicConsultationSettings> {
+  const consultation = await getOptionalPublicConsultationSettings(db, organizationId)
+  if (!consultation) throw new HTTPError({ statusCode: 500, statusMessage: 'Professional-service consultation settings are missing', data: { code: 'CONSULTATION_SETTINGS_MISSING' } })
   return consultation
 }
 

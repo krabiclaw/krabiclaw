@@ -36,14 +36,12 @@
 import type { SubmissionMeasurement } from '~/composables/useOrganizationConversionTracking'
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
-import type { BlawbyDocumentPayload } from '~/utils/blawby-document-contract'
 
 defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 
 const { id: organizationId } = useTenantOrganization().organization
 const { locale, localePath } = useI18n()
-const document = inject<Ref<BlawbyDocumentPayload> | null>('blawby-document', null)
-const consultation = computed(() => document?.value?.shell.consultation)
+const { consultation } = useOrganizationShellState()
 const submitting = ref(false)
 const submitMessage = ref('')
 const form = reactive({ name: '', email: '', subject: 'general', message: '', consent: false })

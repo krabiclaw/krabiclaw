@@ -90,7 +90,7 @@ The destinations are files under `O`, and their URLs are their files:
 
 | Destination | URL |
 | --- | --- |
-| Website | `O/website` — Pages, Blog, Posts, Reviews and Q&A, Brand, Status, Domains, Languages, Currency, Search appearance, Website booking |
+| Website | `O/website` — Pages, Blog, Posts, Reviews and Q&A, Brand, Status, Domains, Languages, Currency, Website booking |
 | Pages | `O/website/pages`, a page `O/website/pages/:pageId`, the Links page `O/website/pages/links` |
 | Blog | `O/website/blog` |
 | Reviews and Q&A | `O/website/qa` |
@@ -167,9 +167,10 @@ Dishes without a section are listed on the Menu page under its sections.
 
 Every level that narrows its rows does it the same way:
 `DashboardFilterPills`, one row of round pills under the title with the chosen
-one solid, 32px from the title and from the rows — Catalog's kinds, the blog's
-and posts' states, a category collection, a photo category. A list carries no
-sentence explaining itself under its title.
+one solid, 32px from the title and from the rows — Catalog's kinds, Today's
+range, Insights views, Payments sections, the blog's and posts' states, a
+category collection, a photo category. A list carries no sentence explaining
+itself under its title.
 
 Every offering, from anywhere, opens the one Product editor at
 `O/products/:productId`. Each card names its actual sections, price and location
@@ -414,10 +415,9 @@ large title with its actions on the same row and no bar above it; a pushed
 level puts a round Back first — on its own row above the title on a phone,
 inline before it from `lg` — with the actions at the right of that row; a
 leaf's sheet has ✕ and its title small and centred, and the leaf's pane its
-title large. Back, ✕ and every action are the same round button. A control
-that names what the whole level shows (Today's range, the calendar's location)
-takes the title's place. Pages supply `title`, `lead` and `#right`; they never
-place a title or an action themselves.
+title large. Back, ✕ and every action are the same round button. Pages
+supply `title`, `lead` and `#right`; they never place a title or an action
+themselves.
 
 **One card, one empty state, one status banner.** A card is `UCard
 variant="subtle"`; its padding and corner come from `app.config.ts`, and a
@@ -435,8 +435,7 @@ is a column rather than the frame names which column in `DashboardIndexPanel
 column`: `leaf` (Menu, Catalog, a booking's notes), `reading` (Earnings,
 Payments, Past activity) or `wide` (Insights, Today, Calendar); beside a child
 every index is `leaf`. The widths live in `dashboardColumnWidths`; a page never
-states one. A column's title heads it, as a leaf's does, unless the navbar
-names what the level shows — Today's range. Every level title is
+states one. A column's title heads it, as a leaf's does. Every level title is
 `dashboardTitleClass`.
 
 **Short text is bare.** A name, title, headline, slug or link renders as a

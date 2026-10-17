@@ -12,6 +12,7 @@ import { isCurrencyCode } from '~/shared/currencies'
 import { parsePostalAddress } from '~/utils/postal-address'
 import type { PublicMediaPlacement } from '~/server/utils/public-social-image'
 import { publicSocialMediaFromPlacements } from '~/utils/social-metadata'
+import type { PublicConsultationSettings, PublicCompliance, PublicBlawbyPageLink } from '~/types/blawby'
 
 type BatchResult = { results?: unknown[] }
 
@@ -156,6 +157,13 @@ export async function buildPublicShellPayload(
   env?: CloudflareEnv,
   /** The bookable experiences, when the caller read them beside the shell rows. */
   experiences?: Product[],
+  extra?: {
+    consultation?: PublicConsultationSettings | null
+    canSchedule?: boolean
+    compliance?: PublicCompliance | null
+    pageLinks?: PublicBlawbyPageLink[]
+    searchConsoleVerification?: string | null
+  },
 ): Promise<PublicShellPayload> {
   const rawLocations = (results[indexes.locations]?.results ?? []) as Record<string, unknown>[]
   const placements = (results[indexes.media]?.results ?? []) as Array<PublicMediaPlacement & { owner_type: string; owner_id: string }>
@@ -244,5 +252,10 @@ export async function buildPublicShellPayload(
       syncedAt: null,
     },
     sections: sections.site,
+    consultation: extra?.consultation ?? null,
+    canSchedule: extra?.canSchedule ?? false,
+    compliance: extra?.compliance ?? null,
+    pageLinks: extra?.pageLinks ?? [],
+    searchConsoleVerification: extra?.searchConsoleVerification ?? (organization.search_console_verification as string | null) ?? null,
   }
 }

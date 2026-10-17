@@ -26,7 +26,7 @@ definePageMeta({ layout: 'dashboard' })
 const editor = inject(organizationSettingsEditorKey)!
 const suspended = computed(() => editor.form.status === 'suspended')
 const items = [
-  { value: 'active', label: 'Live', description: 'Anyone can visit the website, and search engines can list it.' },
+  { value: 'active', label: 'Published', description: 'Anyone can visit the website, and search engines can list it.' },
   { value: 'inactive', label: 'Draft', description: 'Only people with a preview link can see it. Search engines cannot.' },
 ]
 </script>

@@ -360,14 +360,15 @@ async function attemptOrganizationUpdate(
     // platform's hold, so the tenant neither sets it nor clears it. The read
     // answers plainly; the guard on the UPDATE is what a suspension landing
     // between the two cannot outrun.
-    if (updates.status !== 'active' && updates.status !== 'inactive') {
+    const canonicalStatus = updates.status === 'published' ? 'active' : updates.status === 'draft' ? 'inactive' : updates.status
+    if (canonicalStatus !== 'active' && canonicalStatus !== 'inactive') {
       return { status: 400, data: { error: 'Website status must be active or inactive' } }
     }
     if (organization.status === 'suspended') {
       return { status: 409, data: { error: 'This website is suspended. Contact support to restore it.' } }
     }
     setParts.push('status = ?')
-    params.push(updates.status)
+    params.push(canonicalStatus)
     guards.push("status <> 'suspended'")
   }
   if (updates.seo_title !== undefined) {

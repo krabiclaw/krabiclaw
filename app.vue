@@ -14,20 +14,18 @@ const { organization } = useTenantOrganization()
 const { template } = organization
 const isPlatform = template.slug === 'platform'
 
-const organizationShell = template.slug === 'blawby' ? null : useOrganizationShellState()
+const organizationShell = isPlatform ? null : useOrganizationShellState()
 if (import.meta.server) await organizationShell?.ready
 if (organizationShell?.error.value) throw createError(organizationShell.error.value)
-const config = organizationShell?.config
 useHead(() => {
-  const verification = config?.value.search_console_verification
+  const verification = organizationShell?.searchConsoleVerification.value ?? organizationShell?.config.value.search_console_verification
   return {
     link: buildTenantHeadLinks({
       isPlatform,
       organizationMedia: organization.media,
     }),
     // Google fetches the organization's domain to verify Search Console
-    // ownership (server/utils/google-search-console.ts); every public layout
-    // carries it. Blawby serves its own from its document shell.
+    // ownership (server/utils/google-search-console.ts); every public layout carries it.
     meta: verification ? [{ name: 'google-site-verification', content: verification }] : [],
   }
 })

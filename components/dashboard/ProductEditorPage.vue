@@ -232,7 +232,7 @@ const sectionLabels: Record<SectionKey, string> = {
   'options': 'Variants',
   'order-url': 'External link',
   'attributes': 'Details',
-  'publication': 'Website',
+  'publication': 'Status',
   'booking': 'Scheduling',
   'locations': 'Locations',
   'stay': 'Stay settings',
@@ -616,7 +616,7 @@ function bookingSummary(): string {
 }
 
 function publicationSummary(): string {
-  const parts = [form.published ? 'Visible on website' : 'Hidden from website']
+  const parts = [form.published ? 'Published' : 'Draft']
   if (!form.active) parts.push(form.kind === 'experience' || form.kind === 'service' ? 'Bookings paused' : 'Orders paused')
   return parts.join(' · ')
 }
@@ -682,7 +682,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       ...(form.kind === 'stay' ? [] : [{ id: 'order-url', label: 'External link', summary: form.order_url || 'No external link', placeholder: !form.order_url, to: sectionPath('order-url') }]),
       ...(form.kind === 'stay' ? [] : [{ id: 'locations', label: 'Locations', summary: locationsSummary(), placeholder: !Object.keys(form.locations).length, to: sectionPath('locations') }]),
       { id: 'collections', label: sectionLabels.collections, summary: collectionsSummary(), placeholder: !form.collection_ids.length, to: sectionPath('collections') },
-      { id: 'publication', label: 'Website visibility', summary: publicationSummary(), to: sectionPath('publication') },
+      { id: 'publication', label: 'Status', summary: publicationSummary(), to: sectionPath('publication') },
     ].sort((left, right) => rowRank(left.id) - rowRank(right.id)),
   }]
 })
