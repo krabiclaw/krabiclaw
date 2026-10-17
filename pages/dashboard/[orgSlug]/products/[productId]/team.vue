@@ -43,7 +43,11 @@ const UNASSIGNED = 'unassigned'
 
 const teamSelection = computed({
   get: () => p.form.stay_team_id ?? UNASSIGNED,
-  set: (value: string) => { p.form.stay_team_id = value === UNASSIGNED ? null : value },
+  set: (value: string) => {
+    const unassigned = value === UNASSIGNED
+    p.form.stay_team_id = unassigned ? null : value
+    if (unassigned) p.form.stay_member_id = null
+  },
 })
 
 const teamOptions = computed(() => {
