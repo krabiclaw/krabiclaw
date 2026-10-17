@@ -159,7 +159,7 @@ const brandName = computed(() => (props.organization?.name as string)?.trim() ||
 const description = computed(() => props.compliance?.footer_disclaimer || (props.organization?.brand_description as string) || (props.organization?.tagline as string) || '')
 const documents = computed(() => props.compliance?.media.filter(item => item.slot === 'document' && item.public_url) ?? [])
 
-const isService = computed(() => props.organization?.vertical === 'service' || props.compliance !== null || props.pageLinks.some(l => l.path.startsWith('/services/')))
+const isService = computed(() => props.organization?.vertical === 'service' || props.compliance !== null)
 
 const catalogLinks = computed(() => (props.organization?.vertical
   ? catalogNavigation(props.organization.vertical as string, props.sections)

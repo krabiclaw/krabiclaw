@@ -109,12 +109,15 @@ const authoredReviews = computed(() => blockRecords(props.block.data.items).map(
   const mediaRecords = blockRecords(item.media)
   const rawRating = item.rating !== undefined && item.rating !== null && item.rating !== '' ? Number(item.rating) : null
   const rating = rawRating !== null && !Number.isNaN(rawRating) && rawRating > 0 ? rawRating : null
+  const explicitAuthor = blockText(item.author_name)
+  const authorName = explicitAuthor || blockText(item.title)
+  const explicitTitle = blockText(item.review_title) || (explicitAuthor ? blockText(item.title) : null)
   return {
-    id: blockText(item.id) || blockText(item.title),
-    author_name: blockText(item.title) || blockText(item.author_name),
+    id: blockText(item.id) || authorName,
+    author_name: authorName,
     content: blockText(item.content) || blockText(item.description) || blockText(item.body),
     rating,
-    title: blockText(item.title) !== blockText(item.author_name) ? blockText(item.title) : null,
+    title: explicitTitle || null,
     location_title: blockText(item.location_title) || null,
     media: mediaRecords.map(m => ({
       slot: blockText(m.slot),

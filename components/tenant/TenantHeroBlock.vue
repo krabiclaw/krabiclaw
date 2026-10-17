@@ -256,7 +256,8 @@ const activeMedia = ref(0)
 const overviewProse = computed(() => {
   const absorbedId = blawbyHeroProseBlockId(props.page)
   const absorbed = absorbedId ? props.page.blocks.find(item => item.id === absorbedId) : null
-  return (absorbed ? (blockText(absorbed.data.markdown) || blockText(absorbed.data.body)) : null) || description.value
+  const heroProse = blockText(props.block?.data?.markdown) || blockText(props.block?.data?.body)
+  return (absorbed ? (blockText(absorbed.data.markdown) || blockText(absorbed.data.body)) : null) || heroProse || description.value
 })
 const overviewActions = computed(() => {
   const direct = [
