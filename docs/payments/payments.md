@@ -462,6 +462,12 @@ Plan → Services adds that price as a second item on the plan subscription with
 prorations; ending it removes the item. The item's presence is the state
 (`server/utils/strategy-service.ts`); nothing is stored in the application.
 
+Both services are described once, in `SERVICES` (`shared/billing-model.ts`):
+the pricing page's add-ons and its `/pricing.md`, Payments → Plan → Services,
+and the Insights and Today Google Ads cards all read that copy and price. Today
+shows a connected account's last 7 complete days (spend, clicks, conversions)
+and links to Insights → Google Ads; nothing there starts a service.
+
 Activation verifies the live operating-usage contract, its current 10% ad-spend
 rate and collection configuration, the operating Customer's default payment
 method, and the connected Google Ads account's USD currency before recording

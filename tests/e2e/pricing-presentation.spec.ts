@@ -54,6 +54,16 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   await expect(cards.nth(2).locator('.kc-plan-price')).toHaveText('$99')
   await expect(cards.nth(0).locator('[data-plan-locations]')).toHaveText('2 locations included')
   for (const index of [1, 2]) await expect(cards.nth(index).locator('[data-plan-locations]')).toHaveText('2 locations included, then $49 per additional location per month')
+  // The services under the plans and the Markdown projection state the same add-ons from the same catalog.
+  const addons = page.locator('[data-parity-section="add-ons"] .kc-pricing-addon')
+  await expect(addons).toHaveCount(2)
+  await expect(addons.nth(0).getByRole('heading', { name: 'Managed ads', exact: true })).toBeVisible()
+  await expect(addons.nth(0).locator('.kc-pricing-addon__price')).toHaveText('10% of monthly ad spend')
+  await expect(addons.nth(1).getByRole('heading', { name: 'SEO and marketing strategy', exact: true })).toBeVisible()
+  await expect(addons.nth(1).locator('.kc-pricing-addon__price')).toHaveText('$2,000 per month')
+  const markdown = await page.request.get(`${testBaseUrl()}/pricing.md`)
+  expect(markdown.status()).toBe(200)
+  expect(await markdown.text()).toContain('- **SEO and marketing strategy**: $2,000 per month.')
   const sharedPrimary = page.getByRole('link', { name: 'Start free', exact: true }).first()
   const primaryColors = await sharedPrimary.evaluate(element => {
     const style = getComputedStyle(element)
