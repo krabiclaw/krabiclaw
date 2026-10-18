@@ -10,10 +10,22 @@ import { storeIntegration } from './organization-integrations'
 export interface GoogleAdsCustomer {
   customerId: string
   formattedCustomerId: string
-  descriptiveName: string
+  /** Null when Google would not describe the account; `error` says why. */
+  descriptiveName: string | null
   currencyCode?: string
   timeZone?: string
   isManager?: boolean
+  error?: string
+}
+
+/** Google's own message for a failed Ads request, kept short enough to show. */
+function googleAdsErrorMessage(status: number, body: string): string {
+  if (!body.trimStart().startsWith('{')) return `${status}: ${body.slice(0, 200)}`
+  const parsed = JSON.parse(body) as { error?: { message?: string; details?: Array<{ errors?: Array<{ message?: string; errorCode?: Record<string, string> }> }> } }
+  const detail = parsed.error?.details?.[0]?.errors?.[0]
+  const code = detail?.errorCode ? Object.values(detail.errorCode)[0] : undefined
+  const message = detail?.message ?? parsed.error?.message ?? body.slice(0, 200)
+  return code ? `${code}: ${message}` : `${status}: ${message}`
 }
 
 /** Formats a 10-digit customer ID as XXX-XXX-XXXX */
@@ -50,57 +62,30 @@ export async function listGoogleAdsAccounts(accessToken: string, developerToken?
     return []
   }
 
-  // 2. Query descriptive names and details for each customer
+  // 2. Each customer's own details. Google answers per account, and an account
+  // it will not describe (a token without access, a deactivated sub-account) is
+  // listed with Google's reason, never with a made-up name.
   const customers: GoogleAdsCustomer[] = []
   for (const resourceName of resourceNames) {
     const customerId = resourceName.replace(/^customers\//, '')
     const formattedCustomerId = formatGoogleAdsCustomerId(customerId)
-
-    try {
-      const searchResponse = await fetch(`https://googleads.googleapis.com/v25/customers/${customerId}/googleAds:search`, {
-        method: 'POST',
-        headers: {
-          ...headers,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          query: 'SELECT customer.id, customer.descriptive_name, customer.currency_code, customer.time_zone, customer.manager, customer.status FROM customer LIMIT 1',
-        }),
-      })
-
-      if (searchResponse.ok) {
-        const searchData = (await searchResponse.json()) as {
-          results?: Array<{
-            customer?: {
-              id?: string
-              descriptiveName?: string
-              currencyCode?: string
-              timeZone?: string
-              manager?: boolean
-            }
-          }>
-        }
-        const c = searchData.results?.[0]?.customer
-        customers.push({
-          customerId,
-          formattedCustomerId,
-          descriptiveName: c?.descriptiveName || `Google Ads (${formattedCustomerId})`,
-          currencyCode: c?.currencyCode,
-          timeZone: c?.timeZone,
-          isManager: c?.manager ?? false,
-        })
-        continue
-      }
-    } catch {
-      // If querying account details fails (e.g. permission or deactivated sub-account),
-      // still include the customer ID so the tenant sees their accessible ID.
-    }
-
-    customers.push({
-      customerId,
-       formattedCustomerId,
-      descriptiveName: `Google Ads (${formattedCustomerId})`,
+    const searchResponse = await fetch(`https://googleads.googleapis.com/v25/customers/${customerId}/googleAds:search`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        query: 'SELECT customer.id, customer.descriptive_name, customer.currency_code, customer.time_zone, customer.manager, customer.status FROM customer LIMIT 1',
+      }),
     })
+    if (!searchResponse.ok) {
+      customers.push({ customerId, formattedCustomerId, descriptiveName: null, error: googleAdsErrorMessage(searchResponse.status, await searchResponse.text()) })
+      continue
+    }
+    const searchData = (await searchResponse.json()) as {
+      results?: Array<{ customer?: { id?: string; descriptiveName?: string; currencyCode?: string; timeZone?: string; manager?: boolean } }>
+    }
+    const c = searchData.results?.[0]?.customer
+    if (!c) throw new Error(`Google Ads returned no customer row for ${formattedCustomerId}`)
+    customers.push({ customerId, formattedCustomerId, descriptiveName: c.descriptiveName ?? null, currencyCode: c.currencyCode, timeZone: c.timeZone, isManager: c.manager ?? false })
   }
 
   return customers
