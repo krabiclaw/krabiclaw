@@ -173,8 +173,9 @@ it does not change the E2E suite's browser projects. Retain the manifest's actua
 browser and version with the artifacts. Captures from different browser engines
 are not pixel-parity evidence. Routes and viewports are captured sequentially
 so each composition check has one active page rather than competing cold loads.
-The context identifies itself honestly as `KrabiClawScreenshotCrawler`, followed
-by its actual Firefox version; the same user agent is retained in the manifest.
+The context sends an honest `KrabiClawScreenshotCrawler` HTTP user agent, followed
+by its actual Firefox version, through Playwright's native `extraHTTPHeaders`;
+the same user agent is retained in the manifest.
 The existing analytics collectors acknowledge known crawlers with
 `{ ok: true, ignored: true }` before rate counting or analytics writes. Screenshot
 crawls therefore do not become customer visits or consume customer event quotas.

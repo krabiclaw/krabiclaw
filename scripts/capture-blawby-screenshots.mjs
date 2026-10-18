@@ -314,15 +314,17 @@ try {
     : BLAWBY_PARITY_VIEWPORTS)) {
     const context = await browser.newContext({
       viewport,
-      userAgent,
       deviceScaleFactor: 1,
       colorScheme: 'light',
       locale: 'en-US',
       reducedMotion: 'reduce',
       timezoneId: 'America/New_York',
-      extraHTTPHeaders: args.tenantSlug && usesTenantHeader(new URL(args.url).hostname)
-        ? { 'x-preview-tenant': args.tenantSlug, 'cache-control': 'no-store' }
-        : undefined,
+      extraHTTPHeaders: {
+        'user-agent': userAgent,
+        ...(args.tenantSlug && usesTenantHeader(new URL(args.url).hostname)
+          ? { 'x-preview-tenant': args.tenantSlug, 'cache-control': 'no-store' }
+          : {}),
+      },
     })
     for (const [routeName, routeConfig] of Object.entries(args.routes)) {
       const page = await context.newPage()
