@@ -1,5 +1,5 @@
 <template>
-  <section v-if="people.length" class="pb-16" data-parity-section="team">
+  <section v-if="people.length" :class="isBlawby ? 'bg-[var(--blawby-accent-200)] pb-16' : 'pb-16'" data-parity-section="team">
     <div class="tenant-container">
       <ul class="space-y-12 divide-y divide-default" role="list">
         <li v-for="person in people" :key="`${person.first_name}-${person.last_name}`" class="flex flex-col gap-10 pt-12 sm:flex-row items-center">
@@ -26,6 +26,8 @@ import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import { blockText, blockTextOrNull, blockRecords } from '~/utils/tenant-page-block-data'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
+const { organization } = useTenantOrganization()
+const isBlawby = computed(() => organization.template?.slug === 'blawby' || organization.vertical === 'service')
 
 function itemMedia(index: number) {
   return props.block.media.filter(asset => asset.slot === `items.${index}.image`)

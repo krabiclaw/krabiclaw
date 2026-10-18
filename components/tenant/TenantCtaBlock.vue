@@ -65,10 +65,14 @@ const isService = computed(() => organization.template?.slug === 'blawby' || org
 
 const title = computed(() => blockText(props.block.data.title))
 const description = computed(() => blockTextOrNull(props.block.data.description))
-const targetsSchedule = computed(() => Boolean(consultation.value && blockText(props.block.data.url) === consultation.value.schedule_path))
+const targetsSchedule = computed(() => {
+  const url = blockText(props.block.data.url)
+  return Boolean(consultation.value && (url === consultation.value.schedule_path || (!url && isService.value)))
+})
 
 const destination = computed(() => {
-  const url = blockText(props.block.data.url)
+  const rawUrl = blockText(props.block.data.url)
+  const url = rawUrl || (isService.value && consultation.value ? consultation.value.schedule_path : '')
   if (targetsSchedule.value && consultation.value) {
     if (props.page.recipe === 'schedule') {
       if (!canSchedule.value) return localePath('/contact')

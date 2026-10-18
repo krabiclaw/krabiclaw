@@ -1,5 +1,5 @@
 <template>
-  <div class="pointer-events-none relative z-10 aspect-[1920/56] p-0" aria-hidden="true" data-parity-section="shield-divider">
+  <div class="pointer-events-none relative z-10 aspect-[1920/160] p-0" aria-hidden="true" data-parity-section="shield-divider">
     <svg
       class="absolute inset-x-0 top-0 w-full"
       viewBox="0 0 1920 160"
