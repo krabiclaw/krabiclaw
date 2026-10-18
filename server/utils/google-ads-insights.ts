@@ -31,7 +31,9 @@ export async function loadGoogleAdsInsights(env: CloudflareEnv, organizationId: 
     customer: { id: connection.target_id, name: connection.target_name, currency: customer.currencyCode },
     period: { startDate: range.startDate, endDate: range.endDate },
     totals: { costMicros: summary.costMicros, clicks: summary.clicks, impressions: summary.impressions, conversions: summary.conversions, averageCpcMicros: summary.averageCpcMicros },
+    // A removed campaign belongs in the range only by what it spent there.
     campaigns: campaigns
+      .filter(campaign => campaign.status !== 'REMOVED' || campaign.costMicros > 0 || campaign.clicks > 0 || campaign.impressions > 0)
       .map(campaign => ({ id: campaign.id, name: campaign.name, status: campaign.status, costMicros: campaign.costMicros, clicks: campaign.clicks, impressions: campaign.impressions, conversions: campaign.conversions }))
       .sort((a, b) => b.costMicros - a.costMicros),
     managed: services.managed_ads !== null,
