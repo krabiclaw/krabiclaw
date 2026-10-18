@@ -92,8 +92,14 @@ export async function startStrategy(env: CloudflareEnv, db: DbClient, organizati
       expand: ['items.data.price.product'],
     }, { idempotencyKey: `strategy-start:${organizationId}:${attempt}` })
   } catch (cause) {
-    // Stripe added nothing, so there is no agreement to keep.
-    await execute(db, 'DELETE FROM organization_services WHERE id=?', [agreementId])
+    // A rejection means Stripe added nothing; a lost answer may hide an item that was added. The subscription says which.
+    const after = await found.stripe.subscriptions.retrieve(found.subscription.id, { expand: ['items.data.price.product'] })
+    if (strategyItem(after)) throw new Error(`Stripe added the strategy item despite answering with an error: ${cause instanceof Error ? cause.message : String(cause)}`, { cause })
+    try {
+      await execute(db, 'DELETE FROM organization_services WHERE id=?', [agreementId])
+    } catch (cleanup) {
+      throw new Error(`${cause instanceof Error ? cause.message : String(cause)} — and the strategy agreement row could not be removed: ${cleanup instanceof Error ? cleanup.message : String(cleanup)}`, { cause })
+    }
     throw cause
   }
   const item = strategyItem(updated)
@@ -108,6 +114,9 @@ export async function endStrategy(env: CloudflareEnv, db: DbClient, organization
   const item = found && strategyItem(found.subscription)
   if (!found || !item) throw new HTTPError({ statusCode: 409, statusMessage: 'The strategy service is not on' })
   await found.stripe.subscriptionItems.del(item.id, { proration_behavior: 'create_prorations' }, { idempotencyKey: `strategy-end:${organizationId}:${attempt}` })
-  if (await readStrategy(env, db, organizationId)) throw new Error('The strategy item is still on the subscription')
-  await execute(db, "UPDATE organization_services SET ended_at=?,ended_by_user_id=? WHERE organization_id=? AND service='strategy' AND ended_at IS NULL", [new Date().toISOString(), userId, organizationId])
+  // The subscription itself says the item is gone; only then does the agreement close.
+  const after = await found.stripe.subscriptions.retrieve(found.subscription.id, { expand: ['items.data.price.product'] })
+  if (strategyItem(after)) throw new Error('The strategy item is still on the subscription')
+  const closed = await execute(db, "UPDATE organization_services SET ended_at=?,ended_by_user_id=? WHERE organization_id=? AND service='strategy' AND ended_at IS NULL", [new Date().toISOString(), userId, organizationId])
+  if (!closed.meta.changes) throw new Error('The strategy agreement row was not open to close')
 }
