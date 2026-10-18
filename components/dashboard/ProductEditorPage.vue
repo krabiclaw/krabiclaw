@@ -134,7 +134,7 @@
 <script lang="ts">
 import type { ComputedRef, InjectionKey, Ref } from 'vue'
 import type { Collection, Product } from '~/server/types/products'
-import type { StayAmenity, StayCancellationPolicy, StayLongTermCancellationPolicy, StayPropertyType, StayPropertyTypeGroup } from '~/shared/stay-listing'
+import type { StayAmenity, StayCancellationPolicy, StayListingType, StayLongTermCancellationPolicy, StayPropertySizeUnit, StayPropertyType, StayPropertyTypeGroup } from '~/shared/stay-listing'
 import type { DashboardLocation } from '~/composables/useDashboardOrganization'
 import type { GalleryMediaItem } from '~/components/dashboard/DashboardMediaGalleryField.vue'
 import type { StayArrivalGuide, StayArrivalField } from '~/shared/stay-arrival'
@@ -214,6 +214,12 @@ export interface ProductForm {
   stay_member_id: string | null
   stay_property_type_group: StayPropertyTypeGroup | null
   stay_property_type: StayPropertyType | null
+  stay_listing_type: StayListingType | null
+  stay_total_floors: string
+  stay_listing_floor: string
+  stay_year_built: string
+  stay_property_size: string
+  stay_property_size_unit: StayPropertySizeUnit | null
   stay_bedrooms: string
   stay_beds: string
   stay_bathrooms: string
@@ -252,6 +258,7 @@ export interface ProductEditor {
   photoError: Ref<string | null>
   saveLabel: Ref<string>
   saveDisabled: Ref<boolean>
+  propertyTypeErrors: ComputedRef<Record<string, string>>
   setPrimaryImage: (assetId: string | null) => Promise<void>
   /** The photos after the cover, in order, and an empty row while one is being chosen. */
   galleryRows: ComputedRef<GalleryMediaItem[]>
@@ -319,6 +326,7 @@ import { isNavigationFailure } from 'vue-router'
 import { dashboardOverlayOpenKey } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import {
   STAY_PROPERTY_TYPES,
+  STAY_LISTING_TYPES,
   STAY_AMENITIES,
   STAY_PROPERTY_TYPE_GROUPS,
   STAY_CANCELLATION_POLICIES,
@@ -678,7 +686,9 @@ const draft = useState<ProductForm>(draftKey, () => ({
   image_asset_id: null as string | null,
   // A new place to stay starts from these settings; an existing one is loaded from its own.
   stay_location_id: '', check_in_time: '15:00', check_out_time: '11:00', max_guests: '', min_nights: '1', stay_team_id: null, stay_member_id: null,
-  stay_property_type_group: null, stay_property_type: null, stay_bedrooms: '', stay_beds: '', stay_bathrooms: '',
+  stay_property_type_group: null, stay_property_type: null,
+  stay_listing_type: null, stay_total_floors: '', stay_listing_floor: '', stay_year_built: '', stay_property_size: '', stay_property_size_unit: null,
+  stay_bedrooms: '', stay_beds: '', stay_bathrooms: '',
   stay_amenities: [] as StayAmenity[], stay_cancellation_policy: null, stay_long_term_cancellation_policy: null,
 }))
 const form = reactive(draft.value)
@@ -757,6 +767,12 @@ function loadForm(row: Product) {
   form.stay_member_id = stay ? stay.assigned_member_id : null
   form.stay_property_type_group = stay ? stay.property_type_group : null
   form.stay_property_type = stay ? stay.property_type : null
+  form.stay_listing_type = stay ? stay.listing_type : null
+  form.stay_total_floors = stay && stay.total_floors !== null ? String(stay.total_floors) : ''
+  form.stay_listing_floor = stay && stay.listing_floor !== null ? String(stay.listing_floor) : ''
+  form.stay_year_built = stay && stay.year_built !== null ? String(stay.year_built) : ''
+  form.stay_property_size = stay && stay.property_size !== null ? String(stay.property_size) : ''
+  form.stay_property_size_unit = stay ? stay.property_size_unit : null
   form.stay_bedrooms = stay && stay.bedrooms !== null ? String(stay.bedrooms) : ''
   form.stay_beds = stay && stay.beds !== null ? String(stay.beds) : ''
   form.stay_bathrooms = stay && stay.bathrooms !== null ? String(stay.bathrooms) : ''
@@ -853,6 +869,20 @@ function rebuildVariants() {
   })
 }
 
+const propertyTypeErrors = computed(() => {
+  const errors: Record<string, string> = {}
+  if ((form.stay_property_type_group || form.stay_property_type) && !(form.stay_property_type_group && form.stay_property_type && isStayPropertyType(form.stay_property_type_group, form.stay_property_type))) errors.property_type = 'Choose a property type in this group, or clear both.'
+  for (const [field, value] of [['total_floors', form.stay_total_floors], ['listing_floor', form.stay_listing_floor], ['year_built', form.stay_year_built]] as const) {
+    if (value.trim() && (!Number.isSafeInteger(Number(value)) || Number(value) < 1)) errors[field] = 'Enter a positive whole number.'
+  }
+  if (form.stay_total_floors.trim() && form.stay_listing_floor.trim() && Number(form.stay_listing_floor) > Number(form.stay_total_floors)) errors.listing_floor = 'The listing floor cannot exceed the number of floors in the building.'
+  const size = form.stay_property_size.trim()
+  if (size && (!Number.isFinite(Number(size)) || Number(size) <= 0)) errors.property_size = 'Enter a positive property size.'
+  if (size && !form.stay_property_size_unit) errors.property_size_unit = 'Choose a unit for the property size.'
+  if (!size && form.stay_property_size_unit) errors.property_size = 'Enter the property size, or clear its unit.'
+  return errors
+})
+
 const sectionValid = computed(() => {
   if (editorKey.value === 'kind') return PRODUCT_KINDS.includes(form.kind as ProductKind)
   if (editorKey.value === 'name') return Boolean(form.name.trim())
@@ -861,8 +891,7 @@ const sectionValid = computed(() => {
   if (editorKey.value === 'availability') return Number.isInteger(Number(form.min_nights)) && Number(form.min_nights) >= 1 && Number(form.min_nights) <= 365
   if (editorKey.value === 'arrival-time') return MINUTE_TIME_PATTERN.test(form.check_in_time) && MINUTE_TIME_PATTERN.test(form.check_out_time)
   if (editorKey.value === 'property-type') {
-    if (!form.stay_property_type && !form.stay_property_type_group) return true
-    return Boolean(form.stay_property_type && form.stay_property_type_group && isStayPropertyType(form.stay_property_type_group, form.stay_property_type))
+    return !Object.keys(propertyTypeErrors.value).length
   }
   if (editorKey.value === 'rooms') {
     const bedroomsStr = String(form.stay_bedrooms ?? '').trim()
@@ -1028,10 +1057,12 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
             {
               id: 'property-type',
               label: 'Property type',
-              summary: form.stay_property_type
-                ? `${STAY_PROPERTY_TYPES[form.stay_property_type].label}${form.stay_property_type_group ? ` · ${STAY_PROPERTY_TYPE_GROUPS[form.stay_property_type_group].label}` : ''}`
-                : 'Choose property type',
-              placeholder: !form.stay_property_type,
+              summary: product.value.stay?.listing_type
+                ? `${STAY_LISTING_TYPES[product.value.stay.listing_type].label}${product.value.stay.property_type_group ? ` · ${STAY_PROPERTY_TYPE_GROUPS[product.value.stay.property_type_group].label}` : ''}`
+                : product.value.stay?.property_type
+                  ? `${STAY_PROPERTY_TYPES[product.value.stay.property_type].label}${product.value.stay.property_type_group ? ` · ${STAY_PROPERTY_TYPE_GROUPS[product.value.stay.property_type_group].label}` : ''}`
+                  : 'Choose property type',
+              placeholder: !product.value.stay?.listing_type && !product.value.stay?.property_type,
               to: sectionPath('property-type'),
             },
             {
@@ -1205,6 +1236,16 @@ function catalogShapeOf() {
 }
 
 function payload() {
+  if (form.kind === 'stay' && !isNew.value && editorKey.value === 'property-type') return { stay: {
+    property_type_group: form.stay_property_type_group,
+    property_type: form.stay_property_type,
+    listing_type: form.stay_listing_type,
+    total_floors: form.stay_total_floors.trim() ? Number(form.stay_total_floors) : null,
+    listing_floor: form.stay_listing_floor.trim() ? Number(form.stay_listing_floor) : null,
+    year_built: form.stay_year_built.trim() ? Number(form.stay_year_built) : null,
+    property_size: form.stay_property_size.trim() ? Number(form.stay_property_size) : null,
+    property_size_unit: form.stay_property_size_unit,
+  } }
   // Options, variants and prices are restated only when they changed. A save
   // that renames a product says nothing about what it costs, and a patch that
   // omits variants leaves every offer exactly as it is.
@@ -1241,6 +1282,12 @@ function payload() {
       assigned_team_id: form.stay_team_id,
       property_type_group: form.stay_property_type_group || null,
       property_type: form.stay_property_type || null,
+      listing_type: form.stay_listing_type,
+      total_floors: form.stay_total_floors.trim() ? Number(form.stay_total_floors) : null,
+      listing_floor: form.stay_listing_floor.trim() ? Number(form.stay_listing_floor) : null,
+      year_built: form.stay_year_built.trim() ? Number(form.stay_year_built) : null,
+      property_size: form.stay_property_size.trim() ? Number(form.stay_property_size) : null,
+      property_size_unit: form.stay_property_size_unit,
       bedrooms: String(form.stay_bedrooms ?? '').trim() && !Number.isNaN(Number(form.stay_bedrooms)) ? Number(form.stay_bedrooms) : null,
       beds: String(form.stay_beds ?? '').trim() && !Number.isNaN(Number(form.stay_beds)) ? Number(form.stay_beds) : null,
       bathrooms: String(form.stay_bathrooms ?? '').trim() && !Number.isNaN(Number(form.stay_bathrooms)) ? Number(form.stay_bathrooms) : null,
@@ -1261,10 +1308,6 @@ function payload() {
     ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'team' ? { stay: {
       assigned_member_id: form.stay_member_id,
       assigned_team_id: form.stay_team_id,
-    } } : {}),
-    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'property-type' ? { stay: {
-      property_type_group: form.stay_property_type_group || null,
-      property_type: form.stay_property_type || null,
     } } : {}),
     ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'rooms' ? { stay: {
       bedrooms: String(form.stay_bedrooms ?? '').trim() && !Number.isNaN(Number(form.stay_bedrooms)) ? Number(form.stay_bedrooms) : null,
@@ -1310,6 +1353,16 @@ async function save(target?: string, concern?: ProductConcern) {
 async function commit(concern?: ProductConcern) {
   const id = locationId.value
   const publicationDraft = concern === 'publication-visibility' ? form.published : concern === 'publication-availability' ? form.active : null
+  const propertyDraft = !isNew.value && editorKey.value === 'property-type' ? {
+    stay_property_type_group: form.stay_property_type_group,
+    stay_property_type: form.stay_property_type,
+    stay_listing_type: form.stay_listing_type,
+    stay_total_floors: form.stay_total_floors,
+    stay_listing_floor: form.stay_listing_floor,
+    stay_year_built: form.stay_year_built,
+    stay_property_size: form.stay_property_size,
+    stay_property_size_unit: form.stay_property_size_unit,
+  } : null
   saving.value = true
   saveError.value = null
   try {
@@ -1364,13 +1417,14 @@ async function commit(concern?: ProductConcern) {
     await (closeTo.value ? navigateTo(closeTo.value) : level.close())
   } catch (error) {
     saveError.value = getErrorMessage(error, `Failed to save ${itemLabel.value.toLowerCase()}`)
-    if (publicationDraft !== null || error instanceof ApiClientError && (error.data.committed === true || (isRecord(error.data.data) && error.data.data.committed === true))) {
+    if (propertyDraft || publicationDraft !== null || error instanceof ApiClientError && (error.data.committed === true || (isRecord(error.data.data) && error.data.data.committed === true))) {
       try { await reload() } catch (readError) { saveError.value += ` ${getErrorMessage(readError, 'The saved listing could not be read again')}` }
     }
-    // A failed response may follow a committed publication. Saved summaries
+    // A failed response may follow a committed write. Saved summaries
     // re-read it, while the failed leaf retains the choice it submitted.
     if (concern === 'publication-visibility' && publicationDraft !== null) form.published = publicationDraft
     if (concern === 'publication-availability' && publicationDraft !== null) form.active = publicationDraft
+    if (propertyDraft) Object.assign(form, propertyDraft)
   } finally {
     saving.value = false
   }
@@ -1749,6 +1803,7 @@ provide(productEditorKey, {
   photoError,
   saveLabel,
   saveDisabled,
+  propertyTypeErrors,
   setPrimaryImage,
   galleryRows,
   addGalleryRow,

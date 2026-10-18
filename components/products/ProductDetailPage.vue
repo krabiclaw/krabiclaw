@@ -99,6 +99,12 @@
                 {{ (location?.title || organizationName || 'S').slice(0, 1).toUpperCase() }}
               </div>
             </div>
+            <dl v-if="stayPropertyFacts.length" class="mt-5 grid gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
+              <div v-for="fact in stayPropertyFacts" :key="fact.label">
+                <dt class="text-muted">{{ fact.label }}</dt>
+                <dd class="mt-1 text-default">{{ fact.value }}</dd>
+              </div>
+            </dl>
           </div>
 
           <!-- Key highlights for Stays -->
@@ -448,8 +454,9 @@
 <script setup lang="ts">
 import WhoYouMeet from '~/components/booking/WhoYouMeet.vue'
 import type { ProductPresentation, PublicProduct } from '~/server/types/products'
+import type { Accommodation, PropertyValue } from 'nuxt-schema-org/schema'
 import { useSchemaOrg } from '#imports'
-import { STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
+import { STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_SIZE_UNITS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
 import type { CurrencyCode } from '~/shared/currencies'
 import { minorAmountToMajor, selectPrice, type Price } from '~/shared/prices'
 import { formatProductMoney } from '~/utils/product-money'
@@ -529,6 +536,18 @@ const staySpecsSummary = computed(() => {
 const stayPropertyTypeLabel = computed(() => {
   const type = props.product.stay?.property_type
   return type ? STAY_PROPERTY_TYPES[type].label : ''
+})
+
+const stayPropertyFacts = computed(() => {
+  const stay = props.product.stay
+  if (!stay) return []
+  return [
+    ...(stay.listing_type ? [{ label: 'Listing type', value: STAY_LISTING_TYPES[stay.listing_type].label }] : []),
+    ...(stay.total_floors !== null ? [{ label: 'Floors in building', value: String(stay.total_floors) }] : []),
+    ...(stay.listing_floor !== null ? [{ label: 'Listing floor', value: String(stay.listing_floor) }] : []),
+    ...(stay.year_built !== null ? [{ label: 'Year built', value: String(stay.year_built) }] : []),
+    ...(stay.property_size !== null && stay.property_size_unit ? [{ label: 'Property size', value: `${stay.property_size} ${STAY_PROPERTY_SIZE_UNITS[stay.property_size_unit].symbol}` }] : []),
+  ]
 })
 
 const stayCancellationPolicyLabel = computed(() => {
@@ -909,6 +928,12 @@ const stayStructuredData = computed(() => {
     } : {}),
     occupancy: { '@type': 'QuantitativeValue', minValue: 1, maxValue: stay.max_guests },
     ...(stay.property_type ? { accommodationCategory: STAY_PROPERTY_TYPES[stay.property_type].label } : {}),
+    ...(stay.listing_type ? { additionalType: STAY_LISTING_TYPES[stay.listing_type].schemaType satisfies Accommodation['additionalType'] } : {}),
+    ...(stay.property_size !== null && stay.property_size_unit ? { floorSize: {
+      '@type': 'QuantitativeValue',
+      value: stay.property_size,
+      unitText: STAY_PROPERTY_SIZE_UNITS[stay.property_size_unit].label,
+    } } : {}),
     ...(stay.bedrooms !== null ? { numberOfBedrooms: stay.bedrooms } : {}),
     ...(stay.bathrooms !== null ? { numberOfBathroomsTotal: stay.bathrooms } : {}),
     ...(stay.beds !== null ? { bed: { '@type': 'BedDetails', numberOfBeds: stay.beds } } : {}),
@@ -917,7 +942,10 @@ const stayStructuredData = computed(() => {
       { '@type': 'PropertyValue', name: 'checkinTime', value: stay.check_in_time },
       { '@type': 'PropertyValue', name: 'checkoutTime', value: stay.check_out_time },
       { '@type': 'PropertyValue', name: 'minimumNights', value: stay.min_nights },
-    ],
+      ...(stay.total_floors !== null ? [{ '@type': 'PropertyValue' as const, name: 'totalFloors', value: stay.total_floors }] : []),
+      ...(stay.listing_floor !== null ? [{ '@type': 'PropertyValue' as const, name: 'listingFloor', value: stay.listing_floor }] : []),
+      ...(stay.year_built !== null ? [{ '@type': 'PropertyValue' as const, name: 'yearBuilt', value: stay.year_built }] : []),
+    ] satisfies PropertyValue[],
     ...(price ? { offers: {
       '@type': 'Offer',
       url: canonicalProductUrl.value,

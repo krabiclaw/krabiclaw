@@ -1,4 +1,4 @@
-import { isStayAmenity, stayCodes, STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, isStayPropertyType, type StayAmenity, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
+import { isStayAmenity, stayCodes, STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayAmenity, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { ASSIGNED_SERVICE_SQL } from '~/server/utils/member-access'
 import type { ProductBookingSetupInput, SessionAvailability } from '~/server/utils/availability'
@@ -252,7 +252,8 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
       WHERE organization_id = ? AND row_role = 'root' AND kind = 'page' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
-    { query: `SELECT product_id, location_id, check_in_time, check_out_time, max_guests, min_nights, property_type_group, property_type, bedrooms, beds, bathrooms, amenities,
+    { query: `SELECT product_id, location_id, check_in_time, check_out_time, max_guests, min_nights, property_type_group, property_type,
+        listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit, bedrooms, beds, bathrooms, amenities,
         cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id FROM product_stay_configs
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
   ], { operation: 'Hydrate products' })
@@ -774,8 +775,22 @@ function planStayListing(stay: Record<string, unknown>): Pick<ProductStayConfig,
     invalidStayField('amenities', 'stay.amenities must list amenity codes from the catalog, each once')
   }
   const chosen = new Set(amenities as StayAmenity[])
+  const totalFloors = stayCount(stay, 'total_floors', 1, Number.MAX_SAFE_INTEGER, 1)
+  const listingFloor = stayCount(stay, 'listing_floor', 1, Number.MAX_SAFE_INTEGER, 1)
+  if (totalFloors !== null && listingFloor !== null && listingFloor > totalFloors) invalidStayField('listing_floor', 'stay.listing_floor cannot exceed stay.total_floors')
+  const propertySize = stay.property_size ?? null
+  if (propertySize !== null && (typeof propertySize !== 'number' || !Number.isFinite(propertySize) || propertySize <= 0)) invalidStayField('property_size', 'stay.property_size must be a finite positive number, or null')
+  const propertySizeUnit = stayCode(stay, 'property_size_unit', stayCodes(STAY_PROPERTY_SIZE_UNITS))
+  if (propertySize === null && propertySizeUnit !== null) invalidStayField('property_size', 'Provide stay.property_size with its unit, or clear both')
+  if (propertySize !== null && propertySizeUnit === null) invalidStayField('property_size_unit', 'Provide stay.property_size_unit with its size, or clear both')
   return {
     ...stayPropertyType(stay),
+    listing_type: stayCode(stay, 'listing_type', stayCodes(STAY_LISTING_TYPES)),
+    total_floors: totalFloors,
+    listing_floor: listingFloor,
+    year_built: stayCount(stay, 'year_built', 1, Number.MAX_SAFE_INTEGER, 1),
+    property_size: propertySize as number | null,
+    property_size_unit: propertySizeUnit,
     bedrooms: stayCount(stay, 'bedrooms', 0, 50, 1),
     beds: stayCount(stay, 'beds', 1, 50, 1),
     bathrooms: stayCount(stay, 'bathrooms', 0, 50, 0.5),
@@ -790,6 +805,12 @@ function storedStayListing(row: Row): Pick<ProductStayConfig, StayListingField> 
   return {
     property_type_group: row.property_type_group === null ? null : String(row.property_type_group) as StayPropertyTypeGroup,
     property_type: row.property_type === null ? null : String(row.property_type) as StayPropertyType,
+    listing_type: row.listing_type === null ? null : String(row.listing_type) as StayListingType,
+    total_floors: row.total_floors === null ? null : Number(row.total_floors),
+    listing_floor: row.listing_floor === null ? null : Number(row.listing_floor),
+    year_built: row.year_built === null ? null : Number(row.year_built),
+    property_size: row.property_size === null ? null : Number(row.property_size),
+    property_size_unit: row.property_size_unit === null ? null : String(row.property_size_unit) as StayPropertySizeUnit,
     bedrooms: row.bedrooms === null ? null : Number(row.bedrooms),
     beds: row.beds === null ? null : Number(row.beds),
     bathrooms: row.bathrooms === null ? null : Number(row.bathrooms),
@@ -1055,16 +1076,21 @@ function productWrites(
       params: [organizationId, planned.id, planned.stay.location_id, now, now, actor.actorId, actor.actorId],
     }, {
       query: `INSERT INTO product_stay_configs (product_id, organization_id, location_id, check_in_time, check_out_time, max_guests, min_nights,
-                 property_type_group, property_type, bedrooms, beds, bathrooms, amenities, cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id, created_at, updated_at, created_by, updated_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 property_type_group, property_type, listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit,
+                 bedrooms, beds, bathrooms, amenities, cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id, created_at, updated_at, created_by, updated_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT (product_id) DO UPDATE SET check_in_time = excluded.check_in_time, check_out_time = excluded.check_out_time,
                  max_guests = excluded.max_guests, min_nights = excluded.min_nights, property_type_group = excluded.property_type_group, property_type = excluded.property_type, bedrooms = excluded.bedrooms,
+                 listing_type = excluded.listing_type, total_floors = excluded.total_floors, listing_floor = excluded.listing_floor, year_built = excluded.year_built,
+                 property_size = excluded.property_size, property_size_unit = excluded.property_size_unit,
                  beds = excluded.beds, bathrooms = excluded.bathrooms, amenities = excluded.amenities, cancellation_policy = excluded.cancellation_policy,
                  long_term_cancellation_policy = excluded.long_term_cancellation_policy, assigned_member_id = excluded.assigned_member_id,
                  assigned_team_id = excluded.assigned_team_id, updated_at = excluded.updated_at, updated_by = excluded.updated_by
                WHERE product_stay_configs.organization_id = excluded.organization_id AND product_stay_configs.location_id = excluded.location_id`,
       params: [planned.id, organizationId, planned.stay.location_id, planned.stay.check_in_time, planned.stay.check_out_time,
-        planned.stay.max_guests, planned.stay.min_nights, planned.stay.property_type_group, planned.stay.property_type, planned.stay.bedrooms, planned.stay.beds, planned.stay.bathrooms,
+        planned.stay.max_guests, planned.stay.min_nights, planned.stay.property_type_group, planned.stay.property_type,
+        planned.stay.listing_type, planned.stay.total_floors, planned.stay.listing_floor, planned.stay.year_built, planned.stay.property_size, planned.stay.property_size_unit,
+        planned.stay.bedrooms, planned.stay.beds, planned.stay.bathrooms,
         JSON.stringify(planned.stay.amenities), planned.stay.cancellation_policy, planned.stay.long_term_cancellation_policy,
         planned.stay.assigned_member_id, planned.stay.assigned_team_id, now, now, actor.actorId, actor.actorId],
     })

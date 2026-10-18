@@ -61,9 +61,10 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   await expect(page).toHaveURL(new RegExp(`/dashboard/${slug}/products/(?!new)[^/?]+`))
   const productId = new URL(page.url()).pathname.split('/')[4]!
   expect(productId).toMatch(/^[0-9a-f-]{36}$/)
+  const unknownPropertyFacts = { listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null }
   const home = await call<{ product: { kind: string; unit_label: string; stay: Record<string, unknown> } }>('get_product', { product_id: productId })
   expect(home.error).toBeNull()
-  expect(home.data!.product).toMatchObject({ kind: 'stay', unit_label: 'night', stay: { location_id: location.id, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2 } })
+  expect(home.data!.product).toMatchObject({ kind: 'stay', unit_label: 'night', stay: { location_id: location.id, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, ...unknownPropertyFacts } })
 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(`/dashboard/${slug}/products`)
@@ -75,14 +76,129 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   await expect(page.locator('#dashboard-panel-product').getByRole('heading', { name: 'Listing editor', exact: true })).toBeVisible()
   await expect(page.getByTestId('editor-card-name')).toContainText('Cliff Cabin')
 
-  // Listing choices remain real, named controls; their writes are read through MCP.
+  // Only authored property facts are saved. Unknowns remain nullable in the
+  // editor, domain reads and the real guest projection.
+  const propertyFacts = { property_type_group: 'unique_homes', property_type: 'treehouse', listing_type: 'entire_place', total_floors: 3, listing_floor: 2, year_built: 2019, property_size: 85.5, property_size_unit: 'square_meters' } as const
+  const productWritePath = `/api/editor/organizations/${organizationId}/products/${productId}`
   await page.getByRole('link', { name: /Property type/ }).click()
   const propertyPicker = page.locator('#dashboard-panel-product-property-type')
-  await propertyPicker.getByText('Unique space', { exact: true }).click()
-  await propertyPicker.getByText('Treehouse', { exact: true }).click()
-  await expect(propertyPicker.getByRole('radio', { name: /^Treehouse/ })).toBeChecked()
+  const propertyGroup = propertyPicker.getByRole('combobox', { name: 'Which is most like your place?', exact: true })
+  const propertyType = propertyPicker.getByRole('combobox', { name: 'Property type', exact: true })
+  const listingType = propertyPicker.getByRole('combobox', { name: 'Listing type', exact: true })
+  const totalFloors = propertyPicker.getByRole('spinbutton', { name: 'How many floors in the building?', exact: true })
+  const listingFloor = propertyPicker.getByRole('spinbutton', { name: 'Which floor is the listing on?', exact: true })
+  const yearBuilt = propertyPicker.getByRole('spinbutton', { name: 'Year built', exact: true })
+  const propertySize = propertyPicker.getByRole('spinbutton', { name: 'Property size', exact: true })
+  const sizeUnit = propertyPicker.getByRole('combobox', { name: 'Size unit', exact: true })
+  await expect(listingType).not.toContainText('Entire place')
+  for (const input of [totalFloors, listingFloor, yearBuilt, propertySize]) await expect(input).toHaveValue('')
+  await expect(sizeUnit).not.toContainText('Square meters')
+  await propertyGroup.click()
+  await page.getByRole('option', { name: 'Unique space', exact: true }).click()
+  await propertyType.click()
+  await page.getByRole('option', { name: 'Treehouse', exact: true }).click()
+  await listingType.click()
+  await page.getByRole('option', { name: 'Entire place', exact: true }).click()
+  await totalFloors.fill('3')
+  await listingFloor.fill('2')
+  await yearBuilt.fill('2019')
+  await propertySize.fill('85.5')
+  await sizeUnit.click()
+  await page.getByRole('option', { name: 'Square meters', exact: true }).click()
+  await totalFloors.fill('1')
+  await totalFloors.press('Enter')
+  await expect(propertyPicker.getByText('The listing floor cannot exceed the number of floors in the building.', { exact: true })).toBeVisible()
+  await expect(propertyPicker.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+  await expect(totalFloors).toHaveValue('1')
+  await expect(listingFloor).toHaveValue('2')
+  await totalFloors.fill('3')
+  await totalFloors.press('Enter')
+  await expect(propertyPicker.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
+  await expect(listingFloor).toHaveValue('2')
+  await propertyGroup.scrollIntoViewIfNeeded()
   await page.screenshot({ path: testInfo.outputPath('property-choices-mobile.png') })
+  await propertySize.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: testInfo.outputPath('property-details-mobile.png') })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const savedPropertyCard = page.getByTestId('editor-card-property-type')
+  await expect(savedPropertyCard).toBeVisible()
+  await expect(savedPropertyCard).toContainText('Choose property type')
+  await propertyGroup.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: testInfo.outputPath('property-details-desktop.png'), animations: 'disabled' })
+  await propertySize.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: testInfo.outputPath('property-details-lower-desktop.png'), animations: 'disabled' })
+  const interceptProperty = (url: URL) => url.pathname === productWritePath
+  await page.route(interceptProperty, async route => route.request().method() === 'PATCH' ? await route.abort('failed') : await route.continue())
+  const interruptedProperty = page.waitForEvent('requestfailed', outgoing => outgoing.method() === 'PATCH' && new URL(outgoing.url()).pathname === productWritePath)
   await propertyPicker.getByRole('button', { name: 'Save', exact: true }).click()
+  expect((await interruptedProperty).failure()).toEqual({ errorText: 'net::ERR_FAILED' })
+  await expect(propertyPicker.getByText('Failed to fetch', { exact: false })).toBeVisible()
+  await expect(propertyGroup).toContainText('Unique space')
+  await expect(propertyType).toContainText('Treehouse')
+  await expect(listingType).toContainText('Entire place')
+  await expect(totalFloors).toHaveValue('3')
+  await expect(listingFloor).toHaveValue('2')
+  await expect(yearBuilt).toHaveValue('2019')
+  await expect(propertySize).toHaveValue('85.5')
+  await expect(sizeUnit).toContainText('Square meters')
+  await expect(savedPropertyCard).toBeVisible()
+  await expect(savedPropertyCard).toContainText('Choose property type')
+  const unwrittenProperty = await call<{ product: Product }>('get_product', { product_id: productId })
+  expect(unwrittenProperty.error).toBeNull()
+  expect(unwrittenProperty.data!.product.stay).toEqual(home.data!.product.stay)
+  await expect(propertyPicker.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
+  await page.unroute(interceptProperty)
+  const propertySaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
+  await propertyPicker.getByRole('button', { name: 'Save', exact: true }).click()
+  const propertyResponse = await propertySaved
+  expect(propertyResponse.status(), await propertyResponse.text()).toBe(200)
+  expect(propertyResponse.request().postDataJSON()).toEqual({ stay: propertyFacts })
+  await expect(propertyPicker).not.toBeVisible()
+  const savedProperty = await call<{ product: Product }>('get_product', { product_id: productId })
+  expect(savedProperty.error).toBeNull()
+  expect(savedProperty.data!.product.stay).toMatchObject(propertyFacts)
+  const savedHome = await request.get(`/api/dashboard/stay-homes/${productId}`, { params: { org: slug } })
+  expect(savedHome.status(), await savedHome.text()).toBe(200)
+  expect((await savedHome.json() as { home: Record<string, unknown> }).home).toMatchObject(propertyFacts)
+
+  // Clearing optional details writes explicit nulls; it never invents a floor,
+  // year or area. A reload reads that absence before the known facts are restored.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(`/dashboard/${slug}/products/${productId}`)
+  await page.getByTestId('editor-card-property-type').click()
+  await propertyPicker.getByRole('button', { name: 'Clear optional details', exact: true }).click()
+  const propertyCleared = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
+  await propertyPicker.getByRole('button', { name: 'Save', exact: true }).click()
+  const clearedPropertyResponse = await propertyCleared
+  expect(clearedPropertyResponse.status(), await clearedPropertyResponse.text()).toBe(200)
+  expect(clearedPropertyResponse.request().postDataJSON()).toEqual({ stay: { ...propertyFacts, ...unknownPropertyFacts } })
+  await expect(propertyPicker).not.toBeVisible()
+  const clearedHome = await request.get(`/api/dashboard/stay-homes/${productId}`, { params: { org: slug } })
+  expect(clearedHome.status(), await clearedHome.text()).toBe(200)
+  expect((await clearedHome.json() as { home: Record<string, unknown> }).home).toMatchObject({ ...propertyFacts, ...unknownPropertyFacts })
+  await page.getByTestId('editor-card-property-type').click()
+  await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/property-type`)
+  await expect(propertyGroup).toBeVisible()
+  await page.reload()
+  await expect(propertyGroup).toContainText('Unique space')
+  await expect(propertyType).toContainText('Treehouse')
+  await expect(listingType).not.toContainText('Entire place')
+  for (const input of [totalFloors, listingFloor, yearBuilt, propertySize]) await expect(input).toHaveValue('')
+  await expect(sizeUnit).not.toContainText('Square meters')
+  await listingType.click()
+  await page.getByRole('option', { name: 'Entire place', exact: true }).click()
+  await totalFloors.fill('3')
+  await listingFloor.fill('2')
+  await yearBuilt.fill('2019')
+  await propertySize.fill('85.5')
+  await sizeUnit.click()
+  await page.getByRole('option', { name: 'Square meters', exact: true }).click()
+  const propertyRestored = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
+  await propertyPicker.getByRole('button', { name: 'Save', exact: true }).click()
+  const restoredPropertyResponse = await propertyRestored
+  expect(restoredPropertyResponse.status(), await restoredPropertyResponse.text()).toBe(200)
+  expect(restoredPropertyResponse.request().postDataJSON()).toEqual({ stay: propertyFacts })
+  await expect(propertyPicker).not.toBeVisible()
   await page.getByRole('link', { name: /Amenities/ }).click()
   const amenityOverview = page.locator('#dashboard-panel-product-amenities')
   await amenityOverview.getByTestId('list-editor-add').click()
@@ -116,7 +232,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   await expect(page).toHaveURL(new RegExp(`/products/${productId}/amenities$`))
   const described = await call<{ product: { stay: { property_type_group: string; property_type: string; amenities: string[] } } }>('get_product', { product_id: productId })
   expect(described.error).toBeNull()
-  expect(described.data!.product.stay).toMatchObject({ property_type_group: 'unique_homes', property_type: 'treehouse', amenities: ['dryer', 'wireless_internet'] })
+  expect(described.data!.product.stay).toMatchObject({ ...propertyFacts, amenities: ['dryer', 'wireless_internet'] })
   await expect(amenityOverview.getByText('Dryer', { exact: true })).toBeVisible()
   await expect(amenityOverview.getByText('Wifi', { exact: true })).toBeVisible()
   await expect(amenityOverview.getByText('Bathtub', { exact: true })).toHaveCount(0)
@@ -331,6 +447,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   const settingsRead = await call<{ product: { description: string; details: Record<string, unknown>; stay: Record<string, unknown> } }>('get_product', { product_id: productId })
   expect(settingsRead.error).toBeNull()
   expect(settingsRead.data!.product).toMatchObject({ description: listingDescription, details: listingDetails, stay: {
+    ...propertyFacts,
     check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1,
     amenities: ['dryer', 'wireless_internet'], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
   } })
@@ -361,12 +478,29 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
     await expect(preview.getByTestId(`stay-description-${section.section}`)).toContainText(section.value)
     await expect(preview.getByText(section.value, { exact: true })).toHaveCount(1)
   }
+  for (const [label, value] of [['Listing type', 'Entire place'], ['Floors in building', '3'], ['Listing floor', '2'], ['Year built', '2019'], ['Property size', '85.5 m²']] as const) {
+    const term = preview.getByRole('term').filter({ hasText: new RegExp(`^${label}$`) })
+    await expect(term).toBeVisible()
+    await expect(term.locator('..').getByRole('definition')).toHaveText(value)
+  }
+  await preview.getByRole('term').filter({ hasText: /^Listing type$/ }).scrollIntoViewIfNeeded()
+  await page.screenshot({ path: testInfo.outputPath('property-guest-facts-desktop.png'), animations: 'disabled' })
+  const propertySchema = preview.locator('script[type="application/ld+json"]')
+  await expect(propertySchema).toHaveCount(1)
+  const accommodation = (JSON.parse((await propertySchema.textContent())!) as { '@graph': Array<Record<string, unknown>> })['@graph'].find(node => node['@type'] === 'Accommodation')
+  expect(accommodation).toMatchObject({ additionalType: 'EntirePlace', floorSize: { '@type': 'QuantitativeValue', value: 85.5, unitText: 'Square meters' } })
+  expect(accommodation!.additionalProperty).toEqual(expect.arrayContaining([
+    { '@type': 'PropertyValue', name: 'totalFloors', value: 3 },
+    { '@type': 'PropertyValue', name: 'listingFloor', value: 2 },
+    { '@type': 'PropertyValue', name: 'yearBuilt', value: 2019 },
+  ]))
   await expect(preview.locator('article')).toContainText('Sleeps 6')
   await expect(preview.locator('article')).toContainText('Flexible cancellation policy')
   await expect(preview.locator('article')).toContainText('Firm Long Term: Full refund up to 30 days before check-in.')
   const publicRead = await request.get(new URL(previewURL.pathname.replace(/^\/stays\//, '/api/public/stays/'), previewURL).href)
   expect(publicRead.status(), await publicRead.text()).toBe(200)
   expect((await publicRead.json() as { product: unknown }).product).toMatchObject({ description: listingDescription, details: listingDetails, stay: {
+    ...propertyFacts,
     check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1,
     cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
   } })
@@ -468,7 +602,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
     check_in_instructions: null, photos: [],
     // The editor's listing choices persist through the native home projection too.
     description: listingDescription, published: false, address: homeAddress, latitude: null, longitude: null,
-    property_type_group: 'unique_homes', property_type: 'treehouse', bedrooms: null, beds: null, bathrooms: null, amenities: ['dryer', 'wireless_internet'], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
+    ...propertyFacts, bedrooms: null, beds: null, bathrooms: null, amenities: ['dryer', 'wireless_internet'], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
     check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
   }])
 
@@ -1122,6 +1256,15 @@ test('a cleaner sees only assigned-home arrivals and departures on Today and Upc
     const publicResponse = await page.request.get(new URL(publicURL.pathname.replace(/^\/stays\//, '/api/public/stays/'), publicURL).href)
     expect(publicResponse.status(), await publicResponse.text()).toBe(200)
     const publicPayload = await publicResponse.json() as { product: { stay: Record<string, unknown> } }
+    expect(publicPayload.product.stay).toMatchObject({ listing_type: null, total_floors: null, listing_floor: null, year_built: null, property_size: null, property_size_unit: null })
+    for (const label of ['Listing type', 'Floors in building', 'Listing floor', 'Year built', 'Property size']) await expect(publicPreview.getByRole('term').filter({ hasText: new RegExp(`^${label}$`) })).toHaveCount(0)
+    const unprovidedPropertySchema = publicPreview.locator('script[type="application/ld+json"]')
+    await expect(unprovidedPropertySchema).toHaveCount(1)
+    const unknownAccommodation = (JSON.parse((await unprovidedPropertySchema.textContent())!) as { '@graph': Array<Record<string, unknown>> })['@graph'].find(node => node['@type'] === 'Accommodation')
+    expect(unknownAccommodation).toBeDefined()
+    expect(unknownAccommodation).not.toHaveProperty('additionalType')
+    expect(unknownAccommodation).not.toHaveProperty('floorSize')
+    for (const name of ['totalFloors', 'listingFloor', 'yearBuilt']) expect(unknownAccommodation!.additionalProperty).not.toContainEqual(expect.objectContaining({ name }))
     for (const field of Object.keys(guide)) expect(publicPayload.product.stay).not.toHaveProperty(field)
     const publicHTML = await publicPreview.locator('html').innerHTML()
     const publicJSON = JSON.stringify(publicPayload)
