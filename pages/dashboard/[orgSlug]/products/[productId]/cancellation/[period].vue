@@ -83,5 +83,5 @@ function selectPolicy(value: unknown) {
 }
 
 onBeforeRouteLeave(() => { p.revert() })
-onBeforeRouteUpdate(() => { p.revert() })
+onBeforeRouteUpdate((to, from) => { if ('period' in to.params && 'period' in from.params && to.params.period !== from.params.period) p.revert() })
 </script>

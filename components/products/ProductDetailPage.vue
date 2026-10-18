@@ -288,7 +288,7 @@
               <TenantButton v-else-if="canEnquire" block :to="enquiryPath">
                 {{ t('saya.experience_detail.enquire') }}
               </TenantButton>
-              <TenantButton v-else block size="lg" control-id="product-booking-toggle" class="w-full font-semibold" @click="openBooking">
+              <TenantButton v-else-if="canBook" block size="lg" control-id="product-booking-toggle" class="w-full font-semibold" @click="openBooking">
                 {{ bookingLabel }}
               </TenantButton>
             </div>

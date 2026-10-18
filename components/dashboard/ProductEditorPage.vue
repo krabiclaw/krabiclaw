@@ -88,12 +88,47 @@
         <span v-else :class="arrivalTab ? 'line-clamp-2 whitespace-pre-line break-words' : item.id === 'description' ? 'line-clamp-4' : undefined">{{ item.summary }}</span>
       </template>
     </EditorNavigationList>
-    <template v-if="stayEditor && (arrivalTab || stayPreviewUrl)" #footer>
+    <template v-if="stayEditor" #footer>
       <div class="flex justify-center">
-        <UButton :to="arrivalTab ? sectionPath('arrival-guide') : stayPreviewUrl ?? undefined" target="_blank" label="View" icon="i-lucide-eye" color="neutral" class="pointer-events-auto h-12 rounded-full px-6 shadow-lg" />
+        <UButton ref="previewButton" :to="arrivalTab ? sectionPath('arrival-guide') : previewPath" :target="arrivalTab ? '_blank' : undefined" label="View" icon="i-lucide-eye" color="neutral" class="pointer-events-auto h-12 rounded-full px-6 shadow-lg" :disabled="saving" />
       </div>
     </template>
   </DashboardIndexPanel>
+  <UModal
+    v-model:open="previewOpen"
+    title="Listing preview"
+    fullscreen
+    :close="{ color: 'neutral', variant: 'soft' }"
+    :ui="{ header: 'grid grid-cols-[1fr_auto_1fr] gap-3', wrapper: 'sr-only', close: 'static col-start-1 row-start-1 size-10 justify-self-start rounded-full', body: 'min-h-0 p-0 sm:p-0' }"
+    @after:leave="restorePreviewFocus"
+  >
+    <template #actions>
+      <UTabs
+        :model-value="previewViewport ?? undefined"
+        :items="[{ label: 'Desktop view', value: 'desktop' }, { label: 'Mobile view', value: 'mobile' }]"
+        :content="false"
+        size="sm"
+        color="neutral"
+        variant="pill"
+        aria-label="Preview device"
+        class="hidden col-start-2 row-start-1 lg:block"
+        @update:model-value="changePreviewViewport"
+      />
+    </template>
+    <template #body>
+      <UAlert v-if="previewFailure" color="error" variant="soft" title="Listing preview could not be opened" :description="previewFailure" class="m-6" />
+      <div v-else class="flex h-full min-h-0 justify-center overflow-auto bg-muted">
+        <iframe
+          v-if="previewRequested && stayPreviewUrl"
+          :src="stayPreviewUrl"
+          title="Listing preview"
+          sandbox="allow-same-origin allow-scripts allow-forms"
+          class="h-full min-h-0 w-full border-0 bg-default"
+          :class="previewViewport === 'mobile' ? 'max-w-[390px]' : undefined"
+        />
+      </div>
+    </template>
+  </UModal>
 </template>
 
 <script lang="ts">
@@ -110,6 +145,7 @@ export const SECTION_KEYS = [
 ] as const
 export type SectionKey = typeof SECTION_KEYS[number]
 export type BookingConcern = 'enabled' | 'duration' | 'capacity' | 'confirmation' | 'payment' | 'location' | 'assignment' | number
+export type ProductConcern = BookingConcern | 'publication-visibility' | 'publication-availability'
 
 /** Where the product is offered and shown, per location, as its Locations leaf edits it. */
 export interface ProductLocationDraft { active: boolean; published: boolean }
@@ -190,6 +226,9 @@ export interface ProductForm {
 export interface ProductEditor {
   form: ProductForm
   product: ComputedRef<Product | null>
+  /** Saved publication state, separate from the visibility leaf's draft. */
+  published: ComputedRef<boolean>
+  bookingOffering: ComputedRef<boolean>
   itemLabel: ComputedRef<string>
   currency: string
   organizationId: string
@@ -246,7 +285,7 @@ export interface ProductEditor {
    * (one option, one combination's price) names its own parent, so the save
    * lands where its Close would rather than back on the product.
    */
-  save: (closeTo?: string, bookingConcern?: BookingConcern) => Promise<void>
+  save: (closeTo?: string, concern?: ProductConcern) => Promise<void>
   /** Private StayHome fields remain outside the public Product and its draft. */
   arrivalHome: ComputedRef<StayArrivalGuide | null>
   arrivalDraft: Ref<StayArrivalGuide | null>
@@ -276,6 +315,8 @@ import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 import { mediaStillUrl, uniqueMediaAssets } from '~/shared/media-placement-contract'
 import { MINUTE_TIME_PATTERN } from '~/utils/timezone'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
+import { isNavigationFailure } from 'vue-router'
+import { dashboardOverlayOpenKey } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import {
   STAY_PROPERTY_TYPES,
   STAY_AMENITIES,
@@ -416,6 +457,8 @@ const { data: loaded, error: loadFailure, refresh } = await useAsyncData(
   },
 )
 const product = computed(() => loaded.value?.product ?? null)
+const published = computed(() => product.value?.publications.some(entry => entry.organization_id === organizationId && entry.published) === true)
+const bookingOffering = computed(() => Boolean(product.value?.booking) || ['stay', 'experience', 'service'].includes(product.value?.kind ?? ''))
 const collections = computed(() => loaded.value?.collections ?? [])
 const stayEditor = computed(() => product.value?.kind === 'stay')
 const ARRIVAL_SECTIONS = ['arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'checkout-instructions', 'arrival-guide']
@@ -504,6 +547,43 @@ const stayPreviewUrl = computed(() => {
   url.searchParams.set('preview_token', token)
   return url.toString()
 })
+// Preview is a mode of the editor currently open, so its URL reconstructs the
+// same concern and closing never needs a second return-path model.
+const previewButton = useTemplateRef('previewButton')
+const previewRequested = computed(() => route.query.editMode === 'preview')
+provide(dashboardOverlayOpenKey, previewRequested)
+const previewViewport = computed(() => route.query.previewViewport === undefined ? 'desktop'
+  : route.query.previewViewport === 'desktop' || route.query.previewViewport === 'mobile' ? route.query.previewViewport : null)
+const previewNavigationError = ref('')
+const previewPath = computed(() => router.resolve({ path: route.path, query: { ...route.query, editMode: 'preview', previewViewport: 'desktop' }, hash: route.hash }).fullPath)
+const previewFailure = computed(() => previewNavigationError.value || loadError.value || (!stayEditor.value ? 'A listing preview requires a place to stay.'
+  : !stayPreviewUrl.value ? 'The listing’s website address or preview authorization could not be loaded.'
+    : !previewViewport.value ? 'Choose Desktop view or Mobile view to open this preview.' : ''))
+const previewOpen = computed({
+  get: () => previewRequested.value,
+  set: (open: boolean) => { if (!open) void closePreview() },
+})
+watch(() => route.fullPath, () => { previewNavigationError.value = '' })
+async function closePreview() {
+  try {
+    const result = await navigateTo({ path: route.path, query: { ...route.query, editMode: undefined, previewViewport: undefined }, hash: route.hash })
+    if (isNavigationFailure(result)) throw result
+  } catch (error) {
+    previewNavigationError.value = getErrorMessage(error, 'The listing preview could not be closed')
+  }
+}
+async function changePreviewViewport(value: string | number) {
+  if (value !== 'desktop' && value !== 'mobile') return
+  try {
+    const result = await navigateTo({ path: route.path, query: { ...route.query, previewViewport: value }, hash: route.hash }, { replace: true })
+    if (isNavigationFailure(result)) throw result
+  } catch (error) {
+    previewNavigationError.value = getErrorMessage(error, 'The preview device could not be changed')
+  }
+}
+function restorePreviewFocus() {
+  if (previewButton.value?.$el instanceof HTMLElement && previewButton.value.$el.isConnected) previewButton.value.$el.focus({ preventScroll: true })
+}
 const photoAssets = computed(() => product.value ? uniqueMediaAssets([...(product.value.image ? [product.value.image] : []), ...product.value.gallery]) : [])
 const stayPhotos = computed(() => photoAssets.value.map(mediaStillUrl).filter((url): url is string => Boolean(url)))
 const stayAmenityPreview = computed(() => form.stay_amenities.map(code => ({ code, ...STAY_AMENITIES[code] })).sort((left, right) => left.label.localeCompare(right.label)))
@@ -886,8 +966,8 @@ function bookingSummary(): string {
 }
 
 function publicationSummary(): string {
-  const parts = [form.published ? 'Published' : 'Draft']
-  if (!form.active) parts.push(form.kind === 'experience' || form.kind === 'service' ? 'Bookings paused' : 'Orders paused')
+  const parts = [published.value ? 'Published' : 'Draft']
+  if (!product.value?.active) parts.push(bookingOffering.value ? 'Bookings paused' : 'Orders paused')
   return parts.join(' · ')
 }
 
@@ -1009,11 +1089,11 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       { id: 'collections', label: sectionLabels.collections, summary: collectionsSummary(), placeholder: !form.collection_ids.length, to: sectionPath('collections') },
       {
         id: 'publication',
-        label: stayEditor.value ? (form.published ? 'Listed' : 'Unlisted') : 'Status',
+        label: stayEditor.value ? (published.value ? 'Listed' : 'Unlisted') : 'Status',
         summary: stayEditor.value
-          ? (form.published ? (form.active ? 'Your listing is visible on your website.' : 'Your listing is visible. Bookings are paused.') : 'Your listing is hidden from your website. Publish it when you’re ready.')
+          ? (published.value ? (product.value?.active ? 'Your listing is visible on your website.' : 'Your listing is visible. Bookings are paused.') : 'Your listing is hidden from your website. Publish it when you’re ready.')
           : publicationSummary(),
-        status: stayEditor.value ? (form.published ? 'success' as const : 'neutral' as const) : undefined,
+        status: stayEditor.value ? (published.value ? 'success' as const : 'neutral' as const) : undefined,
         to: sectionPath('publication'),
       },
     ].sort((left, right) => rowRank(left.id) - rowRank(right.id)),
@@ -1221,13 +1301,15 @@ const pageTitle = computed(() => isNew.value ? newTitle.value : form.name || ite
 const saveLabel = computed(() => createSaveLabel.value ?? 'Save')
 
 const closeTo = ref<string | null>(null)
-async function save(target?: string, bookingConcern?: BookingConcern) {
+async function save(target?: string, concern?: ProductConcern) {
+  if (saving.value || saveDisabled.value) return
   closeTo.value = target ?? null
-  try { if (bookingConcern !== undefined) await commit(bookingConcern); else await saveCurrentEditor() } finally { closeTo.value = null }
+  try { if (concern !== undefined) await commit(concern); else await saveCurrentEditor() } finally { closeTo.value = null }
 }
 
-async function commit(bookingConcern?: BookingConcern) {
+async function commit(concern?: ProductConcern) {
   const id = locationId.value
+  const publicationDraft = concern === 'publication-visibility' ? form.published : concern === 'publication-availability' ? form.active : null
   saving.value = true
   saveError.value = null
   try {
@@ -1262,26 +1344,33 @@ async function commit(bookingConcern?: BookingConcern) {
       await navigateTo(router.resolve({ path: `${catalogPath.value}/${created.product.id}`, query: { location_id: id ?? undefined } }).fullPath, { replace: true })
       return
     }
-    if (bookingConcern !== undefined) {
-      await saveBooking(bookingConcern)
+    if (concern === 'publication-visibility') {
+      await savePublication()
+    } else if (concern === 'publication-availability') {
+      await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, { method: 'PATCH', body: { active: form.active }, validate: isMutation })
+    } else if (concern !== undefined) {
+      await saveBooking(concern)
     } else {
       await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, {
         method: 'PATCH', body: payload(), validate: isMutation,
       })
-      if (editorKey.value === 'publication') await savePublication()
       if (editorKey.value === 'locations') await saveLocation()
       if (editorKey.value === 'collections') await saveCollections()
     }
     await reload()
     // A booking write changes what the schedule is: its start times, whether the
     // product has a calendar at all, or the time zone an online one runs in.
-    if (bookingConcern !== undefined) await reloadSchedule()
+    if (concern !== undefined && concern !== 'publication-visibility' && concern !== 'publication-availability') await reloadSchedule()
     await (closeTo.value ? navigateTo(closeTo.value) : level.close())
   } catch (error) {
     saveError.value = getErrorMessage(error, `Failed to save ${itemLabel.value.toLowerCase()}`)
-    if (error instanceof ApiClientError && (error.data.committed === true || (isRecord(error.data.data) && error.data.data.committed === true))) {
+    if (publicationDraft !== null || error instanceof ApiClientError && (error.data.committed === true || (isRecord(error.data.data) && error.data.data.committed === true))) {
       try { await reload() } catch (readError) { saveError.value += ` ${getErrorMessage(readError, 'The saved listing could not be read again')}` }
     }
+    // A failed response may follow a committed publication. Saved summaries
+    // re-read it, while the failed leaf retains the choice it submitted.
+    if (concern === 'publication-visibility' && publicationDraft !== null) form.published = publicationDraft
+    if (concern === 'publication-availability' && publicationDraft !== null) form.active = publicationDraft
   } finally {
     saving.value = false
   }
@@ -1640,6 +1729,8 @@ useSeoMeta({ title: () => `${pageTitle.value} | KrabiClaw Dashboard`, robots: 'n
 provide(productEditorKey, {
   form,
   product,
+  published,
+  bookingOffering,
   itemLabel,
   currency,
   organizationId,

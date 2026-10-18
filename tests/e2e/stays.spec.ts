@@ -3,6 +3,7 @@ import sharp from 'sharp'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpRequest } from './helpers/mcp'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations'
+import type { Product } from '../../server/types/products'
 
 // A host's place to stay, end to end through the surfaces that own it: the
 // one Product editor creates the home, MCP adds a stay, Today and the stay's
@@ -334,16 +335,27 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
     amenities: ['dryer', 'wireless_internet'], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
   } })
 
-  // View opens the saved draft on its actual tenant route. Preview access is
-  // carried by the signed link; a separate guest cannot read the hidden stay.
+  // Preview is a URL-owned editor mode around the real guest page. It
+  // preserves the open concern and authored draft while showing saved content.
+  const titlePath = `/dashboard/${slug}/products/${productId}/name?location_id=${encodeURIComponent(location.id)}`
+  await page.goto(titlePath)
+  const titlePanel = page.locator('#dashboard-panel-product-name')
+  const titleInput = titlePanel.getByRole('textbox', { name: 'Title', exact: true })
+  await expect(titleInput).toHaveValue('Cliff Cabin')
+  await titleInput.fill('An unsaved cliff cabin title')
+  const previewSource = page.url()
   const previewLink = page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true })
-  const previewURL = new URL((await previewLink.getAttribute('href'))!, baseURL!)
+  await expect(previewLink).toHaveAttribute('href', /editMode=preview/)
+  await previewLink.click()
+  await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/name`) && url.searchParams.get('location_id') === location.id && url.searchParams.get('editMode') === 'preview' && url.searchParams.get('previewViewport') === 'desktop')
+  const previewModal = page.getByRole('dialog', { name: 'Listing preview', exact: true })
+  const previewIframe = previewModal.locator('iframe[title="Listing preview"]')
+  const preview = previewIframe.contentFrame()
+  await expect(previewModal).toBeVisible()
+  await expect(preview.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
+  const previewURL = new URL((await previewIframe.getAttribute('src'))!, baseURL!)
   expect(previewURL.pathname).toMatch(/^\/stays\//)
   expect(previewURL.searchParams.get('preview_token')).toBeTruthy()
-  const openedPreview = page.waitForEvent('popup')
-  await previewLink.click()
-  const preview = await openedPreview
-  await expect(preview.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
   for (const section of descriptionSections) {
     await expect(preview.getByTestId(`stay-description-${section.section}`)).toHaveCount(1)
     await expect(preview.getByTestId(`stay-description-${section.section}`)).toContainText(section.value)
@@ -352,13 +364,54 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   await expect(preview.locator('article')).toContainText('Sleeps 6')
   await expect(preview.locator('article')).toContainText('Flexible cancellation policy')
   await expect(preview.locator('article')).toContainText('Firm Long Term: Full refund up to 30 days before check-in.')
-  const publicRead = await preview.request.get(new URL(previewURL.pathname.replace(/^\/stays\//, '/api/public/stays/'), previewURL).href)
+  const publicRead = await request.get(new URL(previewURL.pathname.replace(/^\/stays\//, '/api/public/stays/'), previewURL).href)
   expect(publicRead.status(), await publicRead.text()).toBe(200)
   expect((await publicRead.json() as { product: unknown }).product).toMatchObject({ description: listingDescription, details: listingDetails, stay: {
     check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1,
     cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
   } })
-  await preview.screenshot({ path: testInfo.outputPath('stay-preview-desktop.png') })
+  await page.screenshot({ path: testInfo.outputPath('stay-preview-desktop.png') })
+  await previewModal.getByRole('tab', { name: 'Mobile view', exact: true }).click()
+  await expect(page).toHaveURL(url => url.searchParams.get('previewViewport') === 'mobile')
+  await expect(previewIframe).toHaveJSProperty('clientWidth', 390)
+  await expect(previewIframe).toHaveAttribute('src', previewURL.href)
+  await previewModal.getByRole('tab', { name: 'Desktop view', exact: true }).click()
+  await expect(page).toHaveURL(url => url.searchParams.get('previewViewport') === 'desktop')
+  expect(await previewIframe.evaluate(element => element.clientWidth)).toBeGreaterThan(390)
+  await previewModal.getByRole('tab', { name: 'Mobile view', exact: true }).click()
+  await expect(page).toHaveURL(url => url.searchParams.get('previewViewport') === 'mobile')
+  await expect(previewIframe).toHaveJSProperty('clientWidth', 390)
+  const mobilePreviewRoute = page.url()
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(previewModal.getByRole('tab', { name: 'Desktop view', exact: true, includeHidden: true })).not.toBeVisible()
+  await expect(previewModal.getByRole('tab', { name: 'Mobile view', exact: true, includeHidden: true })).not.toBeVisible()
+  await expect(preview.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+  expect(await preview.locator('html').evaluate(element => element.scrollWidth)).toBeLessThanOrEqual(390)
+  await page.screenshot({ path: testInfo.outputPath('stay-preview-mobile.png') })
+  await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(page).toHaveURL(previewSource)
+  await expect(previewModal).not.toBeVisible()
+  await expect(titleInput).toHaveValue('An unsaved cliff cabin title')
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await previewLink.click()
+  await expect(previewModal).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page).toHaveURL(previewSource)
+  await expect(previewModal).not.toBeVisible()
+  await expect(titleInput).toHaveValue('An unsaved cliff cabin title')
+  await titlePanel.getByRole('button', { name: 'Cancel', exact: true }).click()
+  // Direct entry and a reload reconstruct the same device mode from its URL.
+  await page.goto(mobilePreviewRoute)
+  await page.reload()
+  await expect(previewModal).toBeVisible()
+  await expect(previewModal.getByRole('tab', { name: 'Mobile view', exact: true })).toHaveAttribute('aria-selected', 'true')
+  await expect(previewIframe).toHaveJSProperty('clientWidth', 390)
+  await expect(preview.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
+  await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(page).toHaveURL(previewSource)
+  await expect(titleInput).toHaveValue('Cliff Cabin')
+  await titlePanel.getByRole('button', { name: 'Cancel', exact: true }).click()
   const anonymous = await browser.newContext()
   try {
     previewURL.searchParams.delete('preview_token')
@@ -367,7 +420,6 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
     expect(await hidden.text()).not.toContain('Cliff Cabin')
   } finally {
     await anonymous.close()
-    await preview.close()
   }
   await page.setViewportSize({ width: 390, height: 844 })
 
@@ -514,21 +566,18 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   expect(projectedCalendar.error).toBeNull()
   expect(projectedCalendar.data!.home.photos.map(photo => ({ id: photo.id, position: photo.position })))
     .toEqual(uploadedPhotos.map((photo, position) => ({ id: photo.id, position })))
-  const openedPhotoPreview = page.waitForEvent('popup')
   await previewLink.click()
-  const photoPreview = await openedPhotoPreview
-  try {
-    await expect(photoPreview.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
-    const guestPhotos = photoPreview.locator('[data-media-gallery] img')
-    await expect(guestPhotos).toHaveCount(3)
-    for (const [index, photo] of uploadedPhotos.entries()) {
-      await expect(guestPhotos.nth(index)).toHaveAttribute('src', photo.url)
-      await expect(guestPhotos.nth(index)).toHaveJSProperty('naturalWidth', photo.width)
-      await expect(guestPhotos.nth(index)).toHaveJSProperty('naturalHeight', photo.height)
-    }
-  } finally {
-    await photoPreview.close()
+  await expect(previewModal).toBeVisible()
+  await expect(preview.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
+  const guestPhotos = preview.locator('[data-media-gallery] img')
+  await expect(guestPhotos).toHaveCount(3)
+  for (const [index, photo] of uploadedPhotos.entries()) {
+    await expect(guestPhotos.nth(index)).toHaveAttribute('src', photo.url)
+    await expect(guestPhotos.nth(index)).toHaveJSProperty('naturalWidth', photo.width)
+    await expect(guestPhotos.nth(index)).toHaveJSProperty('naturalHeight', photo.height)
   }
+  await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(page).toHaveURL(`${baseURL}${photoPath}`)
   const photoCard = page.getByTestId('editor-card-photo')
   await expect(photoCard).toBeVisible()
   await expect(photoCard).toHaveAccessibleName('Photos 3 photos')
@@ -701,6 +750,150 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   expect(nights.find(night => night.date === closedNight)).toMatchObject({ available: false, closed: true })
   const mcpCalendar = await call<{ nights: Array<{ date: string; closed: boolean }> }>('get_stay_calendar', { product_id: productId, from: closedNight, to: localDay(21) })
   expect(mcpCalendar.data!.nights).toEqual([expect.objectContaining({ date: closedNight, closed: true })])
+
+  // Visibility and accepting bookings are separate writes. A real nightly
+  // price makes this home publishable without changing the earlier unpriced proof.
+  await page.goto(`/dashboard/${slug}/products/${productId}/price`)
+  const nightlyPrice = page.locator('#dashboard-panel-product-price')
+  await nightlyPrice.getByRole('textbox', { name: 'Per night (THB)', exact: true }).fill('150')
+  const priceSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products/${productId}`)
+  await nightlyPrice.getByRole('button', { name: 'Save', exact: true }).click()
+  expect((await priceSaved).status()).toBe(200)
+  await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/photo`))
+  const pricedProduct = await call<{ product: Product }>('get_product', { product_id: productId })
+  expect(pricedProduct.error).toBeNull()
+  expect(pricedProduct.data!.product.variants[0]!.prices).toContainEqual(expect.objectContaining({ unit_amount: 150_00, currency: 'THB' }))
+  expect(pricedProduct.data!.product.active).toBe(true)
+  expect(pricedProduct.data!.product.publications.find(item => item.organization_id === organizationId)!.published).toBe(false)
+  const publicationPath = `/dashboard/${slug}/products/${productId}/publication`
+  const publicationEndpoint = `/api/editor/organizations/${organizationId}/products/${productId}/publication`
+  const productEndpoint = `/api/editor/organizations/${organizationId}/products/${productId}`
+  const publicationBodies: unknown[] = []
+  const availabilityBodies: unknown[] = []
+  page.on('request', outgoing => {
+    const path = new URL(outgoing.url()).pathname
+    if (path === publicationEndpoint && outgoing.method() === 'PUT') publicationBodies.push(outgoing.postDataJSON())
+    if (path === productEndpoint && outgoing.method() === 'PATCH') availabilityBodies.push(outgoing.postDataJSON())
+  })
+  await page.goto(`${publicationPath}/visibility`)
+  const publicationOverview = page.locator('#dashboard-panel-product-publication')
+  const savedVisibility = publicationOverview.getByTestId('editor-card-visibility')
+  const visibility = page.locator('#dashboard-panel-product-visibility')
+  await expect(savedVisibility).toBeVisible()
+  await expect(savedVisibility).toContainText('Unlisted')
+  await visibility.getByText('Listed', { exact: true }).click()
+  await expect(visibility.getByRole('radio', { name: /^Listed/ })).toBeChecked()
+  await expect(savedVisibility).toContainText('Unlisted')
+  const interceptVisibility = (url: URL) => url.pathname === publicationEndpoint
+  await page.route(interceptVisibility, async route => route.request().method() === 'PUT' ? await route.abort('failed') : await route.continue())
+  const interruptedVisibility = page.waitForEvent('requestfailed', outgoing => outgoing.method() === 'PUT' && new URL(outgoing.url()).pathname === publicationEndpoint)
+  await visibility.getByRole('button', { name: 'Save', exact: true }).click()
+  expect((await interruptedVisibility).failure()).toEqual({ errorText: 'net::ERR_FAILED' })
+  await expect(visibility.getByText('Failed to fetch', { exact: false })).toBeVisible()
+  await expect(visibility.getByRole('radio', { name: /^Listed/ })).toBeChecked()
+  await expect(visibility.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
+  await expect(savedVisibility).toContainText('Unlisted')
+  expect(publicationBodies).toEqual([{ published: true }])
+  expect(availabilityBodies).toEqual([])
+  const failedVisibility = await call<{ product: Product }>('get_product', { product_id: productId })
+  expect(failedVisibility.error).toBeNull()
+  expect(failedVisibility.data!.product).toMatchObject({ active: true, name: pricedProduct.data!.product.name, details: pricedProduct.data!.product.details })
+  expect(failedVisibility.data!.product.publications.find(item => item.organization_id === organizationId)!.published).toBe(false)
+  await page.unroute(interceptVisibility)
+  const visibilitySaved = page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname === publicationEndpoint)
+  await visibility.getByRole('button', { name: 'Save', exact: true }).click()
+  expect((await visibilitySaved).status()).toBe(200)
+  await expect(page).toHaveURL(`${baseURL}${publicationPath}`)
+  await expect(savedVisibility).toContainText('Listed')
+  const listedProduct = await call<{ product: Product }>('get_product', { product_id: productId })
+  expect(listedProduct.error).toBeNull()
+  expect(listedProduct.data!.product).toMatchObject({ active: true, name: pricedProduct.data!.product.name, details: pricedProduct.data!.product.details })
+  expect(listedProduct.data!.product.publications.find(item => item.organization_id === organizationId)!.published).toBe(true)
+  expect(publicationBodies).toEqual([{ published: true }, { published: true }])
+  expect(availabilityBodies).toEqual([])
+  await page.screenshot({ path: testInfo.outputPath('listing-status-desktop.png') })
+
+  const anonymousListing = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  try {
+    const guest = await anonymousListing.newPage()
+    const guestResponse = await guest.goto(previewURL.href)
+    expect(guestResponse!.status()).toBe(200)
+    await expect(guest.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
+    await expect(guest.getByRole('button', { name: 'Check availability', exact: true }).last()).toBeVisible()
+    await page.goto(`${publicationPath}/availability`)
+    const availability = page.locator('#dashboard-panel-product-availability')
+    const acceptBookings = availability.getByRole('switch', { name: 'Accept bookings', exact: true })
+    await expect(acceptBookings).toHaveAttribute('aria-checked', 'true')
+    await acceptBookings.click()
+    await expect(acceptBookings).toHaveAttribute('aria-checked', 'false')
+    // Commit through the real server, then fail its response: re-reading an
+    // already-saved choice must still leave a visible, actionable retry.
+    const availabilityFailure = 'Availability was saved, but its completion response failed.'
+    const interceptAvailability = (url: URL) => url.pathname === productEndpoint
+    await page.route(interceptAvailability, async route => {
+      if (route.request().method() !== 'PATCH') return await route.continue()
+      const upstream = await route.fetch()
+      expect(upstream.status(), await upstream.text()).toBe(200)
+      expect((await upstream.json() as { product: Product }).product.active).toBe(false)
+      await route.fulfill({ response: upstream, status: 503, json: { error: availabilityFailure, data: { code: 'POST_WRITE_COMPLETION_FAILED', committed: true, product_id: productId, reason: availabilityFailure } } })
+    })
+    const committedFailure = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productEndpoint)
+    await availability.getByRole('button', { name: 'Save', exact: true }).click()
+    const failedAvailabilityResponse = await committedFailure
+    expect(failedAvailabilityResponse.status()).toBe(503)
+    expect(await failedAvailabilityResponse.json()).toMatchObject({ data: { committed: true, reason: availabilityFailure } })
+    await expect(availability.getByText(availabilityFailure, { exact: true })).toBeVisible()
+    await expect(acceptBookings).toHaveAttribute('aria-checked', 'false')
+    await expect(availability.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
+    const pausedProduct = await call<{ product: Product }>('get_product', { product_id: productId })
+    expect(pausedProduct.error).toBeNull()
+    expect(pausedProduct.data!.product).toMatchObject({ active: false, name: pricedProduct.data!.product.name, details: pricedProduct.data!.product.details })
+    expect(pausedProduct.data!.product.publications.find(item => item.organization_id === organizationId)!.published).toBe(true)
+    expect(availabilityBodies).toEqual([{ active: false }])
+    await page.unroute(interceptAvailability)
+    const availabilitySaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productEndpoint)
+    await availability.getByRole('button', { name: 'Save', exact: true }).click()
+    expect((await availabilitySaved).status()).toBe(200)
+    await expect(page).toHaveURL(`${baseURL}${publicationPath}`)
+    expect(availabilityBodies).toEqual([{ active: false }, { active: false }])
+    const pausedResponse = await guest.reload()
+    expect(pausedResponse!.status()).toBe(200)
+    await expect(guest.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
+    await expect(guest.getByText('Temporarily unavailable', { exact: true }).last()).toBeVisible()
+    await expect(guest.getByRole('button', { name: /^(Check availability|Reserve|Send enquiry)$/ })).toHaveCount(0)
+    const pausedRead = await anonymousListing.request.get(new URL(previewURL.pathname.replace(/^\/stays\//, '/api/public/stays/'), previewURL).href)
+    expect(pausedRead.status(), await pausedRead.text()).toBe(200)
+    expect((await pausedRead.json() as { product: Product }).product).toMatchObject({ name: 'Cliff Cabin', active: false })
+
+    await page.goto(`${publicationPath}/visibility`)
+    await visibility.getByText('Unlisted', { exact: true }).click()
+    const hiddenSaved = page.waitForResponse(response => response.request().method() === 'PUT' && new URL(response.url()).pathname === publicationEndpoint)
+    await visibility.getByRole('button', { name: 'Save', exact: true }).click()
+    expect((await hiddenSaved).status()).toBe(200)
+    await expect(page).toHaveURL(`${baseURL}${publicationPath}`)
+    await expect(savedVisibility).toContainText('Unlisted')
+    const hiddenProduct = await call<{ product: Product }>('get_product', { product_id: productId })
+    expect(hiddenProduct.error).toBeNull()
+    expect(hiddenProduct.data!.product).toMatchObject({ active: false, name: pricedProduct.data!.product.name, details: pricedProduct.data!.product.details })
+    expect(hiddenProduct.data!.product.publications.find(item => item.organization_id === organizationId)!.published).toBe(false)
+    const hiddenResponse = await guest.reload()
+    expect(hiddenResponse!.status()).toBe(404)
+    await expect(guest.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toHaveCount(0)
+    await page.goto(`${publicationPath}/availability`)
+    await availability.getByRole('switch', { name: 'Accept bookings', exact: true }).click()
+    const resumed = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productEndpoint)
+    await availability.getByRole('button', { name: 'Save', exact: true }).click()
+    expect((await resumed).status()).toBe(200)
+    await expect(page).toHaveURL(`${baseURL}${publicationPath}`)
+    const restoredListing = await call<{ product: Product }>('get_product', { product_id: productId })
+    expect(restoredListing.error).toBeNull()
+    expect(restoredListing.data!.product.active).toBe(true)
+    expect(restoredListing.data!.product.publications.find(item => item.organization_id === organizationId)!.published).toBe(false)
+    expect(publicationBodies).toEqual([{ published: true }, { published: true }, { published: false }])
+    expect(availabilityBodies).toEqual([{ active: false }, { active: false }, { active: true }])
+  } finally {
+    await anonymousListing.close()
+  }
 })
 
 test('a cleaner sees only assigned-home arrivals and departures on Today and Upcoming', async ({ page, browser, baseURL }, testInfo) => {
@@ -916,25 +1109,28 @@ test('a cleaner sees only assigned-home arrivals and departures on Today and Upc
     await page.getByRole('tab', { name: 'Your space', exact: true }).click()
     await expect(page).toHaveURL(url => url.pathname === `${productPath}/photo` && !url.searchParams.has('guide'))
     const publicView = page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true })
-    await expect(publicView).toHaveAttribute('href', /preview_token=/)
-    const publicURL = new URL((await publicView.getAttribute('href'))!, baseURL!)
-    expect(publicURL.searchParams.get('preview_token')).toBeTruthy()
-    const publicOpened = page.waitForEvent('popup')
+    await expect(publicView).toHaveAttribute('href', /editMode=preview/)
     await publicView.click()
-    const publicPreview = await publicOpened
+    const publicPreviewModal = page.getByRole('dialog', { name: 'Listing preview', exact: true })
+    const publicIframe = publicPreviewModal.locator('iframe[title="Listing preview"]')
+    const publicPreview = publicIframe.contentFrame()
+    await expect(publicPreviewModal).toBeVisible()
     await expect(publicPreview.getByRole('heading', { name: 'Assigned Cabin', level: 1, exact: true })).toBeVisible()
     await expect(publicPreview.getByText(houseRules, { exact: true })).toBeVisible()
-    const publicResponse = await publicPreview.request.get(new URL(publicURL.pathname.replace(/^\/stays\//, '/api/public/stays/'), publicURL).href)
+    const publicURL = new URL((await publicIframe.getAttribute('src'))!, baseURL!)
+    expect(publicURL.searchParams.get('preview_token')).toBeTruthy()
+    const publicResponse = await page.request.get(new URL(publicURL.pathname.replace(/^\/stays\//, '/api/public/stays/'), publicURL).href)
     expect(publicResponse.status(), await publicResponse.text()).toBe(200)
     const publicPayload = await publicResponse.json() as { product: { stay: Record<string, unknown> } }
     for (const field of Object.keys(guide)) expect(publicPayload.product.stay).not.toHaveProperty(field)
-    const publicHTML = await publicPreview.content()
+    const publicHTML = await publicPreview.locator('html').innerHTML()
     const publicJSON = JSON.stringify(publicPayload)
     for (const value of [guide.directions, guide.wifi_network, guide.wifi_password.trim(), guide.house_manual, guide.check_in_instructions, guide.checkout_instructions[0]!.details]) {
       expect(publicHTML).not.toContain(value)
       expect(publicJSON).not.toContain(value)
     }
-    await publicPreview.close()
+    await publicPreviewModal.getByRole('button', { name: 'Close', exact: true }).click()
+    await expect(page).toHaveURL(`${baseURL}${productPath}/photo`)
 
     // Reading the new private home endpoint follows the same assigned-home
     // scope as Today. A member can read the guide but cannot change it.
