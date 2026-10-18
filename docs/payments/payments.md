@@ -426,7 +426,7 @@ business does not touch buyers' Customers.
 
 ## Metronome operating billing
 
-### Ad spend (Marketing plan)
+### Managed ads
 
 Managed ads is a service: Chris and Julia run a business's Google Ads
 campaigns for 10% of its ad spend. Connecting a Google Ads account costs
@@ -454,6 +454,12 @@ remain free. An active agreement must be ended before disconnecting Ads,
 removing the billing default card, or ending the usage contract. Plan changes
 do not themselves end that usage contract. Ending the service remains available
 when a provider cannot be read, and preserves its previously billable days.
+The connection and usage contract remain until the intersecting managed days
+have actual daily spend receipts, including zero spend, in the existing usage
+outbox. The daily task revisits unrecorded days after Google's two-day reporting
+delay and sends pending events through the existing delivery operation, even
+after Ads is disconnected. `delivery_at` is written only after native ingest
+acceptance; failed reads or deliveries remain failures to resolve.
 
 KrabiClaw Payments: **1.4% of payment volume, plus Stripe fees.** Billed after
 use. KrabiClaw Payments fees aren't returned after a refund or dispute. The

@@ -1,5 +1,7 @@
 import type { CloudflareEnv } from './auth'
-import { storeIntegration } from './organization-integrations'
+import { readIntegration, storeIntegration } from './organization-integrations'
+import { requireRecordedManagedSpend } from '~/server/domain/payments/ad-spend'
+import { HTTPError } from 'nitro'
 
 /**
  * Google Ads as a product of its own, over a Better Auth linked Google
@@ -98,13 +100,14 @@ export async function selectGoogleAdsCustomer(
   accountId: string,
   customerId: string,
   customerName: string,
-  expected?: { revision: string | null },
 ): Promise<string> {
+  await requireRecordedManagedSpend(env.DB, organizationId)
+  if (await readIntegration(env.DB, organizationId, 'google_ads')) throw new HTTPError({ statusCode: 409, message: 'Disconnect Google Ads before connecting again.' })
   return await storeIntegration(env.DB, organizationId, 'google_ads', {
     account_id: accountId,
     target_id: customerId,
     target_name: customerName,
-  }, expected)
+  }, { revision: null })
 }
 
 function googleAdsHeaders(accessToken: string, developerToken?: string): Record<string, string> {

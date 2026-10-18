@@ -5,8 +5,7 @@ import type { VerifiedMetaRequest } from './meta-graph'
 import { deleteIntegration, integrationsThroughAccount } from './organization-integrations'
 import { publicResourceCacheInvalidationQuery } from './public-resource-cache'
 import { reconcileZarazAnalytics } from './zaraz-analytics'
-import { listServices } from './organization-services'
-import { HTTPError } from 'nitro'
+import { requireRecordedManagedSpend } from '~/server/domain/payments/ad-spend'
 
 /**
  * Removing an organization's integration, and what Meta's callbacks ask for.
@@ -49,9 +48,7 @@ export async function releaseIntegration(
   organizationId: string,
   product: IntegrationProduct,
 ): Promise<ReleaseIntegrationResult> {
-  if (product === 'google-ads' && (await listServices(env.DB, organizationId)).managed_ads) {
-    throw new HTTPError({ statusCode: 409, message: 'Turn off managed ads in Plan before disconnecting Google Ads.' })
-  }
+  if (product === 'google-ads') await requireRecordedManagedSpend(env.DB, organizationId)
   const released = await deleteIntegration(env.DB, organizationId, PROVIDER[product])
 
   // Zaraz serves the measurement id of connected sites, so losing Analytics

@@ -19,7 +19,7 @@ import { receiveGuestWebReply } from '../../server/domain/guest-threads/inbound-
 import { acknowledgeBuyerThreadEntries } from '../../server/utils/notification-acknowledgement.ts'
 import { retainPaymentsForTenantDeletion } from '../../server/domain/payments/retention.ts'
 import { deliverPaymentsUsage, finalizePaymentsBilling, paymentsUsageStatus, reconcileNativeBillingCredit } from '../../server/domain/payments/usage.ts'
-import { agreeToService, endService, listServices, organizationsOnServiceAt, SERVICE_TERMS_VERSION } from '../../server/utils/organization-services.ts'
+import { agreeToService, endService, listServices, SERVICE_TERMS_VERSION } from '../../server/utils/organization-services.ts'
 import { storeIntegration, readIntegration } from '../../server/utils/organization-integrations.ts'
 import { releaseIntegration } from '../../server/utils/integration-release.ts'
 import { hashPassword, symmetricEncrypt } from 'better-auth/crypto'
@@ -28,6 +28,9 @@ import { createAuth } from '../../server/utils/auth.ts'
 import servicesPostRoute from '../../server/api/dashboard/services.post.ts'
 import servicesGetRoute from '../../server/api/dashboard/services.get.ts'
 import removeCardRoute from '../../server/api/billing/payment-methods.delete.ts'
+import adSpendDailyTask from '../../server/tasks/marketing-ad-spend-daily.ts'
+import { unrecordedAdSpendDays } from '../../server/domain/payments/ad-spend.ts'
+import { selectGoogleAdsCustomer } from '../../server/utils/google-ads.ts'
 import { getStripe } from '../../server/utils/billing.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { approveRefundAuthorization, executeRefund, requirePayment } from '../../server/domain/payments/index.ts'
@@ -895,6 +898,9 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
   await db.prepare("INSERT INTO payment_billing_accounts(organization_id,stripe_billing_customer_id,metronome_customer_id,metronome_contract_id,contract_start_at,currency,status,updated_at) VALUES(?,'cus_operating','meter-customer','contract','2026-09-01T00:00:00.000Z','USD','active',?)").bind(ORG, NOW).run()
   await db.prepare('UPDATE organization SET "stripeCustomerId"=? WHERE id=?').bind('cus_operating', ORG).run()
   let ending: string | undefined, defaultCard: string | null = 'pm_default', currency = 'USD', rate = 0.1, collectionCustomer = 'cus_operating', providerUnavailable = false
+  let deliveryUnavailable = false
+  let googleReads = 0
+  const ingests: Array<Array<{ transaction_id: string; properties: { pricing_amount: string } }>> = []
   const nativeContract = () => ({ id: 'contract', customer_id: 'meter-customer', uniqueness_key: `payments:${ORG}`, rate_card_id: 'rate-card', starting_at: '2026-09-01T00:00:00.000Z', ...(ending ? { ending_before: ending } : {}), customer_billing_provider_configuration: { customer_id: 'meter-customer', billing_provider: 'stripe', delivery_method: 'direct_to_billing_provider', configuration: { stripe_customer_id: collectionCustomer, stripe_collection_method: 'charge_automatically' }, delivery_method_configuration: { stripe_account_id: 'acct_platform' } } })
   const credit = { id: 'usd-cents', name: 'USD (cents)' }
   const kinds = ['volume', 'cost', 'ads'] as const
@@ -913,6 +919,7 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
     const body = init?.body ? JSON.parse(String(init.body)) : undefined
     if (url.pathname === '/v2/contracts/get') return Response.json({ data: nativeContract() })
     if (url.pathname === '/v2/contracts/list') return Response.json({ data: [nativeContract()] })
+    if (url.pathname === '/v1/customers/meter-customer/invoices') return Response.json({ data: [] })
     if (url.pathname === '/v1/contract-pricing/rate-cards/get') return Response.json({ data: { id: 'rate-card', fiat_credit_type: credit } })
     if (url.pathname === '/v1/contracts/getContractRateSchedule') return Response.json({ data: kinds.map((kind, index) => ({ entitled: true, rate_card_id: 'rate-card', product_id: kind, list_rate: { rate_type: 'FLAT', credit_type: credit, price: [0.014, 1, rate][index] } })) })
     if (url.pathname === '/v1/contract-pricing/products/get') return Response.json({ data: { type: 'USAGE', current: { billable_metric_id: body.id } } })
@@ -922,11 +929,20 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
      return Response.json({ data: { aggregation_type: 'SUM', aggregation_key: 'pricing_amount', event_type_filter: { in_values: events }, property_filters: [{ name: 'pricing_amount', exists: true }, { name: 'currency', exists: true, in_values: ['USD'] }] } })
     }
     if (url.pathname === '/v1/contracts/updateEndDate') { ending = body.ending_before; return Response.json({ data: { id: 'contract' } }) }
+    if (url.pathname === '/v1/ingest') {
+     ingests.push(body)
+     return deliveryUnavailable ? Response.json({ message: 'Native ingestion unavailable at test boundary' }, { status: 503 }) : new Response(null, { status: 200 })
+    }
    }
    if (url.origin === 'https://googleads.googleapis.com') {
+    googleReads++
     assert.equal(url.pathname, '/v25/customers/1234567890/googleAds:search')
     assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer managed-ads-token')
     if (providerUnavailable) return Response.json({ error: 'Reporting unavailable at external boundary' }, { status: 503 })
+    const query = JSON.parse(String(init?.body)).query as string
+    if (query.includes('metrics.cost_micros')) {
+     return Response.json({ results: query.includes("'2026-10-01'") ? [] : [{ customer: { currencyCode: 'USD' }, metrics: { costMicros: '12500000', clicks: '10', impressions: '100', conversions: 1 } }] })
+    }
     return Response.json({ results: [{ customer: { currencyCode: currency, timeZone: 'America/New_York', descriptiveName: 'Managed ads fixture' } }] })
    }
    throw new Error(`Unexpected provider request: ${url.origin}${url.pathname}`)
@@ -964,13 +980,14 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
   await assert.rejects(agree, /This service is already on/u)
   await assert.rejects(() => finalizePaymentsBilling(db, env, { organizationId: ORG, userId: 'verified', role: 'owner' }), /Turn off managed ads in Plan/u)
   await assert.rejects(() => releaseIntegration(env, ORG, 'google-ads'), /Turn off managed ads in Plan/u)
+  await assert.rejects(() => selectGoogleAdsCustomer(env, ORG, 'ads-linked', '2222222222', 'Replacement'), /Turn off managed ads in Plan/u)
   const cardRemoval = await call('/api/billing/payment-methods', 'DELETE', { organizationId: ORG, payment_method_id: 'pm_default' })
   assert.equal(cardRemoval.status, 409)
   assert.equal((await cardRemoval.json() as { message: string }).message, 'Set another default payment method before removing this one while managed ads is on.')
   assert.equal((await readIntegration(db, ORG, 'google_ads'))?.target_id, '1234567890')
-  assert.deepEqual(await organizationsOnServiceAt(db, 'managed_ads', '2026-09-30T23:59:59.999Z'), [])
-  assert.deepEqual(await organizationsOnServiceAt(db, 'managed_ads', '2026-10-01T23:59:59.999Z'), [ORG])
-  t.mock.timers.setTime(new Date('2026-10-02T10:00:00.000Z').getTime())
+  assert.deepEqual(await unrecordedAdSpendDays(db, ORG, '2026-09-30'), [])
+  assert.deepEqual(await unrecordedAdSpendDays(db, ORG, '2026-10-01'), ['2026-10-01'])
+  t.mock.timers.setTime(new Date('2026-10-03T10:00:00.000Z').getTime())
   providerUnavailable = true
   const ended = await call('/api/dashboard/services?org=payments', 'POST', { service: 'managed_ads', action: 'end' })
   assert.equal(ended.status, 200, await ended.text())
@@ -978,13 +995,66 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
   const statusRead = await call('/api/dashboard/services?org=payments')
   assert.equal(statusRead.status, 200)
   assert.deepEqual(await statusRead.json(), { success: true, services: { managed_ads: null } })
-  assert.deepEqual(await db.prepare('SELECT ended_at,ended_by_user_id FROM organization_services WHERE id=?').bind(agreement.id).first(), { ended_at: '2026-10-02T10:00:00.000Z', ended_by_user_id: 'verified' })
-  assert.deepEqual(await organizationsOnServiceAt(db, 'managed_ads', '2026-10-01T23:59:59.999Z'), [ORG])
-  assert.deepEqual(await organizationsOnServiceAt(db, 'managed_ads', '2026-10-02T23:59:59.999Z'), [])
+  assert.deepEqual(await db.prepare('SELECT ended_at,ended_by_user_id FROM organization_services WHERE id=?').bind(agreement.id).first(), { ended_at: '2026-10-03T10:00:00.000Z', ended_by_user_id: 'verified' })
+  assert.deepEqual(await unrecordedAdSpendDays(db, ORG, '2026-10-03'), ['2026-10-01', '2026-10-02'])
   await assert.rejects(() => endService(db, ORG, 'managed_ads', 'other'), /This service is not on/u)
+  await assert.rejects(() => releaseIntegration(env, ORG, 'google-ads'), /Keep Google Ads connected until your prior managed spend has been counted/u)
+  await assert.rejects(() => selectGoogleAdsCustomer(env, ORG, 'ads-linked', '2222222222', 'Replacement'), /Keep Google Ads connected until your prior managed spend has been counted/u)
+  const runDaily = () => adSpendDailyTask.run({ name: 'marketing:ad-spend-daily', payload: {}, context: { cloudflare: { env } } })
+  await assert.rejects(runDaily, /Google Ads search query failed \(503\)/u)
+  assert.equal(await db.prepare("SELECT COUNT(*) AS n FROM payment_usage_events WHERE kind='ad_spend'").first('n'), 0)
+  providerUnavailable = false
+  deliveryUnavailable = true
+  await assert.rejects(runDaily, /Native ingestion unavailable at test boundary/u)
+  assert.deepEqual(await unrecordedAdSpendDays(db, ORG, '2026-10-01'), [])
+  assert.deepEqual(await unrecordedAdSpendDays(db, ORG, '2026-10-03'), ['2026-10-02'])
+  // All mature amounts are captured, but yesterday is still promised and not
+  // mature. Neither disconnection nor replacement may lose that identity.
+  await assert.rejects(() => releaseIntegration(env, ORG, 'google-ads'), /Keep Google Ads connected until your prior managed spend has been counted/u)
+  await assert.rejects(() => selectGoogleAdsCustomer(env, ORG, 'ads-linked', '2222222222', 'Replacement'), /Keep Google Ads connected until your prior managed spend has been counted/u)
+  // The next day recovers the failed older day as well as the newly mature one.
+  t.mock.timers.setTime(new Date('2026-10-04T10:00:00.000Z').getTime())
+  providerUnavailable = false
+  deliveryUnavailable = true
+  await Promise.all([assert.rejects(runDaily, /Native ingestion unavailable at test boundary/u), assert.rejects(runDaily, /Native ingestion unavailable at test boundary/u)])
+  const captured = (await db.prepare("SELECT id,source_id,amount,delivery_at FROM payment_usage_events WHERE kind='ad_spend' ORDER BY source_id").all()).results
+  assert.deepEqual(captured.map(({ source_id, amount, delivery_at }) => ({ source_id, amount, delivery_at })), [
+   { source_id: 'google_ads:1234567890:2026-10-01', amount: 0, delivery_at: null },
+   { source_id: 'google_ads:1234567890:2026-10-02', amount: 1250, delivery_at: null },
+  ])
   assert.deepEqual(await releaseIntegration(env, ORG, 'google-ads'), { product: 'google-ads', released: true })
+  // A new free connection cannot make the previous agreement bill its account.
+  await selectGoogleAdsCustomer(env, ORG, 'ads-linked', '2222222222', 'New free connection')
+  const readsBeforeDelivery = googleReads
+  providerUnavailable = true
+  deliveryUnavailable = false
+  assert.deepEqual((await runDaily()).result, { date: '2026-10-02', billed: 1, skipped: 0 })
+  assert.equal(googleReads, readsBeforeDelivery, 'queued spend no longer needs the old Google identity')
+  assert.equal(ingests.length, 5)
+  assert.deepEqual(ingests[0], ingests[1], 'failed delivery preserves the native transaction')
+  assert.deepEqual(ingests[1], ingests[2], 'concurrent failed deliveries preserve the native transaction')
+  assert.deepEqual(ingests[0], ingests[3], 'a failed zero-spend ingest retries the same native transaction')
+  assert.equal(ingests[3]?.[0]?.properties.pricing_amount, '0')
+  assert.equal(ingests[4]?.[0]?.properties.pricing_amount, '1250')
+  const delivered = (await db.prepare("SELECT id,delivery_at FROM payment_usage_events WHERE kind='ad_spend' ORDER BY source_id").all()).results
+  assert.deepEqual(delivered.map(row => row.id), captured.map(row => row.id))
+  assert.ok(delivered.every(row => row.delivery_at === '2026-10-04T10:00:00.000Z'))
+  assert.deepEqual((await runDaily()).result, { date: '2026-10-02', billed: 0, skipped: 1 })
+  assert.equal(ingests.length, 5)
   await db.prepare("UPDATE payment_billing_accounts SET status='servicing' WHERE organization_id=?").bind(ORG).run()
   assert.equal((await finalizePaymentsBilling(db, env, { organizationId: ORG, userId: 'verified', role: 'owner' })).closed, true)
   assert.deepEqual(await db.prepare('SELECT status FROM payment_billing_accounts WHERE organization_id=?').bind(ORG).first(), { status: 'closed' })
+ } finally { await runtime.dispose() }
+})
+
+test('managed spend eligibility intersects agreement and connection instants without dropping their overlapping closed days', { timeout: 120_000 }, async t => {
+ t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-02T10:00:00.000Z') })
+ const { db, runtime } = await boot()
+ try {
+  await storeIntegration(db, ORG, 'google_ads', { account_id: 'historical-account', target_id: '1234567890', target_name: 'Historical connection' }, { revision: null })
+  await db.prepare("INSERT INTO organization_services(id,organization_id,service,terms_version,agreed_by_user_id,agreed_at,ended_at) VALUES('historical',?,'managed_ads','historical','verified','2026-10-01T12:00:00.000Z','2026-10-04T10:00:00.000Z')").bind(ORG).run()
+  assert.deepEqual(await unrecordedAdSpendDays(db, ORG, '2026-10-05'), ['2026-10-02', '2026-10-03'])
+  assert.deepEqual(await unrecordedAdSpendDays(db, ORG, '2026-10-01'), [])
+  await assert.rejects(() => unrecordedAdSpendDays(db, ORG, 'invalid-date'), /valid Gregorian/u)
  } finally { await runtime.dispose() }
 })

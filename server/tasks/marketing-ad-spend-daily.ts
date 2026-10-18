@@ -1,35 +1,36 @@
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { queryAll } from '~/server/db'
+import { queryAll, queryFirst } from '~/server/db'
 import { defineScheduledTask } from '~/server/utils/scheduled-task'
-import { recordAdSpend } from '~/server/domain/payments/ad-spend'
-import { organizationsOnServiceAt } from '~/server/utils/organization-services'
+import { recordAdSpend, unrecordedAdSpendDays } from '~/server/domain/payments/ad-spend'
+import { deliverPaymentsUsage } from '~/server/domain/payments/usage'
 
 /**
- * Bills each business on managed ads for the Google Ads it spent two days ago: a
- * day Google has finished counting. Every connected account is read; one
- * business's failure is reported after the others have been billed.
+ * Captures missing managed days once they are two days old, including ended
+ * agreements and previously failed reads, then delivers the existing outbox.
+ * One business's failure is reported after the others have been billed.
  */
 export default defineScheduledTask<{ date: string; billed: number; skipped: number }>({
-  meta: { name: 'marketing:ad-spend-daily', description: 'Queue each Marketing business’s Google Ads spend as usage' },
+  meta: { name: 'marketing:ad-spend-daily', description: 'Capture managed Google Ads spend and deliver pending usage' },
   async run({ context }) {
     const env = (context as { cloudflare?: { env?: CloudflareEnv } } | undefined)?.cloudflare?.env
     if (!env?.DB) throw new Error('DB is required')
     const date = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10)
-    // Connecting Google Ads is free; the fee follows the business's agreement to managed ads,
-    // judged as the billed day closed, not as this task runs.
-    const connected = await queryAll<{ organization_id: string }>(env.DB, "SELECT organization_id FROM organization_integrations WHERE provider='google_ads' ORDER BY organization_id")
-    const managed = new Set(await organizationsOnServiceAt(env.DB, 'managed_ads', `${date}T23:59:59.999Z`))
-    const billable = connected.filter(row => managed.has(row.organization_id))
+    const organizations = await queryAll<{ organization_id: string }>(env.DB, "SELECT organization_id FROM organization_integrations WHERE provider='google_ads' UNION SELECT organization_id FROM payment_usage_events WHERE kind='ad_spend' AND delivery_at IS NULL AND dead_letter_at IS NULL ORDER BY organization_id")
     const failures: string[] = []
     let billed = 0
-    for (const { organization_id } of billable) {
+    let skipped = 0
+    for (const { organization_id } of organizations) {
       try {
-        if ((await recordAdSpend(env.DB, env, organization_id, date)).amount > 0) billed++
+        for (const day of await unrecordedAdSpendDays(env.DB, organization_id, date)) await recordAdSpend(env.DB, env, organization_id, day)
+        const pending = await queryFirst<{ amount: number }>(env.DB, "SELECT SUM(amount) AS amount FROM payment_usage_events WHERE organization_id=? AND kind='ad_spend' AND delivery_at IS NULL AND dead_letter_at IS NULL HAVING COUNT(*)>0", [organization_id])
+        if (!pending) { skipped++; continue }
+        await deliverPaymentsUsage(env.DB, env, organization_id)
+        if (pending.amount > 0) billed++
       } catch (error) {
         failures.push(`${organization_id}: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
-    if (failures.length) throw new Error(`Ad spend for ${date} was not billed for ${failures.length} of ${billable.length} businesses: ${failures.join('; ')}`)
-    return { result: { date, billed, skipped: connected.length - billable.length } }
+    if (failures.length) throw new Error(`Managed ad spend through ${date} was not billed for ${failures.length} of ${organizations.length} businesses: ${failures.join('; ')}`)
+    return { result: { date, billed, skipped } }
   },
 })
