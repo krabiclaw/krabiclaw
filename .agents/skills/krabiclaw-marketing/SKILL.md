@@ -19,7 +19,7 @@ Scope authorization explicitly: preparation/capture, paid generation budget, ins
 
 ## Authentic capture
 
-Inspect `scripts/capture-blawby-screenshots.mjs` and `scripts/blawby-parity-config.mjs` before reuse. They already capture real Chromium pixels, stabilize fonts/images, inventory a sitemap, and emit manifests. Their default routes/sections/output are NCLS/Blawby, `--route` adds rather than replaces defaults, and reference mode is pinned to NCLS. Do not run default recipes for Kikuzuki or interpret the source label as customer identity. Inventory mode replaces default routes via `--sitemap-url` (requires a route URL set, not a sitemap index), but still uses Blawby labels/viewports; review suitability first. There is no Flow or authenticated dashboard routine. Use available browser capture for focused selected pages instead of forking a capture engine.
+Use available browser capture for the focused pages the video needs. Do not build or run a route-crawling capture engine.
 
 On a shared Mac, use an isolated window in the existing signed-in Chrome session for captures. Pin the tab and verify its URL, viewport and window dimensions before each capture; normalize AppleScript IDs to text when selecting a tab. The AppleScript window ID and macOS capture window number are different. Target native window pixels rather than whichever application happens to be foreground. Dismiss browser popovers and inspect the captured pixels before acceptance. Cropped native screenshots edited into a typing sequence are actual UI states, not a continuous live recording; record that distinction.
 
