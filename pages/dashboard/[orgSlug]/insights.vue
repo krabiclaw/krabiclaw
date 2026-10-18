@@ -315,34 +315,6 @@
         </div>
       </div>
 
-      <div v-else-if="tab === 'opportunities' && setup && !loadError" class="space-y-6">
-        <div class="space-y-6">
-          <section v-if="setup" class="border-b border-default pb-8 last:border-b-0">
-            <header class="mb-4">
-              <div class="flex items-baseline justify-between gap-3">
-                <h2 class="min-w-0 truncate font-semibold text-highlighted">{{ setup.label }}</h2>
-                <span class="shrink-0 text-sm tabular-nums text-muted">{{ setup.completed }}/{{ setup.total }}</span>
-              </div>
-            </header>
-            <span class="mb-4 block h-2 overflow-hidden rounded-full bg-elevated">
-              <span
-                class="block h-full rounded-full bg-primary"
-                :style="{ width: `${setup.total ? (setup.completed / setup.total) * 100 : 0}%` }"
-              />
-            </span>
-            <ul class="space-y-2">
-              <li v-for="item in setup.items" :key="item.id" class="flex items-center gap-2 text-sm">
-                <UIcon
-                  :name="item.done ? 'i-lucide-circle-check' : 'i-lucide-circle-dashed'"
-                  class="size-4 shrink-0"
-                  :class="item.done ? 'text-success' : 'text-muted'"
-                />
-                <span :class="item.done ? 'text-muted line-through' : 'text-highlighted'">{{ item.label }}</span>
-              </li>
-            </ul>
-          </section>
-        </div>
-      </div>
 
       <div v-else-if="tab === 'instagram'" class="space-y-8">
         <UAlert
@@ -416,10 +388,10 @@ import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
 const route = useRoute()
 const scope = useDashboardRouteScope()
 
-// Reviews and Opportunities read what we actually hold. There is no Superhost
+// Reviews reads what we actually hold. There is no Superhost
 // equivalent, and a review carries one overall rating rather than per-category
 // scores, so neither is invented here.
-const TAB_VALUES = ['views', 'instagram', 'reviews', 'opportunities', 'activity'] as const
+const TAB_VALUES = ['views', 'instagram', 'reviews', 'activity'] as const
 type InsightsTab = typeof TAB_VALUES[number]
 const isTab = (value: unknown): value is InsightsTab => TAB_VALUES.some(candidate => candidate === value)
 const tab = ref<InsightsTab>(isTab(route.query.tab) ? route.query.tab : 'views')
@@ -436,7 +408,6 @@ const tabItems = [
   { label: 'Views', value: 'views' as const },
   { label: 'Instagram', value: 'instagram' as const },
   { label: 'Reviews', value: 'reviews' as const },
-  { label: 'Opportunities', value: 'opportunities' as const },
   // Activity is a report like the others, not a screen of its own: it reads
   // what happened and edits nothing, so it belongs beside Views and Reviews
   // rather than on an orphan route nothing linked to.
@@ -502,7 +473,6 @@ const instagramMetricCards = computed(() => instagram.value?.status === 'connect
   ? INSTAGRAM_ACCOUNT_FIELDS.map(field => ({ label: field.label, value: (instagram.value as Extract<InstagramInsights, { status: 'connected' }>).account[field.key] }))
   : [])
 const reviews = computed(() => insightsResource.value?.reviews)
-const setup = computed(() => insightsResource.value?.setup)
 const loadError = computed(() => resourceError.value?.message ?? null)
 // The same native query MCP exposes (query_organization_analytics), asked for the pageviews of the
 // selected range grouped by language. Every group is reachable: "Show more" follows the cursor.

@@ -154,6 +154,16 @@ conversation work through the same guest inbox as other booked activity.
 Lodging does not offer the appointment-assignee filter: the home's assignment
 controls its stays.
 
+### Verticals and Domain Focus
+
+KrabiClaw serves four explicit, concrete business verticals:
+1. **Restaurant**: menus, dishes, sections, table reservations.
+2. **Experience**: classes, workshops, dated ticketed sessions.
+3. **Lodging**: homes, stays, nights, check-ins, check-outs, turnovers.
+4. **Legal Services (`service`)**: solo attorneys, partners and law firms running the Blawby template (modeled after North Carolina Legal Services).
+
+The `service` vertical is exclusively and canonically **Legal Services**. Do not generalize it into an open-ended multi-service or agency platform (no salons, spas, cleaners, trades, or generic appointment widgets). Offerings are **Practice Areas & Consultations**; practitioners are **Attorneys / Legal Team**; counterparties are **Clients**; and bookings are **Legal Consultation Requests**.
+
 ### Catalog
 
 **Catalog is where everything the business offers is found, as Airbnb's Your
@@ -400,6 +410,46 @@ field never carries a sentence: no `description`, no `help`, no paragraph
 above or below it. A row carries one line of sub-label. A counter
 (`44/50 available`) sits above the field in `text-sm`. `hint` exists only for
 `Optional`.
+
+**Icons identify destinations and meaningful choices.** Follow the captured
+Airbnb host editor's restraint: amenities have recognizable pictograms;
+ordinary listing fields, house rules and safety switches stay text and their
+controls. Meaningful property choices use the same pictogram language. A title,
+description, URL or price does not need a glyph.
+KrabiClaw extends this language to its own destinations — Website, Locations,
+Team, content sections, bookings and Account settings — across every catalog
+kind. A heading or a scalar field is not a destination merely because it has a
+route.
+
+`EditorNavigationList` renders a destination's explicit `icon` as a bare 24px
+outline beside its label. A record's real picture or a provider's logo (`lead`)
+takes precedence; never add both, or put a general glyph in a decorative tile.
+The picture's missing-image footprint remains the picture's, and an icon must
+not hide the factual No photo state. Labels remain visible, icons are hidden
+from assistive technology, and selection is conveyed by a control state and
+border or check mark as well as colour.
+
+Meaningful single choices use the existing `URadioGroup` card with
+`indicator="hidden"` and its native item `icon`: 32px above the label, one
+neutral outline, a strong selected border. Amenity selection is a list of
+24–28px pictograms, labels and an explicit selected state; each complete row is
+one keyboard-operable control. Ordinary settings retain their existing switch
+or rule pair. Action glyphs stay at the existing button size.
+
+**One concept, one icon source.** Product kinds, product details, content block
+types, notification categories and stay vocabularies carry their icons in
+their existing registries. Static destinations declare theirs in the owner
+that already declares the row. Never infer an icon from a label, URL or record
+id, and never create a second navigation model for icons. Native stay symbols
+and web glyph names describe the same canonical choice.
+
+Use the installed Lucide collection first. Original domain drawings belong to
+the `krabi` collection in `build/icon-data/custom-icons.json`: a 24×24 viewBox,
+2px rounded strokes, `currentColor`, and no background or baked-in state. They
+fill recognizable gaps such as a crib, dryer, sauna or treehouse. Nuxt Icon
+bundles the used glyphs and local collection at build time; no runtime icon API
+or full server collection is needed. Check the actual rendered glyph at phone
+and desktop widths before treating a mapping as complete.
 
 **Everything starts at the gutter.** Nuxt UI's panel gutter (`px-4 sm:px-6`,
 `dashboardGutterClass`) is the one horizontal edge, the same as the top nav's:
@@ -814,9 +864,10 @@ screen, an Earnings page — each as its own freshly drawn screen. They did not
 look like Airbnb, did not look like each other, and could not be maintained,
 because every one re-stated layout, copy and state that already existed.
 
-**Read the Airbnb page before drawing anything.** Open the actual screen in the
-owner's logged-in Chrome (`chrome.sh`), read its sections, headings, rows,
-button labels and card shapes, and mirror that structure. "Inspired by" is not
+**Read the Airbnb page before drawing anything.** Start with the saved captures
+and `docs/design/airbnb-navigation-map.md`; where the evidence is missing, open
+the actual screen in the owner's logged-in browser. Read its sections, headings,
+rows, button labels and card shapes, and mirror that structure. "Inspired by" is not
 parity. Earnings is Performance card → Upcoming → Paid → Reports; the account's
 Payments is sections with *Manage payments* → *Your payments*; Payouts is *How
 you get paid* rows + *Add payout method* + *Need help?*. When Airbnb has no
