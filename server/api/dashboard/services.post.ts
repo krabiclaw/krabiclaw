@@ -16,8 +16,8 @@ export default defineHandler(async (event) => {
   if (body.service === 'strategy') {
     // Stripe owns this one: the subscription item is the agreement. The attempt id scopes Stripe's idempotency to this consent.
     if (!isAttemptId(body.attempt)) throw new HTTPError({ statusCode: 400, statusMessage: 'An attempt id is required for the strategy service' })
-    if (body.action === 'agree') await startStrategy(env, db, organization.id, body.attempt)
-    else await endStrategy(env, db, organization.id, body.attempt)
+    if (body.action === 'agree') await startStrategy(env, db, organization.id, userId, body.attempt)
+    else await endStrategy(env, db, organization.id, userId, body.attempt)
   } else {
     if (!isService(body.service)) throw new HTTPError({ statusCode: 400, statusMessage: 'A service and an action (agree or end) are required' })
     if (body.action === 'agree') await agreeToService(db, env, organization.id, body.service, userId)

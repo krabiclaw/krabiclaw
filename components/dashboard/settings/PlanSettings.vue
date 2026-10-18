@@ -58,7 +58,7 @@
         </template>
         <template v-else>
           <p>Julia leads your SEO strategy, hand-writes blog posts written to rank, meets with you weekly and is on chat with you.</p>
-          <p>It costs <strong class="text-highlighted">{{ paymentMoney(strategyOffer.amount, strategyOffer.currency) }} per {{ strategyOffer.interval }}</strong>, added to your plan's subscription and billed to the same card. Stripe invoices and charges today's share as soon as you agree, then the full amount with each plan renewal. You can turn it off here at any time.</p>
+          <p>It costs <strong class="text-highlighted">{{ paymentMoney(strategyOffer.amount, strategyOffer.currency) }} per {{ strategyOffer.interval }}</strong>, added to your plan's subscription and billed to the same card. Stripe invoices and charges today's share as soon as you agree, then the full amount every month on the service's own schedule, whatever your plan's renewal. You can turn it off here at any time.</p>
         </template>
       </div>
     </DashboardListItemDialog>
@@ -243,7 +243,7 @@ const groups = computed<EditorNavigationGroup[]>(() => [{
       : 'Chris manages your Google Ads campaigns, creative and conversion rate, with a weekly meeting · 10% of ad spend.', action: { label: services.value.managed_ads ? 'Turn off' : 'Turn on' } }] : []),
     ...(services.value ? [{ id: 'service:strategy', label: 'SEO and marketing strategy', summary: services.value.strategy
       ? `On since ${formatExactDateTime(services.value.strategy.since)} · ${paymentMoney(services.value.strategy.amount, services.value.strategy.currency)} per ${services.value.strategy.interval}, billed with your plan.`
-      : `Julia leads your SEO strategy, hand-writes ranking blog posts, meets with you weekly and is on chat with you · ${paymentMoney(strategyOffer.amount, strategyOffer.currency)} per ${strategyOffer.interval}.`, action: { label: services.value.strategy ? 'Turn off' : onStarter.value ? 'Choose a plan' : 'Turn on' } }] : []),
+      : `Julia leads your SEO strategy, hand-writes ranking blog posts, meets with you weekly and is on chat with you · ${paymentMoney(strategyOffer.amount, strategyOffer.currency)} per ${strategyOffer.interval}.`, action: { label: services.value.strategy ? 'Turn off' : 'Turn on' } }] : []),
   ],
 }])
 
