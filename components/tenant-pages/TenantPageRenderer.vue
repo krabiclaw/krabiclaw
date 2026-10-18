@@ -104,18 +104,6 @@
         </div>
       </template>
 
-      <template v-else-if="block.type === 'faq'">
-        <section v-if="faqItems(block).length" class="my-12">
-          <h2 v-if="text(block.data.title)" class="mb-6 text-2xl font-semibold">{{ text(block.data.title) }}</h2>
-          <div class="divide-y divide-default rounded-2xl border border-default">
-            <details v-for="(item, index) in faqItems(block)" :key="item.question || index" class="p-5">
-              <summary class="cursor-pointer font-semibold">{{ item.question }}</summary>
-              <div v-if="item.answer" class="prose mt-3 max-w-none whitespace-pre-wrap text-muted">{{ sanitize(item.answer) }}</div>
-            </details>
-          </div>
-        </section>
-      </template>
-
       <template v-else-if="block.type === 'how_to'">
         <section class="my-12">
           <h2 v-if="text(block.data.title)" class="mb-6 text-2xl font-semibold">{{ text(block.data.title) }}</h2>
@@ -389,10 +377,6 @@ function teamItems(block: TenantPageBlock) {
 
 function donationItems(block: TenantPageBlock): GridItem[] {
   return asItems(block.data.tiers)
-}
-
-function faqItems(block: TenantPageBlock): Array<{ question: string; answer: string }> {
-  return asItems(block.data.items).map(item => ({ question: item.title || '', answer: item.description || '' })).filter(item => item.question)
 }
 
 function buttons(block: TenantPageBlock): Array<{ label: string; url: string }> {

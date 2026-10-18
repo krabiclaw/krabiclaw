@@ -16,7 +16,7 @@
     <div class="kc-pricing-plans__rail">
       <BillingPlanCard v-for="(plan, index) in plans" :key="plan.id" :plan="plan" photo :front-image="frontImage(plan.id)" :sequence="index" />
     </div>
-    <p class="kc-pricing-plans__hint">Prices in USD. Paid subscription billed monthly. Swipe to compare plans on mobile.</p>
+    <p class="kc-pricing-plans__hint">Prices in USD. Paid subscription billed monthly.</p>
   </section>
 </template>
 
@@ -95,5 +95,5 @@ useSchemaOrg(computed(() => {
 .kc-pricing-plans { background: #171b31; padding: 0 0 5rem; }
 .kc-pricing-plans__rail { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; max-width: 88rem; margin: 0 auto; padding: 0 2rem; }
 .kc-pricing-plans__hint { text-align: center; color: #bbc0cf; font-size: .8rem; margin: 2rem 1.5rem 0; }
-@media (max-width: 1200px) { .kc-pricing-plans__rail { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; padding: 0 1.25rem 1rem; gap: 1rem; } .kc-pricing-plans__rail > * { flex: 0 0 86%; min-width: 0; scroll-snap-align: center; } }
+@media (max-width: 1100px) { .kc-pricing-plans__rail { grid-template-columns: minmax(0, 1fr); max-width: 42rem; padding-inline: 1.25rem; } }
 </style>

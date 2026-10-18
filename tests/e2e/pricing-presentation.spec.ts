@@ -78,7 +78,7 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   await expect(page.locator('[data-photo-state="flipping"]')).toHaveCount(0)
 })
 
-test('pricing mobile peeks the next card, contains overflow, and respects reduced motion', async ({ page }) => {
+test('pricing mobile stacks readable plans, contains overflow, and respects reduced motion', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.emulateMedia({ reducedMotion: 'reduce' })
   const response = await openTenantPage(page, `${testBaseUrl()}/pricing`, {})
@@ -88,10 +88,26 @@ test('pricing mobile peeks the next card, contains overflow, and respects reduce
   const cards = rail.locator('[data-photo-state]')
   await expect(cards).toHaveCount(3)
   await expect(page.locator('[data-photo-state="flipping"]')).toHaveCount(0)
-  const geometry = await rail.evaluate(element => ({ width: element.clientWidth, scrollWidth: element.scrollWidth, secondLeft: element.children[1]!.getBoundingClientRect().left, pageWidth: document.documentElement.scrollWidth, viewport: window.innerWidth }))
-  expect(geometry.scrollWidth).toBeGreaterThan(geometry.width)
-  expect(geometry.secondLeft).toBeLessThan(geometry.viewport)
+  const geometry = await rail.evaluate(element => ({
+    width: element.clientWidth,
+    scrollWidth: element.scrollWidth,
+    cards: Array.from(element.children, card => {
+      const bounds = card.getBoundingClientRect()
+      return { left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom }
+    }),
+    pageWidth: document.documentElement.scrollWidth,
+    viewport: window.innerWidth,
+  }))
+  expect(geometry.scrollWidth).toBe(geometry.width)
   expect(geometry.pageWidth).toBeLessThanOrEqual(geometry.viewport + 1)
+  for (const card of geometry.cards) {
+    expect(card.left).toBeGreaterThanOrEqual(20)
+    expect(card.right).toBeLessThanOrEqual(geometry.viewport - 20)
+  }
+  for (let index = 1; index < geometry.cards.length; index++) {
+    expect(geometry.cards[index]!.left).toBe(geometry.cards[0]!.left)
+    expect(geometry.cards[index]!.top).toBeGreaterThan(geometry.cards[index - 1]!.bottom)
+  }
   await cards.nth(1).scrollIntoViewIfNeeded()
   await expect(cards.nth(1).getByRole('link')).toBeVisible()
   await cards.nth(2).scrollIntoViewIfNeeded()
