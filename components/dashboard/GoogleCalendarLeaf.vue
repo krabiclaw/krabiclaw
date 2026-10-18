@@ -1,15 +1,15 @@
 <template>
-  <DashboardLeafPanel id="google-calendar" icon="i-logos-google-calendar" title="Google Calendar" lead="See your bookings in Google Calendar." :footer="false" :error="failure || connection.error.value || calendar?.last_error || ''">
-    <IntegrationConnection logo="i-logos-google-calendar" :connection="connected ? { name: 'Google Calendar', connectedAt: calendar!.created_at } : null" :disconnecting="saving" @disconnect="disconnect">
+  <DashboardLeafPanel id="google-calendar" icon="i-logos-google-calendar" title="Google Calendar" :lead="integrationDefinition('google-calendar').purpose" :footer="false" :error="failure || connection.error.value || calendar?.last_error || ''">
+    <IntegrationLeaf integration="google-calendar" :connection="connected ? { name: calendar!.calendar_name, connectedAt: calendar!.created_at, status: calendar!.status, lastError: calendar!.last_error } : null" :disconnecting="saving" @disconnect="disconnect">
       <UButton icon="i-simple-icons-google" size="xl" block :loading="saving || connection.linking.value" @click="connect">Connect Google Calendar</UButton>
-    </IntegrationConnection>
+    </IntegrationLeaf>
     <p v-if="data?.cleanup_pending" class="mt-6 text-sm text-muted">Disconnecting…</p>
-    <dl v-if="connected" class="mt-8 border-b border-default pb-6"><dt class="text-sm text-muted">Booking calendar</dt><dd class="mt-1 text-base text-highlighted">{{ calendar?.calendar_name }}</dd></dl>
     <UButton v-if="calendar?.status === 'error' || data?.cleanup_pending || failure" class="mt-6" color="neutral" variant="outline" :loading="saving" @click="retry">Retry</UButton>
   </DashboardLeafPanel>
 </template>
 <script setup lang="ts">
-import IntegrationConnection from './IntegrationConnection.vue'
+import IntegrationLeaf from './IntegrationLeaf.vue'
+import { integrationDefinition } from '~/shared/integrations'
 import { INTEGRATION_SCOPES, type GoogleCalendarIntegration } from '~/shared/organization-settings'
 const route = useRoute()
 const organizationId = await useDashboardOrganizationId()

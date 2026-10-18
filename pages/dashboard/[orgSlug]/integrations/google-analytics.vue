@@ -3,15 +3,16 @@
     id="integration-google-analytics"
     icon="i-logos-google-analytics"
     title="Google Analytics"
+    :lead="integrationDefinition('google-analytics').purpose"
     :saving="saving"
     :disabled="!accountId || !selected"
     :error="error || data?.error || integrations.failure.value || loadFailure"
     :footer="!analytics && Boolean(accountId) && options.length > 0 && !data?.error"
     @save="select"
   >
-    <IntegrationConnection
-      logo="i-logos-google-analytics"
-      :connection="analytics && { name: analytics.target_name, connectedAt: analytics.connected_at }"
+    <IntegrationLeaf
+      integration="google-analytics"
+      :connection="analytics && { name: analytics.target_name, connectedAt: analytics.connected_at, through: analytics.connected_through, status: analytics.status, lastError: analytics.last_error }"
       :disconnecting="disconnecting"
       @disconnect="disconnect"
     >
@@ -21,13 +22,14 @@
         <USelectMenu v-model="selected" :items="options" value-key="value" placeholder="Choose a GA4 property" class="w-full" />
         <p v-if="!data.error && !options.length" class="mt-2 text-sm text-muted">This Google account has no GA4 properties.</p>
       </UFormField>
-    </IntegrationConnection>
+    </IntegrationLeaf>
   </DashboardLeafPanel>
 </template>
 
 <script setup lang="ts">
 import { INTEGRATION_SCOPES } from '~/shared/organization-settings'
-import IntegrationConnection from '~/components/dashboard/IntegrationConnection.vue'
+import IntegrationLeaf from '~/components/dashboard/IntegrationLeaf.vue'
+import { integrationDefinition } from '~/shared/integrations'
 import { integrationsKey, type ConnectedIntegration } from '../integrations.vue'
 
 definePageMeta({ layout: 'dashboard' })
