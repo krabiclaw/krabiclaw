@@ -555,6 +555,12 @@ test('a host describes a place to stay through its focused editors and previews 
   await titleInput.fill('An unsaved cliff cabin title')
   const previewSource = page.url()
   const { previewLink, previewModal, previewIframe, preview } = previewLocators(page)
+  // The host previewing their own listing is not a guest visit: the guest page records nothing.
+  const previewCollections: string[] = []
+  page.on('request', outgoing => {
+    const url = new URL(outgoing.url())
+    if (url.hostname !== new URL(baseURL!).hostname && ['/api/analytics/track', '/api/public/conversion-events'].includes(url.pathname)) previewCollections.push(url.pathname)
+  })
   await expect(previewLink).toHaveAttribute('href', /editMode=preview/)
   await previewLink.click()
   await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/name`) && url.searchParams.get('location_id') === location.id && url.searchParams.get('editMode') === 'preview' && url.searchParams.get('previewViewport') === 'desktop')
@@ -620,6 +626,7 @@ test('a host describes a place to stay through its focused editors and previews 
   await expect(page).toHaveURL(previewSource)
   await expect(previewModal).not.toBeVisible()
   await expect(titleInput).toHaveValue('An unsaved cliff cabin title')
+  expect(previewCollections).toEqual([])
   await page.setViewportSize({ width: 1440, height: 900 })
   await previewLink.click()
   await expect(previewModal).toBeVisible()

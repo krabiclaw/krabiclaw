@@ -72,7 +72,8 @@ export function registerPageviewTracking() {
 
   const nuxtApp = useNuxtApp()
   if (nuxtApp.payload.error) { settleRegistration(); return }
-  useTenantOrganization()
+  // A preview is the host looking at their own site, not a visit.
+  if (useTenantOrganization().previewAuthorized) { settleRegistration(); return }
   win.__kc_pageview_tracking_registered = true
 
   const router = useRouter()
