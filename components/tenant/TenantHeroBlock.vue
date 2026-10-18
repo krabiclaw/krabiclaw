@@ -6,7 +6,7 @@
     data-saya-critical-hero
     data-blawby-critical-hero
     :data-has-background="backgroundSrc ? 'true' : undefined"
-    :class="isBlawby ? 'relative overflow-hidden bg-[var(--blawby-primary-dark)]' : 'relative isolate min-h-160 overflow-hidden flex items-center bg-zinc-900'"
+    :class="isBlawby ? (backgroundSrc ? 'relative overflow-hidden' : 'relative overflow-hidden bg-[var(--blawby-primary-dark)]') : 'relative isolate min-h-160 overflow-hidden flex items-center bg-zinc-900'"
     data-parity-section="hero"
   >
     <!-- Background media layer -->
