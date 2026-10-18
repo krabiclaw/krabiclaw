@@ -253,6 +253,7 @@ async function renderedPalette(browser: Browser, url: string, headers: Record<st
       const shown = [...document.querySelector('[data-site-logo]')?.querySelectorAll<HTMLElement>('[data-logo-slot]') ?? []]
         .filter(frame => getComputedStyle(frame).display !== 'none')
       const logo = shown[0]
+      const accentButton = layout.querySelector('[data-parity-section="hero"] [data-tenant-button]')
       return {
         dark: document.documentElement.classList.contains('dark'),
         primary: style.getPropertyValue('--ui-primary').trim(),
@@ -261,6 +262,10 @@ async function renderedPalette(browser: Browser, url: string, headers: Record<st
         logoSlots: shown.map(frame => frame.dataset.logoSlot),
         logoShape: logo?.getAttribute('data-logo-shape') ?? null,
         logoPosition: logo ? getComputedStyle(logo.querySelector('img')!).objectPosition : null,
+        accentButton: accentButton ? {
+          color: getComputedStyle(accentButton).color,
+          background: getComputedStyle(accentButton).backgroundColor,
+        } : null,
       }
     }, root)
   } finally { await guest.close() }
@@ -332,9 +337,9 @@ test('palette changes through MCP reach the CMS and Blawby, and invalid colors a
   const readPalette = async () => (await (await owner.get(settingsUrl)).json() as { settings: { palette: typeof TEMPLATE_PALETTES.blawby } }).settings.palette
   try {
     await expectStatus(await owner.patch(settingsUrl, { data: { palette: null } }), 200)
-    mcpData(await (await update({ light: { action: '#0F4C5C' } })).json())
+    mcpData(await (await update({ light: { action: '#0F4C5C', accent: '#F8FAFC' } })).json())
     const changed = await readPalette()
-    expect(changed.light).toEqual({ ...TEMPLATE_PALETTES.blawby.light, action: '#0F4C5C' })
+    expect(changed.light).toEqual({ ...TEMPLATE_PALETTES.blawby.light, action: '#0F4C5C', accent: '#F8FAFC' })
     expect(changed.dark).toEqual(TEMPLATE_PALETTES.blawby.dark)
 
     // A color that is not #RRGGBB, or a role there is not, writes nothing.
@@ -355,6 +360,7 @@ test('palette changes through MCP reach the CMS and Blawby, and invalid colors a
     // Blawby renders the palette, and its dark mode.
     const light = await renderedPalette(browser, `${blawbyTestBaseUrl()}/`, blawbyTestExtraHeaders(), '.blawby-shell', 'light')
     expect(light.primary).toBe('#0F4C5C')
+    expect(light.accentButton).toEqual({ color: 'rgb(0, 0, 0)', background: 'rgb(248, 250, 252)' })
     const dark = await renderedPalette(browser, `${blawbyTestBaseUrl()}/`, blawbyTestExtraHeaders(), '.blawby-shell', 'dark')
     expect(dark.dark).toBe(true)
     expect(dark.background).toBe(rgb(TEMPLATE_PALETTES.blawby.dark.ground))

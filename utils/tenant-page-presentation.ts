@@ -23,7 +23,6 @@ import PlatformWorkflows from '~/components/platform/marketing/PlatformWorkflows
 import PlatformSeoBand from '~/components/platform/marketing/PlatformSeoBand.vue'
 import PlatformPluginSections from '~/components/platform/marketing/PlatformPluginSections.vue'
 import PlatformProseCard from '~/components/platform/marketing/PlatformProseCard.vue'
-import PlatformFaqAccordion from '~/components/platform/marketing/PlatformFaqAccordion.vue'
 import PlatformBottomCta from '~/components/platform/marketing/PlatformBottomCta.vue'
 import SocialPosts from '~/components/social/SocialPosts.vue'
 import TenantHeroBlock from '~/components/tenant/TenantHeroBlock.vue'
@@ -59,7 +58,7 @@ const PRESENTATIONS: Readonly<Record<string, BlockPresentation>> = {
   'platform:callout': PlatformSeoBand,
   'platform:how_to': PlatformPluginSections,
   'platform:markdown': PlatformProseCard,
-  'platform:faq': PlatformFaqAccordion,
+  'platform:faq': TenantFaqBlock,
   'platform:cta': PlatformBottomCta,
   'platform:social_posts': feedOrBlock(SocialPosts),
   'platform:language_reach': PlatformLanguageReach,

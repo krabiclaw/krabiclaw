@@ -8,6 +8,18 @@
     "category": "BUSINESS"
   },
   "tools": {
+    "add_organization_language": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Adds a disabled website language for private authoring or refreshes its stored catalog label; existing publication status and translations are preserved.",
+        "open_world_justification": "Adds a disabled website language for private authoring or refreshes its stored catalog label; existing publication status and translations are preserved. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Adds a disabled website language for private authoring or refreshes its stored catalog label; existing publication status and translations are preserved."
+      }
+    },
     "append_content_block": {
       "annotations": {
         "readOnlyHint": false,
@@ -510,6 +522,18 @@
         "read_only_justification": "Deletes a Better Auth team and removes its offering assignments. Existing bookings retain their saved provider.",
         "open_world_justification": "Deletes a Better Auth team and removes its offering assignments. Existing bookings retain their saved provider. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
         "destructive_justification": "Deletes a Better Auth team and removes its offering assignments. Existing bookings retain their saved provider."
+      }
+    },
+    "disable_organization_language": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Disables an existing secondary website language’s public routes while preserving its translations.",
+        "open_world_justification": "Removes public access to the selected authored language’s routes.",
+        "destructive_justification": "Disables an existing secondary website language’s public routes while preserving its translations."
       }
     },
     "get_blog_post": {
@@ -1220,6 +1244,18 @@
         "destructive_justification": "Publishes the selected draft blog article on the website."
       }
     },
+    "publish_organization_language": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Publishes an added website language after entitlement and translated-homepage checks; public routes show only authored translations.",
+        "open_world_justification": "Makes the selected authored language’s translations available on public website routes.",
+        "destructive_justification": "Publishes an added website language after entitlement and translated-homepage checks; public routes show only authored translations."
+      }
+    },
     "publish_post": {
       "annotations": {
         "readOnlyHint": false,
@@ -1592,18 +1628,6 @@
         "destructive_justification": "Replaces authorized member hours, timezone, time off and approved public profile using optimistic revision. Existing Booking assignments remain fixed."
       }
     },
-    "set_organization_language": {
-      "annotations": {
-        "readOnlyHint": false,
-        "openWorldHint": true,
-        "destructiveHint": true
-      },
-      "justifications": {
-        "read_only_justification": "Adds a private website language or changes its publication status; public routes show only authored translations.",
-        "open_world_justification": "Enables or disables public website routes for the selected authored language.",
-        "destructive_justification": "Adds a private website language or changes its publication status; public routes show only authored translations."
-      }
-    },
     "set_product_booking_config": {
       "annotations": {
         "readOnlyHint": false,
@@ -1643,13 +1667,13 @@
     "set_stay_nights": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Closes or opens nights, sets nightly prices or stay rules, or resets them, for a date range at one place to stay.",
-        "open_world_justification": "Closes or opens nights, sets nightly prices or stay rules, or resets them, for a date range at one place to stay. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Closes or opens nights, sets nightly prices or stay rules, or resets them, for a date range at one place to stay."
+        "read_only_justification": "Changes nightly prices, availability or stay rules on the website and pushes them to the home’s connected Airbnb listing through Channex; channel_push reports the delivery outcome.",
+        "open_world_justification": "Changes publicly bookable nights and prices on the website and, when connected, the home’s Airbnb listing through Channex.",
+        "destructive_justification": "Changes nightly prices, availability or stay rules on the website and pushes them to the home’s connected Airbnb listing through Channex; channel_push reports the delivery outcome."
       }
     },
     "set_team_member": {

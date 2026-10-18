@@ -16,11 +16,6 @@ body {
   font-family: var(--font-sans);
 }
 
-a {
-  color: inherit;
-  text-decoration: inherit;
-}
-
 button {
   font: inherit;
 }
@@ -81,8 +76,4 @@ video {
   background: var(--tenant-primary-dark, #1e293b);
   color: #fff;
   padding-block: 0.625rem;
-}
-
-[data-blawby-critical-button] {
-  color: #fff;
 }

@@ -528,7 +528,7 @@ async function projectPublicPosts(env: CloudflareEnv, db: DbClient, organization
     queryAll<{ post_id: string; channel: 'facebook' | 'instagram'; provider_permalink: string | null; provider_target_id: string }>(db, `SELECT post_id, channel, provider_permalink, provider_target_id
       FROM post_publications WHERE organization_id = ? AND state = 'published' AND channel IN ('facebook', 'instagram') AND post_id IN (SELECT value FROM json_each(?)) ORDER BY channel`,
     [organizationId, d1JsonStringSet(rootIds)]),
-    locale === sourceLocale ? Promise.resolve([]) : loadExactPublicLocalizations(env, db, organizationId, locale),
+    locale === sourceLocale ? Promise.resolve(null) : loadExactPublicLocalizations(env, db, organizationId, locale),
     readIntegration(db, organizationId, 'facebook'),
     readIntegration(db, organizationId, 'instagram'),
   ])
