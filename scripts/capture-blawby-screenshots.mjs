@@ -333,13 +333,19 @@ try {
         const failedFirstParty = []
         const consoleErrors = []
         const requestFailures = []
+        const advisoryPrefetchCancellations = []
         page.on('pageerror', error => pageErrors.push(error.message))
         page.on('console', message => {
           if (message.type() === 'error') consoleErrors.push(message.text())
         })
         page.on('requestfailed', request => {
           if (new URL(request.url()).origin === new URL(args.url).origin) {
-            requestFailures.push(`${request.failure()?.errorText} ${request.url()}`)
+            const error = request.failure()?.errorText
+            if (request.headers()['sec-purpose'] === 'prefetch' && error === 'NS_BINDING_ABORTED') {
+              advisoryPrefetchCancellations.push({ url: request.url(), purpose: 'prefetch', error })
+            } else {
+              requestFailures.push(`${error} ${request.url()}`)
+            }
           }
         })
         page.on('response', response => {
@@ -357,7 +363,7 @@ try {
           }, new URL(args.url).origin)
           const failedUrls = new Set(failedMedia.map(image => image.src))
           return {
-            pageErrors, failedFirstParty, consoleErrors, requestFailures, failedMedia,
+            pageErrors, failedFirstParty, consoleErrors, requestFailures, advisoryPrefetchCancellations, failedMedia,
             imageRequests: (await page.requests()).filter(request => failedUrls.has(request.url()))
               .map(request => ({ url: request.url(), timing: request.timing(), failure: request.failure() })),
             appError: await page.evaluate(() => {
@@ -420,7 +426,7 @@ try {
             status: response.status(), file: portablePath(args.outDir, filePath),
             contentSize: cssContentSize, imageSize: dimensions,
             pageErrors: [...pageErrors], failedFirstParty: [...failedFirstParty], consoleErrors: [...consoleErrors],
-            requestFailures: [...requestFailures], failedMedia: [...failedMedia] })
+            requestFailures: [...requestFailures], advisoryPrefetchCancellations: [...advisoryPrefetchCancellations], failedMedia: [...failedMedia] })
           continue
         }
         await page.evaluate(() => window.scrollTo(0, 0))
@@ -440,6 +446,7 @@ try {
           viewport: viewportName,
           status: response?.status() ?? null,
           file: portablePath(args.outDir, filePath),
+          advisoryPrefetchCancellations: [...advisoryPrefetchCancellations],
         })
 
         for (const section of markedSections) {

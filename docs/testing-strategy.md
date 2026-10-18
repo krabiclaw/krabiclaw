@@ -173,6 +173,12 @@ it does not change the E2E suite's browser projects. Retain the manifest's actua
 browser and version with the artifacts. Captures from different browser engines
 are not pixel-parity evidence.
 
+Browser-owned `Sec-Purpose: prefetch` requests are advisory hints for future
+navigations. Their native `NS_BINDING_ABORTED` cancellations are retained as
+`advisoryPrefetchCancellations` in capture diagnostics and manifests, following
+[Firefox's prefetch lifecycle](https://searchfox.org/firefox-main/source/uriloader/prefetch/nsPrefetchService.cpp).
+Every HTTP error and every other first-party request failure remains blocking.
+
 `staging` is the first deployed validation. A push to `staging` deploys it and
 then runs read-only MCP discovery and tenant rendering against staging itself.
 Production deploys what `main` holds once `main`'s own `Checks` pass; whoever
