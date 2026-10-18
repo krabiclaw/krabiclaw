@@ -13,7 +13,7 @@ import { integrationDefinition } from '~/shared/integrations'
 import { integrationsKey } from '~/pages/dashboard/[orgSlug]/integrations.vue'
 import { INTEGRATION_SCOPES, type GoogleCalendarIntegration } from '~/shared/organization-settings'
 const route = useRoute()
-// The Integrations summary names whose linked account the calendar acts through; the leaf's own read does not.
+// The Integrations summary names the KrabiClaw user who linked the account; the leaf's own read does not.
 const integrations = inject(integrationsKey, null)
 const organizationId = await useDashboardOrganizationId()
 const api = `/api/organizations/${organizationId}/integrations/google-calendar`
