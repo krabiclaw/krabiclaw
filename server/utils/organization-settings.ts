@@ -18,7 +18,7 @@ import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION, parseLogoPresentation } from '~
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { organizationAdapter } from '~/server/utils/member-access'
 import { linkedAccountOwner, type CloudflareEnv } from '~/server/utils/auth'
-import { hasOrganizationEntitlement } from '~/server/utils/billing'
+import { listServices } from '~/server/utils/organization-services'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 
 type SetupEnv = Parameters<typeof createSystemSubdomain>[0]
@@ -197,7 +197,7 @@ export async function loadSettingsPayload(
     catering_email: siteConfig.catering_email || '',
     careers_email: siteConfig.careers_email || '',
     google_analytics_measurement_id: siteConfig.google_analytics_measurement_id || '',
-    integrations: await integrationsSummary(env, organizationId, await listIntegrations(db, organizationId), JSON.parse(updatedOrganization.locations_json) as IntegrationLocation[]),
+    integrations: await integrationsSummary(db, env, organizationId, await listIntegrations(db, organizationId), JSON.parse(updatedOrganization.locations_json) as IntegrationLocation[]),
     created_at: updatedOrganization.created_at,
     updated_at: updatedOrganization.updated_at,
   }
@@ -223,7 +223,7 @@ interface IntegrationLocation {
  * leaves — names and ids, never a token. Google Maps is per location, so
  * its answer is the locations and which of them name a place.
  */
-async function integrationsSummary(env: CloudflareEnv, organizationId: string, integrations: Awaited<ReturnType<typeof listIntegrations>>, locations: IntegrationLocation[]) {
+async function integrationsSummary(db: DbClient, env: CloudflareEnv, organizationId: string, integrations: Awaited<ReturnType<typeof listIntegrations>>, locations: IntegrationLocation[]) {
   // Each connection names whose linked account it acts through, read from Better Auth.
   const owners = new Map(await Promise.all([...new Set(integrations.map(integration => integration.account_id))].map(async id => [id, await linkedAccountOwner(env, id)] as const)))
   const connected = (provider: typeof integrations[number]['provider']) => {
@@ -231,7 +231,7 @@ async function integrationsSummary(env: CloudflareEnv, organizationId: string, i
     return summary && { ...summary, connected_through: owners.get(summary.account_id) ?? null }
   }
   return {
-    entitlements: { marketing: await hasOrganizationEntitlement(env, organizationId, 'marketing') },
+    services: { managed_ads: (await listServices(db, organizationId)).managed_ads !== null },
     google_maps: locations.map(location => ({ ...location, address: formatPostalAddress(parsePostalAddress(location.address)) || null })),
     google_calendar: (() => { const row = integrations.find(row => row.provider === 'google_calendar'); return row ? { account_id: row.account_id, calendar_name: row.target_name, status: row.status, last_error: row.last_error, connected_at: row.created_at, connected_through: owners.get(row.account_id) ?? null } : null })(),
     google_analytics: connected('google_analytics'),

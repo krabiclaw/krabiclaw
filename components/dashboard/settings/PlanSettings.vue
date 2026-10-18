@@ -28,6 +28,18 @@
         <UInputNumber v-model="locationsQuantity" :min="locationsMinimum" :disabled="busy" class="w-full" />
       </UFormField>
     </DashboardListItemDialog>
+    <!-- Managed ads: the consent that starts the 10% fee, stated before it is agreed. -->
+    <DashboardListItemDialog v-model:open="managedAdsOpen" :title="services?.managed_ads ? 'Turn off managed ads' : 'Managed ads'" :saving="busy" :error="sheetError" :save-label="services?.managed_ads ? 'Turn off' : 'Agree and turn on'" @save="toggleManagedAds">
+      <div class="space-y-3 text-base text-muted">
+        <template v-if="services?.managed_ads">
+          <p>Chris and Julia stop managing your campaigns. The fee ends with the day it ends; spend already managed is still billed.</p>
+        </template>
+        <template v-else>
+          <p>Chris and Julia build, pause and budget the campaigns in your connected Google Ads account, and report on them in Insights.</p>
+          <p>The fee is <strong class="text-highlighted">10% of your Google Ads spend</strong>, read from Google each day and billed with your monthly KrabiClaw fees. Google bills the ad spend itself to your Google Ads account. You can turn it off here at any time.</p>
+        </template>
+      </div>
+    </DashboardListItemDialog>
     <DashboardListItemDialog v-model:open="creditOpen" title="Verify credit note" :saving="busy" :save-disabled="!creditNote.trim()" :error="sheetError" save-label="Verify credit" @save="settleCredit">
       <UFormField label="Issued Stripe credit note ID"><UInput v-model="creditNote" placeholder="cn_…" :disabled="busy" class="w-full" /></UFormField>
     </DashboardListItemDialog>
@@ -58,6 +70,28 @@ const errorMessage = ref('')
 const successMessage = ref('')
 const sheetError = ref('')
 const busy = ref(false)
+
+// The services the business is on: a consent row each, read with the plan.
+type Services = { managed_ads: { id: string; agreed_at: string } | null }
+const isServices = (value: unknown): value is { success: true; services: Services } => isRecord(value) && value.success === true && isRecord(value.services) && (value.services.managed_ads === null || (isRecord(value.services.managed_ads) && typeof value.services.managed_ads.agreed_at === 'string'))
+const { data: servicesResource, refresh: refreshServices } = await useAsyncData(`dashboard-services:${String(route.params.orgSlug)}`, () => dashboardApi('/api/dashboard/services', { validate: isServices }))
+const services = computed(() => servicesResource.value?.services ?? null)
+const managedAdsOpen = ref(false)
+async function toggleManagedAds() {
+  busy.value = true
+  sheetError.value = ''
+  try {
+    await dashboardApi('/api/dashboard/services', { method: 'POST', body: { service: 'managed_ads', action: services.value?.managed_ads ? 'end' : 'agree' }, validate: isServices })
+    await refreshServices()
+    await refreshNuxtData(`dashboard-integrations:${String(route.params.orgSlug)}`)
+    managedAdsOpen.value = false
+    successMessage.value = services.value?.managed_ads ? 'Managed ads is on. Chris and Julia will be in touch about your campaigns.' : 'Managed ads is off.'
+  } catch (error) {
+    sheetError.value = getErrorMessage(error, 'Managed ads could not be changed')
+  } finally {
+    busy.value = false
+  }
+}
 const choosing = ref(false)
 
 interface BillingStatus { organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; subscriptionStatus?: string; currentPeriodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month' | 'year'; subscriptionPrice?: { name: string; amount: number; currency: string; interval: 'month' | 'year' }; locations: { used: number; covered: number }; scheduledPlan?: { plan: string; at: string } | null }
@@ -130,6 +164,7 @@ const locationsDialogNote = computed(() => billing.value && isNewSalePlan(billin
 
 const groups = computed<EditorNavigationGroup[]>(() => [{
   id: 'billing',
+  label: 'Plan',
   items: [
     { id: 'plan', label: currentPlan.value?.name ?? 'Plan', summary: planSummary.value, action: { label: onStarter.value ? 'Choose a plan' : 'Manage' } },
     ...(billing.value ? [{ id: 'locations', label: 'Locations', summary: locationsSummary.value, ...(onStarter.value || billing.value.subscriptionStatus !== 'active' || scheduledPlan.value || billing.value.cancelAtPeriodEnd ? {} : { action: { label: 'Change' } }) }] : []),
@@ -139,6 +174,16 @@ const groups = computed<EditorNavigationGroup[]>(() => [{
     ...(usage.value?.credits ?? []).map(credit => ({ id: `credit:${credit.id}`, label: `Pending credit ${paymentMoney(-credit.amount, credit.currency)}`, summary: 'Issue the credit in Stripe, then verify its credit note here.', action: { label: 'Verify' } })),
     ...(billing.value && (scheduledPlan.value || billing.value.cancelAtPeriodEnd) && currentPlan.value ? [{ id: 'restore', label: `Keep ${currentPlan.value.name}`, summary: scheduledPlan.value ? `Stay on ${currentPlan.value.name} instead of changing to ${scheduledPlan.value.name}.` : `Stay on ${currentPlan.value.name} after ${formatExactDateTime(billing.value.currentPeriodEnd!)}.`, action: { label: 'Keep plan' } }] : []),
     ...(!onStarter.value && billing.value && !billing.value.cancelAtPeriodEnd && !scheduledPlan.value ? [{ id: 'cancel', label: 'Cancel plan', summary: 'If you cancel, you keep full access to your plan features until the end of your billing period.', action: { label: 'Cancel' } }] : []),
+  ],
+}, {
+  // What KrabiClaw's people do for the business, beside the plan that includes the software.
+  id: 'services',
+  label: 'Services',
+  items: [
+    { id: 'service:managed_ads', label: 'Managed ads', summary: services.value?.managed_ads
+      ? `On since ${formatExactDateTime(services.value.managed_ads.agreed_at)} · 10% of Google Ads spend, billed with your fees.`
+      : 'Chris and Julia run your Google Ads campaigns · 10% of ad spend.', action: { label: services.value?.managed_ads ? 'Turn off' : 'Turn on' } },
+    { id: 'service:strategy', label: 'SEO and marketing strategy', summary: 'Monthly strategy with Julia · $2,000 per month, billed as its own subscription.', action: { label: 'Ask about it' } },
   ],
 }])
 
@@ -153,6 +198,8 @@ const organizationId = () => {
 async function onRowAction(id: string) {
   if (busy.value) return
   errorMessage.value = ''
+  if (id === 'service:managed_ads') { sheetError.value = ''; managedAdsOpen.value = true; return }
+  if (id === 'service:strategy') { await navigateTo('/help', { external: true }); return }
   if (id === 'plan') { sheetError.value = ''; choosing.value = true; return }
   if (id === 'locations') {
     if (onStarter.value) return
