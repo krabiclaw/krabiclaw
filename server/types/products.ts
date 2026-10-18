@@ -1,7 +1,7 @@
 import type { StayAmenity, StayCancellationPolicy, StayLongTermCancellationPolicy, StayPropertyType, StayPropertyTypeGroup, StayListingType, StayPropertySizeUnit } from '~/shared/stay-listing'
 import type { ResolvedMediaAsset } from '~/server/utils/media-asset-manager'
 import type { Price, PriceInput } from '~/shared/prices'
-import type { ProductDetails, ProductKind } from '~/shared/product-details'
+import type { ProductDetails, ProductDetailsPatch, ProductKind } from '~/shared/product-details'
 import type { SocialImageSource } from '~/utils/social-metadata'
 
 export type ProductSource = 'manual' | 'template' | 'ai' | 'import' | 'copy'
@@ -221,13 +221,21 @@ export type ProductVariantPatchInput = Omit<Partial<ProductVariantInput>, 'price
   prices_mode?: 'merge' | 'replace'
 }
 
-export type UpdateProductInput = Partial<Omit<CreateProductInput, 'source' | 'variants' | 'stay'>> & {
+export type UpdateProductInput = Partial<Omit<CreateProductInput, 'source' | 'variants' | 'stay' | 'details'>> & {
   /** Stay settings to change. The location a home is at is fixed when it is created. */
   stay?: Partial<Omit<ProductStayConfig, 'location_id'>>
   variants?: ProductVariantPatchInput[]
   /** Merge preserves unmentioned variants. Replace removes variants omitted from the supplied list. */
   variants_mode?: 'merge' | 'replace'
-}
+} & ({
+  /** Merge preserves unmentioned facts; null explicitly removes a named fact. */
+  details_mode: 'merge'
+  details: ProductDetailsPatch
+} | {
+  /** Omitted or replace replaces the detail map, retaining featured unless supplied. */
+  details_mode?: 'replace'
+  details?: ProductDetails
+})
 
 export interface SetProductPublicationInput {
   organization_id: string

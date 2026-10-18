@@ -29,7 +29,7 @@ import {
   type PriceInput,
   type PriceSelection,
 } from '~/shared/prices'
-import { assertProductKind, validateProductDetails, ProductDetailError, PRICING_NOTE_HANDLE, PRODUCT_KINDS, type ProductDetailValue, type ProductKind } from '~/shared/product-details'
+import { assertProductKind, patchProductDetails, validateProductDetails, ProductDetailError, PRICING_NOTE_HANDLE, PRODUCT_KINDS, type ProductDetailValue, type ProductKind } from '~/shared/product-details'
 import type { CatalogCounts } from '~/utils/product-presentation'
 import type {
   Collection,
@@ -1041,7 +1041,7 @@ function productWrites(
   // Prices are rewritten only by a caller that actually supplied variants.
   // Saving a description restates nothing about money, and must not retire and
   // remint every offer a product has.
-  options: { writePrices: boolean; priceIds?: ReadonlySet<string>; writeOptions?: boolean; variantIds?: ReadonlySet<string>; expectedUpdatedAt?: string; writeStay?: boolean } = { writePrices: true },
+  options: { writePrices: boolean; priceIds?: ReadonlySet<string>; writeOptions?: boolean; variantIds?: ReadonlySet<string>; expectedUpdatedAt?: string; stayFields?: readonly (keyof ProductStayConfig)[] } = { writePrices: true },
 ): BatchQuery[] {
   const upsert = mode === 'upsert'
   const writes: BatchQuery[] = [{
@@ -1065,7 +1065,14 @@ function productWrites(
 
   // Stay settings are written when created or when an edit names them, so an
   // unrelated save never restates settings someone else changed.
-  if (planned.stay && options.writeStay !== false) {
+  if (planned.stay && (options.stayFields === undefined || options.stayFields.length)) {
+    const columns = [
+      'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'property_type_group', 'property_type',
+      'listing_type', 'total_floors', 'listing_floor', 'year_built', 'property_size', 'property_size_unit',
+      'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy', 'assigned_member_id', 'assigned_team_id',
+    ] as const satisfies readonly (keyof ProductStayConfig)[]
+    const assignments = columns.filter(column => options.stayFields === undefined || options.stayFields.includes(column))
+      .map(column => `${column} = excluded.${column}`)
     // The location relationship first: the stay settings name it, so a home's one
     // location is the relationship its config holds.
     writes.push({
@@ -1079,13 +1086,7 @@ function productWrites(
                  property_type_group, property_type, listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit,
                  bedrooms, beds, bathrooms, amenities, cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id, created_at, updated_at, created_by, updated_by)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT (product_id) DO UPDATE SET check_in_time = excluded.check_in_time, check_out_time = excluded.check_out_time,
-                 max_guests = excluded.max_guests, min_nights = excluded.min_nights, property_type_group = excluded.property_type_group, property_type = excluded.property_type, bedrooms = excluded.bedrooms,
-                 listing_type = excluded.listing_type, total_floors = excluded.total_floors, listing_floor = excluded.listing_floor, year_built = excluded.year_built,
-                 property_size = excluded.property_size, property_size_unit = excluded.property_size_unit,
-                 beds = excluded.beds, bathrooms = excluded.bathrooms, amenities = excluded.amenities, cancellation_policy = excluded.cancellation_policy,
-                 long_term_cancellation_policy = excluded.long_term_cancellation_policy, assigned_member_id = excluded.assigned_member_id,
-                 assigned_team_id = excluded.assigned_team_id, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+               ON CONFLICT (product_id) DO UPDATE SET ${[...assignments, 'updated_at = excluded.updated_at', 'updated_by = excluded.updated_by'].join(', ')}
                WHERE product_stay_configs.organization_id = excluded.organization_id AND product_stay_configs.location_id = excluded.location_id`,
       params: [planned.id, organizationId, planned.stay.location_id, planned.stay.check_in_time, planned.stay.check_out_time,
         planned.stay.max_guests, planned.stay.min_nights, planned.stay.property_type_group, planned.stay.property_type,
@@ -1510,6 +1511,9 @@ async function planProductUpdate(db: DbClient, input: {
     if (at < 0) variants.push(mergedVariant)
     else variants[at] = mergedVariant
   }
+  let details: Product['details']
+  try { details = patchProductDetails(patch.kind ?? current.kind, current.details, patch.details, patch.details_mode) }
+  catch (error) { if (!(error instanceof ProductDetailError)) throw error; invalid(error.message) }
   const merged: CreateProductInput = {
     kind: patch.kind ?? current.kind,
     name: patch.name ?? current.name,
@@ -1525,7 +1529,7 @@ async function planProductUpdate(db: DbClient, input: {
       values: option.values.map(value => ({ id: value.id, value: value.value, sort_order: value.sort_order })),
     })),
     variants,
-    details: { featured: current.details.featured ?? false, ...(patch.details ?? current.details) },
+    details,
     // The location a home is at is fixed: a patch naming another one is refused, never merged.
     stay: current.stay ? { ...current.stay, ...patch.stay, location_id: current.stay.location_id } : patch.stay as CreateProductInput['stay'],
   }
@@ -1568,8 +1572,7 @@ async function planProductUpdate(db: DbClient, input: {
     return !before || variant.name !== before.name || variant.sku !== before.sku || variant.active !== before.active || variant.sort_order !== before.sort_order
   }).map(variant => variant.id))
   const writes: BatchQuery[] = [
-    // Selections and named details are rebuilt wholesale: nothing
-    // references them, so replacing them is simpler and cannot drift.
+    // Option selections are rebuilt from the validated variant plan.
     { query: 'DELETE FROM product_variant_option_values WHERE organization_id = ? AND product_id = ?', params: [organizationId, productId] },
     // Only explicit replacement removes prices; merged omissions remain in the plan.
     ...(writesPrices
@@ -1587,8 +1590,10 @@ async function planProductUpdate(db: DbClient, input: {
     { query: 'DELETE FROM product_option_values WHERE organization_id = ? AND product_id = ? AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, productId, keptValues] },
     { query: 'DELETE FROM product_options WHERE organization_id = ? AND product_id = ? AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, productId, keptOptions] },
     ...productWrites(organizationId, planned, input.actor, input.now, 'upsert', {
-      writePrices: writesPrices, priceIds, writeOptions: patch.options !== undefined, variantIds, writeStay: patch.stay !== undefined,
-      expectedUpdatedAt: planned.kind === 'experience' && !planned.order_url ? current.updated_at : undefined,
+      writePrices: writesPrices, priceIds, writeOptions: patch.options !== undefined, variantIds,
+      stayFields: Object.keys(patch.stay ?? {}) as (keyof ProductStayConfig)[],
+      // A narrow edit still restates the Product it read, including its details.
+      expectedUpdatedAt: current.updated_at,
     }),
     ...(guardPublication ? [{
       query: `UPDATE products SET updated_at=CASE WHEN NOT EXISTS (SELECT 1 FROM product_publications WHERE organization_id=? AND product_id=? AND published=1) ${readiness?.allocation ? `OR (${readiness.allocation.query})` : ''} THEN updated_at ELSE NULL END WHERE organization_id=? AND id=?`,
@@ -2323,7 +2328,9 @@ export async function reconcileProducts(db: DbClient, input: {
 export interface MenuSectionInput {
   collection_id?: string
   name: string
-  items: Array<Omit<UpdateProductInput, 'kind' | 'variants' | 'variants_mode'> & {
+  items: Array<Omit<UpdateProductInput, 'kind' | 'variants' | 'variants_mode' | 'details' | 'details_mode'> & {
+    /** Menu reconciliation supplies a complete detail map when it changes details. */
+    details?: CreateProductInput['details']
     product_id?: string
     name: string
     variants?: Array<Omit<ProductVariantPatchInput, 'prices_mode'>>
@@ -2390,10 +2397,13 @@ export async function updateMenu(db: DbClient, input: {
     organizationEventQuery({ organizationId, locationId, actorId: actor.actorId, eventType: 'product.updated', entityType: 'menu', entityId: locationId, dedupeKey, metadata: { request_hash: requestHash, product_count: ids.length, section_count: sections.length } }))
   if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This menu exceeds one atomic update; submit its sections in separate updates')
   try { await executeBatch(db, writes, { operation: 'Update public menu' }) } catch (error) {
-    if (!isUniqueDedupeConflict(error)) throw error
-    const completed = await readCreationRecord(db, dedupeKey)
-    if (completed?.requestHash !== requestHash) throw error
-    return read(true)
+    const stale = /NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))
+    if (stale || isUniqueDedupeConflict(error)) {
+      const completed = await readCreationRecord(db, dedupeKey)
+      if (completed?.requestHash === requestHash) return read(true)
+    }
+    if (stale) throw new HTTPError({ statusCode: 409, statusMessage: 'The menu changed while you were editing. Nothing was changed; read its current state and retry.', data: { code: 'PRODUCT_UPDATE_CONFLICT' }, cause: error })
+    throw error
   }
   return read(false)
 }

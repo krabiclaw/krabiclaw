@@ -244,7 +244,7 @@
               <div v-for="detail in thingsToKnow" :key="detail.key">
                 <h3 class="text-sm font-semibold text-default">{{ detail.label }}</h3>
                 <ul class="mt-2 space-y-1.5">
-                  <li v-for="line in detail.values" :key="line" class="text-sm leading-6 text-muted">{{ line }}</li>
+                  <li v-for="(line, index) in detail.values" :key="index" class="whitespace-pre-wrap break-words text-sm leading-6 text-muted">{{ line }}</li>
                 </ul>
               </div>
             </div>
@@ -464,7 +464,7 @@ import { ga4Major } from '~/utils/ga4-projection'
 import { productLocationCollectionPath } from '~/utils/product-presentation'
 import { extractDietarySchemaUrls, type ProductCollectionSibling } from '~/utils/product-seo'
 import type { ProductDetailValue } from '~/shared/product-details'
-import { EXPERIENCE_ATTRIBUTE_HANDLES, productDetailFields, productDetailKey, PRICING_NOTE_HANDLE, STAY_DESCRIPTION_DETAIL_KEYS } from '~/shared/product-details'
+import { EXPERIENCE_ATTRIBUTE_HANDLES, productDetailFields, productDetailKey, PRICING_NOTE_HANDLE, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, stayHouseRuleLines } from '~/shared/product-details'
 import type { PublicProductBooking, PublicProductLocation, PublicProductReview, PublicProductSession } from '~/server/utils/public-products'
 import { addressPlaceName, formatPostalAddress, schemaPostalAddress } from '~/utils/postal-address'
 import { formatTime } from '~/utils/timezone'
@@ -711,7 +711,7 @@ const visibleDetails = computed(() => productDetailFields(props.product.kind).fl
   const handle = productDetailKey(definition)
   // The pricing note is shown where the price goes, so it is not repeated in
   // the attribute list underneath it.
-  if (handle === PRICING_NOTE_HANDLE || definition.value_type === 'boolean') return []
+  if (handle === PRICING_NOTE_HANDLE || definition.value_type === 'boolean' || (STAY_HOUSE_RULE_DETAIL_KEYS as readonly string[]).includes(handle)) return []
   const value = props.product.details[handle]
   if (value === undefined || value === null) return []
   const values = Array.isArray(value) ? value : [String(value)]
@@ -803,10 +803,14 @@ const meetingPoint = computed(() => attribute(EXPERIENCE_ATTRIBUTE_HANDLES.meeti
 const includedItems = computed(() => attribute(EXPERIENCE_ATTRIBUTE_HANDLES.includedItems, asList) ?? [])
 const whatToBring = computed(() => attribute(EXPERIENCE_ATTRIBUTE_HANDLES.whatToBring, asList) ?? [])
 const PLACED_ATTRIBUTE_HANDLES = new Set<string>([...Object.values(EXPERIENCE_ATTRIBUTE_HANDLES), ...STAY_DESCRIPTION_DETAIL_KEYS])
-const thingsToKnow = computed(() => visibleDetails.value.filter((detail) => {
-  const definition = productDetailFields(props.product.kind).find(entry => entry.id === detail.key)
-  return !definition || !PLACED_ATTRIBUTE_HANDLES.has(productDetailKey(definition))
-}))
+const stayRules = computed(() => props.product.kind === 'stay' ? stayHouseRuleLines(props.product.details, value => formatTime(value, locale.value)) : [])
+const thingsToKnow = computed(() => [
+  ...(stayRules.value.length ? [{ key: 'house_rules', label: 'House rules', values: stayRules.value }] : []),
+  ...visibleDetails.value.filter((detail) => {
+    const definition = productDetailFields(props.product.kind).find(entry => entry.id === detail.key)
+    return !definition || !PLACED_ATTRIBUTE_HANDLES.has(productDetailKey(definition))
+  }),
+])
 
 const addressLine = computed(() => formatPostalAddress(props.location?.address ?? null))
 // A home is named by its town, as Airbnb's "Villa in Ao Nang"; its location's title is the home's own name.
