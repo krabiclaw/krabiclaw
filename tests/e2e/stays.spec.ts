@@ -897,6 +897,8 @@ test('a cleaner sees only assigned-home arrivals and departures on Today and Upc
     await expect(stayBack).toHaveAttribute('href', `/dashboard/${slug}/calendar${calendarStayURL.search}`)
     await stayBack.click()
     await expect(page).toHaveURL(`/dashboard/${slug}/calendar${calendarStayURL.search}`)
+    await expect(inspector.getByText('Reserved', { exact: true })).toBeVisible()
+    await page.setViewportSize({ width: 1440, height: 900 })
     await expect(calendar).toBeVisible()
     await expect(calendar.getByRole('button', { name: 'Assigned Cabin', exact: true })).toBeVisible()
 
