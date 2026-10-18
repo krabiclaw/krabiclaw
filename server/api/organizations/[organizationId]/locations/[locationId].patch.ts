@@ -12,7 +12,7 @@ export default defineHandler(async (event) => {
   }
 
   const body = await readRequiredBody<Record<string, unknown>>(event)
-  const { env, db, session, organization } = await requireLocationAccess(event, organizationId, locationId)
+  const { env, db, session, organization } = await requireLocationAccess(event, organizationId, locationId, body)
 
   const rating = body.rating === undefined || body.rating === null || String(body.rating).trim() === ''
     ? undefined
@@ -20,10 +20,20 @@ export default defineHandler(async (event) => {
   const reviewCount = body.review_count === undefined || body.review_count === null || String(body.review_count).trim() === ''
     ? undefined
     : Number(body.review_count)
+  const assignedMemberId = body.assigned_member_id === undefined
+    ? undefined
+    : body.assigned_member_id === null || body.assigned_member_id === ''
+      ? null
+      : String(body.assigned_member_id)
+  const assignedTeamId = body.assigned_team_id === undefined
+    ? undefined
+    : body.assigned_team_id === null || body.assigned_team_id === ''
+      ? null
+      : String(body.assigned_team_id)
 
   const result = await updateLocation(
     db, organization.id, locationId, {
-      title: typeof body.title === 'string' ? body.title : undefined, slug: typeof body.slug === 'string' ? body.slug : undefined, address: body.address, phone: typeof body.phone === 'string' ? body.phone : undefined, email: typeof body.email === 'string' ? body.email : undefined, website_url: typeof body.website_url === 'string' ? body.website_url : body.website_url === null ? null : undefined, maps_url: typeof body.maps_url === 'string' ? body.maps_url : body.maps_url === null ? null : undefined, opening_hours: body.opening_hours === undefined ? undefined : (body.opening_hours || null) as UpdateLocationInput['opening_hours'], special_hours: body.special_hours === undefined ? undefined : (body.special_hours || null) as UpdateLocationInput['special_hours'], expected_updated_at: typeof body.expected_updated_at === 'string' ? body.expected_updated_at : undefined, description: typeof body.description === 'string' ? body.description : body.description === null ? null : undefined, short_description: typeof body.short_description === 'string' ? body.short_description : body.short_description === null ? null : undefined, price_level: typeof body.price_level === 'string' ? body.price_level : body.price_level === null ? null : undefined, google_place_id: typeof body.google_place_id === 'string' ? body.google_place_id : body.google_place_id === null ? null : undefined, rating, review_count: reviewCount, status: body.status === 'active' || body.status === 'inactive' || body.status === 'sync_error'
+      title: typeof body.title === 'string' ? body.title : undefined, slug: typeof body.slug === 'string' ? body.slug : undefined, address: body.address, phone: typeof body.phone === 'string' ? body.phone : undefined, email: typeof body.email === 'string' ? body.email : undefined, website_url: typeof body.website_url === 'string' ? body.website_url : body.website_url === null ? null : undefined, maps_url: typeof body.maps_url === 'string' ? body.maps_url : body.maps_url === null ? null : undefined, opening_hours: body.opening_hours === undefined ? undefined : (body.opening_hours || null) as UpdateLocationInput['opening_hours'], special_hours: body.special_hours === undefined ? undefined : (body.special_hours || null) as UpdateLocationInput['special_hours'], expected_updated_at: typeof body.expected_updated_at === 'string' ? body.expected_updated_at : undefined, description: typeof body.description === 'string' ? body.description : body.description === null ? null : undefined, short_description: typeof body.short_description === 'string' ? body.short_description : body.short_description === null ? null : undefined, price_level: typeof body.price_level === 'string' ? body.price_level : body.price_level === null ? null : undefined, google_place_id: typeof body.google_place_id === 'string' ? body.google_place_id : body.google_place_id === null ? null : undefined, rating, review_count: reviewCount, assigned_member_id: assignedMemberId, assigned_team_id: assignedTeamId, status: body.status === 'active' || body.status === 'inactive' || body.status === 'sync_error'
         ? body.status
         : undefined, }, session.user.id, env)
 

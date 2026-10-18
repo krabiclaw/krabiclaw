@@ -2,7 +2,7 @@ import { assertCalendarDate, isValidTimezone, instantDate, localDateAt, addLocal
 import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, type DbClient } from '~/server/db'
 import { resolveOrganizationCmsCapabilities } from '~/server/utils/cms-capabilities'
-import { assignedBookingSql, assignedHomeSql, roleAllows, assertRoleAllows, type ResolvedMembership } from '~/server/utils/member-access'
+import { assignedBookingSql, assignedHomeSql, assignedLocationSql, roleAllows, assertRoleAllows, type ResolvedMembership } from '~/server/utils/member-access'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { REQUEST_CURRENT_BUYER_SQL } from '~/server/domain/requests'
@@ -190,8 +190,9 @@ export async function listAgenda(
     { query: `SELECT l.id, l.organization_id, l.title FROM business_locations l WHERE l.organization_id = ? AND l.organization_id ${scopeSql}
         ${staff ? `AND (EXISTS (SELECT 1 FROM requests r JOIN bookings b ON b.request_id = r.id AND b.organization_id = r.organization_id
           WHERE r.organization_id = l.organization_id AND r.location_id = l.id AND ${assignedBookingSql('b')})
-          OR EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = l.organization_id AND c.location_id = l.id AND ${assignedHomeSql('c')}))` : ''}
-        ORDER BY l.title, l.id`, params: [scope.organizationId ?? '', scopeParam, ...(staff ? [staff.userId, staff.userId, staff.userId] : [])] },
+          OR EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = l.organization_id AND c.location_id = l.id AND ${assignedHomeSql('c')})
+          OR (${assignedLocationSql('l')}))` : ''}
+        ORDER BY l.title, l.id`, params: [scope.organizationId ?? '', scopeParam, ...(staff ? [staff.userId, staff.userId, staff.userId, staff.userId, staff.userId] : [])] },
     // A business with a place to stay has arrivals and departures; a buyer's agenda has none.
     { query: 'SELECT 1 AS present FROM product_stay_configs WHERE organization_id = ? LIMIT 1', params: [scope.organizationId ?? ''] },
   ], { operation: 'Read the agenda scope' })
@@ -202,7 +203,7 @@ export async function listAgenda(
   for (const organization of capabilityOrganizations) {
     const { capabilities } = resolveOrganizationCmsCapabilities(organization.vertical, organization.theme_id)
     const features = new Set([...capabilities.pages.map(page => page.feature), ...capabilities.managers.map(manager => manager.id)])
-    if (!staff && features.has('reservations')) available.add('reservation')
+    if (features.has('reservations')) available.add('reservation')
     // A class's schedule is the product's own; the calendar carries who is
     // coming to it, not every session it could run.
     if (features.has('products')) available.add('booking')
@@ -211,7 +212,7 @@ export async function listAgenda(
   // site template says: the record exists, so the calendar shows it.
   if (capabilityOrganizations.length) {
     if (bookableResult?.results?.length) available.add('booking')
-    if (!staff && reservingResult?.results?.length) available.add('reservation')
+    if (reservingResult?.results?.length) available.add('reservation')
   }
   if (scope.organizationId && hostingResult?.results?.length) available.add('stay')
   const availableKinds = AGENDA_KINDS.filter(kind => available.has(kind))
@@ -259,7 +260,7 @@ export async function listAgenda(
     json_extract(r.payload_json, '$.guest.name') AS title, printf('%d%s guests', agenda_reservation.party_size, CASE json_extract(r.payload_json, '$.party_size_is_minimum') WHEN 1 THEN '+' ELSE '' END) AS subtitle, agenda_reservation.party_size, agenda_reservation.status`, {
     joins: 'JOIN reservations agenda_reservation ON agenda_reservation.request_id = r.id',
     timezone: 'agenda_reservation.timezone',
-  })} AND agenda_reservation.status <> 'cancelled' AND agenda_reservation.starts_at BETWEEN ? AND ?`, [...params(), broadFrom, broadTo]))
+  })} ${staff ? `AND (${assignedLocationSql('l')})` : ''} AND agenda_reservation.status <> 'cancelled' AND agenda_reservation.starts_at BETWEEN ? AND ?`, [...params(), ...(staff ? [staff.userId, staff.userId] : []), broadFrom, broadTo]))
   if (requestedKinds.has('booking')) sourceQueries.push(queryAll(db, `${commonSelect('b', 'booking', `agenda_session.starts_at, agenda_session.ends_at,
     json_extract(b.payload_json, '$.guest.name') AS title, printf('%d guests', agenda_booking.party_size) AS subtitle, agenda_booking.party_size AS party_size, agenda_booking.status`, {
     joins: `JOIN bookings agenda_booking ON agenda_booking.request_id = b.id

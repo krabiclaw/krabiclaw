@@ -48,6 +48,8 @@ export interface CreateLocationInput {
   seo_title?: string | null;
   seo_description?: string | null;
   canonical_url?: string | null;
+  assigned_member_id?: string | null;
+  assigned_team_id?: string | null;
 }
 
 export interface UpdateLocationInput extends Partial<CreateLocationInput> {
@@ -82,6 +84,8 @@ export interface LocationRecord {
   seo_title?: string | null;
   seo_description?: string | null;
   canonical_url?: string | null;
+  assigned_member_id?: string | null;
+  assigned_team_id?: string | null;
   created_at?: string;
   updated_at?: string;
 }
@@ -182,6 +186,7 @@ async function loadLocation(
            rating, review_count, description, short_description, status,
            address, opening_hours, special_hours, categories, price_level,
            timezone, max_capacity, seo_title, seo_description, canonical_url,
+           assigned_member_id, assigned_team_id,
            created_at, updated_at`;
   // Check id first so a slug that happens to collide with another row's id can
   // never shadow the row actually addressed by that id.
@@ -302,6 +307,14 @@ export async function createLocation(
     return locationValidationFailure(error, 'special_hours');
   }
 
+  for (const [key, table, column] of [['assigned_member_id', 'member', 'organizationId'], ['assigned_team_id', 'team', 'organizationId']] as const) {
+    if (!(key in input)) continue;
+    const value = input[key];
+    if (value !== null && value !== undefined && (typeof value !== 'string' || !await queryFirst(db, `SELECT 1 FROM ${table} WHERE ${column} = ? AND id = ?`, [organizationId, value]))) {
+      return { status: 422, data: { error: `${key} must be a ${table} of this organization, or null`, code: 'INVALID_LOCATION_FIELD', field: key } };
+    }
+  }
+
   const baseSlug = toSlug((input.slug ?? title).trim());
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
@@ -319,9 +332,11 @@ export async function createLocation(
             google_review_url, google_place_id, description, short_description, address, opening_hours, special_hours, rating, review_count,
             price_level,
             timezone, max_capacity, status,
-            seo_title, seo_description, canonical_url, created_at, updated_at
+            seo_title, seo_description, canonical_url,
+            assigned_member_id, assigned_team_id,
+            created_at, updated_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)
         `,
         params: [
           id,
@@ -347,6 +362,8 @@ export async function createLocation(
           input.seo_title ?? null,
           input.seo_description ?? null,
           input.canonical_url ?? null,
+          input.assigned_member_id ?? null,
+          input.assigned_team_id ?? null,
           now,
           now,
         ],
@@ -522,6 +539,14 @@ export async function updateLocation(
     };
   }
 
+  for (const [key, table, column] of [['assigned_member_id', 'member', 'organizationId'], ['assigned_team_id', 'team', 'organizationId']] as const) {
+    if (!(key in input)) continue;
+    const value = input[key];
+    if (value !== null && value !== undefined && (typeof value !== 'string' || !await queryFirst(db, `SELECT 1 FROM ${table} WHERE ${column} = ? AND id = ?`, [organizationId, value]))) {
+      return { status: 422, data: { error: `${key} must be a ${table} of this organization, or null`, code: 'INVALID_LOCATION_FIELD', field: key } };
+    }
+  }
+
   const now = new Date().toISOString();
   const sets: string[] = ["updated_at = ?"];
   const params: Array<string | number | null> = [now];
@@ -558,6 +583,8 @@ export async function updateLocation(
     "seo_title",
     "seo_description",
     "canonical_url",
+    "assigned_member_id",
+    "assigned_team_id",
   ] as const;
 
   for (const field of simpleFields) {

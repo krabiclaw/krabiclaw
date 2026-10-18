@@ -7,7 +7,7 @@ const statements = {
   organization: ['read', 'update', 'delete'],
   members: ['read', 'invite', 'update', 'remove'],
   invitations: ['read', 'create', 'cancel'],
-  locations: ['read', 'create', 'update', 'delete'],
+  locations: ['read', 'create', 'update', 'delete', 'assigned'],
   content: ['read', 'create', 'update', 'delete', 'publish'],
   media: ['read', 'create', 'update', 'delete'],
   blog: ['read', 'create', 'update', 'delete', 'publish'],
@@ -62,6 +62,7 @@ export const organizationRoles = {
   member: organizationAccessControl.newRole({
     scheduling: ['own'],
     products: ['assigned'],
+    locations: ['assigned'],
     operations: ['assigned'],
     team_messages: ['read', 'send'],
   }),
