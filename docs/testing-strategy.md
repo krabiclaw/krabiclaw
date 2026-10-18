@@ -171,7 +171,8 @@ Install its pinned native browser with `yarn playwright install firefox`
 also required). The capture CLI uses Firefox's native document screenshots;
 it does not change the E2E suite's browser projects. Retain the manifest's actual
 browser and version with the artifacts. Captures from different browser engines
-are not pixel-parity evidence.
+are not pixel-parity evidence. Routes and viewports are captured sequentially
+so each composition check has one active page rather than competing cold loads.
 
 Browser-owned `Sec-Purpose: prefetch` requests are advisory hints for future
 navigations. Their native `NS_BINDING_ABORTED` cancellations are retained as
