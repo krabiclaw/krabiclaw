@@ -3,7 +3,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
+import { H3 } from 'nitro/h3'
 import * as schema from '../../server/db/schema.ts'
+import analyticsTrackRoute from '../../server/api/analytics/track.post.ts'
+import conversionEventRoute from '../../server/api/public/conversion-events.post.ts'
 import { recordTenantPageview, type TenantPageviewInput } from '../../server/utils/pageview-tracking.ts'
 import { measurementOutcome, recordOrganizationConversionEvent } from '../../server/utils/organization-conversions.ts'
 import { handleAnalyticsTools } from '../../server/utils/mcp-tools/analytics.ts'
@@ -19,7 +22,7 @@ async function openDb() {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'native-analytics', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
-    env: { DB: { type: 'd1' } },
+    env: { DB: { type: 'd1' }, MEDIA_BUCKET: { type: 'r2' }, ORGANIZATION_CACHE: { type: 'kv' }, AI: { type: 'ai' } },
   } }] })
   const db = await runtime.getD1Database('DB')
   const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
@@ -168,6 +171,35 @@ test('native analytics: producers → D1 → MCP query contract', { timeout: 120
 
     // A tenant never reads another tenant's events.
     assert.equal((await mcp(db, OTHER, { mode: 'events', ...range })).rows.length, 0)
+
+    // Actual collectors acknowledge the screenshot crawler before consuming
+    // quota or changing the history and summaries the workflow just produced.
+    const before = await db.batch([
+      db.prepare('SELECT * FROM analytics_events ORDER BY id'),
+      db.prepare('SELECT * FROM analytics_summaries ORDER BY id'),
+      db.prepare('SELECT * FROM rate_limits ORDER BY key'),
+    ])
+    const app = new H3()
+    app.post('/api/analytics/track', analyticsTrackRoute)
+    app.post('/api/public/conversion-events', conversionEventRoute)
+    const env = await runtime.getBindings()
+    for (const [path, body] of [
+      ['/api/analytics/track', { eventId: uuid(10000), eventType: 'pageview', pagePath: '/' }],
+      ['/api/public/conversion-events', { event_id: uuid(10001), event_name: 'product_view', page_path: '/' }],
+    ] as const) {
+      const response = await app.request(Object.assign(new Request(`https://a.example${path}`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'user-agent': 'KrabiClawScreenshotCrawler' }, body: JSON.stringify(body),
+      }), { runtime: { name: 'cloudflare', cloudflare: { env } } }), undefined, { organizationId: ORG, tenantType: 'tenant' })
+      assert.equal(response.status, 200)
+      assert.deepEqual(await response.json(), { ok: true, ignored: true })
+      assert.equal(response.headers.get('set-cookie'), null)
+    }
+    const after = await db.batch([
+      db.prepare('SELECT * FROM analytics_events ORDER BY id'),
+      db.prepare('SELECT * FROM analytics_summaries ORDER BY id'),
+      db.prepare('SELECT * FROM rate_limits ORDER BY key'),
+    ])
+    assert.deepEqual(after.map(result => result.results), before.map(result => result.results))
   } finally {
     await runtime.dispose()
   }

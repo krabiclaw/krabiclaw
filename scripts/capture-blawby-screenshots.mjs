@@ -284,6 +284,8 @@ if (args.source === 'reference') {
 }
 
 const browser = await firefox.launch()
+const browserVersion = browser.version()
+const userAgent = `KrabiClawScreenshotCrawler Firefox/${browserVersion}`
 const manifest = {
   schema_version: 2,
   captured_at: new Date().toISOString(),
@@ -294,7 +296,7 @@ const manifest = {
   observed_reference_etag: referenceEtag,
   base_url: args.url,
   route_inventory_source: args.sitemapUrl || (inventoryMode ? 'command-line --route' : null),
-  browser: { name: 'firefox', channel: null, version: browser.version(), device_scale_factor: 1 },
+  browser: { name: 'firefox', channel: null, version: browserVersion, user_agent: userAgent, device_scale_factor: 1 },
   rendering: {
     color_scheme: 'light',
     locale: 'en-US',
@@ -312,6 +314,7 @@ try {
     : BLAWBY_PARITY_VIEWPORTS)) {
     const context = await browser.newContext({
       viewport,
+      userAgent,
       deviceScaleFactor: 1,
       colorScheme: 'light',
       locale: 'en-US',
