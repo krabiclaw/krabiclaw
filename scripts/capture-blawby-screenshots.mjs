@@ -109,16 +109,8 @@ async function stabilizePage(page, inventoryMode) {
     if (inventoryMode) {
       for (const image of images) image.loading = 'eager'
     }
-    await Promise.race([
-      Promise.all(images.map(image => image.complete
-        ? Promise.resolve()
-        : new Promise(resolve => {
-            image.addEventListener('load', resolve, { once: true })
-            image.addEventListener('error', resolve, { once: true })
-          }))),
-      delay(5_000),
-    ])
   }, inventoryMode)
+  await page.waitForFunction(() => Array.from(document.images).every(image => image.complete))
 }
 
 async function markCaptureSections(page, routeName, expectedSections) {
@@ -342,7 +334,6 @@ try {
     const failedFirstParty = []
     const consoleErrors = []
     const requestFailures = []
-    let failedMedia = []
     page.on('pageerror', error => pageErrors.push(error.message))
     page.on('console', message => {
       if (message.type() === 'error') consoleErrors.push(message.text())
@@ -358,7 +349,16 @@ try {
       }
     })
     const failureDetails = async () => ({
-      pageErrors, failedFirstParty, consoleErrors, requestFailures, failedMedia,
+      pageErrors, failedFirstParty, consoleErrors, requestFailures,
+      failedMedia: await page.evaluate(captureOrigin => {
+        const origins = new Set([captureOrigin, 'https://media.krabiclaw.com', 'https://imagedelivery.net'])
+        return Array.from(document.images)
+          .filter(image => origins.has(new URL(image.currentSrc || image.src, document.baseURI).origin)
+            && (!image.complete || image.naturalWidth === 0))
+          .map(image => ({ src: image.currentSrc || image.src, currentSrc: image.currentSrc, loading: image.loading, complete: image.complete, naturalWidth: image.naturalWidth }))
+      }, new URL(args.url).origin),
+      imageRequests: (await page.requests()).filter(request => request.resourceType() === 'image')
+        .map(request => ({ url: request.url(), timing: request.timing(), failure: request.failure() })),
       appError: await page.evaluate(() => {
         const error = document.querySelector('#__nuxt')?.__vue_app__?.$nuxt?.payload?.error
         return error ? { message: error.message, status: error.statusCode, stack: error.stack, cause: error.cause?.message } : null
@@ -369,7 +369,6 @@ try {
       failedFirstParty.length = 0
       consoleErrors.length = 0
       requestFailures.length = 0
-      failedMedia = []
       const targetUrl = resolveUrl(args.url, routeConfig.path)
       const filePath = path.resolve(args.outDir, 'screenshots', args.source, `${routeName}-${viewportName}.png`)
       await fs.mkdir(path.dirname(filePath), { recursive: true })
@@ -380,18 +379,9 @@ try {
           throw new Error(`${routeConfig.path} did not hydrate at ${viewportName} (${page.url()}): ${JSON.stringify(await failureDetails())}`, { cause: error })
         })
       }
-      await stabilizePage(page, inventoryMode).catch(error => {
-        throw new Error(`${routeConfig.path} could not stabilize at ${viewportName} (${page.url()})`, { cause: error })
+      await stabilizePage(page, inventoryMode).catch(async error => {
+        throw new Error(`${routeConfig.path} could not stabilize at ${viewportName} (${page.url()}): ${JSON.stringify(await failureDetails())}`, { cause: error })
       })
-      if (inventoryMode) {
-        failedMedia = await page.evaluate(captureOrigin => {
-          const origins = new Set([captureOrigin, 'https://media.krabiclaw.com', 'https://imagedelivery.net'])
-          return Array.from(document.images)
-            .filter(image => origins.has(new URL(image.currentSrc || image.src, document.baseURI).origin)
-              && (!image.complete || image.naturalWidth === 0))
-            .map(image => ({ src: image.currentSrc || image.src, complete: image.complete, naturalWidth: image.naturalWidth }))
-        }, new URL(args.url).origin)
-      }
       const { cssContentSize } = await captureSession.send('Page.getLayoutMetrics')
       const dimensions = { width: Math.ceil(cssContentSize.width), height: Math.ceil(cssContentSize.height) }
       const clips = []
@@ -410,8 +400,10 @@ try {
           throw new Error(`${routeConfig.path} could not read main content at ${viewportName} (${page.url()}): ${JSON.stringify(await failureDetails())}`, { cause: error })
         })
         if (!mainText.trim()) throw new Error(`${routeConfig.path} has no visible main content at ${viewportName}`)
+        const details = await failureDetails()
+        const { failedMedia } = details
         if (pageErrors.length || failedFirstParty.length || consoleErrors.length || requestFailures.length || failedMedia.length) {
-          throw new Error(`${routeConfig.path} failed at ${viewportName}: ${JSON.stringify(await failureDetails())}`)
+          throw new Error(`${routeConfig.path} failed at ${viewportName}: ${JSON.stringify(details)}`)
         }
         manifest.screenshots.push({ route_name: routeName, route: routeConfig.path, viewport: viewportName,
           status: response.status(), file: portablePath(args.outDir, filePath),
