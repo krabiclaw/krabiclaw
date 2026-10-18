@@ -137,7 +137,7 @@ const sayaVariantClasses = {
 
 const blawbyVariantClasses = {
   primary: {
-    solid: 'bg-[var(--site-accent)] text-white hover:bg-[var(--blawby-accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--blawby-accent)] focus-visible:ring-offset-2',
+    solid: 'bg-[var(--site-accent)] text-[var(--site-on-accent)] hover:bg-[var(--blawby-accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--blawby-accent)] focus-visible:ring-offset-2',
     soft: 'bg-[var(--blawby-accent-100)] text-[var(--blawby-primary)] hover:bg-[var(--blawby-accent-200)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--blawby-accent)] focus-visible:ring-offset-2',
     outline: 'bg-[var(--blawby-accent-100)] text-[var(--blawby-primary)] hover:bg-[var(--blawby-accent-200)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--blawby-accent)] focus-visible:ring-offset-2',
     ghost: 'bg-transparent text-[var(--blawby-primary)] hover:bg-[var(--blawby-accent-100)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--blawby-accent)] focus-visible:ring-offset-2',
