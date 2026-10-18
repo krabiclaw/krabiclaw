@@ -82,7 +82,7 @@ function portablePath(root, filePath) {
   return path.relative(path.resolve(root), filePath).replaceAll('\\', '/')
 }
 
-async function stabilizePage(page, inventoryMode) {
+async function stabilizePage(page) {
   await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: 'light' })
   await page.addStyleTag({
     content: `
@@ -96,7 +96,7 @@ async function stabilizePage(page, inventoryMode) {
       }
     `,
   })
-  await page.evaluate(async inventoryMode => {
+  await page.evaluate(async () => {
     if (document.fonts?.ready) await document.fonts.ready
     const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
     const step = Math.max(window.innerHeight, 600)
@@ -105,11 +105,8 @@ async function stabilizePage(page, inventoryMode) {
       await delay(50)
     }
     window.scrollTo(0, 0)
-    const images = Array.from(document.images)
-    if (inventoryMode) {
-      for (const image of images) image.loading = 'eager'
-    }
-  }, inventoryMode)
+    for (const image of document.images) image.loading = 'eager'
+  })
   await page.waitForFunction(() => Array.from(document.images).every(image => image.complete))
 }
 
@@ -348,22 +345,25 @@ try {
         failedFirstParty.push(`${response.status()} ${response.url()}`)
       }
     })
-    const failureDetails = async () => ({
-      pageErrors, failedFirstParty, consoleErrors, requestFailures,
-      failedMedia: await page.evaluate(captureOrigin => {
+    const failureDetails = async () => {
+      const failedMedia = await page.evaluate(captureOrigin => {
         const origins = new Set([captureOrigin, 'https://media.krabiclaw.com', 'https://imagedelivery.net'])
         return Array.from(document.images)
           .filter(image => origins.has(new URL(image.currentSrc || image.src, document.baseURI).origin)
             && (!image.complete || image.naturalWidth === 0))
           .map(image => ({ src: image.currentSrc || image.src, currentSrc: image.currentSrc, loading: image.loading, complete: image.complete, naturalWidth: image.naturalWidth }))
-      }, new URL(args.url).origin),
-      imageRequests: (await page.requests()).filter(request => request.resourceType() === 'image')
-        .map(request => ({ url: request.url(), timing: request.timing(), failure: request.failure() })),
-      appError: await page.evaluate(() => {
-        const error = document.querySelector('#__nuxt')?.__vue_app__?.$nuxt?.payload?.error
-        return error ? { message: error.message, status: error.statusCode, stack: error.stack, cause: error.cause?.message } : null
-      }),
-    })
+      }, new URL(args.url).origin)
+      const failedUrls = new Set(failedMedia.map(image => image.src))
+      return {
+        pageErrors, failedFirstParty, consoleErrors, requestFailures, failedMedia,
+        imageRequests: (await page.requests()).filter(request => failedUrls.has(request.url()))
+          .map(request => ({ url: request.url(), timing: request.timing(), failure: request.failure() })),
+        appError: await page.evaluate(() => {
+          const error = document.querySelector('#__nuxt')?.__vue_app__?.$nuxt?.payload?.error
+          return error ? { message: error.message, status: error.statusCode, stack: error.stack, cause: error.cause?.message } : null
+        }),
+      }
+    }
     for (const [routeName, routeConfig] of routes) {
       pageErrors.length = 0
       failedFirstParty.length = 0
@@ -379,7 +379,7 @@ try {
           throw new Error(`${routeConfig.path} did not hydrate at ${viewportName} (${page.url()}): ${JSON.stringify(await failureDetails())}`, { cause: error })
         })
       }
-      await stabilizePage(page, inventoryMode).catch(async error => {
+      await stabilizePage(page).catch(async error => {
         throw new Error(`${routeConfig.path} could not stabilize at ${viewportName} (${page.url()}): ${JSON.stringify(await failureDetails())}`, { cause: error })
       })
       const { cssContentSize } = await captureSession.send('Page.getLayoutMetrics')
