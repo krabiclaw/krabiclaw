@@ -642,7 +642,8 @@ test.describe('NCLS representative journeys', () => {
         expect(actionBounds!.x + actionBounds!.width).toBeLessThanOrEqual(width)
         expect(await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth))).toBeLessThanOrEqual(width)
         if (width < 1024) {
-          const menu = header.locator('summary')
+          const menu = header.getByLabel('Toggle navigation', { exact: true })
+          const navigation = menu.locator('..')
           await expect(menu).toBeVisible()
           const menuBounds = await menu.boundingBox()
           expect(menuBounds).not.toBeNull()
@@ -650,12 +651,12 @@ test.describe('NCLS representative journeys', () => {
           expect(menuBounds!.x + menuBounds!.width).toBeLessThanOrEqual(width)
           if (name === 'home') await menu.click()
           else await menu.press('Enter')
-          await expect(header.locator('details')).toHaveJSProperty('open', true)
-          if (name === 'home') await expect(header.locator('details').getByRole('link', { name: 'Services', exact: true })).toBeVisible()
-          else await expect(header.locator('details').getByRole('button', { name: 'Search Blog', exact: true })).toBeVisible()
+          await expect(navigation).toHaveJSProperty('open', true)
+          if (name === 'home') await expect(navigation.getByRole('link', { name: 'Services', exact: true })).toBeVisible()
+          else await expect(navigation.getByRole('button', { name: 'Search Blog', exact: true })).toBeVisible()
           expect(await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth))).toBeLessThanOrEqual(width)
           await menu.press('Enter')
-          await expect(header.locator('details')).toHaveJSProperty('open', false)
+          await expect(navigation).toHaveJSProperty('open', false)
         } else {
           const dimensions = await logo.evaluate(image => {
             if (!(image instanceof HTMLImageElement)) throw new Error('The tenant logo is not an image')
