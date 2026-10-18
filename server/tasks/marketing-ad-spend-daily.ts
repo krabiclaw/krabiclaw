@@ -9,19 +9,19 @@ import { deliverPaymentsUsage } from '~/server/domain/payments/usage'
  * agreements and previously failed reads, then delivers the existing outbox.
  * One business's failure is reported after the others have been billed.
  */
-export default defineScheduledTask<{ date: string; billed: number; skipped: number }>({
+export default defineScheduledTask<{ billed: number; skipped: number }>({
   meta: { name: 'marketing:ad-spend-daily', description: 'Capture managed Google Ads spend and deliver pending usage' },
   async run({ context }) {
     const env = (context as { cloudflare?: { env?: CloudflareEnv } } | undefined)?.cloudflare?.env
     if (!env?.DB) throw new Error('DB is required')
-    const date = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10)
+    const now = new Date()
     const organizations = await queryAll<{ organization_id: string }>(env.DB, "SELECT organization_id FROM organization_integrations WHERE provider='google_ads' UNION SELECT organization_id FROM payment_usage_events WHERE kind='ad_spend' AND delivery_at IS NULL AND dead_letter_at IS NULL ORDER BY organization_id")
     const failures: string[] = []
     let billed = 0
     let skipped = 0
     for (const { organization_id } of organizations) {
       try {
-        for (const day of await unrecordedAdSpendDays(env.DB, organization_id, date)) await recordAdSpend(env.DB, env, organization_id, day)
+        for (const day of await unrecordedAdSpendDays(env.DB, env, organization_id, now, 2)) await recordAdSpend(env.DB, env, organization_id, day)
         const pending = await queryFirst<{ amount: number }>(env.DB, "SELECT SUM(amount) AS amount FROM payment_usage_events WHERE organization_id=? AND kind='ad_spend' AND delivery_at IS NULL AND dead_letter_at IS NULL HAVING COUNT(*)>0", [organization_id])
         if (!pending) { skipped++; continue }
         await deliverPaymentsUsage(env.DB, env, organization_id)
@@ -30,7 +30,7 @@ export default defineScheduledTask<{ date: string; billed: number; skipped: numb
         failures.push(`${organization_id}: ${error instanceof Error ? error.message : String(error)}`)
       }
     }
-    if (failures.length) throw new Error(`Managed ad spend through ${date} was not billed for ${failures.length} of ${organizations.length} businesses: ${failures.join('; ')}`)
-    return { result: { date, billed, skipped } }
+    if (failures.length) throw new Error(`Managed ad spend was not billed for ${failures.length} of ${organizations.length} businesses: ${failures.join('; ')}`)
+    return { result: { billed, skipped } }
   },
 })

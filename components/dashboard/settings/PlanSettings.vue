@@ -33,12 +33,13 @@
     <DashboardListItemDialog v-model:open="managedAdsOpen" :title="services?.managed_ads ? 'Turn off managed ads' : 'Managed ads'" :saving="busy" :error="sheetError" :save-label="services?.managed_ads ? 'Turn off' : 'Agree and turn on'" @save="toggleManagedAds">
       <div class="space-y-3 text-base text-muted">
         <template v-if="services?.managed_ads">
-          <p>Chris and Julia stop managing your campaigns. The fee ends with the day it ends; spend already managed is still billed.</p>
+          <p>Chris and Julia stop managing your campaigns. Today's spend is excluded if you turn this off before the day closes in your Google Ads account's time zone. Earlier managed days are still billed.</p>
           <p>Keep Google Ads connected until your prior managed spend has been counted. We count each day after two days.</p>
         </template>
         <template v-else>
           <p>Chris and Julia build, pause and budget the campaigns in your connected Google Ads account, and report on them in Insights.</p>
           <p>The fee is <strong class="text-highlighted">10% of your Google Ads spend</strong>, read from Google each day and billed with your monthly KrabiClaw fees. Google bills the ad spend itself to your Google Ads account. You can turn it off here at any time.</p>
+          <p>Reporting days follow your Google Ads account's time zone. A day's spend is included only if managed ads is on when that day closes.</p>
           <p>Before turning it on, connect a Google Ads account billed in USD and set up active Payments billing with a default payment method.</p>
           <div class="flex flex-wrap gap-3">
             <UButton v-if="billing && (!billing.stripeCustomerId || (usage?.configured === false && !getPlanEntitlements(billing.plan).payments))" label="Choose a plan with Payments" color="neutral" variant="outline" @click="managedAdsOpen = false; choosing = true" />

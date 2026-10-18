@@ -40,6 +40,7 @@ import { cleanupOrganizationBeforeDelete } from '~/server/utils/tenant-deletion'
 import { APPLE_AUTHORIZATION_CODE_HEADER, exchangeAppleAuthorizationCode, revokeAppleGrant } from '~/server/utils/apple-revocation'
 import { reconcileZarazAnalytics } from '~/server/utils/zaraz-analytics'
 import { isKnownRecurringPlan, isNewSalePlan, normalizeBillingPlanId } from '~/shared/billing-model'
+import { integrationsThroughAccount } from '~/server/utils/organization-integrations'
 
 type MemberRow = InferSelectModel<typeof schema.member>
 
@@ -262,6 +263,12 @@ function trustedOriginsForAuth(env: CloudflareEnv): string[] | ((_request?: Requ
   return [...origins]
 }
 
+async function requireDisconnectedGoogleAds(db: ReturnType<typeof createDb>, account: { id: string; providerId: string }) {
+  if (account.providerId === 'google' && (await integrationsThroughAccount(db, 'google_ads', account.id)).length) {
+    throw new APIError('CONFLICT', { message: 'Disconnect Google Ads in each business through Menu → Integrations → Google Ads before removing this Google account.' })
+  }
+}
+
 /**
  * What has to hold, and what has to be undone elsewhere, before an account is
  * deleted (docs/shared-auth-contract.md D6). Each step fails the deletion: the
@@ -287,6 +294,11 @@ async function prepareAccountDeletion(env: CloudflareEnv, db: ReturnType<typeof 
       message: `Transfer ownership of, or delete, ${soleOwned.map(organization => organization.name).join(', ')} before deleting your account.`,
     })
   }
+
+  // Better Auth deletes sessions before its account deleteMany hooks. Preflight
+  // the same condition before any part of a full user deletion can begin.
+  const accounts = await (await createAuth(env).$context).internalAdapter.findAccounts(userId)
+  for (const account of accounts) await requireDisconnectedGoogleAds(db, account)
 
   // An account signed in with Apple proves it again at deletion so its grant can be revoked.
   const appleAccount = await queryFirst<{ accountId: string }>(db, `SELECT "accountId" FROM account WHERE "userId" = ? AND "providerId" = 'apple'`, [userId])
@@ -533,6 +545,7 @@ function buildAuth(env: CloudflareEnv) {
       account: {
         create: { after: integrationAccountLinked },
         update: { after: integrationAccountLinked },
+        delete: { before: async (account) => requireDisconnectedGoogleAds(db, account) },
       },
       user: {
         delete: {
