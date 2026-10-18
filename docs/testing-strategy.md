@@ -164,6 +164,15 @@ Local Playwright waits for the Worker's health endpoint before running specs.
 The tests exercise cache invalidation without provisioning or indexing a remote
 AI Search instance.
 
+Published-page screenshot evidence uses `yarn client:screenshots:blawby` with
+explicit `--url`, `--source-revision` and `--route` or `--sitemap-url` arguments.
+Install its pinned native browser with `yarn playwright install firefox`
+(`yarn playwright install --with-deps firefox` when system dependencies are
+also required). The capture CLI uses Firefox's native document screenshots;
+it does not change the E2E suite's browser projects. Retain the manifest's actual
+browser and version with the artifacts. Captures from different browser engines
+are not pixel-parity evidence.
+
 `staging` is the first deployed validation. A push to `staging` deploys it and
 then runs read-only MCP discovery and tenant rendering against staging itself.
 Production deploys what `main` holds once `main`'s own `Checks` pass; whoever
