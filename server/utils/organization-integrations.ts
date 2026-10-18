@@ -119,6 +119,7 @@ export function integrationSummary(integration: OrganizationIntegration | null) 
   return integration && {
     account_id: integration.account_id, target_id: integration.target_id, target_name: integration.target_name,
     measurement_id: integration.measurement_id, verified: integration.verified,
+    status: integration.status, last_error: integration.last_error,
     // Choosing a property, Page or account writes the row, so `created_at` is when this connection was made.
     connected_at: integration.created_at,
   }

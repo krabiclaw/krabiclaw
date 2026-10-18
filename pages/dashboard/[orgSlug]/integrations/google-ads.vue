@@ -3,15 +3,17 @@
     id="integration-google-ads"
     icon="i-logos-google-ads"
     title="Google Ads"
+    :lead="integrationDefinition('google-ads').purpose"
     :saving="saving"
     :disabled="!accountId || !selected"
     :error="error || data?.error || integrations.failure.value || loadFailure"
     :footer="!ads && Boolean(accountId) && options.length > 0 && !data?.error"
     @save="select"
   >
-    <IntegrationConnection
-      logo="i-logos-google-ads"
-      :connection="ads && { name: ads.target_name, connectedAt: ads.connected_at }"
+    <IntegrationLeaf
+      integration="google-ads"
+      :connection="ads && { name: ads.target_name, connectedAt: ads.connected_at, through: ads.connected_through, status: ads.status, lastError: ads.last_error }"
+      :entitled="integrations.summary.value?.entitlements.marketing ?? true"
       :disconnecting="disconnecting"
       @disconnect="disconnect"
     >
@@ -22,13 +24,14 @@
         <p v-if="!data.error && !options.length" class="mt-2 text-sm text-muted">This Google account has no accessible Google Ads accounts.</p>
         <p v-for="line in accountErrors" :key="line" class="mt-2 text-sm text-error">{{ line }}</p>
       </UFormField>
-    </IntegrationConnection>
+    </IntegrationLeaf>
   </DashboardLeafPanel>
 </template>
 
 <script setup lang="ts">
 import { INTEGRATION_SCOPES } from '~/shared/organization-settings'
-import IntegrationConnection from '~/components/dashboard/IntegrationConnection.vue'
+import IntegrationLeaf from '~/components/dashboard/IntegrationLeaf.vue'
+import { integrationDefinition } from '~/shared/integrations'
 import { integrationsKey, type ConnectedIntegration } from '../integrations.vue'
 
 definePageMeta({ layout: 'dashboard' })
