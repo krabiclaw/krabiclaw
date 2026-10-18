@@ -340,21 +340,17 @@ export async function findOrganizationById(env: CloudflareEnv, organizationId: s
 }
 
 /**
- * Organization-wide management access, which is now the only kind.
+ * Organization-wide management access.
  *
- * Authorization is the Better Auth organization role and nothing else. There
- * used to be a second answer — membership in a `location:<id>` Better Auth
- * team — so "may this person reach this location" could be decided two ways.
- * That existed to scope the `editor` role, `editor` existed to receive WhatsApp
- * at a configured number, and neither has any user.
+ * Authorization is the Better Auth organization role (owner or admin).
  */
 export async function assertOrganizationWideAccess(_db: DbClient, input: MemberAccessPrincipal): Promise<void> {
   if (isOrganizationWideRole(input.role)) return
   throw new HTTPError({ statusCode: 404, message: 'Not found or access denied' })
 }
 
-/** The service assignment belongs to this tenant's Better Auth member or team. */
-export const ASSIGNED_SERVICE_SQL = `p.kind = 'service' AND EXISTS (
+/** The offering assignment belongs to this tenant's Better Auth member or team. */
+export const ASSIGNED_SERVICE_SQL = `(p.kind = 'service' OR p.kind = 'experience') AND EXISTS (
   SELECT 1 FROM product_booking_configs c
   WHERE c.organization_id = p.organization_id AND c.product_id = p.id AND c.scheduling_mode = 'provider'
     AND (EXISTS (SELECT 1 FROM member m WHERE m.id = c.assigned_member_id AND m.organizationId = c.organization_id AND m.userId = ?)
@@ -366,14 +362,14 @@ export const ASSIGNED_SERVICE_SQL = `p.kind = 'service' AND EXISTS (
 export async function assertProductAccess(db: DbClient, input: MemberAccessPrincipal & { productId: string; patch?: Record<string, unknown> }): Promise<void> {
   if (await roleAllows({ ...input, permissions: { products: ['update'] } })) return
   await assertRoleAllows({ ...input, permissions: { products: ['assigned'] } })
-  const assigned = await queryFirst<Record<string, unknown>>(db, `SELECT c.scheduling_mode, c.assigned_member_id, c.assigned_team_id, c.held_online
+  const assigned = await queryFirst<{ kind: string; scheduling_mode: string; assigned_member_id: string | null; assigned_team_id: string | null; held_online: number }>(db, `SELECT p.kind, c.scheduling_mode, c.assigned_member_id, c.assigned_team_id, c.held_online
     FROM products p JOIN product_booking_configs c ON c.product_id = p.id AND c.organization_id = p.organization_id
     WHERE p.organization_id = ? AND p.id = ? AND (${ASSIGNED_SERVICE_SQL})`, [input.organizationId, input.productId, input.userId, input.userId])
-  if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Service not found or access denied' })
-  if (input.patch?.kind !== undefined && input.patch.kind !== 'service') throw new HTTPError({ statusCode: 403, message: 'Service kind requires admin access' })
+  if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Offering not found or access denied' })
+  if (input.patch?.kind !== undefined && input.patch.kind !== assigned.kind) throw new HTTPError({ statusCode: 403, message: 'Offering kind requires admin access' })
   const booking = input.patch?.booking && typeof input.patch.booking === 'object' ? input.patch.booking as Record<string, unknown> : input.patch
   for (const field of ['scheduling_mode', 'assigned_member_id', 'assigned_team_id', 'held_online']) {
-    if (booking?.[field] !== undefined && booking[field] !== (field === 'held_online' ? assigned[field] === 1 : assigned[field])) throw new HTTPError({ statusCode: 403, message: 'Service assignment requires admin access' })
+    if (booking?.[field] !== undefined && booking[field] !== (field === 'held_online' ? assigned[field as keyof typeof assigned] === 1 : assigned[field as keyof typeof assigned])) throw new HTTPError({ statusCode: 403, message: 'Offering assignment requires admin access' })
   }
   if (input.patch?.booking !== undefined) throw new HTTPError({ statusCode: 403, message: 'Offering creation requires admin access; edit saved booking settings and schedule separately' })
 }
@@ -391,9 +387,8 @@ export function assignedHomeSql(alias: string): string {
 }
 
 export function assignedBookingSql(alias: string): string {
-  return `EXISTS (SELECT 1 FROM member m JOIN products assigned_product ON assigned_product.organization_id = m.organizationId
-    WHERE m.id = ${alias}.assigned_member_id AND m.organizationId = ${alias}.organization_id AND m.userId = ?
-      AND assigned_product.id = ${alias}.product_id AND assigned_product.kind = 'service')`
+  return `EXISTS (SELECT 1 FROM member m
+    WHERE m.id = ${alias}.assigned_member_id AND m.organizationId = ${alias}.organization_id AND m.userId = ?)`
 }
 
 /** The same assigned-conversation scope is used by lists, reads, writes and realtime. */
