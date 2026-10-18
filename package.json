@@ -50,7 +50,6 @@
     "client:import": "node scripts/client-import.mjs",
     "client:onboard": "node scripts/client-onboard.mjs",
     "client:verify": "node scripts/client-verify.mjs",
-    "client:screenshots:blawby": "node scripts/capture-blawby-screenshots.mjs",
     "test:mcp": "node scripts/test-mcp-oauth.mjs",
     "test:mcp:app": "node --env-file-if-exists=.env scripts/check-mcp-app-contract.mjs",
     "test:mcp:edit": "node --env-file-if-exists=.env scripts/check-mcp-edit-flow.mjs",

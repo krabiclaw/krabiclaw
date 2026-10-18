@@ -117,7 +117,7 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
       'Lists your campaigns, and on the Business plan creates, clones, pauses and budgets Search campaigns when you ask',
       'With managed ads on, reads each finished day’s spend for the 10% fee',
     ],
-    service: { name: 'Managed ads', summary: 'Chris and Julia run your campaigns · 10% of ad spend' },
+    service: { name: 'Managed ads', summary: 'Chris manages your campaigns, creative and conversion rate, with a weekly meeting · 10% of ad spend' },
     prompts: [
       'Create a Search campaign for [page] with a daily budget of [amount]',
       'Pause any campaign that spent money this week without a conversion',

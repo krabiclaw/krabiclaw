@@ -33,11 +33,11 @@
     <DashboardListItemDialog v-model:open="managedAdsOpen" :title="services?.managed_ads ? 'Turn off managed ads' : 'Managed ads'" :saving="busy" :error="sheetError" :save-label="services?.managed_ads ? 'Turn off' : 'Agree and turn on'" @save="toggleManagedAds">
       <div class="space-y-3 text-base text-muted">
         <template v-if="services?.managed_ads">
-          <p>Chris and Julia stop managing your campaigns. Today's spend is excluded if you turn this off before the day closes in your Google Ads account's time zone. Earlier managed days are still billed.</p>
+          <p>Chris stops managing your campaigns. Today's spend is excluded if you turn this off before the day closes in your Google Ads account's time zone. Earlier managed days are still billed.</p>
           <p>Keep Google Ads connected until your prior managed spend has been counted. We count each day after two days.</p>
         </template>
         <template v-else>
-          <p>Chris and Julia build, pause and budget the campaigns in your connected Google Ads account, and report on them in Insights.</p>
+          <p>Chris hand-manages the campaigns in your connected Google Ads account — budgets, creative direction and conversion rate — and meets with you weekly. Results stay in Insights.</p>
           <p>The fee is <strong class="text-highlighted">10% of your Google Ads spend</strong>, read from Google each day and billed with your monthly KrabiClaw fees. Google bills the ad spend itself to your Google Ads account. You can turn it off here at any time.</p>
           <p>Reporting days follow your Google Ads account's time zone. A day's spend is included only if managed ads is on when that day closes.</p>
           <p>Before turning it on, connect a Google Ads account billed in USD and set up active Payments billing with a default payment method.</p>
@@ -47,6 +47,18 @@
             <UButton label="Google Ads settings" color="neutral" variant="outline" :to="`/dashboard/${route.params.orgSlug}/integrations/google-ads`" @click="managedAdsOpen = false" />
             <UButton label="Billing setup help" color="neutral" variant="link" to="/help" />
           </div>
+        </template>
+      </div>
+    </DashboardListItemDialog>
+    <!-- Strategy: the consent that adds Julia's service to the plan subscription; Stripe prorates and bills it. -->
+    <DashboardListItemDialog v-model:open="strategyOpen" :title="services?.strategy ? 'Turn off the strategy service' : 'SEO and marketing strategy'" :saving="busy" :error="sheetError" :save-label="services?.strategy ? 'Turn off' : 'Agree and turn on'" @save="toggleStrategy">
+      <div class="space-y-3 text-base text-muted">
+        <template v-if="services?.strategy">
+          <p>Julia's service ends now. Stripe credits the unused part of this period to your next invoice.</p>
+        </template>
+        <template v-else>
+          <p>Julia leads your SEO strategy, hand-writes blog posts written to rank, meets with you weekly and is on chat with you.</p>
+          <p>It costs <strong class="text-highlighted">{{ paymentMoney(strategyOffer.amount, strategyOffer.currency) }} per {{ strategyOffer.interval }}</strong>, added to your plan's subscription and billed to the same card. Stripe invoices and charges today's share as soon as you agree, then the full amount every month on the service's own schedule, whatever your plan's renewal. You can turn it off here at any time.</p>
         </template>
       </div>
     </DashboardListItemDialog>
@@ -61,7 +73,7 @@ import EditorNavigationList from '~/components/dashboard/EditorNavigationList.vu
 import type { EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import { authClient } from '~/lib/auth-client'
-import { additionalLocationPrice, INCLUDED_LOCATIONS, STARTER_PLAN_ID, isKnownBillingPlan, isNewSalePlan } from '~/shared/billing-model'
+import { additionalLocationPrice, INCLUDED_LOCATIONS, SERVICE_PRICES, STARTER_PLAN_ID, isKnownBillingPlan, isNewSalePlan } from '~/shared/billing-model'
 import { isLocationCount } from '~/composables/useOrganizationSubscription'
 import { paymentMoney } from '~/shared/payment-display'
 import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
@@ -82,12 +94,38 @@ const sheetError = ref('')
 const busy = ref(false)
 
 // The services the business is on: a consent row each, read with the plan.
-type Services = { managed_ads: { id: string; agreed_at: string } | null }
-const isServices = (value: unknown): value is { success: true; services: Services } => isRecord(value) && value.success === true && isRecord(value.services) && (value.services.managed_ads === null || (isRecord(value.services.managed_ads) && typeof value.services.managed_ads.agreed_at === 'string'))
+type Strategy = { item_id: string; amount: number; currency: string; interval: string; since: string }
+type Services = { managed_ads: { id: string; agreed_at: string } | null; strategy: Strategy | null }
+const isStrategy = (value: unknown): value is Strategy => isRecord(value) && typeof value.item_id === 'string' && Number.isSafeInteger(value.amount) && isCurrencyCode(value.currency) && typeof value.since === 'string'
+const isServices = (value: unknown): value is { success: true; services: Services } => isRecord(value) && value.success === true && isRecord(value.services) && (value.services.managed_ads === null || (isRecord(value.services.managed_ads) && typeof value.services.managed_ads.agreed_at === 'string')) && (value.services.strategy === null || isStrategy(value.services.strategy))
 const { data: servicesResource, error: servicesError, refresh: refreshServices } = await useAsyncData(`dashboard-services:${String(route.params.orgSlug)}`, () => dashboardApi('/api/dashboard/services', { validate: isServices }))
 // Unknown until read: a failed read shows its error above and offers no service action.
 const services = computed(() => servicesResource.value?.services)
+// The offer's price is the catalog's, the same source the Stripe product was created from.
+const strategyOffer = { amount: SERVICE_PRICES.strategy.monthly, currency: 'USD' as const, interval: 'month' }
 const managedAdsOpen = ref(false)
+const strategyOpen = ref(false)
+// A new attempt each time the dialog opens: a retried submit deduplicates at Stripe, a later consent does not.
+const strategyAttempt = ref('')
+watch(strategyOpen, (open) => { if (open) strategyAttempt.value = crypto.randomUUID() })
+// Stripe owns the strategy item: starting adds it to the plan subscription, ending removes it, both prorated by Stripe.
+async function toggleStrategy() {
+  if (!services.value) return
+  busy.value = true
+  sheetError.value = ''
+  successMessage.value = ''
+  try {
+    const updated = await dashboardApi('/api/dashboard/services', { method: 'POST', body: { service: 'strategy', action: services.value.strategy ? 'end' : 'agree', attempt: strategyAttempt.value }, validate: isServices })
+    servicesResource.value = updated
+    await refreshBilling()
+    strategyOpen.value = false
+    successMessage.value = updated.services.strategy ? 'The strategy service is on. Julia will be in touch to set up your weekly meeting and chat.' : 'The strategy service is off.'
+  } catch (error) {
+    sheetError.value = getErrorMessage(error, 'The strategy service could not be changed')
+  } finally {
+    busy.value = false
+  }
+}
 async function toggleManagedAds() {
   if (!services.value) return
   busy.value = true
@@ -105,7 +143,7 @@ async function toggleManagedAds() {
       throw new Error(`Managed ads was turned ${updated.services.managed_ads ? 'on' : 'off'}, but its status could not be refreshed. ${getErrorMessage(servicesError.value, 'Reload to check its status.')}`)
     }
     managedAdsOpen.value = false
-    successMessage.value = updated.services.managed_ads ? 'Managed ads is on. Chris and Julia will be in touch about your campaigns.' : 'Managed ads is off.'
+    successMessage.value = updated.services.managed_ads ? 'Managed ads is on. Chris will be in touch to set up your weekly meeting.' : 'Managed ads is off.'
   } catch (error) {
     sheetError.value = getErrorMessage(error, 'Managed ads could not be changed')
   } finally {
@@ -202,8 +240,10 @@ const groups = computed<EditorNavigationGroup[]>(() => [{
   items: [
     ...(services.value ? [{ id: 'service:managed_ads', label: 'Managed ads', summary: services.value.managed_ads
       ? `On since ${formatExactDateTime(services.value.managed_ads.agreed_at)} · 10% of Google Ads spend, billed with your fees.`
-      : 'Chris and Julia run your Google Ads campaigns · 10% of ad spend.', action: { label: services.value.managed_ads ? 'Turn off' : 'Turn on' } }] : []),
-    { id: 'service:strategy', label: 'SEO and marketing strategy', summary: 'Monthly strategy with Julia · $2,000 per month, billed as its own subscription.', action: { label: 'Ask about it' } },
+      : 'Chris manages your Google Ads campaigns, creative and conversion rate, with a weekly meeting · 10% of ad spend.', action: { label: services.value.managed_ads ? 'Turn off' : 'Turn on' } }] : []),
+    ...(services.value ? [{ id: 'service:strategy', label: 'SEO and marketing strategy', summary: services.value.strategy
+      ? `On since ${formatExactDateTime(services.value.strategy.since)} · ${paymentMoney(services.value.strategy.amount, services.value.strategy.currency)} per ${services.value.strategy.interval}, billed with your plan.`
+      : `Julia leads your SEO strategy, hand-writes ranking blog posts, meets with you weekly and is on chat with you · ${paymentMoney(strategyOffer.amount, strategyOffer.currency)} per ${strategyOffer.interval}.`, action: { label: services.value.strategy ? 'Turn off' : 'Turn on' } }] : []),
   ],
 }])
 
@@ -219,7 +259,7 @@ async function onRowAction(id: string) {
   if (busy.value) return
   errorMessage.value = ''
   if (id === 'service:managed_ads') { sheetError.value = ''; managedAdsOpen.value = true; return }
-  if (id === 'service:strategy') { await navigateTo('/help', { external: true }); return }
+  if (id === 'service:strategy') { sheetError.value = ''; if (onStarter.value && !services.value?.strategy) { choosing.value = true; return } strategyOpen.value = true; return }
   if (id === 'plan') { sheetError.value = ''; choosing.value = true; return }
   if (id === 'locations') {
     if (onStarter.value) return
