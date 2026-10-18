@@ -96,7 +96,13 @@ test('Business catalog consolidates new sales without repricing existing contrac
   assert.deepEqual(plan.providerSnapshot.subscriptions, original.subscriptions)
   assert.equal(plan.providerSnapshotSha256, sha256Json(original))
   assert.deepEqual(plan.operations.filter(operation => operation.type.includes('subscription')), [])
-  assert.deepEqual(plan.operations.filter(operation => operation.type === 'create_product').map(operation => operation.planId), ['business', 'site_language'])
+  assert.deepEqual(plan.operations.filter(operation => operation.type === 'create_product').map(operation => operation.planId), ['business', 'site_language', 'strategy'])
+  // The app finds the strategy product by its service metadata and never by a plan id, which would make Better Auth treat it as a plan.
+  const strategyProduct = plan.operations.find(operation => operation.type === 'create_product' && operation.planId === 'strategy')
+  assert.deepEqual(strategyProduct?.params.metadata, { product_family: 'services', service: 'strategy', highlighted: 'false' })
+  assert.equal(strategyProduct?.params.metadata.plan_id, undefined)
+  const strategyPrice = plan.operations.find(operation => operation.type === 'create_price' && operation.planId === 'strategy')
+  assert.deepEqual(strategyPrice?.params, { currency: 'usd', recurring: { interval: 'month', interval_count: 1 }, billing_scheme: 'per_unit', unit_amount: 200000 })
   const businessPrice = plan.operations.find(operation => operation.type === 'create_price' && operation.planId === 'business')
   assert.deepEqual(businessPrice?.params, {
     currency: 'usd', recurring: { interval: 'month', interval_count: 1 },

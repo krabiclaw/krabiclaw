@@ -1147,7 +1147,7 @@ test.describe('dashboard pane hierarchy', () => {
       // setup action, and cannot record a billable agreement by submitting it.
       const servicesBefore = await page.request.get('/api/dashboard/services?org=cedar-legal-demo')
       expect(servicesBefore.status(), await servicesBefore.text()).toBe(200)
-      expect(await servicesBefore.json()).toEqual({ success: true, services: { managed_ads: null } })
+      expect(await servicesBefore.json()).toEqual({ success: true, services: { managed_ads: null, strategy: null } })
       await payments.getByRole('button', { name: /^Managed ads/ }).click()
       const managedAds = page.getByRole('dialog', { name: 'Managed ads', exact: true })
       await expect(managedAds.getByText('Before turning it on, connect a Google Ads account billed in USD and set up active Payments billing with a default payment method.', { exact: true })).toBeVisible()
@@ -1166,7 +1166,7 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(payments.getByText('Managed ads is off.', { exact: true })).toHaveCount(0)
       const servicesAfter = await page.request.get('/api/dashboard/services?org=cedar-legal-demo')
       expect(servicesAfter.status(), await servicesAfter.text()).toBe(200)
-      expect(await servicesAfter.json()).toEqual({ success: true, services: { managed_ads: null } })
+      expect(await servicesAfter.json()).toEqual({ success: true, services: { managed_ads: null, strategy: null } })
       await managedAds.getByTestId('list-item-dismiss').click()
     } finally {
       try {
