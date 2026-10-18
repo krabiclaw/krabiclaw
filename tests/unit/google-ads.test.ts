@@ -27,7 +27,7 @@ test('listGoogleAdsAccounts queries accessible customers and retrieves descripti
 
     if (url.endsWith('/customers:listAccessibleCustomers')) {
       return Response.json({
-        resourceNames: ['customers/3317427925', 'customers/1234567890'],
+        resourceNames: ['customers/3317427925', 'customers/1234567890', 'customers/5555555555'],
       })
     }
 
@@ -45,6 +45,10 @@ test('listGoogleAdsAccounts queries accessible customers and retrieves descripti
           },
         ],
       })
+    }
+
+    if (url.includes('/customers/5555555555/googleAds:search')) {
+      return Response.json({ error: { code: 403, message: 'The caller does not have permission', details: [{ errors: [{ errorCode: { authorizationError: 'DEVELOPER_TOKEN_NOT_APPROVED' }, message: 'The developer token is only approved for use with test accounts.' }] }] } }, { status: 403 })
     }
 
     if (url.includes('/customers/1234567890/googleAds:search')) {
@@ -67,7 +71,9 @@ test('listGoogleAdsAccounts queries accessible customers and retrieves descripti
   })
 
   const accounts = await listGoogleAdsAccounts('test-token', 'dev-tok-123')
-  assert.equal(accounts.length, 2)
+  assert.equal(accounts.length, 3)
+  // An account Google will not describe carries Google's reason, not a made-up name.
+  assert.deepEqual(accounts[2], { customerId: '5555555555', formattedCustomerId: '555-555-5555', descriptiveName: null, error: 'DEVELOPER_TOKEN_NOT_APPROVED: The developer token is only approved for use with test accounts.' })
   assert.deepEqual(accounts[0], {
     customerId: '3317427925',
     formattedCustomerId: '331-742-7925',
@@ -84,7 +90,7 @@ test('listGoogleAdsAccounts queries accessible customers and retrieves descripti
     timeZone: 'Asia/Bangkok',
     isManager: true,
   })
-  assert.equal(requests.length, 3)
+  assert.equal(requests.length, 4)
 })
 
 test('listGoogleAdsCampaigns queries campaigns and formats performance metrics', async (t) => {

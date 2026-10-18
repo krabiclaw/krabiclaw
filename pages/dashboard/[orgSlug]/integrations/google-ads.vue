@@ -20,6 +20,7 @@
       <UFormField v-if="data?.account_id" label="Google Ads account" :error="data.error ?? undefined">
         <USelectMenu v-model="selected" :items="options" value-key="value" placeholder="Choose a Google Ads account" class="w-full" />
         <p v-if="!data.error && !options.length" class="mt-2 text-sm text-muted">This Google account has no accessible Google Ads accounts.</p>
+        <p v-for="line in accountErrors" :key="line" class="mt-2 text-sm text-error">{{ line }}</p>
       </UFormField>
     </IntegrationConnection>
   </DashboardLeafPanel>
@@ -35,7 +36,7 @@ definePageMeta({ layout: 'dashboard' })
 interface AdsLeaf {
   account_id: string | null
   ads: ConnectedIntegration | null
-  accounts: Array<{ customerId: string; formattedCustomerId: string; descriptiveName: string; isManager?: boolean }>
+  accounts: Array<{ customerId: string; formattedCustomerId: string; descriptiveName: string | null; isManager?: boolean; error?: string }>
   error: string | null
 }
 
@@ -58,9 +59,12 @@ const { data, refresh, error: loadError } = await useAsyncData(
 const selected = ref<string | undefined>()
 
 const options = computed(() => (data.value?.accounts ?? []).map(account => ({
-  label: `${account.descriptiveName} (${account.formattedCustomerId})`,
+  label: account.descriptiveName ? `${account.descriptiveName} (${account.formattedCustomerId})` : account.formattedCustomerId,
   value: account.customerId,
+  disabled: Boolean(account.error),
 })))
+// Google's reason for each account it would not describe, shown under the picker.
+const accountErrors = computed(() => (data.value?.accounts ?? []).filter(account => account.error).map(account => `${account.formattedCustomerId}: ${account.error}`))
 
 const loadFailure = computed(() => loadError.value ? getErrorMessage(loadError.value, 'Could not load Google Ads.') : '')
 const saving = ref(false)
