@@ -626,7 +626,7 @@ test.describe('NCLS representative journeys', () => {
       await waitForNuxtHydration(page)
       for (const width of [320, 375, 390, 1440]) {
         await page.setViewportSize({ width, height: 900 })
-        const header = page.locator('header')
+        const header = page.getByRole('banner')
         const logo = header.locator('[data-site-logo] img:visible')
         await expect(logo).toBeVisible()
         await expect.poll(() => logo.evaluate(image => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0)).toBe(true)
@@ -651,7 +651,8 @@ test.describe('NCLS representative journeys', () => {
           if (name === 'home') await menu.click()
           else await menu.press('Enter')
           await expect(header.locator('details')).toHaveJSProperty('open', true)
-          await expect(header.locator('details').getByRole('link', { name: 'Services', exact: true })).toBeVisible()
+          if (name === 'home') await expect(header.locator('details').getByRole('link', { name: 'Services', exact: true })).toBeVisible()
+          else await expect(header.locator('details').getByRole('button', { name: 'Search Blog', exact: true })).toBeVisible()
           expect(await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth))).toBeLessThanOrEqual(width)
           await menu.press('Enter')
           await expect(header.locator('details')).toHaveJSProperty('open', false)
