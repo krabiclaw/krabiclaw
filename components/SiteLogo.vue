@@ -1,5 +1,5 @@
 <template>
-  <span v-if="shown.length" class="inline-flex shrink-0" data-site-logo>
+  <span v-if="shown.length" class="inline-flex min-w-0 max-w-full" data-site-logo>
     <span v-for="entry in shown" :key="entry.logo.slot" :class="[frameClass(entry.logo), entry.modeClass]" :data-logo-slot="entry.logo.slot" :data-logo-shape="entry.logo.presentation.shape">
       <img
         :src="source(entry.logo)"
@@ -55,12 +55,12 @@ const PIXELS = { sm: 80, md: 112, lg: 128 } as const
 // The display comes only from the mode class; a second display utility here
 // would beat `hidden` and show both logos.
 function frameClass(entry: SiteLogo) {
-  if (entry.presentation.shape === 'original') return ''
+  if (entry.presentation.shape === 'original') return 'min-w-0'
   return ['overflow-hidden', BOX[props.size], entry.presentation.shape === 'circle' ? 'rounded-full' : 'rounded-md']
 }
 function imageClass(entry: SiteLogo) {
   return entry.presentation.shape === 'original'
-    ? [HEIGHT[props.size], 'w-auto object-contain', MAX_WIDTH[props.size]]
+    ? [HEIGHT[props.size], 'min-w-0 w-auto object-contain', MAX_WIDTH[props.size]]
     : 'size-full object-cover'
 }
 // Twice the rendered height, for sharp edges on dense screens.

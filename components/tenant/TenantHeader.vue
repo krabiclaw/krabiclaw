@@ -114,8 +114,8 @@
       class="blawby-container"
     >
       <nav class="relative z-50 flex items-center justify-between gap-4 py-2" :aria-label="navAriaLabel">
-        <div class="flex shrink-0 items-center">
-          <NuxtLink :to="localePath('/')" class="no-underline" :aria-label="`${brandName} home`">
+        <div class="flex min-w-0 items-center">
+          <NuxtLink :to="localePath('/')" class="block min-w-0 no-underline" :aria-label="`${brandName} home`">
             <SiteLogo :alt="brandName" size="lg" loading="eager">
               <span class="blawby-display truncate text-lg text-[var(--blawby-primary)] sm:text-xl">
                 {{ brandName }}
@@ -124,7 +124,7 @@
           </NuxtLink>
         </div>
 
-        <div class="flex min-w-0 items-center gap-x-3 font-semibold uppercase">
+        <div class="flex shrink-0 items-center gap-x-3 font-semibold uppercase">
           <div class="hidden items-center whitespace-nowrap text-[var(--blawby-primary)] lg:flex">
             <NuxtLink
               v-for="item in serviceNavItems"

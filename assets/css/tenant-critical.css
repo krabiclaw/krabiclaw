@@ -20,14 +20,6 @@ button {
   font: inherit;
 }
 
-img,
-svg,
-video {
-  display: block;
-  max-width: 100%;
-  vertical-align: middle;
-}
-
 .tenant-theme,
 .saya-theme,
 .blawby-theme {
