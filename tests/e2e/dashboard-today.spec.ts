@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type BrowserContext } from '@playwright/test'
 import { loginAs, authRequestHeaders } from './helpers/auth'
 import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
@@ -144,7 +144,7 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
   let originalTeamIds: string[] | null = null
   let teamId: string | null = null
   let reservationId: string | null = null
-  const memberContext = await browser.newContext({ baseURL })
+  let memberContext: BrowserContext | null = null
   const failures: unknown[] = []
   const readAssignment = async () => {
     const response = await page.request.get(`/api/organizations/${organizationId}/locations/${locationId}`)
@@ -152,6 +152,8 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
     return (await response.json() as { location: Assignment }).location
   }
   try {
+    memberContext = await browser.newContext({ baseURL })
+    const memberRequest = memberContext.request
     await loginAs(page.request, baseURL!)
     original = await readAssignment()
     expect(original).toMatchObject({ assigned_member_id: null, assigned_team_id: null })
@@ -195,12 +197,12 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
       headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor.id, role: 'member' },
     })
     expect(changed.status(), await changed.text()).toBe(200)
-    await loginAs(memberContext.request, baseURL!, actor.userId)
+    await loginAs(memberRequest, baseURL!, actor.userId)
     const memberPage = await memberContext.newPage()
     await dismissPreviewToolbar(memberPage)
     const verifyAccess = async (assigned: boolean) => {
       for (const range of ['today', 'upcoming'] as const) {
-        const response = await memberContext.request.get('/api/dashboard/today', { params: { org, range, ...(range === 'upcoming' ? { from: day.date, to: day.date } : {}) } })
+        const response = await memberRequest.get('/api/dashboard/today', { params: { org, range, ...(range === 'upcoming' ? { from: day.date, to: day.date } : {}) } })
         expect(response.status(), await response.text()).toBe(200)
         const feed = await response.json() as TodayFeedPayload
         const id = `${range === 'today' ? 'attention' : 'reservation'}:${reservationId}`
@@ -209,21 +211,21 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
           expect(feed.locations.map(location => location.id)).toContain(locationId)
         } else expect(feed.cards.some(card => card.id === id)).toBe(false)
       }
-      const agendaResponse = await memberContext.request.get('/api/dashboard/agenda', { params: { org, from: day.date, to: day.date } })
+      const agendaResponse = await memberRequest.get('/api/dashboard/agenda', { params: { org, from: day.date, to: day.date } })
       expect(agendaResponse.status(), await agendaResponse.text()).toBe(200)
       const agenda = await agendaResponse.json() as AgendaPayload
       if (assigned) expect(agenda.items.find(item => item.requestId === reservationId)).toMatchObject({ id: `reservation:${reservationId}`, kind: 'reservation', requestId: reservationId, locationId, title: guestName, status: 'confirmed', startsAt: slot.starts_at, to: destination })
       else expect(agenda.items.some(item => item.requestId === reservationId)).toBe(false)
       for (const path of [inboxPath, '/api/dashboard/guest-threads']) {
-        const response = await memberContext.request.get(path, { params: { org, location_id: locationId, type: 'reservation' } })
+        const response = await memberRequest.get(path, { params: { org, location_id: locationId, type: 'reservation' } })
         expect(response.status(), await response.text()).toBe(200)
         const { threads } = await response.json() as GuestThreadListPage
         if (assigned) expect(threads.find(thread => thread.id === reservationId)).toMatchObject({ id: reservationId, guestName, locationId, submissionType: 'reservation', operationalStatus: 'confirmed', occurrenceAt: slot.starts_at })
         else expect(threads.some(thread => thread.id === reservationId)).toBe(false)
       }
-      const detail = await memberContext.request.get(`${inboxPath}/${reservationId}`)
+      const detail = await memberRequest.get(`${inboxPath}/${reservationId}`)
       expect(detail.status(), await detail.text()).toBe(assigned ? 200 : 404)
-      const record = await memberContext.request.get(bookingPath, { params: { org } })
+      const record = await memberRequest.get(bookingPath, { params: { org } })
       expect(record.status(), await record.text()).toBe(assigned ? 200 : 404)
       if (assigned) {
         expect((await detail.json() as { thread: GuestThreadDetailViewModel }).thread).toMatchObject({ id: reservationId, guestName, source: { operationalStatus: 'confirmed' } })
@@ -249,7 +251,7 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
     teamId = (await created.json() as { id: string }).id
     const included = await page.request.post('/api/auth/organization/add-team-member', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId, userId: actor.userId } })
     expect(included.status(), await included.text()).toBe(200)
-    const membership = await memberContext.request.get('/api/auth/organization/list-team-members', { params: { teamId } })
+    const membership = await memberRequest.get('/api/auth/organization/list-team-members', { params: { teamId } })
     expect(membership.status(), await membership.text()).toBe(200)
     expect((await membership.json() as Array<{ userId: string }>).map(member => member.userId)).toContain(actor.userId)
     const assignedTeam = { assigned_member_id: null, assigned_team_id: teamId }
@@ -298,7 +300,7 @@ test('branch assignments grant and revoke a member’s reservation agenda and in
         expect((await members.json() as { members: Member[] }).members.find(member => member.id === actor!.id)?.role).toBe(actor.role)
       }
     } catch (error) { failures.push(error) }
-    try { await memberContext.close() } catch (error) { failures.push(error) }
+    try { await memberContext?.close() } catch (error) { failures.push(error) }
     try { await release() } catch (error) { failures.push(error) }
   }
   if (failures.length) throw new AggregateError(failures, 'Branch reservation access workflow or restoration failed')
