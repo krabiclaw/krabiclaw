@@ -218,7 +218,17 @@ const navAriaLabel = computed(() => t('saya.header.nav_aria'))
 const { trackConsultationClick } = useOrganizationConversionTracking(() => props.consultation)
 
 const brandName = computed(() => (props.organization?.name as string)?.trim() || '')
-const phone = computed(() => (props.organization?.phone as string) || null)
+const phone = computed(() => {
+  const org = props.organization
+  const orgConfig = org && typeof org.config === 'object' && org.config !== null ? (org.config as Record<string, unknown>) : null
+  const candidates = [org?.phone, orgConfig?.phone, props.locations?.[0]?.phone]
+  for (const candidate of candidates) {
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return candidate.trim()
+    }
+  }
+  return null
+})
 const isService = computed(() => props.organization?.vertical === 'service' || Boolean(props.consultation?.mode) || props.pageLinks.some(l => l.path === '/services'))
 
 // Header height CSS variable sync
@@ -262,13 +272,10 @@ const catalogLinks = computed(() => (props.organization?.vertical
   ? catalogNavigation(props.organization.vertical as string, props.sections)
   : []))
 const serviceNavItems = computed(() => {
-  const authoredPaths = new Set(headerItems.value.map(item => item.path))
-  return [
-    ...catalogLinks.value
-      .filter(item => !authoredPaths.has(item.path))
-      .map(item => ({ path: item.path, title: t(item.labelKey) })),
-    ...headerItems.value,
-  ]
+  if (headerItems.value.length > 0) {
+    return headerItems.value
+  }
+  return catalogLinks.value.map(item => ({ path: item.path, title: t(item.labelKey) }))
 })
 const showLocations = computed(() => (props.locations || []).filter(location => !location.home_slug).length > 1)
 

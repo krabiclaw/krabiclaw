@@ -136,7 +136,7 @@
           </h1>
           <p v-for="(part, idx) in scheduleSubtitleParts" :key="idx" class="mt-6 text-lg leading-8 text-gray-300 sm:text-xl min-[1920px]:text-2xl">{{ part }}</p>
           <p v-if="schedulePriceLine && !nativeSchedule" class="mt-6 text-lg font-bold text-[var(--blawby-accent,var(--ui-primary))] sm:text-xl min-[1920px]:text-2xl">{{ schedulePriceLine }}</p>
-          <TenantButton v-if="!nativeSchedule && scheduleDestination" :to="scheduleDestination" class="mt-10 w-full px-8 py-4 text-lg min-[1920px]:px-4 min-[1920px]:py-4 min-[1920px]:text-base min-[2560px]:px-5 min-[2560px]:py-5 min-[2560px]:text-lg">
+          <TenantButton v-if="!nativeSchedule && scheduleDestination" :to="scheduleDestination" size="lg" block class="mt-10">
             <svg class="-ml-0.5 mr-2 size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M8 2v4m8-4v4M3 10h18" /><rect x="3" y="4" width="18" height="18" rx="2" /></svg>
             {{ scheduleLabel }}
           </TenantButton>
@@ -156,7 +156,10 @@
     <TenantMediaGallery v-model="activeMedia" :media="gallery" :fallback-alt="page.title" />
     <div class="flex-1">
       <div class="tenant-container pb-8 pt-8">
-        <h1 v-if="title" class="mx-auto max-w-4xl tenant-display text-3xl font-bold text-highlighted sm:text-4xl md:mt-2">
+        <h1 v-if="title" class="mx-auto max-w-4xl tenant-display text-3xl font-bold text-highlighted sm:text-4xl md:mt-2" :class="isBlawby ? 'blawby-display text-[var(--blawby-primary)]' : undefined">
+          <span v-if="isBlawby" class="flex items-center" aria-hidden="true">
+            <TenantIcon v-for="star in 5" :key="star" name="star" solid class="size-5 shrink-0 text-yellow-400" />
+          </span>
           {{ title }}
         </h1>
         <div v-if="overviewProse" class="mt-6">
@@ -164,9 +167,6 @@
         </div>
         <div v-if="overviewActions.length" class="mt-10 grid grid-cols-1 gap-x-6 gap-y-4 sm:grid-cols-2">
           <TenantButton v-for="action in overviewActions" :key="action.url" :to="action.url" class="gap-2">
-            <svg v-if="isBlawby" class="-ml-0.5 mr-2 size-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <path d="M7.5 4.5h9A4.5 4.5 0 0 1 21 9v3a4.5 4.5 0 0 1-4.5 4.5h-4.86L7.2 20.2a.75.75 0 0 1-1.2-.6v-3.35A4.5 4.5 0 0 1 3 12V9a4.5 4.5 0 0 1 4.5-4.5Z" />
-            </svg>
             {{ action.label }}
           </TenantButton>
         </div>
@@ -208,7 +208,6 @@
           </p>
         <div v-if="ctaUrl && ctaLabel" class="mt-10">
           <TenantButton :to="ctaUrl" class="gap-2">
-            <svg v-if="isBlawby" class="-ml-0.5 mr-2 size-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7.5 4.5h9A4.5 4.5 0 0 1 21 9v3a4.5 4.5 0 0 1-4.5 4.5h-4.86L7.2 20.2a.75.75 0 0 1-1.2-.6v-3.35A4.5 4.5 0 0 1 3 12V9a4.5 4.5 0 0 1 4.5-4.5Z" /></svg>
             {{ ctaLabel }}
           </TenantButton>
         </div>
@@ -241,7 +240,7 @@ const isSchedule = computed(() => props.page.recipe === 'schedule' || route.path
 const title = computed(() => blockText(props.block?.data?.title) || props.page.title || '')
 const subtitle = computed(() => blockText(props.block?.data?.subtitle) || '')
 const eyebrow = computed(() => blockText(props.block?.data?.eyebrow) || '')
-const description = computed(() => blockText(props.block?.data?.description) || props.page.summary || '')
+const description = computed(() => blockText(props.block?.data?.description) || blockText(props.block?.data?.subtitle) || props.page.summary || '')
 const ctaLabel = computed(() => blockText(props.block?.data?.cta_label) || '')
 const ctaUrl = computed(() => {
   const url = blockText(props.block?.data?.cta_url)
