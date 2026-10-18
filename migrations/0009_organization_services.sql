@@ -13,4 +13,4 @@ CREATE TABLE `organization_services` (
 	FOREIGN KEY (`ended_by_user_id`) REFERENCES `user`(`id`) ON UPDATE no action ON DELETE set null
 );
 --> statement-breakpoint
-CREATE INDEX `organization_services_current_idx` ON `organization_services` (`organization_id`,`service`,`ended_at`);
+CREATE UNIQUE INDEX `organization_services_current_unique` ON `organization_services` (`organization_id`,`service`) WHERE ended_at IS NULL;

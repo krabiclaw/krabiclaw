@@ -2,7 +2,7 @@ import { linkedAccountAccessToken, readLinkedAccount, type CloudflareEnv } from 
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { resolveOrganizationAnalyticsContext } from '~/server/utils/analytics-report'
 import { parseAnalyticsRange } from '~/server/utils/analytics-calendar'
-import { getGoogleAdsPerformanceSummary, listGoogleAdsCampaigns } from '~/server/utils/google-ads'
+import { getGoogleAdsCustomer, getGoogleAdsPerformanceSummary, listGoogleAdsCampaigns } from '~/server/utils/google-ads'
 import { listServices } from '~/server/utils/organization-services'
 import type { GoogleAdsInsights } from '~/shared/google-ads-insights'
 
@@ -19,14 +19,16 @@ export async function loadGoogleAdsInsights(env: CloudflareEnv, organizationId: 
   const context = await resolveOrganizationAnalyticsContext(env.DB, organizationId)
   const range = parseAnalyticsRange({ startDate: query.startDate, endDate: query.endDate, timeZone: context.timezone, now: new Date() })
   const { accessToken } = await linkedAccountAccessToken(env, connection.account_id)
-  const [summary, campaigns, services] = await Promise.all([
+  // The currency is the account's, read on its own: a quiet range returns no metric rows at all.
+  const [customer, summary, campaigns, services] = await Promise.all([
+    getGoogleAdsCustomer(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, connection.target_id),
     getGoogleAdsPerformanceSummary(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, connection.target_id, range.startDate, range.endDate),
-    listGoogleAdsCampaigns(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, connection.target_id, 'ALL'),
+    listGoogleAdsCampaigns(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, connection.target_id, 'ALL', { startDate: range.startDate, endDate: range.endDate }),
     listServices(env.DB, organizationId),
   ])
   return {
     status: 'connected',
-    customer: { id: connection.target_id, name: connection.target_name, currency: summary.currencyCode },
+    customer: { id: connection.target_id, name: connection.target_name, currency: customer.currencyCode },
     period: { startDate: range.startDate, endDate: range.endDate },
     totals: { costMicros: summary.costMicros, clicks: summary.clicks, impressions: summary.impressions, conversions: summary.conversions, averageCpcMicros: summary.averageCpcMicros },
     campaigns: campaigns

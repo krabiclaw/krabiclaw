@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "df88bace-ecc3-418b-a610-1f38c385aea7",
+  "id": "5056ee41-b36a-4459-be1b-d22c36f2515c",
   "prevId": "b35adcd0-5811-41bb-be9b-4baf157f6366",
   "tables": {
     "account": {
@@ -8163,14 +8163,14 @@
         }
       },
       "indexes": {
-        "organization_services_current_idx": {
-          "name": "organization_services_current_idx",
+        "organization_services_current_unique": {
+          "name": "organization_services_current_unique",
           "columns": [
             "organization_id",
-            "service",
-            "ended_at"
+            "service"
           ],
-          "isUnique": false
+          "isUnique": true,
+          "where": "ended_at IS NULL"
         }
       },
       "foreignKeys": {

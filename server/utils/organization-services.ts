@@ -23,9 +23,13 @@ export async function listServices(db: DbClient, organizationId: string): Promis
   return Object.fromEntries(SERVICES.map(service => [service, rows.find(row => row.service === service) ?? null])) as Record<Service, ServiceAgreement | null>
 }
 
-/** The organizations currently on a service, for the work that bills or performs it. */
-export async function organizationsOnService(db: DbClient, service: Service): Promise<string[]> {
-  return (await queryAll<{ organization_id: string }>(db, 'SELECT organization_id FROM organization_services WHERE service=? AND ended_at IS NULL ORDER BY organization_id', [service])).map(row => row.organization_id)
+/**
+ * The organizations on a service at an instant — for billing a day, its end:
+ * a day's spend is billed when the service was on as that day closed, whether
+ * it was agreed to during the day or ended after it.
+ */
+export async function organizationsOnServiceAt(db: DbClient, service: Service, at: string): Promise<string[]> {
+  return (await queryAll<{ organization_id: string }>(db, 'SELECT DISTINCT organization_id FROM organization_services WHERE service=? AND agreed_at<=? AND (ended_at IS NULL OR ended_at>?) ORDER BY organization_id', [service, at, at])).map(row => row.organization_id)
 }
 
 export async function agreeToService(db: DbClient, organizationId: string, service: Service, userId: string): Promise<ServiceAgreement> {

@@ -8,6 +8,7 @@
   <div class="space-y-6">
     <UAlert v-if="billingError" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(billingError, 'Failed to load billing')" />
     <UAlert v-if="usageError" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(usageError, 'Payments fees could not be loaded')" />
+    <UAlert v-if="servicesError" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(servicesError, 'Services could not be loaded')" />
     <UAlert v-if="errorMessage" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="errorMessage" />
     <UAlert v-if="successMessage" color="success" variant="soft" icon="i-lucide-circle-check" :description="successMessage" />
     <EditorNavigationList :groups="groups" @act="onRowAction" />
@@ -74,10 +75,12 @@ const busy = ref(false)
 // The services the business is on: a consent row each, read with the plan.
 type Services = { managed_ads: { id: string; agreed_at: string } | null }
 const isServices = (value: unknown): value is { success: true; services: Services } => isRecord(value) && value.success === true && isRecord(value.services) && (value.services.managed_ads === null || (isRecord(value.services.managed_ads) && typeof value.services.managed_ads.agreed_at === 'string'))
-const { data: servicesResource, refresh: refreshServices } = await useAsyncData(`dashboard-services:${String(route.params.orgSlug)}`, () => dashboardApi('/api/dashboard/services', { validate: isServices }))
-const services = computed(() => servicesResource.value?.services ?? null)
+const { data: servicesResource, error: servicesError, refresh: refreshServices } = await useAsyncData(`dashboard-services:${String(route.params.orgSlug)}`, () => dashboardApi('/api/dashboard/services', { validate: isServices }))
+// Unknown until read: a failed read shows its error above and offers no service action.
+const services = computed(() => servicesResource.value?.services)
 const managedAdsOpen = ref(false)
 async function toggleManagedAds() {
+  if (!services.value) return
   busy.value = true
   sheetError.value = ''
   try {
@@ -180,9 +183,9 @@ const groups = computed<EditorNavigationGroup[]>(() => [{
   id: 'services',
   label: 'Services',
   items: [
-    { id: 'service:managed_ads', label: 'Managed ads', summary: services.value?.managed_ads
+    ...(services.value ? [{ id: 'service:managed_ads', label: 'Managed ads', summary: services.value.managed_ads
       ? `On since ${formatExactDateTime(services.value.managed_ads.agreed_at)} · 10% of Google Ads spend, billed with your fees.`
-      : 'Chris and Julia run your Google Ads campaigns · 10% of ad spend.', action: { label: services.value?.managed_ads ? 'Turn off' : 'Turn on' } },
+      : 'Chris and Julia run your Google Ads campaigns · 10% of ad spend.', action: { label: services.value.managed_ads ? 'Turn off' : 'Turn on' } }] : []),
     { id: 'service:strategy', label: 'SEO and marketing strategy', summary: 'Monthly strategy with Julia · $2,000 per month, billed as its own subscription.', action: { label: 'Ask about it' } },
   ],
 }])

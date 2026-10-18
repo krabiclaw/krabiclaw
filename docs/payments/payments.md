@@ -433,8 +433,9 @@ campaigns for 10% of its ad spend. Connecting a Google Ads account costs
 nothing and feeds Insights → Google Ads; the fee follows the business's
 agreement, recorded in `organization_services` (`managed_ads`, who agreed,
 when, which terms) from Payments → Plan → Services. The daily
-`marketing:ad-spend-daily` task reads, for each business on the service with a
-connected account, Google's cost for the day two days back (a day Google has
+`marketing:ad-spend-daily` task reads, for each business whose agreement was on
+as the billed day closed (agreed before its end, not ended by it) and whose
+account is connected, Google's cost for the day two days back (a day Google has
 finished counting), and queues it as an `ad_spend` usage event
 (`google_ads:<customer>:<date>`, USD cents) delivered through the same Metronome
 path as captured volume, as `payments_ad_spend`.

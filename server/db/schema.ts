@@ -1573,7 +1573,8 @@ export const organization_services = sqliteTable("organization_services", {
 	ended_at: text(),
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
-	index("organization_services_current_idx").on(table.organization_id, table.service, table.ended_at),
+	// One current agreement per service: concurrent agreements cannot both land.
+	uniqueIndex("organization_services_current_unique").on(table.organization_id, table.service).where(sql`ended_at IS NULL`),
 ]);
 
 export const organization_integrations = sqliteTable("organization_integrations", {
