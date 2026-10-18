@@ -57,7 +57,7 @@
         </span>
         <span v-else-if="item.id === 'name'" class="block text-xl font-medium leading-snug text-highlighted">{{ item.summary }}</span>
         <template v-else-if="item.id === 'photo'">
-          <span class="block">{{ roomsSummary() }}</span>
+          <span class="sr-only">{{ item.summary }}</span>
           <span v-if="stayPhotos.length" class="relative mt-6 block h-44" aria-hidden="true">
             <img
               v-for="(photo, index) in stayPhotos.slice(0, 3)"
@@ -67,7 +67,7 @@
               class="absolute left-1/2 top-0 h-44 w-36 rounded-3xl object-cover"
               :class="index === 0 ? 'z-20 -translate-x-1/2' : index === 1 ? 'z-10 -translate-x-[90%] rotate-[-5deg] scale-90' : 'z-0 -translate-x-[10%] rotate-[5deg] scale-90'"
             >
-            <span class="absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full bg-default px-3 py-1 text-xs text-highlighted">{{ stayPhotos.length }} {{ stayPhotos.length === 1 ? 'photo' : 'photos' }}</span>
+            <span class="absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full bg-default px-3 py-1 text-xs text-highlighted">{{ photoAssets.length }} {{ photoAssets.length === 1 ? 'photo' : 'photos' }}</span>
           </span>
           <span v-else class="mt-6 flex flex-col items-center gap-3 rounded-xl bg-muted px-4 py-8 text-sm">
             <UIcon name="i-lucide-image-plus" class="size-8 text-dimmed" aria-hidden="true" />
@@ -220,6 +220,12 @@ export interface ProductEditor {
   setGalleryAsset: (index: number, asset: { asset_id: string } | null) => Promise<void>
   removeGalleryPhoto: (index: number) => Promise<void>
   moveGalleryPhoto: (from: number, to: number) => Promise<void>
+  /** The Product's cover and gallery, in the same order guests see them. */
+  photoAssets: ComputedRef<Product['gallery']>
+  addStayPhoto: (assetId: string) => Promise<boolean>
+  reorderStayPhotos: (photoIds: string[]) => Promise<boolean>
+  describeStayPhoto: (photoId: string, text: string) => Promise<boolean>
+  removeStayPhotos: (photoIds: string[]) => Promise<boolean>
   /** Make the page this product owns, when it has none; opening Page content never does. */
   createPage: () => Promise<void>
   addOption: () => void
@@ -267,7 +273,7 @@ import { isStayArrivalGuide } from '~/shared/stay-arrival'
 import type { ProductMutation } from '~/server/utils/product-management'
 import { presentationForProduct, STAY_PRESENTATION } from '~/utils/product-presentation'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
-import { mediaStillUrl } from '~/shared/media-placement-contract'
+import { mediaStillUrl, uniqueMediaAssets, MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
 import { MINUTE_TIME_PATTERN } from '~/utils/timezone'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 import {
@@ -498,7 +504,8 @@ const stayPreviewUrl = computed(() => {
   url.searchParams.set('preview_token', token)
   return url.toString()
 })
-const stayPhotos = computed(() => [product.value?.image, ...(product.value?.gallery ?? [])].map(mediaStillUrl).filter((url): url is string => Boolean(url)))
+const photoAssets = computed(() => product.value ? uniqueMediaAssets([...(product.value.image ? [product.value.image] : []), ...product.value.gallery]) : [])
+const stayPhotos = computed(() => photoAssets.value.map(mediaStillUrl).filter((url): url is string => Boolean(url)))
 const stayAmenityPreview = computed(() => form.stay_amenities.map(code => ({ code, ...STAY_AMENITIES[code] })).sort((left, right) => left.label.localeCompare(right.label)))
 // A product that is not there is not a page. A request that failed is a state
 // this level shows, because the product may well still exist.
@@ -925,7 +932,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
   return [{
     id: 'item',
     items: [
-      { id: 'photo', label: 'Photos', summary: stayEditor.value ? roomsSummary() : image ? (product.value.gallery.length ? `${product.value.gallery.length + 1} photos` : '') : 'No photo yet', placeholder: !image, to: sectionPath('photo') },
+      { id: 'photo', label: 'Photos', summary: stayEditor.value ? (photoAssets.value.length ? `${photoAssets.value.length} ${photoAssets.value.length === 1 ? 'photo' : 'photos'}` : 'No photos yet') : image ? (product.value.gallery.length ? `${product.value.gallery.length + 1} photos` : '') : 'No photo yet', placeholder: stayEditor.value ? !photoAssets.value.length : !image, to: sectionPath('photo') },
       { id: 'name', label: stayEditor.value ? 'Title' : 'Name', summary: form.name || 'Not named yet', placeholder: !form.name, to: sectionPath('name') },
       { id: 'description', label: 'Description', summary: form.description || 'Nothing written yet', placeholder: !form.description, to: sectionPath('description') },
       // A service is shown by a page of its own. The page has one editor, in
@@ -1496,6 +1503,78 @@ async function moveGalleryPhoto(from: number, to: number) {
   })
 }
 
+// Stay photo operations own the complete cover/gallery arrangement. The
+// independent Product read below is also the source for the listing summaries
+// and the guest page, rather than retaining a second photo list from a write.
+const stayPhotoUrl = () => `/api/dashboard/stay-homes/${encodeURIComponent(productId.value)}/photos`
+const isStayPhotoMutation = (value: unknown): value is { home: { product_id: string; photos: unknown[] } } =>
+  isRecord(value) && isRecord(value.home) && value.home.product_id === productId.value && Array.isArray(value.home.photos)
+
+async function changeStayPhotos(change: () => Promise<unknown>): Promise<boolean> {
+  if (saving.value) return false
+  saving.value = true
+  photoError.value = null
+  let changed = false
+  try {
+    if (product.value?.kind !== 'stay' || loadError.value) throw new Error('Load this listing before changing its photos.')
+    try {
+      await change()
+      changed = true
+    } catch (error) {
+      photoError.value = getErrorMessage(error, 'The photos could not be saved')
+    }
+    // Publication can fail after a placement committed. Re-read in either
+    // case, while keeping the submitted draft and the original failure.
+    try {
+      await reload()
+    } catch (error) {
+      const reason = getErrorMessage(error, 'Read failed')
+      photoError.value = photoError.value ? `${photoError.value} The photos could not be read again: ${reason}` : `The photos could not be read again: ${reason}`
+    }
+    return changed && !photoError.value
+  } catch (error) {
+    photoError.value = getErrorMessage(error, 'The photos could not be saved')
+    return false
+  } finally {
+    saving.value = false
+  }
+}
+
+async function addStayPhoto(assetId: string) {
+  return await changeStayPhotos(async () => {
+    const photos = photoAssets.value
+    if (photos.some(photo => photo.asset_id === assetId)) throw new Error('This photo is already on the listing.')
+    if (photos.length >= MAX_ORDERED_MEDIA_ASSETS) throw new Error(`A listing can have at most ${MAX_ORDERED_MEDIA_ASSETS} photos.`)
+    // The existing library picker owns uploads. Attaching its selected asset
+    // uses the canonical placement owner; an empty home gets a cover first.
+    if (!photos.length) {
+      await dashboardApi(`/api/editor/organizations/${organizationId}/media/placements`, {
+        method: 'PUT', body: { placement: { owner_type: 'product', owner_id: productId.value, slot: 'image' }, asset_id: assetId }, validate: isRecord,
+      })
+    } else await galleryCall('attach', { asset_id: assetId })
+  })
+}
+
+async function reorderStayPhotos(photoIds: string[]) {
+  return await changeStayPhotos(async () => await dashboardApi(stayPhotoUrl(), {
+    method: 'PUT', body: { photo_ids: photoIds }, validate: isStayPhotoMutation,
+  }))
+}
+
+async function describeStayPhoto(photoId: string, text: string) {
+  return await changeStayPhotos(async () => await dashboardApi(`${stayPhotoUrl()}/${encodeURIComponent(photoId)}`, {
+    method: 'PATCH', body: { alt_text: text.trim() || null }, validate: isStayPhotoMutation,
+  }))
+}
+
+async function removeStayPhotos(photoIds: string[]) {
+  return await changeStayPhotos(async () => {
+    // Each deletion reads the remaining canonical order; concurrent deletes
+    // would race their whole-list replacements against one another.
+    for (const photoId of photoIds) await dashboardApi(`${stayPhotoUrl()}/${encodeURIComponent(photoId)}`, { method: 'DELETE', validate: isStayPhotoMutation })
+  })
+}
+
 // ── Localization ────────────────────────────────────────
 /**
  * Which fields can be translated comes from the tenant's own definitions, so
@@ -1593,6 +1672,11 @@ provide(productEditorKey, {
   setGalleryAsset,
   removeGalleryPhoto,
   moveGalleryPhoto,
+  photoAssets,
+  addStayPhoto,
+  reorderStayPhotos,
+  describeStayPhoto,
+  removeStayPhotos,
   createPage,
   addOption,
   removeOption,

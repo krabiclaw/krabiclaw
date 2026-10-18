@@ -474,6 +474,7 @@ import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import { isRecord, publicApiRequest } from '~/utils/api-clients'
 import MediaGallery from '~/components/MediaGallery.vue'
 import ProductVariantPrices from '~/components/products/ProductVariantPrices.vue'
+import { uniqueMediaAssets } from '~/shared/media-placement-contract'
 
 const props = defineProps<{
   organizationId: string
@@ -629,11 +630,11 @@ const canBook = computed(() => isStay.value
  * — two slots, read as the two things they are, not one list with a chosen
  * head.
  */
-const galleryItems = computed(() => [
+const galleryItems = computed(() => uniqueMediaAssets([
   ...(props.product.image ? [props.product.image] : []),
   ...props.product.gallery,
   ...(props.pageDocument?.media.filter(asset => asset.slot === 'cover' || asset.slot === 'gallery') ?? []),
-].filter((asset, index, assets) => asset.public_url && assets.findIndex(item => item.public_url === asset.public_url) === index).map(asset => ({
+]).filter(asset => asset.public_url).map(asset => ({
   url: asset.public_url!,
   kind: asset.kind,
   poster: asset.kind === 'video' ? asset.thumbnail_url : undefined,

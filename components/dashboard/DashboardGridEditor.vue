@@ -7,21 +7,23 @@
           <slot name="actions" />
           <UButton
             v-if="items.length"
-            label="Manage"
+            :label="manageLabel ?? 'Manage'"
             color="neutral"
             variant="soft"
             data-testid="grid-editor-manage"
             @click="openSelection"
           />
-          <UButton
-            icon="i-lucide-plus"
-            :aria-label="addLabel"
-            color="neutral"
-            variant="soft"
-            square
-            data-testid="grid-editor-add"
-            @click="$emit('add')"
-          />
+          <slot name="add-action">
+            <UButton
+              icon="i-lucide-plus"
+              :aria-label="addLabel"
+              color="neutral"
+              variant="soft"
+              square
+              data-testid="grid-editor-add"
+              @click="$emit('add')"
+            />
+          </slot>
         </div>
       </Teleport>
 
@@ -32,26 +34,32 @@
     </div>
 
     <UAlert
-      v-if="error"
+      v-if="error && !selecting"
       color="error"
       variant="soft"
       :title="`${title || 'This list'} could not be loaded`"
       :description="error"
     />
 
-    <UEmpty v-else-if="!items.length" :icon="emptyIcon" :title="emptyTitle" data-testid="grid-editor-empty" />
+    <UEmpty v-if="!error && !items.length" :icon="emptyIcon" :title="emptyTitle" data-testid="grid-editor-empty" />
 
-    <div v-else :class="gridClass">
-      <button
+    <div v-if="items.length" :class="gridClass">
+      <div
         v-for="item in items"
         :key="item.id"
-        type="button"
-        class="group relative aspect-square overflow-hidden rounded-lg border-2 border-transparent text-left"
-        :aria-label="`Open ${item.title}`"
-        @click="$emit('open', item)"
+        class="relative"
       >
-        <slot name="tile" :item="item" />
-      </button>
+        <ULink
+          raw
+          :to="item.to"
+          class="group relative block aspect-square overflow-hidden rounded-lg border-2 border-transparent text-left"
+          :aria-label="`Open ${item.title}`"
+          @click="!item.to && $emit('open', item)"
+        >
+          <slot name="tile" :item="item" />
+        </ULink>
+        <slot name="tile-actions" :item="item" />
+      </div>
     </div>
 
     <!--
@@ -80,7 +88,7 @@
             <slot name="bulk-actions" :ids="selectedIds" />
             <UButton
               icon="i-lucide-trash-2"
-              :aria-label="`Delete ${selectedIds.length} selected`"
+              :aria-label="removeLabel ?? `Delete ${selectedIds.length} selected`"
               color="error"
               variant="ghost"
               size="sm"
@@ -111,6 +119,14 @@
       </header>
 
       <div class="min-h-0 flex-1 overflow-y-auto py-4" :class="dashboardGutterClass">
+        <UAlert
+          v-if="error"
+          color="error"
+          variant="soft"
+          :title="`${title || 'This list'} could not be loaded`"
+          :description="error"
+          class="mb-4"
+        />
         <div :class="gridClass">
           <button
             v-for="item in items"
@@ -154,6 +170,10 @@ const props = defineProps<{
   addLabel: string
   /** Bar title while selecting, e.g. "Select photos". */
   selectionTitle: string
+  /** Names the selection action when the domain has a more specific term. */
+  manageLabel?: string
+  /** Names removal when it detaches a placement rather than deleting an asset. */
+  removeLabel?: string
   error?: string | null
   /** Tailwind grid classes, so a page can size its own tiles. */
   gridClass?: string
@@ -192,9 +212,13 @@ watch(selecting, (open) => {
 </script>
 
 <script lang="ts">
+import type { RouteLocationRaw } from 'vue-router'
+
 export interface GridEditorItem {
   id: string
   /** Names the tile in its open and select labels. */
   title: string
+  /** An item's editor route; absent when opening is handled by the page. */
+  to?: RouteLocationRaw
 }
 </script>
