@@ -108,6 +108,7 @@ async function stabilizePage(page) {
     for (const image of document.images) image.loading = 'eager'
   })
   await page.waitForFunction(() => Array.from(document.images).every(image => image.complete))
+  await page.evaluate(() => Promise.all(Array.from(document.images, image => image.decode())))
 }
 
 async function markCaptureSections(page, routeName, expectedSections) {
