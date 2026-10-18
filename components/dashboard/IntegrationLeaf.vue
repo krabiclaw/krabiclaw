@@ -1,7 +1,7 @@
 <template>
   <!--
     One shape for every integration, as a connector's own page is: what is
-    connected and through which account, what it does here, prompts the
+    connected and who linked it, what it does here, prompts the
     KrabiClaw app answers with it, the plan it needs, and Disconnect last.
     The slot holds the one provider-specific control: connecting.
   -->
@@ -19,7 +19,7 @@
       <div class="min-w-0 flex-1">
         <p class="truncate font-semibold text-highlighted">{{ connection.name }}</p>
         <p class="mt-0.5 text-sm text-muted">
-          <template v-if="connection.through">Through {{ definition.linkedAccount }} · {{ connection.through.email || connection.through.name }}<template v-if="connection.through.name && connection.through.email"> ({{ connection.through.name }})</template> · </template>Connected {{ connectedOn }}
+          <template v-if="connection.through">Linked by {{ connection.through.email || connection.through.name }}<template v-if="connection.through.name && connection.through.email"> ({{ connection.through.name }})</template> · </template>Connected {{ connectedOn }}
         </p>
       </div>
     </div>
@@ -84,7 +84,7 @@ export interface IntegrationLeafConnection {
   name: string
   image?: string | null
   connectedAt: string
-  /** The linked account the organization acts through. */
+  /** The KrabiClaw user who linked the account. */
   through?: { email: string | null; name: string | null } | null
   status?: 'active' | 'disabled' | 'error' | null
   lastError?: string | null
