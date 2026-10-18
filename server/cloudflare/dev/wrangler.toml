@@ -4,7 +4,7 @@
 name = "krabiclaw-guest-inbox-hub"
 main = "guest-inbox-hub.worker.ts"
 compatibility_date = "2024-11-01"
-compatibility_flags = ["nodejs_compat_v2"]
+compatibility_flags = ["nodejs_compat_v2", "web_socket_auto_reply_to_close"]
 
 [[durable_objects.bindings]]
 name = "GUEST_INBOX_HUBS"

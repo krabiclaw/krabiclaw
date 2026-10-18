@@ -125,10 +125,6 @@ export class GuestInboxHubObject extends DurableObject<GuestInboxHubEnv> {
     }
   }
 
-  override webSocketClose(socket: WebSocket, code: number, reason: string): void {
-    socket.close(code, reason)
-  }
-
   override webSocketError(socket: WebSocket, error: unknown): void {
     console.error('Dashboard WebSocket error', error)
     socket.close(1011, 'Guest inbox connection error')
