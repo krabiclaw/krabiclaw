@@ -37,13 +37,13 @@ const editor = await useLocationEditor(organizationId, dashboardLocation.current
 
 const { data: members, error: membersError, status: membersStatus } = await useMemberSchedulingList(organizationId)
 
-const WHOLE_ORGANIZATION = 'whole-organization'
+const ADMINISTRATORS = 'administrators'
 
 const assignedChoice = computed({
   get: () => {
     if (editor.detailsForm.assigned_team_id) return `team:${editor.detailsForm.assigned_team_id}`
     if (editor.detailsForm.assigned_member_id) return `member:${editor.detailsForm.assigned_member_id}`
-    return WHOLE_ORGANIZATION
+    return ADMINISTRATORS
   },
   set: (val: string) => {
     editor.detailsForm.assigned_team_id = val.startsWith('team:') ? val.slice(5) : null
@@ -55,19 +55,19 @@ const assignmentOptions = computed(() => {
   if (!members.value) return []
   return [
     {
-      value: WHOLE_ORGANIZATION,
-      label: 'Whole organization',
-      description: 'All team members and administrators manage this location.',
+      value: ADMINISTRATORS,
+      label: 'Administrators',
+      description: 'No staff are assigned. Owners and administrators manage this location.',
     },
     ...members.value.teams.map(team => ({
       value: `team:${team.id}`,
       label: `Team: ${team.name}`,
-      description: `Members of ${team.name} manage this location and its reservations.`,
+      description: `Members of ${team.name}, owners and administrators manage this location and its reservations.`,
     })),
     ...members.value.members.map(member => ({
       value: `member:${member.id}`,
       label: member.name,
-      description: `${member.name} manages this location and its reservations.`,
+      description: `${member.name}, owners and administrators manage this location and its reservations.`,
     })),
   ]
 })

@@ -51,8 +51,8 @@ export interface BusinessLocation {
   status: string
   last_synced_at: string | null
   timezone: string
-  assigned_member_id?: string | null
-  assigned_team_id?: string | null
+  assigned_member_id: string | null
+  assigned_team_id: string | null
 }
 
 /**
@@ -170,6 +170,8 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       && (value.address === null || isRecord(value.address))
       && isNullableString(value.phone)
       && isNullableString(value.google_place_id)
+      && isNullableString(value.assigned_member_id)
+      && isNullableString(value.assigned_team_id)
   }
   const isLocationResponse = (value: unknown): value is { success: true; location: BusinessLocation } =>
     isRecord(value) && value.success === true && isBusinessLocation(value.location)
@@ -264,13 +266,13 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     detailsForm.description = loc.description ?? ''
     hoursForm.value = { timezone: loc.timezone, hours: parseOpeningHours(loc.opening_hours), specialHours: parseSpecialHours(loc.special_hours) }
     detailsForm.status = loc.status
-    detailsForm.assigned_member_id = loc.assigned_member_id ?? null
-    detailsForm.assigned_team_id = loc.assigned_team_id ?? null
+    detailsForm.assigned_member_id = loc.assigned_member_id
+    detailsForm.assigned_team_id = loc.assigned_team_id
   }
 
   const { data: schedulingMembers, error: schedulingMembersError } = await useMemberSchedulingList(() => organizationId)
   const assignmentSummary = computed(() => {
-    if (!detailsForm.assigned_team_id && !detailsForm.assigned_member_id) return 'Whole organization'
+    if (!detailsForm.assigned_team_id && !detailsForm.assigned_member_id) return 'Administrators'
     if (schedulingMembersError.value) return 'Team members could not be loaded'
     if (!schedulingMembers.value) return 'Loading team members…'
     if (detailsForm.assigned_team_id) return schedulingMembers.value.teams.find(t => t.id === detailsForm.assigned_team_id)?.name ?? 'Assigned team'
