@@ -273,7 +273,7 @@ import { isStayArrivalGuide } from '~/shared/stay-arrival'
 import type { ProductMutation } from '~/server/utils/product-management'
 import { presentationForProduct, STAY_PRESENTATION } from '~/utils/product-presentation'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
-import { mediaStillUrl, uniqueMediaAssets, MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
+import { mediaStillUrl, uniqueMediaAssets } from '~/shared/media-placement-contract'
 import { MINUTE_TIME_PATTERN } from '~/utils/timezone'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 import {
@@ -1542,16 +1542,8 @@ async function changeStayPhotos(change: () => Promise<unknown>): Promise<boolean
 
 async function addStayPhoto(assetId: string) {
   return await changeStayPhotos(async () => {
-    const photos = photoAssets.value
-    if (photos.some(photo => photo.asset_id === assetId)) throw new Error('This photo is already on the listing.')
-    if (photos.length >= MAX_ORDERED_MEDIA_ASSETS) throw new Error(`A listing can have at most ${MAX_ORDERED_MEDIA_ASSETS} photos.`)
-    // The existing library picker owns uploads. Attaching its selected asset
-    // uses the canonical placement owner; an empty home gets a cover first.
-    if (!photos.length) {
-      await dashboardApi(`/api/editor/organizations/${organizationId}/media/placements`, {
-        method: 'PUT', body: { placement: { owner_type: 'product', owner_id: productId.value, slot: 'image' }, asset_id: assetId }, validate: isRecord,
-      })
-    } else await galleryCall('attach', { asset_id: assetId })
+    if (photoAssets.value.some(photo => photo.asset_id === assetId)) throw new Error('This photo is already on the listing.')
+    await dashboardApi(stayPhotoUrl(), { method: 'POST', body: { asset_id: assetId }, validate: isStayPhotoMutation })
   })
 }
 

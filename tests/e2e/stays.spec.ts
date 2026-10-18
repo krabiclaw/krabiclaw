@@ -438,28 +438,57 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   const allPhotosPath = `${photoPath}/photos`
   await page.goto(photoPath)
   const photoOverview = page.locator('#dashboard-panel-product-photo')
+  type PhotoProduct = { image: { asset_id: string; alt_text: string | null } | null; gallery: Array<{ asset_id: string; alt_text: string | null }> }
   const uploadedPhotos: Array<{ id: string; url: string; width: number; height: number }> = []
-  for (const [name, background, width, height] of [
-    ['red-upload-proof.avif', '#dc2626', 120, 80],
-    ['blue-upload-proof.avif', '#2563eb', 96, 128],
-    ['green-upload-proof.avif', '#16a34a', 144, 96],
-  ] as const) {
-    await photoOverview.getByRole('button', { name: 'Add photos', exact: true }).click()
-    const picker = page.getByRole('dialog', { name: 'Add photos', exact: true })
-    const uploaded = page.waitForResponse(response => new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/media/upload` && response.request().method() === 'POST')
-    await picker.locator('input[type="file"]').setInputFiles({ name, mimeType: 'image/avif', buffer: await sharp({ create: { width, height, channels: 3, background } }).avif().toBuffer() })
-    const uploadResponse = await uploaded
-    expect(uploadResponse.status(), await uploadResponse.text()).toBe(200)
-    const asset = await uploadResponse.json() as { asset_id: string; public_url: string; kind: string; status: string; thumbnail_url: string | null }
-    expect(asset).toMatchObject({ kind: 'image', status: 'active', thumbnail_url: null })
-    uploadedPhotos.push({ id: asset.asset_id, url: asset.public_url, width, height })
-    await picker.getByRole('button', { name: 'Done', exact: true }).click()
-    await expect(picker).not.toBeVisible()
-    await expect(photoOverview.locator('img')).toHaveCount(uploadedPhotos.length)
-    const image = photoOverview.locator('img').nth(uploadedPhotos.length - 1)
-    await expect(image).toHaveAttribute('src', asset.public_url)
-    await expect(image).toHaveJSProperty('naturalWidth', width)
-    await expect(image).toHaveJSProperty('naturalHeight', height)
+  await expect(photoOverview.getByRole('heading', { name: 'Add your first photo', exact: true })).toBeVisible()
+  const stalePhotoPage = await page.context().newPage()
+  try {
+    await stalePhotoPage.goto(photoPath)
+    const staleOverview = stalePhotoPage.locator('#dashboard-panel-product-photo')
+    await expect(staleOverview.getByRole('heading', { name: 'Add your first photo', exact: true })).toBeVisible()
+    for (const [name, background, width, height] of [
+      ['red-upload-proof.avif', '#dc2626', 120, 80],
+      ['blue-upload-proof.avif', '#2563eb', 96, 128],
+      ['green-upload-proof.avif', '#16a34a', 144, 96],
+    ] as const) {
+      // The second editor was loaded empty before red became the cover.
+      // Its Add must append blue against the server's current placements.
+      const activePage = name === 'blue-upload-proof.avif' ? stalePhotoPage : page
+      const activeOverview = activePage.locator('#dashboard-panel-product-photo')
+      if (activePage === stalePhotoPage) await expect(activeOverview.getByRole('heading', { name: 'Add your first photo', exact: true })).toBeVisible()
+      await activeOverview.getByRole('button', { name: 'Add photos', exact: true }).click()
+      const picker = activePage.getByRole('dialog', { name: 'Add photos', exact: true })
+      const uploaded = activePage.waitForResponse(response => new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/media/upload` && response.request().method() === 'POST')
+      await picker.locator('input[type="file"]').setInputFiles({ name, mimeType: 'image/avif', buffer: await sharp({ create: { width, height, channels: 3, background } }).avif().toBuffer() })
+      const uploadResponse = await uploaded
+      expect(uploadResponse.status(), await uploadResponse.text()).toBe(200)
+      const asset = await uploadResponse.json() as { asset_id: string; public_url: string; kind: string; status: string; thumbnail_url: string | null }
+      expect(asset).toMatchObject({ kind: 'image', status: 'active', thumbnail_url: null })
+      uploadedPhotos.push({ id: asset.asset_id, url: asset.public_url, width, height })
+      await picker.getByRole('button', { name: 'Done', exact: true }).click()
+      await expect(picker).not.toBeVisible()
+      await expect(activeOverview.locator('img')).toHaveCount(uploadedPhotos.length)
+      const image = activeOverview.locator('img').nth(uploadedPhotos.length - 1)
+      await expect(image).toHaveAttribute('src', asset.public_url)
+      await expect(image).toHaveJSProperty('naturalWidth', width)
+      await expect(image).toHaveJSProperty('naturalHeight', height)
+      if (activePage === stalePhotoPage) {
+        const appendedProduct = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+        expect(appendedProduct.error).toBeNull()
+        expect(appendedProduct.data!.product.image!.asset_id).toBe(uploadedPhotos[0]!.id)
+        expect(appendedProduct.data!.product.gallery.map(item => item.asset_id)).toEqual([asset.asset_id])
+        await page.reload()
+        for (const overview of [photoOverview, staleOverview]) {
+          await expect(overview.locator('img')).toHaveCount(2)
+          for (const [index, photo] of uploadedPhotos.entries()) {
+            await expect(overview.locator('img').nth(index)).toHaveAttribute('src', photo.url)
+            await expect(overview.locator('img').nth(index)).toHaveJSProperty('naturalWidth', photo.width)
+          }
+        }
+      }
+    }
+  } finally {
+    await stalePhotoPage.close()
   }
   const [red, blue, green] = uploadedPhotos as [typeof uploadedPhotos[number], typeof uploadedPhotos[number], typeof uploadedPhotos[number]]
   const storedUploads = await call<{ assets: Array<{ asset_id: string; public_url: string; provider: string; status: string; kind: string; alt_text: string | null }> }>('get_organization_media_assets', { kind: 'image' })
@@ -468,7 +497,6 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
     .toEqual(uploadedPhotos.map(photo => ({ id: photo.id, url: photo.url, provider: 'cloudflare_r2', status: 'active', kind: 'image' })).sort((a, b) => a.id.localeCompare(b.id)))
   // Generic media permits one asset in both slots; the stay photo order is
   // still a unique list, and an uncommitted reorder must preserve both slots.
-  type PhotoProduct = { image: { asset_id: string; alt_text: string | null } | null; gallery: Array<{ asset_id: string; alt_text: string | null }> }
   const sharedCover = await call('attach_media', { placement: { owner_type: 'product', owner_id: productId, slot: 'gallery' }, asset_id: red.id })
   expect(sharedCover.error).toBeNull()
   const duplicatePlacement = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })

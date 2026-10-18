@@ -24,7 +24,7 @@ import { stayThreadQueries } from '~/server/domain/requests'
 import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planStayMessages } from '~/server/domain/scheduled-guest-messages'
 import { arrangeProductPhotos, readProductPhotos, type MediaPlacementItem } from '~/server/utils/media-placement'
-import { deleteMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
+import { deleteMediaAsset, getMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
 import { sanitizeFilename, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
 import { MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, sniffMediaMimeType } from '~/server/utils/media-mime'
 import { mediaStillUrl, MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
@@ -802,9 +802,23 @@ function homePhoto(home: StayHome, photoId: string): StayPhoto {
   return photo
 }
 
-/** Add a photo after the home's others; the first photo a home gets is its cover. The file is kept in the organization's media library. */
-export async function addStayHomePhoto(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, productId: string, file: unknown): Promise<StayHome> {
+/** Add an uploaded File or an explicit { asset_id } from the organization's library after the home's current photos. */
+export async function addStayHomePhoto(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, productId: string, input: unknown): Promise<StayHome> {
   const home = await managedHome(db, access, productId)
+  if (!(input instanceof File) && isRecord(input)) {
+    if (typeof input.asset_id !== 'string' || !input.asset_id.trim()) fail(422, 'PHOTO_REQUIRED', 'Choose the library photo by its asset_id', 'asset_id')
+    const unknown = Object.keys(input).find(key => key !== 'asset_id')
+    if (unknown) fail(422, 'INVALID_PHOTO_FIELD', `${unknown} cannot be changed here`, unknown)
+    const asset = await getMediaAsset(db, input.asset_id, access.organizationId)
+    if (!asset || asset.status !== 'active') fail(404, 'PHOTO_NOT_FOUND', 'That photo is not in this organization\'s media library', 'asset_id')
+    if (asset.kind !== 'image') fail(415, 'UNSUPPORTED_PHOTO_TYPE', 'Choose an image from the media library', 'asset_id')
+    if (home.photos.some(photo => photo.id === asset.id)) fail(409, 'PHOTO_ALREADY_ADDED', 'That photo is already on this home', 'asset_id')
+    // Read the home on the server for every append. The complete arrangement
+    // guards against another write between this read and its atomic commit.
+    // A library asset was not created here and is never removed on failure.
+    return await arrangeHomePhotos(db, env, access, principal, home, [...home.photos.map(photo => photo.id), asset.id])
+  }
+  const file = input
   if (!(file instanceof File)) fail(422, 'PHOTO_REQUIRED', 'Send the photo as the multipart field image', 'image')
   if (file.size > MAX_IMAGE_BYTES) fail(413, 'PHOTO_TOO_LARGE', `A photo can be at most ${MAX_IMAGE_BYTES / 1024 / 1024} MB`, 'image')
   if (home.photos.length >= MAX_ORDERED_MEDIA_ASSETS) fail(422, 'PHOTO_LIMIT', `A home holds at most ${MAX_ORDERED_MEDIA_ASSETS} photos`, 'image')
