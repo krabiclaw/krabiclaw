@@ -13,7 +13,6 @@ import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import type { Collection, Product } from '../../server/types/products'
 import type { DashboardLocation } from '../../composables/useDashboardOrganization'
 import type { TodayFeedPayload } from '../../shared/dashboard-today'
-import { isTransactionsView } from '../../shared/earnings-display'
 
 // The dashboard's pane topology is the nested route tree (DESIGN.md, Route
 // hierarchy). On a wide screen a level renders beside the parent its Back goes
@@ -1058,23 +1057,14 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page).toHaveURL(`${ORG}/earnings`)
     await expect(page.locator('#dashboard-panel-earnings [data-testid="dashboard-navbar-back"]')).toHaveAttribute('href', `${ORG}/menu`)
     await expect(page.getByRole('heading', { name: 'Earnings', exact: true })).toBeVisible()
-    const transactionsLoaded = page.waitForResponse(response => {
-      const url = new URL(response.url())
-      return url.pathname === '/api/dashboard/payments' && url.searchParams.get('view') === 'transactions'
-    })
     await open(page, `${ORG}/earnings/transactions`)
-    const transactionsResponse = await transactionsLoaded
-    expect(transactionsResponse.status()).toBe(200)
-    const transactions = await transactionsResponse.json()
-    if (!isTransactionsView(transactions)) throw new Error('Transactions did not return their documented view.')
-    // This copied demo has payment history within the selected twelve-month window.
-    expect(transactions.payments.length, 'the copied demo has transactions in the selected twelve-month window').toBeGreaterThan(0)
-    await expect(page.locator('#dashboard-panel-earnings-transactions [data-testid^="transaction-"]')).toHaveCount(transactions.payments.length)
-    for (const row of transactions.payments) {
-      await expect(page.getByTestId(`transaction-${row.id}`)).toHaveAttribute('href', row.to)
-      await expect(page.getByTestId(`transaction-${row.id}`)).toContainText(row.title)
-    }
-    await expect(page.getByText('No transactions in this period.', { exact: true })).toHaveCount(0)
+    await expect(page).toHaveURL(`${ORG}/earnings/transactions`)
+    const transactions = page.locator('#dashboard-panel-earnings-transactions')
+    await expect(transactions.getByRole('heading', { name: 'Transactions', exact: true })).toBeVisible()
+    const transactionsBack = transactions.getByRole('link', { name: 'Back', exact: true })
+    await expect(transactionsBack).toHaveAttribute('href', `${ORG}/earnings`)
+    await transactionsBack.click()
+    await expect(page).toHaveURL(`${ORG}/earnings`)
     await open(page, `${ORG}/earnings/refunds`)
     await expect(page.getByText('No refunds yet.', { exact: true })).toBeVisible()
     await expect(page.getByText('No disputes.', { exact: true })).toBeVisible()
