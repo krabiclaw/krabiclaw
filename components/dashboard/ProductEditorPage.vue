@@ -52,8 +52,8 @@
     >
       <template v-if="stayEditor" #summary="{ item }">
         <span v-if="arrivalTab && item.id === 'arrival-time'" class="grid grid-cols-2 gap-4 text-base">
-          <span class="block border-r border-default pr-4"><span class="block font-medium text-highlighted">Check-in</span><span class="mt-1 block">{{ form.check_in_time }}</span></span>
-          <span class="block"><span class="block font-medium text-highlighted">Checkout</span><span class="mt-1 block">{{ form.check_out_time }}</span></span>
+          <span class="block border-r border-default pr-4"><span class="block font-medium text-highlighted">Check-in</span><span class="mt-1 block">{{ product?.stay?.check_in_time }}</span></span>
+          <span class="block"><span class="block font-medium text-highlighted">Checkout</span><span class="mt-1 block">{{ product?.stay?.check_out_time }}</span></span>
         </span>
         <span v-else-if="item.id === 'name'" class="block text-xl font-medium leading-snug text-highlighted">{{ item.summary }}</span>
         <template v-else-if="item.id === 'photo'">
@@ -88,18 +88,53 @@
         <span v-else :class="arrivalTab ? 'line-clamp-2 whitespace-pre-line break-words' : item.id === 'description' ? 'line-clamp-4' : undefined">{{ item.summary }}</span>
       </template>
     </EditorNavigationList>
-    <template v-if="stayEditor && (arrivalTab || stayPreviewUrl)" #footer>
+    <template v-if="stayEditor" #footer>
       <div class="flex justify-center">
-        <UButton :to="arrivalTab ? sectionPath('arrival-guide') : stayPreviewUrl ?? undefined" target="_blank" label="View" icon="i-lucide-eye" color="neutral" class="pointer-events-auto h-12 rounded-full px-6 shadow-lg" />
+        <UButton ref="previewButton" :to="arrivalTab ? sectionPath('arrival-guide') : previewPath" :target="arrivalTab ? '_blank' : undefined" label="View" icon="i-lucide-eye" color="neutral" class="pointer-events-auto h-12 rounded-full px-6 shadow-lg" :disabled="saving" />
       </div>
     </template>
   </DashboardIndexPanel>
+  <UModal
+    v-model:open="previewOpen"
+    title="Listing preview"
+    fullscreen
+    :close="{ color: 'neutral', variant: 'soft' }"
+    :ui="{ header: 'grid grid-cols-[1fr_auto_1fr] gap-3', wrapper: 'sr-only', close: 'static col-start-1 row-start-1 size-10 justify-self-start rounded-full', body: 'min-h-0 p-0 sm:p-0' }"
+    @after:leave="restorePreviewFocus"
+  >
+    <template #actions>
+      <UTabs
+        :model-value="previewViewport ?? undefined"
+        :items="[{ label: 'Desktop view', value: 'desktop' }, { label: 'Mobile view', value: 'mobile' }]"
+        :content="false"
+        size="sm"
+        color="neutral"
+        variant="pill"
+        aria-label="Preview device"
+        class="hidden col-start-2 row-start-1 lg:block"
+        @update:model-value="changePreviewViewport"
+      />
+    </template>
+    <template #body>
+      <UAlert v-if="previewFailure" color="error" variant="soft" title="Listing preview could not be opened" :description="previewFailure" class="m-6" />
+      <div v-else class="flex h-full min-h-0 justify-center overflow-auto bg-muted">
+        <iframe
+          v-if="previewRequested && stayPreviewUrl"
+          :src="stayPreviewUrl"
+          title="Listing preview"
+          sandbox="allow-same-origin allow-scripts allow-forms"
+          class="h-full min-h-0 w-full border-0 bg-default"
+          :class="previewViewport === 'mobile' ? 'max-w-[390px]' : undefined"
+        />
+      </div>
+    </template>
+  </UModal>
 </template>
 
 <script lang="ts">
 import type { ComputedRef, InjectionKey, Ref } from 'vue'
 import type { Collection, Product } from '~/server/types/products'
-import type { StayAmenity, StayCancellationPolicy, StayLongTermCancellationPolicy, StayPropertyType, StayPropertyTypeGroup } from '~/shared/stay-listing'
+import type { StayAmenity, StayCancellationPolicy, StayListingType, StayLongTermCancellationPolicy, StayPropertySizeUnit, StayPropertyType, StayPropertyTypeGroup } from '~/shared/stay-listing'
 import type { DashboardLocation } from '~/composables/useDashboardOrganization'
 import type { GalleryMediaItem } from '~/components/dashboard/DashboardMediaGalleryField.vue'
 import type { StayArrivalGuide, StayArrivalField } from '~/shared/stay-arrival'
@@ -110,6 +145,7 @@ export const SECTION_KEYS = [
 ] as const
 export type SectionKey = typeof SECTION_KEYS[number]
 export type BookingConcern = 'enabled' | 'duration' | 'capacity' | 'confirmation' | 'payment' | 'location' | 'assignment' | number
+export type ProductConcern = BookingConcern | 'publication-visibility' | 'publication-availability' | 'house-rules' | 'additional-rules' | 'arrival-time'
 
 /** Where the product is offered and shown, per location, as its Locations leaf edits it. */
 export interface ProductLocationDraft { active: boolean; published: boolean }
@@ -178,6 +214,12 @@ export interface ProductForm {
   stay_member_id: string | null
   stay_property_type_group: StayPropertyTypeGroup | null
   stay_property_type: StayPropertyType | null
+  stay_listing_type: StayListingType | null
+  stay_total_floors: string
+  stay_listing_floor: string
+  stay_year_built: string
+  stay_property_size: string
+  stay_property_size_unit: StayPropertySizeUnit | null
   stay_bedrooms: string
   stay_beds: string
   stay_bathrooms: string
@@ -190,6 +232,9 @@ export interface ProductForm {
 export interface ProductEditor {
   form: ProductForm
   product: ComputedRef<Product | null>
+  /** Saved publication state, separate from the visibility leaf's draft. */
+  published: ComputedRef<boolean>
+  bookingOffering: ComputedRef<boolean>
   itemLabel: ComputedRef<string>
   currency: string
   organizationId: string
@@ -213,6 +258,7 @@ export interface ProductEditor {
   photoError: Ref<string | null>
   saveLabel: Ref<string>
   saveDisabled: Ref<boolean>
+  propertyTypeErrors: ComputedRef<Record<string, string>>
   setPrimaryImage: (assetId: string | null) => Promise<void>
   /** The photos after the cover, in order, and an empty row while one is being chosen. */
   galleryRows: ComputedRef<GalleryMediaItem[]>
@@ -240,13 +286,13 @@ export interface ProductEditor {
   slotsFor: (weekday: number) => ScheduleSlotDraft[]
   addSlot: (weekday: number) => void
   removeSlot: (slot: ScheduleSlotDraft) => void
-  revert: () => void
+  revert: (concern?: 'additional-rules' | 'arrival-time') => void
   /**
    * Commit the draft, then close the open leaf. A leaf nested below a section
    * (one option, one combination's price) names its own parent, so the save
    * lands where its Close would rather than back on the product.
    */
-  save: (closeTo?: string, bookingConcern?: BookingConcern) => Promise<void>
+  save: (closeTo?: string, concern?: ProductConcern) => Promise<void>
   /** Private StayHome fields remain outside the public Product and its draft. */
   arrivalHome: ComputedRef<StayArrivalGuide | null>
   arrivalDraft: Ref<StayArrivalGuide | null>
@@ -263,7 +309,7 @@ export const productEditorKey = Symbol('product-editor') as InjectionKey<Product
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
 import type { ProductDetailField, ProductDetailValue, ProductKind } from '~/shared/product-details'
-import { productDetailFields, PRODUCT_KINDS, PRODUCT_KIND_LABELS, assertProductKind, productDetailKey, PRICING_NOTE_HANDLE, STAY_DESCRIPTION_DETAIL_KEYS } from '~/shared/product-details'
+import { productDetailFields, PRODUCT_KINDS, PRODUCT_KIND_LABELS, assertProductKind, productDetailKey, PRICING_NOTE_HANDLE, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, stayHouseRuleLines } from '~/shared/product-details'
 import { isCurrencyCode } from '~/shared/currencies'
 import { majorAmountToMinor, minorAmountToMajor, selectPrice, type Price } from '~/shared/prices'
 import { formatProductMoney } from '~/utils/product-money'
@@ -274,10 +320,13 @@ import type { ProductMutation } from '~/server/utils/product-management'
 import { presentationForProduct, STAY_PRESENTATION } from '~/utils/product-presentation'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 import { mediaStillUrl, uniqueMediaAssets } from '~/shared/media-placement-contract'
-import { MINUTE_TIME_PATTERN } from '~/utils/timezone'
+import { formatTime, MINUTE_TIME_PATTERN } from '~/utils/timezone'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
+import { isNavigationFailure } from 'vue-router'
+import { dashboardOverlayOpenKey } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 import {
   STAY_PROPERTY_TYPES,
+  STAY_LISTING_TYPES,
   STAY_AMENITIES,
   STAY_PROPERTY_TYPE_GROUPS,
   STAY_CANCELLATION_POLICIES,
@@ -287,6 +336,7 @@ import {
 } from '~/shared/stay-listing'
 
 const route = useRoute()
+const { locale } = useI18n()
 const router = useRouter()
 const dashboardApi = useDashboardApi()
 const productId = computed(() => String(route.params.productId ?? ''))
@@ -374,6 +424,7 @@ const isNew = computed(() => productId.value === 'new')
 
 // ── Load ────────────────────────────────────────────────
 const definitions = computed(() => form.kind ? productDetailFields(form.kind) : [])
+const mainHouseRuleKeys = STAY_HOUSE_RULE_DETAIL_KEYS.filter(key => key !== 'house_rules')
 const saveError = ref<string | null>(null)
 const photoError = ref<string | null>(null)
 const saving = ref(false)
@@ -416,6 +467,8 @@ const { data: loaded, error: loadFailure, refresh } = await useAsyncData(
   },
 )
 const product = computed(() => loaded.value?.product ?? null)
+const published = computed(() => product.value?.publications.some(entry => entry.organization_id === organizationId && entry.published) === true)
+const bookingOffering = computed(() => Boolean(product.value?.booking) || ['stay', 'experience', 'service'].includes(product.value?.kind ?? ''))
 const collections = computed(() => loaded.value?.collections ?? [])
 const stayEditor = computed(() => product.value?.kind === 'stay')
 const ARRIVAL_SECTIONS = ['arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'checkout-instructions', 'arrival-guide']
@@ -504,9 +557,47 @@ const stayPreviewUrl = computed(() => {
   url.searchParams.set('preview_token', token)
   return url.toString()
 })
+// Preview is a mode of the editor currently open, so its URL reconstructs the
+// same concern and closing never needs a second return-path model.
+const previewButton = useTemplateRef('previewButton')
+const previewRequested = computed(() => route.query.editMode === 'preview')
+provide(dashboardOverlayOpenKey, previewRequested)
+const previewViewport = computed(() => route.query.previewViewport === undefined ? 'desktop'
+  : route.query.previewViewport === 'desktop' || route.query.previewViewport === 'mobile' ? route.query.previewViewport : null)
+const previewNavigationError = ref('')
+const previewPath = computed(() => router.resolve({ path: route.path, query: { ...route.query, editMode: 'preview', previewViewport: 'desktop' }, hash: route.hash }).fullPath)
+const previewFailure = computed(() => previewNavigationError.value || loadError.value || (!stayEditor.value ? 'A listing preview requires a place to stay.'
+  : !stayPreviewUrl.value ? 'The listing’s website address or preview authorization could not be loaded.'
+    : !previewViewport.value ? 'Choose Desktop view or Mobile view to open this preview.' : ''))
+const previewOpen = computed({
+  get: () => previewRequested.value,
+  set: (open: boolean) => { if (!open) void closePreview() },
+})
+watch(() => route.fullPath, () => { previewNavigationError.value = '' })
+async function closePreview() {
+  try {
+    const result = await navigateTo({ path: route.path, query: { ...route.query, editMode: undefined, previewViewport: undefined }, hash: route.hash })
+    if (isNavigationFailure(result)) throw result
+  } catch (error) {
+    previewNavigationError.value = getErrorMessage(error, 'The listing preview could not be closed')
+  }
+}
+async function changePreviewViewport(value: string | number) {
+  if (value !== 'desktop' && value !== 'mobile') return
+  try {
+    const result = await navigateTo({ path: route.path, query: { ...route.query, previewViewport: value }, hash: route.hash }, { replace: true })
+    if (isNavigationFailure(result)) throw result
+  } catch (error) {
+    previewNavigationError.value = getErrorMessage(error, 'The preview device could not be changed')
+  }
+}
+function restorePreviewFocus() {
+  if (previewButton.value?.$el instanceof HTMLElement && previewButton.value.$el.isConnected) previewButton.value.$el.focus({ preventScroll: true })
+}
 const photoAssets = computed(() => product.value ? uniqueMediaAssets([...(product.value.image ? [product.value.image] : []), ...product.value.gallery]) : [])
 const stayPhotos = computed(() => photoAssets.value.map(mediaStillUrl).filter((url): url is string => Boolean(url)))
 const stayAmenityPreview = computed(() => form.stay_amenities.map(code => ({ code, ...STAY_AMENITIES[code] })).sort((left, right) => left.label.localeCompare(right.label)))
+const savedHouseRules = computed(() => product.value?.kind === 'stay' ? stayHouseRuleLines(product.value.details, value => formatTime(value, locale.value)) : [])
 // A product that is not there is not a page. A request that failed is a state
 // this level shows, because the product may well still exist.
 watchEffect(() => {
@@ -598,7 +689,9 @@ const draft = useState<ProductForm>(draftKey, () => ({
   image_asset_id: null as string | null,
   // A new place to stay starts from these settings; an existing one is loaded from its own.
   stay_location_id: '', check_in_time: '15:00', check_out_time: '11:00', max_guests: '', min_nights: '1', stay_team_id: null, stay_member_id: null,
-  stay_property_type_group: null, stay_property_type: null, stay_bedrooms: '', stay_beds: '', stay_bathrooms: '',
+  stay_property_type_group: null, stay_property_type: null,
+  stay_listing_type: null, stay_total_floors: '', stay_listing_floor: '', stay_year_built: '', stay_property_size: '', stay_property_size_unit: null,
+  stay_bedrooms: '', stay_beds: '', stay_bathrooms: '',
   stay_amenities: [] as StayAmenity[], stay_cancellation_policy: null, stay_long_term_cancellation_policy: null,
 }))
 const form = reactive(draft.value)
@@ -677,6 +770,12 @@ function loadForm(row: Product) {
   form.stay_member_id = stay ? stay.assigned_member_id : null
   form.stay_property_type_group = stay ? stay.property_type_group : null
   form.stay_property_type = stay ? stay.property_type : null
+  form.stay_listing_type = stay ? stay.listing_type : null
+  form.stay_total_floors = stay && stay.total_floors !== null ? String(stay.total_floors) : ''
+  form.stay_listing_floor = stay && stay.listing_floor !== null ? String(stay.listing_floor) : ''
+  form.stay_year_built = stay && stay.year_built !== null ? String(stay.year_built) : ''
+  form.stay_property_size = stay && stay.property_size !== null ? String(stay.property_size) : ''
+  form.stay_property_size_unit = stay ? stay.property_size_unit : null
   form.stay_bedrooms = stay && stay.bedrooms !== null ? String(stay.bedrooms) : ''
   form.stay_beds = stay && stay.beds !== null ? String(stay.beds) : ''
   form.stay_bathrooms = stay && stay.bathrooms !== null ? String(stay.bathrooms) : ''
@@ -773,6 +872,20 @@ function rebuildVariants() {
   })
 }
 
+const propertyTypeErrors = computed(() => {
+  const errors: Record<string, string> = {}
+  if ((form.stay_property_type_group || form.stay_property_type) && !(form.stay_property_type_group && form.stay_property_type && isStayPropertyType(form.stay_property_type_group, form.stay_property_type))) errors.property_type = 'Choose a property type in this group, or clear both.'
+  for (const [field, value] of [['total_floors', form.stay_total_floors], ['listing_floor', form.stay_listing_floor], ['year_built', form.stay_year_built]] as const) {
+    if (value.trim() && (!Number.isSafeInteger(Number(value)) || Number(value) < 1)) errors[field] = 'Enter a positive whole number.'
+  }
+  if (form.stay_total_floors.trim() && form.stay_listing_floor.trim() && Number(form.stay_listing_floor) > Number(form.stay_total_floors)) errors.listing_floor = 'The listing floor cannot exceed the number of floors in the building.'
+  const size = form.stay_property_size.trim()
+  if (size && (!Number.isFinite(Number(size)) || Number(size) <= 0)) errors.property_size = 'Enter a positive property size.'
+  if (size && !form.stay_property_size_unit) errors.property_size_unit = 'Choose a unit for the property size.'
+  if (!size && form.stay_property_size_unit) errors.property_size = 'Enter the property size, or clear its unit.'
+  return errors
+})
+
 const sectionValid = computed(() => {
   if (editorKey.value === 'kind') return PRODUCT_KINDS.includes(form.kind as ProductKind)
   if (editorKey.value === 'name') return Boolean(form.name.trim())
@@ -781,8 +894,7 @@ const sectionValid = computed(() => {
   if (editorKey.value === 'availability') return Number.isInteger(Number(form.min_nights)) && Number(form.min_nights) >= 1 && Number(form.min_nights) <= 365
   if (editorKey.value === 'arrival-time') return MINUTE_TIME_PATTERN.test(form.check_in_time) && MINUTE_TIME_PATTERN.test(form.check_out_time)
   if (editorKey.value === 'property-type') {
-    if (!form.stay_property_type && !form.stay_property_type_group) return true
-    return Boolean(form.stay_property_type && form.stay_property_type_group && isStayPropertyType(form.stay_property_type_group, form.stay_property_type))
+    return !Object.keys(propertyTypeErrors.value).length
   }
   if (editorKey.value === 'rooms') {
     const bedroomsStr = String(form.stay_bedrooms ?? '').trim()
@@ -886,8 +998,8 @@ function bookingSummary(): string {
 }
 
 function publicationSummary(): string {
-  const parts = [form.published ? 'Published' : 'Draft']
-  if (!form.active) parts.push(form.kind === 'experience' || form.kind === 'service' ? 'Bookings paused' : 'Orders paused')
+  const parts = [published.value ? 'Published' : 'Draft']
+  if (!product.value?.active) parts.push(bookingOffering.value ? 'Bookings paused' : 'Orders paused')
   return parts.join(' · ')
 }
 
@@ -916,17 +1028,17 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
   if (arrivalTab.value) {
     const home = arrivalHome.value
     if (!home || arrivalError.value) return []
-    const rules = product.value.details.house_rules
     return [{ id: 'arrival', items: [
-      { id: 'arrival-time', label: '', summary: `${form.check_in_time} · ${form.check_out_time}`, to: sectionPath('arrival-time') },
+      { id: 'arrival-time', label: '', summary: `${product.value.stay!.check_in_time} · ${product.value.stay!.check_out_time}`, to: sectionPath('arrival-time') },
       { id: 'directions', label: 'Directions', summary: home.directions || 'Add details', placeholder: !home.directions, to: sectionPath('directions') },
       { id: 'check-in-method', label: 'Check-in method', summary: home.check_in_method ? STAY_CHECK_IN_METHODS[home.check_in_method].label : 'Add details', placeholder: !home.check_in_method, to: sectionPath('check-in-method') },
       { id: 'wifi', label: 'Wifi details', summary: home.wifi_network || 'Add details', placeholder: !home.wifi_network, to: sectionPath('wifi') },
       { id: 'house-manual', label: 'House manual', summary: home.house_manual || 'Add details', placeholder: !home.house_manual, to: sectionPath('house-manual') },
-      { id: 'house-rules', label: 'House rules', summary: typeof rules === 'string' && rules ? rules : 'Add details', placeholder: !rules, to: sectionPath('house-rules') },
+      { id: 'house-rules', label: 'House rules', summary: savedHouseRules.value.join('\n') || 'Add details', placeholder: !savedHouseRules.value.length, to: sectionPath('house-rules') },
       { id: 'checkout-instructions', label: 'Checkout instructions', summary: home.checkout_instructions.length ? `${home.checkout_instructions.length} ${home.checkout_instructions.length === 1 ? 'instruction' : 'instructions'}` : 'Add details', placeholder: !home.checkout_instructions.length, to: sectionPath('checkout-instructions') },
     ] }]
   }
+  const authoredDetails = definitions.value.filter(definition => form.details[productDetailKey(definition)] !== undefined && !(STAY_DESCRIPTION_DETAIL_KEYS as readonly string[]).includes(definition.key) && !(STAY_HOUSE_RULE_DETAIL_KEYS as readonly string[]).includes(definition.key))
   // One flat list, the same for every kind: what the product is, what it costs,
   // how it is booked, and where it is offered and shown.
   return [{
@@ -948,10 +1060,12 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
             {
               id: 'property-type',
               label: 'Property type',
-              summary: form.stay_property_type
-                ? `${STAY_PROPERTY_TYPES[form.stay_property_type].label}${form.stay_property_type_group ? ` · ${STAY_PROPERTY_TYPE_GROUPS[form.stay_property_type_group].label}` : ''}`
-                : 'Choose property type',
-              placeholder: !form.stay_property_type,
+              summary: product.value.stay?.listing_type
+                ? `${STAY_LISTING_TYPES[product.value.stay.listing_type].label}${product.value.stay.property_type_group ? ` · ${STAY_PROPERTY_TYPE_GROUPS[product.value.stay.property_type_group].label}` : ''}`
+                : product.value.stay?.property_type
+                  ? `${STAY_PROPERTY_TYPES[product.value.stay.property_type].label}${product.value.stay.property_type_group ? ` · ${STAY_PROPERTY_TYPE_GROUPS[product.value.stay.property_type_group].label}` : ''}`
+                  : 'Choose property type',
+              placeholder: !product.value.stay?.listing_type && !product.value.stay?.property_type,
               to: sectionPath('property-type'),
             },
             {
@@ -980,8 +1094,8 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
               to: sectionPath('cancellation'),
             },
             { id: 'availability', label: 'Availability', summary: `${form.min_nights} ${Number(form.min_nights) === 1 ? 'night' : 'nights'} minimum`, to: sectionPath('availability') },
-            { id: 'guests', label: 'Number of guests', summary: `${form.max_guests} ${Number(form.max_guests) === 1 ? 'guest' : 'guests'}`, to: sectionPath('guests') },
-            { id: 'house-rules', label: 'House rules', summary: typeof product.value.details.house_rules === 'string' ? product.value.details.house_rules : 'Add details', placeholder: !product.value.details.house_rules, to: sectionPath('house-rules') },
+            { id: 'guests', label: 'Number of guests', summary: `${product.value.stay!.max_guests} ${product.value.stay!.max_guests === 1 ? 'guest' : 'guests'}`, to: sectionPath('guests') },
+            { id: 'house-rules', label: 'House rules', summary: savedHouseRules.value.join('\n') || 'Add details', placeholder: !savedHouseRules.value.length, to: sectionPath('house-rules') },
             { id: 'team', label: 'Looked after by', summary: stayTeamSummary(), to: sectionPath('team') },
           ]
         : []),
@@ -997,8 +1111,8 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       {
         id: 'attributes',
         label: 'Details',
-        summary: listSummary(definitions.value.filter(definition => form.details[productDetailKey(definition)] !== undefined && !(STAY_DESCRIPTION_DETAIL_KEYS as readonly string[]).includes(definition.key) && definition.key !== 'house_rules').map(definition => definition.name), 'None set'),
-        placeholder: !Object.keys(form.details).length,
+        summary: listSummary(authoredDetails.map(definition => definition.name), 'None set'),
+        placeholder: !authoredDetails.length,
         to: sectionPath('attributes'),
       },
       { id: 'kind', label: 'Type', summary: form.kind ? PRODUCT_KIND_LABELS[form.kind] : 'Choose a type', to: sectionPath('kind') },
@@ -1009,11 +1123,11 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       { id: 'collections', label: sectionLabels.collections, summary: collectionsSummary(), placeholder: !form.collection_ids.length, to: sectionPath('collections') },
       {
         id: 'publication',
-        label: stayEditor.value ? (form.published ? 'Listed' : 'Unlisted') : 'Status',
+        label: stayEditor.value ? (published.value ? 'Listed' : 'Unlisted') : 'Status',
         summary: stayEditor.value
-          ? (form.published ? (form.active ? 'Your listing is visible on your website.' : 'Your listing is visible. Bookings are paused.') : 'Your listing is hidden from your website. Publish it when you’re ready.')
+          ? (published.value ? (product.value?.active ? 'Your listing is visible on your website.' : 'Your listing is visible. Bookings are paused.') : 'Your listing is hidden from your website. Publish it when you’re ready.')
           : publicationSummary(),
-        status: stayEditor.value ? (form.published ? 'success' as const : 'neutral' as const) : undefined,
+        status: stayEditor.value ? (published.value ? 'success' as const : 'neutral' as const) : undefined,
         to: sectionPath('publication'),
       },
     ].sort((left, right) => rowRank(left.id) - rowRank(right.id)),
@@ -1124,7 +1238,31 @@ function catalogShapeOf() {
   return JSON.stringify(buildCatalog())
 }
 
-function payload() {
+function payload(concern?: ProductConcern) {
+  if (concern === 'arrival-time') {
+    if (!product.value?.stay) throw new Error('Arrival times require a place to stay.')
+    return { stay: { check_in_time: form.check_in_time, check_out_time: form.check_out_time } }
+  }
+  if (concern === 'house-rules' || concern === 'additional-rules') {
+    const stay = product.value?.stay
+    if (!stay) throw new Error('House rules require a place to stay.')
+    const keys = concern === 'additional-rules' ? ['house_rules'] : mainHouseRuleKeys
+    return {
+      details_mode: 'merge',
+      details: Object.fromEntries(keys.map(key => [key, form.details[key] ?? null])),
+      ...(concern === 'house-rules' && Number(form.max_guests) !== stay.max_guests ? { stay: { max_guests: Number(form.max_guests) } } : {}),
+    }
+  }
+  if (form.kind === 'stay' && !isNew.value && editorKey.value === 'property-type') return { stay: {
+    property_type_group: form.stay_property_type_group,
+    property_type: form.stay_property_type,
+    listing_type: form.stay_listing_type,
+    total_floors: form.stay_total_floors.trim() ? Number(form.stay_total_floors) : null,
+    listing_floor: form.stay_listing_floor.trim() ? Number(form.stay_listing_floor) : null,
+    year_built: form.stay_year_built.trim() ? Number(form.stay_year_built) : null,
+    property_size: form.stay_property_size.trim() ? Number(form.stay_property_size) : null,
+    property_size_unit: form.stay_property_size_unit,
+  } }
   // Options, variants and prices are restated only when they changed. A save
   // that renames a product says nothing about what it costs, and a patch that
   // omits variants leaves every offer exactly as it is.
@@ -1161,16 +1299,18 @@ function payload() {
       assigned_team_id: form.stay_team_id,
       property_type_group: form.stay_property_type_group || null,
       property_type: form.stay_property_type || null,
+      listing_type: form.stay_listing_type,
+      total_floors: form.stay_total_floors.trim() ? Number(form.stay_total_floors) : null,
+      listing_floor: form.stay_listing_floor.trim() ? Number(form.stay_listing_floor) : null,
+      year_built: form.stay_year_built.trim() ? Number(form.stay_year_built) : null,
+      property_size: form.stay_property_size.trim() ? Number(form.stay_property_size) : null,
+      property_size_unit: form.stay_property_size_unit,
       bedrooms: String(form.stay_bedrooms ?? '').trim() && !Number.isNaN(Number(form.stay_bedrooms)) ? Number(form.stay_bedrooms) : null,
       beds: String(form.stay_beds ?? '').trim() && !Number.isNaN(Number(form.stay_beds)) ? Number(form.stay_beds) : null,
       bathrooms: String(form.stay_bathrooms ?? '').trim() && !Number.isNaN(Number(form.stay_bathrooms)) ? Number(form.stay_bathrooms) : null,
       amenities: form.stay_amenities,
       cancellation_policy: form.stay_cancellation_policy || null,
       long_term_cancellation_policy: form.stay_long_term_cancellation_policy || null,
-    } } : {}),
-    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'arrival-time' ? { stay: {
-      check_in_time: form.check_in_time,
-      check_out_time: form.check_out_time,
     } } : {}),
     ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'guests' ? { stay: {
       max_guests: Number(form.max_guests),
@@ -1181,10 +1321,6 @@ function payload() {
     ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'team' ? { stay: {
       assigned_member_id: form.stay_member_id,
       assigned_team_id: form.stay_team_id,
-    } } : {}),
-    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'property-type' ? { stay: {
-      property_type_group: form.stay_property_type_group || null,
-      property_type: form.stay_property_type || null,
     } } : {}),
     ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'rooms' ? { stay: {
       bedrooms: String(form.stay_bedrooms ?? '').trim() && !Number.isNaN(Number(form.stay_bedrooms)) ? Number(form.stay_bedrooms) : null,
@@ -1221,13 +1357,39 @@ const pageTitle = computed(() => isNew.value ? newTitle.value : form.name || ite
 const saveLabel = computed(() => createSaveLabel.value ?? 'Save')
 
 const closeTo = ref<string | null>(null)
-async function save(target?: string, bookingConcern?: BookingConcern) {
+async function save(target?: string, concern?: ProductConcern) {
+  if (saving.value || saveDisabled.value) return
   closeTo.value = target ?? null
-  try { if (bookingConcern !== undefined) await commit(bookingConcern); else await saveCurrentEditor() } finally { closeTo.value = null }
+  try { if (concern !== undefined) await commit(concern); else await saveCurrentEditor() } finally { closeTo.value = null }
 }
 
-async function commit(bookingConcern?: BookingConcern) {
+async function commit(concern?: ProductConcern) {
   const id = locationId.value
+  const publicationDraft = concern === 'publication-visibility' ? form.published : concern === 'publication-availability' ? form.active : null
+  const propertyDraft = !isNew.value && editorKey.value === 'property-type' ? {
+    stay_property_type_group: form.stay_property_type_group,
+    stay_property_type: form.stay_property_type,
+    stay_listing_type: form.stay_listing_type,
+    stay_total_floors: form.stay_total_floors,
+    stay_listing_floor: form.stay_listing_floor,
+    stay_year_built: form.stay_year_built,
+    stay_property_size: form.stay_property_size,
+    stay_property_size_unit: form.stay_property_size_unit,
+  } : null
+  const arrivalTimeDraft = concern === 'arrival-time' ? { check_in_time: form.check_in_time, check_out_time: form.check_out_time } : null
+  const houseRulesDraft = concern === 'house-rules' || concern === 'additional-rules' || concern === 'arrival-time' && editorKey.value === 'house-rules' ? {
+    details: { ...form.details },
+    max_guests: Number(form.max_guests) !== product.value?.stay?.max_guests ? form.max_guests : null,
+  } : null
+  function restoreHouseRules(includeAdditional: boolean) {
+    if (!houseRulesDraft) return
+    for (const key of includeAdditional ? STAY_HOUSE_RULE_DETAIL_KEYS : mainHouseRuleKeys) {
+      const value = houseRulesDraft.details[key]
+      if (value === undefined) Reflect.deleteProperty(form.details, key)
+      else form.details[key] = value
+    }
+    if (houseRulesDraft.max_guests !== null) form.max_guests = houseRulesDraft.max_guests
+  }
   saving.value = true
   saveError.value = null
   try {
@@ -1262,26 +1424,39 @@ async function commit(bookingConcern?: BookingConcern) {
       await navigateTo(router.resolve({ path: `${catalogPath.value}/${created.product.id}`, query: { location_id: id ?? undefined } }).fullPath, { replace: true })
       return
     }
-    if (bookingConcern !== undefined) {
-      await saveBooking(bookingConcern)
+    if (concern === 'publication-visibility') {
+      await savePublication()
+    } else if (concern === 'publication-availability') {
+      await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, { method: 'PATCH', body: { active: form.active }, validate: isMutation })
+    } else if (concern === 'house-rules' || concern === 'additional-rules' || concern === 'arrival-time') {
+      await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, { method: 'PATCH', body: payload(concern), validate: isMutation })
+    } else if (concern !== undefined) {
+      await saveBooking(concern)
     } else {
       await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, {
         method: 'PATCH', body: payload(), validate: isMutation,
       })
-      if (editorKey.value === 'publication') await savePublication()
       if (editorKey.value === 'locations') await saveLocation()
       if (editorKey.value === 'collections') await saveCollections()
     }
     await reload()
+    if (concern === 'additional-rules' || concern === 'arrival-time') restoreHouseRules(false)
     // A booking write changes what the schedule is: its start times, whether the
     // product has a calendar at all, or the time zone an online one runs in.
-    if (bookingConcern !== undefined) await reloadSchedule()
+    if (concern !== undefined && concern !== 'publication-visibility' && concern !== 'publication-availability' && concern !== 'house-rules' && concern !== 'additional-rules' && concern !== 'arrival-time') await reloadSchedule()
     await (closeTo.value ? navigateTo(closeTo.value) : level.close())
   } catch (error) {
     saveError.value = getErrorMessage(error, `Failed to save ${itemLabel.value.toLowerCase()}`)
-    if (error instanceof ApiClientError && (error.data.committed === true || (isRecord(error.data.data) && error.data.data.committed === true))) {
+    if (arrivalTimeDraft || houseRulesDraft || propertyDraft || publicationDraft !== null || error instanceof ApiClientError && (error.data.committed === true || (isRecord(error.data.data) && error.data.data.committed === true))) {
       try { await reload() } catch (readError) { saveError.value += ` ${getErrorMessage(readError, 'The saved listing could not be read again')}` }
     }
+    // A failed response may follow a committed write. Saved summaries
+    // re-read it, while the failed leaf retains the choice it submitted.
+    if (concern === 'publication-visibility' && publicationDraft !== null) form.published = publicationDraft
+    if (concern === 'publication-availability' && publicationDraft !== null) form.active = publicationDraft
+    if (propertyDraft) Object.assign(form, propertyDraft)
+    if (arrivalTimeDraft) Object.assign(form, arrivalTimeDraft)
+    restoreHouseRules(concern === 'additional-rules')
   } finally {
     saving.value = false
   }
@@ -1383,8 +1558,19 @@ async function saveSchedule(weekday: number) {
 }
 
 /** A cancelled leaf puts the loaded product back before it closes. */
-function revert() {
+function revert(concern?: 'additional-rules' | 'arrival-time') {
   saveError.value = null
+  if (concern === 'arrival-time') {
+    form.check_in_time = product.value?.stay?.check_in_time ?? ''
+    form.check_out_time = product.value?.stay?.check_out_time ?? ''
+    return
+  }
+  if (concern === 'additional-rules') {
+    const value = product.value?.details.house_rules
+    if (value === undefined) Reflect.deleteProperty(form.details, 'house_rules')
+    else form.details.house_rules = value
+    return
+  }
   photoError.value = null
   revertArrival()
   if (product.value) loadForm(product.value)
@@ -1640,6 +1826,8 @@ useSeoMeta({ title: () => `${pageTitle.value} | KrabiClaw Dashboard`, robots: 'n
 provide(productEditorKey, {
   form,
   product,
+  published,
+  bookingOffering,
   itemLabel,
   currency,
   organizationId,
@@ -1649,7 +1837,7 @@ provide(productEditorKey, {
   organizationLocationsError: computed(() => locationsError.value ? getErrorMessage(locationsError.value, 'Locations could not be loaded') : null),
   collections,
   sectionPath,
-  definitions,
+  definitions: computed(() => definitions.value.filter(field => !(STAY_HOUSE_RULE_DETAIL_KEYS as readonly string[]).includes(field.key))),
   isNew,
   loadError,
   sectionLabels,
@@ -1658,6 +1846,7 @@ provide(productEditorKey, {
   photoError,
   saveLabel,
   saveDisabled,
+  propertyTypeErrors,
   setPrimaryImage,
   galleryRows,
   addGalleryRow,

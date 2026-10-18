@@ -3,7 +3,7 @@ import { organizationTool, type McpToolDefinition } from './shared'
 import { NOT_HANDLED, requiredString, type McpExecutorContext } from './execution'
 import { CHANNEL_PUSH_SCHEMA } from '~/shared/channel-push'
 import { STAY_BOOKED_POLICIES } from '~/shared/stay-cancellation'
-import { STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_TYPE_GROUPS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
+import { STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, STAY_LISTING_TYPES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_SIZE_UNITS, STAY_PROPERTY_TYPE_GROUPS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
 import { memberAccessPrincipal } from '~/server/utils/member-access'
 import { cancelStay, createStay, deleteStayPayment, getStay, listStays, readStayCalendar, recordStayPayment, setStayNights, stayAccessFor, updateStay, STAY_CHANNELS, STAY_PAYMENT_METHODS, STAY_STATUSES } from '~/server/domain/stays'
 
@@ -40,6 +40,12 @@ const nullableCode = (vocabulary: Record<string, unknown>, description: string) 
 export const STAY_LISTING_SCHEMA = {
   property_type_group: nullableCode(STAY_PROPERTY_TYPE_GROUPS, `Airbnb's property group: ${Object.entries(STAY_PROPERTY_TYPE_GROUPS).map(([code, group]) => `${code} (${group.label}: ${group.types.join(', ')})`).join('; ')}. Set with property_type, both or neither.`),
   property_type: nullableCode(STAY_PROPERTY_TYPES, 'Airbnb property type, one the property_type_group offers. Null with property_type_group when not said.'),
+  listing_type: nullableCode(STAY_LISTING_TYPES, 'Whether guests book the entire place, a private room or a shared room. Null when not said.'),
+  total_floors: { type: ['integer', 'null'], minimum: 1, maximum: Number.MAX_SAFE_INTEGER, description: 'Total floors in the property; null when not said.' },
+  listing_floor: { type: ['integer', 'null'], minimum: 1, maximum: Number.MAX_SAFE_INTEGER, description: 'The listing’s floor, counted from 1. Cannot exceed total_floors when both are known; null when not said.' },
+  year_built: { type: ['integer', 'null'], minimum: 1, maximum: Number.MAX_SAFE_INTEGER, description: 'Year the property was built; null when not said.' },
+  property_size: { type: ['number', 'null'], exclusiveMinimum: 0, description: 'Property area in property_size_unit. Size and unit must both be set or both null.' },
+  property_size_unit: nullableCode(STAY_PROPERTY_SIZE_UNITS, 'The unit of property_size. Size and unit must both be set or both null.'),
   bedrooms: { type: ['integer', 'null'], minimum: 0, maximum: 50, description: 'Bedrooms; 0 is a studio.' },
   beds: { type: ['integer', 'null'], minimum: 1, maximum: 50 },
   bathrooms: { type: ['number', 'null'], minimum: 0, maximum: 50, multipleOf: 0.5, description: 'Whole and half baths, such as 1.5.' },

@@ -10,7 +10,7 @@ import { executeRefund, requirePayment, type Payment } from '~/server/domain/pay
 import { paymentsStripe } from '~/server/utils/stripe-connect'
 import { isRecord } from '~/server/utils/type-guards'
 import { isStayCheckInMethod, STAY_ARRIVAL_TEXT_LIMITS, STAY_CHECKOUT_DETAILS_LIMIT } from '~/shared/stay-arrival'
-import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
+import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
 import { createProduct, getProduct, setProductPublication, updateProduct } from '~/server/utils/product-management'
 import type { Product, UpdateProductInput } from '~/server/types/products'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -154,6 +154,12 @@ export interface StayHome {
   longitude: number | null
   property_type_group: StayPropertyTypeGroup | null
   property_type: StayPropertyType | null
+  listing_type: StayListingType | null
+  total_floors: number | null
+  listing_floor: number | null
+  year_built: number | null
+  property_size: number | null
+  property_size_unit: StayPropertySizeUnit | null
   bedrooms: number | null
   beds: number | null
   bathrooms: number | null
@@ -331,7 +337,8 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
 async function stayHomesWhere(db: DbClient, organizationId: string, productId: string | null, scope: { sql: string; params: string[] }): Promise<StayHome[]> {
   const rows = await queryAll<Record<string, unknown>>(db, `
     SELECT p.id AS product_id, p.name, p.description, c.location_id, l.timezone, l.address, l.latitude, l.longitude, o.default_currency,
-           c.check_in_time, c.check_out_time, c.max_guests, c.min_nights, c.property_type_group, c.property_type, c.bedrooms, c.beds, c.bathrooms, c.amenities,
+           c.check_in_time, c.check_out_time, c.max_guests, c.min_nights, c.property_type_group, c.property_type,
+           c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
            c.cancellation_policy, c.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
            c.directions, c.house_manual, c.checkout_instructions, c.assigned_member_id, c.assigned_team_id,
            COALESCE((SELECT pp.published FROM product_publications pp WHERE pp.organization_id = c.organization_id AND pp.product_id = c.product_id), 0) AS published,
@@ -363,6 +370,9 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       address: stayAddress(row.address), latitude: nullableNumber(row.latitude), longitude: nullableNumber(row.longitude),
       property_type_group: nullableText(row.property_type_group) as StayPropertyTypeGroup | null,
       property_type: nullableText(row.property_type) as StayPropertyType | null,
+      listing_type: nullableText(row.listing_type) as StayListingType | null,
+      total_floors: nullableNumber(row.total_floors), listing_floor: nullableNumber(row.listing_floor), year_built: nullableNumber(row.year_built),
+      property_size: nullableNumber(row.property_size), property_size_unit: nullableText(row.property_size_unit) as StayPropertySizeUnit | null,
       bedrooms: nullableNumber(row.bedrooms), beds: nullableNumber(row.beds), bathrooms: nullableNumber(row.bathrooms),
       amenities: JSON.parse(String(row.amenities)) as StayAmenity[],
       cancellation_policy: nullableText(row.cancellation_policy) as StayCancellationPolicy | null,
@@ -502,7 +512,7 @@ function homeAddress(body: Record<string, unknown>, prefix: string): Pick<NewSta
 }
 
 /** What the home is and offers: product stay settings, checked by the product writer. */
-const LISTING_FIELDS = ['property_type_group', 'property_type', 'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy'] as const
+const LISTING_FIELDS = ['property_type_group', 'property_type', 'listing_type', 'total_floors', 'listing_floor', 'year_built', 'property_size', 'property_size_unit', 'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy'] as const
 /** The arrival guide: private columns only this module reads and writes. */
 const ARRIVAL_FIELDS = [...Object.keys(STAY_ARRIVAL_TEXT_LIMITS) as Array<keyof typeof STAY_ARRIVAL_TEXT_LIMITS>, 'check_in_method', 'checkout_instructions'] as const
 const LOCATION_FIELDS = ['address', 'latitude', 'longitude'] as const

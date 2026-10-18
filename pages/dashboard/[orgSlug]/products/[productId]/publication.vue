@@ -1,6 +1,7 @@
 <template>
-  <DashboardIndexPanel id="product-publication" :title="p.sectionLabels['publication']">
-    <EditorNavigationList :groups="groups" :active-item="level.child.value" />
+  <DashboardIndexPanel id="product-publication" :title="isStay ? 'Listing status' : p.sectionLabels.publication" column="leaf">
+    <UAlert v-if="p.loadError.value || p.saveError.value" color="error" variant="soft" :description="p.loadError.value || p.saveError.value || ''" class="mb-6" />
+    <EditorNavigationList v-if="p.product.value && !p.loadError.value" :groups="groups" :active-item="level.child.value" :variant="isStay ? 'cards' : 'rows'" />
   </DashboardIndexPanel>
 </template>
 
@@ -10,8 +11,9 @@ import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 definePageMeta({ layout: 'dashboard' })
 const p = inject(productEditorKey)!
 const level = useRouteLevel()
+const isStay = computed(() => p.product.value?.kind === 'stay')
 const groups = computed(() => [{ id: 'website', items: [
-  { id: 'visibility', label: 'Show on website', summary: p.form.published ? 'Visible to customers' : 'Hidden from customers', to: `${level.path.value}/visibility` },
-  { id: 'availability', label: p.form.bookable || p.form.kind === 'service' ? 'Accept bookings' : 'Accept orders', summary: p.form.active ? 'Customers can book or order' : 'Paused — the page can stay visible', to: `${level.path.value}/availability` },
+  { id: 'visibility', label: isStay.value ? 'Listing status' : 'Show on website', summary: isStay.value ? (p.published.value ? 'Listed · Visible on your website' : 'Unlisted · Hidden from your website') : p.published.value ? 'Visible to customers' : 'Hidden from customers', status: isStay.value ? (p.published.value ? 'success' as const : 'neutral' as const) : undefined, to: p.sectionPath('publication/visibility') },
+  { id: 'availability', label: p.bookingOffering.value ? 'Accept bookings' : 'Accept orders', summary: p.product.value?.active ? (p.bookingOffering.value ? 'Accepting new bookings' : 'Accepting new orders') : (p.bookingOffering.value ? 'Bookings paused' : 'Orders paused'), to: p.sectionPath('publication/availability') },
 ] }])
 </script>

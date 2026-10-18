@@ -1,6 +1,6 @@
 <template>
   <UDrawer
-    v-if="!pane"
+    v-if="!pane && !overlayOpen"
     :open="drawerOpen"
     :title="title"
     :description="lead"
@@ -93,7 +93,7 @@
 
 <script setup lang="ts">
 import { isNavigationFailure } from 'vue-router'
-import { dashboardColumnWidths, dashboardGutterClass, dashboardLeafParentKey } from './dashboardPanelContext'
+import { dashboardColumnWidths, dashboardGutterClass, dashboardLeafParentKey, dashboardOverlayOpenKey } from './dashboardPanelContext'
 import { getErrorMessage } from '~/utils/errors'
 
 /*
@@ -134,6 +134,9 @@ const emit = defineEmits<{ save: []; cancel: [] }>()
 const level = useRouteLevel()
 const router = useRouter()
 const pane = useDashboardPane()
+// An ancestor's fullscreen view owns the modal boundary. Keep this editor in its
+// detached teleport target until that mode closes, including across a resize.
+const overlayOpen = inject(dashboardOverlayOpenKey, null)
 const drawerOpen = ref(true)
 const drawerTarget = useTemplateRef<HTMLDivElement>('drawerTarget')
 // Reka hides the siblings of every live region while a modal mounts. Keep the
