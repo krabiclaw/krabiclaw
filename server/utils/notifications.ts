@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { HTTPError } from 'nitro'
+import { z } from 'zod'
 import { guestAccountUrl } from '~/shared/guest-account'
 import { formatCalendarDate, formatTime, formatTimestamp, localPartsAt } from '~/utils/timezone'
 import { getGuestRequest, requestSummary, type cancelBookingRequest } from '~/server/domain/requests'
@@ -50,9 +51,9 @@ import { createCanonicalNotification, type NotificationSeverity } from '~/server
 import { buildOwnerThreadInboxUrl, getPlatformDomain, platformOrigin, resolveDashboardSlugs } from '~/server/utils/dashboard-notification-links'
 import { reviewEditorPath } from '~/server/utils/dashboard-links'
 import { createDeliveryReceipt, isDeliverySent, recordDeliveryOutcome } from '~/server/domain/guest-threads/deliveries'
-import { appendEntry, findEntryByDedupeKey } from '~/server/domain/guest-threads/entries'
+import { appendEntry, findEntryByDedupeKey, parseEntryPayload } from '~/server/domain/guest-threads/entries'
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
-import type { GuestThreadDeliveryPurpose } from '~/server/domain/guest-threads/types'
+import type { GuestThreadDeliveryPurpose, GuestThreadDeliveryRow } from '~/server/domain/guest-threads/types'
 import { getPersistedSourceLocale } from '~/server/utils/localization'
 import { indexStoredPublicLocalizations, type StoredPublicLocalizationRow } from '~/server/utils/public-localization'
 import { platformLocale } from '~/shared/platform-locales'
@@ -1369,56 +1370,82 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
 export async function notifyStayCancelled(env: NotificationEnv, db: DbClient, organizationId: string, stayId: string, by: 'guest' | 'host', refundMinor: number) {
   const { readCheckoutStay } = await import('~/server/domain/stays')
   const stay = await readCheckoutStay(db, organizationId, stayId)
-  const organization = await queryFirst<{ name: string | null }>(db, 'SELECT name FROM organization WHERE id = ?', [organizationId])
-  if (!organization || !stay.request_id || !stay.guest_email || !stay.guest_name) throw new Error('A stay paid on the site needs its organization, guest conversation, guest name and email')
+  if (!stay.request_id) throw new Error('A stay paid on the site needs its guest conversation')
   if (!isCurrencyCode(stay.currency)) throw new Error('The stay has an unsupported currency')
   const home = stay.home
-  const studio = organizationName({ organizationId, organizationName: organization.name })
-  const [replyTo, inboxUrl, hero, logoUrl, guest, contact] = await Promise.all([
-    buildReplyToAddress(env, 'stay', stay.request_id),
-    buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: home.location_id, threadId: stay.request_id }),
-    messageHero(db, organizationId, { type: 'product', id: home.product_id }),
-    organizationLogo(db, organizationId),
-    guestPresentation(db, { organizationId, organizationName: studio, productId: home.product_id, productTitle: home.name, locationId: home.location_id }),
-    resolveLocationContact(db, organizationId, home.location_id),
-  ])
-  const nights = Math.round((Date.parse(`${stay.check_out_date}T00:00:00Z`) - Date.parse(`${stay.check_in_date}T00:00:00Z`)) / 86_400_000)
-  const day = (date: string, locale: string) => formatCalendarDate(date, locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
-  const guestMessage = guestBookingCancelledMessage({
-    locale: guest.locale, guestName: stay.guest_name, organizationName: guest.organizationName, organizationLogoUrl: logoUrl, productTitle: guest.productTitle ?? home.name,
-    date: `${day(stay.check_in_date, guest.locale)} – ${day(stay.check_out_date, guest.locale)}`, time: formatTime(home.check_in_time, guest.locale),
-    partySize: String(stay.adults + stay.children), contactPhone: contact.contactPhone ?? null, contactEmail: contact.contactEmail ?? null, wasConfirmed: true,
-  })
-  const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain: getPlatformDomain(env) })
-  const entry = await appendEntry(db, {
-    threadId: stay.request_id, kind: 'operation', actorKind: by === 'guest' ? 'guest' : 'member', channel: 'web', body: guestEmail.text,
-    eventName: `stay.${by}_cancelled`, payloadJson: { subject: guestMessage.title, refund_minor: refundMinor }, dedupeKey: `stay-cancellation:${stayId}`,
-  })
-  const threadContext = { guestThreadId: stay.request_id, sourceEntryId: entry.id }
-  const payload = {
-    stay_id: stay.id, guest_name: stay.guest_name, email: stay.guest_email, home: home.name, check_in_date: stay.check_in_date, check_out_date: stay.check_out_date,
-    party_size: String(stay.adults + stay.children), organization_name: studio, deep_link: inboxUrl ?? '',
+  const dedupeKey = `stay-cancellation:${stayId}`
+  let entry = await findEntryByDedupeKey(db, dedupeKey)
+  if (!entry) {
+    const organization = await queryFirst<{ name: string | null }>(db, 'SELECT name FROM organization WHERE id = ?', [organizationId])
+    if (!organization || !stay.guest_email || !stay.guest_name) throw new Error('A stay paid on the site needs its organization, guest name and email')
+    const studio = organizationName({ organizationId, organizationName: organization.name })
+    const [replyTo, inboxUrl, hero, logoUrl, guest, contact] = await Promise.all([
+      buildReplyToAddress(env, 'stay', stay.request_id),
+      buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: home.location_id, threadId: stay.request_id }),
+      messageHero(db, organizationId, { type: 'product', id: home.product_id }),
+      organizationLogo(db, organizationId),
+      guestPresentation(db, { organizationId, organizationName: studio, productId: home.product_id, productTitle: home.name, locationId: home.location_id }),
+      resolveLocationContact(db, organizationId, home.location_id),
+    ])
+    const nights = Math.round((Date.parse(`${stay.check_out_date}T00:00:00Z`) - Date.parse(`${stay.check_in_date}T00:00:00Z`)) / 86_400_000)
+    const day = (date: string, locale: string) => formatCalendarDate(date, locale, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+    const guestMessage = guestBookingCancelledMessage({
+      locale: guest.locale, guestName: stay.guest_name, organizationName: guest.organizationName, organizationLogoUrl: logoUrl, productTitle: guest.productTitle ?? home.name,
+      date: `${day(stay.check_in_date, guest.locale)} – ${day(stay.check_out_date, guest.locale)}`, time: formatTime(home.check_in_time, guest.locale),
+      partySize: String(stay.adults + stay.children), contactPhone: contact.contactPhone ?? null, contactEmail: contact.contactEmail ?? null, wasConfirmed: true,
+    })
+    const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain: getPlatformDomain(env) })
+    const guestTitle = `${guestMessage.title} — ${guestMessage.preheader?.split(' · ')[0] ?? home.name}`
+    entry = await appendEntry(db, {
+      threadId: stay.request_id, kind: 'operation', actorKind: by === 'guest' ? 'guest' : 'member', channel: 'web', body: guestEmail.text,
+      eventName: `stay.${by}_cancelled`, dedupeKey,
+      payloadJson: { subject: guestTitle, refund_minor: refundMinor, location_id: home.location_id, member_ids: home.assigned_member_id ? [home.assigned_member_id] : [],
+        email: { to: stay.guest_email, fromName: studio, replyTo, html: guestEmail.html, text: guestEmail.text },
+        owner: {
+          guestName: stay.guest_name, guestEmail: stay.guest_email, guestPhone: stay.guest_phone, homeName: home.name,
+          checkIn: `${day(stay.check_in_date, 'en-US')} · ${formatTime(home.check_in_time, 'en-US')}`, checkOut: `${day(stay.check_out_date, 'en-US')} · ${formatTime(home.check_out_time, 'en-US')}`,
+          nights: String(nights), guests: String(stay.adults + stay.children), refund: formatMinorAmount(refundMinor, stay.currency, 'en-US'),
+          organizationName: studio, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
+        },
+      },
+    })
   }
-  const guestTitle = `${guestMessage.title} — ${guestMessage.preheader?.split(' · ')[0] ?? home.name}`
+  if (entry.request_id !== stay.request_id || entry.kind !== 'operation' || entry.actor_kind !== (by === 'guest' ? 'guest' : 'member') || entry.event_name !== `stay.${by}_cancelled`) throw new Error('Stay cancellation notification has a different ledger fact')
+  const stored = parseEntryPayload(entry)
+  if (stored?.refund_minor !== refundMinor) throw new Error('Stay cancellation notification differs from its recorded refund')
+  // A host cancellation has one required notice. Guest cancellations also
+  // resume the host alert: a sent guest email cannot prove that alert completed.
+  if (by === 'host') {
+    const receipts = await queryAll<GuestThreadDeliveryRow>(db, 'SELECT * FROM guest_thread_deliveries WHERE entry_id = ?', [entry.id])
+    if (receipts.some(receipt => receipt.channel === 'email' && receipt.purpose === 'guest_acknowledgement') && receipts.every(isDeliverySent)) return
+  }
+  if (!isRecord(stored?.email)) throw new Error('Stay cancellation notification has no recorded email content to retry')
+  const recorded = z.object({
+    subject: z.string().min(1), refund_minor: z.number().int().nonnegative(), location_id: z.string().min(1), member_ids: z.array(z.string().min(1)),
+    email: z.object({ to: z.string().min(1), fromName: z.string().min(1), replyTo: z.string().nullable(), html: z.string().min(1), text: z.string().min(1) }),
+    owner: z.object({
+      guestName: z.string(), guestEmail: z.string(), guestPhone: z.string().nullable(), homeName: z.string(), checkIn: z.string(), checkOut: z.string(),
+      nights: z.string(), guests: z.string(), refund: z.string(), organizationName: z.string(), heroImageUrl: z.string().nullable(), replyUrl: z.string().nullable(),
+    }),
+  }).parse(stored)
+  if (recorded.refund_minor !== refundMinor || entry.body !== recorded.email.text) throw new Error('Stay cancellation notification differs from its recorded refund or email')
+  const ownerMessage = stayCancelledMessage(recorded.owner)
+  const threadContext = { guestThreadId: stay.request_id, sourceEntryId: entry.id }
+  const payload = { stay_id: stay.id, organization_name: recorded.email.fromName, deep_link: recorded.owner.replyUrl ?? '' }
   const results = await Promise.allSettled([
     ...(by === 'guest' ? [notifyOwner(env, db, {
-      organizationId, organizationName: studio, locationId: home.location_id, template: 'stay_cancelled', payload, notificationSource: { threadId: threadContext.guestThreadId, entryId: threadContext.sourceEntryId },
-      memberIds: home.assigned_member_id ? [home.assigned_member_id] : [],
-      ...((message) => ({ title: message.title, message }))(stayCancelledMessage({
-        guestName: stay.guest_name, guestEmail: stay.guest_email, guestPhone: stay.guest_phone, homeName: home.name,
-        checkIn: `${day(stay.check_in_date, 'en-US')} · ${formatTime(home.check_in_time, 'en-US')}`, checkOut: `${day(stay.check_out_date, 'en-US')} · ${formatTime(home.check_out_time, 'en-US')}`,
-        nights: String(nights), guests: String(stay.adults + stay.children), refund: formatMinorAmount(refundMinor, stay.currency, 'en-US'),
-        organizationName: studio, heroImageUrl: hero?.imageUrl ?? null, replyUrl: inboxUrl,
-      })),
+      organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, template: 'stay_cancelled', payload,
+      notificationSource: { threadId: threadContext.guestThreadId, entryId: threadContext.sourceEntryId },
+      memberIds: recorded.member_ids, title: ownerMessage.title, message: ownerMessage,
     })] : []),
     sendEmailNotification(env, db, {
-      organizationId, organizationName: studio, locationId: home.location_id, to: stay.guest_email, replyTo,
-      template: 'stay_customer_cancelled', title: guestTitle, payload,
-      email: { subject: guestTitle, html: guestEmail.html, text: guestEmail.text },
-      delivery: threadDelivery(threadContext, 'guest_acknowledgement', 'email', 'stay_customer_cancelled', stay.guest_email),
+      organizationId, organizationName: recorded.email.fromName, locationId: recorded.location_id, to: recorded.email.to, replyTo: recorded.email.replyTo,
+      template: 'stay_customer_cancelled', title: recorded.subject, payload,
+      email: { subject: recorded.subject, html: recorded.email.html, text: recorded.email.text },
+      delivery: threadDelivery(threadContext, 'guest_acknowledgement', 'email', 'stay_customer_cancelled', recorded.email.to),
     }),
   ])
-  raiseSettledFailures('notifyStayCancelled', `stayId ${stayId}`, results)
+  raiseSettledFailures('notifyStayCancelled', `stayId ${stayId}`, results, by === 'guest' ? ['notifyOwner', 'sendEmailNotification'] : ['sendEmailNotification'])
 }
 
 export async function notifyBookingCancelled(

@@ -18,6 +18,18 @@
       @remove="remove"
       @move="move"
     >
+      <template #item="{ item }">
+        <div class="flex items-center gap-4">
+          <span class="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-elevated">
+            <img v-if="item.image" :src="item.image" alt="" class="size-full object-cover" loading="lazy" decoding="async">
+            <UIcon v-else :name="item.icon" class="size-6 text-muted" aria-hidden="true" />
+          </span>
+          <div class="min-w-0">
+            <p class="truncate text-sm font-medium text-highlighted">{{ item.title }}</p>
+            <p v-if="item.summary" class="mt-1 line-clamp-2 text-sm text-muted">{{ item.summary }}</p>
+          </div>
+        </div>
+      </template>
     </DashboardListEditor>
 
     <template v-if="dirty" #footer>
@@ -30,7 +42,7 @@
 import DashboardListEditor from '~/components/dashboard/DashboardListEditor.vue'
 import { getErrorMessage } from '~/utils/errors'
 import { tenantPageBlockSummary } from '~/utils/tenant-page-editor'
-import { tenantPageBlockLabel } from '~/utils/tenant-page-block-sections'
+import { TENANT_PAGE_BLOCK_REGISTRY } from '~/utils/tenant-page-blocks'
 
 const props = defineProps<{ organizationId: string; pageId: string }>()
 
@@ -43,7 +55,10 @@ const errorMessage = ref('')
 
 const listItems = computed(() => draft.value.blocks.map(block => ({
   id: block.id,
-  title: tenantPageBlockLabel(block.type),
+  title: TENANT_PAGE_BLOCK_REGISTRY[block.type].label,
+  icon: TENANT_PAGE_BLOCK_REGISTRY[block.type].icon,
+  image: block.media.find(media => media.slot === 'media' || media.slot === 'gallery')?.thumbnail_url
+    || block.media.find(media => media.kind === 'image' && (media.slot === 'media' || media.slot === 'gallery'))?.public_url,
   summary: tenantPageBlockSummary(block),
   to: `${level.path.value}/${block.id}`,
 })))

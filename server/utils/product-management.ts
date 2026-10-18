@@ -1,4 +1,4 @@
-import { isStayAmenity, stayCodes, STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, isStayPropertyType, type StayAmenity, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
+import { isStayAmenity, stayCodes, STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayAmenity, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { ASSIGNED_SERVICE_SQL } from '~/server/utils/member-access'
 import type { ProductBookingSetupInput, SessionAvailability } from '~/server/utils/availability'
@@ -13,8 +13,8 @@ import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organiz
 import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, type TenantPageEditorInput } from '~/server/utils/content/pages'
 import { loadOrganizationTemplate } from '~/server/utils/content/publishing'
 import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
-import { requireChannelPush } from '~/server/integrations/channex/ari'
-import type { ChannelPush } from '~/shared/channel-push'
+import { completeChannelPush, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
+import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
@@ -29,7 +29,7 @@ import {
   type PriceInput,
   type PriceSelection,
 } from '~/shared/prices'
-import { assertProductKind, validateProductDetails, ProductDetailError, PRICING_NOTE_HANDLE, PRODUCT_KINDS, type ProductDetailValue, type ProductKind } from '~/shared/product-details'
+import { assertProductKind, patchProductDetails, validateProductDetails, ProductDetailError, PRICING_NOTE_HANDLE, PRODUCT_KINDS, type ProductDetailValue, type ProductKind } from '~/shared/product-details'
 import type { CatalogCounts } from '~/utils/product-presentation'
 import type {
   Collection,
@@ -252,7 +252,8 @@ async function hydrate(db: DbClient, organizationId: string, products: Product[]
     // The page each product owns: the source row that carries its product_id.
     { query: `SELECT product_id, id, path, title FROM content_documents
       WHERE organization_id = ? AND row_role = 'root' AND kind = 'page' AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
-    { query: `SELECT product_id, location_id, check_in_time, check_out_time, max_guests, min_nights, property_type_group, property_type, bedrooms, beds, bathrooms, amenities,
+    { query: `SELECT product_id, location_id, check_in_time, check_out_time, max_guests, min_nights, property_type_group, property_type,
+        listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit, bedrooms, beds, bathrooms, amenities,
         cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id FROM product_stay_configs
       WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
   ], { operation: 'Hydrate products' })
@@ -447,7 +448,7 @@ export async function listOrganizationProducts(db: DbClient, input: ProductListI
   const requireReadiness = input.publishedOnly === true && (input.bookableOnly || !input.kind || input.kind === 'experience' || input.kind === 'service' || input.kind === 'stay')
   const window = requireReadiness ? undefined : input.window
   const selection = `FROM products p
-    JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
+    LEFT JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
     WHERE p.organization_id = ? AND (? = 0 OR (${PUBLIC_PRODUCT_SQL}))${input.kind ? ' AND p.kind = ?' : ''}${input.featured === undefined ? '' : " AND COALESCE(json_extract(p.details_json, '$.featured'), 0) = ?"}${input.assignedUserId ? ` AND (${ASSIGNED_SERVICE_SQL})` : ''}`
   const params = [input.organizationId, input.publishedOnly ? 1 : 0,
     ...(input.kind ? [input.kind] : []),
@@ -563,7 +564,7 @@ export function resolveVariantPrice(variant: ProductVariant, selection: PriceSel
 interface Actor { actorId: string }
 
 /** A write receipt, never a field on a stored or read Product. */
-export type ProductMutation = Product & { channel_push: ChannelPush | null }
+export type ProductMutation = Product & { channel_push: SuccessfulChannelPush | null }
 
 export function slugCandidate(base: string, attempt: number): string {
   const normalized = base.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, PRODUCT_LIMITS.slug)
@@ -774,8 +775,22 @@ function planStayListing(stay: Record<string, unknown>): Pick<ProductStayConfig,
     invalidStayField('amenities', 'stay.amenities must list amenity codes from the catalog, each once')
   }
   const chosen = new Set(amenities as StayAmenity[])
+  const totalFloors = stayCount(stay, 'total_floors', 1, Number.MAX_SAFE_INTEGER, 1)
+  const listingFloor = stayCount(stay, 'listing_floor', 1, Number.MAX_SAFE_INTEGER, 1)
+  if (totalFloors !== null && listingFloor !== null && listingFloor > totalFloors) invalidStayField('listing_floor', 'stay.listing_floor cannot exceed stay.total_floors')
+  const propertySize = stay.property_size ?? null
+  if (propertySize !== null && (typeof propertySize !== 'number' || !Number.isFinite(propertySize) || propertySize <= 0)) invalidStayField('property_size', 'stay.property_size must be a finite positive number, or null')
+  const propertySizeUnit = stayCode(stay, 'property_size_unit', stayCodes(STAY_PROPERTY_SIZE_UNITS))
+  if (propertySize === null && propertySizeUnit !== null) invalidStayField('property_size', 'Provide stay.property_size with its unit, or clear both')
+  if (propertySize !== null && propertySizeUnit === null) invalidStayField('property_size_unit', 'Provide stay.property_size_unit with its size, or clear both')
   return {
     ...stayPropertyType(stay),
+    listing_type: stayCode(stay, 'listing_type', stayCodes(STAY_LISTING_TYPES)),
+    total_floors: totalFloors,
+    listing_floor: listingFloor,
+    year_built: stayCount(stay, 'year_built', 1, Number.MAX_SAFE_INTEGER, 1),
+    property_size: propertySize as number | null,
+    property_size_unit: propertySizeUnit,
     bedrooms: stayCount(stay, 'bedrooms', 0, 50, 1),
     beds: stayCount(stay, 'beds', 1, 50, 1),
     bathrooms: stayCount(stay, 'bathrooms', 0, 50, 0.5),
@@ -790,6 +805,12 @@ function storedStayListing(row: Row): Pick<ProductStayConfig, StayListingField> 
   return {
     property_type_group: row.property_type_group === null ? null : String(row.property_type_group) as StayPropertyTypeGroup,
     property_type: row.property_type === null ? null : String(row.property_type) as StayPropertyType,
+    listing_type: row.listing_type === null ? null : String(row.listing_type) as StayListingType,
+    total_floors: row.total_floors === null ? null : Number(row.total_floors),
+    listing_floor: row.listing_floor === null ? null : Number(row.listing_floor),
+    year_built: row.year_built === null ? null : Number(row.year_built),
+    property_size: row.property_size === null ? null : Number(row.property_size),
+    property_size_unit: row.property_size_unit === null ? null : String(row.property_size_unit) as StayPropertySizeUnit,
     bedrooms: row.bedrooms === null ? null : Number(row.bedrooms),
     beds: row.beds === null ? null : Number(row.beds),
     bathrooms: row.bathrooms === null ? null : Number(row.bathrooms),
@@ -1020,7 +1041,7 @@ function productWrites(
   // Prices are rewritten only by a caller that actually supplied variants.
   // Saving a description restates nothing about money, and must not retire and
   // remint every offer a product has.
-  options: { writePrices: boolean; priceIds?: ReadonlySet<string>; writeOptions?: boolean; variantIds?: ReadonlySet<string>; expectedUpdatedAt?: string; writeStay?: boolean } = { writePrices: true },
+  options: { writePrices: boolean; priceIds?: ReadonlySet<string>; writeOptions?: boolean; variantIds?: ReadonlySet<string>; expectedUpdatedAt?: string; stayFields?: readonly (keyof ProductStayConfig)[] } = { writePrices: true },
 ): BatchQuery[] {
   const upsert = mode === 'upsert'
   const writes: BatchQuery[] = [{
@@ -1044,7 +1065,14 @@ function productWrites(
 
   // Stay settings are written when created or when an edit names them, so an
   // unrelated save never restates settings someone else changed.
-  if (planned.stay && options.writeStay !== false) {
+  if (planned.stay && (options.stayFields === undefined || options.stayFields.length)) {
+    const columns = [
+      'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'property_type_group', 'property_type',
+      'listing_type', 'total_floors', 'listing_floor', 'year_built', 'property_size', 'property_size_unit',
+      'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy', 'assigned_member_id', 'assigned_team_id',
+    ] as const satisfies readonly (keyof ProductStayConfig)[]
+    const assignments = columns.filter(column => options.stayFields === undefined || options.stayFields.includes(column))
+      .map(column => `${column} = excluded.${column}`)
     // The location relationship first: the stay settings name it, so a home's one
     // location is the relationship its config holds.
     writes.push({
@@ -1055,16 +1083,15 @@ function productWrites(
       params: [organizationId, planned.id, planned.stay.location_id, now, now, actor.actorId, actor.actorId],
     }, {
       query: `INSERT INTO product_stay_configs (product_id, organization_id, location_id, check_in_time, check_out_time, max_guests, min_nights,
-                 property_type_group, property_type, bedrooms, beds, bathrooms, amenities, cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id, created_at, updated_at, created_by, updated_by)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT (product_id) DO UPDATE SET check_in_time = excluded.check_in_time, check_out_time = excluded.check_out_time,
-                 max_guests = excluded.max_guests, min_nights = excluded.min_nights, property_type_group = excluded.property_type_group, property_type = excluded.property_type, bedrooms = excluded.bedrooms,
-                 beds = excluded.beds, bathrooms = excluded.bathrooms, amenities = excluded.amenities, cancellation_policy = excluded.cancellation_policy,
-                 long_term_cancellation_policy = excluded.long_term_cancellation_policy, assigned_member_id = excluded.assigned_member_id,
-                 assigned_team_id = excluded.assigned_team_id, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+                 property_type_group, property_type, listing_type, total_floors, listing_floor, year_built, property_size, property_size_unit,
+                 bedrooms, beds, bathrooms, amenities, cancellation_policy, long_term_cancellation_policy, assigned_member_id, assigned_team_id, created_at, updated_at, created_by, updated_by)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT (product_id) DO UPDATE SET ${[...assignments, 'updated_at = excluded.updated_at', 'updated_by = excluded.updated_by'].join(', ')}
                WHERE product_stay_configs.organization_id = excluded.organization_id AND product_stay_configs.location_id = excluded.location_id`,
       params: [planned.id, organizationId, planned.stay.location_id, planned.stay.check_in_time, planned.stay.check_out_time,
-        planned.stay.max_guests, planned.stay.min_nights, planned.stay.property_type_group, planned.stay.property_type, planned.stay.bedrooms, planned.stay.beds, planned.stay.bathrooms,
+        planned.stay.max_guests, planned.stay.min_nights, planned.stay.property_type_group, planned.stay.property_type,
+        planned.stay.listing_type, planned.stay.total_floors, planned.stay.listing_floor, planned.stay.year_built, planned.stay.property_size, planned.stay.property_size_unit,
+        planned.stay.bedrooms, planned.stay.beds, planned.stay.bathrooms,
         JSON.stringify(planned.stay.amenities), planned.stay.cancellation_policy, planned.stay.long_term_cancellation_policy,
         planned.stay.assigned_member_id, planned.stay.assigned_team_id, now, now, actor.actorId, actor.actorId],
     })
@@ -1484,6 +1511,9 @@ async function planProductUpdate(db: DbClient, input: {
     if (at < 0) variants.push(mergedVariant)
     else variants[at] = mergedVariant
   }
+  let details: Product['details']
+  try { details = patchProductDetails(patch.kind ?? current.kind, current.details, patch.details, patch.details_mode) }
+  catch (error) { if (!(error instanceof ProductDetailError)) throw error; invalid(error.message) }
   const merged: CreateProductInput = {
     kind: patch.kind ?? current.kind,
     name: patch.name ?? current.name,
@@ -1499,7 +1529,7 @@ async function planProductUpdate(db: DbClient, input: {
       values: option.values.map(value => ({ id: value.id, value: value.value, sort_order: value.sort_order })),
     })),
     variants,
-    details: { featured: current.details.featured ?? false, ...(patch.details ?? current.details) },
+    details,
     // The location a home is at is fixed: a patch naming another one is refused, never merged.
     stay: current.stay ? { ...current.stay, ...patch.stay, location_id: current.stay.location_id } : patch.stay as CreateProductInput['stay'],
   }
@@ -1542,8 +1572,7 @@ async function planProductUpdate(db: DbClient, input: {
     return !before || variant.name !== before.name || variant.sku !== before.sku || variant.active !== before.active || variant.sort_order !== before.sort_order
   }).map(variant => variant.id))
   const writes: BatchQuery[] = [
-    // Selections and named details are rebuilt wholesale: nothing
-    // references them, so replacing them is simpler and cannot drift.
+    // Option selections are rebuilt from the validated variant plan.
     { query: 'DELETE FROM product_variant_option_values WHERE organization_id = ? AND product_id = ?', params: [organizationId, productId] },
     // Only explicit replacement removes prices; merged omissions remain in the plan.
     ...(writesPrices
@@ -1561,8 +1590,10 @@ async function planProductUpdate(db: DbClient, input: {
     { query: 'DELETE FROM product_option_values WHERE organization_id = ? AND product_id = ? AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, productId, keptValues] },
     { query: 'DELETE FROM product_options WHERE organization_id = ? AND product_id = ? AND id NOT IN (SELECT value FROM json_each(?))', params: [organizationId, productId, keptOptions] },
     ...productWrites(organizationId, planned, input.actor, input.now, 'upsert', {
-      writePrices: writesPrices, priceIds, writeOptions: patch.options !== undefined, variantIds, writeStay: patch.stay !== undefined,
-      expectedUpdatedAt: planned.kind === 'experience' && !planned.order_url ? current.updated_at : undefined,
+      writePrices: writesPrices, priceIds, writeOptions: patch.options !== undefined, variantIds,
+      stayFields: Object.keys(patch.stay ?? {}) as (keyof ProductStayConfig)[],
+      // A narrow edit still restates the Product it read, including its details.
+      expectedUpdatedAt: current.updated_at,
     }),
     ...(guardPublication ? [{
       query: `UPDATE products SET updated_at=CASE WHEN NOT EXISTS (SELECT 1 FROM product_publications WHERE organization_id=? AND product_id=? AND published=1) ${readiness?.allocation ? `OR (${readiness.allocation.query})` : ''} THEN updated_at ELSE NULL END WHERE organization_id=? AND id=?`,
@@ -1670,14 +1701,16 @@ export async function updateProduct(db: DbClient, input: {
   const env = input.env
   const reprice = input.patch.variants !== undefined || input.patch.stay?.min_nights !== undefined
   const complete = async (product: Product): Promise<ProductMutation> => {
-    let channelPush: ChannelPush | null = null
+    let channelPush: ChannelPushCompletion = null
     if (product.kind === 'stay' && reprice && !input.deferStayNightPush) {
       if (!env) throw new HTTPError({ statusCode: 503, message: 'The saved home requires its organization environment to update the channel', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', committed: true, product_id: product.id, updated_at: product.updated_at } })
       const { pushStayHomeNights } = await import('~/server/domain/stays')
       channelPush = await pushStayHomeNights(db, env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product)
     }
-    await publishStayProducts(env, [product])
-    return { ...product, channel_push: channelPush }
+    return completeChannelPush(channelPush, { product_id: product.id, updated_at: product.updated_at }, async () => {
+      await publishStayProducts(env, [product])
+      return product
+    })
   }
   const dedupeKey = input.idempotencyKey ? `product-update:${input.organizationId}:${input.productId}:${input.idempotencyKey}` : null
   const requestHash = dedupeKey ? await creationRequestHash({ patch: input.patch, booking: input.booking?.data ?? null }) : null
@@ -2231,18 +2264,30 @@ export async function reconcileProducts(db: DbClient, input: {
   })
   const reprice = new Set(input.products.flatMap(product => product.product_id && (product.variants !== undefined || product.stay?.min_nights !== undefined) ? [product.product_id] : []))
   const complete = async (products: Product[]): Promise<ProductMutation[]> => {
-    const results: ProductMutation[] = []
+    const results: Array<{ product: Product; channelPush: ChannelPushCompletion }> = []
     for (const product of products) {
-      let channelPush: ChannelPush | null = null
+      let channelPush: ChannelPushCompletion = null
       if (product.kind === 'stay' && reprice.has(product.id)) {
-        if (!input.env) throw new HTTPError({ statusCode: 503, message: 'The saved home requires its organization environment to update the channel', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', committed: true, product_id: product.id, updated_at: product.updated_at } })
-        const { pushStayHomeNights } = await import('~/server/domain/stays')
-        channelPush = await pushStayHomeNights(db, input.env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product)
+        if (!input.env) channelPush = new Error('The saved home requires its organization environment to update the channel')
+        else {
+          const { pushStayHomeNights } = await import('~/server/domain/stays')
+          channelPush = await pushStayHomeNights(db, input.env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product)
+        }
       }
-      results.push({ ...product, channel_push: channelPush })
+      results.push({ product, channelPush })
     }
-    await publishStayProducts(input.env, products)
-    return results
+    const publication = publishStayProducts(input.env, products)
+    const completed = await Promise.allSettled(results.map(({ product, channelPush }) => completeChannelPush(channelPush,
+      { product_id: product.id, updated_at: product.updated_at }, async () => { await publication; return product })))
+    const failures = [...new Set(completed.flatMap(result => result.status === 'rejected' ? [result.reason] : []))]
+    if (failures.length === 1) throw failures[0]
+    const channelFailed = failures.some(error => error instanceof HTTPError && error.data?.code === 'CHANNEL_PUSH_FAILED')
+    if (failures.length) throw new HTTPError({ statusCode: 503,
+      message: failures.map(error => error instanceof Error ? error.message : String(error)).join(' '),
+      data: { code: channelFailed ? 'CHANNEL_PUSH_FAILED' : 'POST_WRITE_COMPLETION_FAILED', field: channelFailed ? 'channel_push' : 'completion', committed: true,
+        failures: failures.map(error => error instanceof HTTPError ? error.data : { reason: error instanceof Error ? error.message : String(error) }) },
+      cause: new AggregateError(failures, 'The saved catalog has incomplete channel updates') })
+    return completed.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
   }
   const dedupeKey = input.idempotencyKey ? `catalog-reconcile:${input.organizationId}:${input.idempotencyKey}` : null
   const requestHash = dedupeKey ? await creationRequestHash({ products: input.products, deactivateMissing: input.deactivateMissing ?? false }) : null
@@ -2283,7 +2328,9 @@ export async function reconcileProducts(db: DbClient, input: {
 export interface MenuSectionInput {
   collection_id?: string
   name: string
-  items: Array<Omit<UpdateProductInput, 'kind' | 'variants' | 'variants_mode'> & {
+  items: Array<Omit<UpdateProductInput, 'kind' | 'variants' | 'variants_mode' | 'details' | 'details_mode'> & {
+    /** Menu reconciliation supplies a complete detail map when it changes details. */
+    details?: CreateProductInput['details']
     product_id?: string
     name: string
     variants?: Array<Omit<ProductVariantPatchInput, 'prices_mode'>>
@@ -2350,10 +2397,13 @@ export async function updateMenu(db: DbClient, input: {
     organizationEventQuery({ organizationId, locationId, actorId: actor.actorId, eventType: 'product.updated', entityType: 'menu', entityId: locationId, dedupeKey, metadata: { request_hash: requestHash, product_count: ids.length, section_count: sections.length } }))
   if (writes.length > MAX_D1_BATCH_STATEMENTS) invalid('This menu exceeds one atomic update; submit its sections in separate updates')
   try { await executeBatch(db, writes, { operation: 'Update public menu' }) } catch (error) {
-    if (!isUniqueDedupeConflict(error)) throw error
-    const completed = await readCreationRecord(db, dedupeKey)
-    if (completed?.requestHash !== requestHash) throw error
-    return read(true)
+    const stale = /NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))
+    if (stale || isUniqueDedupeConflict(error)) {
+      const completed = await readCreationRecord(db, dedupeKey)
+      if (completed?.requestHash === requestHash) return read(true)
+    }
+    if (stale) throw new HTTPError({ statusCode: 409, statusMessage: 'The menu changed while you were editing. Nothing was changed; read its current state and retry.', data: { code: 'PRODUCT_UPDATE_CONFLICT' }, cause: error })
+    throw error
   }
   return read(false)
 }

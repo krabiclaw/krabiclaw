@@ -12,7 +12,10 @@ import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { listGuestThreads, updateThreadProjectionIfLatestEntry } from '../../server/domain/guest-threads/repository.ts'
 import { requestBookingChange, respondToBookingChange } from '../../server/domain/guest-threads/booking-changes.ts'
-import { notifyContactSubmitted, notifyFinancialNotification } from '../../server/utils/notifications.ts'
+import { notifyContactSubmitted, notifyFinancialNotification, notifyStayCancelled } from '../../server/utils/notifications.ts'
+import { createProduct, getProduct, updateProduct } from '../../server/utils/product-management.ts'
+import { cancelStay, createStay, getStay } from '../../server/domain/stays.ts'
+import { organizationAdapter } from '../../server/utils/member-access.ts'
 import { createCanonicalNotification } from '../../server/utils/notification-center.ts'
 import { buildNotificationVisibilityFilter, type NotificationVisibilityPrincipal } from '../../server/utils/notification-access.ts'
 import { acknowledgeNotification } from '../../server/utils/notification-acknowledgement.ts'
@@ -323,6 +326,95 @@ test('a replayed status email sends its recorded content and refuses a supersede
       .bind((await getDeliveryById(db, deliveryId))!.entry_id).first<{ body: string; payload_json: string }>()
     assert.equal(entry!.body, guestBody)
     assert.equal(JSON.parse(entry!.payload_json).subject, original.subject)
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('a failed stay cancellation email retries its recorded content after display edits and sends once', async (t) => {
+  const runtime = new Miniflare({ workers: [{ config: {
+    name: 'stay-cancellation-delivery-proof', compatibilityDate: '2024-11-01',
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
+    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stay-cancellation-delivery-proof', exportName: 'Hub' } },
+  } }] })
+  const requests: Array<{ body: { subject: string; text: string; html: string }; idempotencyKey: string | null }> = []
+  let reject = true
+  t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
+    assert.equal(url, 'https://api.resend.com/emails')
+    requests.push({ body: JSON.parse(String(init.body)), idempotencyKey: new Headers(init.headers).get('idempotency-key') })
+    return reject
+      ? Response.json({ name: 'application_error', message: 'Cancellation delivery rejected' }, { status: 503 })
+      : Response.json({ id: 'stay-cancellation-delivered' })
+  })
+  try {
+    const db = await runtime.getD1Database('DB')
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+      NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'provider', WHATSAPP_DELIVERY_MODE: 'log_only',
+      STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>' }
+    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    for (const statement of [
+      "INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone, vertical, theme_id) VALUES ('org-stay-cancel', 'Original Retreat', 'stay-cancel', 'stay-cancel', 'USD', 'Asia/Bangkok', 'lodging', 'saya-theme-v1')",
+      "INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('stay-cancel-en', 'org-stay-cancel', 'en', 1, 'published')",
+      "INSERT INTO user (id, name, email) VALUES ('owner-stay-cancel', 'Owner', 'owner@proof.example')",
+      "INSERT INTO member (id, organizationId, userId, role) VALUES ('member-stay-cancel', 'org-stay-cancel', 'owner-stay-cancel', 'owner')",
+      "INSERT INTO business_locations (id, organization_id, slug, title, timezone, status) VALUES ('location-stay-cancel', 'org-stay-cancel', 'retreat', 'Retreat', 'Asia/Bangkok', 'active')",
+    ]) await db.prepare(statement).run()
+    const access = { organizationId: 'org-stay-cancel', actorId: 'owner-stay-cancel', manage: true }
+    const home = await createProduct(db, { env, organizationId: access.organizationId, actor: { actorId: access.actorId }, product: {
+      kind: 'stay', name: 'Original Cabin', variants: [{ name: 'Original Cabin', prices: [{ unit_amount: 15000, currency: 'USD' }] }],
+      stay: { location_id: 'location-stay-cancel', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: null },
+    } })
+    const stay = await createStay(db, env, access, { product_id: home.id, idempotency_key: 'stay-cancellation-email', check_in_date: '2098-10-01', check_out_date: '2098-10-03',
+      adults: 2, guest_name: 'Ana', guest_email: 'guest@provider-proof.com', total_minor: 30000 })
+    await cancelStay(db, env, access, stay.id, { expected_version: stay.version })
+    assert.equal((await getStay(db, access, stay.id)).status, 'cancelled')
+    await assert.rejects(notifyStayCancelled(env, db, access.organizationId, stay.id, 'host', 0), (error: AggregateError) => {
+      assert(error instanceof AggregateError)
+      assert.match(error.message, /sendEmailNotification/u)
+      assert.equal(error.errors.length, 1)
+      assert.match(error.errors[0].message, /RESEND_REJECTED: .*Cancellation delivery rejected/u)
+      return true
+    })
+    assert.equal(requests.length, 1)
+    const original = requests[0]!
+    assert.match(original.body.subject, /Original Cabin/u)
+    for (const body of [original.body.text, original.body.html]) {
+      assert.match(body, /Original Retreat/u)
+      assert.match(body, /Original Cabin/u)
+      assert.match(body, /2098/u)
+    }
+    const entry = await db.prepare('SELECT * FROM activity_entries WHERE dedupe_key = ?').bind(`stay-cancellation:${stay.id}`).first<{ id: string; body: string; payload_json: string; event_name: string }>()
+    assert(entry)
+    assert.equal(entry.event_name, 'stay.host_cancelled')
+    assert.equal(entry.body, original.body.text)
+    const recorded = JSON.parse(entry.payload_json)
+    assert.equal(recorded.subject, original.body.subject)
+    assert.deepEqual({ to: recorded.email.to, fromName: recorded.email.fromName, html: recorded.email.html, text: recorded.email.text }, {
+      to: 'guest@provider-proof.com', fromName: 'Original Retreat', html: original.body.html, text: original.body.text,
+    })
+    const receipts = await db.prepare('SELECT id FROM guest_thread_deliveries WHERE entry_id = ?').bind(entry.id).all<{ id: string }>()
+    assert.equal(receipts.results.length, 1)
+    const deliveryId = receipts.results[0]!.id
+    assert.equal(original.idempotencyKey, deliveryId)
+    assert.equal((await getDeliveryById(db, deliveryId))!.status, 'failed')
+    assert.match((await getDeliveryById(db, deliveryId))!.error!, /Cancellation delivery rejected/u)
+
+    await updateProduct(db, { env, organizationId: access.organizationId, productId: home.id, actor: { actorId: access.actorId }, patch: { name: 'Renamed Cabin' } })
+    await (await organizationAdapter(env)).updateOrganization(access.organizationId, { name: 'Renamed Retreat' })
+    assert.equal((await getProduct(db, access.organizationId, home.id)).name, 'Renamed Cabin')
+    assert.equal(await db.prepare('SELECT name FROM organization WHERE id = ?').bind(access.organizationId).first('name'), 'Renamed Retreat')
+    reject = false
+    await notifyStayCancelled(env, db, access.organizationId, stay.id, 'host', 0)
+    assert.deepEqual(requests, [original, original])
+    const settled = await getDeliveryById(db, deliveryId)
+    assert.deepEqual({ status: settled!.status, error: settled!.error, providerMessageId: settled!.provider_message_id }, { status: 'sent', error: null, providerMessageId: 'stay-cancellation-delivered' })
+    await notifyStayCancelled(env, db, access.organizationId, stay.id, 'host', 0)
+    assert.equal(requests.length, 2)
+    assert.deepEqual(await db.prepare('SELECT * FROM activity_entries WHERE dedupe_key = ?').bind(`stay-cancellation:${stay.id}`).first(), entry)
+    assert.equal(await db.prepare("SELECT count(*) AS count FROM activity_entries WHERE request_id = ? AND event_name = 'stay.host_cancelled'").bind(stay.request_id).first('count'), 1)
+    assert.equal(await db.prepare('SELECT count(*) AS count FROM guest_thread_deliveries WHERE entry_id = ?').bind(entry.id).first('count'), 1)
+    assert.equal((await getStay(db, access, stay.id)).version, stay.version + 1)
   } finally {
     await runtime.dispose()
   }

@@ -12,23 +12,11 @@ import {
   type McpLocationSummary,
   type McpOrganizationSummary,
 } from "~/server/utils/mcp-context";
-import { sniffMediaMimeType, VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_IMAGE_BYTES, R2_IMAGE_MIME_TYPES, RESOLVED_MEDIA_IMAGE_TYPES } from "~/server/utils/media-mime";
+import { sniffMediaMimeType, VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES } from "~/server/utils/media-mime";
 import { assertMarkdownSize, decodeMarkdownText, resolveMarkdownMimeType } from "~/server/utils/markdown-document";
-import { assertCloudflareImagesConfigured } from "~/server/utils/cloudflare-images";
 import { findOrganizationById } from '~/server/utils/member-access'
 import { publicTenantVisibilitySql } from '~/server/utils/public-base'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
-
-/**
- * Resolves the upload provider for an image based on content type and Cloudflare Images config.
- * Returns "cloudflare_r2" for R2-compatible formats (e.g., AVIF), otherwise undefined (requires Cloudflare Images).
- * Throws if Cloudflare Images is required but not configured.
- */
-export function resolveImageUploadProvider(contentType: string, env: ApiRecord): "cloudflare_r2" | "cloudflare_images" | undefined {
-  const provider = R2_IMAGE_MIME_TYPES.has(contentType) ? "cloudflare_r2" : undefined;
-  if (!provider) assertCloudflareImagesConfigured(env);
-  return provider as "cloudflare_r2" | "cloudflare_images" | undefined;
-}
 
 export async function requireActiveImageAsset(
   db: D1Database,

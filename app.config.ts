@@ -80,7 +80,10 @@ export default defineAppConfig({
           card: { item: 'w-full rounded-xl border-default has-data-[state=checked]:ring-2 has-data-[state=checked]:ring-inset has-data-[state=checked]:ring-(color:--ui-text-highlighted)' }
         }
       },
-      compoundVariants: [{ variant: 'card', class: { item: 'p-5 has-data-[state=checked]:border-transparent has-data-[state=checked]:bg-transparent' } }],
+      compoundVariants: [
+        { variant: 'card', class: { item: 'p-5 has-data-[state=checked]:border-transparent has-data-[state=checked]:bg-transparent' } },
+        { indicator: 'hidden', class: { icon: 'size-8 text-highlighted' } }
+      ],
       defaultVariants: { size: 'lg', color: 'neutral' }
     },
     // A label is the 16px line a row reads; anything under it is 14px muted.

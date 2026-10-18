@@ -107,6 +107,7 @@ import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
 import { formatCalendarDate, localDateAt } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
+import { ApiClientError } from '~/utils/api-clients'
 
 const props = defineProps<{
   stayId: string
@@ -213,6 +214,14 @@ async function run(key: string, action: () => Promise<unknown>, failure: string)
     if (error.value) throw error.value
   } catch (cause) {
     actionError.value = getErrorMessage(cause, failure)
+    if (cause instanceof ApiClientError && (cause.data.committed === true || (isRecord(cause.data.data) && cause.data.data.committed === true))) {
+      try {
+        await refresh()
+        if (error.value) throw error.value
+      } catch (readError) {
+        actionError.value += ` ${getErrorMessage(readError, 'The saved stay could not be reloaded.')}`
+      }
+    }
   } finally {
     busy.value = null
   }
@@ -258,7 +267,17 @@ async function cancel() {
   } catch (cause) {
     const approval = isRecord(cause) && isRecord(cause.data) && isRecord(cause.data.data) && typeof cause.data.data.financial_approval_url === 'string' ? cause.data.data.financial_approval_url : null
     if (approval) await navigateTo(approval)
-    else actionError.value = getErrorMessage(cause, 'The stay could not be cancelled')
+    else {
+      actionError.value = getErrorMessage(cause, 'The stay could not be cancelled')
+      if (cause instanceof ApiClientError && (cause.data.committed === true || (isRecord(cause.data.data) && cause.data.data.committed === true))) {
+        try {
+          await refresh()
+          if (error.value) throw error.value
+        } catch (readError) {
+          actionError.value += ` ${getErrorMessage(readError, 'The saved stay could not be reloaded.')}`
+        }
+      }
+    }
   } finally {
     busy.value = null
   }

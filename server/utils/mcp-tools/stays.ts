@@ -1,8 +1,9 @@
+import { STAY_ARRIVAL_TEXT_LIMITS, STAY_CHECKOUT_DETAILS_LIMIT } from '~/shared/stay-arrival'
 import { organizationTool, type McpToolDefinition } from './shared'
 import { NOT_HANDLED, requiredString, type McpExecutorContext } from './execution'
 import { CHANNEL_PUSH_SCHEMA } from '~/shared/channel-push'
 import { STAY_BOOKED_POLICIES } from '~/shared/stay-cancellation'
-import { STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_TYPE_GROUPS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
+import { STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, STAY_LISTING_TYPES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_SIZE_UNITS, STAY_PROPERTY_TYPE_GROUPS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
 import { memberAccessPrincipal } from '~/server/utils/member-access'
 import { cancelStay, createStay, deleteStayPayment, getStay, listStays, readStayCalendar, recordStayPayment, setStayNights, stayAccessFor, updateStay, STAY_CHANNELS, STAY_PAYMENT_METHODS, STAY_STATUSES } from '~/server/domain/stays'
 
@@ -28,7 +29,7 @@ const stayProperties = {
   version: { type: 'integer' }, created_at: text, updated_at: text,
 }
 const stay = { type: 'object', properties: stayProperties, required: Object.keys(stayProperties) }
-const channelPush = { ...CHANNEL_PUSH_SCHEMA, description: "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it." }
+const channelPush = { ...CHANNEL_PUSH_SCHEMA, description: "What the home's connected channel took from this change: null when no channel push is needed; pushed only when delivery completed. A failed channel update returns a committed error." }
 const onlinePayment = { type: ['object', 'null'], description: 'The Stripe payment the guest made when booking this stay on the site; null for a stay booked any other way. paid_minor counts it net of refunds.',
   properties: { payment_id: text, state: { type: 'string', enum: ['pending', 'captured', 'failed', 'recovery', 'refunded'] }, currency: text, amount_minor: { type: 'integer' }, captured_minor: { type: 'integer' }, refunded_minor: { type: 'integer' }, receipt_url: nullableText, created_at: text },
   required: ['payment_id', 'state', 'currency', 'amount_minor', 'captured_minor', 'refunded_minor', 'receipt_url', 'created_at'] }
@@ -39,6 +40,12 @@ const nullableCode = (vocabulary: Record<string, unknown>, description: string) 
 export const STAY_LISTING_SCHEMA = {
   property_type_group: nullableCode(STAY_PROPERTY_TYPE_GROUPS, `Airbnb's property group: ${Object.entries(STAY_PROPERTY_TYPE_GROUPS).map(([code, group]) => `${code} (${group.label}: ${group.types.join(', ')})`).join('; ')}. Set with property_type, both or neither.`),
   property_type: nullableCode(STAY_PROPERTY_TYPES, 'Airbnb property type, one the property_type_group offers. Null with property_type_group when not said.'),
+  listing_type: nullableCode(STAY_LISTING_TYPES, 'Whether guests book the entire place, a private room or a shared room. Null when not said.'),
+  total_floors: { type: ['integer', 'null'], minimum: 1, maximum: Number.MAX_SAFE_INTEGER, description: 'Total floors in the property; null when not said.' },
+  listing_floor: { type: ['integer', 'null'], minimum: 1, maximum: Number.MAX_SAFE_INTEGER, description: 'The listing’s floor, counted from 1. Cannot exceed total_floors when both are known; null when not said.' },
+  year_built: { type: ['integer', 'null'], minimum: 1, maximum: Number.MAX_SAFE_INTEGER, description: 'Year the property was built; null when not said.' },
+  property_size: { type: ['number', 'null'], exclusiveMinimum: 0, description: 'Property area in property_size_unit. Size and unit must both be set or both null.' },
+  property_size_unit: nullableCode(STAY_PROPERTY_SIZE_UNITS, 'The unit of property_size. Size and unit must both be set or both null.'),
   bedrooms: { type: ['integer', 'null'], minimum: 0, maximum: 50, description: 'Bedrooms; 0 is a studio.' },
   beds: { type: ['integer', 'null'], minimum: 1, maximum: 50 },
   bathrooms: { type: ['number', 'null'], minimum: 0, maximum: 50, multipleOf: 0.5, description: 'Whole and half baths, such as 1.5.' },
@@ -46,15 +53,15 @@ export const STAY_LISTING_SCHEMA = {
   cancellation_policy: nullableCode(STAY_CANCELLATION_POLICIES, 'Policy shown to guests for stays under 28 nights. It does not refund by itself.'),
   long_term_cancellation_policy: nullableCode(STAY_LONG_TERM_CANCELLATION_POLICIES, 'Policy shown to guests for stays of 28 nights or more.'),
 }
-const checkoutInstruction = { type: 'object', properties: { task: { type: 'string', enum: Object.keys(STAY_CHECKOUT_TASKS) }, details: { type: ['string', 'null'], minLength: 1, maxLength: 500, description: 'Required for additional.' } }, required: ['task', 'details'], additionalProperties: false }
+const checkoutInstruction = { type: 'object', properties: { task: { type: 'string', enum: Object.keys(STAY_CHECKOUT_TASKS) }, details: { type: ['string', 'null'], minLength: 1, maxLength: STAY_CHECKOUT_DETAILS_LIMIT, description: 'Required for additional.' } }, required: ['task', 'details'], additionalProperties: false }
 /** The private arrival guide: managers and assigned members read it; no public page carries it. */
 export const STAY_ARRIVAL_SCHEMA = {
   check_in_method: nullableCode(STAY_CHECK_IN_METHODS, 'How guests get in.'),
-  check_in_instructions: { type: ['string', 'null'], minLength: 1, maxLength: 5000 },
-  wifi_network: { type: ['string', 'null'], minLength: 1, maxLength: 100 },
-  wifi_password: { type: ['string', 'null'], minLength: 1, maxLength: 100 },
-  directions: { type: ['string', 'null'], minLength: 1, maxLength: 5000 },
-  house_manual: { type: ['string', 'null'], minLength: 1, maxLength: 5000 },
+  check_in_instructions: { type: ['string', 'null'], minLength: 1, maxLength: STAY_ARRIVAL_TEXT_LIMITS.check_in_instructions },
+  wifi_network: { type: ['string', 'null'], minLength: 1, maxLength: STAY_ARRIVAL_TEXT_LIMITS.wifi_network },
+  wifi_password: { type: ['string', 'null'], minLength: 1, maxLength: STAY_ARRIVAL_TEXT_LIMITS.wifi_password },
+  directions: { type: ['string', 'null'], minLength: 1, maxLength: STAY_ARRIVAL_TEXT_LIMITS.directions },
+  house_manual: { type: ['string', 'null'], minLength: 1, maxLength: STAY_ARRIVAL_TEXT_LIMITS.house_manual },
   checkout_instructions: { type: 'array', items: checkoutInstruction, description: 'What guests do before leaving, in order, each task once; replaces the whole list.' },
 }
 const homeAddress = { type: ['object', 'null'], properties: { address: text, city: nullableText, state: nullableText, country: { type: 'string', pattern: '^[A-Z]{2}$' }, zip_code: nullableText }, required: ['address', 'city', 'state', 'country', 'zip_code'] }
@@ -102,7 +109,7 @@ export const STAYS_TOOLS: McpToolDefinition[] = [
     required: ['stay_id', 'amount_minor', 'method', 'paid_on', 'idempotency_key'], outputSchema: { type: 'object', properties: { stay: stayDetail }, required: ['stay'] } }),
   organizationTool({ name: 'delete_stay_payment', domain: 'stays', minimumRole: 'admin', description: 'Remove a payment recorded by mistake from a stay.',
     inputSchema: { stay_id: stayId, payment_id: text }, required: ['stay_id', 'payment_id'], outputSchema: { type: 'object', properties: { stay: stayDetail }, required: ['stay'] } }),
-  organizationTool({ name: 'set_stay_nights', domain: 'stays', minimumRole: 'admin', description: 'Close or open nights, set a nightly price, or set stay rules for a date range at one place to stay. Fields left out keep each night’s value; price_minor null returns to the base price; reset removes the range’s overrides. Updates the website’s bookable nights and, when connected, pushes prices, availability and stay rules to the home’s Airbnb listing through Channex. Returns channel_push with any delivery failure.',
+  organizationTool({ name: 'set_stay_nights', domain: 'stays', minimumRole: 'admin', description: 'Close or open nights, set a nightly price, or set stay rules for a date range at one place to stay. Fields left out keep each night’s value; price_minor null returns to the base price; reset removes the range’s overrides. Updates the website’s bookable nights and, when connected, pushes prices, availability and stay rules to the home’s Airbnb listing through Channex. Returns channel_push on success. A failed channel update raises CHANNEL_PUSH_FAILED with committed:true; read the calendar before retrying.',
     inputSchema: { product_id: productId, from: day, to: { ...day, description: 'Exclusive; at most 500 days after from.' }, closed: { type: 'boolean' }, price_minor: { type: ['integer', 'null'], minimum: 0 },
       min_stay_arrival: { type: ['integer', 'null'], minimum: 1 }, min_stay_through: { type: ['integer', 'null'], minimum: 1 }, max_stay: { type: ['integer', 'null'], minimum: 1 },
       closed_to_arrival: { type: 'boolean' }, closed_to_departure: { type: 'boolean' }, reset: { type: 'boolean' } },

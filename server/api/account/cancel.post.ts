@@ -6,7 +6,7 @@ import {ownedBuyerRequest} from '~/server/domain/payments/buyer'
 import {cancelBookingRequest} from '~/server/domain/requests'
 import {cancelStayAsGuest} from '~/server/domain/stays'
 import {queryFirst} from '~/server/db'
-import {notifyGuestCancellation,notifyStayCancelled} from '~/server/utils/notifications'
+import {notifyGuestCancellation} from '~/server/utils/notifications'
 
 export default defineHandler(async event=>{
  const env=cloudflareEnv(event),session=await getAuthSession(event,env)
@@ -20,7 +20,6 @@ export default defineHandler(async event=>{
   const stay=await queryFirst<{id:string}>(env.DB,'SELECT id FROM stays WHERE organization_id=? AND request_id=? AND user_id=?',[scope.organization_id,body.request_id,session.user.id])
   if(!stay)throw new HTTPError({statusCode:404,statusMessage:'Owned stay not found'})
   const cancelled=await cancelStayAsGuest(env.DB,env,scope.organization_id,stay.id,session.user.id)
-  await notifyStayCancelled(env,env.DB,scope.organization_id,stay.id,'guest',cancelled.refund_minor)
   return jsonResponse({success:true,kind:'stay',status:'cancelled',refund_minor:cancelled.refund_minor})
  }
  const cancelled=await cancelBookingRequest(env.DB,{id:body.request_id,organizationId:scope.organization_id,kind:scope.kind,buyerUserId:session.user.id,now:new Date().toISOString(),env})

@@ -31,13 +31,13 @@ const to = (segment: string) => router.resolve({ path: `${level.path.value}/${se
 const groups = computed<EditorNavigationGroup[]>(() => [
   {
     id: 'availability',
-    items: [{ id: 'availability', label: 'Availability', to: to('availability') }],
+    items: [{ id: 'availability', icon: 'i-lucide-calendar-clock', label: 'Availability', to: to('availability') }],
   },
   ...(editor?.location.value ? [{
     id: 'cancellations',
     label: 'Cancellations',
     items: [
-      { id: 'cancellation', label: 'Cancellation policy', summary: cancellationSummary(editor.reservationForm.value), to: to('cancellation') },
+      { id: 'cancellation', icon: 'i-lucide-calendar-x', label: 'Cancellation policy', summary: cancellationSummary(editor.reservationForm.value), to: to('cancellation') },
     ],
   }] : []),
 ])

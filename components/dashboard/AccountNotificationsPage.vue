@@ -13,7 +13,7 @@
 <script setup lang="ts">
 import { authClient } from '~/lib/auth-client'
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
-import { NOTIFICATION_CATEGORIES, NOTIFICATION_CATEGORY_LABELS, describeNotificationSetting } from '~/shared/notification-categories'
+import { NOTIFICATION_CATEGORIES, NOTIFICATION_CATEGORY_LABELS, NOTIFICATION_CATEGORY_ICONS, describeNotificationSetting } from '~/shared/notification-categories'
 
 const level = useRouteLevel()
 
@@ -27,6 +27,7 @@ const groups = computed<EditorNavigationGroup[]>(() => [{
   items: NOTIFICATION_CATEGORIES.map(category => ({
     id: category,
     label: NOTIFICATION_CATEGORY_LABELS[category],
+    icon: NOTIFICATION_CATEGORY_ICONS[category],
     summary: preferences.value ? describeNotificationSetting(preferences.value[category]) : '',
     to: `${level.path.value}/${category}`,
   })),

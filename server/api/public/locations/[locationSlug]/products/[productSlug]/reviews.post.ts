@@ -1,7 +1,6 @@
 import { execute, queryFirst } from '~/server/db'
 import { cleanString, cloudflareEnv, jsonResponse, rethrowHttpError } from '~/server/utils/api-response'
 import { getClientIp, hashClientIp, HOUR_MS, incrementHourlyRateLimit } from '~/server/utils/hourly-rate-limit'
-import { previewSecretOf, resolvePreviewAuthorization } from '~/server/utils/preview-token'
 import { loadPublicProductApiDetail } from '~/server/utils/public-products'
 import { notifyReviewReceived } from '~/server/utils/notifications'
 import { ensureInteractionUser } from '~/server/utils/auth'
@@ -19,8 +18,7 @@ export default defineHandler(async (event) => {
     const env = cloudflareEnv(event)
     const db = env.DB
     if (!db) return jsonResponse({ error: 'Database unavailable' }, { status: 503 })
-    const previewAuthorized = await resolvePreviewAuthorization(event, organizationId, previewSecretOf(cloudflareEnv(event)))
-    const resolved = await loadPublicProductApiDetail(env, db, organizationId, previewAuthorized, locationSlug, productSlug)
+    const resolved = await loadPublicProductApiDetail(env, db, organizationId, false, locationSlug, productSlug)
     if (!resolved) return jsonResponse({ error: 'Product not found' }, { status: 404 })
     const body = await readBody(event) as ApiRecord
     const author = cleanString(body.author, 80)

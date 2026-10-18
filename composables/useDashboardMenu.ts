@@ -77,15 +77,15 @@ export function useDashboardMenu() {
   // several open the list under Account settings; none offers to start one.
   const switchRow = computed(() => {
     const organizations = (scopeHeaderModel?.value.peers ?? []).filter(peer => peer.id)
-    if (organizations.length === 1) return organizations[0]!.to ? { id: 'switch-organization', label: `Switch to ${organizations[0]!.label}`, to: organizations[0]!.to } : { id: 'switch-organization', label: `Switch to ${organizations[0]!.label}`, action: {} }
-    if (organizations.length > 1) return { id: 'switch-organization', label: 'Switch to an organization', to: '/dashboard/account/profile/organizations' }
-    return { id: 'switch-organization', label: 'New organization', to: '/dashboard/onboarding' }
+    if (organizations.length === 1) return organizations[0]!.to ? { id: 'switch-organization', icon: 'i-lucide-repeat-2', label: `Switch to ${organizations[0]!.label}`, to: organizations[0]!.to } : { id: 'switch-organization', icon: 'i-lucide-repeat-2', label: `Switch to ${organizations[0]!.label}`, action: {} }
+    if (organizations.length > 1) return { id: 'switch-organization', icon: 'i-lucide-repeat-2', label: 'Switch to an organization', to: '/dashboard/account/profile/organizations' }
+    return { id: 'switch-organization', icon: 'i-lucide-plus', label: 'New organization', to: '/dashboard/onboarding' }
   })
   const groups = computed<EditorNavigationGroup[]>(() => personal.value ? [{
     id: 'account', items: [
-      { id: 'account', label: 'Account settings', to: '/dashboard/account/profile' },
+      { id: 'account', icon: 'i-lucide-user-round-cog', label: 'Account settings', to: '/dashboard/account/profile' },
       switchRow.value,
-      { id: 'log-out', label: 'Log out', action: {} },
+      { id: 'log-out', icon: 'i-lucide-log-out', label: 'Log out', action: {} },
     ],
   }] : organizationSettings.groups.value)
   const activeItem = computed(() => organizationSettings.activeItem.value)

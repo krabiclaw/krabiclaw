@@ -148,6 +148,8 @@ export interface TenantPageField {
 export interface TenantPageBlockDefinition {
   type: TenantPageBlockType
   label: string
+  /** The section type pictogram in the CMS list and picker. */
+  icon: string
   description: string
   schemaVersion: typeof TENANT_PAGE_SCHEMA_VERSION
   allowedRecipes: readonly string[]
@@ -205,7 +207,7 @@ const GRID_ITEM_FIELDS = {
 } as const
 
 export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageBlockDefinition> = {
-  heading: blockDefinitionWithMetadata('heading', 'Heading', 'A heading a visitor reads.', ALL_RECIPES, {
+  heading: blockDefinitionWithMetadata('heading', 'Heading', 'i-lucide-heading', 'A heading a visitor reads.', ALL_RECIPES, {
     text: text('Heading text', { required: true, section: 'content' }),
     // Writes the block's own column. See TenantPageField.store.
     level: {
@@ -214,7 +216,7 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
     },
   }, { accessibility: 'required', seo: 'structured' }),
 
-  markdown: blockDefinitionWithMetadata('markdown', 'Text', 'Paragraphs, lists and links.', ALL_RECIPES, {
+  markdown: blockDefinitionWithMetadata('markdown', 'Text', 'i-lucide-text', 'Paragraphs, lists and links.', ALL_RECIPES, {
     title: text('Title'),
     markdown: { kind: 'markdown', label: 'Text', required: true, section: 'content' },
     // The writer requires this; it was declared nowhere, so nothing could tell
@@ -225,26 +227,26 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
     },
   }, { accessibility: 'required', seo: 'inherited' }),
 
-  image: blockDefinitionWithMetadata('image', 'Image', 'One picture.', ALL_RECIPES, {
+  image: blockDefinitionWithMetadata('image', 'Image', 'i-lucide-image', 'One picture.', ALL_RECIPES, {
     media: { kind: 'media', label: 'Image', translatable: false, section: 'content', slot: 'media' },
     caption: text('Caption', { section: 'content' }),
   }),
 
-  gallery: blockDefinitionWithMetadata('gallery', 'Gallery', 'Pictures in an order you choose.', ALL_RECIPES, {
+  gallery: blockDefinitionWithMetadata('gallery', 'Gallery', 'i-lucide-images', 'Pictures in an order you choose.', ALL_RECIPES, {
     media: { kind: 'media', label: 'Images', translatable: false, section: 'content', slot: 'gallery' },
     caption: text('Caption', { section: 'content' }),
   }),
 
   // A YouTube video, embedded. Its url may be any address YouTube gives out;
   // the upload date is what lets the page describe it to search engines.
-  video: blockDefinitionWithMetadata('video', 'Video', 'A YouTube video.', ALL_RECIPES, {
+  video: blockDefinitionWithMetadata('video', 'Video', 'i-lucide-video', 'A YouTube video.', ALL_RECIPES, {
     url: link('YouTube URL', { required: true, section: 'content' }),
     title: text('Video title', { required: true, section: 'content' }),
     caption: text('Caption', { section: 'content' }),
     upload_date: { kind: 'text', label: 'Upload date (YYYY-MM-DD)', translatable: false, section: 'search' },
   }, { accessibility: 'required', seo: 'structured' }),
 
-  faq: blockDefinitionWithMetadata('faq', 'Questions & answers', 'The questions published for this page or site.', ALL_RECIPES, {
+  faq: blockDefinitionWithMetadata('faq', 'Questions & answers', 'i-lucide-messages-square', 'The questions published for this page or site.', ALL_RECIPES, {
     title: text('Title', { section: 'settings' }),
     source: {
       kind: 'enum', label: 'Questions', required: true, translatable: false, section: 'settings', default: 'page_qa',
@@ -252,7 +254,7 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
     },
   }, { accessibility: 'required', seo: 'structured' }),
 
-  how_to: blockDefinitionWithMetadata('how_to', 'How-to', 'Steps in order.', ALL_RECIPES, {
+  how_to: blockDefinitionWithMetadata('how_to', 'How-to', 'i-lucide-list-ordered', 'Steps in order.', ALL_RECIPES, {
     title: text('Title', { section: 'settings' }),
     description: prose('Introduction', { section: 'copy' }),
     label: text('Label', { section: 'settings' }),
@@ -267,25 +269,25 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
     },
   }, { accessibility: 'required', seo: 'structured' }),
 
-  divider: blockDefinitionWithMetadata('divider', 'Divider', 'A break between sections.', ALL_RECIPES, {},
+  divider: blockDefinitionWithMetadata('divider', 'Divider', 'i-lucide-minus', 'A break between sections.', ALL_RECIPES, {},
     { accessibility: 'inherited', seo: 'none' }),
 
-  cta: blockDefinitionWithMetadata('cta', 'Call to action', 'A prompt with one button.', ALL_RECIPES, {
+  cta: blockDefinitionWithMetadata('cta', 'Call to action', 'i-lucide-mouse-pointer-click', 'A prompt with one button.', ALL_RECIPES, {
     ...CTA_FIELDS,
     media: { kind: 'media', label: 'Background image', translatable: false, section: 'image', slot: 'media' },
   }),
-  contact_cta: blockDefinitionWithMetadata('contact_cta', 'Contact prompt', 'A prompt to get in touch.', ALL_RECIPES, CTA_FIELDS),
+  contact_cta: blockDefinitionWithMetadata('contact_cta', 'Contact prompt', 'i-lucide-phone', 'A prompt to get in touch.', ALL_RECIPES, CTA_FIELDS),
   // A booking prompt says what it costs and what the visitor is agreeing to.
   // Both were stored and read as `priceLine` and `notice`, which no list
   // declared, so neither could be translated — and the button was a second
   // naming of the one every other prompt uses.
-  booking_cta: blockDefinitionWithMetadata('booking_cta', 'Booking prompt', 'A prompt to book.', ALL_RECIPES, {
+  booking_cta: blockDefinitionWithMetadata('booking_cta', 'Booking prompt', 'i-lucide-calendar-check', 'A prompt to book.', ALL_RECIPES, {
     ...CTA_FIELDS,
     price_line: text('Price line', { section: 'settings' }),
     notice: prose('Small print', { section: 'settings' }),
   }),
 
-  callout: blockDefinitionWithMetadata('callout', 'Callout', 'A highlighted message.', ALL_RECIPES, {
+  callout: blockDefinitionWithMetadata('callout', 'Callout', 'i-lucide-message-square-text', 'A highlighted message.', ALL_RECIPES, {
     title: text('Title'),
     body: prose('Message'),
     items: { kind: 'list', label: 'Supporting facts', section: 'items', of: GRID_ITEM_FIELDS },
@@ -300,7 +302,7 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
     buttons: { kind: 'list', label: 'Buttons', section: 'buttons', of: { label: text('Label', { required: true }), url: link('URL') } },
   }),
 
-  hero: blockDefinitionWithMetadata('hero', 'Hero', 'The opening of a page.', ALL_RECIPES, {
+  hero: blockDefinitionWithMetadata('hero', 'Hero', 'i-lucide-panels-top-left', 'The opening of a page.', ALL_RECIPES, {
     // The headline and the phrase inside it that carries emphasis; the rest of
     // the opening words are their own concern, because four controls is not a
     // leaf (DESIGN.md).
@@ -319,11 +321,11 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
     secondary_url: link('Second button URL', { section: 'second_button', pairedWith: 'secondary_label' }),
   }, { accessibility: 'required', seo: 'structured' }),
 
-  button_group: blockDefinitionWithMetadata('button_group', 'Buttons', 'A row of links.', ALL_RECIPES, {
+  button_group: blockDefinitionWithMetadata('button_group', 'Buttons', 'i-lucide-mouse-pointer-click', 'A row of links.', ALL_RECIPES, {
     buttons: { kind: 'list', label: 'Buttons', section: 'buttons', of: { label: text('Label', { required: true }), url: link('URL') } },
   }),
 
-  feature_grid: blockDefinitionWithMetadata('feature_grid', 'Features', 'A grid you write, or rows read from your site.', ALL_RECIPES, {
+  feature_grid: blockDefinitionWithMetadata('feature_grid', 'Features', 'i-lucide-layout-grid', 'A grid you write, or rows read from your site.', ALL_RECIPES, {
     title: text('Section title', { section: 'headline' }),
     title_muted: text('Closing title', { section: 'headline' }),
     eyebrow: text('Eyebrow', { section: 'copy' }),
@@ -363,7 +365,7 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
   // in one block. It was two feature_grids that only a `section` of
   // "comparison-against" and "comparison-for" told apart, so the document was
   // naming the component that drew it.
-  comparison: blockDefinitionWithMetadata('comparison', 'Comparison', 'Two sides, set against each other.', ALL_RECIPES, {
+  comparison: blockDefinitionWithMetadata('comparison', 'Comparison', 'i-lucide-columns-2', 'Two sides, set against each other.', ALL_RECIPES, {
     title: text('Section title', { section: 'settings' }),
     description: prose('Description', { section: 'settings' }),
     problem_title: text('Without heading', { section: 'without' }),
@@ -382,7 +384,7 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
 
   // Numbers with what they count. Items are a value and its label, which is a
   // different thing from a feature's title and its prose.
-  stat_grid: blockDefinitionWithMetadata('stat_grid', 'Stats', 'Figures and what they measure.', ALL_RECIPES, {
+  stat_grid: blockDefinitionWithMetadata('stat_grid', 'Stats', 'i-lucide-chart-no-axes-column-increasing', 'Figures and what they measure.', ALL_RECIPES, {
     title: text('Section title', { section: 'settings' }),
     description: prose('Description', { section: 'settings' }),
     label: text('Label', { section: 'settings' }),
@@ -394,7 +396,7 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
 
   // Something the reader can ask an assistant to do, and what happens when they
   // do. The prompt is the content; a feature grid has nothing like it.
-  workflow_grid: blockDefinitionWithMetadata('workflow_grid', 'Workflows', 'Things to ask for, and what they do.', ALL_RECIPES, {
+  workflow_grid: blockDefinitionWithMetadata('workflow_grid', 'Workflows', 'i-lucide-workflow', 'Things to ask for, and what they do.', ALL_RECIPES, {
     title: text('Section title', { section: 'settings' }),
     description: prose('Description', { section: 'settings' }),
     label: text('Label', { section: 'settings' }),
@@ -415,7 +417,7 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
   // Statements that take turns, each shown by its own three pictures: a wide
   // one, a tall one and a wide one. The pictures are the block's placements at
   // `items.<index>.left`, `.center` and `.right`.
-  showcase: blockDefinitionWithMetadata('showcase', 'Showcase', 'Statements that take turns, each with three pictures.', ALL_RECIPES, {
+  showcase: blockDefinitionWithMetadata('showcase', 'Showcase', 'i-lucide-gallery-horizontal-end', 'Statements that take turns, each with three pictures.', ALL_RECIPES, {
     items: {
       kind: 'list', label: 'Statements', section: 'items',
       of: {
@@ -430,7 +432,7 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
   // The languages a site is read in, each with a picture of the site in it and
   // the places its readers find it. A language's picture is the block's
   // placement at `items.<index>.image`.
-  language_reach: blockDefinitionWithMetadata('language_reach', 'Languages', 'The languages your site speaks, and where each is found.', ALL_RECIPES, {
+  language_reach: blockDefinitionWithMetadata('language_reach', 'Languages', 'i-lucide-languages', 'The languages your site speaks, and where each is found.', ALL_RECIPES, {
     title: text('Section title', { section: 'copy' }),
     subtitle: text('Card title', { section: 'copy' }),
     description: prose('Description', { section: 'copy' }),
@@ -450,7 +452,7 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
 
   // Numbered steps, each a link to where it is explained, beside two pictures
   // and one button. The pictures are the block's ordered `gallery` placement.
-  steps: blockDefinitionWithMetadata('steps', 'Steps', 'Numbered steps that link to how each is done.', ALL_RECIPES, {
+  steps: blockDefinitionWithMetadata('steps', 'Steps', 'i-lucide-list-ordered', 'Numbered steps that link to how each is done.', ALL_RECIPES, {
     title: text('Section title', { section: 'settings' }),
     gallery: { kind: 'media', label: 'Pictures', translatable: false, section: 'pictures', slot: 'gallery' },
     items: {
@@ -462,7 +464,7 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
   }),
 
   // A video with the points it makes.
-  video_feature: blockDefinitionWithMetadata('video_feature', 'Video', 'A video and what it shows.', ALL_RECIPES, {
+  video_feature: blockDefinitionWithMetadata('video_feature', 'Video', 'i-lucide-clapperboard', 'A video and what it shows.', ALL_RECIPES, {
     title: text('Section title', { section: 'settings' }),
     description: prose('Description', { section: 'settings' }),
     video_title: text('Video title', { section: 'video' }),
@@ -479,7 +481,7 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
   // thing and was stored as three unrelated blocks (`story.title`,
   // `story.image`, `story.body`) that the renderer re-assembled at display
   // time, in the alphabetical order the migration wrote them.
-  media_text: blockDefinitionWithMetadata('media_text', 'Image with text', 'A picture and the words beside it.', ALL_RECIPES, {
+  media_text: blockDefinitionWithMetadata('media_text', 'Image with text', 'i-lucide-panels-top-left', 'A picture and the words beside it.', ALL_RECIPES, {
     title: text('Title'),
     body: prose('Text'),
     media: { kind: 'media', label: 'Image or video', translatable: false, section: 'image', slot: 'media', accept: 'any' },
@@ -500,10 +502,10 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
   // The form a visitor writes in. It has no fields of its own — what it asks
   // for is the site's contact form — but it is a block so that a page says
   // where on it the form sits, which was fixed in the markup before.
-  contact_form: blockDefinitionWithMetadata('contact_form', 'Contact form', 'A form a visitor writes in.', ['contact', 'custom'], {},
+  contact_form: blockDefinitionWithMetadata('contact_form', 'Contact form', 'i-lucide-mail', 'A form a visitor writes in.', ['contact', 'custom'], {},
     { accessibility: 'inherited', seo: 'none' }),
 
-  team_grid: blockDefinitionWithMetadata('team_grid', 'Team', 'The people behind the business.', ALL_RECIPES, {
+  team_grid: blockDefinitionWithMetadata('team_grid', 'Team', 'i-lucide-users', 'The people behind the business.', ALL_RECIPES, {
     title: text('Section title', { section: 'settings' }),
     description: prose('Description', { section: 'settings' }),
     items: {
@@ -520,12 +522,12 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
     },
   }),
 
-  testimonial_grid: blockDefinitionWithMetadata('testimonial_grid', 'Reviews', "The site's published reviews.", ALL_RECIPES, {
+  testimonial_grid: blockDefinitionWithMetadata('testimonial_grid', 'Reviews', 'i-lucide-quote', "The site's published reviews.", ALL_RECIPES, {
     title: text('Section title', { section: 'settings' }),
     description: prose('Description', { section: 'settings' }),
   }),
 
-  donation_choices: blockDefinitionWithMetadata('donation_choices', 'Donation amounts', 'The amounts a donor may choose.', ['donate'], {
+  donation_choices: blockDefinitionWithMetadata('donation_choices', 'Donation amounts', 'i-lucide-hand-heart', 'The amounts a donor may choose.', ['donate'], {
     title: text('Title'),
     description: prose('Description'),
     destination: link('Destination', { section: 'destination' }),
@@ -546,21 +548,21 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
     // recipe list above is the gate that matters.
   }, { allowedPageTypes: ['custom', 'recipe', 'system'] }),
 
-  page_grid: blockDefinitionWithMetadata('page_grid', 'Pages', 'Cards linking to other pages.', ['home', 'about', 'pricing', 'custom', 'services'], {
+  page_grid: blockDefinitionWithMetadata('page_grid', 'Pages', 'i-lucide-files', 'Cards linking to other pages.', ['home', 'about', 'pricing', 'custom', 'services'], {
     title: text('Section title', { section: 'settings' }),
     accent: text('Emphasised phrase', { section: 'settings' }),
     description: prose('Description', { section: 'settings' }),
     page_ids: { kind: 'reference', label: 'Pages', required: true, min: 1, translatable: false, section: 'pages', reference: 'page' },
   }, { allowedPageTypes: ['custom', 'recipe', 'system'] }),
 
-  product_grid: blockDefinitionWithMetadata('product_grid', 'Products', 'Cards linking to products.', ['home', 'about', 'pricing', 'custom', 'services', 'menu', 'order', 'products'], {
+  product_grid: blockDefinitionWithMetadata('product_grid', 'Products', 'i-lucide-package', 'Cards linking to products.', ['home', 'about', 'pricing', 'custom', 'services', 'menu', 'order', 'products'], {
     title: text('Section title', { section: 'settings' }),
     description: prose('Description', { section: 'settings' }),
     collection_id: { kind: 'reference', label: 'Collection', translatable: false, section: 'products', reference: 'collection' },
     product_ids: { kind: 'reference', label: 'Products', translatable: false, section: 'products', reference: 'product' },
   }, { allowedPageTypes: ['custom', 'recipe', 'system'] }),
 
-  location_grid: blockDefinitionWithMetadata('location_grid', 'Locations', 'Cards linking to locations.', ['home', 'about', 'contact', 'custom'], {
+  location_grid: blockDefinitionWithMetadata('location_grid', 'Locations', 'i-lucide-map-pin', 'Cards linking to locations.', ['home', 'about', 'contact', 'custom'], {
     title: text('Section title', { section: 'settings' }),
     description: prose('Description', { section: 'settings' }),
     location_ids: { kind: 'reference', label: 'Locations', translatable: false, section: 'locations', reference: 'location' },
@@ -569,7 +571,7 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
   // The organization's short posts, read from the same feed /posts shows. The
   // block holds what the author chose — its heading, how many, which location,
   // an optional button — and never a copy of a post.
-  social_posts: blockDefinitionWithMetadata('social_posts', 'Social posts', 'The latest short posts, with their photos, dates and where else they were posted.', ALL_RECIPES, {
+  social_posts: blockDefinitionWithMetadata('social_posts', 'Social posts', 'i-lucide-megaphone', 'The latest short posts, with their photos, dates and where else they were posted.', ALL_RECIPES, {
     title: text('Section title', { section: 'settings' }),
     description: prose('Description', { section: 'settings' }),
     limit: { kind: 'number', label: 'How many posts', translatable: false, section: 'posts', min: 1, max: SOCIAL_POSTS_BLOCK_MAX, default: String(SOCIAL_POSTS_BLOCK_DEFAULT) },
@@ -585,7 +587,7 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
   // recipe and no page type. Before this it existed only in the server's own
   // type list, so a page carrying one threw "not registered" on read instead of
   // being refused on write.
-  ai_assistance: blockDefinitionWithMetadata('ai_assistance', 'Ask AI', 'Suggested prompts for an assistant.', [], {
+  ai_assistance: blockDefinitionWithMetadata('ai_assistance', 'Ask AI', 'i-lucide-sparkles', 'Suggested prompts for an assistant.', [], {
     label: text('Label', { section: 'settings' }),
     intro: prose('Intro', { section: 'settings' }),
     prompts: {
@@ -650,6 +652,7 @@ function byteLength(value: unknown): number {
 function blockDefinitionWithMetadata(
   type: TenantPageBlockType,
   label: string,
+  icon: string,
   description: string,
   allowedRecipes: readonly string[],
   fields: Readonly<Record<string, TenantPageField>>,
@@ -658,6 +661,7 @@ function blockDefinitionWithMetadata(
   return {
     type,
     label,
+    icon,
     description,
     schemaVersion: TENANT_PAGE_SCHEMA_VERSION,
     allowedRecipes,

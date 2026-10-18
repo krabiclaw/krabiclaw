@@ -23,7 +23,6 @@ import {
   mutationContextPayload,
   optionalString,
   requiredString,
-  resolveImageUploadProvider,
   resolveUserUploadedMediaFile,
   toolFileReference,
 } from './execution'
@@ -381,7 +380,6 @@ export async function handleMediaTools(ctx: McpExecutorContext): Promise<unknown
         uploaded = await uploadResolvedMediaToAssetStore({
           ...uploadInput,
           kind: 'image',
-          provider: resolveImageUploadProvider(resolved.contentType, organization.env),
         })
       } else {
         uploaded = await uploadResolvedMediaToAssetStore({

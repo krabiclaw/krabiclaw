@@ -43,7 +43,7 @@ const createdTeamId = ref<string | null>(null)
 const saveError = ref<string | null>(null)
 const groups = computed(() => [{ id: 'team', items: [
   { id: 'name', label: 'Name', summary: team.value?.name ?? 'Choose a name', to: `${level.path.value}/name` },
-  ...(team.value ? [{ id: 'members', label: 'Members', summary: `${team.value.members.length} members`, to: `${level.path.value}/members` }] : []),
+  ...(team.value ? [{ id: 'members', icon: 'i-lucide-users', label: 'Members', summary: `${team.value.members.length} members`, to: `${level.path.value}/members` }] : []),
 ] }])
 watchEffect(() => {
   if (level.mode.value === 'yield') return

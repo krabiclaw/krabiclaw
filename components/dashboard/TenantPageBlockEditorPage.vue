@@ -140,7 +140,7 @@ watchEffect(() => {
 
 const typeOptions = computed(() => Object.values(TENANT_PAGE_BLOCK_REGISTRY)
   .filter(definition => isTenantPageBlockAllowed(definition, draft.value.recipe, draft.value.page_type))
-  .map(definition => ({ label: definition.label, value: definition.type })))
+  .map(definition => ({ label: definition.label, value: definition.type, icon: definition.icon })))
 const newType = computed(() => newBlock.value?.type)
 
 function chooseType(value: unknown) {
@@ -189,7 +189,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
     id: 'block',
     items: sections.value.map((section) => {
       const { summary, placeholder } = sectionSummary(section)
-      return { id: section.key, label: section.label, summary, placeholder, to: `${level.path.value}/${section.key}` }
+      return { id: section.key, label: section.label, icon: section.icon, summary, placeholder, to: `${level.path.value}/${section.key}` }
     }),
   }]
 })

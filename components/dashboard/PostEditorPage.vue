@@ -195,12 +195,12 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
   if (isNew.value) return [{ id: 'new-post', items: [body] }]
   const action = editor.form.callToAction
   return [{ id: 'post', items: [
-    { id: 'photo', label: 'Photos and video', summary: mediaSummary(), placeholder: !editor.form.media.length, to: sectionPath('photo') },
+    { id: 'photo', label: 'Photos and video', lead: { image: editor.form.media[0]?.thumbnail_url || (editor.form.media[0]?.kind === 'video' ? null : editor.form.media[0]?.public_url), icon: 'i-lucide-images' }, summary: mediaSummary(), placeholder: !editor.form.media.length, to: sectionPath('photo') },
     { id: 'headline', label: 'Headline', summary: editor.form.title || 'No headline', placeholder: !editor.form.title, to: sectionPath('headline') },
     body,
     { id: 'action', label: 'Link button', summary: action ? `${action.label} → ${action.url}` : 'No button', placeholder: !action, to: sectionPath('action') },
-    { id: 'location', label: 'Location', summary: locationSummary(), to: sectionPath('location') },
-    { id: 'publishing', label: 'Where it is published', summary: publishingSummary(), to: sectionPath('publishing') },
+    { id: 'location', label: 'Location', icon: 'i-lucide-map-pin', summary: locationSummary(), to: sectionPath('location') },
+    { id: 'publishing', label: 'Where it is published', icon: 'i-lucide-send', summary: publishingSummary(), to: sectionPath('publishing') },
   ] }]
 })
 const openSections = computed(() => navigationGroups.value.flatMap(group => group.items.map(item => item.id)))

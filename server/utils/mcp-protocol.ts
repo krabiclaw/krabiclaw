@@ -7,6 +7,8 @@
 // auth failures. Every tool result is encoded by the SDK.
 
 import { isAPIError } from 'better-auth/api'
+import { isChannelPush } from '~/shared/channel-push'
+import { isValidCalendarDate, isValidInstant } from '~/utils/timezone'
 
 export type JsonRpcId = string | number | null
 
@@ -49,7 +51,7 @@ export function mcpProtocolError(code: number, message: string, data?: unknown, 
 export function mcpErrorRecoveryIds(value: unknown): Record<string, string> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
   const details = value as Record<string, unknown>
-  return Object.fromEntries(['organization_id', 'draft_id', 'invitation_id', 'location_id', 'product_id', 'request_id'].flatMap(key =>
+  return Object.fromEntries(['organization_id', 'draft_id', 'invitation_id', 'location_id', 'product_id', 'stay_id', 'request_id'].flatMap(key =>
     typeof details[key] === 'string' && /^[A-Za-z0-9_:-]{1,200}$/.test(details[key]) ? [[key, details[key]]] : [],
   ))
 }
@@ -59,6 +61,19 @@ export function mcpErrorRecoveryDetails(value: unknown): Record<string, unknown>
   const details = value as Record<string, unknown>
   const recovery: Record<string, unknown> = mcpErrorRecoveryIds(details)
   if (typeof details.code === 'string' && /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(details.code)) recovery.code = details.code
+  if (details.committed === true) {
+    recovery.committed = true
+    if (typeof details.field === 'string' && /^[A-Za-z_][A-Za-z0-9_.\[\]]*$/.test(details.field)) recovery.field = details.field
+    if (Number.isInteger(details.version) && Number(details.version) >= 1) recovery.version = details.version
+    if (isValidInstant(details.updated_at)) recovery.updated_at = details.updated_at
+    if (typeof details.reason === 'string' && details.reason.trim()) recovery.reason = details.reason
+    if (isChannelPush(details.channel_push)) recovery.channel_push = details.channel_push === null ? null : { state: details.channel_push.state, detail: details.channel_push.detail }
+    if (details.channel_outcome === 'unknown') recovery.channel_outcome = 'unknown'
+    if (Array.isArray(details.ranges) && details.ranges.every(range => range && typeof range === 'object'
+      && isValidCalendarDate(range.from) && isValidCalendarDate(range.to) && range.from < range.to)) recovery.ranges = details.ranges.map(({ from, to }) => ({ from, to }))
+    if (Array.isArray(details.failures) && details.failures.every(failure => failure && typeof failure === 'object' && failure.committed === true
+      && typeof failure.code === 'string' && /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(failure.code))) recovery.failures = details.failures.map(mcpErrorRecoveryDetails)
+  }
   for (const key of ['missing', 'missing_fields', 'invalid_fields', 'fields', 'missing_product_ids', 'draft_ids', 'removed_block_ids', 'resource_ids']) {
     const values = details[key]
     const pattern = ['missing', 'missing_fields', 'invalid_fields', 'fields'].includes(key) ? /^[A-Za-z_][A-Za-z0-9_.\[\]]*$/ : /^[A-Za-z0-9_:-]{1,200}$/

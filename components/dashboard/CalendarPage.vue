@@ -12,6 +12,9 @@
   >
     <template #right>
       <div class="flex items-center gap-1">
+        <UDropdownMenu v-if="nightlyHomes?.length" :items="nightlyHomes.map(home => ({ label: home.name, to: { path: level.path.value, query: { product_id: home.product_id } } }))" :content="{ align: 'end' }">
+          <UButton label="Nightly calendar" icon="i-lucide-calendar-days" color="neutral" variant="outline" />
+        </UDropdownMenu>
         <UButton
           v-if="!personalScope && chosenLocation && !selecting && view === 'month'"
           label="Select dates"
@@ -39,6 +42,7 @@
     </template>
 
     <div>
+      <UAlert v-if="nightlyError" class="mb-6" color="error" variant="soft" title="Nightly calendars could not be loaded" :description="nightlyError" />
       <!-- Which location the calendar is, the same pill Catalog narrows by. An account has no branch to choose. -->
       <div v-if="!personalScope" class="mb-8 flex">
         <DashboardLocationFilter v-model="filters.locationId" :items="locationItems" />
@@ -245,7 +249,7 @@ useSeoMeta({ title: 'Calendar | KrabiClaw', robots: 'noindex, nofollow' })
 
 // One calendar for both readers. Personal scope reads the account agenda,
 // has no branch to filter, block or configure, and opens a day the same way.
-const props = defineProps<{ personalScope?: boolean }>()
+const props = defineProps<{ personalScope?: boolean; nightlyHomes?: Array<{ product_id: string; name: string }>; nightlyError?: string }>()
 
 // Named here rather than imported: the agenda module is the server's, and a value import would bundle it.
 const AGENDA_KINDS = ['reservation', 'booking', 'post', 'stay'] as const satisfies readonly AgendaKind[]

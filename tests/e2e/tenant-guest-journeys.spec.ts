@@ -303,7 +303,7 @@ for (const target of [
       await expect(availability).toHaveAttribute('aria-checked', 'true')
       await availability.click()
       await page.getByRole('button', { name: 'Save', exact: true }).click()
-      await expect(page).toHaveURL(new RegExp(`/products/${product.id}$`))
+      await expect(page).toHaveURL(new RegExp(`/products/${product.id}/publication$`))
       const paused = mcpData<{ product: { active: boolean; publications: Array<{ organization_id: string; published: boolean }> } }>(await (await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: target.org, product_id: product.id } })).json()).product
       expect(paused.active).toBe(false)
       expect(paused.publications).toContainEqual(expect.objectContaining({ organization_id: target.org, published: true }))

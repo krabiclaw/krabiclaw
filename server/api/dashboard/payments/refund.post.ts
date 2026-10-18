@@ -24,14 +24,40 @@ export default defineHandler(async event=>{
  if(authorization.action==='cancel_stay'){
   const payment=await requirePayment(db,organization.id,authorization.payment_id)
   if(payment.subject_type!=='stay'||!payment.subject_id) throw new HTTPError({statusCode:409,statusMessage:'Authorization is not for a stay payment'})
-  // A retry after the stay was cancelled only sends the refund that cancellation queued.
+  // An approved retry repairs the cancellation's channel and publication, too.
   const stay=await queryFirst<{status:string;version:number}>(db,'SELECT status,version FROM stays WHERE id=? AND organization_id=?',[payment.subject_id,organization.id])
   if(!stay) throw new HTTPError({statusCode:409,statusMessage:'Paid stay is unavailable'})
-  if(stay.status!=='cancelled') await cancelStay(db,env,await stayAccessFor(memberAccessPrincipal(organization,{env,event})),payment.subject_id,{expected_version:stay.version,reason:authorization.note,authorization_id:body.authorization_id})
   const key=visitRefundKey('cancel','stay',payment.subject_id)
-  if(!await queryFirst(db,'SELECT id FROM payment_refunds WHERE payment_id=? AND idempotency_key=?',[payment.id,key])) throw new HTTPError({statusCode:409,statusMessage:'The stay was cancelled without its refund. Send a refund from the stay.'})
-  const submitted=await executeRefund(db,stripe,payment,null,key,'requested_by_customer',userId,env,authorization.note)
-  await notifyStayCancelled(env,db,organization.id,payment.subject_id,'host',payment.captured_amount-payment.refunded_amount)
+  const earlierRefund=await queryFirst(db,'SELECT id FROM payment_refunds WHERE payment_id=? AND idempotency_key=?',[payment.id,key])
+  const access=await stayAccessFor(memberAccessPrincipal(organization,{env,event}))
+  const failures:unknown[]=[]
+  try {
+   await cancelStay(db,env,access,payment.subject_id,{expected_version:stay.version,reason:authorization.note,authorization_id:body.authorization_id})
+  } catch(error) {
+   // A first cancellation must commit before money moves. An already approved
+   // durable refund still completes when its cancelled stay's repair fails.
+   if(!(error instanceof HTTPError&&error.data?.committed===true)&&!(stay.status==='cancelled'&&earlierRefund))throw error
+   failures.push(error)
+  }
+  const [refunded]=await Promise.allSettled([queryFirst(db,'SELECT id FROM payment_refunds WHERE payment_id=? AND idempotency_key=?',[payment.id,key]).then(refund=>{
+   if(!refund)throw new HTTPError({statusCode:409,statusMessage:'The stay was cancelled without its refund. Send a refund from the stay.'})
+   return executeRefund(db,stripe,payment,null,key,'requested_by_customer',userId,env,authorization.note)
+  })])
+  if(refunded.status==='rejected')failures.push(refunded.reason)
+  try {
+   const refund=await queryFirst<{amount:number|null;status:string;stripe_refund_id:string|null}>(db,'SELECT amount,status,stripe_refund_id FROM payment_refunds WHERE payment_id=? AND idempotency_key=?',[payment.id,key])
+   if(!refund?.stripe_refund_id||refund.amount===null||!Number.isSafeInteger(refund.amount)||refund.amount<0)throw new Error('The stay refund has no confirmed native amount; retry this approval to finish its notice')
+   if(refunded.status==='fulfilled'&&(refund.status!==refunded.value.status||refund.stripe_refund_id!==refunded.value.stripe_refund_id))throw new Error('The cancelled stay refund could not be verified')
+   await notifyStayCancelled(env,db,organization.id,payment.subject_id,'host',refund.amount)
+  } catch(error) {
+   failures.push(error)
+  }
+  if(failures.length===1&&failures[0] instanceof HTTPError&&failures[0].data?.committed===true)throw failures[0]
+  if(failures.length||refunded.status==='rejected'){
+   const reason=failures.map(error=>error instanceof Error?error.message:String(error)).join(' ')
+   throw new HTTPError({statusCode:503,message:`The stay was cancelled, but its completion failed. ${reason}`,data:{code:'POST_WRITE_COMPLETION_FAILED',field:'completion',committed:true,stay_id:payment.subject_id,payment_id:payment.id,reason,failures:failures.map(error=>error instanceof HTTPError&&error.data?error.data:{reason:error instanceof Error?error.message:String(error)})},cause:new AggregateError(failures,reason)})
+  }
+  const submitted=refunded.value
   return jsonResponse(submitted)
  }
  if(authorization.action==='reject_booking'||authorization.action==='cancel_booking'||authorization.action==='cancel_reservation'){

@@ -132,9 +132,9 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => [
   {
     id: 'question',
     items: [
-      { id: 'question', label: 'Question', summary: form.question.trim() || 'Not written yet', icon: 'i-lucide-circle-help', to: sectionUrl('question') },
-      { id: 'answer', label: 'Answer', summary: form.answer.trim() || 'No answer yet', icon: 'i-lucide-message-square', to: sectionUrl('answer') },
-      { id: 'visibility', label: 'Status', summary: form.published ? 'Published' : 'Draft', icon: 'i-lucide-activity', to: sectionUrl('visibility') },
+      { id: 'question', label: 'Question', summary: form.question.trim() || 'Not written yet', to: sectionUrl('question') },
+      { id: 'answer', label: 'Answer', summary: form.answer.trim() || 'No answer yet', to: sectionUrl('answer') },
+      { id: 'visibility', label: 'Status', summary: form.published ? 'Published' : 'Draft', to: sectionUrl('visibility') },
     ],
   },
 ])

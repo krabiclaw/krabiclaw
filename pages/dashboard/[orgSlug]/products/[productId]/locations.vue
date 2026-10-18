@@ -30,6 +30,7 @@ const groups = computed<EditorNavigationGroup[]>(() => [{
   items: p.organizationLocations.value.map(location => ({
     id: location.id,
     label: location.title,
+    icon: 'i-lucide-map-pin',
     summary: summary(location.id),
     placeholder: !p.form.locations[location.id],
     to: p.sectionPath(`locations/${encodeURIComponent(location.id)}`),

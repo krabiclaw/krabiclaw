@@ -4,7 +4,7 @@
     @click="open"
     @keydown.enter.prevent="open"
     @keydown.space.prevent="open"
-    class="w-full text-left"
+    class="text-left"
     :class="disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'"
     role="button"
     :aria-disabled="disabled"
@@ -118,7 +118,8 @@ interface PickerMediaAsset {
   thumbnail_url?: string | null
   alt_text?: string | null
   file_name?: string | null
-  size?: number | null
+  provider: 'cloudflare_images' | 'cloudflare_r2' | 'static'
+  file_size: number | null
 }
 
 interface SelectedMediaAsset {
@@ -152,6 +153,8 @@ const isPickerMediaResponse = (value: unknown): value is { media: PickerMediaAss
   && value.media.every(asset =>
     isRecord(asset)
     && typeof asset.id === 'string'
+    && (asset.provider === 'cloudflare_images' || asset.provider === 'cloudflare_r2' || asset.provider === 'static')
+    && (asset.file_size === null || (typeof asset.file_size === 'number' && Number.isSafeInteger(asset.file_size) && asset.file_size >= 0))
     && (asset.kind === undefined || asset.kind === null || typeof asset.kind === 'string')
     && (asset.public_url === undefined || asset.public_url === null || typeof asset.public_url === 'string')
     && (asset.thumbnail_url === undefined || asset.thumbnail_url === null || typeof asset.thumbnail_url === 'string')
@@ -264,12 +267,11 @@ function onSelect(asset: PickerMediaAsset) {
   }
 }
 
-function onUploaded(asset: PickerMediaAsset) {
+function onUploaded(asset: PickerMediaAsset & { kind: 'image' | 'video'; provider: 'cloudflare_images' | 'cloudflare_r2'; file_size: number }) {
   // The upload answered with the asset it created, and that asset knows what
   // it is. Reading the kind back off the URL's extension invented a second
   // answer that could disagree with the row.
-  const kind = asset.kind ?? null
-  const size = asset.size ?? 0
+  const kind = asset.kind
   pendingAsset.value = {
     asset_id: asset.id,
     public_url: asset.public_url ?? null,
@@ -278,9 +280,9 @@ function onUploaded(asset: PickerMediaAsset) {
     alt_text: assetAlt(asset),
   }
   if (kind === 'image') {
-    trackImageUploaded(props.organizationId, size, 'cloudflare_images')
+    trackImageUploaded(props.organizationId, asset.file_size, asset.provider)
   } else {
-    trackVideoUploaded(props.organizationId, size, 'cloudflare_r2')
+    trackVideoUploaded(props.organizationId, asset.file_size, asset.provider)
   }
 }
 
