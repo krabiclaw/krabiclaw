@@ -65,10 +65,6 @@ export const organizationAnalyticsSchema = z.object({
     distribution: z.array(z.object({ rating: z.number(), count })),
     recent: z.array(z.object({ id: text, author: text, rating: z.number(), title: nullableText, content: nullableText, createdAt: text })),
   }),
-  setup: z.object({
-    organizationId: text, label: text, completed: count, total: count,
-    items: z.array(z.object({ id: text, label: text, done: z.boolean() })),
-  }),
 })
 
 export type AnalyticsReport = z.infer<typeof analyticsReportSchema>
