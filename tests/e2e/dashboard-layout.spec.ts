@@ -1061,7 +1061,9 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page).toHaveURL(`${ORG}/earnings/transactions`)
     const transactions = page.locator('#dashboard-panel-earnings-transactions')
     await expect(transactions.getByRole('heading', { name: 'Transactions', exact: true })).toBeVisible()
+    await page.setViewportSize(PHONE)
     const transactionsBack = transactions.getByRole('link', { name: 'Back', exact: true })
+    await expect(transactionsBack).toBeVisible()
     await expect(transactionsBack).toHaveAttribute('href', `${ORG}/earnings`)
     await transactionsBack.click()
     await expect(page).toHaveURL(`${ORG}/earnings`)
@@ -1069,7 +1071,6 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page.getByText('No refunds yet.', { exact: true })).toBeVisible()
     await expect(page.getByText('No disputes.', { exact: true })).toBeVisible()
 
-    await page.setViewportSize({ width: 390, height: 844 })
     await open(page, `${ORG}/earnings`)
     const mobileNav = page.getByTestId('dashboard-mobile-nav')
     await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'])
