@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type BrowserContext, type Page } from '@playwright/test'
 import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
@@ -107,9 +107,14 @@ test.describe('dashboard pane hierarchy', () => {
     }
   })
 
-  test('Team changes member roles through Better Auth, and self-demotion refreshes context before leaving Team', async ({ page, baseURL, browser }) => {
+  test.describe('team and location assignment', () => {
+    test.describe.configure({ mode: 'default' })
+
+  test('Team changes member roles through Better Auth, and self-demotion refreshes context before leaving Team', async ({ page, baseURL, browser }, testInfo) => {
     test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'Role writes use local D1 only.')
     const organizationId = 'org-demo'
+    const release = await acquireTenantMutationLock(testInfo, organizationId)
+    try {
     const before = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
     expect(before.status(), await before.text()).toBe(200)
     const members = (await before.json() as { members: Array<{ id: string; userId: string; role: string; user: { name: string } }> }).members
@@ -168,11 +173,16 @@ test.describe('dashboard pane hierarchy', () => {
         await ownerContext.close()
       }
     }
+    } finally {
+      await release()
+    }
   })
 
-  test('Booking team forms create, rename and change native Better Auth membership', async ({ page, baseURL, playwright }) => {
+  test('Booking team forms create, rename and change native Better Auth membership', async ({ page, baseURL, playwright }, testInfo) => {
     test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Team writes require isolated local D1.')
     const organizationId = 'org-demo'
+    const release = await acquireTenantMutationLock(testInfo, organizationId)
+    try {
     const membersResponse = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
     expect(membersResponse.status(), await membersResponse.text()).toBe(200)
     const member = (await membersResponse.json() as { members: Array<{ userId: string; user: { name: string } }> }).members.find(row => row.userId === 'user-e2e-demo-role-owner')
@@ -256,6 +266,174 @@ test.describe('dashboard pane hierarchy', () => {
         expect((await readTeams()).map(row => row.id)).not.toContain(teamId)
       }
     }
+    } finally {
+      await release()
+    }
+  })
+
+  test('location assignments survive reload and let assigned staff discover and edit their branch', async ({ page, baseURL, browser }, testInfo) => {
+    test.setTimeout(120_000)
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Location assignments and role changes use disposable local data only.')
+    const organizationId = 'org-demo'
+    const org = 'ember-slice-demo'
+    const locationId = 'loc-demo'
+    const endpoint = `/api/dashboard/locations/${locationId}`
+    const independentEndpoint = `/api/organizations/${organizationId}/locations/${locationId}`
+    const release = await acquireTenantMutationLock(testInfo, organizationId)
+    let memberContext: BrowserContext | null = null
+    type Location = { id: string; slug: string; title: string; email: string | null; assigned_member_id: string | null; assigned_team_id: string | null }
+    type Member = { id: string; userId: string; role: string; user: { name: string } }
+    let original: Location | null = null
+    let actor: Member | undefined
+    let teamId: string | null = null
+    let roleChanged = false
+    const failures: unknown[] = []
+    const readLocation = async () => {
+      const response = await page.request.get(independentEndpoint)
+      expect(response.status(), await response.text()).toBe(200)
+      return (await response.json() as { location: Location }).location
+    }
+    try {
+      memberContext = await browser.newContext({ baseURL, viewport: PHONE })
+      original = await readLocation()
+      expect(original).toMatchObject({ id: locationId, assigned_member_id: null, assigned_team_id: null })
+      const otherTenant = await page.request.get('/api/dashboard/locations/loc-pottery-house', { params: { org: 'pottery-house' } })
+      expect(otherTenant.status(), await otherTenant.text()).toBe(200)
+      expect(await otherTenant.json()).toMatchObject({ location: { id: 'loc-pottery-house', organization_id: 'org-user-pottery-house' } })
+      const memberRead = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
+      expect(memberRead.status(), await memberRead.text()).toBe(200)
+      actor = (await memberRead.json() as { members: Member[] }).members.find(member => member.userId === 'user-e2e-demo-role-owner')
+      expect(actor, 'The canonical role actor already belongs to the demo tenant').toBeDefined()
+      if (!actor) throw new Error('The canonical demo role actor is missing')
+      expect(actor.role).toBe('owner')
+      const changed = await page.request.post('/api/auth/organization/update-member-role', {
+        headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor.id, role: 'member' },
+      })
+      expect(changed.status(), await changed.text()).toBe(200)
+      roleChanged = true
+      await loginAs(memberContext.request, baseURL!, actor.userId)
+      const beforeList = await memberContext.request.get('/api/dashboard/locations', { params: { org, organization: 'true' } })
+      expect(beforeList.status(), await beforeList.text()).toBe(200)
+      expect((await beforeList.json() as { locations: DashboardLocation[] }).locations.map(location => location.id)).not.toContain(locationId)
+      const unassigned = await memberContext.request.get(endpoint, { params: { org } })
+      expect(unassigned.status(), await unassigned.text()).toBe(404)
+
+      const assignmentPath = `${ORG}/locations/${original.slug}/settings/assignment`
+      await page.setViewportSize(WIDE)
+      await open(page, assignmentPath)
+      const leaf = page.locator('#dashboard-panel-location-assignment')
+      await expect(leaf.getByRole('radio', { name: 'Administrators', exact: true })).toBeChecked()
+      await expect(leaf).toContainText('No staff are assigned. Owners and administrators manage this location.')
+      const memberChoice = leaf.getByRole('radio', { name: actor.user.name, exact: true })
+      await memberChoice.click()
+      const saved = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
+      await leaf.getByRole('button', { name: 'Save', exact: true }).click()
+      expect((await saved).status()).toBe(200)
+      await expect(leaf.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+      await page.reload()
+      await waitForNuxtHydration(page)
+      await expect(memberChoice).toBeChecked()
+      await expect(page.locator('#dashboard-panel-location-settings').getByRole('link', { name: /Team assignment/ })).toContainText(actor.user.name)
+      expect(await readLocation()).toMatchObject({ assigned_member_id: actor.id, assigned_team_id: null })
+
+      const memberPage = await memberContext.newPage()
+      await dismissPreviewToolbar(memberPage)
+      await open(memberPage, `${ORG}/locations`)
+      const branch = memberPage.getByTestId(`selector-item-${locationId}`)
+      await expect(branch).toBeVisible()
+      await expect(branch).toHaveAttribute('href', `${ORG}/locations/${original.slug}`)
+      await branch.click()
+      await expect(memberPage.locator('#dashboard-panel-location-index').getByRole('heading', { name: original.title, exact: true })).toBeVisible()
+      await open(memberPage, `${ORG}/locations/${original.slug}/contact`)
+      const contact = memberPage.locator('#dashboard-panel-location-contact')
+      const email = `location-assignment-${Date.now()}@playwright.example`
+      await contact.getByRole('textbox', { name: 'Email', exact: true }).fill(email)
+      const edited = memberPage.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
+      await contact.getByRole('button', { name: 'Save', exact: true }).click()
+      expect((await edited).status()).toBe(200)
+      await expect(contact.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+      await memberPage.reload()
+      await waitForNuxtHydration(memberPage)
+      await expect(contact.getByRole('textbox', { name: 'Email', exact: true })).toHaveValue(email)
+      expect(await readLocation()).toMatchObject({ email, assigned_member_id: actor.id, assigned_team_id: null })
+      const forbidden = await memberContext.request.patch(endpoint, { params: { org }, data: { assigned_member_id: null, assigned_team_id: null } })
+      expect(forbidden.status(), await forbidden.text()).toBe(403)
+      expect(await readLocation()).toMatchObject({ email, assigned_member_id: actor.id, assigned_team_id: null })
+      const wrongTenant = await memberContext.request.get(`/api/organizations/${organizationId}/locations/loc-pottery-house`)
+      expect(wrongTenant.status(), await wrongTenant.text()).toBe(404)
+
+      const name = `E2E Location Team ${Date.now().toString(36)}`
+      const created = await page.request.post('/api/auth/organization/create-team', { headers: authRequestHeaders(baseURL!), data: { organizationId, name } })
+      expect(created.status(), await created.text()).toBe(200)
+      teamId = (await created.json() as { id: string }).id
+      const included = await page.request.post('/api/auth/organization/add-team-member', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId, userId: actor.userId } })
+      expect(included.status(), await included.text()).toBe(200)
+      const nativeMembers = await memberContext.request.get('/api/auth/organization/list-team-members', { params: { teamId } })
+      expect(nativeMembers.status(), await nativeMembers.text()).toBe(200)
+      expect((await nativeMembers.json() as Array<{ userId: string }>).map(member => member.userId)).toContain(actor.userId)
+      await page.reload()
+      await waitForNuxtHydration(page)
+      const teamChoice = leaf.getByRole('radio', { name: `Team: ${name}`, exact: true })
+      await teamChoice.click()
+      const teamSaved = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
+      await leaf.getByRole('button', { name: 'Save', exact: true }).click()
+      expect((await teamSaved).status()).toBe(200)
+      await expect(leaf.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+      await page.reload()
+      await waitForNuxtHydration(page)
+      await expect(teamChoice).toBeChecked()
+      expect(await readLocation()).toMatchObject({ assigned_member_id: null, assigned_team_id: teamId })
+      await open(memberPage, `${ORG}/locations`)
+      await expect(branch).toBeVisible()
+      await branch.click()
+      await expect(memberPage.locator('#dashboard-panel-location-index').getByRole('heading', { name: original.title, exact: true })).toBeVisible()
+      const teamForbidden = await memberContext.request.patch(endpoint, { params: { org }, data: { assigned_member_id: actor.id, assigned_team_id: null } })
+      expect(teamForbidden.status(), await teamForbidden.text()).toBe(403)
+      expect(await readLocation()).toMatchObject({ assigned_member_id: null, assigned_team_id: teamId })
+      await memberPage.screenshot({ path: testInfo.outputPath('assigned-location-mobile.png'), fullPage: true })
+    } catch (error) {
+      failures.push(error)
+    } finally {
+      try {
+        if (original) {
+          const restored = await page.request.patch(endpoint, { params: { org }, data: {
+            email: original.email, assigned_member_id: original.assigned_member_id, assigned_team_id: original.assigned_team_id,
+          } })
+          expect(restored.status(), await restored.text()).toBe(200)
+          expect(await readLocation()).toMatchObject({ email: original.email, assigned_member_id: original.assigned_member_id, assigned_team_id: original.assigned_team_id })
+          if (roleChanged && memberContext) {
+            const restoredAccess = await memberContext.request.get(endpoint, { params: { org } })
+            expect(restoredAccess.status(), await restoredAccess.text()).toBe(404)
+          }
+        }
+      } catch (error) { failures.push(error) }
+      try {
+        if (teamId) {
+          const removed = await page.request.post('/api/auth/organization/remove-team', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId } })
+          expect(removed.status(), await removed.text()).toBe(200)
+          const teams = await page.request.get('/api/auth/organization/list-teams', { params: { organizationId } })
+          expect(teams.status(), await teams.text()).toBe(200)
+          expect((await teams.json() as Array<{ id: string }>).map(team => team.id)).not.toContain(teamId)
+        }
+      } catch (error) { failures.push(error) }
+      try {
+        if (roleChanged && actor) {
+          const restored = await page.request.post('/api/auth/organization/update-member-role', { headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor.id, role: actor.role } })
+          expect(restored.status(), await restored.text()).toBe(200)
+          const members = await page.request.get('/api/dashboard/members', { params: { org } })
+          expect(members.status(), await members.text()).toBe(200)
+          expect((await members.json() as OrganizationMembersData).members.find(member => member.id === actor!.id)?.role).toBe(actor.role)
+        }
+      } catch (error) { failures.push(error) }
+      try {
+        await memberContext?.close()
+      } catch (error) { failures.push(error) }
+      try {
+        await release()
+      } catch (error) { failures.push(error) }
+    }
+    if (failures.length) throw new AggregateError(failures, 'Location assignment workflow or restoration failed')
+  })
   })
 
   test('Notification form saves each channel and reloads the account preference', async ({ page, baseURL }) => {
