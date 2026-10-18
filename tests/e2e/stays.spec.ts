@@ -1,4 +1,4 @@
-import { expect, test, type APIRequestContext, type WebSocket } from '@playwright/test'
+import { expect, test, type APIRequestContext, type Page, type WebSocket } from '@playwright/test'
 import sharp from 'sharp'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpRequest } from './helpers/mcp'
@@ -25,12 +25,10 @@ async function tool<T>(request: APIRequestContext, baseURL: string, organization
   return { data: body.result!.structuredContent!, error: null }
 }
 
-test('a host creates a place to stay, sees its stay on Today, and records payment and cancellation', async ({ page, browser, baseURL }, testInfo) => {
-  test.setTimeout(60_000)
-  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+async function createStayHome(page: Page, baseURL: string) {
   const request = page.request
-  await loginAs(request, baseURL!, 'user-e2e-lodging-host')
-  const headers = authRequestHeaders(baseURL!)
+  await loginAs(request, baseURL, 'user-e2e-lodging-host')
+  const headers = authRequestHeaders(baseURL)
   const slug = `e2e-stays-${crypto.randomUUID().slice(0, 8)}`
   const created = await request.post(`${baseURL}/api/auth/organization/create`, { headers, data: { name: `Stays ${slug}`, slug, default_currency: 'THB', timezone: TIME_ZONE } })
   expect(created.status(), await created.text()).toBe(200)
@@ -38,7 +36,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   const provisioned = await request.post(`${baseURL}/api/organizations`, { headers, data: { organizationId, name: `Stays ${slug}`, subdomain: slug, vertical: 'lodging', sourceLocale: 'en' } })
   expect(provisioned.status(), await provisioned.text()).toBe(200)
   expect((await request.post(`${baseURL}/api/auth/organization/set-active`, { headers, data: { organizationId } })).status()).toBe(200)
-  const call = <T>(name: string, args: Record<string, unknown>) => tool<T>(request, baseURL!, organizationId, name, args)
+  const call = <T>(name: string, args: Record<string, unknown>) => tool<T>(request, baseURL, organizationId, name, args)
   const locations = await call<{ locations: Array<{ id: string; title: string }> }>('list_locations', {})
   const location = locations.data!.locations[0]!
   expect(location).toBeTruthy()
@@ -65,6 +63,87 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   const home = await call<{ product: { kind: string; unit_label: string; stay: Record<string, unknown> } }>('get_product', { product_id: productId })
   expect(home.error).toBeNull()
   expect(home.data!.product).toMatchObject({ kind: 'stay', unit_label: 'night', stay: { location_id: location.id, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, ...unknownPropertyFacts } })
+  const api = (path: string) => `${baseURL}/api/dashboard/${path}${path.includes('?') ? '&' : '?'}org=${encodeURIComponent(slug)}`
+  return { request, headers, slug, organizationId, location, homeAddress, call, api, productId, unknownPropertyFacts, home }
+}
+
+// The editor's View mode wraps the real guest page in one iframe.
+function previewLocators(page: Page) {
+  const previewLink = page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true })
+  const previewModal = page.getByRole('dialog', { name: 'Listing preview', exact: true })
+  const previewIframe = previewModal.locator('iframe[title="Listing preview"]')
+  return { previewLink, previewModal, previewIframe, preview: previewIframe.contentFrame() }
+}
+
+test('a host creates a place to stay, sees its stay on Today, and records payment and cancellation', async ({ page, baseURL }) => {
+  test.setTimeout(60_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const { request, headers, slug, call, api, productId } = await createStayHome(page, baseURL!)
+  await page.setViewportSize({ width: 390, height: 844 })
+
+  // A stay arriving today holds its nights; another on them is refused.
+  const checkIn = localDay(0)
+  const checkOut = localDay(2)
+  const stay = await call<{ stay: { id: string; version: number; status: string } }>('create_stay', {
+    product_id: productId, check_in_date: checkIn, check_out_date: checkOut, adults: 2, guest_name: 'Ana', guest_surname: 'Silva', total_minor: 300_00, idempotency_key: `${slug}-a`,
+  })
+  expect(stay.error).toBeNull()
+  const overlap = await call('create_stay', { product_id: productId, check_in_date: localDay(1), check_out_date: localDay(3), adults: 1, guest_name: 'Bo', total_minor: 100_00, idempotency_key: `${slug}-b` })
+  expect(overlap.error).toContain('Another stay already holds one of these nights')
+
+  // Today lists the arrival and opens the stay.
+  await page.goto(`/dashboard/${slug}`)
+  // Today's card names the guest by first name and the moment: arriving, at the home's check-in time.
+  const arrival = page.getByRole('link', { name: /3:00\sPM Ana arrives today with 2 guests/ })
+  await expect(arrival).toHaveAttribute('href', `/dashboard/${slug}/bookings/stay/${stay.data!.stay.id}`)
+  await arrival.click()
+  await expect(page.getByRole('heading', { name: 'Ana Silva', level: 2, exact: true })).toBeVisible()
+
+  await page.getByRole('textbox', { name: 'Amount (THB)' }).fill('100')
+  await page.getByRole('button', { name: 'Record payment' }).click()
+  // The recorded row, not the method picker: it names the amount with its method.
+  await expect(page.getByRole('listitem').filter({ hasText: /100\.00 · Cash/ })).toBeVisible()
+  const paid = await call<{ stay: { paid_minor: number; payment_status: string; payments: Array<{ method: string; amount_minor: number }> } }>('get_stay', { stay_id: stay.data!.stay.id })
+  expect(paid.data!.stay).toMatchObject({ paid_minor: 100_00, payment_status: 'partial', payments: [{ method: 'cash', amount_minor: 100_00 }] })
+
+  await page.getByRole('button', { name: 'Cancel stay' }).click()
+  await page.getByRole('dialog').getByRole('button', { name: 'Cancel stay' }).click()
+  await expect(page.getByText('Cancelled', { exact: true })).toBeVisible()
+  const calendar = await call<{ nights: Array<{ date: string; available: boolean }> }>('get_stay_calendar', { product_id: productId, from: checkIn, to: checkOut })
+  expect(calendar.data!.nights.map(night => night.available)).toEqual([true, true])
+  const cancelled = await call<{ stay: { status: string; cancelled_at: string | null } }>('get_stay', { stay_id: stay.data!.stay.id })
+  expect(cancelled.data!.stay.status).toBe('cancelled')
+  expect(cancelled.data!.stay.cancelled_at).toBeTruthy()
+
+  const later = [localDay(10), localDay(13)] as const
+  const made = await request.post(api('stays'), { headers, data: { product_id: productId, check_in_date: later[0], check_out_date: later[1], adults: 2, guest_name: 'Kai', total_minor: 450_00, idempotency_key: `${slug}-native` } })
+  expect(made.status(), await made.text()).toBe(201)
+  const native = (await made.json() as { stay: { id: string; version: number } }).stay
+  const edited = await request.patch(api(`stays/${native.id}`), { headers, data: { expected_version: native.version, guest_name: 'Kai Mendes' } })
+  expect(edited.status(), await edited.text()).toBe(200)
+  const nativeRead = await call<{ stay: { guest_name: string; check_in_date: string; total_minor: number } }>('get_stay', { stay_id: native.id })
+  expect(nativeRead.data!.stay).toMatchObject({ guest_name: 'Kai Mendes', check_in_date: later[0], check_out_date: later[1], total_minor: 450_00 })
+
+  const listed = await request.get(api(`stays?from=${later[0]}&to=${later[1]}`))
+  expect(listed.status(), await listed.text()).toBe(200)
+  expect((await listed.json() as { stays: Array<{ id: string }> }).stays.map(stay => stay.id)).toEqual([native.id])
+
+  const closedNight = localDay(20)
+  const closed = await request.put(api(`stay-homes/${productId}/nights`), { headers, data: { from: closedNight, to: localDay(21), closed: true } })
+  expect(closed.status(), await closed.text()).toBe(200)
+  const nativeCalendar = await request.get(api(`stay-homes/${productId}/calendar?from=${later[0]}&to=${localDay(21)}`))
+  expect(nativeCalendar.status(), await nativeCalendar.text()).toBe(200)
+  const nights = (await nativeCalendar.json() as { nights: Array<{ date: string; available: boolean; stay_id: string | null; closed: boolean }> }).nights
+  expect(nights.filter(night => night.stay_id === native.id).map(night => night.date)).toEqual([later[0], localDay(11), localDay(12)])
+  expect(nights.find(night => night.date === closedNight)).toMatchObject({ available: false, closed: true })
+  const mcpCalendar = await call<{ nights: Array<{ date: string; closed: boolean }> }>('get_stay_calendar', { product_id: productId, from: closedNight, to: localDay(21) })
+  expect(mcpCalendar.data!.nights).toEqual([expect.objectContaining({ date: closedNight, closed: true })])
+})
+
+test('a host describes a place to stay through its focused editors and previews the saved guest page', async ({ page, browser, baseURL }, testInfo) => {
+  test.setTimeout(60_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const { request, slug, organizationId, location, homeAddress, call, api, productId, unknownPropertyFacts, home } = await createStayHome(page, baseURL!)
 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(`/dashboard/${slug}/products`)
@@ -452,6 +531,20 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
     amenities: ['dryer', 'wireless_internet'], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
   } })
 
+  // The editor's listing choices persist through the native home projection.
+  const homes = await request.get(api('stay-homes'))
+  expect(homes.status(), await homes.text()).toBe(200)
+  // The editor created the home without a nightly price, so it has no base price; its currency is the organization's.
+  expect((await homes.json() as { homes: unknown[] }).homes).toEqual([{
+    product_id: productId, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null,
+    check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1, assigned_member_id: null, assigned_team_id: null, channel: null,
+    check_in_instructions: null, photos: [],
+    // The editor's listing choices persist through the native home projection too.
+    description: listingDescription, published: false, address: homeAddress, latitude: null, longitude: null,
+    ...propertyFacts, bedrooms: null, beds: null, bathrooms: null, amenities: ['dryer', 'wireless_internet'], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
+    check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
+  }])
+
   // Preview is a URL-owned editor mode around the real guest page. It
   // preserves the open concern and authored draft while showing saved content.
   const titlePath = `/dashboard/${slug}/products/${productId}/name?location_id=${encodeURIComponent(location.id)}`
@@ -461,13 +554,10 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   await expect(titleInput).toHaveValue('Cliff Cabin')
   await titleInput.fill('An unsaved cliff cabin title')
   const previewSource = page.url()
-  const previewLink = page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true })
+  const { previewLink, previewModal, previewIframe, preview } = previewLocators(page)
   await expect(previewLink).toHaveAttribute('href', /editMode=preview/)
   await previewLink.click()
   await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/name`) && url.searchParams.get('location_id') === location.id && url.searchParams.get('editMode') === 'preview' && url.searchParams.get('previewViewport') === 'desktop')
-  const previewModal = page.getByRole('dialog', { name: 'Listing preview', exact: true })
-  const previewIframe = previewModal.locator('iframe[title="Listing preview"]')
-  const preview = previewIframe.contentFrame()
   await expect(previewModal).toBeVisible()
   await expect(preview.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
   const previewURL = new URL((await previewIframe.getAttribute('src'))!, baseURL!)
@@ -558,56 +648,15 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   } finally {
     await anonymous.close()
   }
-  await page.setViewportSize({ width: 390, height: 844 })
+})
 
-  // A stay arriving today holds its nights; another on them is refused.
+test("a host uploads, arranges, describes and removes a place to stay's photos", async ({ page, baseURL }, testInfo) => {
+  test.setTimeout(60_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const { request, headers, slug, organizationId, call, api, productId } = await createStayHome(page, baseURL!)
+  const { previewLink, previewModal, preview } = previewLocators(page)
   const checkIn = localDay(0)
   const checkOut = localDay(2)
-  const stay = await call<{ stay: { id: string; version: number; status: string } }>('create_stay', {
-    product_id: productId, check_in_date: checkIn, check_out_date: checkOut, adults: 2, guest_name: 'Ana', guest_surname: 'Silva', total_minor: 300_00, idempotency_key: `${slug}-a`,
-  })
-  expect(stay.error).toBeNull()
-  const overlap = await call('create_stay', { product_id: productId, check_in_date: localDay(1), check_out_date: localDay(3), adults: 1, guest_name: 'Bo', total_minor: 100_00, idempotency_key: `${slug}-b` })
-  expect(overlap.error).toContain('Another stay already holds one of these nights')
-
-  // Today lists the arrival and opens the stay.
-  await page.goto(`/dashboard/${slug}`)
-  // Today's card names the guest by first name and the moment: arriving, at the home's check-in time.
-  const arrival = page.getByRole('link', { name: /4:00\sPM Ana arrives today with 2 guests/ })
-  await expect(arrival).toHaveAttribute('href', `/dashboard/${slug}/bookings/stay/${stay.data!.stay.id}`)
-  await arrival.click()
-  await expect(page.getByRole('heading', { name: 'Ana Silva', level: 2, exact: true })).toBeVisible()
-
-  await page.getByRole('textbox', { name: 'Amount (THB)' }).fill('100')
-  await page.getByRole('button', { name: 'Record payment' }).click()
-  // The recorded row, not the method picker: it names the amount with its method.
-  await expect(page.getByRole('listitem').filter({ hasText: /100\.00 · Cash/ })).toBeVisible()
-  const paid = await call<{ stay: { paid_minor: number; payment_status: string; payments: Array<{ method: string; amount_minor: number }> } }>('get_stay', { stay_id: stay.data!.stay.id })
-  expect(paid.data!.stay).toMatchObject({ paid_minor: 100_00, payment_status: 'partial', payments: [{ method: 'cash', amount_minor: 100_00 }] })
-
-  await page.getByRole('button', { name: 'Cancel stay' }).click()
-  await page.getByRole('dialog').getByRole('button', { name: 'Cancel stay' }).click()
-  await expect(page.getByText('Cancelled', { exact: true })).toBeVisible()
-  const calendar = await call<{ nights: Array<{ date: string; available: boolean }> }>('get_stay_calendar', { product_id: productId, from: checkIn, to: checkOut })
-  expect(calendar.data!.nights.map(night => night.available)).toEqual([true, true])
-  const cancelled = await call<{ stay: { status: string; cancelled_at: string | null } }>('get_stay', { stay_id: stay.data!.stay.id })
-  expect(cancelled.data!.stay.status).toBe('cancelled')
-  expect(cancelled.data!.stay.cancelled_at).toBeTruthy()
-
-  // The native app's routes are the same domain: every write is read back through MCP.
-  const api = (path: string) => `${baseURL}/api/dashboard/${path}${path.includes('?') ? '&' : '?'}org=${encodeURIComponent(slug)}`
-  const homes = await request.get(api('stay-homes'))
-  expect(homes.status(), await homes.text()).toBe(200)
-  // The editor created the home without a nightly price, so it has no base price; its currency is the organization's.
-  expect((await homes.json() as { homes: unknown[] }).homes).toEqual([{
-    product_id: productId, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null,
-    check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1, assigned_member_id: null, assigned_team_id: null, channel: null,
-    check_in_instructions: null, photos: [],
-    // The editor's listing choices persist through the native home projection too.
-    description: listingDescription, published: false, address: homeAddress, latitude: null, longitude: null,
-    ...propertyFacts, bedrooms: null, beds: null, bathrooms: null, amenities: ['dryer', 'wireless_internet'], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
-    check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
-  }])
 
   // A home's photos are its product's media; the photo routes refuse what is not a photo before storing anything.
   const photos = api(`stay-homes/${productId}/photos`)
@@ -863,30 +912,22 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   const reattachedProduct = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
   expect(reattachedProduct.error).toBeNull()
   expect([reattachedProduct.data!.product.image!.asset_id, ...reattachedProduct.data!.product.gallery.map(asset => asset.asset_id)]).toEqual([red.id, blue.id])
+})
 
-  const later = [localDay(10), localDay(13)] as const
-  const made = await request.post(api('stays'), { headers, data: { product_id: productId, check_in_date: later[0], check_out_date: later[1], adults: 2, guest_name: 'Kai', total_minor: 450_00, idempotency_key: `${slug}-native` } })
-  expect(made.status(), await made.text()).toBe(201)
-  const native = (await made.json() as { stay: { id: string; version: number } }).stay
-  const edited = await request.patch(api(`stays/${native.id}`), { headers, data: { expected_version: native.version, guest_name: 'Kai Mendes' } })
-  expect(edited.status(), await edited.text()).toBe(200)
-  const nativeRead = await call<{ stay: { guest_name: string; check_in_date: string; total_minor: number } }>('get_stay', { stay_id: native.id })
-  expect(nativeRead.data!.stay).toMatchObject({ guest_name: 'Kai Mendes', check_in_date: later[0], check_out_date: later[1], total_minor: 450_00 })
-
-  const listed = await request.get(api(`stays?from=${later[0]}&to=${later[1]}`))
-  expect(listed.status(), await listed.text()).toBe(200)
-  expect((await listed.json() as { stays: Array<{ id: string }> }).stays.map(stay => stay.id)).toEqual([native.id])
-
-  const closedNight = localDay(20)
-  const closed = await request.put(api(`stay-homes/${productId}/nights`), { headers, data: { from: closedNight, to: localDay(21), closed: true } })
-  expect(closed.status(), await closed.text()).toBe(200)
-  const nativeCalendar = await request.get(api(`stay-homes/${productId}/calendar?from=${later[0]}&to=${localDay(21)}`))
-  expect(nativeCalendar.status(), await nativeCalendar.text()).toBe(200)
-  const nights = (await nativeCalendar.json() as { nights: Array<{ date: string; available: boolean; stay_id: string | null; closed: boolean }> }).nights
-  expect(nights.filter(night => night.stay_id === native.id).map(night => night.date)).toEqual([later[0], localDay(11), localDay(12)])
-  expect(nights.find(night => night.date === closedNight)).toMatchObject({ available: false, closed: true })
-  const mcpCalendar = await call<{ nights: Array<{ date: string; closed: boolean }> }>('get_stay_calendar', { product_id: productId, from: closedNight, to: localDay(21) })
-  expect(mcpCalendar.data!.nights).toEqual([expect.objectContaining({ date: closedNight, closed: true })])
+test('a host lists, pauses and unlists a priced place to stay', async ({ page, browser, baseURL }, testInfo) => {
+  test.setTimeout(60_000)
+  test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
+  const { slug, organizationId, call, productId } = await createStayHome(page, baseURL!)
+  const { previewLink, previewModal, previewIframe } = previewLocators(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  // The guest page is the one the editor previews, without the preview token.
+  await page.goto(`/dashboard/${slug}/products/${productId}`)
+  await previewLink.click()
+  await expect(previewModal).toBeVisible()
+  const previewURL = new URL((await previewIframe.getAttribute('src'))!, baseURL!)
+  previewURL.searchParams.delete('preview_token')
+  await previewModal.getByRole('button', { name: 'Close', exact: true }).click()
+  await expect(previewModal).not.toBeVisible()
 
   // Visibility and accepting bookings are separate writes. A real nightly
   // price makes this home publishable without changing the earlier unpriced proof.
