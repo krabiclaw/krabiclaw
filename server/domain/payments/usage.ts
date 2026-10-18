@@ -338,7 +338,7 @@ export async function reconcileNativeBillingCredit(db:DbClient,stripe:Stripe,env
 export async function finalizePaymentsBilling(db:DbClient,env:CloudflareEnv,principal:FinancialPrincipal){
  const {assertRoleAllows}=await import('~/server/utils/member-access')
  await assertRoleAllows({organizationId:principal.organizationId,role:principal.role,permissions:{billing:['update']}})
- await requireRecordedManagedSpend(db,principal.organizationId)
+ await requireRecordedManagedSpend(db,env,principal.organizationId)
  const account=await queryFirst<BillingAccount>(db,'SELECT * FROM payment_billing_accounts WHERE organization_id=?',[principal.organizationId])
  if(!account?.metronome_customer_id||!account.metronome_contract_id)throw new HTTPError({statusCode:409,statusMessage:'Native Payments usage contract is not configured'})
  if(account.status==='closed'){

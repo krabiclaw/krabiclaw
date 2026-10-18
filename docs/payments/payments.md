@@ -432,13 +432,20 @@ Managed ads is a service: Chris and Julia run a business's Google Ads
 campaigns for 10% of its ad spend. Connecting a Google Ads account costs
 nothing and feeds Insights → Google Ads; the fee follows the business's
 agreement, recorded in `organization_services` (`managed_ads`, who agreed,
-when, which terms) from Payments → Plan → Services. The daily
+when, which terms) from Payments → Plan → Services. Reporting days follow the
+connected Google Ads account's actual timezone, including daylight saving time;
+the day ends at its next local midnight. The daily
 `marketing:ad-spend-daily` task reads, for each business whose agreement was on
 as the billed day closed (agreed before its end, not ended by it) and whose
-account is connected, Google's cost for the day two days back (a day Google has
+account is connected, Google's cost for the day two calendar days back in that
+account's timezone (a day Google has
 finished counting), and queues it as an `ad_spend` usage event
 (`google_ads:<customer>:<date>`, USD cents) delivered through the same Metronome
 path as captured volume, as `payments_ad_spend`.
+The usage event's source timestamp is the final millisecond of that actual
+reporting day. Missing or invalid provider timezone stops activation/capture;
+there is no UTC default. Agreement eligibility compares the same actual day
+boundary with the recorded consent and connection instants.
 Metronome prices it at the ad-spend rate on the Payments rate card:
 `validatePaymentsRateCard` accepts that third flat rate, and the plan screen and
 `get_payments_usage` show it as `ad_spend_rate_percent`. A Google Ads account

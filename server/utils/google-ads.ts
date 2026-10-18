@@ -2,6 +2,7 @@ import type { CloudflareEnv } from './auth'
 import { readIntegration, storeIntegration } from './organization-integrations'
 import { requireRecordedManagedSpend } from '~/server/domain/payments/ad-spend'
 import { HTTPError } from 'nitro'
+import { isValidTimezone } from '~/utils/timezone'
 
 /**
  * Google Ads as a product of its own, over a Better Auth linked Google
@@ -101,7 +102,7 @@ export async function selectGoogleAdsCustomer(
   customerId: string,
   customerName: string,
 ): Promise<string> {
-  await requireRecordedManagedSpend(env.DB, organizationId)
+  await requireRecordedManagedSpend(env.DB, env, organizationId)
   if (await readIntegration(env.DB, organizationId, 'google_ads')) throw new HTTPError({ statusCode: 409, message: 'Disconnect Google Ads before connecting again.' })
   return await storeIntegration(env.DB, organizationId, 'google_ads', {
     account_id: accountId,
@@ -597,7 +598,7 @@ export async function updateGoogleAdsCampaignBudget(
   return { budgetId, amountMicros }
 }
 
-/** The account's currency and name, independent of any reporting range. */
+/** The account's currency, reporting timezone and name, independent of any reporting range. */
 export async function getGoogleAdsCustomer(accessToken: string, developerToken: string | undefined, customerId: string): Promise<{ descriptiveName: string; currencyCode: string; timeZone: string }> {
   const cid = cleanCustomerId(customerId)
   const response = await fetch(`https://googleads.googleapis.com/v25/customers/${cid}/googleAds:search`, {
@@ -608,7 +609,8 @@ export async function getGoogleAdsCustomer(accessToken: string, developerToken: 
   if (!response.ok) throw new Error(`Google Ads API error (${response.status}): ${(await response.text()).slice(0, 300)}`)
   const data = (await response.json()) as { results?: Array<{ customer?: { descriptiveName?: string; currencyCode?: string; timeZone?: string } }> }
   const customer = data.results?.[0]?.customer
-  if (!customer?.currencyCode || !customer.timeZone) throw new Error(`Google Ads did not describe customer ${cid}`)
+  if (!customer?.currencyCode) throw new Error(`Google Ads did not describe customer ${cid}`)
+  if (!isValidTimezone(customer.timeZone)) throw new Error(`Google Ads did not provide a valid reporting timezone for customer ${cid}`)
   return { descriptiveName: customer.descriptiveName ?? '', currencyCode: customer.currencyCode, timeZone: customer.timeZone }
 }
 

@@ -14,7 +14,7 @@ import { getGoogleAdsCustomer } from '~/server/utils/google-ads'
 export const SERVICES = ['managed_ads'] as const
 export type Service = typeof SERVICES[number]
 /** Bump when the terms a business agrees to change; the row keeps the version it agreed to. */
-export const SERVICE_TERMS_VERSION: Record<Service, string> = { managed_ads: '2026-10-18.1' }
+export const SERVICE_TERMS_VERSION: Record<Service, string> = { managed_ads: '2026-10-18.2' }
 
 export interface ServiceAgreement { id: string; service: Service; terms_version: string; agreed_by_user_id: string | null; agreed_at: string; ended_at: string | null }
 

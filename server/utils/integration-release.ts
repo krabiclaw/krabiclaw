@@ -48,7 +48,7 @@ export async function releaseIntegration(
   organizationId: string,
   product: IntegrationProduct,
 ): Promise<ReleaseIntegrationResult> {
-  if (product === 'google-ads') await requireRecordedManagedSpend(env.DB, organizationId)
+  if (product === 'google-ads') await requireRecordedManagedSpend(env.DB, env, organizationId)
   const released = await deleteIntegration(env.DB, organizationId, PROVIDER[product])
 
   // Zaraz serves the measurement id of connected sites, so losing Analytics
