@@ -1555,6 +1555,28 @@ export const inventory_levels = sqliteTable("inventory_levels", {
 // stops serving a measurement id), so it goes through releaseIntegration.
 // Read/write: server/utils/organization-integrations.ts.
 // ---------------------------------------------------------------------------
+/**
+ * A service the business asked KrabiClaw's people for, with the consent that
+ * started it: who agreed, when, and to which terms. Managed ads is the only
+ * service whose fee is usage (Metronome `payments_ad_spend`), so its consent
+ * lives here rather than on a Stripe subscription. A row with `ended_at` is
+ * history; the current agreement for a service is the one without.
+ */
+export const organization_services = sqliteTable("organization_services", {
+	id: text().primaryKey(),
+	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
+	service: text({ enum: ["managed_ads"] }).notNull(),
+	terms_version: text().notNull(),
+	agreed_by_user_id: text().references(() => user.id, { onDelete: "set null" }),
+	agreed_at: text().notNull(),
+	ended_by_user_id: text().references(() => user.id, { onDelete: "set null" }),
+	ended_at: text(),
+	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
+}, (table) => [
+	// One current agreement per service: concurrent agreements cannot both land.
+	uniqueIndex("organization_services_current_unique").on(table.organization_id, table.service).where(sql`ended_at IS NULL`),
+]);
+
 export const organization_integrations = sqliteTable("organization_integrations", {
 	id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),

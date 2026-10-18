@@ -34,16 +34,17 @@
       :description="connection.lastError || 'The last sync failed.'"
     />
 
-    <!-- Gated: the plan row, as Airbnb names what a setting needs. -->
+    <!-- The service KrabiClaw's people offer on this connection; it starts and stops in Payments → Plan. -->
     <NuxtLink
-      v-if="definition.entitlement && !entitled"
+      v-if="definition.service"
       :to="planTo"
       class="-mx-4 flex items-center gap-4 px-4 py-4 hover:bg-elevated"
+      data-testid="integration-service"
     >
-      <UIcon name="i-lucide-lock" class="size-5 shrink-0 text-dimmed" />
+      <UIcon name="i-lucide-users" class="size-5 shrink-0 text-dimmed" />
       <span class="min-w-0 flex-1">
-        <span class="block font-medium text-highlighted">Requires Business</span>
-        <span class="block text-sm text-muted">{{ definition.name }} is part of the Business plan.</span>
+        <span class="block font-medium text-highlighted">{{ definition.service.name }}<template v-if="serviceOn"> · On</template></span>
+        <span class="block text-sm text-muted">{{ definition.service.summary }}</span>
       </span>
       <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
     </NuxtLink>
@@ -95,9 +96,9 @@ const props = withDefaults(defineProps<{
   integration: IntegrationKey
   connection: IntegrationLeafConnection | null
   disconnecting?: boolean
-  /** Whether the organization's plan grants the integration; defaults to granted for ungated ones. */
-  entitled?: boolean
-}>(), { disconnecting: false, entitled: true })
+  /** Whether the business is on the service the integration offers. */
+  serviceOn?: boolean
+}>(), { disconnecting: false, serviceOn: false })
 
 const emit = defineEmits<{ disconnect: [] }>()
 

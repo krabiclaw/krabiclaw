@@ -18,7 +18,7 @@
         class="mb-8"
       />
 
-      <div v-if="tab === 'views' || tab === 'instagram'" class="flex flex-wrap items-center justify-end gap-4">
+      <div v-if="tab === 'views' || tab === 'instagram' || tab === 'ads'" class="flex flex-wrap items-center justify-end gap-4">
         <p v-if="tab === 'views' && analytics" class="mr-auto text-sm text-muted" data-testid="insights-period">
           <time :datetime="analytics.period.startDate">{{ formatDate(analytics.period.startDate) }}</time> – <time :datetime="analytics.period.endDate">{{ formatDate(analytics.period.endDate) }}</time>
         </p>
@@ -367,6 +367,59 @@
         </template>
       </div>
 
+      <div v-else-if="tab === 'ads'" class="space-y-8">
+        <UAlert
+          v-if="adsError"
+          color="error"
+          variant="soft"
+          title="Google Ads could not be loaded"
+          :description="adsError.message"
+          :actions="[{ label: 'Try again', onClick: () => refreshAds() }]"
+        />
+        <div v-else-if="adsLoading && !ads" class="space-y-4" role="status" aria-label="Loading Google Ads">
+          <USkeleton class="h-28 w-full rounded-2xl" />
+        </div>
+        <UAlert
+          v-else-if="ads && ads.status !== 'connected'"
+          color="neutral"
+          variant="soft"
+          :description="ads.message"
+          :actions="[{ label: 'Google Ads settings', to: `/dashboard/${scope?.orgSlug}/integrations/google-ads` }]"
+        />
+        <template v-else-if="ads && ads.status === 'connected'">
+          <p class="text-sm text-muted">{{ ads.customer.name }} · {{ formatDate(ads.period.startDate) }} – {{ formatDate(ads.period.endDate) }} · In {{ ads.customer.currency }}, as Google reports it.</p>
+          <section class="border-b border-default pb-8">
+            <div class="grid grid-cols-2 gap-x-6 gap-y-6 sm:grid-cols-3">
+              <div v-for="metric in adsMetricCards" :key="metric.label">
+                <p class="text-sm text-muted">{{ metric.label }}</p>
+                <p class="mt-2 text-3xl font-semibold tabular-nums tracking-tight text-highlighted">{{ metric.value }}</p>
+              </div>
+            </div>
+          </section>
+          <!-- The service, offered where its evidence is; it starts in Payments → Plan. -->
+          <section v-if="!ads.managed" class="rounded-2xl p-6 ring ring-default" data-testid="insights-managed-ads">
+            <h2 class="text-xl font-semibold text-highlighted">Get more from this budget</h2>
+            <p class="mt-2 text-base text-muted">Chris and Julia manage your campaigns — building, pausing and budgeting them against these numbers — for 10% of ad spend, billed with your KrabiClaw fees.</p>
+            <UButton class="mt-4" label="See managed ads" :to="`/dashboard/${scope?.orgSlug}/payments?tab=plan`" />
+          </section>
+          <section>
+            <header class="mb-4"><h2 class="font-semibold text-highlighted">Campaigns by spend</h2></header>
+            <p v-if="!ads.campaigns.length" class="text-sm text-muted">No campaigns in this account.</p>
+            <table v-else class="w-full text-left text-sm">
+              <thead class="text-xs text-muted"><tr><th class="pb-3 font-medium">Campaign</th><th class="pb-3 text-right font-medium">Spend</th><th class="pb-3 pl-4 text-right font-medium">Clicks</th><th class="pb-3 pl-4 text-right font-medium">Conversions</th></tr></thead>
+              <tbody class="divide-y divide-default">
+                <tr v-for="campaign in ads.campaigns" :key="campaign.id">
+                  <td class="py-3 pr-4"><p class="font-medium text-highlighted">{{ campaign.name }}</p><p class="mt-1 text-xs text-muted">{{ campaign.status === 'ENABLED' ? 'Running' : campaign.status === 'PAUSED' ? 'Paused' : campaign.status }}</p></td>
+                  <td class="py-3 text-right tabular-nums text-highlighted">{{ formatMicros(campaign.costMicros, ads.customer.currency) }}</td>
+                  <td class="py-3 pl-4 text-right tabular-nums text-highlighted">{{ formatCount(campaign.clicks) }}</td>
+                  <td class="py-3 pl-4 text-right tabular-nums text-highlighted">{{ formatCount(Math.round(campaign.conversions)) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+        </template>
+      </div>
+
       <ActivityFeed v-else-if="tab === 'activity'" />
     </div>
   </DashboardIndexPanel>
@@ -383,6 +436,7 @@ import DashboardAnalyticsRow from '~/lib/components/workspace/dashboard/Analytic
 import { localDateAt, addLocalDays, formatCalendarDate } from '~/utils/timezone'
 import { organizationAnalyticsSchema, type AnalyticsReport, type OrganizationAnalyticsReport } from '~/shared/analytics-report'
 import { instagramInsightsSchema, type InstagramInsights } from '~/shared/instagram-insights'
+import { googleAdsInsightsSchema, type GoogleAdsInsights } from '~/shared/google-ads-insights'
 import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
 
 const route = useRoute()
@@ -391,7 +445,7 @@ const scope = useDashboardRouteScope()
 // Reviews reads what we actually hold. There is no Superhost
 // equivalent, and a review carries one overall rating rather than per-category
 // scores, so neither is invented here.
-const TAB_VALUES = ['views', 'instagram', 'reviews', 'activity'] as const
+const TAB_VALUES = ['views', 'instagram', 'ads', 'reviews', 'activity'] as const
 type InsightsTab = typeof TAB_VALUES[number]
 const isTab = (value: unknown): value is InsightsTab => TAB_VALUES.some(candidate => candidate === value)
 const tab = ref<InsightsTab>(isTab(route.query.tab) ? route.query.tab : 'views')
@@ -407,6 +461,7 @@ watch(tab, (next) => {
 const tabItems = [
   { label: 'Views', value: 'views' as const },
   { label: 'Instagram', value: 'instagram' as const },
+  { label: 'Google Ads', value: 'ads' as const },
   { label: 'Reviews', value: 'reviews' as const },
   // Activity is a report like the others, not a screen of its own: it reads
   // what happened and edits nothing, so it belongs beside Views and Reviews
@@ -460,6 +515,38 @@ const { data: instagram, pending: instagramLoading, error: instagramError, refre
   { lazy: true, immediate: false },
 )
 watch(() => tab.value === 'instagram' ? `${scope.value?.orgSlug}:${requestedRange.value.startDate ?? ''}:${requestedRange.value.endDate ?? ''}` : null, (key) => { if (key) void loadInstagram() }, { immediate: true })
+// Google Ads' own numbers for the same range when its tab is open; spend is Google's, never added to revenue.
+const { data: ads, pending: adsLoading, error: adsError, refresh: refreshAds, execute: loadAds } = await useAsyncData(
+  () => `dashboard-org-ads:${scope.value?.orgSlug}:${requestedRange.value.startDate ?? ''}:${requestedRange.value.endDate ?? ''}`,
+  () => dashboardApi<GoogleAdsInsights>('/api/dashboard/google-ads-insights', {
+    query: requestedRange.value,
+    validate: (value): value is GoogleAdsInsights => {
+      const result = googleAdsInsightsSchema.safeParse(value)
+      if (!result.success) throw new ApiClientError('Invalid Google Ads insights response', 502, 'INVALID_GOOGLE_ADS_INSIGHTS_RESPONSE', null)
+      return true
+    },
+  }),
+  { lazy: true, immediate: false },
+)
+watch(() => tab.value === 'ads' ? `${scope.value?.orgSlug}:${requestedRange.value.startDate ?? ''}:${requestedRange.value.endDate ?? ''}` : null, (key) => { if (key) void loadAds() }, { immediate: true })
+// Google reports money in millionths of the account's currency unit.
+function formatMicros(micros: number, currency: string): string {
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 2 }).format(micros / 1_000_000)
+}
+const adsMetricCards = computed(() => {
+  const report = ads.value
+  if (!report || report.status !== 'connected') return []
+  const { totals, customer } = report
+  const costPerConversion = totals.conversions > 0 ? totals.costMicros / totals.conversions : null
+  return [
+    { label: 'Spend', value: formatMicros(totals.costMicros, customer.currency) },
+    { label: 'Clicks', value: formatCount(totals.clicks) },
+    { label: 'Impressions', value: formatCount(totals.impressions) },
+    { label: 'Conversions', value: formatCount(Math.round(totals.conversions)) },
+    { label: 'Avg. cost per click', value: formatMicros(totals.averageCpcMicros, customer.currency) },
+    { label: 'Cost per conversion', value: costPerConversion === null ? '—' : formatMicros(costPerConversion, customer.currency) },
+  ]
+})
 const INSTAGRAM_ACCOUNT_FIELDS = [
   { key: 'views', label: 'Views' }, { key: 'reach', label: 'Accounts reached' }, { key: 'accounts_engaged', label: 'Accounts engaged' },
   { key: 'total_interactions', label: 'Interactions' }, { key: 'likes', label: 'Likes' }, { key: 'comments', label: 'Comments' },

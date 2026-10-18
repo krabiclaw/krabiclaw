@@ -1,11 +1,11 @@
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { queryAll } from '~/server/db'
-import { filterEntitledRows } from '~/server/utils/billing-access'
 import { defineScheduledTask } from '~/server/utils/scheduled-task'
 import { recordAdSpend } from '~/server/domain/payments/ad-spend'
+import { organizationsOnServiceAt } from '~/server/utils/organization-services'
 
 /**
- * Bills each Marketing business for the Google Ads it spent two days ago: a
+ * Bills each business on managed ads for the Google Ads it spent two days ago: a
  * day Google has finished counting. Every connected account is read; one
  * business's failure is reported after the others have been billed.
  */
@@ -15,8 +15,11 @@ export default defineScheduledTask<{ date: string; billed: number; skipped: numb
     const env = (context as { cloudflare?: { env?: CloudflareEnv } } | undefined)?.cloudflare?.env
     if (!env?.DB) throw new Error('DB is required')
     const date = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10)
+    // Connecting Google Ads is free; the fee follows the business's agreement to managed ads,
+    // judged as the billed day closed, not as this task runs.
     const connected = await queryAll<{ organization_id: string }>(env.DB, "SELECT organization_id FROM organization_integrations WHERE provider='google_ads' ORDER BY organization_id")
-    const billable = await filterEntitledRows(env, connected, 'marketing')
+    const managed = new Set(await organizationsOnServiceAt(env.DB, 'managed_ads', `${date}T23:59:59.999Z`))
+    const billable = connected.filter(row => managed.has(row.organization_id))
     const failures: string[] = []
     let billed = 0
     for (const { organization_id } of billable) {

@@ -33,8 +33,8 @@ export interface IntegrationDefinition {
   does: readonly string[]
   /** Prompts the KrabiClaw app answers with this connection; brackets mark what the reader fills in. */
   prompts: readonly string[]
-  /** The plan entitlement the connection needs, when it is not on every plan. */
-  entitlement?: 'marketing'
+  /** A service KrabiClaw's people offer on this connection, named with its price; sold in Payments → Plan. */
+  service?: { name: string; summary: string }
 }
 
 export const INTEGRATIONS: readonly IntegrationDefinition[] = [
@@ -110,13 +110,14 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
     ],
   },
   {
-    key: 'google-ads', name: 'Google Ads', logo: 'i-logos-google-ads', group: 'reach', entitlement: 'marketing',
-    purpose: 'Search campaigns, run from your dashboard and ChatGPT.',
+    key: 'google-ads', name: 'Google Ads', logo: 'i-logos-google-ads', group: 'reach',
+    purpose: 'Your ad spend and results in Insights, and campaigns run from your dashboard and ChatGPT.',
     does: [
-      'Lists your campaigns with spend, clicks and conversions',
-      'Creates, clones, pauses and budgets Search campaigns when you ask',
-      'Reads each finished day’s spend for the 10% ad-spend fee',
+      'Reads spend, clicks, impressions and conversions into Insights',
+      'Lists your campaigns, and on the Business plan creates, clones, pauses and budgets Search campaigns when you ask',
+      'With managed ads on, reads each finished day’s spend for the 10% fee',
     ],
+    service: { name: 'Managed ads', summary: 'Chris and Julia run your campaigns · 10% of ad spend' },
     prompts: [
       'Create a Search campaign for [page] with a daily budget of [amount]',
       'Pause any campaign that spent money this week without a conversion',

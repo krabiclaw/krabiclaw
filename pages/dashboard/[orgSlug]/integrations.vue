@@ -28,8 +28,8 @@ export interface ConnectedIntegration {
 }
 
 export interface IntegrationsSummary {
-  /** What the organization's plan grants, for the gated integrations. */
-  entitlements: { marketing: boolean }
+  /** The services the business is on, for the connections that offer one. */
+  services: { managed_ads: boolean }
   google_maps: Array<{
     id: string
     slug: string
@@ -77,7 +77,7 @@ const base = computed(() => `/dashboard/${String(route.params.orgSlug)}/integrat
 
 const isSummaryResponse = (value: unknown): value is { settings: { integrations: IntegrationsSummary } } =>
   isRecord(value) && isRecord(value.settings) && isRecord(value.settings.integrations)
-  && Array.isArray(value.settings.integrations.google_maps) && isRecord(value.settings.integrations.entitlements)
+  && Array.isArray(value.settings.integrations.google_maps) && isRecord(value.settings.integrations.services)
 
 const { data: summary, error, refresh } = await useAsyncData(
   () => `dashboard-integrations:${String(route.params.orgSlug)}`,
@@ -102,7 +102,7 @@ const rows = computed<Record<IntegrationKey, Pick<EditorNavigationItem, 'summary
       ? { summary: `${connected} of ${maps.length} ${maps.length === 1 ? 'location' : 'locations'} connected`, status: connected ? 'success' : 'neutral' }
       : { summary: 'No locations yet' },
     'google-analytics': connection(s?.google_analytics ?? null),
-    'google-ads': !s?.google_ads && s && !s.entitlements.marketing ? { summary: 'Requires Business', status: 'neutral' } : connection(s?.google_ads ?? null),
+    'google-ads': connection(s?.google_ads ?? null),
     'google-search-console': connection(s?.google_search_console ?? null),
     'google-calendar': calendar
       ? { summary: calendar.status === 'error' ? `${calendar.calendar_name} · Needs attention` : calendar.calendar_name, status: calendar.status === 'active' ? 'success' : 'error' }

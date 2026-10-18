@@ -140,17 +140,24 @@ export async function listGoogleAdsCampaigns(
   developerToken: string | undefined,
   customerId: string,
   statusFilter?: 'ENABLED' | 'PAUSED' | 'ALL',
+  /** Metrics for these calendar days (YYYY-MM-DD, the account's time zone); all time when absent. */
+  range?: { startDate: string; endDate: string },
 ): Promise<GoogleAdsCampaignSummary[]> {
   const cid = cleanCustomerId(customerId)
-  const whereClause = statusFilter && statusFilter !== 'ALL'
-    ? `WHERE campaign.status = '${statusFilter}'`
-    : `WHERE campaign.status != 'REMOVED'`
+  for (const date of range ? [range.startDate, range.endDate] : []) {
+    if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)) throw new Error(`Google Ads date range must be calendar days: ${date}`)
+  }
+  // A range reports what spent in it, removed campaigns included; without one, the list is what still exists.
+  const whereClause = [
+    ...(statusFilter && statusFilter !== 'ALL' ? [`campaign.status = '${statusFilter}'`] : range ? [] : [`campaign.status != 'REMOVED'`]),
+    ...(range ? [`segments.date BETWEEN '${range.startDate}' AND '${range.endDate}'`] : []),
+  ].join(' AND ')
 
   const response = await fetch(`https://googleads.googleapis.com/v25/customers/${cid}/googleAds:search`, {
     method: 'POST',
     headers: googleAdsHeaders(accessToken, developerToken),
     body: JSON.stringify({
-      query: `SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, campaign_budget.amount_micros, campaign_budget.id, metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions FROM campaign ${whereClause} ORDER BY campaign.id DESC LIMIT 100`,
+      query: `SELECT campaign.id, campaign.name, campaign.status, campaign.advertising_channel_type, campaign_budget.amount_micros, campaign_budget.id, metrics.clicks, metrics.impressions, metrics.cost_micros, metrics.conversions FROM campaign WHERE ${whereClause} ORDER BY metrics.cost_micros DESC LIMIT 100`,
     }),
   })
 
@@ -585,6 +592,21 @@ export async function updateGoogleAdsCampaignBudget(
   }
 
   return { budgetId, amountMicros }
+}
+
+/** The account's currency and name, independent of any reporting range. */
+export async function getGoogleAdsCustomer(accessToken: string, developerToken: string | undefined, customerId: string): Promise<{ descriptiveName: string; currencyCode: string; timeZone: string }> {
+  const cid = cleanCustomerId(customerId)
+  const response = await fetch(`https://googleads.googleapis.com/v25/customers/${cid}/googleAds:search`, {
+    method: 'POST',
+    headers: googleAdsHeaders(accessToken, developerToken),
+    body: JSON.stringify({ query: 'SELECT customer.descriptive_name, customer.currency_code, customer.time_zone FROM customer LIMIT 1' }),
+  })
+  if (!response.ok) throw new Error(`Google Ads API error (${response.status}): ${(await response.text()).slice(0, 300)}`)
+  const data = (await response.json()) as { results?: Array<{ customer?: { descriptiveName?: string; currencyCode?: string; timeZone?: string } }> }
+  const customer = data.results?.[0]?.customer
+  if (!customer?.currencyCode || !customer.timeZone) throw new Error(`Google Ads did not describe customer ${cid}`)
+  return { descriptiveName: customer.descriptiveName ?? '', currencyCode: customer.currencyCode, timeZone: customer.timeZone }
 }
 
 /** Query aggregated Google Ads performance for date range */
