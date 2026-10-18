@@ -1142,6 +1142,32 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(payments.getByText('Free', { exact: true })).toBeVisible()
       await expect(payments.getByText('Choose a plan', { exact: true })).toBeVisible()
       await expect(payments.locator('[data-slot="description"]')).toHaveCount(0)
+
+      // A Basic business without an operating billing customer gets the actual
+      // setup action, and cannot record a billable agreement by submitting it.
+      const servicesBefore = await page.request.get('/api/dashboard/services?org=cedar-legal-demo')
+      expect(servicesBefore.status(), await servicesBefore.text()).toBe(200)
+      expect(await servicesBefore.json()).toEqual({ success: true, services: { managed_ads: null } })
+      await payments.getByRole('button', { name: /^Managed ads/ }).click()
+      const managedAds = page.getByRole('dialog', { name: 'Managed ads', exact: true })
+      await expect(managedAds.getByText('Before turning it on, connect a Google Ads account billed in USD and set up active Payments billing with a default payment method.', { exact: true })).toBeVisible()
+      await expect(managedAds.getByRole('link', { name: 'Payment methods', exact: true })).toHaveCount(0)
+      await managedAds.getByRole('button', { name: 'Choose a plan with Payments', exact: true }).click()
+      const plans = page.getByRole('dialog', { name: 'Change plan', exact: true })
+      await expect(plans).toBeVisible()
+      await plans.getByTestId('list-item-dismiss').click()
+      await payments.getByRole('button', { name: /^Managed ads/ }).click()
+      const rejectedAgreement = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/services' && response.request().method() === 'POST')
+      await managedAds.getByRole('button', { name: 'Agree and turn on', exact: true }).click()
+      const rejected = await rejectedAgreement
+      expect(rejected.status(), await rejected.text()).toBe(409)
+      const setupMessage = 'Set up active Payments billing in Plan before turning on managed ads. Choose a plan with Payments if your business does not have billing set up.'
+      await expect(managedAds.getByText(setupMessage, { exact: true })).toBeVisible()
+      await expect(payments.getByText('Managed ads is off.', { exact: true })).toHaveCount(0)
+      const servicesAfter = await page.request.get('/api/dashboard/services?org=cedar-legal-demo')
+      expect(servicesAfter.status(), await servicesAfter.text()).toBe(200)
+      expect(await servicesAfter.json()).toEqual({ success: true, services: { managed_ads: null } })
+      await managedAds.getByTestId('list-item-dismiss').click()
     } finally {
       try {
         if (impersonated) {

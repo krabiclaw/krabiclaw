@@ -445,6 +445,16 @@ Metronome prices it at the ad-spend rate on the Payments rate card:
 in a currency other than USD, or a day whose spend changed after it was queued,
 fails the task for that business rather than being converted or overwritten.
 
+Activation verifies the live operating-usage contract, its current 10% ad-spend
+rate and collection configuration, the operating Customer's default payment
+method, and the connected Google Ads account's USD currency before recording
+consent. A missing or invalid prerequisite leaves no agreement. Setup uses the
+existing Plan and payment-method flows; connecting Ads and reading Insights
+remain free. An active agreement must be ended before disconnecting Ads,
+removing the billing default card, or ending the usage contract. Plan changes
+do not themselves end that usage contract. Ending the service remains available
+when a provider cannot be read, and preserves its previously billable days.
+
 KrabiClaw Payments: **1.4% of payment volume, plus Stripe fees.** Billed after
 use. KrabiClaw Payments fees aren't returned after a refund or dispute. The
 subscription is billed separately. Public pricing follows the Stripe and

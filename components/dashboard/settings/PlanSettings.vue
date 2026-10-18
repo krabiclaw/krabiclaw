@@ -38,6 +38,13 @@
         <template v-else>
           <p>Chris and Julia build, pause and budget the campaigns in your connected Google Ads account, and report on them in Insights.</p>
           <p>The fee is <strong class="text-highlighted">10% of your Google Ads spend</strong>, read from Google each day and billed with your monthly KrabiClaw fees. Google bills the ad spend itself to your Google Ads account. You can turn it off here at any time.</p>
+          <p>Before turning it on, connect a Google Ads account billed in USD and set up active Payments billing with a default payment method.</p>
+          <div class="flex flex-wrap gap-3">
+            <UButton v-if="billing && (!billing.stripeCustomerId || (usage?.configured === false && !getPlanEntitlements(billing.plan).payments))" label="Choose a plan with Payments" color="neutral" variant="outline" @click="managedAdsOpen = false; choosing = true" />
+            <UButton v-if="billing?.stripeCustomerId" label="Payment methods" color="neutral" variant="outline" :to="`/dashboard/${route.params.orgSlug}/payments`" @click="managedAdsOpen = false" />
+            <UButton label="Google Ads settings" color="neutral" variant="outline" :to="`/dashboard/${route.params.orgSlug}/integrations/google-ads`" @click="managedAdsOpen = false" />
+            <UButton label="Billing setup help" color="neutral" variant="link" to="/help" />
+          </div>
         </template>
       </div>
     </DashboardListItemDialog>
@@ -83,12 +90,20 @@ async function toggleManagedAds() {
   if (!services.value) return
   busy.value = true
   sheetError.value = ''
+  successMessage.value = ''
   try {
-    await dashboardApi('/api/dashboard/services', { method: 'POST', body: { service: 'managed_ads', action: services.value?.managed_ads ? 'end' : 'agree' }, validate: isServices })
+    const updated = await dashboardApi('/api/dashboard/services', { method: 'POST', body: { service: 'managed_ads', action: services.value.managed_ads ? 'end' : 'agree' }, validate: isServices })
+    servicesResource.value = updated
+    clearNuxtData(`dashboard-integrations:${String(route.params.orgSlug)}`)
     await refreshServices()
-    await refreshNuxtData(`dashboard-integrations:${String(route.params.orgSlug)}`)
+    if (servicesError.value) {
+      // Nuxt records refresh errors instead of rejecting. Keep the actual write
+      // result visible, and report the failed independent read before success.
+      servicesResource.value = updated
+      throw new Error(`Managed ads was turned ${updated.services.managed_ads ? 'on' : 'off'}, but its status could not be refreshed. ${getErrorMessage(servicesError.value, 'Reload to check its status.')}`)
+    }
     managedAdsOpen.value = false
-    successMessage.value = services.value?.managed_ads ? 'Managed ads is on. Chris and Julia will be in touch about your campaigns.' : 'Managed ads is off.'
+    successMessage.value = updated.services.managed_ads ? 'Managed ads is on. Chris and Julia will be in touch about your campaigns.' : 'Managed ads is off.'
   } catch (error) {
     sheetError.value = getErrorMessage(error, 'Managed ads could not be changed')
   } finally {

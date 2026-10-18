@@ -337,6 +337,7 @@ export async function reconcileNativeBillingCredit(db:DbClient,stripe:Stripe,env
 export async function finalizePaymentsBilling(db:DbClient,env:CloudflareEnv,principal:FinancialPrincipal){
  const {assertRoleAllows}=await import('~/server/utils/member-access')
  await assertRoleAllows({organizationId:principal.organizationId,role:principal.role,permissions:{billing:['update']}})
+ if(await queryFirst(db,"SELECT id FROM organization_services WHERE organization_id=? AND service='managed_ads' AND ended_at IS NULL",[principal.organizationId]))throw new HTTPError({statusCode:409,statusMessage:'Turn off managed ads in Plan before ending Payments billing'})
  const account=await queryFirst<BillingAccount>(db,'SELECT * FROM payment_billing_accounts WHERE organization_id=?',[principal.organizationId])
  if(!account?.metronome_customer_id||!account.metronome_contract_id)throw new HTTPError({statusCode:409,statusMessage:'Native Payments usage contract is not configured'})
  if(account.status==='closed'){
