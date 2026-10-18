@@ -147,8 +147,9 @@ export async function listGoogleAdsCampaigns(
   for (const date of range ? [range.startDate, range.endDate] : []) {
     if (!/^\d{4}-\d{2}-\d{2}$/u.test(date)) throw new Error(`Google Ads date range must be calendar days: ${date}`)
   }
+  // A range reports what spent in it, removed campaigns included; without one, the list is what still exists.
   const whereClause = [
-    statusFilter && statusFilter !== 'ALL' ? `campaign.status = '${statusFilter}'` : `campaign.status != 'REMOVED'`,
+    ...(statusFilter && statusFilter !== 'ALL' ? [`campaign.status = '${statusFilter}'`] : range ? [] : [`campaign.status != 'REMOVED'`]),
     ...(range ? [`segments.date BETWEEN '${range.startDate}' AND '${range.endDate}'`] : []),
   ].join(' AND ')
 
