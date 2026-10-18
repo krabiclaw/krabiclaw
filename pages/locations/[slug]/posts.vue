@@ -3,7 +3,7 @@
 
     <template v-if="location">
       <!-- Sub-nav (Level 2) -->
-      <SayaSubNav
+      <TenantSubNav
         :location-slug="slug"
         active="posts"
       />
@@ -34,7 +34,7 @@
 import SocialPosts from '~/components/social/SocialPosts.vue'
 const { localePath, t } = useI18n()
 
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const route = useRoute()
 const { organization } = useTenantOrganization()

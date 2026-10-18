@@ -166,7 +166,6 @@ const blogLocalizationFields = computed(() => {
   const fields: Array<{ key: string; label: string; source: string | null | undefined; multiline?: boolean; rows?: number }> = [
     { key: 'title', label: 'Title', source: post?.title },
     { key: 'summary', label: 'Excerpt', source: post?.excerpt, multiline: true, rows: 4 },
-    { key: 'seo_keywords', label: 'Search keywords', source: post?.seo_keywords },
   ]
   sourceBlogBlocks.value.forEach((block, blockIndex) => {
     blogLocalizedTextFields(block).forEach((field) => {
@@ -229,7 +228,7 @@ async function saveBlogLocalization(locale: string, submitted: Record<string, un
     })
   })
   const values: Record<string, unknown> = {}
-  for (const key of ['title', 'summary', 'seo_keywords']) {
+  for (const key of ['title', 'summary']) {
     if (Object.hasOwn(submitted, key)) values[key] = submitted[key]
   }
   const post = postResource.value?.post

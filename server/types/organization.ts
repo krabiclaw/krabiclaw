@@ -53,10 +53,10 @@ export interface UpdateOrganizationSettingsRequest {
   name?: string
   /**
    * The website's publication state, and the only one there is. A tenant moves
-   * between 'active' (Live) and 'inactive' (Draft); 'suspended' is KrabiClaw's
+   * between 'active' (Live / published) and 'inactive' (Draft); 'suspended' is KrabiClaw's
    * and is rejected here. server/utils/organization-settings.ts enforces it.
    */
-  status?: 'active' | 'inactive'
+  status?: 'active' | 'inactive' | 'published' | 'draft'
   brand_description?: string
   // A full replacement of the announcement, or null to remove it entirely. There is no partial
   // patch: the CMS leaf edits every field together, the same way the old banner did.

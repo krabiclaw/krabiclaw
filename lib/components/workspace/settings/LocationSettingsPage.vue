@@ -51,6 +51,8 @@ export interface BusinessLocation {
   status: string
   last_synced_at: string | null
   timezone: string
+  assigned_member_id: string | null
+  assigned_team_id: string | null
 }
 
 /**
@@ -59,7 +61,7 @@ export interface BusinessLocation {
  * rest are the gear's.
  */
 export const HUB_KEYS = ['name', 'description', 'hours', 'address', 'contact', 'reservations'] as const
-export const SETTINGS_KEYS = ['status', 'slug'] as const
+export const SETTINGS_KEYS = ['assignment', 'status'] as const
 export type LocationEditorKey = typeof HUB_KEYS[number] | typeof SETTINGS_KEYS[number]
 
 /** `/locations/new`: the location record before it exists. */
@@ -168,6 +170,8 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       && (value.address === null || isRecord(value.address))
       && isNullableString(value.phone)
       && isNullableString(value.google_place_id)
+      && isNullableString(value.assigned_member_id)
+      && isNullableString(value.assigned_team_id)
   }
   const isLocationResponse = (value: unknown): value is { success: true; location: BusinessLocation } =>
     isRecord(value) && value.success === true && isBusinessLocation(value.location)
@@ -222,6 +226,8 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     short_description: '',
     description: '',
     status: 'active',
+    assigned_member_id: null as string | null,
+    assigned_team_id: null as string | null,
   })
   const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/localization`)
   const locationLocalizationFields = computed(() => [
@@ -260,15 +266,25 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     detailsForm.description = loc.description ?? ''
     hoursForm.value = { timezone: loc.timezone, hours: parseOpeningHours(loc.opening_hours), specialHours: parseSpecialHours(loc.special_hours) }
     detailsForm.status = loc.status
-    }
+    detailsForm.assigned_member_id = loc.assigned_member_id
+    detailsForm.assigned_team_id = loc.assigned_team_id
+  }
 
-  const slugSummary = computed(() => location.value?.slug?.trim() || 'Not set')
-  const statusSummary = computed(() => location.value?.status === 'active' ? 'Active' : 'Hidden from the public site')
+  const { data: schedulingMembers, error: schedulingMembersError } = await useMemberSchedulingList(() => organizationId)
+  const assignmentSummary = computed(() => {
+    if (!detailsForm.assigned_team_id && !detailsForm.assigned_member_id) return 'Administrators'
+    if (schedulingMembersError.value) return 'Team members could not be loaded'
+    if (!schedulingMembers.value) return 'Loading team members…'
+    if (detailsForm.assigned_team_id) return schedulingMembers.value.teams.find(t => t.id === detailsForm.assigned_team_id)?.name ?? 'Assigned team'
+    return schedulingMembers.value.members.find(m => m.id === detailsForm.assigned_member_id)?.name ?? 'Assigned member'
+  })
+
+  const statusSummary = computed(() => location.value?.status === 'active' ? 'Published' : 'Draft')
   const navigationGroups = computed(() => [{
     id: 'settings',
     items: [
+      { id: 'assignment', label: 'Team assignment', summary: assignmentSummary.value, to: `${settingsBase.value}/assignment` },
       { id: 'status', label: 'Status', summary: statusSummary.value, to: `${settingsBase.value}/status` },
-      { id: 'slug', label: 'Link', summary: slugSummary.value, to: `${settingsBase.value}/slug` },
       { id: 'languages', label: 'Languages', summary: 'Translate the name, description and address', to: `${settingsBase.value}?editMode=translations` },
     ],
   }])
@@ -281,9 +297,9 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   function editorSignature(key: string | null): string {
     switch (key) {
       case 'name': return JSON.stringify(detailsForm.title)
-      case 'slug': return JSON.stringify(detailsForm.slug)
       case 'address': return JSON.stringify([detailsForm.addressLines, detailsForm.regionCode, detailsForm.locality, detailsForm.sublocality, detailsForm.administrativeArea, detailsForm.postalCode])
       case 'contact': return JSON.stringify([detailsForm.phone, detailsForm.email])
+      case 'assignment': return JSON.stringify([detailsForm.assigned_member_id, detailsForm.assigned_team_id])
       case 'status': return JSON.stringify(detailsForm.status)
       case 'hours': return JSON.stringify(hoursForm.value)
       case 'description': return JSON.stringify([detailsForm.short_description, detailsForm.description, detailsForm.price_level])
@@ -293,7 +309,6 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   }
   const validationMessage = computed(() => {
     if (key === 'name' && !detailsForm.title.trim()) return 'Enter a location name.'
-    if (key === 'slug' && !detailsForm.slug.trim()) return 'Enter a location slug.'
     if (key === 'contact') {
       if (detailsForm.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(detailsForm.email)) return 'Enter a valid email address.'
     }
@@ -396,10 +411,6 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       await patchLocation({ title: detailsForm.title.trim() })
       return
     }
-    if (key === 'slug') {
-      await patchLocation({ slug: detailsForm.slug.trim() })
-      return
-    }
     if (key === 'address') {
       await patchLocation({ address: addressFromForm() })
       return
@@ -408,6 +419,13 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       await patchLocation({
         phone: detailsForm.phone.trim() || null,
         email: detailsForm.email.trim() || null,
+      })
+      return
+    }
+    if (key === 'assignment') {
+      await patchLocation({
+        assigned_member_id: detailsForm.assigned_member_id,
+        assigned_team_id: detailsForm.assigned_team_id,
       })
       return
     }

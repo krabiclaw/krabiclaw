@@ -402,7 +402,7 @@ async function hydrateBlocks(
       url: `${articlePrefix}/${row.slug}`,
       labelKey: 'saya.posts.read_full_story',
       media: cover
-        ? projectLocalizedMediaAlt([{ asset_id: cover.asset_id, slot: 'media', public_url: cover.public_url, thumbnail_url: cover.thumbnail_url, kind: cover.kind, alt_text: cover.alt_text }], localizations ?? [])
+        ? projectLocalizedMediaAlt([{ asset_id: cover.asset_id, slot: 'media', public_url: cover.public_url, thumbnail_url: cover.thumbnail_url, kind: cover.kind, alt_text: cover.alt_text }], localizations)
         : [],
     }
   })
@@ -491,7 +491,7 @@ async function hydrateBlocks(
               : 'public_path' in location && typeof location.public_path === 'string' ? location.public_path : publicLocationPath(location),
           label: locationCopy.visitLocationCta,
           media: location.asset_id
-            ? projectLocalizedMediaAlt([{ asset_id: location.asset_id, slot: 'hero', public_url: location.public_url, thumbnail_url: location.thumbnail_url, kind: location.kind, alt_text: location.alt_text }], localizations ?? [])
+            ? projectLocalizedMediaAlt([{ asset_id: location.asset_id, slot: 'hero', public_url: location.public_url, thumbnail_url: location.thumbnail_url, kind: location.kind, alt_text: location.alt_text }], localizations)
             : [],
         }]
       })

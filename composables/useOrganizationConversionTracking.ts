@@ -58,7 +58,7 @@ function mirrorConversion(payload: ConversionPayload, eventId: string, value?: C
   window.zaraz?.track(projection.name, projection.params)
 }
 
-export function useOrganizationConversionTracking(consultationSource?: MaybeRefOrGetter<PublicConsultationSettings>) {
+export function useOrganizationConversionTracking(consultationSource?: MaybeRefOrGetter<PublicConsultationSettings | null | undefined>) {
   const nuxtApp = useNuxtApp()
 
   /**

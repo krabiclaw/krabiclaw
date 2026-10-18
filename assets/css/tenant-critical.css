@@ -1,0 +1,71 @@
+/* Critical shell for tenant routes */
+
+*,
+::before,
+::after {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  line-height: 1.5;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+}
+
+button {
+  font: inherit;
+}
+
+.tenant-theme,
+.saya-theme,
+.blawby-theme {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--ui-bg);
+  color: var(--ui-text);
+}
+
+.tenant-container,
+.blawby-container {
+  width: 100%;
+  max-width: 80rem;
+  margin-inline: auto;
+  padding-inline: 1rem;
+}
+
+@media (min-width: 640px) {
+  .tenant-container,
+  .blawby-container {
+    padding-inline: 1.5rem;
+  }
+}
+
+@media (min-width: 1024px) {
+  .tenant-container,
+  .blawby-container {
+    padding-inline: 2rem;
+  }
+}
+
+[data-tenant-critical-header],
+[data-saya-critical-header],
+[data-blawby-critical-header] {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  border-bottom: 1px solid var(--ui-border);
+  background-color: color-mix(in srgb, var(--ui-bg) 80%, transparent);
+  backdrop-filter: blur(12px);
+}
+
+[data-tenant-critical-banner],
+[data-blawby-critical-banner] {
+  background: var(--tenant-primary-dark, #1e293b);
+  color: #fff;
+  padding-block: 0.625rem;
+}

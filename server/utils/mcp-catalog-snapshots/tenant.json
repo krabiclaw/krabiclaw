@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:203e7c47c879ce41fe4578a477dee04c6a03fb4b353fe772e76c2caeb2b21dd1",
-  "documentationFingerprint": "sha256:aea6e81732842e92dbbf4470d99a931867577cbe59cfb59e3b42acff6550ed0e",
+  "fingerprint": "sha256:e67faccb7958ddebae38ff82713363b1f86dcd78b78e853167d012450cf26645",
+  "documentationFingerprint": "sha256:f3903d408629aae3c2de43965a05df7c6f0310ffcac78ad2109f2eab697bd665",
   "tools": [
     {
       "name": "add_organization_language",
@@ -10969,13 +10969,6 @@
           "organization_id": {
             "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
             "type": "string"
-          },
-          "seo_keywords": {
-            "description": "Comma-separated SEO keyword phrases when useful.",
-            "type": [
-              "string",
-              "null"
-            ]
           },
           "title": {
             "type": "string"
@@ -96686,13 +96679,6 @@
           "reset_slug_override": {
             "type": "boolean"
           },
-          "seo_keywords": {
-            "description": "Comma-separated SEO keyword phrases when useful.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "slug": {
             "description": "Manual URL slug override. Published slug changes preserve a permanent redirect by default.",
             "type": [
@@ -100825,13 +100811,6 @@
               "null"
             ]
           },
-          "canonical_url": {
-            "description": "Optional canonical URL override. Leave unset for the default self-referencing canonical.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "description": {
             "description": "Long description shown on the location page. Pass null to clear it.",
             "type": [
@@ -100980,20 +100959,6 @@
             "description": "Public phone number shown to guests on the website and in booking/reservation confirmation emails.",
             "type": "string"
           },
-          "seo_description": {
-            "description": "Optional SEO meta description override. Falls back to the computed default if unset.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "seo_title": {
-            "description": "Optional SEO title override. Falls back to the computed default if unset.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "short_description": {
             "description": "One-line summary shown on location cards. Pass null to clear it.",
             "type": [
@@ -101123,8 +101088,10 @@
             "description": "Explicit dated hours or closures. Closure starts_on is required; ends_on is inclusive and null means indefinite. Dated hours replace regular hours; periods [] closes the date."
           },
           "status": {
-            "description": "inactive takes the location and everything held there off the website and frees its plan slot; active puts it back, and is refused when every slot the plan covers is in use.",
+            "description": "published/active keeps the location on the website; draft/inactive takes the location off the website and frees its plan slot.",
             "enum": [
+              "published",
+              "draft",
               "active",
               "inactive"
             ],
@@ -103550,13 +103517,6 @@
           "brand_description": {
             "type": "string"
           },
-          "canonical_url": {
-            "description": "Optional site-wide canonical URL override for the homepage.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "careers_email": {
             "type": "string"
           },
@@ -103705,23 +103665,11 @@
           "press_email": {
             "type": "string"
           },
-          "seo_description": {
-            "description": "Optional site-wide default SEO description override. Falls back to brand_description if unset.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "seo_title": {
-            "description": "Optional site-wide default SEO title override for the homepage and any page without its own override. Falls back to name if unset.",
-            "type": [
-              "string",
-              "null"
-            ]
-          },
           "status": {
-            "description": "Website status: active is Live (public and indexable), inactive is Draft (preview only). A suspended website cannot be changed.",
+            "description": "Website status: published/active is Live (public and indexable), draft/inactive is Draft (preview only). A suspended website cannot be changed.",
             "enum": [
+              "published",
+              "draft",
               "active",
               "inactive"
             ],
@@ -115808,7 +115756,7 @@
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
         "update_menu": "sha256:e6584d9728979ac3dd33bcec051dddc7870891da96453a35ec8a0b97fcb4577f",
-        "update_organization_settings": "sha256:3454f63997eec1f0379204170954ab64862914c016110f93d2e05e89c9134ea7",
+        "update_organization_settings": "sha256:c7ab6bac088414e7f6397f3fcd00d9c8c79dd30b4575f35ed4050388748e1047",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
     },
@@ -115951,7 +115899,7 @@
       "slug": "publish-a-post",
       "contentHash": "sha256:20b71a412abc2f5b707463326e643c5f540dba815c168559b15c3aa3274e44f2",
       "toolContracts": {
-        "create_blog_post": "sha256:09f345c380200cf5cf6e7bc68b72a21ed609b5333efb632f4ddd55a255e87e17",
+        "create_blog_post": "sha256:eadc0eba432b4e9844c9c8ed23327aafee2fdfc4b3c306b36c9d235a4a109cfe",
         "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
         "get_channel_post": "sha256:698bf8872c9dd2a8620b91933ded4589e572e082603730a787b21b53f895d9e8",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",

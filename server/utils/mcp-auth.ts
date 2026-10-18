@@ -21,9 +21,9 @@ export type McpToolRole = 'owner' | 'admin' | 'member'
  * `minimumRole` stays on the tool definition because it is published to MCP
  * clients in `_meta`, but the decision it drives comes from the same matrix as
  * every other authorization in the repository (utils/organization-access.ts)
- * rather than from a rank ladder that could disagree with it. `editor` is
- * "takes part in tenant content at all"; `admin` is the site-settings floor the
- * three configuration tools need.
+ * rather than from a rank ladder that could disagree with it. `member` is
+ * scoped to assigned work; `admin` is the organization management floor;
+ * `owner` owns billing and deletion.
  */
 const TOOL_ROLE_PERMISSIONS: Record<McpToolRole, OrganizationPermissions> = {
   member: { scheduling: ['own'] },

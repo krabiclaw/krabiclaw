@@ -9,9 +9,10 @@
     @cancel="editor.revert"
     @save="editor.save"
   >
-    <UFormField v-if="!editor.loadError.value" label="Title" required>
-      <UInput v-model="editor.draft.value.title" maxlength="200" autofocus class="w-full" />
-    </UFormField>
+    <template v-if="!editor.loadError.value">
+      <p class="mb-2 text-sm font-semibold text-muted">{{ charactersRemaining }}/200 available</p>
+      <UInput v-model="editor.draft.value.title" aria-label="Title" maxlength="200" autofocus class="w-full" />
+    </template>
   </DashboardLeafPanel>
 </template>
 
@@ -21,4 +22,5 @@ import { tenantPageEditorKey } from '~/components/dashboard/TenantPageEditorPage
 definePageMeta({ layout: 'dashboard' })
 
 const editor = inject(tenantPageEditorKey)!
+const charactersRemaining = computed(() => 200 - (editor.draft.value?.title?.length ?? 0))
 </script>

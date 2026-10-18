@@ -6,7 +6,14 @@
   -->
   <DashboardIndexPanel id="organization-payments" title="Payments" column="reading">
     <div class="pb-10">
-      <UTabs v-model="tab" :items="tabs" :content="false" color="neutral" aria-label="Payments section" class="mb-8" />
+      <DashboardFilterPills
+        id="payments-tab"
+        v-model="tab"
+        label="Payments section"
+        :items="tabs"
+        role="tablist"
+        class="mb-8"
+      />
       <PaymentsAccountSettings v-if="tab === 'payments'" />
       <PayoutMethodSettings v-else-if="tab === 'payouts'" />
       <PlanSettings v-else />
@@ -30,7 +37,7 @@ const tabs: Array<{ label: string; value: Tab }> = [
   { label: 'Payouts', value: 'payouts' },
   { label: 'Plan', value: 'plan' },
 ]
-const tab = computed<string | number>({
+const tab = computed<string>({
   get: () => route.query.tab === 'plan' || route.query.tab === 'payouts' ? String(route.query.tab) : 'payments',
   set: value => void router.replace({ query: { ...route.query, tab: value === 'payments' ? undefined : String(value) } }),
 })

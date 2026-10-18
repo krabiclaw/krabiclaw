@@ -113,9 +113,9 @@
         </template>
         <div v-else class="text-sm text-muted">{{ resolvedChooseSeatingLabel }}</div>
       </div>
-      <SayaButton size="lg" :disabled="!modelValue" class="shrink-0" @click="$emit('next')">
+      <TenantButton size="lg" :disabled="!modelValue" class="shrink-0" @click="$emit('next')">
         {{ resolvedContinueLabel }}
-      </SayaButton>
+      </TenantButton>
     </div>
   </div>
 </template>

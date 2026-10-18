@@ -36,7 +36,7 @@
 <script lang="ts">
 import type { InjectionKey, Reactive, Ref } from 'vue'
 
-export const SECTION_LABELS = { question: 'Question', answer: 'Answer', visibility: 'Visibility' } as const
+export const SECTION_LABELS = { question: 'Question', answer: 'Answer', visibility: 'Status' } as const
 export type SectionKey = keyof typeof SECTION_LABELS
 
 /** The question's draft and the save walk its leaves commit through. */
@@ -134,7 +134,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => [
     items: [
       { id: 'question', label: 'Question', summary: form.question.trim() || 'Not written yet', icon: 'i-lucide-circle-help', to: sectionUrl('question') },
       { id: 'answer', label: 'Answer', summary: form.answer.trim() || 'No answer yet', icon: 'i-lucide-message-square', to: sectionUrl('answer') },
-      { id: 'visibility', label: 'Visibility', summary: form.published ? 'Published' : 'Hidden', icon: 'i-lucide-eye', to: sectionUrl('visibility') },
+      { id: 'visibility', label: 'Status', summary: form.published ? 'Published' : 'Draft', icon: 'i-lucide-activity', to: sectionUrl('visibility') },
     ],
   },
 ])

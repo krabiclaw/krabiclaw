@@ -1,6 +1,6 @@
 import type { McpToolDefinition } from './shared'
 import { calendarDateSchema, addLocalDays, assertCalendarDate, localNow, timezoneSchema } from '~/utils/timezone'
-import { locationListItemObject, locationMutationSummaryObject, locationObject, openingHoursInputSchema, pageInfoObject, paginationInputSchema, postalAddressSchema, seoOverrideFieldsSchema, organizationTool, specialHoursInputSchema } from './shared'
+import { locationListItemObject, locationMutationSummaryObject, locationObject, openingHoursInputSchema, pageInfoObject, paginationInputSchema, postalAddressSchema, organizationTool, specialHoursInputSchema } from './shared'
 import { HTTPError } from 'nitro'
 import type { McpExecutorContext } from './execution'
 import { createLocation, getLocation, updateLocation, type CreateLocationInput, type LocationRecord } from '~/server/utils/location-management'
@@ -89,7 +89,7 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
         slug: { type: 'string', minLength: 1, maxLength: 200, pattern: '\\S', description: 'URL slug for the location page. Normalized, and suffixed -2, -3… when another location already uses it. Changes the public URL.' },
         description: { type: ['string', 'null'], description: 'Long description shown on the location page. Pass null to clear it.' },
         short_description: { type: ['string', 'null'], description: 'One-line summary shown on location cards. Pass null to clear it.' },
-        status: { type: 'string', enum: ['active', 'inactive'], description: 'inactive takes the location and everything held there off the website and frees its plan slot; active puts it back, and is refused when every slot the plan covers is in use.' },
+        status: { type: 'string', enum: ['published', 'draft', 'active', 'inactive'], description: 'published/active keeps the location on the website; draft/inactive takes the location off the website and frees its plan slot.' },
         address: postalAddressSchema,
         phone: { type: 'string', description: 'Public phone number shown to guests on the website and in booking/reservation confirmation emails.' },
         email: { type: ['string', 'null'], description: 'Public email shown to guests on the website and in booking/reservation confirmation emails. Pass null to clear it.' },
@@ -97,7 +97,6 @@ export const LOCATIONS_TOOLS: McpToolDefinition[] = [
         max_capacity: { type: ['number', 'null'], description: 'Stored location capacity metadata; does not limit reservation availability. Reservation seats per start time are controlled by update_reservation_policy.slot_capacity. Pass null to clear the metadata.' },
         opening_hours: openingHoursInputSchema,
         special_hours: specialHoursInputSchema,
-        ...seoOverrideFieldsSchema(),
       },
       required: ['location_id'],
       outputSchema: locationMutationSummaryObject,
@@ -209,6 +208,11 @@ export async function handleLocationsTools(ctx: McpExecutorContext): Promise<unk
     case "update_location": {
       const locationId = requiredString(args, "location_id");
       const updateFields = omit(args, ["location_id"]) as Record<string, unknown>;
+      if (updateFields.status === 'published') {
+        updateFields.status = 'active';
+      } else if (updateFields.status === 'draft') {
+        updateFields.status = 'inactive';
+      }
       const result = await updateLocation(
         organization.db,
         organization.organizationId,

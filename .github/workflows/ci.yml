@@ -170,6 +170,18 @@ jobs:
       # schema, and the new Worker never meets a schema it predates. Deploying first
       # leaves a window of new code against old schema, and a failed migration would
       # leave that code live.
+      # Checks finish out of order, so an older push can enter the deployment
+      # queue after a newer one. Concurrency serializes jobs, not branch history.
+      - &require_current_deployment_branch
+        name: Require current deployment branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/${GITHUB_REF#refs/}" --jq '.object.sha')"
+          if [[ "$branch_sha" != "$GITHUB_SHA" ]]; then
+            echo "::error::Refusing outdated deployment $GITHUB_SHA; $GITHUB_REF now points to $branch_sha."
+            exit 1
+          fi
       - name: Apply staging migrations
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -265,6 +277,7 @@ jobs:
           build_id="$(node -p 'JSON.parse(require("node:fs").readFileSync(".output/public/_nuxt/builds/latest.json", "utf8")).id')"
           printf 'id=%s\n' "$build_id" >> "$GITHUB_OUTPUT"
       # Migrations before the deploy, for the reason given in the staging job.
+      - *require_current_deployment_branch
       - name: Apply production migrations
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

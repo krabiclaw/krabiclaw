@@ -127,15 +127,10 @@ useSocialMetadata(() => {
       imageHeight: post.value.cover?.height,
       dateModified: post.value.updated_at,
       articleSection: post.value.category?.name,
-      keywords: post.value.seo_keywords,
       inLanguage: locale.value === 'en' ? 'en-US' : locale.value,
     },
   }
 })
-
-useHead(() => ({
-  meta: post.value.seo_keywords?.trim() ? [{ name: 'keywords', content: post.value.seo_keywords.trim() }] : [],
-}))
 </script>
 
 <style scoped>

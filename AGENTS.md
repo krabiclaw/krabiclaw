@@ -266,6 +266,20 @@ Preserve the actual amounts, charge basis, currency, billing interval and
 conditions. Public pages and their Markdown, SEO and LLM projections use the
 same canonical published pricing content.
 
+## Vertical focus and domain boundaries
+
+The `service` vertical is specifically and canonically **Legal Services** (solo practitioners, attorneys, and law firms running the Blawby template, modeled on North Carolina Legal Services).
+
+Do not invent or abstract generic service models (e.g. spas, salons, cleaners, trades, or open-ended consulting platforms).
+
+- Offerings are **Practice Areas & Consultations**;
+- Practitioners and operators are **Attorneys / Legal Team**;
+- Counterparties and prospective clients are **Clients**;
+- The booking flow is a **Legal Consultation Request** (`CONSULTATION`);
+- Physical and remote contact points are **Offices** / **Practice Locations**.
+
+Any agent or LLM working on the `service` vertical or Blawby must use authentic legal practice domain concepts rather than abstracting to generic service entities.
+
 ## Dashboard CMS
 
 CMS work starts from `DESIGN.md`: its workspace map, its ownership table and

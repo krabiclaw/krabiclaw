@@ -69,14 +69,6 @@ export const workspaceContextObject = {
 // --- reusable schema fragments ---
 
 
-/** SEO override fields shared across location/Product/experience/site tools. */
-export function seoOverrideFieldsSchema() {
-  return {
-    seo_title: { type: ['string', 'null'], description: 'Optional SEO title override. Falls back to the computed default if unset.' },
-    seo_description: { type: ['string', 'null'], description: 'Optional SEO meta description override. Falls back to the computed default if unset.' },
-    canonical_url: { type: ['string', 'null'], description: 'Optional canonical URL override. Leave unset for the default self-referencing canonical.' },
-  }
-}
 
 export const openingHoursInputSchema = { ...openingHoursSchema, description: 'Canonical weekly endpoint periods. Days use Sunday=0. Null means unknown; periods [] means closed. Sunday 00:00 without a close means always open.' }
 export const specialHoursInputSchema = { ...specialHoursSchema, description: 'Explicit dated hours or closures. Closure starts_on is required; ends_on is inclusive and null means indefinite. Dated hours replace regular hours; periods [] closes the date.' }

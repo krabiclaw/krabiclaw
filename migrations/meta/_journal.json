@@ -57,6 +57,20 @@
       "when": 1792161403052,
       "tag": "0007_stay_booked_cancellation_policy",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1792293392872,
+      "tag": "0008_location_assignment",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1792296878544,
+      "tag": "0009_organization_services",
+      "breakpoints": true
     }
   ]
 }

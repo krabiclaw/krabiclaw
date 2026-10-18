@@ -47,7 +47,7 @@
               :aria-label="`${star} star${star === 1 ? '' : 's'}`"
               @click="rating = star"
             >
-              <SayaIcon name="star" solid class="size-8" :class="star <= rating ? 'text-primary' : 'text-muted'" />
+              <TenantIcon name="star" solid class="size-8" :class="star <= rating ? 'text-primary' : 'text-muted'" />
             </button>
           </div>
         </div>
@@ -102,9 +102,9 @@
         <p v-if="submitError" class="mt-4 text-sm text-error">{{ submitError }}</p>
 
         <div class="mt-8 flex flex-wrap items-center gap-3">
-          <SayaButton type="submit" :disabled="submitting || removingMediaAssetId !== null">
+          <TenantButton type="submit" :disabled="submitting || removingMediaAssetId !== null">
             {{ submitting ? 'Submitting...' : 'Submit review' }}
-          </SayaButton>
+          </TenantButton>
           <button type="button" class="text-sm text-muted underline-offset-4 hover:underline" @click="optOut">
             Opt out of review emails
           </button>
@@ -121,7 +121,7 @@ import { REVIEW_VIDEO_MAX_BYTES, REVIEW_VIDEO_MAX_LABEL } from '~/config/media-l
 
 const { localePath } = useI18n()
 
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const route = useRoute()
 const slug = computed(() => String(route.params.slug))

@@ -18,7 +18,7 @@
             :to="localePath(`/locations/${loc.slug}/photos`)"
             class="inline-flex items-center gap-2 rounded-full border border-default px-5 py-2.5 text-sm text-muted no-underline transition hover:bg-muted hover:text-default"
           >
-            <SayaIcon name="map-pin" class="size-3.5 opacity-70" />
+            <TenantIcon name="map-pin" class="size-3.5 opacity-70" />
             {{ loc.title }}
           </NuxtLink>
         </div>
@@ -32,7 +32,7 @@
 
       <template v-else>
         <!-- Category filter tabs -->
-        <SayaFilterTabs v-model="activeCategory" :tabs="cats" />
+        <TenantFilterTabs v-model="activeCategory" :tabs="cats" />
 
         <!-- Gallery -->
         <div class="mx-auto max-w-7xl px-4 pt-12 pb-24 sm:px-6 lg:px-8">
@@ -66,7 +66,7 @@
 </template>
 
 <script setup>
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const { localePath, t } = useI18n()
 const { organization } = useTenantOrganization()

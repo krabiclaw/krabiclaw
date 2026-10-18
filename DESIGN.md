@@ -90,7 +90,7 @@ The destinations are files under `O`, and their URLs are their files:
 
 | Destination | URL |
 | --- | --- |
-| Website | `O/website` — Pages, Blog, Posts, Reviews and Q&A, Brand, Status, Domains, Languages, Currency, Search appearance, Website booking |
+| Website | `O/website` — Pages, Blog, Posts, Reviews and Q&A, Brand, Status, Domains, Languages, Currency, Website booking |
 | Pages | `O/website/pages`, a page `O/website/pages/:pageId`, the Links page `O/website/pages/links` |
 | Blog | `O/website/blog` |
 | Reviews and Q&A | `O/website/qa` |
@@ -154,6 +154,16 @@ conversation work through the same guest inbox as other booked activity.
 Lodging does not offer the appointment-assignee filter: the home's assignment
 controls its stays.
 
+### Verticals and Domain Focus
+
+KrabiClaw serves four explicit, concrete business verticals:
+1. **Restaurant**: menus, dishes, sections, table reservations.
+2. **Experience**: classes, workshops, dated ticketed sessions.
+3. **Lodging**: homes, stays, nights, check-ins, check-outs, turnovers.
+4. **Legal Services (`service`)**: solo attorneys, partners and law firms running the Blawby template (modeled after North Carolina Legal Services).
+
+The `service` vertical is exclusively and canonically **Legal Services**. Do not generalize it into an open-ended multi-service or agency platform (no salons, spas, cleaners, trades, or generic appointment widgets). Offerings are **Practice Areas & Consultations**; practitioners are **Attorneys / Legal Team**; counterparties are **Clients**; and bookings are **Legal Consultation Requests**.
+
 ### Catalog
 
 **Catalog is where everything the business offers is found, as Airbnb's Your
@@ -167,9 +177,10 @@ Dishes without a section are listed on the Menu page under its sections.
 
 Every level that narrows its rows does it the same way:
 `DashboardFilterPills`, one row of round pills under the title with the chosen
-one solid, 32px from the title and from the rows — Catalog's kinds, the blog's
-and posts' states, a category collection, a photo category. A list carries no
-sentence explaining itself under its title.
+one solid, 32px from the title and from the rows — Catalog's kinds, Today's
+range, Insights views, Payments sections, the blog's and posts' states, a
+category collection, a photo category. A list carries no sentence explaining
+itself under its title.
 
 Every offering, from anywhere, opens the one Product editor at
 `O/products/:productId`. Each card names its actual sections, price and location
@@ -400,6 +411,46 @@ above or below it. A row carries one line of sub-label. A counter
 (`44/50 available`) sits above the field in `text-sm`. `hint` exists only for
 `Optional`.
 
+**Icons identify destinations and meaningful choices.** Follow the captured
+Airbnb host editor's restraint: amenities have recognizable pictograms;
+ordinary listing fields, house rules and safety switches stay text and their
+controls. Meaningful property choices use the same pictogram language. A title,
+description, URL or price does not need a glyph.
+KrabiClaw extends this language to its own destinations — Website, Locations,
+Team, content sections, bookings and Account settings — across every catalog
+kind. A heading or a scalar field is not a destination merely because it has a
+route.
+
+`EditorNavigationList` renders a destination's explicit `icon` as a bare 24px
+outline beside its label. A record's real picture or a provider's logo (`lead`)
+takes precedence; never add both, or put a general glyph in a decorative tile.
+The picture's missing-image footprint remains the picture's, and an icon must
+not hide the factual No photo state. Labels remain visible, icons are hidden
+from assistive technology, and selection is conveyed by a control state and
+border or check mark as well as colour.
+
+Meaningful single choices use the existing `URadioGroup` card with
+`indicator="hidden"` and its native item `icon`: 32px above the label, one
+neutral outline, a strong selected border. Amenity selection is a list of
+24–28px pictograms, labels and an explicit selected state; each complete row is
+one keyboard-operable control. Ordinary settings retain their existing switch
+or rule pair. Action glyphs stay at the existing button size.
+
+**One concept, one icon source.** Product kinds, product details, content block
+types, notification categories and stay vocabularies carry their icons in
+their existing registries. Static destinations declare theirs in the owner
+that already declares the row. Never infer an icon from a label, URL or record
+id, and never create a second navigation model for icons. Native stay symbols
+and web glyph names describe the same canonical choice.
+
+Use the installed Lucide collection first. Original domain drawings belong to
+the `krabi` collection in `build/icon-data/custom-icons.json`: a 24×24 viewBox,
+2px rounded strokes, `currentColor`, and no background or baked-in state. They
+fill recognizable gaps such as a crib, dryer, sauna or treehouse. Nuxt Icon
+bundles the used glyphs and local collection at build time; no runtime icon API
+or full server collection is needed. Check the actual rendered glyph at phone
+and desktop widths before treating a mapping as complete.
+
 **Everything starts at the gutter.** Nuxt UI's panel gutter (`px-4 sm:px-6`,
 `dashboardGutterClass`) is the one horizontal edge, the same as the top nav's:
 Back or ✕, the title, the rows, the fields and Cancel all start on it, and
@@ -414,10 +465,9 @@ large title with its actions on the same row and no bar above it; a pushed
 level puts a round Back first — on its own row above the title on a phone,
 inline before it from `lg` — with the actions at the right of that row; a
 leaf's sheet has ✕ and its title small and centred, and the leaf's pane its
-title large. Back, ✕ and every action are the same round button. A control
-that names what the whole level shows (Today's range, the calendar's location)
-takes the title's place. Pages supply `title`, `lead` and `#right`; they never
-place a title or an action themselves.
+title large. Back, ✕ and every action are the same round button. Pages
+supply `title`, `lead` and `#right`; they never place a title or an action
+themselves.
 
 **One card, one empty state, one status banner.** A card is `UCard
 variant="subtle"`; its padding and corner come from `app.config.ts`, and a
@@ -435,8 +485,7 @@ is a column rather than the frame names which column in `DashboardIndexPanel
 column`: `leaf` (Menu, Catalog, a booking's notes), `reading` (Earnings,
 Payments, Past activity) or `wide` (Insights, Today, Calendar); beside a child
 every index is `leaf`. The widths live in `dashboardColumnWidths`; a page never
-states one. A column's title heads it, as a leaf's does, unless the navbar
-names what the level shows — Today's range. Every level title is
+states one. A column's title heads it, as a leaf's does. Every level title is
 `dashboardTitleClass`.
 
 **Short text is bare.** A name, title, headline, slug or link renders as a
@@ -815,9 +864,10 @@ screen, an Earnings page — each as its own freshly drawn screen. They did not
 look like Airbnb, did not look like each other, and could not be maintained,
 because every one re-stated layout, copy and state that already existed.
 
-**Read the Airbnb page before drawing anything.** Open the actual screen in the
-owner's logged-in Chrome (`chrome.sh`), read its sections, headings, rows,
-button labels and card shapes, and mirror that structure. "Inspired by" is not
+**Read the Airbnb page before drawing anything.** Start with the saved captures
+and `docs/design/airbnb-navigation-map.md`; where the evidence is missing, open
+the actual screen in the owner's logged-in browser. Read its sections, headings,
+rows, button labels and card shapes, and mirror that structure. "Inspired by" is not
 parity. Earnings is Performance card → Upcoming → Paid → Reports; the account's
 Payments is sections with *Manage payments* → *Your payments*; Payouts is *How
 you get paid* rows + *Add payout method* + *Need help?*. When Airbnb has no

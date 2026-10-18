@@ -220,11 +220,10 @@ async function get(path, opts = {}) {
   }
 }
 
-// Bootstrap is fetched once and cached — phases 3, 6, 7 all reuse it
+// Bootstrap is fetched once and cached — route publication and later phases reuse it.
 let _bootstrapData = null;
 async function getBootstrap() {
   if (_bootstrapData !== null) return _bootstrapData;
-  if (!ORGANIZATION_ID) return null;
   const res = await get(`/api/public/shell`);
   if (!res.ok) return null;
   _bootstrapData = await res.json();
@@ -240,14 +239,20 @@ const routes = REQUIRED_ROUTES_BY_VERTICAL[VERTICAL] ?? [
   ...(VERTICAL_ROUTES[VERTICAL] ?? []),
 ];
 const pageHtml = {};
+const reviewsPublished = (await getBootstrap())?.sections?.reviews;
+if (typeof reviewsPublished !== "boolean") {
+  fail("Bootstrap API must provide the site's reviews publication flag");
+}
 
 for (const route of routes) {
+  if (route === "/reviews" && typeof reviewsPublished !== "boolean") continue;
+  const expectedStatus = route === "/reviews" && !reviewsPublished ? 404 : 200;
   const res = await get(route);
-  if (res.ok) {
-    pass(`GET ${route} → ${res.status}`);
-    pageHtml[route] = await res.text();
+  if (res.status === expectedStatus) {
+    pass(`GET ${route} → ${res.status}${expectedStatus === 404 ? " (section not published)" : ""}`);
+    if (expectedStatus === 200) pageHtml[route] = await res.text();
   } else {
-    fail(`GET ${route} → ${res.status} ${res.statusText}`);
+    fail(`GET ${route} → ${res.status} ${res.statusText}; expected ${expectedStatus}`);
   }
 }
 

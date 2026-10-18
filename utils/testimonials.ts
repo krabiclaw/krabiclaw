@@ -26,7 +26,7 @@ export interface OrganizationTestimonial {
 export const COLLECTION_METHOD_LABELS = OWNER_REVIEW_COLLECTION_METHOD_LABELS
 
 // `rejected` is the stored status of a review the owner archived: hidden from the public site.
-export const REVIEW_STATUS_LABELS: Record<TestimonialStatus, string> = { pending: 'Pending', approved: 'Published', rejected: 'Archived' }
+export const REVIEW_STATUS_LABELS: Record<TestimonialStatus, string> = { pending: 'Pending', approved: 'Published', rejected: 'Draft' }
 
 const isStringOrNull = (value: unknown): value is string | null => value === null || typeof value === 'string'
 

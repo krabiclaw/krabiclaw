@@ -76,7 +76,7 @@ async function readMemberOrganizationRow(db: DbClient, env: CloudflareEnv, organ
  * location. Use for any resource genuinely owned by one location (Products and
  * reviews with a location_id set, experiences, bookings, location QA/settings).
  */
-export async function requireLocationAccess(event: H3Event, organizationId: string, locationId: string) {
+export async function requireLocationAccess(event: H3Event, organizationId: string, locationId: string, patch?: Record<string, unknown>) {
   const env = cloudflareEnv(event)
   const db = env.DB
   if (!db) throw new HTTPError({ statusCode: 500, message: 'Database not available', data: { code: 'DATABASE_UNAVAILABLE', field: 'DB' } })
@@ -87,7 +87,7 @@ export async function requireLocationAccess(event: H3Event, organizationId: stri
   const organization = await loadMemberOrganizationRow(event, db, env, organizationId, session.user.id)
   if (!organization) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'organizationId' } })
 
-  await assertLocationAccess(db, { ...memberAccessPrincipal(organization.membership, { env, event }), locationId })
+  await assertLocationAccess(db, { ...memberAccessPrincipal(organization.membership, { env, event }), locationId, patch })
 
   const location = await queryFirst<LocationAccessRow>(db, `
     SELECT id

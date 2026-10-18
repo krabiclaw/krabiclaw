@@ -41,6 +41,11 @@ export interface PublicShellPayload {
   googleMaps: ApiRecord
   sections: Record<PublicSiteSection, boolean>
   platformMessages: Record<string, string> | null
+  consultation?: import('~/types/blawby').PublicConsultationSettings | null
+  canSchedule?: boolean
+  compliance?: import('~/types/blawby').PublicCompliance | null
+  pageLinks?: import('~/types/blawby').PublicBlawbyPageLink[]
+  searchConsoleVerification?: string | null
 }
 
 const sectionFlags = (value: unknown, names: readonly string[]): boolean =>
@@ -76,6 +81,11 @@ export const isPublicShellPayload = (value: unknown): value is PublicShellPayloa
     || !Array.isArray(value.googleMaps.media)) return false
   if (value.platformMessages !== null && (!isRecord(value.platformMessages)
     || !Object.values(value.platformMessages).every(message => typeof message === 'string'))) return false
+  if (value.consultation !== undefined && value.consultation !== null && (!isRecord(value.consultation) || typeof value.consultation.mode !== 'string')) return false
+  if (value.canSchedule !== undefined && typeof value.canSchedule !== 'boolean') return false
+  if (value.compliance !== undefined && value.compliance !== null && !isRecord(value.compliance)) return false
+  if (value.pageLinks !== undefined && !Array.isArray(value.pageLinks)) return false
+  if (value.searchConsoleVerification !== undefined && value.searchConsoleVerification !== null && typeof value.searchConsoleVerification !== 'string') return false
   return sectionFlags(value.sections, PUBLIC_SITE_SECTIONS)
 }
 

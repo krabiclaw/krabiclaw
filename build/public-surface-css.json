@@ -1,7 +1,6 @@
 {
   "platform-app-entry": "surfaces/platform-app.css",
   "platform": "surfaces/platform.css",
-  "saya": "surfaces/saya.css",
-  "blawby": "surfaces/blawby.css",
+  "tenant": "surfaces/tenant.css",
   "japanese-fonts": "surfaces/japanese-fonts.css"
 }

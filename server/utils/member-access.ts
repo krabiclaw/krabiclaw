@@ -340,21 +340,17 @@ export async function findOrganizationById(env: CloudflareEnv, organizationId: s
 }
 
 /**
- * Organization-wide management access, which is now the only kind.
+ * Organization-wide management access.
  *
- * Authorization is the Better Auth organization role and nothing else. There
- * used to be a second answer — membership in a `location:<id>` Better Auth
- * team — so "may this person reach this location" could be decided two ways.
- * That existed to scope the `editor` role, `editor` existed to receive WhatsApp
- * at a configured number, and neither has any user.
+ * Authorization is the Better Auth organization role (owner or admin).
  */
 export async function assertOrganizationWideAccess(_db: DbClient, input: MemberAccessPrincipal): Promise<void> {
   if (isOrganizationWideRole(input.role)) return
   throw new HTTPError({ statusCode: 404, message: 'Not found or access denied' })
 }
 
-/** The service assignment belongs to this tenant's Better Auth member or team. */
-export const ASSIGNED_SERVICE_SQL = `p.kind = 'service' AND EXISTS (
+/** The offering assignment belongs to this tenant's Better Auth member or team. */
+export const ASSIGNED_SERVICE_SQL = `(p.kind = 'service' OR p.kind = 'experience') AND EXISTS (
   SELECT 1 FROM product_booking_configs c
   WHERE c.organization_id = p.organization_id AND c.product_id = p.id AND c.scheduling_mode = 'provider'
     AND (EXISTS (SELECT 1 FROM member m WHERE m.id = c.assigned_member_id AND m.organizationId = c.organization_id AND m.userId = ?)
@@ -366,14 +362,14 @@ export const ASSIGNED_SERVICE_SQL = `p.kind = 'service' AND EXISTS (
 export async function assertProductAccess(db: DbClient, input: MemberAccessPrincipal & { productId: string; patch?: Record<string, unknown> }): Promise<void> {
   if (await roleAllows({ ...input, permissions: { products: ['update'] } })) return
   await assertRoleAllows({ ...input, permissions: { products: ['assigned'] } })
-  const assigned = await queryFirst<Record<string, unknown>>(db, `SELECT c.scheduling_mode, c.assigned_member_id, c.assigned_team_id, c.held_online
+  const assigned = await queryFirst<{ kind: string; scheduling_mode: string; assigned_member_id: string | null; assigned_team_id: string | null; held_online: number }>(db, `SELECT p.kind, c.scheduling_mode, c.assigned_member_id, c.assigned_team_id, c.held_online
     FROM products p JOIN product_booking_configs c ON c.product_id = p.id AND c.organization_id = p.organization_id
     WHERE p.organization_id = ? AND p.id = ? AND (${ASSIGNED_SERVICE_SQL})`, [input.organizationId, input.productId, input.userId, input.userId])
-  if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Service not found or access denied' })
-  if (input.patch?.kind !== undefined && input.patch.kind !== 'service') throw new HTTPError({ statusCode: 403, message: 'Service kind requires admin access' })
+  if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Offering not found or access denied' })
+  if (input.patch?.kind !== undefined && input.patch.kind !== assigned.kind) throw new HTTPError({ statusCode: 403, message: 'Offering kind requires admin access' })
   const booking = input.patch?.booking && typeof input.patch.booking === 'object' ? input.patch.booking as Record<string, unknown> : input.patch
   for (const field of ['scheduling_mode', 'assigned_member_id', 'assigned_team_id', 'held_online']) {
-    if (booking?.[field] !== undefined && booking[field] !== (field === 'held_online' ? assigned[field] === 1 : assigned[field])) throw new HTTPError({ statusCode: 403, message: 'Service assignment requires admin access' })
+    if (booking?.[field] !== undefined && booking[field] !== (field === 'held_online' ? assigned[field as keyof typeof assigned] === 1 : assigned[field as keyof typeof assigned])) throw new HTTPError({ statusCode: 403, message: 'Offering assignment requires admin access' })
   }
   if (input.patch?.booking !== undefined) throw new HTTPError({ statusCode: 403, message: 'Offering creation requires admin access; edit saved booking settings and schedule separately' })
 }
@@ -391,9 +387,20 @@ export function assignedHomeSql(alias: string): string {
 }
 
 export function assignedBookingSql(alias: string): string {
-  return `EXISTS (SELECT 1 FROM member m JOIN products assigned_product ON assigned_product.organization_id = m.organizationId
-    WHERE m.id = ${alias}.assigned_member_id AND m.organizationId = ${alias}.organization_id AND m.userId = ?
-      AND assigned_product.id = ${alias}.product_id AND assigned_product.kind = 'service')`
+  return `EXISTS (SELECT 1 FROM member m
+    WHERE m.id = ${alias}.assigned_member_id AND m.organizationId = ${alias}.organization_id AND m.userId = ?)`
+}
+
+/**
+ * The location is looked after by the caller, directly or through their team.
+ * `alias` is a business_locations row; the statement binds the caller's
+ * userId twice.
+ */
+export function assignedLocationSql(alias: string): string {
+  return `(EXISTS (SELECT 1 FROM member m WHERE m.id = ${alias}.assigned_member_id AND m.organizationId = ${alias}.organization_id AND m.userId = ?)
+    OR EXISTS (SELECT 1 FROM team t JOIN teamMember tm ON tm.teamId = t.id
+      JOIN member m ON m.userId = tm.userId AND m.organizationId = t.organizationId
+      WHERE t.id = ${alias}.assigned_team_id AND t.organizationId = ${alias}.organization_id AND m.userId = ?))`
 }
 
 /** The same assigned-conversation scope is used by lists, reads, writes and realtime. */
@@ -403,8 +410,12 @@ export function assignedGuestThreadScope(alias: string, userId: string): { sql: 
       OR EXISTS (SELECT 1 FROM stays st JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
         WHERE st.request_id = ${alias}.id AND st.organization_id = ${alias}.organization_id AND ${assignedHomeSql('c')})
       OR EXISTS (SELECT 1 FROM channel_threads ct JOIN product_stay_configs c ON c.organization_id = ct.organization_id AND c.product_id = ct.product_id
-        WHERE ct.request_id = ${alias}.id AND ct.organization_id = ${alias}.organization_id AND ${assignedHomeSql('c')}))`,
-    params: [userId, userId, userId, userId, userId],
+        WHERE ct.request_id = ${alias}.id AND ct.organization_id = ${alias}.organization_id AND ${assignedHomeSql('c')})
+      OR (${alias}.location_id IS NOT NULL AND EXISTS (SELECT 1 FROM business_locations bl
+        WHERE bl.id = ${alias}.location_id AND bl.organization_id = ${alias}.organization_id AND ${assignedLocationSql('bl')}))
+      OR EXISTS (SELECT 1 FROM reservations res JOIN business_locations bl ON bl.id = res.location_id AND bl.organization_id = res.organization_id
+        WHERE res.request_id = ${alias}.id AND res.organization_id = ${alias}.organization_id AND ${assignedLocationSql('bl')}))`,
+    params: [userId, userId, userId, userId, userId, userId, userId, userId, userId],
   }
 }
 
@@ -425,11 +436,24 @@ export async function assertAssignedBookingAccess(db: DbClient, input: MemberAcc
   }
 }
 
-/** The location must belong to the tenant the caller authorized against; reaching it is the organization role. */
-export async function assertLocationAccess(db: DbClient, input: MemberAccessPrincipal & { locationId: string }): Promise<void> {
-  await assertOrganizationWideAccess(db, input)
-  const location = await findLocation(db, { organizationId: input.organizationId, locationId: input.locationId })
-  if (!location) throw new HTTPError({ statusCode: 404, message: 'Resource not found' })
+/** The location must belong to the tenant the caller authorized against; reaching it is an org-wide role or location assignment. */
+export async function assertLocationAccess(db: DbClient, input: MemberAccessPrincipal & { locationId: string; patch?: Record<string, unknown> }): Promise<void> {
+  if (await roleAllows({ ...input, permissions: { locations: ['update'] } })) {
+    const location = await findLocation(db, { organizationId: input.organizationId, locationId: input.locationId })
+    if (!location) throw new HTTPError({ statusCode: 404, message: 'Resource not found' })
+    return
+  }
+  await assertRoleAllows({ ...input, permissions: { locations: ['assigned'] } })
+  const assigned = await queryFirst<{ id: string; assigned_member_id: string | null; assigned_team_id: string | null }>(db, `SELECT bl.id, bl.assigned_member_id, bl.assigned_team_id
+    FROM business_locations bl
+    WHERE bl.organization_id = ? AND bl.id = ? AND (${assignedLocationSql('bl')})`, [input.organizationId, input.locationId, input.userId, input.userId])
+  if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Location not found or access denied' })
+  if (input.patch?.assigned_member_id !== undefined && input.patch.assigned_member_id !== assigned.assigned_member_id) {
+    throw new HTTPError({ statusCode: 403, message: 'Location assignment requires admin access' })
+  }
+  if (input.patch?.assigned_team_id !== undefined && input.patch.assigned_team_id !== assigned.assigned_team_id) {
+    throw new HTTPError({ statusCode: 403, message: 'Location assignment requires admin access' })
+  }
 }
 
 /** A resource that may or may not belong to one location (e.g. a review row) — dispatches to assertOrganizationWideAccess when the row's own location_id is null, assertLocationAccess otherwise. Check the target row's location_id, never a caller-supplied param. Media authorization uses its placement owner instead. */
@@ -440,9 +464,9 @@ export async function assertResourceAccess(db: DbClient, input: MemberAccessPrin
   return assertLocationAccess(db, { ...input, locationId: input.resourceLocationId })
 }
 
-export async function assertMemberScope(db: DbClient, input: MemberAccessPrincipal & { locationId?: string | null }): Promise<void> {
+export async function assertMemberScope(db: DbClient, input: MemberAccessPrincipal & { locationId?: string | null; patch?: Record<string, unknown> }): Promise<void> {
   if (input.locationId) {
-    await assertLocationAccess(db, { ...input, locationId: input.locationId })
+    await assertLocationAccess(db, { ...input, locationId: input.locationId, patch: input.patch })
     return
   }
   await assertOrganizationWideAccess(db, input)

@@ -10,8 +10,9 @@
   <section v-else-if="page.recipe === 'products'" class="kc-product-more" data-parity-section="product-more">
     <div class="kc-product-more__inner">
       <h2 v-if="title">{{ title }}</h2>
-      <div class="kc-product-more__columns">
+      <div class="kc-product-more__columns" :style="{ '--kc-columns': String(Math.min(items.length, 3)) }">
         <div v-for="item in items" :key="item.title">
+          <Icon v-if="item.icon.startsWith('simple-icons:')" :name="item.icon" class="kc-product-more__mark" aria-hidden="true" />
           <h3>{{ item.title }}</h3>
           <p>{{ item.description }}</p>
           <NuxtLink v-if="item.url && item.linkLabel" :to="route(item.url)" class="kc-product-link">{{ item.linkLabel }} <span aria-hidden="true">↗</span></NuxtLink>

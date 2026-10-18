@@ -336,12 +336,8 @@ export default defineNuxtConfig({
       pathPrefix: false,
     },
     {
-      path: '~/components/blawby',
+      path: '~/components/tenant',
       pathPrefix: false,
-    },
-    {
-      path: '~/components/saya',
-      prefix: 'Saya',
     },
     {
       path: '~/components/platform',

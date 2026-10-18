@@ -23,7 +23,7 @@ const organizationId = await useDashboardOrganizationId()
 const editor = await useLocationEditor(organizationId, dashboardLocation.currentLocationId, 'status')
 
 const STATUS_ITEMS = [
-  { value: 'active', label: 'Active' },
-  { value: 'inactive', label: 'Inactive' },
+  { value: 'active', label: 'Published', description: 'Visible to guests on your website.' },
+  { value: 'inactive', label: 'Draft', description: 'Hidden from your website. Only team members can see it.' },
 ]
 </script>

@@ -3,6 +3,7 @@
     id="integration-discord"
     icon="i-logos-discord-icon"
     title="Discord"
+    :lead="integrationDefinition('discord').purpose"
     :saving="saving"
     :disabled="!accountId || !chosenChannel"
     :error="error || data?.error || integrations.failure.value || loadFailure"
@@ -10,22 +11,23 @@
     save-label="Connect this channel"
     @save="chooseChannel"
   >
-    <IntegrationConnection
-      logo="i-logos-discord-icon"
-      :connection="discord && { name: `#${discord.target_name}`, connectedAt: discord.connected_at }"
+    <IntegrationLeaf
+      integration="discord"
+      :connection="discord && { name: `#${discord.target_name}`, connectedAt: discord.connected_at, through: discord.connected_through, status: discord.status, lastError: discord.last_error }"
       :disconnecting="disconnecting"
       @disconnect="disconnect"
     >
       <UButton v-if="!accountId || loadFailure || data?.error || !choices.length" icon="i-logos-discord-icon" size="xl" block :loading="linking" @click="connect()">Connect Discord</UButton>
 
       <URadioGroup v-if="choices.length" v-model="chosenChannel" legend="Which channel should posts go to?" :items="choices" variant="card" />
-    </IntegrationConnection>
+    </IntegrationLeaf>
   </DashboardLeafPanel>
 </template>
 
 <script setup lang="ts">
 import { INTEGRATION_SCOPES } from '~/shared/organization-settings'
-import IntegrationConnection from '~/components/dashboard/IntegrationConnection.vue'
+import IntegrationLeaf from '~/components/dashboard/IntegrationLeaf.vue'
+import { integrationDefinition } from '~/shared/integrations'
 import { integrationsKey, type ConnectedIntegration } from '../integrations.vue'
 
 definePageMeta({ layout: 'dashboard' })

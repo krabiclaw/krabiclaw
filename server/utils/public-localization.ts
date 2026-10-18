@@ -168,8 +168,9 @@ export function resolveLocalizedRouteResourceId(
 
 export function projectLocalizedMediaAlt<T extends { asset_id: string; alt_text: string | null }>(
   media: readonly T[],
-  localizations: readonly ExactPublicLocalization[],
+  localizations: readonly ExactPublicLocalization[] | null,
 ): T[] {
+  if (localizations === null) return [...media]
   const byResourceId = new Map(
     localizations
       .filter(localization => localization.resourceType === 'media_asset')

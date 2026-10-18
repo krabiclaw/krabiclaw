@@ -33,7 +33,9 @@ export function agendaToTodayCard(item: AgendaItem, input: { resolvedAt: string;
   const when = distance <= 0 ? 'today' : distance === 1 ? 'tomorrow' : `in ${distance} days`
   const guests = item.partySize && item.partySize > 0 ? `${item.partySize} ${item.partySize === 1 ? 'guest' : 'guests'}` : ''
   const firstName = item.title.trim().split(/\s+/)[0] || item.title
-  const resourceIcon = item.kind === 'booking' ? 'i-lucide-ticket' : item.kind === 'stay' ? 'i-lucide-house' : 'i-lucide-map-pin'
+  const resourceIcon = item.kind === 'booking'
+    ? (input.vertical === 'service' ? 'i-lucide-calendar-clock' : 'i-lucide-ticket')
+    : item.kind === 'stay' ? 'i-lucide-house' : 'i-lucide-map-pin'
   const presentation = input.personal || item.kind === 'stay' ? null : resolveBookingPresentation(item.kind, input.vertical)
   const headline = input.personal ? `${item.title} ${when}${guests ? ` for ${guests}` : ''}`
     : item.kind === 'stay' ? `${item.title.startsWith('Overbooked · ') ? item.title : firstName} ${item.stayMoment === 'departure' ? 'leaves' : 'arrives'} ${when}${guests ? ` with ${guests}` : ''}`

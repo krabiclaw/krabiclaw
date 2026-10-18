@@ -5,21 +5,11 @@ import { getDashboardContext } from '~/server/utils/dashboard-context'
 import { assertRoleAllows } from '~/server/utils/member-access'
 import { getAnalyticsReport } from '~/server/utils/analytics-report'
 import { AnalyticsQueryError, queryOrganizationAnalytics, type AnalyticsQueryInput } from '~/server/utils/analytics-query'
-import { loadOnboardingChecklist } from '~/server/utils/onboarding-checklist'
 import { queryAll, type DbClient } from '~/server/db'
 
 import { organizationAnalyticsSchema, type OrganizationAnalyticsReport } from '~/shared/analytics-report'
 
 type OrganizationReviewsSummary = OrganizationAnalyticsReport['reviews']
-type OrganizationSetupProgress = OrganizationAnalyticsReport['setup']
-
-const SETUP_ITEM_LABELS: Record<string, string> = {
-  business_info: 'Business details',
-  hero_image: 'Hero image',
-  core_offering: 'Products or services',
-  story: 'Your story',
-  post: 'A first post',
-}
 
 /**
  * Approved reviews across the sites in scope.
@@ -66,26 +56,6 @@ async function loadReviewsSummary(db: DbClient, organizationIds: readonly string
   }
 }
 
-/** The tenant's setup progress. A checklist belongs to one tenant. */
-async function loadSetupProgress(
-  event: H3Event,
-  organization: { id: string; label: string },
-): Promise<OrganizationSetupProgress> {
-  const checklist = await loadOnboardingChecklist(event, organization.id)
-  const items = Object.entries(checklist.items).map(([id, done]) => ({
-    id,
-    label: SETUP_ITEM_LABELS[id] ?? id,
-    done: Boolean(done),
-  }))
-  return {
-    organizationId: organization.id,
-    label: organization.label,
-    completed: items.filter(item => item.done).length,
-    total: items.length,
-    items,
-  }
-}
-
 /**
  * Analytics for the tenant.
  *
@@ -109,17 +79,16 @@ export async function loadDashboardOrganizationAnalytics(
 
   await assertRoleAllows({ organizationId: organization.id, role: organization.role, permissions: { analytics: ['read'] } })
 
-  const [report, reviews, setup] = await Promise.all([
+  const [report, reviews] = await Promise.all([
     getAnalyticsReport(db, {
       organizationId: organization.id,
       startDate: query.startDate,
       endDate: query.endDate,
     }),
     loadReviewsSummary(db, [organization.id]),
-    loadSetupProgress(event, { id: organization.id, label: organization.name }),
   ])
 
-  return organizationAnalyticsSchema.parse({ organizationId: organization.id, report, reviews, setup })
+  return organizationAnalyticsSchema.parse({ organizationId: organization.id, report, reviews })
 }
 
 /**

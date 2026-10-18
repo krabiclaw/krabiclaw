@@ -2,6 +2,7 @@
   <DashboardLeafPanel
     id="product-photo"
     :title="p.sectionLabels['photo']"
+    lead="The picture guests recognise this by, in the list and on your site."
     :saving="p.saving.value"
     :disabled="p.saveDisabled.value"
     :save-label="p.saveLabel.value"
@@ -10,8 +11,7 @@
     @cancel="p.revert"
     @save="p.save"
   >
-    <div v-if="p.isNew.value || p.product.value" class="space-y-4">
-      <p class="text-base text-muted">The picture guests recognise this by, in the list and on your site.</p>
+    <div v-if="p.isNew.value || p.product.value" class="space-y-6">
       <DashboardCoverPhotoField
         :organization-id="p.organizationId"
         :location-id="p.locationId.value"
@@ -22,7 +22,7 @@
         testid="product-photo"
         @update:model-value="p.setPrimaryImage"
       />
-      <UFormField v-if="p.product.value" label="More photos" help="Shown after the cover, in this order.">
+      <UFormField v-if="p.product.value" label="More photos">
         <DashboardMediaGalleryField
           :items="p.galleryRows.value"
           :organization-id="p.organizationId"
@@ -34,7 +34,6 @@
           @asset-change="p.setGalleryAsset"
         />
       </UFormField>
-      <p class="text-sm text-muted">A photo saves as soon as you choose it.</p>
     </div>
   </DashboardLeafPanel>
 </template>

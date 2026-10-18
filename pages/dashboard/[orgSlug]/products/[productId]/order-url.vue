@@ -2,6 +2,7 @@
   <DashboardLeafPanel
     id="product-order-url"
     :title="p.sectionLabels['order-url']"
+    lead="Customers continue to this website to order or book. Adding a link replaces the booking action on your website."
     :saving="p.saving.value"
     :disabled="p.saveDisabled.value"
     :save-label="p.saveLabel.value"
@@ -10,8 +11,7 @@
     @save="p.save"
   >
     <template v-if="p.isNew.value || p.product.value">
-      <p class="mb-6 text-base text-muted">Customers continue to this website to order or book. Adding a link replaces the booking action on your website.</p>
-      <UFormField label="Website address">
+      <UFormField label="Website address" hint="Optional">
         <UInput v-model="p.form.order_url" type="url" placeholder="https://…" class="w-full" />
       </UFormField>
     </template>

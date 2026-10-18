@@ -14,21 +14,21 @@
 
     <form class="space-y-4" novalidate @submit.prevent="handleSubmit">
       <div class="grid gap-4 sm:grid-cols-2">
-        <SayaFormField v-slot="{ id, describedBy, invalid }" label="Name" name="name" required :error="fieldError('name')">
+        <TenantFormField v-slot="{ id, describedBy, invalid }" label="Name" name="name" required :error="fieldError('name')">
           <input :id="id" v-model="form.name" type="text" placeholder="Your name" :class="inputClass" :aria-describedby="describedBy" :aria-invalid="invalid" />
-        </SayaFormField>
-        <SayaFormField v-slot="{ id, describedBy, invalid }" label="Email" name="email" required :error="fieldError('email')">
+        </TenantFormField>
+        <TenantFormField v-slot="{ id, describedBy, invalid }" label="Email" name="email" required :error="fieldError('email')">
           <input :id="id" v-model="form.email" type="email" placeholder="you@example.com" :class="inputClass" :aria-describedby="describedBy" :aria-invalid="invalid" />
-        </SayaFormField>
+        </TenantFormField>
       </div>
 
-      <SayaFormField v-slot="{ id, describedBy, invalid }" label="Topic" name="topic" required :error="fieldError('topic')">
+      <TenantFormField v-slot="{ id, describedBy, invalid }" label="Topic" name="topic" required :error="fieldError('topic')">
         <input :id="id" v-model="form.topic" type="text" placeholder="What do you need help with?" :class="inputClass" :aria-describedby="describedBy" :aria-invalid="invalid" />
-      </SayaFormField>
+      </TenantFormField>
 
-      <SayaFormField v-slot="{ id, describedBy, invalid }" label="Message" name="message" required :error="fieldError('message')">
+      <TenantFormField v-slot="{ id, describedBy, invalid }" label="Message" name="message" required :error="fieldError('message')">
         <textarea :id="id" v-model="form.message" rows="5" placeholder="Share the details..." :class="inputClass" :aria-describedby="describedBy" :aria-invalid="invalid" />
-      </SayaFormField>
+      </TenantFormField>
 
       <label class="flex items-start gap-3 rounded-xl border border-default bg-elevated/60 px-4 py-3 text-sm">
         <input v-model="form.consent" type="checkbox" class="mt-0.5 size-4 rounded border-default" />

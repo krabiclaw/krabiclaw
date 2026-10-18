@@ -17,7 +17,8 @@ import { applySitePalettePatch, isPaletteTemplate, resolveSitePalette } from '~/
 import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION, parseLogoPresentation } from '~/shared/media-placement-contract'
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { organizationAdapter } from '~/server/utils/member-access'
-import type { CloudflareEnv } from '~/server/utils/auth'
+import { linkedAccountOwner, type CloudflareEnv } from '~/server/utils/auth'
+import { listServices } from '~/server/utils/organization-services'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 
 type SetupEnv = Parameters<typeof createSystemSubdomain>[0]
@@ -196,7 +197,7 @@ export async function loadSettingsPayload(
     catering_email: siteConfig.catering_email || '',
     careers_email: siteConfig.careers_email || '',
     google_analytics_measurement_id: siteConfig.google_analytics_measurement_id || '',
-    integrations: integrationsSummary(await listIntegrations(db, organizationId), JSON.parse(updatedOrganization.locations_json) as IntegrationLocation[]),
+    integrations: await integrationsSummary(db, env, organizationId, await listIntegrations(db, organizationId), JSON.parse(updatedOrganization.locations_json) as IntegrationLocation[]),
     created_at: updatedOrganization.created_at,
     updated_at: updatedOrganization.updated_at,
   }
@@ -222,11 +223,17 @@ interface IntegrationLocation {
  * leaves — names and ids, never a token. Google Maps is per location, so
  * its answer is the locations and which of them name a place.
  */
-function integrationsSummary(integrations: Awaited<ReturnType<typeof listIntegrations>>, locations: IntegrationLocation[]) {
-  const connected = (provider: typeof integrations[number]['provider']) => integrationSummary(integrations.find(integration => integration.provider === provider) ?? null)
+async function integrationsSummary(db: DbClient, env: CloudflareEnv, organizationId: string, integrations: Awaited<ReturnType<typeof listIntegrations>>, locations: IntegrationLocation[]) {
+  // Each connection names whose linked account it acts through, read from Better Auth.
+  const owners = new Map(await Promise.all([...new Set(integrations.map(integration => integration.account_id))].map(async id => [id, await linkedAccountOwner(env, id)] as const)))
+  const connected = (provider: typeof integrations[number]['provider']) => {
+    const summary = integrationSummary(integrations.find(integration => integration.provider === provider) ?? null)
+    return summary && { ...summary, connected_through: owners.get(summary.account_id) ?? null }
+  }
   return {
+    services: { managed_ads: (await listServices(db, organizationId)).managed_ads !== null },
     google_maps: locations.map(location => ({ ...location, address: formatPostalAddress(parsePostalAddress(location.address)) || null })),
-    google_calendar: (() => { const row = integrations.find(row => row.provider === 'google_calendar'); return row ? { account_id: row.account_id, calendar_name: row.target_name, status: row.status, connected_at: row.created_at } : null })(),
+    google_calendar: (() => { const row = integrations.find(row => row.provider === 'google_calendar'); return row ? { account_id: row.account_id, calendar_name: row.target_name, status: row.status, last_error: row.last_error, connected_at: row.created_at, connected_through: owners.get(row.account_id) ?? null } : null })(),
     google_analytics: connected('google_analytics'),
     google_ads: connected('google_ads'),
     google_search_console: connected('google_search_console'),
@@ -360,14 +367,15 @@ async function attemptOrganizationUpdate(
     // platform's hold, so the tenant neither sets it nor clears it. The read
     // answers plainly; the guard on the UPDATE is what a suspension landing
     // between the two cannot outrun.
-    if (updates.status !== 'active' && updates.status !== 'inactive') {
+    const canonicalStatus = updates.status === 'published' ? 'active' : updates.status === 'draft' ? 'inactive' : updates.status
+    if (canonicalStatus !== 'active' && canonicalStatus !== 'inactive') {
       return { status: 400, data: { error: 'Website status must be active or inactive' } }
     }
     if (organization.status === 'suspended') {
       return { status: 409, data: { error: 'This website is suspended. Contact support to restore it.' } }
     }
     setParts.push('status = ?')
-    params.push(updates.status)
+    params.push(canonicalStatus)
     guards.push("status <> 'suspended'")
   }
   if (updates.seo_title !== undefined) {

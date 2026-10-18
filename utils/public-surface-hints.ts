@@ -29,11 +29,8 @@ export function publicSurfaceStylesheetForRequest(input: {
     themeId: input.themeId,
     vertical: input.vertical,
   })
-  if (template.slug === 'blawby') {
-    return '/_nuxt/surfaces/blawby.css'
-  }
-  if (template.slug === 'saya') {
-    return '/_nuxt/surfaces/saya.css'
+  if (template.slug === 'blawby' || template.slug === 'saya') {
+    return '/_nuxt/surfaces/tenant.css'
   }
   throw new Error(`Unsupported public template "${template.slug}".`)
 }

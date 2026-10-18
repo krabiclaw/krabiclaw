@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { chromium } from '@playwright/test'
+import { firefox } from '@playwright/test'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import sharp from 'sharp'
@@ -82,7 +82,7 @@ function portablePath(root, filePath) {
   return path.relative(path.resolve(root), filePath).replaceAll('\\', '/')
 }
 
-async function stabilizePage(page, inventoryMode) {
+async function stabilizePage(page) {
   await page.emulateMedia({ reducedMotion: 'reduce', colorScheme: 'light' })
   await page.addStyleTag({
     content: `
@@ -96,7 +96,7 @@ async function stabilizePage(page, inventoryMode) {
       }
     `,
   })
-  await page.evaluate(async inventoryMode => {
+  await page.evaluate(async () => {
     if (document.fonts?.ready) await document.fonts.ready
     const delay = milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds))
     const step = Math.max(window.innerHeight, 600)
@@ -105,20 +105,10 @@ async function stabilizePage(page, inventoryMode) {
       await delay(50)
     }
     window.scrollTo(0, 0)
-    const images = Array.from(document.images)
-    if (inventoryMode) {
-      for (const image of images) image.loading = 'eager'
-    }
-    await Promise.race([
-      Promise.all(images.map(image => image.complete
-        ? Promise.resolve()
-        : new Promise(resolve => {
-            image.addEventListener('load', resolve, { once: true })
-            image.addEventListener('error', resolve, { once: true })
-          }))),
-      delay(5_000),
-    ])
-  }, inventoryMode)
+    for (const image of document.images) image.loading = 'eager'
+  })
+  await page.waitForFunction(() => Array.from(document.images).every(image => image.complete))
+  await page.evaluate(() => Promise.all(Array.from(document.images, image => image.decode())))
 }
 
 async function markCaptureSections(page, routeName, expectedSections) {
@@ -293,7 +283,7 @@ if (args.source === 'reference') {
   }
 }
 
-const browser = await chromium.launch({ channel: 'chromium' })
+const browser = await firefox.launch()
 const manifest = {
   schema_version: 2,
   captured_at: new Date().toISOString(),
@@ -304,7 +294,7 @@ const manifest = {
   observed_reference_etag: referenceEtag,
   base_url: args.url,
   route_inventory_source: args.sitemapUrl || (inventoryMode ? 'command-line --route' : null),
-  browser: { name: 'chromium', channel: 'chromium', version: browser.version(), device_scale_factor: 1 },
+  browser: { name: 'firefox', channel: null, version: browser.version(), device_scale_factor: 1 },
   rendering: {
     color_scheme: 'light',
     locale: 'en-US',
@@ -317,14 +307,9 @@ const manifest = {
 }
 
 try {
-  const captures = Object.entries(inventoryMode
+  for (const [viewportName, viewport] of Object.entries(inventoryMode
     ? { mobile: BLAWBY_PARITY_VIEWPORTS.mobile, desktop: BLAWBY_PARITY_VIEWPORTS.desktop }
-    : BLAWBY_PARITY_VIEWPORTS).flatMap(([viewportName, viewport]) =>
-    Array.from({ length: inventoryMode ? 2 : 1 }, (_, lane) => ({
-      viewportName, viewport,
-      routes: Object.entries(args.routes).filter((_, index) => !inventoryMode || index % 2 === lane),
-    })))
-  await Promise.all(captures.map(async ({ viewportName, viewport, routes }) => {
+    : BLAWBY_PARITY_VIEWPORTS)) {
     const context = await browser.newContext({
       viewport,
       deviceScaleFactor: 1,
@@ -336,152 +321,175 @@ try {
         ? { 'x-preview-tenant': args.tenantSlug, 'cache-control': 'no-store' }
         : undefined,
     })
-    const page = await context.newPage()
-    const captureSession = await context.newCDPSession(page)
-    const pageErrors = []
-    const failedFirstParty = []
-    const consoleErrors = []
-    const requestFailures = []
-    let failedMedia = []
-    page.on('pageerror', error => pageErrors.push(error.message))
-    page.on('console', message => {
-      if (message.type() === 'error') consoleErrors.push(message.text())
-    })
-    page.on('requestfailed', request => {
-      if (new URL(request.url()).origin === new URL(args.url).origin) {
-        requestFailures.push(`${request.failure()?.errorText} ${request.url()}`)
-      }
-    })
-    page.on('response', response => {
-      if (new URL(response.url()).origin === new URL(args.url).origin && response.status() >= 400) {
-        failedFirstParty.push(`${response.status()} ${response.url()}`)
-      }
-    })
-    const failureDetails = async () => ({
-      pageErrors, failedFirstParty, consoleErrors, requestFailures, failedMedia,
-      appError: await page.evaluate(() => {
-        const error = document.querySelector('#__nuxt')?.__vue_app__?.$nuxt?.payload?.error
-        return error ? { message: error.message, status: error.statusCode, stack: error.stack, cause: error.cause?.message } : null
-      }),
-    })
-    for (const [routeName, routeConfig] of routes) {
-      pageErrors.length = 0
-      failedFirstParty.length = 0
-      consoleErrors.length = 0
-      requestFailures.length = 0
-      failedMedia = []
-      const targetUrl = resolveUrl(args.url, routeConfig.path)
-      const filePath = path.resolve(args.outDir, 'screenshots', args.source, `${routeName}-${viewportName}.png`)
-      await fs.mkdir(path.dirname(filePath), { recursive: true })
-      const response = await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 })
-      if (inventoryMode) {
-        if (response?.status() !== 200) throw new Error(`${routeConfig.path} returned ${response?.status() ?? 'no response'} at ${viewportName}`)
-        await page.waitForFunction(() => document.querySelector('#__nuxt')?.__vue_app__?.$nuxt?.isHydrating === false).catch(async error => {
-          throw new Error(`${routeConfig.path} did not hydrate at ${viewportName} (${page.url()}): ${JSON.stringify(await failureDetails())}`, { cause: error })
+    for (const [routeName, routeConfig] of Object.entries(args.routes)) {
+      const page = await context.newPage()
+      try {
+        const pageErrors = []
+        const failedFirstParty = []
+        const consoleErrors = []
+        const requestFailures = []
+        const advisoryPrefetchCancellations = []
+        page.on('pageerror', error => pageErrors.push(error.message))
+        page.on('console', message => {
+          if (message.type() === 'error') consoleErrors.push(message.text())
         })
-      }
-      await stabilizePage(page, inventoryMode).catch(error => {
-        throw new Error(`${routeConfig.path} could not stabilize at ${viewportName} (${page.url()})`, { cause: error })
-      })
-      if (inventoryMode) {
-        failedMedia = await page.evaluate(captureOrigin => {
-          const origins = new Set([captureOrigin, 'https://media.krabiclaw.com', 'https://imagedelivery.net'])
-          return Array.from(document.images)
-            .filter(image => origins.has(new URL(image.currentSrc || image.src, document.baseURI).origin)
-              && (!image.complete || image.naturalWidth === 0))
-            .map(image => ({ src: image.currentSrc || image.src, complete: image.complete, naturalWidth: image.naturalWidth }))
-        }, new URL(args.url).origin)
-      }
-      const { cssContentSize } = await captureSession.send('Page.getLayoutMetrics')
-      const dimensions = { width: Math.ceil(cssContentSize.width), height: Math.ceil(cssContentSize.height) }
-      const clips = []
-      // Keep native compositor surfaces below its texture limit without changing the document viewport.
-      for (let top = 0; top < dimensions.height; top += 8_192) {
-        const height = Math.min(8_192, dimensions.height - top)
-        const input = await page.screenshot({ fullPage: true, clip: { x: 0, y: top, width: dimensions.width, height } })
-        if (input.readUInt32BE(16) !== dimensions.width || input.readUInt32BE(20) !== height) {
-          throw new Error(`${routeConfig.path} screenshot clip geometry mismatch at ${viewportName}, row ${top}`)
-        }
-        clips.push({ input, top, left: 0 })
-      }
-      await sharp({ create: { ...dimensions, channels: 3, background: 'white' } }).composite(clips).png().toFile(filePath)
-      if (inventoryMode) {
-        const mainText = await page.locator('main').innerText().catch(async error => {
-          throw new Error(`${routeConfig.path} could not read main content at ${viewportName} (${page.url()}): ${JSON.stringify(await failureDetails())}`, { cause: error })
-        })
-        if (!mainText.trim()) throw new Error(`${routeConfig.path} has no visible main content at ${viewportName}`)
-        if (pageErrors.length || failedFirstParty.length || consoleErrors.length || requestFailures.length || failedMedia.length) {
-          throw new Error(`${routeConfig.path} failed at ${viewportName}: ${JSON.stringify(await failureDetails())}`)
-        }
-        manifest.screenshots.push({ route_name: routeName, route: routeConfig.path, viewport: viewportName,
-          status: response.status(), file: portablePath(args.outDir, filePath),
-          contentSize: cssContentSize, imageSize: dimensions,
-          pageErrors: [...pageErrors], failedFirstParty: [...failedFirstParty], consoleErrors: [...consoleErrors],
-          requestFailures: [...requestFailures], failedMedia: [...failedMedia] })
-        continue
-      }
-      await page.evaluate(() => window.scrollTo(0, 0))
-      const markedSections = await markCaptureSections(page, routeName, routeConfig.sections)
-      const markedMainNames = markedSections
-        .filter(section => section.slot.startsWith('main-'))
-        .map(section => section.name)
-      if (JSON.stringify(markedMainNames) !== JSON.stringify(routeConfig.sections)) {
-        throw new Error(
-          `Section recipe mismatch for ${routeName}/${viewportName}: `
-          + `expected ${JSON.stringify(routeConfig.sections)}, found ${JSON.stringify(markedMainNames)}`,
-        )
-      }
-      manifest.screenshots.push({
-        route_name: routeName,
-        route: routeConfig.path,
-        viewport: viewportName,
-        status: response?.status() ?? null,
-        file: portablePath(args.outDir, filePath),
-      })
-
-      for (const section of markedSections) {
-        const sectionPath = path.resolve(
-          args.outDir,
-          'screenshots',
-          args.source,
-          'sections',
-          routeName,
-          viewportName,
-          `${section.slot}-${section.name}.png`,
-        )
-        await fs.mkdir(path.dirname(sectionPath), { recursive: true })
-        try {
-          if (section.slot !== 'header') {
-            await page.locator('header').first().evaluate(element => { element.style.visibility = 'hidden' })
+        page.on('requestfailed', request => {
+          if (new URL(request.url()).origin === new URL(args.url).origin) {
+            const error = request.failure()?.errorText
+            if (request.headers()['sec-purpose'] === 'prefetch' && error === 'NS_BINDING_ABORTED') {
+              advisoryPrefetchCancellations.push({ url: request.url(), purpose: 'prefetch', error })
+            } else {
+              requestFailures.push(`${error} ${request.url()}`)
+            }
           }
-          await page.locator(`[data-parity-capture-slot="${section.slot}"]`).first().screenshot({
-            path: sectionPath,
-            animations: 'disabled',
+        })
+        page.on('response', response => {
+          if (new URL(response.url()).origin === new URL(args.url).origin && response.status() >= 400) {
+            failedFirstParty.push(`${response.status()} ${response.url()}`)
+          }
+        })
+        const failureDetails = async () => {
+          const failedMedia = await page.evaluate(captureOrigin => {
+            const origins = new Set([captureOrigin, 'https://media.krabiclaw.com', 'https://imagedelivery.net'])
+            return Array.from(document.images)
+              .filter(image => origins.has(new URL(image.currentSrc || image.src, document.baseURI).origin)
+                && (!image.complete || image.naturalWidth === 0))
+              .map(image => ({ src: image.currentSrc || image.src, currentSrc: image.currentSrc, loading: image.loading, complete: image.complete, naturalWidth: image.naturalWidth }))
+          }, new URL(args.url).origin)
+          const failedUrls = new Set(failedMedia.map(image => image.src))
+          return {
+            pageErrors, failedFirstParty, consoleErrors, requestFailures, advisoryPrefetchCancellations, failedMedia,
+            imageRequests: (await page.requests()).filter(request => failedUrls.has(request.url()))
+              .map(request => ({ url: request.url(), timing: request.timing(), failure: request.failure() })),
+            appError: await page.evaluate(() => {
+              const error = document.querySelector('#__nuxt')?.__vue_app__?.$nuxt?.payload?.error
+              return error ? { message: error.message, status: error.statusCode, stack: error.stack, cause: error.cause?.message } : null
+            }),
+          }
+        }
+        const targetUrl = resolveUrl(args.url, routeConfig.path)
+        const filePath = path.resolve(args.outDir, 'screenshots', args.source, `${routeName}-${viewportName}.png`)
+        await fs.mkdir(path.dirname(filePath), { recursive: true })
+        const response = await page.goto(targetUrl, { waitUntil: 'domcontentloaded', timeout: 60_000 })
+        if (inventoryMode) {
+          if (response?.status() !== 200) throw new Error(`${routeConfig.path} returned ${response?.status() ?? 'no response'} at ${viewportName}`)
+          await page.waitForFunction(() => document.querySelector('#__nuxt')?.__vue_app__?.$nuxt?.isHydrating === false).catch(async error => {
+            throw new Error(`${routeConfig.path} did not hydrate at ${viewportName} (${page.url()}): ${JSON.stringify(await failureDetails())}`, { cause: error })
           })
-        } catch (error) {
-          throw new Error(
-            `Section capture failed for ${routeName}/${viewportName}/${section.slot}-${section.name} `
-            + `at ${JSON.stringify(section.clip)}: ${error instanceof Error ? error.message : String(error)}`, { cause: error },
-          )
-        } finally {
-          if (section.slot !== 'header') {
-            await page.locator('header').first().evaluate(element => { element.style.visibility = '' })
-          }
         }
-        manifest.sections.push({
+        await stabilizePage(page).catch(async error => {
+          throw new Error(`${routeConfig.path} could not stabilize at ${viewportName} (${page.url()}): ${JSON.stringify(await failureDetails())}`, { cause: error })
+        })
+        const cssContentSize = await page.evaluate(() => ({
+          x: 0, y: 0,
+          width: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth,
+            document.body.offsetWidth, document.documentElement.offsetWidth,
+            document.body.clientWidth, document.documentElement.clientWidth),
+          height: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight,
+            document.body.offsetHeight, document.documentElement.offsetHeight,
+            document.body.clientHeight, document.documentElement.clientHeight),
+        }))
+        const dimensions = { width: Math.ceil(cssContentSize.width), height: Math.ceil(cssContentSize.height) }
+        const clips = []
+        // Keep native compositor surfaces below its texture limit without changing the document viewport.
+        for (let top = 0; top < dimensions.height; top += 8_192) {
+          const height = Math.min(8_192, dimensions.height - top)
+          const input = await page.screenshot({ fullPage: true, clip: { x: 0, y: top, width: dimensions.width, height } })
+          if (input.readUInt32BE(16) !== dimensions.width || input.readUInt32BE(20) !== height) {
+            throw new Error(`${routeConfig.path} screenshot clip geometry mismatch at ${viewportName}, row ${top}`)
+          }
+          clips.push({ input, top, left: 0 })
+        }
+        await sharp({ create: { ...dimensions, channels: 3, background: 'white' } }).composite(clips).png().toFile(filePath)
+        if (inventoryMode) {
+          const finalUrl = new URL(page.url()).href
+          if (finalUrl !== new URL(targetUrl).href) {
+            throw new Error(`${routeConfig.path} final URL mismatch at ${viewportName}: expected ${targetUrl}, found ${finalUrl}`)
+          }
+          const htmlLang = await page.locator('html').getAttribute('lang')
+          const mainText = await page.locator('main').innerText().catch(async error => {
+            throw new Error(`${routeConfig.path} could not read main content at ${viewportName} (${page.url()}): ${JSON.stringify(await failureDetails())}`, { cause: error })
+          })
+          if (!mainText.trim()) throw new Error(`${routeConfig.path} has no visible main content at ${viewportName}`)
+          const details = await failureDetails()
+          const { failedMedia } = details
+          if (pageErrors.length || failedFirstParty.length || consoleErrors.length || requestFailures.length || failedMedia.length) {
+            throw new Error(`${routeConfig.path} failed at ${viewportName}: ${JSON.stringify(details)}`)
+          }
+          manifest.screenshots.push({ route_name: routeName, route: routeConfig.path, viewport: viewportName,
+            final_url: finalUrl, html_lang: htmlLang,
+            status: response.status(), file: portablePath(args.outDir, filePath),
+            contentSize: cssContentSize, imageSize: dimensions,
+            pageErrors: [...pageErrors], failedFirstParty: [...failedFirstParty], consoleErrors: [...consoleErrors],
+            requestFailures: [...requestFailures], advisoryPrefetchCancellations: [...advisoryPrefetchCancellations], failedMedia: [...failedMedia] })
+          continue
+        }
+        await page.evaluate(() => window.scrollTo(0, 0))
+        const markedSections = await markCaptureSections(page, routeName, routeConfig.sections)
+        const markedMainNames = markedSections
+          .filter(section => section.slot.startsWith('main-'))
+          .map(section => section.name)
+        if (JSON.stringify(markedMainNames) !== JSON.stringify(routeConfig.sections)) {
+          throw new Error(
+            `Section recipe mismatch for ${routeName}/${viewportName}: `
+            + `expected ${JSON.stringify(routeConfig.sections)}, found ${JSON.stringify(markedMainNames)}`,
+          )
+        }
+        manifest.screenshots.push({
           route_name: routeName,
           route: routeConfig.path,
           viewport: viewportName,
-          slot: section.slot,
-          name: section.name,
-          style_signature: section.style_signature,
-          file: portablePath(args.outDir, sectionPath),
+          status: response?.status() ?? null,
+          file: portablePath(args.outDir, filePath),
+          advisoryPrefetchCancellations: [...advisoryPrefetchCancellations],
         })
-      }
 
+        for (const section of markedSections) {
+          const sectionPath = path.resolve(
+            args.outDir,
+            'screenshots',
+            args.source,
+            'sections',
+            routeName,
+            viewportName,
+            `${section.slot}-${section.name}.png`,
+          )
+          await fs.mkdir(path.dirname(sectionPath), { recursive: true })
+          try {
+            if (section.slot !== 'header') {
+              await page.locator('header').first().evaluate(element => { element.style.visibility = 'hidden' })
+            }
+            await page.locator(`[data-parity-capture-slot="${section.slot}"]`).first().screenshot({
+              path: sectionPath,
+              animations: 'disabled',
+            })
+          } catch (error) {
+            throw new Error(
+              `Section capture failed for ${routeName}/${viewportName}/${section.slot}-${section.name} `
+              + `at ${JSON.stringify(section.clip)}: ${error instanceof Error ? error.message : String(error)}`, { cause: error },
+            )
+          } finally {
+            if (section.slot !== 'header') {
+              await page.locator('header').first().evaluate(element => { element.style.visibility = '' })
+            }
+          }
+          manifest.sections.push({
+            route_name: routeName,
+            route: routeConfig.path,
+            viewport: viewportName,
+            slot: section.slot,
+            name: section.name,
+            style_signature: section.style_signature,
+            file: portablePath(args.outDir, sectionPath),
+          })
+        }
+
+      } finally {
+        await page.close()
+      }
     }
     await context.close()
-  }))
+  }
 } finally {
   await browser.close()
 }

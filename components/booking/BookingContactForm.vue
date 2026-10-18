@@ -66,9 +66,9 @@
     </div>
 
     <div class="pt-2">
-      <SayaButton type="submit" size="lg" block :loading="loading" :disabled="loading">
+      <TenantButton type="submit" size="lg" block :loading="loading" :disabled="loading">
         {{ loading ? t('saya.experience_detail.processing') : submitText || t('saya.experience_detail.confirm_booking') }}
-      </SayaButton>
+      </TenantButton>
     </div>
   </form>
 </template>

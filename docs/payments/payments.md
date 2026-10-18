@@ -426,19 +426,47 @@ business does not touch buyers' Customers.
 
 ## Metronome operating billing
 
-### Ad spend (Marketing plan)
+### Managed ads
 
-The Marketing plan's usage fee is a share of Google Ads spend. The daily
-`marketing:ad-spend-daily` task reads, for each business whose plan grants
-`marketing` and whose Google Ads account is connected, Google's cost for the day
-two days back (a day Google has finished counting), and queues it as an
-`ad_spend` usage event (`google_ads:<customer>:<date>`, USD cents) delivered
-through the same Metronome path as captured volume, as `payments_ad_spend`.
+Managed ads is a service: Chris and Julia run a business's Google Ads
+campaigns for 10% of its ad spend. Connecting a Google Ads account costs
+nothing and feeds Insights → Google Ads; the fee follows the business's
+agreement, recorded in `organization_services` (`managed_ads`, who agreed,
+when, which terms) from Payments → Plan → Services. Reporting days follow the
+connected Google Ads account's actual timezone, including daylight saving time;
+the day ends at its next local midnight. The daily
+`marketing:ad-spend-daily` task reads, for each business whose agreement was on
+as the billed day closed (agreed before its end, not ended by it) and whose
+account is connected, Google's cost for the day two calendar days back in that
+account's timezone (a day Google has
+finished counting), and queues it as an `ad_spend` usage event
+(`google_ads:<customer>:<date>`, USD cents) delivered through the same Metronome
+path as captured volume, as `payments_ad_spend`.
+The usage event's source timestamp is the final millisecond of that actual
+reporting day. Missing or invalid provider timezone stops activation/capture;
+there is no UTC default. Agreement eligibility compares the same actual day
+boundary with the recorded consent and connection instants.
 Metronome prices it at the ad-spend rate on the Payments rate card:
 `validatePaymentsRateCard` accepts that third flat rate, and the plan screen and
 `get_payments_usage` show it as `ad_spend_rate_percent`. A Google Ads account
 in a currency other than USD, or a day whose spend changed after it was queued,
 fails the task for that business rather than being converted or overwritten.
+
+Activation verifies the live operating-usage contract, its current 10% ad-spend
+rate and collection configuration, the operating Customer's default payment
+method, and the connected Google Ads account's USD currency before recording
+consent. A missing or invalid prerequisite leaves no agreement. Setup uses the
+existing Plan and payment-method flows; connecting Ads and reading Insights
+remain free. An active agreement must be ended before disconnecting Ads,
+removing the billing default card, or ending the usage contract. Plan changes
+do not themselves end that usage contract. Ending the service remains available
+when a provider cannot be read, and preserves its previously billable days.
+The connection and usage contract remain until the intersecting managed days
+have actual daily spend receipts, including zero spend, in the existing usage
+outbox. The daily task revisits unrecorded days after Google's two-day reporting
+delay and sends pending events through the existing delivery operation, even
+after Ads is disconnected. `delivery_at` is written only after native ingest
+acceptance; failed reads or deliveries remain failures to resolve.
 
 KrabiClaw Payments: **1.4% of payment volume, plus Stripe fees.** Billed after
 use. KrabiClaw Payments fees aren't returned after a refund or dispute. The
