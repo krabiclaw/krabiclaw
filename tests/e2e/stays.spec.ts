@@ -832,16 +832,17 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   expect(coveredProduct.error).toBeNull()
   expect([coveredProduct.data!.product.image!.asset_id, ...coveredProduct.data!.product.gallery.map(asset => asset.asset_id)]).toEqual([blue.id, red.id, green.id])
 
-  const originalAlt = storedUploads.data!.assets.find(asset => asset.asset_id === blue.id)!.alt_text
-  await photoDetail.getByRole('link', { name: originalAlt ? 'Edit visual description' : 'Add a visual description', exact: true }).click()
+  // An upload stores no visual description until the host writes one.
+  expect(storedUploads.data!.assets.find(asset => asset.asset_id === blue.id)!.alt_text).toBeNull()
+  await photoDetail.getByRole('link', { name: 'Add a visual description', exact: true }).click()
   const photoDescriptionPanel = page.locator('#dashboard-panel-product-photo-visual-description')
   const visualDescription = photoDescriptionPanel.getByRole('textbox', { name: 'Visual description', exact: true })
   await expect(visualDescription).toHaveAttribute('maxlength', '500')
   await visualDescription.fill('An unsaved visual description')
   await photoDescriptionPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
   await expect(page).toHaveURL(`${baseURL}${allPhotosPath}/${blue.id}`)
-  await photoDetail.getByRole('link', { name: originalAlt ? 'Edit visual description' : 'Add a visual description', exact: true }).click()
-  await expect(visualDescription).toHaveValue(originalAlt ?? '')
+  await photoDetail.getByRole('link', { name: 'Add a visual description', exact: true }).click()
+  await expect(visualDescription).toHaveValue('')
   const photoDescription = 'A blue rectangular technical image used to verify a photo upload.'
   await visualDescription.fill(photoDescription)
   const photoEndpoint = `/api/dashboard/stay-homes/${productId}/photos/${blue.id}`
@@ -854,7 +855,7 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
   await expect(visualDescription).toHaveValue(photoDescription)
   await expect(photoDescriptionPanel.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
   const unwrittenDescription = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
-  expect(unwrittenDescription.data!.product.image!.alt_text).toBe(originalAlt)
+  expect(unwrittenDescription.data!.product.image!.alt_text).toBeNull()
   await page.unroute(interceptPhoto)
   await photoDescriptionPanel.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(page).toHaveURL(`${baseURL}${allPhotosPath}/${blue.id}`)
