@@ -1024,7 +1024,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
     ],
   }]
   // A product that failed to load has nothing to summarize; the level shows the failure.
-  if (!product.value) return []
+  if (!product.value || loadError.value) return []
   if (arrivalTab.value) {
     const home = arrivalHome.value
     if (!home || arrivalError.value) return []
