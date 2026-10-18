@@ -98,7 +98,7 @@ export async function startStrategy(env: CloudflareEnv, db: DbClient, organizati
     try {
       await execute(db, 'DELETE FROM organization_services WHERE id=?', [agreementId])
     } catch (cleanup) {
-      throw new Error(`${cause instanceof Error ? cause.message : String(cause)} — and the strategy agreement row could not be removed: ${cleanup instanceof Error ? cleanup.message : String(cleanup)}`, { cause })
+      throw new Error(`${cause instanceof Error ? cause.message : String(cause)} — and the strategy agreement row could not be removed: ${cleanup instanceof Error ? cleanup.message : String(cleanup)}`, { cause: cleanup })
     }
     throw cause
   }
