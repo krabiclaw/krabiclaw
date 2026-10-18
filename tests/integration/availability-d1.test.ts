@@ -80,13 +80,14 @@ test('session materialization is idempotent across cancel, edit and reschedule',
   const { runtime, db } = await boot()
   try {
     await addRule(db, 'rule-sunday')
-    const first = await materializeSessions(db, { organizationId: ORG, productId: PRODUCT, throughDate: '2026-10-31', actorId: ACTOR })
+    const throughDate = addLocalDays(localNow('Asia/Bangkok').date, 31)
+    const first = await materializeSessions(db, { organizationId: ORG, productId: PRODUCT, throughDate, actorId: ACTOR })
     assert(first.created > 0, 'the weekly rule generates sessions')
     assert.equal(first.existing, 0)
     const count = await db.prepare('SELECT count(*) n FROM product_sessions').first<number>('n')
 
     // Re-running changes nothing.
-    const second = await materializeSessions(db, { organizationId: ORG, productId: PRODUCT, throughDate: '2026-10-31', actorId: ACTOR })
+    const second = await materializeSessions(db, { organizationId: ORG, productId: PRODUCT, throughDate, actorId: ACTOR })
     assert.equal(second.created, 0, 'regeneration must not duplicate a session')
     assert.equal(second.existing, first.created)
     assert.equal(await db.prepare('SELECT count(*) n FROM product_sessions').first<number>('n'), count)
@@ -97,7 +98,7 @@ test('session materialization is idempotent across cancel, edit and reschedule',
 
     // A cancelled occurrence stays cancelled.
     await updateSession(db, { organizationId: ORG, sessionId: target.id, actorId: ACTOR, status: 'cancelled' })
-    await materializeSessions(db, { organizationId: ORG, productId: PRODUCT, throughDate: '2026-10-31', actorId: ACTOR })
+    await materializeSessions(db, { organizationId: ORG, productId: PRODUCT, throughDate, actorId: ACTOR })
     assert.equal(await db.prepare('SELECT status FROM product_sessions WHERE id = ?').bind(target.id).first<string>('status'), 'cancelled',
       'regeneration must not resurrect a cancelled occurrence')
     assert.equal(await db.prepare('SELECT count(*) n FROM product_sessions').first<number>('n'), count)
@@ -108,7 +109,7 @@ test('session materialization is idempotent across cancel, edit and reschedule',
     assert(moved)
     const newStart = new Date(Date.parse(moved.starts_at) + 3_600_000).toISOString()
     await updateSession(db, { organizationId: ORG, sessionId: moved.id, actorId: ACTOR, startsAt: newStart, endsAt: new Date(Date.parse(moved.ends_at) + 3_600_000).toISOString(), capacity: 4 })
-    await materializeSessions(db, { organizationId: ORG, productId: PRODUCT, throughDate: '2026-10-31', actorId: ACTOR })
+    await materializeSessions(db, { organizationId: ORG, productId: PRODUCT, throughDate, actorId: ACTOR })
     const after = await db.prepare('SELECT starts_at, capacity FROM product_sessions WHERE id = ?').bind(moved.id).first<{ starts_at: string; capacity: number }>()
     assert.equal(after?.starts_at, newStart, 'a rescheduled session keeps its new time')
     assert.equal(after?.capacity, 4, 'regeneration must not overwrite an edited capacity')

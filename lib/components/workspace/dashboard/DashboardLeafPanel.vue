@@ -1,6 +1,6 @@
 <template>
   <UDrawer
-    v-if="!pane"
+    v-if="!pane && !overlayOpen"
     :open="drawerOpen"
     :title="title"
     :description="lead"
@@ -20,7 +20,7 @@
   </UDrawer>
 
   <!-- Moving the panel preserves its fields, form state and draft across lg. -->
-  <Teleport :to="drawerTarget ?? 'body'" :disabled="pane || !drawerTarget">
+  <Teleport :to="drawerTarget ?? pendingDrawerTarget" :disabled="pane">
   <UDashboardPanel :id="id" :class="!pane && !drawerTarget ? 'invisible' : undefined" :ui="{ root: 'min-h-0 lg:min-h-full pb-[env(safe-area-inset-bottom)] lg:pb-0' }">
     <template #header>
       <!--
@@ -80,6 +80,7 @@
           :save-label="saveLabel"
           :loading="saving"
           :disabled="disabled"
+          :desktop-cancel="desktopCancel"
           leaf
           @cancel="cancel"
           @save="$emit('save')"
@@ -92,7 +93,7 @@
 
 <script setup lang="ts">
 import { isNavigationFailure } from 'vue-router'
-import { dashboardColumnWidths, dashboardGutterClass, dashboardLeafParentKey } from './dashboardPanelContext'
+import { dashboardColumnWidths, dashboardGutterClass, dashboardLeafParentKey, dashboardOverlayOpenKey } from './dashboardPanelContext'
 import { getErrorMessage } from '~/utils/errors'
 
 /*
@@ -124,6 +125,8 @@ const props = withDefaults(defineProps<{
   saveLabel?: string | null
   /** Off for a leaf whose controls act at once and has nothing to Save. */
   footer?: boolean
+  /** Keep the explicit Cancel action beside a focused lodging editor. */
+  desktopCancel?: boolean
 }>(), { saving: false, disabled: false, error: '', saveLabel: 'Save', footer: true })
 
 const emit = defineEmits<{ save: []; cancel: [] }>()
@@ -131,8 +134,15 @@ const emit = defineEmits<{ save: []; cancel: [] }>()
 const level = useRouteLevel()
 const router = useRouter()
 const pane = useDashboardPane()
+// An ancestor's fullscreen view owns the modal boundary. Keep this editor in its
+// detached teleport target until that mode closes, including across a resize.
+const overlayOpen = inject(dashboardOverlayOpenKey, null)
 const drawerOpen = ref(true)
 const drawerTarget = useTemplateRef<HTMLDivElement>('drawerTarget')
+// Reka hides the siblings of every live region while a modal mounts. Keep the
+// moving panel detached until its drawer owns it, so a live count is never
+// outside the dialog when that native accessibility boundary is established.
+const pendingDrawerTarget = import.meta.client ? document.createElement('div') : 'body'
 const closeButton = useTemplateRef('closeButton')
 const dismissError = ref('')
 let dismissal: { from: string; to: string } | null = null

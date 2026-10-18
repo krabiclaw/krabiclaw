@@ -14,7 +14,7 @@ import {
   type MediaAssetRefInput,
   type StoredMediaPlacementItem,
 } from '~/server/utils/media-asset-manager'
-import { isEditableMediaPlacement, isEditableMediaPlacementOwnerType, type EditableMediaPlacementOwnerType, type LogoPresentation, type MediaPlacementOwnerType } from '~/shared/media-placement-contract'
+import { isEditableMediaPlacement, isEditableMediaPlacementOwnerType, uniqueMediaAssets, type EditableMediaPlacementOwnerType, type LogoPresentation, type MediaPlacementOwnerType } from '~/shared/media-placement-contract'
 import { refreshSocialCard, socialCardRefreshOwnersForPlacement } from '~/server/utils/social-card'
 import { postMediaMutationQueries } from '~/server/utils/post-management'
 
@@ -397,14 +397,15 @@ export async function reorderMediaPlacements(db: DbClient, input: {
 /**
  * A product's photos as one ordered list: its `image` (the cover every
  * surface shows first) followed by its `gallery` in order. A product with no
- * cover but a gallery lists the gallery alone.
+ * cover but a gallery lists the gallery alone. An asset reused across the two
+ * slots appears once, in its first position.
  */
 export async function readProductPhotos(db: DbClient, input: { organizationId: string; productIds: string[] }): Promise<Map<string, MediaPlacementItem[]>> {
   const placements = await getMediaPlacements(db, { organizationId: input.organizationId, ownerType: 'product', ownerIds: input.productIds })
-  return new Map([...placements].map(([productId, items]) => [productId, [
+  return new Map([...placements].map(([productId, items]) => [productId, uniqueMediaAssets([
     ...items.filter(item => item.slot === 'image'),
     ...items.filter(item => item.slot === 'gallery'),
-  ]]))
+  ])]))
 }
 
 /**
@@ -427,7 +428,12 @@ export async function arrangeProductPhotos(db: DbClient, input: {
   if (input.to.length > MAX_ORDERED_MEDIA_ASSETS) {
     throw new HTTPError({ statusCode: 422, statusMessage: `A product holds at most ${MAX_ORDERED_MEDIA_ASSETS} photos`, data: { code: 'PHOTO_LIMIT', field: 'photos' } })
   }
-  const current = (await readProductPhotos(db, { organizationId: input.organizationId, productIds: [input.productId] })).get(input.productId) ?? []
+  const placements = ((await getMediaPlacements(db, { organizationId: input.organizationId, ownerType: 'product', ownerIds: [input.productId] })).get(input.productId) ?? [])
+    .filter(item => item.slot === 'image' || item.slot === 'gallery')
+  const current = uniqueMediaAssets([
+    ...placements.filter(item => item.slot === 'image'),
+    ...placements.filter(item => item.slot === 'gallery'),
+  ])
   const changed = () => new HTTPError({ statusCode: 409, statusMessage: 'The photos changed while saving; reload them and try again', data: { code: 'PHOTOS_CHANGED', field: 'photos' } })
   if (current.length !== input.from.length || current.some((item, index) => item.asset_id !== input.from[index])) throw changed()
   const media = await hydrateMediaAssetRefs(db, {
@@ -439,8 +445,8 @@ export async function arrangeProductPhotos(db: DbClient, input: {
   // The batch fails on the sort-order check unless the photos are still the
   // rows read above, slot for slot and position for position; an asset
   // deleted meanwhile fails its foreign key. Either is a change since the read.
-  const expected = d1JsonStringSet(current.map(item => `${item.slot}:${item.sort_order}:${item.asset_id}`))
-  // The same rows readProductPhotos lists: active placements of active assets.
+  const expected = d1JsonStringSet(placements.map(item => `${item.slot}:${item.sort_order}:${item.asset_id}`))
+  // Every active placement of an active asset, including reuse across slots.
   const placed = `SELECT mp.slot || ':' || mp.sort_order || ':' || mp.asset_id AS entry FROM media_placements mp
     JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id AND ma.status = 'active'
     WHERE mp.organization_id = ? AND mp.owner_type = 'product' AND mp.owner_id = ? AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'`

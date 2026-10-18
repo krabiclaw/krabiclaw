@@ -1,97 +1,95 @@
 <template>
-  <DashboardLeafPanel
+  <DashboardIndexPanel
     id="product-amenities"
-    :title="p.sectionLabels['amenities']"
-    lead="Select the amenities available at this place to stay."
-    :saving="p.saving.value"
-    :disabled="p.saveDisabled.value"
-    :save-label="p.saveLabel.value"
-    :error="p.loadError.value || p.saveError.value || ''"
-    @cancel="p.revert"
-    @save="p.save"
+    :title="p.sectionLabels.amenities"
+    lead="You’ve added these to your listing so far."
+    column="leaf"
+    :paired-size="63"
   >
-    <div v-if="p.isNew.value || p.product.value" class="space-y-6">
-      <div class="flex items-center gap-4">
-        <USelect
-          v-model="activeGroup"
-          :items="groupItems"
-          placeholder="All categories"
-          class="w-64"
-        />
-        <span class="text-xs text-muted">
-          {{ p.form.stay_amenities.length }} selected
-        </span>
-      </div>
-
-      <div class="space-y-3">
-        <div
-          v-for="item in visibleAmenities"
-          :key="item.code"
-          class="flex items-center justify-between rounded-lg border border-default p-3 hover:bg-muted/10 cursor-pointer"
-          @click="toggleAmenity(item.code)"
-        >
-          <div class="flex items-center gap-3">
-            <span class="text-sm font-medium">{{ item.label }}</span>
+    <template v-if="level.child.value" #leading>
+      <DashboardNavbarLeading
+        :to="router.resolve({ path: level.path.value, query: route.query }).fullPath"
+        :disabled="p.saving.value"
+      />
+    </template>
+    <UAlert
+      v-if="p.loadError.value || p.saveError.value"
+      class="mb-6"
+      color="error"
+      variant="soft"
+      icon="i-lucide-triangle-alert"
+      :description="p.loadError.value || p.saveError.value || ''"
+    />
+    <DashboardListEditor
+      v-if="p.product.value && !p.loadError.value"
+      :editing="editing"
+      :items="selectedAmenities"
+      title="Amenities"
+      empty-title="No amenities added yet"
+      empty-icon="i-lucide-house"
+      add-label="Add amenity"
+      :add-to="p.sectionPath('amenities/add')"
+      :addable="!editing"
+      :disabled="p.saving.value"
+      :aria-busy="p.saving.value"
+      class="[&_ul]:border-0 [&_ul]:divide-y-0 [&_li]:gap-5 [&_li]:py-7"
+      @update:editing="setEditing"
+      @remove="removeAmenity"
+    >
+      <template v-if="editing" #actions>
+        <UButton label="Cancel" color="neutral" variant="soft" :disabled="p.saving.value" @click="cancelEditing" />
+      </template>
+      <template #item="{ item }">
+        <div class="flex items-center gap-5">
+          <UIcon v-if="!editing" :name="item.icon" class="size-7 shrink-0 text-highlighted" aria-hidden="true" />
+          <div class="min-w-0 flex-1">
+            <p class="text-base text-highlighted">{{ item.title }}</p>
+            <p v-if="item.description" class="mt-1 text-sm text-muted">{{ item.description }}</p>
           </div>
-          <UCheckbox
-            :model-value="isSelected(item.code)"
-            @update:model-value="toggleAmenity(item.code)"
-            @click.stop
-          />
         </div>
-      </div>
-    </div>
-  </DashboardLeafPanel>
+      </template>
+    </DashboardListEditor>
+  </DashboardIndexPanel>
 </template>
 
 <script setup lang="ts">
+import DashboardListEditor from '~/components/dashboard/DashboardListEditor.vue'
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
-import {
-  STAY_AMENITIES,
-  STAY_AMENITY_GROUPS,
-  type StayAmenity,
-  type StayAmenityGroup,
-} from '~/shared/stay-listing'
+import { STAY_AMENITIES, type StayAmenity } from '~/shared/stay-listing'
 
 definePageMeta({ layout: 'dashboard' })
 
 const p = inject(productEditorKey)!
+const route = useRoute()
+const router = useRouter()
+const level = useRouteLevel()
+const editing = ref(false)
+const selectedAmenities = computed(() => p.form.stay_amenities.map((code) => {
+  const amenity = STAY_AMENITIES[code]
+  return { id: code, title: amenity.label, icon: amenity.icon, description: 'description' in amenity ? amenity.description : undefined }
+}).sort((left, right) => left.title.localeCompare(right.title)))
 
-const activeGroup = ref<string>('all')
-
-const groupItems = computed(() => [
-  { value: 'all', label: 'All categories' },
-  ...Object.entries(STAY_AMENITY_GROUPS).map(([key, group]) => ({
-    value: key,
-    label: group.label,
-  })),
-])
-
-const visibleAmenities = computed(() => {
-  if (activeGroup.value === 'all' || !activeGroup.value) {
-    return Object.entries(STAY_AMENITIES).map(([code, info]) => ({
-      code: code as StayAmenity,
-      label: info.label,
-    }))
+async function setEditing(value: boolean) {
+  if (p.saving.value) return
+  if (value) {
+    editing.value = true
+    return
   }
-  const group = STAY_AMENITY_GROUPS[activeGroup.value as StayAmenityGroup]
-  if (!group) return []
-  return group.amenities.map((code) => ({
-    code,
-    label: STAY_AMENITIES[code]?.label ?? code,
-  }))
-})
-
-function isSelected(code: StayAmenity): boolean {
-  return p.form.stay_amenities.includes(code)
+  await p.save(router.resolve({ path: level.path.value, query: route.query }).fullPath)
+  if (!p.saveError.value) editing.value = false
 }
 
-function toggleAmenity(code: StayAmenity) {
-  const index = p.form.stay_amenities.indexOf(code)
-  if (index >= 0) {
-    p.form.stay_amenities.splice(index, 1)
-  } else {
-    p.form.stay_amenities.push(code)
-  }
+function removeAmenity(item: { id: StayAmenity }) {
+  if (p.saving.value) return
+  p.form.stay_amenities = p.form.stay_amenities.filter(code => code !== item.id)
 }
+
+function cancelEditing() {
+  p.revert()
+  editing.value = false
+}
+
+// The parent product keeps the draft while the picker is open. Leaving this
+// concern discards it, including a browser Back during inline removal.
+onBeforeRouteLeave(() => { p.revert() })
 </script>

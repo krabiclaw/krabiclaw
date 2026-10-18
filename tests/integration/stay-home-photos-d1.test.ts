@@ -4,6 +4,7 @@ import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/
 import { Miniflare } from 'miniflare'
 import { H3 } from 'nitro/h3'
 import { hashPassword } from 'better-auth/crypto'
+import sharp from 'sharp'
 import * as schema from '../../server/db/schema.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import createHomeRoute from '../../server/api/dashboard/stay-homes/index.post.ts'
@@ -29,7 +30,7 @@ test('a home orders, describes and removes its product photos, and refuses what 
     name: 'stay-home-photos-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
-    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stay-home-photos-proof', exportName: 'Hub' } },
+    env: { DB: { type: 'd1' }, MEDIA_BUCKET: { type: 'r2' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stay-home-photos-proof', exportName: 'Hub' } },
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
@@ -45,6 +46,7 @@ test('a home orders, describes and removes its product photos, and refuses what 
     const env = {
       ...await runtime.getBindings<CloudflareEnv>(), DB: db, BETTER_AUTH_SECRET: 'stay-home-photos-secret-long-enough-for-auth', BETTER_AUTH_URL: BASE, NUXT_PUBLIC_PLATFORM_DOMAIN: BASE,
       STRIPE_SECRET_KEY: 'sk_test_stay_home_photos_no_provider_requests', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only',
+      MEDIA_BASE_URL: 'https://media.proof.example',
     } as CloudflareEnv
     const cookieFor = async (id: string) => {
       const login = await createAuth(env).api.signInEmail({ body: { email: `${id}@proof.example`, password: PASSWORD }, asResponse: true })
@@ -122,17 +124,51 @@ test('a home orders, describes and removes its product photos, and refuses what 
     assert.equal(await db.prepare("SELECT status FROM media_assets WHERE id = 'bedroom'").first('status'), 'active')
     assert.deepEqual(refusal(await call(owner, 'DELETE', `/${productId}/photos/bedroom`)), { status: 404, code: 'PHOTO_NOT_FOUND', field: 'photo_id' })
 
+    // A library append reads the current home rather than trusting a tab's
+    // earlier cover choice. Existing cover/gallery placements survive it.
+    const attached = await call(owner, 'POST', `/${productId}/photos`, { asset_id: 'bedroom' })
+    assert.equal(attached.status, 201)
+    assert.deepEqual([((await rendered()).image)?.asset_id, (await rendered()).gallery.map(asset => asset.asset_id)], ['deck', ['kitchen', 'bedroom']])
+    assert.deepEqual((await homes())[0]!.photos, [photo('deck', 0, 'The deck at sunset'), photo('kitchen', 1), photo('bedroom', 2)])
+    assert.deepEqual(refusal(await call(owner, 'POST', `/${productId}/photos`, { asset_id: 'bedroom' })), { status: 409, code: 'PHOTO_ALREADY_ADDED', field: 'asset_id' })
+    assert.deepEqual(refusal(await call(owner, 'POST', `/${productId}/photos`, { asset_id: 'bedroom', caption: 'x' })), { status: 422, code: 'INVALID_PHOTO_FIELD', field: 'caption' })
+    assert.deepEqual(refusal(await call(owner, 'POST', `/${productId}/photos`, { asset_id: 'absent' })), { status: 404, code: 'PHOTO_NOT_FOUND', field: 'asset_id' })
+    assert.equal(await db.prepare("SELECT status FROM media_assets WHERE id = 'bedroom'").first('status'), 'active')
+    assert.equal((await call(owner, 'DELETE', `/${productId}/photos/bedroom`)).status, 200)
+
     // Uploads refuse what is not a photo before anything is stored.
     const form = (part: Blob | string, name = 'image') => { const data = new FormData(); data.append(name, part, ...(typeof part === 'string' ? [] : ['notes.txt'] as [string])); return data }
     assert.deepEqual(refusal(await call(owner, 'POST', `/${productId}/photos`, form(new Blob(['not a photo'], { type: 'text/plain' })))), { status: 415, code: 'UNSUPPORTED_PHOTO_TYPE', field: 'image' })
     assert.deepEqual(refusal(await call(owner, 'POST', `/${productId}/photos`, form(new Blob([]), 'file'))), { status: 422, code: 'PHOTO_REQUIRED', field: 'image' })
-    assert.deepEqual(refusal(await call(owner, 'POST', `/${productId}/photos`, { image: 'x' })), { status: 415, code: 'UNSUPPORTED_MEDIA_TYPE', field: 'content-type' })
+    // JSON now explicitly accepts asset_id; a JSON file surrogate is invalid.
+    assert.deepEqual(refusal(await call(owner, 'POST', `/${productId}/photos`, { image: 'x' })), { status: 422, code: 'PHOTO_REQUIRED', field: 'asset_id' })
     assert.equal(await db.prepare('SELECT COUNT(*) AS n FROM media_assets WHERE organization_id = ?').bind(ORG).first('n'), 3)
 
     // Only managers change a home's photos.
     const helper = await cookieFor('helper')
     assert.deepEqual(refusal(await call(helper, 'PUT', `/${productId}/photos`, { photo_ids: ['kitchen', 'deck'] })), { status: 403, code: 'STAY_ROLE_REQUIRED' })
     assert.deepEqual(refusal(await call(helper, 'DELETE', `/${productId}/photos/deck`)), { status: 403, code: 'STAY_ROLE_REQUIRED' })
+    assert.deepEqual(refusal(await call(helper, 'POST', `/${productId}/photos`, { asset_id: 'bedroom' })), { status: 403, code: 'STAY_ROLE_REQUIRED' })
+    assert.deepEqual((await homes())[0]!.photos, [photo('deck', 0, 'The deck at sunset'), photo('kitchen', 1)])
+
+    // Multipart File remains a distinct input: the real AVIF bytes reach R2
+    // unchanged and the appended photo is read independently through Product.
+    const bytes = await sharp({ create: { width: 12, height: 8, channels: 3, background: '#2563eb' } }).avif().toBuffer()
+    const upload = new FormData()
+    upload.append('image', new File([Uint8Array.from(bytes)], 'native-photo-proof.avif', { type: 'image/avif' }))
+    const uploaded = await call(owner, 'POST', `/${productId}/photos`, upload)
+    assert.equal(uploaded.status, 201)
+    const uploadedId = (uploaded.body.home as { photos: Array<{ id: string }> }).photos.at(-1)!.id
+    const uploadedProduct = await rendered()
+    assert.deepEqual([uploadedProduct.image?.asset_id, uploadedProduct.gallery.map(asset => asset.asset_id)], ['deck', ['kitchen', uploadedId]])
+    const stored = await db.prepare('SELECT r2_key, kind, mime_type, provider, status FROM media_assets WHERE id = ? AND organization_id = ?').bind(uploadedId, ORG).first<{ r2_key: string; kind: string; mime_type: string; provider: string; status: string }>()
+    assert(stored)
+    assert.partialDeepStrictEqual(stored, { kind: 'image', mime_type: 'image/avif', provider: 'cloudflare_r2', status: 'active' })
+    const object = await env.MEDIA_BUCKET!.get(stored.r2_key)
+    assert(object)
+    assert.deepEqual(new Uint8Array(await object.arrayBuffer()), Uint8Array.from(bytes))
+    assert.equal((await call(owner, 'DELETE', `/${productId}/photos/${uploadedId}`)).status, 200)
+    assert.equal(await db.prepare('SELECT status FROM media_assets WHERE id = ?').bind(uploadedId).first('status'), 'active')
     assert.deepEqual((await homes())[0]!.photos, [photo('deck', 0, 'The deck at sunset'), photo('kitchen', 1)])
   } finally {
     await runtime.dispose()

@@ -209,7 +209,7 @@ function trustSummary(qa: number, reviews: number, organizationQa: number): stri
   return parts.length ? parts.join(' · ') : 'Answer your first question'
 }
 
-interface HubCard { id: string; title: string; description: string; to: string; image?: string }
+interface HubCard { id: string; title: string; description: string; to: string; image?: string; icon?: string }
 
 const router = useRouter()
 const organizationLinks = dashboard.organizationPaths
@@ -224,7 +224,7 @@ const cards = computed<HubCard[]>(() => {
     const draft = newLocation.draft.value
     return [
       { id: 'name', title: 'Name', description: draft.title.trim() || 'Not named yet', to: `${locationPath.value}/name` },
-      { id: 'hours', title: 'Hours', description: draft.hours.timezone ? timezoneLabel(draft.hours.timezone) : 'Choose the time zone', to: `${locationPath.value}/hours` },
+      { id: 'hours', icon: 'i-lucide-clock', title: 'Hours', description: draft.hours.timezone ? timezoneLabel(draft.hours.timezone) : 'Choose the time zone', to: `${locationPath.value}/hours` },
     ]
   }
   const resource = overview.value
@@ -237,20 +237,21 @@ const cards = computed<HubCard[]>(() => {
     { id: 'photos', title: 'Photos', description: countSummary(counts.photos, 'photo', 'Add photos'), to: `${locationPath.value}/photos`, image: locationImage.value || undefined, visible: hasFeature('photos') },
     { id: 'name', title: 'Name', description: loc.title, to: `${locationPath.value}/name`, visible: true },
     { id: 'description', title: 'Description', description: loc.short_description?.trim() || loc.description?.trim() || 'Describe this location', to: `${locationPath.value}/description`, visible: true },
-    { id: 'hours', title: 'Hours', description: currentOpeningState.value, to: `${locationPath.value}/hours`, visible: true },
-    { id: 'address', title: 'Address', description: addressSummary.value, to: `${locationPath.value}/address`, visible: true },
-    { id: 'contact', title: 'Contact', description: contact || 'Add a phone or email', to: `${locationPath.value}/contact`, visible: true },
+    { id: 'hours', icon: 'i-lucide-clock', title: 'Hours', description: currentOpeningState.value, to: `${locationPath.value}/hours`, visible: true },
+    { id: 'address', icon: 'i-lucide-map-pin', title: 'Address', description: addressSummary.value, to: `${locationPath.value}/address`, visible: true },
+    { id: 'contact', icon: 'i-lucide-contact-round', title: 'Contact', description: contact || 'Add a phone or email', to: `${locationPath.value}/contact`, visible: true },
     // What this location offers, its posts and its Q&A each have one manager,
     // shared with the whole organization; these rows open it scoped to here.
     // Built only when this site carries a catalogue at all: a vertical with no
     // product presentation has no word for one, and asking for it throws.
     ...(hasFeature('products')
-      ? [{ id: 'products', title: catalogLabelText(resource.catalog), description: catalogSummaryText(resource.catalog), to: scopedToLocation(organizationLinks.value?.catalog), visible: true }]
+      ? [{ id: 'products', icon: 'i-lucide-store', title: catalogLabelText(resource.catalog), description: catalogSummaryText(resource.catalog), to: scopedToLocation(organizationLinks.value?.catalog), visible: true }]
       : []),
-    { id: 'posts', title: 'Posts', description: countSummary(counts.posts, 'published post', 'Write your first post'), to: scopedToLocation(organizationLinks.value?.posts), visible: hasFeature('posts') },
-    { id: 'qa', title: 'Reviews and Q&A', description: trustSummary(counts.qa, counts.reviews, counts.organizationQa), to: scopedToLocation(organizationLinks.value?.qa), visible: hasFeature('qa') },
+    { id: 'posts', icon: 'i-lucide-megaphone', title: 'Posts', description: countSummary(counts.posts, 'published post', 'Write your first post'), to: scopedToLocation(organizationLinks.value?.posts), visible: hasFeature('posts') },
+    { id: 'qa', icon: 'i-lucide-message-circle-question', title: 'Reviews and Q&A', description: trustSummary(counts.qa, counts.reviews, counts.organizationQa), to: scopedToLocation(organizationLinks.value?.qa), visible: hasFeature('qa') },
     {
       id: 'reservations',
+      icon: 'i-lucide-calendar-check',
       title: 'Reservations',
       description: !policy ? 'Not taking reservations' : policy.slot_capacity === null ? 'Open, no seat limit' : `Open, ${policy.slot_capacity} guests per slot`,
       to: `${locationPath.value}/reservations`,
@@ -265,6 +266,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => [{
   items: cards.value.map(card => ({
     id: card.id,
     label: card.title,
+    icon: card.icon,
     summary: card.description,
     to: card.to,
     image: card.image ?? null,

@@ -12,5 +12,5 @@ definePageMeta({layout:'dashboard'})
 const level=useRouteLevel()
 const organizations=authClient.useListOrganizations()
 const state=computed(()=>unref(organizations))
-const groups=computed(()=>[{id:'organizations',items:(state.value.data??[]).map(org=>({id:org.id,label:org.name,to:`${level.path.value}/${encodeURIComponent(org.id)}`}))}])
+const groups=computed(()=>[{id:'organizations',items:(state.value.data??[]).map(org=>({id:org.id,label:org.name,lead:{image:org.logo,icon:'i-lucide-building-2'},to:`${level.path.value}/${encodeURIComponent(org.id)}`}))}])
 </script>

@@ -24,11 +24,9 @@ let claimedPageRoutes: ClaimedRoute[] = []
 const claimedRoutesModulePath = resolve(import.meta.dirname, '.nuxt-generated/claimed-public-routes.mjs')
 
 // nuxt/icon's serverBundle bundles a named collection in full — no usage-based
-// tree-shaking. lucide is the app's sole icon pack (it's also what Nuxt UI's
-// own internal defaults are hardcoded to), so only one collection ships.
-// simple-icons/logos brand marks are owned locally in
-// build/icon-data/custom-icons.json instead of depending on @iconify-json
-// packages at build time (see that file for how to regenerate it).
+// tree-shaking. Lucide supplies general UI glyphs; the small local collections
+// supply provider logos and original domain pictograms. The client bundle
+// includes their data at build time, with no icon API or Worker collection.
 const requireFromConfig = createRequire(import.meta.url)
 const customIconData = requireFromConfig('./build/icon-data/custom-icons.json')
 function pickIcons(collection: string, names: string[]) {
@@ -153,19 +151,10 @@ export default defineNuxtConfig({
   icon: {
     provider: 'none',
     fallbackToApi: false,
-    // Nuxt UI's own internal default icons (UChatPromptSubmit's arrowUp, etc.)
-    // are resolved from appConfig.ui.icons dynamically, not as static name=""
-    // literals, so Nuxt Icon can't inline them at build time — they're
-    // resolved at request time via a self-fetch to /api/_nuxt_icon/lucide.json
-    // (same internal-self-fetch category as isInternalSelfFetch() in
-    // server/utils/api-response.ts). The default 1500ms fetchTimeout is too
-    // tight for that round-trip in local dev; bump it so it resolves instead
-    // of silently failing to render.
-    fetchTimeout: 5000,
     serverBundle: false,
     clientBundle: {
       scan: {
-        globInclude: ['**/*.{vue,jsx,tsx,md,mdc,mdx}', '{server/utils,shared}/dashboard-today.ts'],
+        globInclude: ['**/*.{vue,jsx,tsx,md,mdc,mdx}', '{composables,shared,utils}/**/*.ts', 'app.config.ts', 'server/utils/dashboard-today.ts'],
       },
       icons: [
         'lucide:menu',
@@ -177,6 +166,7 @@ export default defineNuxtConfig({
       pickIcons('simple-icons', ['claude', 'facebook', 'google', 'googlemaps', 'instagram', 'modelcontextprotocol', 'openai', 'whatsapp']),
       pickIcons('logos', ['discord-icon', 'facebook', 'google-ads', 'google-analytics', 'google-calendar', 'google-icon', 'google-maps', 'google-search-console', 'whatsapp-icon']),
       pickIcons('skill-icons', ['instagram']),
+      customIconData.krabi,
     ],
   },
   runtimeConfig: {

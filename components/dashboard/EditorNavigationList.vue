@@ -5,21 +5,19 @@
         {{ group.label }}
       </h2>
 
-      <!-- Rows: settings, where the chevron marks a push into a deeper screen. -->
-      <!-- The rows sit on the pane itself: a card around them is a second surface saying nothing.
-           Their highlight reaches into the gutter so their text keeps the gutter's edge. -->
-      <div class="-mx-4">
+      <div :class="variant === 'cards' ? 'space-y-4' : '-mx-4'">
         <component
           :is="item.to ? NuxtLink : item.action ? 'button' : 'div'"
           v-for="(item, index) in group.items"
           :key="item.id"
           v-bind="item.to ? { to: item.to } : item.action ? { type: 'button' } : {}"
-          class="group flex min-h-20 w-full items-center gap-4 text-left px-4 py-4 transition-colors focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary"
+          class="group flex w-full items-center gap-4 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-highlighted"
           :class="[
-            index > 0 ? 'border-t border-default' : '',
-            item.id === activeItem ? 'bg-elevated shadow-[inset_3px_0_0_var(--ui-primary)]' : '',
-            item.to || item.action ? 'hover:bg-elevated' : '',
+            variant === 'cards'
+              ? ['rounded-xl border-2 p-5 shadow-[0_8px_24px_rgb(0_0_0/0.08)]', item.status ? 'bg-muted shadow-none' : 'bg-elevated', item.id === activeItem ? 'border-(--ui-text-muted)' : 'border-transparent', item.to || item.action ? 'hover:border-(--ui-text-dimmed)' : '']
+              : ['min-h-20 px-4 py-4', index > 0 ? 'border-t border-default' : '', item.id === activeItem ? 'bg-elevated shadow-[inset_3px_0_0_var(--ui-primary)]' : '', item.to || item.action ? 'hover:bg-elevated' : ''],
           ]"
+          :data-testid="variant === 'cards' ? `editor-card-${item.id}` : `editor-row-${item.id}`"
           :aria-current="item.id === activeItem ? 'page' : undefined"
           @click="item.action ? $emit('act', item.id) : undefined"
         >
@@ -50,8 +48,14 @@
               loading="lazy"
               decoding="async"
             >
-            <UIcon v-if="!item.lead.image" :name="item.lead.icon" class="size-7 text-dimmed" />
+            <UIcon v-if="!item.lead.image" :name="item.lead.icon" class="size-7 text-dimmed" aria-hidden="true" />
           </span>
+          <UIcon
+            v-else-if="item.icon && variant !== 'cards'"
+            :name="item.icon"
+            class="size-6 shrink-0 text-highlighted"
+            aria-hidden="true"
+          />
           <span class="min-w-0 flex-1">
             <!-- The picture leads, in the row's own footprint (DESIGN.md). -->
             <img
@@ -77,16 +81,20 @@
                 decoding="async"
               >
             </span>
-            <span class="block font-semibold text-highlighted">{{ item.label }}</span>
+            <span class="block font-semibold text-highlighted" :class="variant === 'cards' ? 'text-sm' : undefined"><span
+              v-if="item.status && variant === 'cards'"
+              class="me-2 inline-block size-2 rounded-full align-middle"
+              :class="{ success: 'bg-success', error: 'bg-error', neutral: 'bg-(--ui-text-dimmed)' }[item.status]"
+            />{{ item.label }}</span>
             <span
               v-if="item.summary && !item.card"
-              class="mt-1 line-clamp-2 block text-sm"
-              :class="item.placeholder ? 'italic text-dimmed' : 'text-muted'"
+              class="mt-1 block"
+              :class="[variant === 'cards' ? 'text-base' : 'line-clamp-2 text-sm', item.placeholder ? (variant === 'cards' ? 'text-muted' : 'italic text-dimmed') : 'text-muted']"
             ><span
-              v-if="item.status"
+              v-if="item.status && variant !== 'cards'"
               class="me-1.5 inline-block size-2 rounded-full align-middle"
               :class="{ success: 'bg-success', error: 'bg-error', neutral: 'bg-(--ui-text-dimmed)' }[item.status]"
-            />{{ item.summary }}</span>
+            /><slot name="summary" :item="item">{{ item.summary }}</slot></span>
 
 
             <!--
@@ -122,7 +130,7 @@
             v-if="item.action?.label"
             class="shrink-0 text-sm font-medium text-highlighted underline underline-offset-4"
           >{{ item.action.label }}</span>
-          <UIcon v-else-if="item.to" name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted transition-transform group-hover:translate-x-0.5" />
+          <UIcon v-else-if="item.to && variant !== 'cards'" name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted transition-transform group-hover:translate-x-0.5" />
         </component>
       </div>
     </section>
@@ -136,6 +144,7 @@ export interface EditorNavigationItem {
   id: string
   label: string
   summary?: string
+  /** A recognizable destination or choice; plain fields need no decoration. */
   icon?: string
   /**
    * Where the row goes. A row with no `to` and no `action` states a value and
@@ -180,10 +189,12 @@ export interface EditorNavigationGroup {
   items: EditorNavigationItem[]
 }
 
-defineProps<{
+withDefaults(defineProps<{
   groups: EditorNavigationGroup[]
   activeItem?: string | null
-}>()
+  /** Rich record summaries, selected with a neutral outline. Settings retain rows. */
+  variant?: 'rows' | 'cards'
+}>(), { variant: 'rows' })
 
 defineEmits<{
   /** Emitted by a session action row's control, carrying the item id. */

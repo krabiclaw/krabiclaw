@@ -99,6 +99,12 @@
                 {{ (location?.title || organizationName || 'S').slice(0, 1).toUpperCase() }}
               </div>
             </div>
+            <dl v-if="stayPropertyFacts.length" class="mt-5 grid gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
+              <div v-for="fact in stayPropertyFacts" :key="fact.label">
+                <dt class="text-muted">{{ fact.label }}</dt>
+                <dd class="mt-1 text-default">{{ fact.value }}</dd>
+              </div>
+            </dl>
           </div>
 
           <!-- Key highlights for Stays -->
@@ -119,9 +125,13 @@
             </div>
           </div>
 
-          <section v-if="!compact && product.description" class="border-t border-default pt-8">
+          <section v-if="!compact && (product.description || stayDescriptionDetails.length)" class="border-t border-default pt-8" data-testid="product-description">
             <h2 v-if="vertical !== 'service'" class="saya-display text-2xl text-default sm:text-3xl">{{ isStay ? t('stay.about_this_place') : t('saya.experience_detail.what_youll_do') }}</h2>
-            <p class="mt-4 whitespace-pre-line text-base leading-relaxed text-muted sm:text-lg">{{ product.description }}</p>
+            <p v-if="product.description" class="mt-4 text-base leading-relaxed text-muted sm:text-lg" :class="isStay ? 'whitespace-pre-wrap break-words' : 'whitespace-pre-line'" :data-testid="isStay ? 'stay-description-listing-description' : undefined">{{ product.description }}</p>
+            <div v-for="detail in stayDescriptionDetails" :key="detail.key" class="mt-6" :data-testid="`stay-description-${detail.key}`">
+              <h3 class="text-lg font-semibold text-default">{{ detail.label }}</h3>
+              <p class="mt-3 whitespace-pre-wrap break-words text-base leading-relaxed text-muted sm:text-lg">{{ detail.value }}</p>
+            </div>
           </section>
 
           <!-- What this place offers (Amenities) -->
@@ -129,7 +139,7 @@
             <h2 class="saya-display text-2xl text-default sm:text-3xl">What this place offers</h2>
             <div class="mt-5 grid grid-cols-2 gap-4">
               <div v-for="amenity in stayAmenitiesList" :key="amenity.code" class="flex items-center gap-3">
-                <TenantIcon :name="amenity.icon" class="size-5 shrink-0 text-muted" />
+                <UIcon :name="amenity.icon" class="size-5 shrink-0 text-muted" aria-hidden="true" />
                 <span class="text-sm text-default">{{ amenity.label }}</span>
               </div>
             </div>
@@ -223,7 +233,7 @@
                 class="h-56 w-full border-t border-default"
                 style="border-width: 1px 0 0"
                 loading="lazy"
-                referrerpolicy="no-referrer-when-downgrade"
+                referrerpolicy="strict-origin-when-cross-origin"
               />
             </div>
           </section>
@@ -234,7 +244,7 @@
               <div v-for="detail in thingsToKnow" :key="detail.key">
                 <h3 class="text-sm font-semibold text-default">{{ detail.label }}</h3>
                 <ul class="mt-2 space-y-1.5">
-                  <li v-for="line in detail.values" :key="line" class="text-sm leading-6 text-muted">{{ line }}</li>
+                  <li v-for="(line, index) in detail.values" :key="index" class="whitespace-pre-wrap break-words text-sm leading-6 text-muted">{{ line }}</li>
                 </ul>
               </div>
             </div>
@@ -284,7 +294,7 @@
               <TenantButton v-else-if="canEnquire" block :to="enquiryPath">
                 {{ t('saya.experience_detail.enquire') }}
               </TenantButton>
-              <TenantButton v-else block size="lg" control-id="product-booking-toggle" class="w-full font-semibold" @click="openBooking">
+              <TenantButton v-else-if="canBook" block size="lg" control-id="product-booking-toggle" class="w-full font-semibold" @click="openBooking">
                 {{ bookingLabel }}
               </TenantButton>
             </div>
@@ -442,11 +452,11 @@
 </template>
 
 <script setup lang="ts">
-import type { TenantIconName } from '~/components/tenant/TenantIcon.vue'
 import WhoYouMeet from '~/components/booking/WhoYouMeet.vue'
 import type { ProductPresentation, PublicProduct } from '~/server/types/products'
+import type { Accommodation, PropertyValue } from 'nuxt-schema-org/schema'
 import { useSchemaOrg } from '#imports'
-import { STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
+import { STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_SIZE_UNITS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
 import type { CurrencyCode } from '~/shared/currencies'
 import { minorAmountToMajor, selectPrice, type Price } from '~/shared/prices'
 import { formatProductMoney } from '~/utils/product-money'
@@ -454,7 +464,7 @@ import { ga4Major } from '~/utils/ga4-projection'
 import { productLocationCollectionPath } from '~/utils/product-presentation'
 import { extractDietarySchemaUrls, type ProductCollectionSibling } from '~/utils/product-seo'
 import type { ProductDetailValue } from '~/shared/product-details'
-import { EXPERIENCE_ATTRIBUTE_HANDLES, productDetailFields, productDetailKey, PRICING_NOTE_HANDLE } from '~/shared/product-details'
+import { EXPERIENCE_ATTRIBUTE_HANDLES, productDetailFields, productDetailKey, PRICING_NOTE_HANDLE, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, stayHouseRuleLines } from '~/shared/product-details'
 import type { PublicProductBooking, PublicProductLocation, PublicProductReview, PublicProductSession } from '~/server/utils/public-products'
 import { addressPlaceName, formatPostalAddress, schemaPostalAddress } from '~/utils/postal-address'
 import { formatTime } from '~/utils/timezone'
@@ -471,6 +481,7 @@ import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import { isRecord, publicApiRequest } from '~/utils/api-clients'
 import MediaGallery from '~/components/MediaGallery.vue'
 import ProductVariantPrices from '~/components/products/ProductVariantPrices.vue'
+import { uniqueMediaAssets } from '~/shared/media-placement-contract'
 
 const props = defineProps<{
   organizationId: string
@@ -527,6 +538,18 @@ const stayPropertyTypeLabel = computed(() => {
   return type ? STAY_PROPERTY_TYPES[type].label : ''
 })
 
+const stayPropertyFacts = computed(() => {
+  const stay = props.product.stay
+  if (!stay) return []
+  return [
+    ...(stay.listing_type ? [{ label: 'Listing type', value: STAY_LISTING_TYPES[stay.listing_type].label }] : []),
+    ...(stay.total_floors !== null ? [{ label: 'Floors in building', value: String(stay.total_floors) }] : []),
+    ...(stay.listing_floor !== null ? [{ label: 'Listing floor', value: String(stay.listing_floor) }] : []),
+    ...(stay.year_built !== null ? [{ label: 'Year built', value: String(stay.year_built) }] : []),
+    ...(stay.property_size !== null && stay.property_size_unit ? [{ label: 'Property size', value: `${stay.property_size} ${STAY_PROPERTY_SIZE_UNITS[stay.property_size_unit].symbol}` }] : []),
+  ]
+})
+
 const stayCancellationPolicyLabel = computed(() => {
   const p = props.product.stay?.cancellation_policy
   return p ? `${STAY_CANCELLATION_POLICIES[p].label} cancellation policy` : ''
@@ -535,16 +558,7 @@ const stayCancellationPolicyLabel = computed(() => {
 const stayAmenitiesList = computed(() => {
   const stay = props.product.stay
   if (!stay) return []
-  return stay.amenities.map(code => {
-    return {
-      code,
-      label: STAY_AMENITIES[code].label,
-      icon: (code.includes('work') ? 'briefcase'
-        : code.includes('sparkles') ? 'sparkles'
-        : code.includes('home') ? 'home'
-        : 'check-circle') as TenantIconName,
-    }
-  })
+  return stay.amenities.map(code => ({ code, label: STAY_AMENITIES[code].label, icon: STAY_AMENITIES[code].icon }))
 })
 
 const { trackProductOrder, trackProductView } = useOrganizationConversionTracking()
@@ -635,11 +649,11 @@ const canBook = computed(() => isStay.value
  * — two slots, read as the two things they are, not one list with a chosen
  * head.
  */
-const galleryItems = computed(() => [
+const galleryItems = computed(() => uniqueMediaAssets([
   ...(props.product.image ? [props.product.image] : []),
   ...props.product.gallery,
   ...(props.pageDocument?.media.filter(asset => asset.slot === 'cover' || asset.slot === 'gallery') ?? []),
-].filter((asset, index, assets) => asset.public_url && assets.findIndex(item => item.public_url === asset.public_url) === index).map(asset => ({
+]).filter(asset => asset.public_url).map(asset => ({
   url: asset.public_url!,
   kind: asset.kind,
   poster: asset.kind === 'video' ? asset.thumbnail_url : undefined,
@@ -697,7 +711,7 @@ const visibleDetails = computed(() => productDetailFields(props.product.kind).fl
   const handle = productDetailKey(definition)
   // The pricing note is shown where the price goes, so it is not repeated in
   // the attribute list underneath it.
-  if (handle === PRICING_NOTE_HANDLE || definition.value_type === 'boolean') return []
+  if (handle === PRICING_NOTE_HANDLE || definition.value_type === 'boolean' || (STAY_HOUSE_RULE_DETAIL_KEYS as readonly string[]).includes(handle)) return []
   const value = props.product.details[handle]
   if (value === undefined || value === null) return []
   const values = Array.isArray(value) ? value : [String(value)]
@@ -778,14 +792,25 @@ function attribute<T>(handle: keyof PublicProduct['details'], read: (_value: Pro
 const asText = (value: ProductDetailValue) => (typeof value === 'string' && value.trim() ? value : null)
 const asList = (value: ProductDetailValue) => (Array.isArray(value) ? value.map(String).filter(Boolean) : null)
 const tagline = computed(() => attribute(EXPERIENCE_ATTRIBUTE_HANDLES.tagline, asText))
+const stayDescriptionDetails = computed(() => props.product.kind === 'stay'
+  ? productDetailFields('stay').flatMap(definition => {
+      if (!(STAY_DESCRIPTION_DETAIL_KEYS as readonly string[]).includes(definition.key)) return []
+      const value = props.product.details[definition.key]
+      return typeof value === 'string' && value.trim() ? [{ key: definition.key, label: definition.name, value }] : []
+    })
+  : [])
 const meetingPoint = computed(() => attribute(EXPERIENCE_ATTRIBUTE_HANDLES.meetingPoint, asText))
 const includedItems = computed(() => attribute(EXPERIENCE_ATTRIBUTE_HANDLES.includedItems, asList) ?? [])
 const whatToBring = computed(() => attribute(EXPERIENCE_ATTRIBUTE_HANDLES.whatToBring, asList) ?? [])
-const PLACED_ATTRIBUTE_HANDLES = new Set<string>(Object.values(EXPERIENCE_ATTRIBUTE_HANDLES))
-const thingsToKnow = computed(() => visibleDetails.value.filter((detail) => {
-  const definition = productDetailFields(props.product.kind).find(entry => entry.id === detail.key)
-  return !definition || !PLACED_ATTRIBUTE_HANDLES.has(productDetailKey(definition))
-}))
+const PLACED_ATTRIBUTE_HANDLES = new Set<string>([...Object.values(EXPERIENCE_ATTRIBUTE_HANDLES), ...STAY_DESCRIPTION_DETAIL_KEYS])
+const stayRules = computed(() => props.product.kind === 'stay' ? stayHouseRuleLines(props.product.details, value => formatTime(value, locale.value)) : [])
+const thingsToKnow = computed(() => [
+  ...(stayRules.value.length ? [{ key: 'house_rules', label: 'House rules', values: stayRules.value }] : []),
+  ...visibleDetails.value.filter((detail) => {
+    const definition = productDetailFields(props.product.kind).find(entry => entry.id === detail.key)
+    return !definition || !PLACED_ATTRIBUTE_HANDLES.has(productDetailKey(definition))
+  }),
+])
 
 const addressLine = computed(() => formatPostalAddress(props.location?.address ?? null))
 // A home is named by its town, as Airbnb's "Villa in Ao Nang"; its location's title is the home's own name.
@@ -907,6 +932,12 @@ const stayStructuredData = computed(() => {
     } : {}),
     occupancy: { '@type': 'QuantitativeValue', minValue: 1, maxValue: stay.max_guests },
     ...(stay.property_type ? { accommodationCategory: STAY_PROPERTY_TYPES[stay.property_type].label } : {}),
+    ...(stay.listing_type ? { additionalType: STAY_LISTING_TYPES[stay.listing_type].schemaType satisfies Accommodation['additionalType'] } : {}),
+    ...(stay.property_size !== null && stay.property_size_unit ? { floorSize: {
+      '@type': 'QuantitativeValue',
+      value: stay.property_size,
+      unitText: STAY_PROPERTY_SIZE_UNITS[stay.property_size_unit].label,
+    } } : {}),
     ...(stay.bedrooms !== null ? { numberOfBedrooms: stay.bedrooms } : {}),
     ...(stay.bathrooms !== null ? { numberOfBathroomsTotal: stay.bathrooms } : {}),
     ...(stay.beds !== null ? { bed: { '@type': 'BedDetails', numberOfBeds: stay.beds } } : {}),
@@ -915,7 +946,10 @@ const stayStructuredData = computed(() => {
       { '@type': 'PropertyValue', name: 'checkinTime', value: stay.check_in_time },
       { '@type': 'PropertyValue', name: 'checkoutTime', value: stay.check_out_time },
       { '@type': 'PropertyValue', name: 'minimumNights', value: stay.min_nights },
-    ],
+      ...(stay.total_floors !== null ? [{ '@type': 'PropertyValue' as const, name: 'totalFloors', value: stay.total_floors }] : []),
+      ...(stay.listing_floor !== null ? [{ '@type': 'PropertyValue' as const, name: 'listingFloor', value: stay.listing_floor }] : []),
+      ...(stay.year_built !== null ? [{ '@type': 'PropertyValue' as const, name: 'yearBuilt', value: stay.year_built }] : []),
+    ] satisfies PropertyValue[],
     ...(price ? { offers: {
       '@type': 'Offer',
       url: canonicalProductUrl.value,

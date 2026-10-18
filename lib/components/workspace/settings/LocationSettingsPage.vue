@@ -285,7 +285,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     items: [
       { id: 'assignment', label: 'Team assignment', summary: assignmentSummary.value, to: `${settingsBase.value}/assignment` },
       { id: 'status', label: 'Status', summary: statusSummary.value, to: `${settingsBase.value}/status` },
-      { id: 'languages', label: 'Languages', summary: 'Translate the name, description and address', to: `${settingsBase.value}?editMode=translations` },
+      { id: 'languages', icon: 'i-lucide-languages', label: 'Languages', summary: 'Translate the name, description and address', to: `${settingsBase.value}?editMode=translations` },
     ],
   }])
 

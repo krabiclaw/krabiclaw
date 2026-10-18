@@ -31,8 +31,8 @@ const groups = computed<EditorNavigationGroup[]>(() => [
   {
     id: 'add',
     items: [
-      { id: 'new-closure', label: 'Add closure', to: `${level.path.value}/new-closure` },
-      { id: 'new-hours', label: 'Add date hours', to: `${level.path.value}/new-hours` },
+      { id: 'new-closure', icon: 'i-lucide-calendar-off', label: 'Add closure', to: `${level.path.value}/new-closure` },
+      { id: 'new-hours', icon: 'i-lucide-calendar-plus', label: 'Add date hours', to: `${level.path.value}/new-hours` },
     ],
   },
 ].filter(group => group.items.length))

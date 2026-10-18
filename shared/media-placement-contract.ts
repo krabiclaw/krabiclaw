@@ -105,6 +105,16 @@ export function isSingleMediaPlacement(placement: { owner_type: string; slot: st
   return isSupportedMediaPlacement(placement) && !ORDERED_PLACEMENTS.has(`${placement.owner_type}:${placement.slot}`)
 }
 
+/** Each asset once, with its first placement determining its order and presentation. */
+export function uniqueMediaAssets<T extends { asset_id: string }>(media: readonly T[]): T[] {
+  const seen = new Set<string>()
+  return media.filter((item) => {
+    if (seen.has(item.asset_id)) return false
+    seen.add(item.asset_id)
+    return true
+  })
+}
+
 /**
  * What a media record says about itself. `media_assets.kind` is the authority:
  * a video carries its file in `public_url` and a required poster in

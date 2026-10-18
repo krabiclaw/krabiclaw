@@ -21,6 +21,7 @@ export interface TenantPageBlockSection {
   /** The route segment, and the key the editors switch on. */
   key: string
   label: string
+  icon?: string
   kind: TenantPageBlockSectionKind
   /** Which array a `list` section browses. */
   collection?: TenantPageBlockCollection
@@ -32,12 +33,28 @@ export interface TenantPageBlockSection {
   sources?: readonly string[]
 }
 
-const SECTION_LABELS: Record<string, string> = {
-  content: 'Content', copy: 'Copy', button: 'Button', buttons: 'Buttons',
-  settings: 'Settings', items: 'Items', steps: 'Steps', tiers: 'Amounts', headline: 'Headline',
-  pages: 'Pages', locations: 'Locations', products: 'Products', materials: 'Tools and supplies',
-  destination: 'Destination', calculator: 'Calculator', image: 'Image',
-  icon: 'Icon', link: 'Link', posts: 'Posts', video: 'Video', search: 'Search results',
+const SECTION_PRESENTATION: Record<string, { label: string; icon?: string }> = {
+  content: { label: 'Content' },
+  copy: { label: 'Copy' },
+  button: { label: 'Button', icon: 'i-lucide-mouse-pointer-click' },
+  buttons: { label: 'Buttons', icon: 'i-lucide-mouse-pointer-click' },
+  settings: { label: 'Settings' },
+  items: { label: 'Items', icon: 'i-lucide-layout-list' },
+  steps: { label: 'Steps', icon: 'i-lucide-list-ordered' },
+  tiers: { label: 'Amounts', icon: 'i-lucide-hand-heart' },
+  headline: { label: 'Headline' },
+  pages: { label: 'Pages', icon: 'i-lucide-files' },
+  locations: { label: 'Locations', icon: 'i-lucide-map-pin' },
+  products: { label: 'Products', icon: 'i-lucide-package' },
+  materials: { label: 'Tools and supplies', icon: 'i-lucide-wrench' },
+  destination: { label: 'Destination', icon: 'i-lucide-navigation' },
+  calculator: { label: 'Calculator', icon: 'i-lucide-calculator' },
+  image: { label: 'Image', icon: 'i-lucide-image' },
+  icon: { label: 'Icon', icon: 'i-lucide-shapes' },
+  link: { label: 'Link' },
+  posts: { label: 'Posts', icon: 'i-lucide-megaphone' },
+  video: { label: 'Video', icon: 'i-lucide-video' },
+  search: { label: 'Search results', icon: 'i-lucide-search' },
 }
 
 const COLLECTIONS = new Set<TenantPageBlockCollection>(['items', 'buttons', 'steps', 'tiers'])
@@ -59,13 +76,15 @@ function blockSections(type: TenantPageBlockType): readonly TenantPageBlockSecti
       if (isList && !existing.collection) {
         existing.kind = 'list'
         existing.collection = key as TenantPageBlockCollection
-        existing.label = SECTION_LABELS[key] ?? field.label
+        existing.label = SECTION_PRESENTATION[key]?.label ?? field.label
+        existing.icon = SECTION_PRESENTATION[key]?.icon
       }
       continue
     }
     sections.push({
       key: isList ? key : sectionKey,
-      label: SECTION_LABELS[isList ? key : sectionKey] ?? field.label,
+      label: SECTION_PRESENTATION[isList ? key : sectionKey]?.label ?? field.label,
+      icon: SECTION_PRESENTATION[isList ? key : sectionKey]?.icon,
       kind: isList ? 'list' : 'leaf',
       ...(isList ? { collection: key as TenantPageBlockCollection } : {}),
       ...(field.availableWhen?.field === 'source' ? { sources: field.availableWhen.equals } : {}),

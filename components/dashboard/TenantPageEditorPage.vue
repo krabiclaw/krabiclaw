@@ -166,6 +166,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
         {
           id: 'sections',
           label: 'Sections',
+          icon: 'i-lucide-panels-top-left',
           summary: sectionsSummary.value,
           placeholder: !draft.value.blocks.length,
           to: sectionUrl('sections'),

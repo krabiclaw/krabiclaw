@@ -122,7 +122,9 @@ const props = defineProps<{
 
 interface MediaAsset {
   id: string
-  kind?: string
+  kind: 'image' | 'video' | 'file'
+  provider: 'cloudflare_images' | 'cloudflare_r2' | 'static'
+  file_size: number | null
   file_name?: string
   thumbnail_url?: string | null
   public_url?: string
@@ -134,7 +136,9 @@ interface MediaAsset {
 const isMediaAsset = (value: unknown): value is MediaAsset =>
   isRecord(value)
   && typeof value.id === 'string'
-  && (value.kind === undefined || typeof value.kind === 'string')
+  && (value.kind === 'image' || value.kind === 'video' || value.kind === 'file')
+  && (value.provider === 'cloudflare_images' || value.provider === 'cloudflare_r2' || value.provider === 'static')
+  && (value.file_size === null || (typeof value.file_size === 'number' && Number.isSafeInteger(value.file_size) && value.file_size >= 0))
   && (value.public_url === undefined || typeof value.public_url === 'string')
   && (value.thumbnail_url === undefined || value.thumbnail_url === null || typeof value.thumbnail_url === 'string')
 
@@ -145,7 +149,7 @@ const isMediaResponse = (value: unknown): value is { media: MediaAsset[] } =>
 
 const emit = defineEmits<{
   select: [asset: MediaAsset]
-  uploaded: [asset: MediaAsset]
+  uploaded: [asset: MediaAsset & { kind: 'image' | 'video'; provider: 'cloudflare_images' | 'cloudflare_r2'; file_size: number }]
 }>()
 
 const ALL_MEDIA_KIND = 'all'
@@ -203,6 +207,7 @@ async function upload(file: File) {
     return
   }
 
+  let uploadedAssetId: string | null = null
   try {
     const result = await uploadMedia(file)
     if (!result) {
@@ -210,16 +215,22 @@ async function upload(file: File) {
       return
     }
 
+    uploadedAssetId = result.asset_id
+    const saved = await dashboardApi<{ media: MediaAsset[] }>(
+      `/api/editor/organizations/${props.organizationId}/media`,
+      { query: { id: uploadedAssetId }, validate: isMediaResponse },
+    )
+    const asset = saved.media.find(entry => entry.id === uploadedAssetId)
+    if (!asset || (asset.kind !== 'image' && asset.kind !== 'video') || asset.kind !== result.kind || asset.provider === 'static' || asset.file_size === null) {
+      throw new Error('The uploaded file could not be read back with its saved metadata.')
+    }
     await refresh()
-    emit('uploaded', media.value?.media.find(asset => asset.id === result.asset_id) ?? {
-      id: result.asset_id,
-      kind: result.kind,
-      file_name: file.name,
-      public_url: result.public_url ?? undefined,
-      thumbnail_url: result.thumbnail_url ?? null,
-    })
+    if (mediaError.value) throw mediaError.value
+    emit('uploaded', { ...asset, kind: asset.kind, provider: asset.provider, file_size: asset.file_size })
   } catch (err) {
-    uploadError.value = getErrorMessage(err, 'Upload failed.')
+    uploadError.value = uploadedAssetId
+      ? `The file was uploaded, but the media library could not be read. Close and reopen the picker to select it. ${getErrorMessage(err, 'Failed to load media.')}`
+      : getErrorMessage(err, 'Upload failed.')
   }
 }
 

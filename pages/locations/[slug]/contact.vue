@@ -74,7 +74,7 @@
               style="border:0;filter:grayscale(0.12)"
               allowfullscreen
               loading="lazy"
-              referrerpolicy="no-referrer-when-downgrade"
+              referrerpolicy="strict-origin-when-cross-origin"
             />
             <div v-else class="flex h-full w-full flex-col items-center justify-center gap-3">
               <TenantIcon name="map-pin" class="size-8 text-muted" />

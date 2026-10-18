@@ -2,7 +2,7 @@
   <!-- The panel's footer frame holds the gutter; this is the row inside it. -->
   <div class="flex w-full items-center justify-between gap-4">
     <!-- Cancel reads as text; Save is the only filled control on screen. -->
-    <UButton color="neutral" variant="link" :label="cancelLabel" :disabled="loading" class="px-0 font-semibold text-highlighted underline-offset-4 hover:underline" :class="leaf ? 'lg:invisible' : undefined" @click="$emit('cancel')" />
+    <UButton color="neutral" variant="link" :label="cancelLabel" :disabled="loading" class="px-0 font-semibold text-highlighted underline-offset-4 hover:underline" :class="leaf && !desktopCancel ? 'lg:invisible' : undefined" @click="$emit('cancel')" />
     <UButton :label="saveLabel || 'Save'" size="xl" :loading="loading" :disabled="disabled" @click="$emit('save')" />
   </div>
 </template>
@@ -19,6 +19,7 @@ const props = withDefaults(defineProps<{
   disabled?: boolean
   /** A leaf's footer: its Cancel exists only where the leaf is a sheet, never beside its index. */
   leaf?: boolean
+  desktopCancel?: boolean
 }>(), { saveLabel: 'Save', cancelLabel: 'Cancel', loading: false, disabled: false, leaf: false })
 
 defineEmits<{ cancel: []; save: [] }>()
