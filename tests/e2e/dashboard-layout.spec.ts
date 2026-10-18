@@ -662,7 +662,8 @@ test.describe('dashboard pane hierarchy', () => {
 
         await open(page, path)
         await expect(save).toBeDisabled()
-        await leaf.getByRole('radio', { name: 'Cancelled', exact: true }).click()
+        await leaf.getByText('Cancelled', { exact: true }).click()
+        await expect(leaf.getByRole('radio', { name: 'cancelled', exact: true })).toBeChecked()
         await commit()
         expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: endsAt, capacity: 9, status: 'cancelled' })
       } finally {
@@ -676,7 +677,7 @@ test.describe('dashboard pane hierarchy', () => {
         await expect(leaf.getByLabel('Starts', { exact: true })).toHaveValue(localInput(original!.starts_at))
         await expect(leaf.getByLabel('Ends', { exact: true })).toHaveValue(localInput(original!.ends_at))
         await expect(leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('8')
-        await expect(leaf.getByRole('radio', { name: 'Scheduled', exact: true })).toBeChecked()
+        await expect(leaf.getByRole('radio', { name: 'scheduled', exact: true })).toBeChecked()
         await expect(save).toBeDisabled()
       }
     } finally {
@@ -1066,13 +1067,14 @@ test.describe('dashboard pane hierarchy', () => {
     expect(transactionsResponse.status()).toBe(200)
     const transactions = await transactionsResponse.json()
     if (!isTransactionsView(transactions)) throw new Error('Transactions did not return their documented view.')
-    // The copied demo owns real payment history; compare the rendered rows with it.
+    // This copied demo has payment history within the selected twelve-month window.
+    expect(transactions.payments.length, 'the copied demo has transactions in the selected twelve-month window').toBeGreaterThan(0)
     await expect(page.locator('#dashboard-panel-earnings-transactions [data-testid^="transaction-"]')).toHaveCount(transactions.payments.length)
     for (const row of transactions.payments) {
       await expect(page.getByTestId(`transaction-${row.id}`)).toHaveAttribute('href', row.to)
       await expect(page.getByTestId(`transaction-${row.id}`)).toContainText(row.title)
     }
-    if (!transactions.payments.length) await expect(page.getByText('No transactions in this period.', { exact: true })).toBeVisible()
+    await expect(page.getByText('No transactions in this period.', { exact: true })).toHaveCount(0)
     await open(page, `${ORG}/earnings/refunds`)
     await expect(page.getByText('No refunds yet.', { exact: true })).toBeVisible()
     await expect(page.getByText('No disputes.', { exact: true })).toBeVisible()
@@ -1670,7 +1672,8 @@ test.describe('dashboard pane hierarchy', () => {
     await page.locator('#dashboard-panel-catalog').getByTestId('catalog-add').click()
     await expect(page).toHaveURL(`${services}/products/new/kind`)
     const kind = page.locator('#dashboard-panel-product-kind')
-    await kind.getByRole('radio', { name: 'Service or appointment', exact: true }).check()
+    await kind.getByText('Service or appointment', { exact: true }).click()
+    await expect(kind.getByRole('radio', { name: 'Service or appointment', exact: true })).toBeChecked()
     await kind.getByRole('button', { name: 'Next: Name', exact: true }).click()
     await expect(page).toHaveURL(`${services}/products/new/name`)
     // The level is named for what is being made, and the step's own footer is the only commit.

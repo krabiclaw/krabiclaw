@@ -252,7 +252,7 @@ async function chooseDates() {
   if (!pane.value) drawerOpen.value = true
 }
 async function changeMonth(value: DateValue) {
-  if (busy.value) return false
+  if (busy.value) { writeError.value = 'Wait for the current calendar changes to finish before choosing another month.'; return false }
   placeholder.value = value
   const month = value.toString().slice(0, 7)
   try {

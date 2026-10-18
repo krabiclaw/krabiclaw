@@ -1852,14 +1852,23 @@ export async function releaseLapsedStayHolds(db: DbClient, env: StayMutationEnv)
       FROM stay_nights WHERE ${LAPSED_HOLD_CLAIM_SQL}
      GROUP BY stay_nights.hold_id, stay_nights.organization_id, stay_nights.product_id LIMIT 100`)
   const pushes: SuccessfulChannelPush[] = []
+  const failures: unknown[] = []
+  let released = 0
   for (const hold of lapsed) {
     // The calendar already reads a lapsed claim as free, so the channel is told first; the claims
-    // go only once it has been, and a push that throws leaves them for the next run to retry.
-    const pushed = await pushStayHoldNights(db, env, hold.organization_id, hold.product_id, hold.check_in, hold.check_out)
-    if (pushed) pushes.push(pushed)
-    await executeBatch(db, [{ query: `DELETE FROM stay_nights WHERE hold_id = ? AND ${LAPSED_HOLD_CLAIM_SQL}`, params: [hold.hold_id] }], { operation: 'Release lapsed stay hold' })
+    // go only after completion. A failed hold retains its claims and reports
+    // its error after every other independent hold has had its turn.
+    try {
+      const pushed = await pushStayHoldNights(db, env, hold.organization_id, hold.product_id, hold.check_in, hold.check_out)
+      if (pushed) pushes.push(pushed)
+      await executeBatch(db, [{ query: `DELETE FROM stay_nights WHERE hold_id = ? AND ${LAPSED_HOLD_CLAIM_SQL}`, params: [hold.hold_id] }], { operation: 'Release lapsed stay hold' })
+      released += 1
+    } catch (error) {
+      failures.push(error)
+    }
   }
-  return { released: lapsed.length, channel_push: pushes }
+  if (failures.length) throw new AggregateError(failures, `${failures.length} lapsed stay holds could not be released. ${failures.map(error => error instanceof Error ? error.message : String(error)).join(' ')}`)
+  return { released, channel_push: pushes }
 }
 
 /** What a captured checkout made a stay of: its frozen quote and the guest who paid. */

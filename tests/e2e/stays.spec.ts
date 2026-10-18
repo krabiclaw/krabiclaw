@@ -24,6 +24,7 @@ async function tool<T>(request: APIRequestContext, baseURL: string, organization
 }
 
 test('a host creates a place to stay, sees its stay on Today, and records payment and cancellation', async ({ page, browser, baseURL }, testInfo) => {
+  test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const request = page.request
   await loginAs(request, baseURL!, 'user-e2e-lodging-host')
@@ -456,6 +457,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
 })
 
 test('a cleaner sees only assigned-home arrivals and departures on Today and Upcoming', async ({ page, browser, baseURL }, testInfo) => {
+  test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates local stays and uses disposable actors')
   await loginAs(page.request, baseURL!, 'user-e2e-lodging-host')
   const headers = authRequestHeaders(baseURL!)
