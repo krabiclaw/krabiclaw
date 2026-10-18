@@ -33,15 +33,13 @@ export interface IntegrationDefinition {
   does: readonly string[]
   /** Prompts the KrabiClaw app answers with this connection; brackets mark what the reader fills in. */
   prompts: readonly string[]
-  /** The linked account the connection acts through. */
-  linkedAccount: 'Google' | 'Facebook' | 'Instagram' | 'Discord'
   /** A service KrabiClaw's people offer on this connection, named with its price; sold in Payments → Plan. */
   service?: { name: string; summary: string }
 }
 
 export const INTEGRATIONS: readonly IntegrationDefinition[] = [
   {
-    key: 'google-maps', name: 'Google Maps', logo: 'i-logos-google-maps', group: 'found', linkedAccount: 'Google',
+    key: 'google-maps', name: 'Google Maps', logo: 'i-logos-google-maps', group: 'found',
     purpose: 'Each location matched to its Google Maps place: hours, photos, rating and reviews.',
     does: [
       'Imports a location’s hours, address, photos and rating from its Google Maps place',
@@ -54,7 +52,7 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
     ],
   },
   {
-    key: 'google-search-console', name: 'Google Search Console', logo: 'i-logos-google-search-console', group: 'found', linkedAccount: 'Google',
+    key: 'google-search-console', name: 'Google Search Console', logo: 'i-logos-google-search-console', group: 'found',
     purpose: 'Proof to Google that this site is yours.',
     does: [
       'Verifies your site with Google Search Console through the Google account you choose',
@@ -63,7 +61,7 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
     prompts: [],
   },
   {
-    key: 'google-analytics', name: 'Google Analytics', logo: 'i-logos-google-analytics', group: 'found', linkedAccount: 'Google',
+    key: 'google-analytics', name: 'Google Analytics', logo: 'i-logos-google-analytics', group: 'found',
     purpose: 'Website traffic, and where your bookings come from.',
     does: [
       'Reads sessions, page views and attribution from the GA4 property you choose',
@@ -76,7 +74,7 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
     ],
   },
   {
-    key: 'facebook', name: 'Facebook', logo: 'i-logos-facebook', group: 'reach', linkedAccount: 'Facebook',
+    key: 'facebook', name: 'Facebook', logo: 'i-logos-facebook', group: 'reach',
     purpose: 'Posts from your site, published to your Facebook Page.',
     does: [
       'Publishes the posts you choose to the Page',
@@ -88,7 +86,7 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
     ],
   },
   {
-    key: 'instagram', name: 'Instagram', logo: 'i-skill-icons-instagram', group: 'reach', linkedAccount: 'Instagram',
+    key: 'instagram', name: 'Instagram', logo: 'i-skill-icons-instagram', group: 'reach',
     purpose: 'Photo posts, published to your Instagram professional account.',
     does: [
       'Publishes the photo posts you choose to the account',
@@ -100,7 +98,7 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
     ],
   },
   {
-    key: 'discord', name: 'Discord', logo: 'i-logos-discord-icon', group: 'reach', linkedAccount: 'Discord',
+    key: 'discord', name: 'Discord', logo: 'i-logos-discord-icon', group: 'reach',
     purpose: 'Announcements, posted to one channel in your server.',
     does: [
       'Posts the announcements you choose to the channel',
@@ -112,7 +110,7 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
     ],
   },
   {
-    key: 'google-ads', name: 'Google Ads', logo: 'i-logos-google-ads', group: 'reach', linkedAccount: 'Google',
+    key: 'google-ads', name: 'Google Ads', logo: 'i-logos-google-ads', group: 'reach',
     purpose: 'Your ad spend and results in Insights, and campaigns run from your dashboard and ChatGPT.',
     does: [
       'Reads spend, clicks, impressions and conversions into Insights',
@@ -127,7 +125,7 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
     ],
   },
   {
-    key: 'google-calendar', name: 'Google Calendar', logo: 'i-logos-google-calendar', group: 'day', linkedAccount: 'Google',
+    key: 'google-calendar', name: 'Google Calendar', logo: 'i-logos-google-calendar', group: 'day',
     purpose: 'Your bookings on the calendar your team already uses.',
     does: [
       'Adds each confirmed booking to the calendar you choose and updates it when the booking changes',
