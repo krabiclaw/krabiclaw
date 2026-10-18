@@ -1,8 +1,114 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:c0439e218732398f49ee6ff8c69a61d26964bd1970dd09f6ddbae5e299fc1519",
-  "documentationFingerprint": "sha256:464b109c060a63b63c758628332bd7d5fa6d74bccc8e6ede230498b2c882fdb7",
+  "fingerprint": "sha256:e67faccb7958ddebae38ff82713363b1f86dcd78b78e853167d012450cf26645",
+  "documentationFingerprint": "sha256:f3903d408629aae3c2de43965a05df7c6f0310ffcac78ad2109f2eab697bd665",
   "tools": [
+    {
+      "name": "add_organization_language",
+      "title": "Add organization language",
+      "description": "Add a website language for private authoring. Requires the website’s language entitlement. A new language starts disabled; an existing language keeps its publication status and translations while its stored label is refreshed from the platform catalog.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "locale": {
+            "enum": [
+              "en",
+              "ja",
+              "th",
+              "vi"
+            ],
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "locale"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "additionalProperties": false,
+        "properties": {
+          "locales": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "created_at": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "is_source": {
+                  "type": "boolean"
+                },
+                "label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "locale": {
+                  "type": "string"
+                },
+                "organization_id": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "published",
+                    "disabled"
+                  ],
+                  "type": "string"
+                },
+                "updated_at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "organization_id",
+                "locale",
+                "label",
+                "is_source",
+                "status",
+                "created_at",
+                "updated_at"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "locales"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": false,
+        "readOnlyHint": false
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "locales",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
     {
       "name": "append_content_block",
       "title": "Append content block",
@@ -35683,6 +35789,112 @@
       "uiResourceUri": null
     },
     {
+      "name": "disable_organization_language",
+      "title": "Disable organization language",
+      "description": "Disable an existing website language’s public routes while preserving its translations for private authoring. The source language cannot be disabled.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "locale": {
+            "enum": [
+              "en",
+              "ja",
+              "th",
+              "vi"
+            ],
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "locale"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "additionalProperties": false,
+        "properties": {
+          "locales": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "created_at": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "is_source": {
+                  "type": "boolean"
+                },
+                "label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "locale": {
+                  "type": "string"
+                },
+                "organization_id": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "published",
+                    "disabled"
+                  ],
+                  "type": "string"
+                },
+                "updated_at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "organization_id",
+                "locale",
+                "label",
+                "is_source",
+                "status",
+                "created_at",
+                "updated_at"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "locales"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "locales",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "get_blog_post",
       "title": "Get blog post",
       "description": "Read one blog or documentation article by ID or slug, including its ordered content_blocks and updated_at token. Use that token when editing or publishing the article.",
@@ -66986,6 +67198,112 @@
       "uiResourceUri": null
     },
     {
+      "name": "publish_organization_language",
+      "title": "Publish organization language",
+      "description": "Publish an added website language’s authored translations on public routes. Requires the website’s language entitlement and a translated homepage. Missing translations remain unavailable; the source language is unchanged.",
+      "inputSchema": {
+        "additionalProperties": false,
+        "properties": {
+          "locale": {
+            "enum": [
+              "en",
+              "ja",
+              "th",
+              "vi"
+            ],
+            "type": "string"
+          },
+          "organization_id": {
+            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "locale"
+        ],
+        "type": "object"
+      },
+      "outputSchema": {
+        "$defs": {},
+        "additionalProperties": false,
+        "properties": {
+          "locales": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "created_at": {
+                  "type": "string"
+                },
+                "id": {
+                  "type": "string"
+                },
+                "is_source": {
+                  "type": "boolean"
+                },
+                "label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "locale": {
+                  "type": "string"
+                },
+                "organization_id": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "published",
+                    "disabled"
+                  ],
+                  "type": "string"
+                },
+                "updated_at": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "organization_id",
+                "locale",
+                "label",
+                "is_source",
+                "status",
+                "created_at",
+                "updated_at"
+              ],
+              "type": "object"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "locales"
+        ],
+        "type": "object"
+      },
+      "annotations": {
+        "destructiveHint": true,
+        "idempotentHint": true,
+        "openWorldHint": true,
+        "readOnlyHint": false
+      },
+      "securitySchemes": [
+        {
+          "scopes": [
+            "tenant"
+          ],
+          "type": "oauth2"
+        }
+      ],
+      "domain": "locales",
+      "minimumRole": "admin",
+      "requiredEntitlement": null,
+      "fileParams": [],
+      "uiResourceUri": null
+    },
+    {
       "name": "publish_post",
       "title": "Publish post",
       "description": "Publish the post to the selected website or social destinations, returning one result per target. Retry processing with the same post; reconcile an unknown result before publishing again.",
@@ -90979,121 +91297,6 @@
       "uiResourceUri": null
     },
     {
-      "name": "set_organization_language",
-      "title": "Set organization language",
-      "description": "Add a website language for private authoring, publish its translations, or disable its public routes. Publishing shows only authored translations. Adding and publishing require the website’s language entitlement.",
-      "inputSchema": {
-        "additionalProperties": false,
-        "properties": {
-          "action": {
-            "enum": [
-              "add",
-              "publish",
-              "disable"
-            ],
-            "type": "string"
-          },
-          "locale": {
-            "enum": [
-              "en",
-              "ja",
-              "th",
-              "vi"
-            ],
-            "type": "string"
-          },
-          "organization_id": {
-            "description": "Internal KrabiClaw organization ID from get_workspace_context or list_organizations, e.g. org-pottery-house. Do not pass a public URL, hostname, subdomain, custom domain, slug, or business name here.",
-            "type": "string"
-          }
-        },
-        "required": [
-          "locale",
-          "action"
-        ],
-        "type": "object"
-      },
-      "outputSchema": {
-        "$defs": {},
-        "additionalProperties": false,
-        "properties": {
-          "locales": {
-            "items": {
-              "additionalProperties": false,
-              "properties": {
-                "created_at": {
-                  "type": "string"
-                },
-                "id": {
-                  "type": "string"
-                },
-                "is_source": {
-                  "type": "boolean"
-                },
-                "label": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "locale": {
-                  "type": "string"
-                },
-                "organization_id": {
-                  "type": "string"
-                },
-                "status": {
-                  "enum": [
-                    "published",
-                    "disabled"
-                  ],
-                  "type": "string"
-                },
-                "updated_at": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "id",
-                "organization_id",
-                "locale",
-                "label",
-                "is_source",
-                "status",
-                "created_at",
-                "updated_at"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          }
-        },
-        "required": [
-          "locales"
-        ],
-        "type": "object"
-      },
-      "annotations": {
-        "destructiveHint": true,
-        "idempotentHint": true,
-        "openWorldHint": true,
-        "readOnlyHint": false
-      },
-      "securitySchemes": [
-        {
-          "scopes": [
-            "tenant"
-          ],
-          "type": "oauth2"
-        }
-      ],
-      "domain": "locales",
-      "minimumRole": "admin",
-      "requiredEntitlement": null,
-      "fileParams": [],
-      "uiResourceUri": null
-    },
-    {
       "name": "set_product_booking_config",
       "title": "Set product booking config",
       "description": "Configure booking duration, capacity and scheduling. New settings default to instant confirmation and no online collection. Omitted fields retain saved settings; existing sessions keep their times and capacity. Read settings with get_product.",
@@ -93657,7 +93860,7 @@
     {
       "name": "set_stay_nights",
       "title": "Set stay nights",
-      "description": "Close or open nights, set a nightly price, or set stay rules for a date range at one place to stay. Fields left out keep each night’s value; price_minor null returns to the base price; reset removes the range’s overrides.",
+      "description": "Close or open nights, set a nightly price, or set stay rules for a date range at one place to stay. Fields left out keep each night’s value; price_minor null returns to the base price; reset removes the range’s overrides. Updates the website’s bookable nights and, when connected, pushes prices, availability and stay rules to the home’s Airbnb listing through Channex. Returns channel_push with any delivery failure.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -94735,7 +94938,7 @@
       "annotations": {
         "destructiveHint": true,
         "idempotentHint": true,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "readOnlyHint": false
       },
       "securitySchemes": [

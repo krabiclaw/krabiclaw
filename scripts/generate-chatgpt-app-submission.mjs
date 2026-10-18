@@ -32,7 +32,9 @@ const effects = {
   update_team: 'Overwrites the selected Better Auth team name.',
   set_team_member: 'Adds or removes an existing business teammate from a Better Auth team. Existing bookings retain their saved provider.',
   delete_team: 'Deletes a Better Auth team and removes its offering assignments. Existing bookings retain their saved provider.',
-  set_organization_language: 'Adds a private website language or changes its publication status; public routes show only authored translations.',
+  add_organization_language: 'Adds a disabled website language for private authoring or refreshes its stored catalog label; existing publication status and translations are preserved.',
+  publish_organization_language: 'Publishes an added website language after entitlement and translated-homepage checks; public routes show only authored translations.',
+  disable_organization_language: 'Disables an existing secondary website language’s public routes while preserving its translations.',
   delete_organization_language: 'Deletes a disabled website language and its translations while preserving source content.',
   list_guest_conversations: 'Reads authorized contact, reservation and booking conversations and their inbox state.',
   get_guest_conversation: 'Reads an authorized conversation, its messages, operational record, proposals, attachments and delivery receipts.',
@@ -79,7 +81,7 @@ const effects = {
   cancel_stay: 'Cancels a host-entered stay under its version and frees its nights; sends no email and moves no money.',
   record_stay_payment: 'Records money the host received outside KrabiClaw against a host-entered stay, idempotently per key; moves no money.',
   delete_stay_payment: 'Deletes one offline payment record from a host-entered stay.',
-  set_stay_nights: 'Closes or opens nights, sets nightly prices or stay rules, or resets them, for a date range at one place to stay.',
+  set_stay_nights: 'Changes nightly prices, availability or stay rules on the website and pushes them to the home’s connected Airbnb listing through Channex; channel_push reports the delivery outcome.',
   append_content_block: 'Inserts one block into the selected blog article or tenant page after a named block, leaving every other block as it is.',
   attach_media: 'Adds an existing asset to a public content collection without replacing its existing placements.',
   batch_create_products: 'Creates products from the supplied catalog entries and records product events.',
@@ -175,6 +177,7 @@ const effects = {
 }
 
 const openWorldEffects = {
+  set_stay_nights: 'Changes publicly bookable nights and prices on the website and, when connected, the home’s Airbnb listing through Channex.',
   create_google_ads_search_campaign: 'Writes to the Google Ads account the business explicitly connected; it spends that account’s own advertising budget on Google.',
   clone_google_ads_campaign: 'Writes to the Google Ads account the business explicitly connected; it spends that account’s own advertising budget on Google.',
   update_google_ads_campaign: 'Changes status or budget only in the Google Ads account the business explicitly connected.',
@@ -197,7 +200,8 @@ const openWorldEffects = {
   update_qa: 'Changes authored Q&A text or visibility shown to public website visitors.',
   delete_qa: 'Removes authored Q&A and its translations from the public website.',
   reorder_qa: 'Changes the order of authored Q&A shown to public website visitors.',
-  set_organization_language: 'Enables or disables public website routes for the selected authored language.',
+  publish_organization_language: 'Makes the selected authored language’s translations available on public website routes.',
+  disable_organization_language: 'Removes public access to the selected authored language’s routes.',
   put_resource_localization: 'Changes translated content visible on enabled public website language routes.',
   replace_resource_localizations: 'Replaces submitted resource translations shown on enabled public website language routes.',
   delete_resource_localization: 'Removes the selected translated representation and its owned route content from the public website.',
