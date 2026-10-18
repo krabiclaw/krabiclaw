@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
+import type { UpdateProductInput } from '../../server/types/products.ts'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
@@ -268,6 +269,84 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     assert.equal((await getProduct(db, ORG, cabin.id)).stay?.min_nights, 5)
     assert.equal(edited.stay?.max_guests, 6)
     assert.equal(edited.stay?.location_id, 'cabin-site')
+
+    // Focused rule edits read the current detail owner, preserving facts a
+    // different editor saved after this home was first loaded.
+    assert.deepEqual(cabin.details, { featured: false })
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: {
+      details: { featured: true, your_property: 'A cabin beside the cliff.', house_rules: 'Leave muddy shoes outside.' },
+    } })
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: {
+      details_mode: 'merge', details: { your_property: 'A cabin with a sheltered terrace.', smoking_allowed: false },
+    } })
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: {
+      details_mode: 'merge', details: { pets_allowed: true },
+    } })
+    const rules = { featured: true, your_property: 'A cabin with a sheltered terrace.', house_rules: 'Leave muddy shoes outside.', smoking_allowed: false, pets_allowed: true }
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).details, rules)
+    assert.deepEqual(JSON.parse((await db.prepare('SELECT details_json FROM products WHERE id = ?').bind(cabin.id).first<string>('details_json'))!), rules)
+
+    const simultaneous = [
+      { details_mode: 'merge', details: { events_allowed: false } },
+      { details_mode: 'merge', details: { commercial_photography_allowed: true } },
+      { stay: { check_in_time: '17:00', check_out_time: '11:00' } },
+    ] satisfies UpdateProductInput[]
+    const outcomes = await Promise.allSettled(simultaneous.map(patch => updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch })))
+    assert(outcomes.some(outcome => outcome.status === 'fulfilled'))
+    for (const [index, outcome] of outcomes.entries()) {
+      if (outcome.status !== 'rejected') continue
+      assert.equal((outcome.reason as { status: number }).status, 409)
+      assert.equal((outcome.reason as { data?: { code?: string } }).data?.code, 'PRODUCT_UPDATE_CONFLICT')
+      // The caller reads the committed state before explicitly retrying the
+      // refused edit. A concurrent fact is never silently overwritten.
+      const committed = await getProduct(db, ORG, cabin.id)
+      assert.equal(committed.details.featured, true)
+      await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: simultaneous[index]! })
+    }
+    const combinedRules = { ...rules, events_allowed: false, commercial_photography_allowed: true }
+    const afterConcurrentEdits = await getProduct(db, ORG, cabin.id)
+    assert.deepEqual(afterConcurrentEdits.details, combinedRules)
+    assert.equal(afterConcurrentEdits.stay?.check_in_time, '17:00')
+    assert.equal(afterConcurrentEdits.stay?.check_out_time, '11:00')
+    assert.deepEqual(JSON.parse((await db.prepare('SELECT details_json FROM products WHERE id = ?').bind(cabin.id).first<string>('details_json'))!), combinedRules)
+    assert.deepEqual(await db.prepare('SELECT check_in_time, check_out_time FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first(), {
+      check_in_time: '17:00', check_out_time: '11:00',
+    })
+
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: {
+      details_mode: 'merge', details: { quiet_hours: true, quiet_hours_start: '22:00', quiet_hours_end: '07:00' },
+    } })
+    const beforeRefusals = await db.prepare('SELECT details_json FROM products WHERE id = ?').bind(cabin.id).first<string>('details_json')
+    for (const patch of [
+      { details_mode: 'merge', details: { quiet_hours: false } },
+      { details_mode: 'merge', details: { quiet_hours_start: null } },
+      { details_mode: 'merge', details: { quiet_hours_start: '22:30' } },
+      { details_mode: 'merge', details: { unknown_rule: null } },
+      { details: { pets_allowed: null } },
+      { details_mode: 'replace', details: { house_rules: null } },
+      { details_mode: 'unknown', details: {} },
+      { details_mode: 'merge' },
+    ]) {
+      await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: patch as UpdateProductInput }),
+        (error: unknown) => (error as { status: number }).status === 400)
+      assert.equal(await db.prepare('SELECT details_json FROM products WHERE id = ?').bind(cabin.id).first<string>('details_json'), beforeRefusals)
+    }
+
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: {
+      details_mode: 'merge', details: { quiet_hours: null, quiet_hours_start: null, quiet_hours_end: null, smoking_allowed: null },
+    } })
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).details, {
+      featured: true, your_property: 'A cabin with a sheltered terrace.', house_rules: 'Leave muddy shoes outside.',
+      pets_allowed: true, events_allowed: false, commercial_photography_allowed: true,
+    })
+    // The default remains replacement, while featured retains its saved value.
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { details: { house_rules: 'Leave shoes at the door.' } } })
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).details, { featured: true, house_rules: 'Leave shoes at the door.' })
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { details_mode: 'merge', details: { pets_allowed: false } } })
+    assert.equal((await getProduct(db, ORG, cabin.id)).details.pets_allowed, false)
+    await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { details_mode: 'merge', details: { pets_allowed: null, house_rules: null } } })
+    assert.deepEqual((await getProduct(db, ORG, cabin.id)).details, { featured: true })
+    assert.deepEqual(JSON.parse((await db.prepare('SELECT details_json FROM products WHERE id = ?').bind(cabin.id).first<string>('details_json'))!), { featured: true })
   } finally {
     await runtime.dispose()
   }

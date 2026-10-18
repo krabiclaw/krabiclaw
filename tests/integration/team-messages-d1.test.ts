@@ -5,7 +5,7 @@ import { Miniflare } from 'miniflare'
 import * as schema from '../../server/db/schema.ts'
 import { createProduct } from '../../server/utils/product-management.ts'
 import { memberAccessPrincipal } from '../../server/utils/member-access.ts'
-import { createStay, listStayHomes, releaseUnassignableHomes, setMemberHomes, stayAccessFor, type StayAccess } from '../../server/domain/stays.ts'
+import { createStay, listStayHomes, releaseUnassignableHomes, setMemberHomes, stayAccessFor, updateStayHome, type StayAccess } from '../../server/domain/stays.ts'
 import { createTeamThread, listTeamMembers, listTeamMessages, listTeamThreads, markTeamThreadRead, sendTeamMessage, teamAccessFor } from '../../server/domain/team-messages.ts'
 import { setNotificationPreference } from '../../server/domain/notification-preferences.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
@@ -140,9 +140,15 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.deepEqual((await listTeamThreads(env, db, cook)).map(thread => thread.id), [raced[0].id])
 
     // Reassigning the home to another member clears it from the first.
-    await setMemberHomes(env, db, ownerStays, 'm-cook', [cabin.id])
+    await Promise.all([
+      setMemberHomes(env, db, ownerStays, 'm-cook', [cabin.id]),
+      updateStayHome(env, db, manager, cabin.id, { check_in_time: '17:00', check_out_time: '11:00' }),
+    ])
     assert.deepEqual((await setMemberHomes(env, db, ownerStays, 'm-cleaner', [])).productIds, [])
     assert.equal((await listStayHomes(db, manager)).find(home => home.product_id === cabin.id)?.assigned_member_id, 'm-cook')
+    assert.deepEqual(await db.prepare('SELECT assigned_member_id, check_in_time, check_out_time FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first(), {
+      assigned_member_id: 'm-cook', check_in_time: '17:00', check_out_time: '11:00',
+    })
 
     // Leaving the organization ends the seat; what they wrote stays, sent by their user.
     await db.prepare("DELETE FROM member WHERE id = 'm-cleaner'").run()
@@ -154,8 +160,14 @@ test('members talk in team conversations, see unread state and receive recorded 
     const assignee = async () => (await listStayHomes(db, manager)).find(home => home.product_id === cabin.id)?.assigned_member_id
     await releaseUnassignableHomes(env, db, { organizationId: ORG })
     assert.equal(await assignee(), 'm-cook')
-    await releaseUnassignableHomes(env, db, { organizationId: ORG, departingUserId: 'cook' })
+    await Promise.all([
+      releaseUnassignableHomes(env, db, { organizationId: ORG, departingUserId: 'cook' }),
+      updateStayHome(env, db, manager, cabin.id, { max_guests: 3 }),
+    ])
     assert.equal(await assignee(), null)
+    assert.deepEqual(await db.prepare('SELECT assigned_member_id, max_guests, check_in_time, check_out_time FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first(), {
+      assigned_member_id: null, max_guests: 3, check_in_time: '17:00', check_out_time: '11:00',
+    })
     await setMemberHomes(env, db, ownerStays, 'm-cook', [cabin.id])
     await db.prepare("UPDATE member SET role = 'admin' WHERE id = 'm-cook'").run()
     await releaseUnassignableHomes(env, db, { organizationId: ORG })

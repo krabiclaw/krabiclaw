@@ -29,9 +29,11 @@
         <h2 class="text-xl font-medium text-highlighted">House manual</h2>
         <p class="mt-3 whitespace-pre-wrap break-words text-base text-muted">{{ p.arrivalHome.value.house_manual }}</p>
       </section>
-      <section v-if="houseRules">
+      <section v-if="houseRules.length">
         <h2 class="text-xl font-medium text-highlighted">House rules</h2>
-        <p class="mt-3 whitespace-pre-wrap break-words text-base text-muted">{{ houseRules }}</p>
+        <ul class="mt-3 space-y-3 text-base text-muted">
+          <li v-for="(line, index) in houseRules" :key="index" class="whitespace-pre-wrap break-words">{{ line }}</li>
+        </ul>
       </section>
       <section v-if="p.arrivalHome.value.checkout_instructions.length">
         <h2 class="text-xl font-medium text-highlighted">Checkout instructions</h2>
@@ -50,13 +52,16 @@
 <script setup lang="ts">
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS } from '~/shared/stay-listing'
+import { stayHouseRuleLines } from '~/shared/product-details'
+import { formatTime } from '~/utils/timezone'
 
 definePageMeta({ layout: 'dashboard' })
 const p = inject(productEditorKey)!
+const { locale } = useI18n()
 const method = computed(() => p.arrivalHome.value?.check_in_method ? STAY_CHECK_IN_METHODS[p.arrivalHome.value.check_in_method] : null)
-const houseRules = computed(() => typeof p.product.value?.details.house_rules === 'string' ? p.product.value.details.house_rules : null)
+const houseRules = computed(() => p.product.value ? stayHouseRuleLines(p.product.value.details, value => formatTime(value, locale.value)) : [])
 const hasGuideDetails = computed(() => {
   const home = p.arrivalHome.value
-  return home && (home.directions || home.check_in_method || home.check_in_instructions || home.wifi_network || home.wifi_password || home.house_manual || home.checkout_instructions.length || houseRules.value)
+  return home && (home.directions || home.check_in_method || home.check_in_instructions || home.wifi_network || home.wifi_password || home.house_manual || home.checkout_instructions.length || houseRules.value.length)
 })
 </script>

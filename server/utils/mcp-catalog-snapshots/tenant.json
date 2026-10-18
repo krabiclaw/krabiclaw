@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:d7c58d3f454f0e185a375957c4b6b1bd9b960e97b9c3ee382056df9d529191df",
-  "documentationFingerprint": "sha256:10bdb299bd3254d13a6c6e41c6f6f3a3b3812059ee2e28edc62c2be65b830979",
+  "fingerprint": "sha256:1531c8ee54ae3a0558e4de3c66002cb5d46bd68db9318194091e9197291ee701",
+  "documentationFingerprint": "sha256:1f6aa0aa6f440da2ba535be80456da256d7f7d6cb336091bb1dcacc174fcd20e",
   "tools": [
     {
       "name": "add_organization_language",
@@ -6217,6 +6217,10 @@
                       "pattern": "\\S",
                       "type": "string"
                     },
+                    "commercial_photography_allowed": {
+                      "description": "Whether guests may take commercial photos or film at the property.",
+                      "type": "boolean"
+                    },
                     "dietary_notes": {
                       "description": "Merchant-stated dietary facts displayed with a dish.",
                       "items": {
@@ -6235,6 +6239,10 @@
                       "minLength": 1,
                       "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
                       "type": "string"
+                    },
+                    "events_allowed": {
+                      "description": "Whether guests may host events at the property.",
+                      "type": "boolean"
                     },
                     "featured": {
                       "description": "Highlight this item on the menu and homepage.",
@@ -6323,6 +6331,10 @@
                       "pattern": "\\S",
                       "type": "string"
                     },
+                    "pets_allowed": {
+                      "description": "Let guests know if they can bring pets.",
+                      "type": "boolean"
+                    },
                     "preparation": {
                       "description": "Preparation instructions shown to customers before a session or appointment.",
                       "maxLength": 10000,
@@ -6332,6 +6344,76 @@
                     },
                     "pricing_note": {
                       "description": "An explicitly stated price such as Market price; use only when no numeric price is set.",
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                      "type": "string"
+                    },
+                    "quiet_hours": {
+                      "description": "Hours when guests should keep noise to a minimum.",
+                      "type": "boolean"
+                    },
+                    "quiet_hours_end": {
+                      "description": "Local end of quiet hours, required with quiet hours and its start time.",
+                      "enum": [
+                        "00:00",
+                        "01:00",
+                        "02:00",
+                        "03:00",
+                        "04:00",
+                        "05:00",
+                        "06:00",
+                        "07:00",
+                        "08:00",
+                        "09:00",
+                        "10:00",
+                        "11:00",
+                        "12:00",
+                        "13:00",
+                        "14:00",
+                        "15:00",
+                        "16:00",
+                        "17:00",
+                        "18:00",
+                        "19:00",
+                        "20:00",
+                        "21:00",
+                        "22:00",
+                        "23:00"
+                      ],
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                      "type": "string"
+                    },
+                    "quiet_hours_start": {
+                      "description": "Local start of quiet hours, required with quiet hours and its end time.",
+                      "enum": [
+                        "00:00",
+                        "01:00",
+                        "02:00",
+                        "03:00",
+                        "04:00",
+                        "05:00",
+                        "06:00",
+                        "07:00",
+                        "08:00",
+                        "09:00",
+                        "10:00",
+                        "11:00",
+                        "12:00",
+                        "13:00",
+                        "14:00",
+                        "15:00",
+                        "16:00",
+                        "17:00",
+                        "18:00",
+                        "19:00",
+                        "20:00",
+                        "21:00",
+                        "22:00",
+                        "23:00"
+                      ],
                       "maxLength": 1000,
                       "minLength": 1,
                       "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
@@ -6348,6 +6430,10 @@
                       "maxItems": 100,
                       "type": "array",
                       "uniqueItems": true
+                    },
+                    "smoking_allowed": {
+                      "description": "Whether guests may smoke or vape at the property.",
+                      "type": "boolean"
                     },
                     "soup": {
                       "description": "Authored soup information shown with the dish.",
@@ -6830,6 +6916,10 @@
                       "pattern": "\\S",
                       "type": "string"
                     },
+                    "commercial_photography_allowed": {
+                      "description": "Whether guests may take commercial photos or film at the property.",
+                      "type": "boolean"
+                    },
                     "dietary_notes": {
                       "description": "Merchant-stated dietary facts displayed with a dish.",
                       "items": {
@@ -6848,6 +6938,10 @@
                       "minLength": 1,
                       "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
                       "type": "string"
+                    },
+                    "events_allowed": {
+                      "description": "Whether guests may host events at the property.",
+                      "type": "boolean"
                     },
                     "featured": {
                       "description": "Highlight this item on the menu and homepage.",
@@ -6936,6 +7030,10 @@
                       "pattern": "\\S",
                       "type": "string"
                     },
+                    "pets_allowed": {
+                      "description": "Let guests know if they can bring pets.",
+                      "type": "boolean"
+                    },
                     "preparation": {
                       "description": "Preparation instructions shown to customers before a session or appointment.",
                       "maxLength": 10000,
@@ -6945,6 +7043,76 @@
                     },
                     "pricing_note": {
                       "description": "An explicitly stated price such as Market price; use only when no numeric price is set.",
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                      "type": "string"
+                    },
+                    "quiet_hours": {
+                      "description": "Hours when guests should keep noise to a minimum.",
+                      "type": "boolean"
+                    },
+                    "quiet_hours_end": {
+                      "description": "Local end of quiet hours, required with quiet hours and its start time.",
+                      "enum": [
+                        "00:00",
+                        "01:00",
+                        "02:00",
+                        "03:00",
+                        "04:00",
+                        "05:00",
+                        "06:00",
+                        "07:00",
+                        "08:00",
+                        "09:00",
+                        "10:00",
+                        "11:00",
+                        "12:00",
+                        "13:00",
+                        "14:00",
+                        "15:00",
+                        "16:00",
+                        "17:00",
+                        "18:00",
+                        "19:00",
+                        "20:00",
+                        "21:00",
+                        "22:00",
+                        "23:00"
+                      ],
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                      "type": "string"
+                    },
+                    "quiet_hours_start": {
+                      "description": "Local start of quiet hours, required with quiet hours and its end time.",
+                      "enum": [
+                        "00:00",
+                        "01:00",
+                        "02:00",
+                        "03:00",
+                        "04:00",
+                        "05:00",
+                        "06:00",
+                        "07:00",
+                        "08:00",
+                        "09:00",
+                        "10:00",
+                        "11:00",
+                        "12:00",
+                        "13:00",
+                        "14:00",
+                        "15:00",
+                        "16:00",
+                        "17:00",
+                        "18:00",
+                        "19:00",
+                        "20:00",
+                        "21:00",
+                        "22:00",
+                        "23:00"
+                      ],
                       "maxLength": 1000,
                       "minLength": 1,
                       "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
@@ -6961,6 +7129,10 @@
                       "maxItems": 100,
                       "type": "array",
                       "uniqueItems": true
+                    },
+                    "smoking_allowed": {
+                      "description": "Whether guests may smoke or vape at the property.",
+                      "type": "boolean"
                     },
                     "soup": {
                       "description": "Authored soup information shown with the dish.",
@@ -16699,7 +16871,7 @@
     {
       "name": "create_product",
       "title": "Create product",
-      "description": "Add a catalog item, experience, service or place to stay. Experiences need booking duration, capacity, location and actual times, or an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and stay settings), takes its guest-facing rules in details.house_rules, and is priced per night by its variant price; guests book it on the site and pay in full, so it takes no order_url and publishes only once it has a nightly price and online payments are set up. Repeat the same idempotency key on retry.",
+      "description": "Add a catalog item, experience, service or place to stay. Experiences need booking duration, capacity, location and actual times, or an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and stay settings), keeps its public house rules in details, and is priced per night by its variant price; guests book it on the site and pay in full, so it takes no order_url and publishes only once it has a nightly price and online payments are set up. Repeat the same idempotency key on retry.",
       "inputSchema": {
         "$defs": {
           "content_ai_assistance": {
@@ -18501,6 +18673,10 @@
                 "pattern": "\\S",
                 "type": "string"
               },
+              "commercial_photography_allowed": {
+                "description": "Whether guests may take commercial photos or film at the property.",
+                "type": "boolean"
+              },
               "dietary_notes": {
                 "description": "Merchant-stated dietary facts displayed with a dish.",
                 "items": {
@@ -18519,6 +18695,10 @@
                 "minLength": 1,
                 "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
                 "type": "string"
+              },
+              "events_allowed": {
+                "description": "Whether guests may host events at the property.",
+                "type": "boolean"
               },
               "featured": {
                 "description": "Highlight this item on the menu and homepage.",
@@ -18607,6 +18787,10 @@
                 "pattern": "\\S",
                 "type": "string"
               },
+              "pets_allowed": {
+                "description": "Let guests know if they can bring pets.",
+                "type": "boolean"
+              },
               "preparation": {
                 "description": "Preparation instructions shown to customers before a session or appointment.",
                 "maxLength": 10000,
@@ -18616,6 +18800,76 @@
               },
               "pricing_note": {
                 "description": "An explicitly stated price such as Market price; use only when no numeric price is set.",
+                "maxLength": 1000,
+                "minLength": 1,
+                "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                "type": "string"
+              },
+              "quiet_hours": {
+                "description": "Hours when guests should keep noise to a minimum.",
+                "type": "boolean"
+              },
+              "quiet_hours_end": {
+                "description": "Local end of quiet hours, required with quiet hours and its start time.",
+                "enum": [
+                  "00:00",
+                  "01:00",
+                  "02:00",
+                  "03:00",
+                  "04:00",
+                  "05:00",
+                  "06:00",
+                  "07:00",
+                  "08:00",
+                  "09:00",
+                  "10:00",
+                  "11:00",
+                  "12:00",
+                  "13:00",
+                  "14:00",
+                  "15:00",
+                  "16:00",
+                  "17:00",
+                  "18:00",
+                  "19:00",
+                  "20:00",
+                  "21:00",
+                  "22:00",
+                  "23:00"
+                ],
+                "maxLength": 1000,
+                "minLength": 1,
+                "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                "type": "string"
+              },
+              "quiet_hours_start": {
+                "description": "Local start of quiet hours, required with quiet hours and its end time.",
+                "enum": [
+                  "00:00",
+                  "01:00",
+                  "02:00",
+                  "03:00",
+                  "04:00",
+                  "05:00",
+                  "06:00",
+                  "07:00",
+                  "08:00",
+                  "09:00",
+                  "10:00",
+                  "11:00",
+                  "12:00",
+                  "13:00",
+                  "14:00",
+                  "15:00",
+                  "16:00",
+                  "17:00",
+                  "18:00",
+                  "19:00",
+                  "20:00",
+                  "21:00",
+                  "22:00",
+                  "23:00"
+                ],
                 "maxLength": 1000,
                 "minLength": 1,
                 "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
@@ -18632,6 +18886,10 @@
                 "maxItems": 100,
                 "type": "array",
                 "uniqueItems": true
+              },
+              "smoking_allowed": {
+                "description": "Whether guests may smoke or vape at the property.",
+                "type": "boolean"
               },
               "soup": {
                 "description": "Authored soup information shown with the dish.",
@@ -21499,6 +21757,10 @@
                     "pattern": "\\S",
                     "type": "string"
                   },
+                  "commercial_photography_allowed": {
+                    "description": "Whether guests may take commercial photos or film at the property.",
+                    "type": "boolean"
+                  },
                   "dietary_notes": {
                     "description": "Merchant-stated dietary facts displayed with a dish.",
                     "items": {
@@ -21517,6 +21779,10 @@
                     "minLength": 1,
                     "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
                     "type": "string"
+                  },
+                  "events_allowed": {
+                    "description": "Whether guests may host events at the property.",
+                    "type": "boolean"
                   },
                   "featured": {
                     "description": "Highlight this item on the menu and homepage.",
@@ -21605,6 +21871,10 @@
                     "pattern": "\\S",
                     "type": "string"
                   },
+                  "pets_allowed": {
+                    "description": "Let guests know if they can bring pets.",
+                    "type": "boolean"
+                  },
                   "preparation": {
                     "description": "Preparation instructions shown to customers before a session or appointment.",
                     "maxLength": 10000,
@@ -21614,6 +21884,76 @@
                   },
                   "pricing_note": {
                     "description": "An explicitly stated price such as Market price; use only when no numeric price is set.",
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                    "type": "string"
+                  },
+                  "quiet_hours": {
+                    "description": "Hours when guests should keep noise to a minimum.",
+                    "type": "boolean"
+                  },
+                  "quiet_hours_end": {
+                    "description": "Local end of quiet hours, required with quiet hours and its start time.",
+                    "enum": [
+                      "00:00",
+                      "01:00",
+                      "02:00",
+                      "03:00",
+                      "04:00",
+                      "05:00",
+                      "06:00",
+                      "07:00",
+                      "08:00",
+                      "09:00",
+                      "10:00",
+                      "11:00",
+                      "12:00",
+                      "13:00",
+                      "14:00",
+                      "15:00",
+                      "16:00",
+                      "17:00",
+                      "18:00",
+                      "19:00",
+                      "20:00",
+                      "21:00",
+                      "22:00",
+                      "23:00"
+                    ],
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                    "type": "string"
+                  },
+                  "quiet_hours_start": {
+                    "description": "Local start of quiet hours, required with quiet hours and its end time.",
+                    "enum": [
+                      "00:00",
+                      "01:00",
+                      "02:00",
+                      "03:00",
+                      "04:00",
+                      "05:00",
+                      "06:00",
+                      "07:00",
+                      "08:00",
+                      "09:00",
+                      "10:00",
+                      "11:00",
+                      "12:00",
+                      "13:00",
+                      "14:00",
+                      "15:00",
+                      "16:00",
+                      "17:00",
+                      "18:00",
+                      "19:00",
+                      "20:00",
+                      "21:00",
+                      "22:00",
+                      "23:00"
+                    ],
                     "maxLength": 1000,
                     "minLength": 1,
                     "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
@@ -21630,6 +21970,10 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "smoking_allowed": {
+                    "description": "Whether guests may smoke or vape at the property.",
+                    "type": "boolean"
                   },
                   "soup": {
                     "description": "Authored soup information shown with the dish.",
@@ -46016,6 +46360,10 @@
                     "pattern": "\\S",
                     "type": "string"
                   },
+                  "commercial_photography_allowed": {
+                    "description": "Whether guests may take commercial photos or film at the property.",
+                    "type": "boolean"
+                  },
                   "dietary_notes": {
                     "description": "Merchant-stated dietary facts displayed with a dish.",
                     "items": {
@@ -46034,6 +46382,10 @@
                     "minLength": 1,
                     "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
                     "type": "string"
+                  },
+                  "events_allowed": {
+                    "description": "Whether guests may host events at the property.",
+                    "type": "boolean"
                   },
                   "featured": {
                     "description": "Highlight this item on the menu and homepage.",
@@ -46122,6 +46474,10 @@
                     "pattern": "\\S",
                     "type": "string"
                   },
+                  "pets_allowed": {
+                    "description": "Let guests know if they can bring pets.",
+                    "type": "boolean"
+                  },
                   "preparation": {
                     "description": "Preparation instructions shown to customers before a session or appointment.",
                     "maxLength": 10000,
@@ -46131,6 +46487,76 @@
                   },
                   "pricing_note": {
                     "description": "An explicitly stated price such as Market price; use only when no numeric price is set.",
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                    "type": "string"
+                  },
+                  "quiet_hours": {
+                    "description": "Hours when guests should keep noise to a minimum.",
+                    "type": "boolean"
+                  },
+                  "quiet_hours_end": {
+                    "description": "Local end of quiet hours, required with quiet hours and its start time.",
+                    "enum": [
+                      "00:00",
+                      "01:00",
+                      "02:00",
+                      "03:00",
+                      "04:00",
+                      "05:00",
+                      "06:00",
+                      "07:00",
+                      "08:00",
+                      "09:00",
+                      "10:00",
+                      "11:00",
+                      "12:00",
+                      "13:00",
+                      "14:00",
+                      "15:00",
+                      "16:00",
+                      "17:00",
+                      "18:00",
+                      "19:00",
+                      "20:00",
+                      "21:00",
+                      "22:00",
+                      "23:00"
+                    ],
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                    "type": "string"
+                  },
+                  "quiet_hours_start": {
+                    "description": "Local start of quiet hours, required with quiet hours and its end time.",
+                    "enum": [
+                      "00:00",
+                      "01:00",
+                      "02:00",
+                      "03:00",
+                      "04:00",
+                      "05:00",
+                      "06:00",
+                      "07:00",
+                      "08:00",
+                      "09:00",
+                      "10:00",
+                      "11:00",
+                      "12:00",
+                      "13:00",
+                      "14:00",
+                      "15:00",
+                      "16:00",
+                      "17:00",
+                      "18:00",
+                      "19:00",
+                      "20:00",
+                      "21:00",
+                      "22:00",
+                      "23:00"
+                    ],
                     "maxLength": 1000,
                     "minLength": 1,
                     "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
@@ -46147,6 +46573,10 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "smoking_allowed": {
+                    "description": "Whether guests may smoke or vape at the property.",
+                    "type": "boolean"
                   },
                   "soup": {
                     "description": "Authored soup information shown with the dish.",
@@ -47714,6 +48144,10 @@
                           "pattern": "\\S",
                           "type": "string"
                         },
+                        "commercial_photography_allowed": {
+                          "description": "Whether guests may take commercial photos or film at the property.",
+                          "type": "boolean"
+                        },
                         "dietary_notes": {
                           "description": "Merchant-stated dietary facts displayed with a dish.",
                           "items": {
@@ -47732,6 +48166,10 @@
                           "minLength": 1,
                           "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
                           "type": "string"
+                        },
+                        "events_allowed": {
+                          "description": "Whether guests may host events at the property.",
+                          "type": "boolean"
                         },
                         "featured": {
                           "description": "Highlight this item on the menu and homepage.",
@@ -47820,6 +48258,10 @@
                           "pattern": "\\S",
                           "type": "string"
                         },
+                        "pets_allowed": {
+                          "description": "Let guests know if they can bring pets.",
+                          "type": "boolean"
+                        },
                         "preparation": {
                           "description": "Preparation instructions shown to customers before a session or appointment.",
                           "maxLength": 10000,
@@ -47829,6 +48271,76 @@
                         },
                         "pricing_note": {
                           "description": "An explicitly stated price such as Market price; use only when no numeric price is set.",
+                          "maxLength": 1000,
+                          "minLength": 1,
+                          "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                          "type": "string"
+                        },
+                        "quiet_hours": {
+                          "description": "Hours when guests should keep noise to a minimum.",
+                          "type": "boolean"
+                        },
+                        "quiet_hours_end": {
+                          "description": "Local end of quiet hours, required with quiet hours and its start time.",
+                          "enum": [
+                            "00:00",
+                            "01:00",
+                            "02:00",
+                            "03:00",
+                            "04:00",
+                            "05:00",
+                            "06:00",
+                            "07:00",
+                            "08:00",
+                            "09:00",
+                            "10:00",
+                            "11:00",
+                            "12:00",
+                            "13:00",
+                            "14:00",
+                            "15:00",
+                            "16:00",
+                            "17:00",
+                            "18:00",
+                            "19:00",
+                            "20:00",
+                            "21:00",
+                            "22:00",
+                            "23:00"
+                          ],
+                          "maxLength": 1000,
+                          "minLength": 1,
+                          "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                          "type": "string"
+                        },
+                        "quiet_hours_start": {
+                          "description": "Local start of quiet hours, required with quiet hours and its end time.",
+                          "enum": [
+                            "00:00",
+                            "01:00",
+                            "02:00",
+                            "03:00",
+                            "04:00",
+                            "05:00",
+                            "06:00",
+                            "07:00",
+                            "08:00",
+                            "09:00",
+                            "10:00",
+                            "11:00",
+                            "12:00",
+                            "13:00",
+                            "14:00",
+                            "15:00",
+                            "16:00",
+                            "17:00",
+                            "18:00",
+                            "19:00",
+                            "20:00",
+                            "21:00",
+                            "22:00",
+                            "23:00"
+                          ],
                           "maxLength": 1000,
                           "minLength": 1,
                           "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
@@ -47845,6 +48357,10 @@
                           "maxItems": 100,
                           "type": "array",
                           "uniqueItems": true
+                        },
+                        "smoking_allowed": {
+                          "description": "Whether guests may smoke or vape at the property.",
+                          "type": "boolean"
                         },
                         "soup": {
                           "description": "Authored soup information shown with the dish.",
@@ -76885,6 +77401,10 @@
                       "pattern": "\\S",
                       "type": "string"
                     },
+                    "commercial_photography_allowed": {
+                      "description": "Whether guests may take commercial photos or film at the property.",
+                      "type": "boolean"
+                    },
                     "dietary_notes": {
                       "description": "Merchant-stated dietary facts displayed with a dish.",
                       "items": {
@@ -76903,6 +77423,10 @@
                       "minLength": 1,
                       "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
                       "type": "string"
+                    },
+                    "events_allowed": {
+                      "description": "Whether guests may host events at the property.",
+                      "type": "boolean"
                     },
                     "featured": {
                       "description": "Highlight this item on the menu and homepage.",
@@ -76991,6 +77515,10 @@
                       "pattern": "\\S",
                       "type": "string"
                     },
+                    "pets_allowed": {
+                      "description": "Let guests know if they can bring pets.",
+                      "type": "boolean"
+                    },
                     "preparation": {
                       "description": "Preparation instructions shown to customers before a session or appointment.",
                       "maxLength": 10000,
@@ -77000,6 +77528,76 @@
                     },
                     "pricing_note": {
                       "description": "An explicitly stated price such as Market price; use only when no numeric price is set.",
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                      "type": "string"
+                    },
+                    "quiet_hours": {
+                      "description": "Hours when guests should keep noise to a minimum.",
+                      "type": "boolean"
+                    },
+                    "quiet_hours_end": {
+                      "description": "Local end of quiet hours, required with quiet hours and its start time.",
+                      "enum": [
+                        "00:00",
+                        "01:00",
+                        "02:00",
+                        "03:00",
+                        "04:00",
+                        "05:00",
+                        "06:00",
+                        "07:00",
+                        "08:00",
+                        "09:00",
+                        "10:00",
+                        "11:00",
+                        "12:00",
+                        "13:00",
+                        "14:00",
+                        "15:00",
+                        "16:00",
+                        "17:00",
+                        "18:00",
+                        "19:00",
+                        "20:00",
+                        "21:00",
+                        "22:00",
+                        "23:00"
+                      ],
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                      "type": "string"
+                    },
+                    "quiet_hours_start": {
+                      "description": "Local start of quiet hours, required with quiet hours and its end time.",
+                      "enum": [
+                        "00:00",
+                        "01:00",
+                        "02:00",
+                        "03:00",
+                        "04:00",
+                        "05:00",
+                        "06:00",
+                        "07:00",
+                        "08:00",
+                        "09:00",
+                        "10:00",
+                        "11:00",
+                        "12:00",
+                        "13:00",
+                        "14:00",
+                        "15:00",
+                        "16:00",
+                        "17:00",
+                        "18:00",
+                        "19:00",
+                        "20:00",
+                        "21:00",
+                        "22:00",
+                        "23:00"
+                      ],
                       "maxLength": 1000,
                       "minLength": 1,
                       "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
@@ -77016,6 +77614,10 @@
                       "maxItems": 100,
                       "type": "array",
                       "uniqueItems": true
+                    },
+                    "smoking_allowed": {
+                      "description": "Whether guests may smoke or vape at the property.",
+                      "type": "boolean"
                     },
                     "soup": {
                       "description": "Authored soup information shown with the dish.",
@@ -77527,6 +78129,10 @@
                       "pattern": "\\S",
                       "type": "string"
                     },
+                    "commercial_photography_allowed": {
+                      "description": "Whether guests may take commercial photos or film at the property.",
+                      "type": "boolean"
+                    },
                     "dietary_notes": {
                       "description": "Merchant-stated dietary facts displayed with a dish.",
                       "items": {
@@ -77545,6 +78151,10 @@
                       "minLength": 1,
                       "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
                       "type": "string"
+                    },
+                    "events_allowed": {
+                      "description": "Whether guests may host events at the property.",
+                      "type": "boolean"
                     },
                     "featured": {
                       "description": "Highlight this item on the menu and homepage.",
@@ -77633,6 +78243,10 @@
                       "pattern": "\\S",
                       "type": "string"
                     },
+                    "pets_allowed": {
+                      "description": "Let guests know if they can bring pets.",
+                      "type": "boolean"
+                    },
                     "preparation": {
                       "description": "Preparation instructions shown to customers before a session or appointment.",
                       "maxLength": 10000,
@@ -77642,6 +78256,76 @@
                     },
                     "pricing_note": {
                       "description": "An explicitly stated price such as Market price; use only when no numeric price is set.",
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                      "type": "string"
+                    },
+                    "quiet_hours": {
+                      "description": "Hours when guests should keep noise to a minimum.",
+                      "type": "boolean"
+                    },
+                    "quiet_hours_end": {
+                      "description": "Local end of quiet hours, required with quiet hours and its start time.",
+                      "enum": [
+                        "00:00",
+                        "01:00",
+                        "02:00",
+                        "03:00",
+                        "04:00",
+                        "05:00",
+                        "06:00",
+                        "07:00",
+                        "08:00",
+                        "09:00",
+                        "10:00",
+                        "11:00",
+                        "12:00",
+                        "13:00",
+                        "14:00",
+                        "15:00",
+                        "16:00",
+                        "17:00",
+                        "18:00",
+                        "19:00",
+                        "20:00",
+                        "21:00",
+                        "22:00",
+                        "23:00"
+                      ],
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                      "type": "string"
+                    },
+                    "quiet_hours_start": {
+                      "description": "Local start of quiet hours, required with quiet hours and its end time.",
+                      "enum": [
+                        "00:00",
+                        "01:00",
+                        "02:00",
+                        "03:00",
+                        "04:00",
+                        "05:00",
+                        "06:00",
+                        "07:00",
+                        "08:00",
+                        "09:00",
+                        "10:00",
+                        "11:00",
+                        "12:00",
+                        "13:00",
+                        "14:00",
+                        "15:00",
+                        "16:00",
+                        "17:00",
+                        "18:00",
+                        "19:00",
+                        "20:00",
+                        "21:00",
+                        "22:00",
+                        "23:00"
+                      ],
                       "maxLength": 1000,
                       "minLength": 1,
                       "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
@@ -77658,6 +78342,10 @@
                       "maxItems": 100,
                       "type": "array",
                       "uniqueItems": true
+                    },
+                    "smoking_allowed": {
+                      "description": "Whether guests may smoke or vape at the property.",
+                      "type": "boolean"
                     },
                     "soup": {
                       "description": "Authored soup information shown with the dish.",
@@ -80141,6 +80829,10 @@
                     "pattern": "\\S",
                     "type": "string"
                   },
+                  "commercial_photography_allowed": {
+                    "description": "Whether guests may take commercial photos or film at the property.",
+                    "type": "boolean"
+                  },
                   "dietary_notes": {
                     "description": "Merchant-stated dietary facts displayed with a dish.",
                     "items": {
@@ -80159,6 +80851,10 @@
                     "minLength": 1,
                     "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
                     "type": "string"
+                  },
+                  "events_allowed": {
+                    "description": "Whether guests may host events at the property.",
+                    "type": "boolean"
                   },
                   "featured": {
                     "description": "Highlight this item on the menu and homepage.",
@@ -80247,6 +80943,10 @@
                     "pattern": "\\S",
                     "type": "string"
                   },
+                  "pets_allowed": {
+                    "description": "Let guests know if they can bring pets.",
+                    "type": "boolean"
+                  },
                   "preparation": {
                     "description": "Preparation instructions shown to customers before a session or appointment.",
                     "maxLength": 10000,
@@ -80256,6 +80956,76 @@
                   },
                   "pricing_note": {
                     "description": "An explicitly stated price such as Market price; use only when no numeric price is set.",
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                    "type": "string"
+                  },
+                  "quiet_hours": {
+                    "description": "Hours when guests should keep noise to a minimum.",
+                    "type": "boolean"
+                  },
+                  "quiet_hours_end": {
+                    "description": "Local end of quiet hours, required with quiet hours and its start time.",
+                    "enum": [
+                      "00:00",
+                      "01:00",
+                      "02:00",
+                      "03:00",
+                      "04:00",
+                      "05:00",
+                      "06:00",
+                      "07:00",
+                      "08:00",
+                      "09:00",
+                      "10:00",
+                      "11:00",
+                      "12:00",
+                      "13:00",
+                      "14:00",
+                      "15:00",
+                      "16:00",
+                      "17:00",
+                      "18:00",
+                      "19:00",
+                      "20:00",
+                      "21:00",
+                      "22:00",
+                      "23:00"
+                    ],
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                    "type": "string"
+                  },
+                  "quiet_hours_start": {
+                    "description": "Local start of quiet hours, required with quiet hours and its end time.",
+                    "enum": [
+                      "00:00",
+                      "01:00",
+                      "02:00",
+                      "03:00",
+                      "04:00",
+                      "05:00",
+                      "06:00",
+                      "07:00",
+                      "08:00",
+                      "09:00",
+                      "10:00",
+                      "11:00",
+                      "12:00",
+                      "13:00",
+                      "14:00",
+                      "15:00",
+                      "16:00",
+                      "17:00",
+                      "18:00",
+                      "19:00",
+                      "20:00",
+                      "21:00",
+                      "22:00",
+                      "23:00"
+                    ],
                     "maxLength": 1000,
                     "minLength": 1,
                     "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
@@ -80272,6 +81042,10 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "smoking_allowed": {
+                    "description": "Whether guests may smoke or vape at the property.",
+                    "type": "boolean"
                   },
                   "soup": {
                     "description": "Authored soup information shown with the dish.",
@@ -92453,6 +93227,10 @@
                     "pattern": "\\S",
                     "type": "string"
                   },
+                  "commercial_photography_allowed": {
+                    "description": "Whether guests may take commercial photos or film at the property.",
+                    "type": "boolean"
+                  },
                   "dietary_notes": {
                     "description": "Merchant-stated dietary facts displayed with a dish.",
                     "items": {
@@ -92471,6 +93249,10 @@
                     "minLength": 1,
                     "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
                     "type": "string"
+                  },
+                  "events_allowed": {
+                    "description": "Whether guests may host events at the property.",
+                    "type": "boolean"
                   },
                   "featured": {
                     "description": "Highlight this item on the menu and homepage.",
@@ -92559,6 +93341,10 @@
                     "pattern": "\\S",
                     "type": "string"
                   },
+                  "pets_allowed": {
+                    "description": "Let guests know if they can bring pets.",
+                    "type": "boolean"
+                  },
                   "preparation": {
                     "description": "Preparation instructions shown to customers before a session or appointment.",
                     "maxLength": 10000,
@@ -92568,6 +93354,76 @@
                   },
                   "pricing_note": {
                     "description": "An explicitly stated price such as Market price; use only when no numeric price is set.",
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                    "type": "string"
+                  },
+                  "quiet_hours": {
+                    "description": "Hours when guests should keep noise to a minimum.",
+                    "type": "boolean"
+                  },
+                  "quiet_hours_end": {
+                    "description": "Local end of quiet hours, required with quiet hours and its start time.",
+                    "enum": [
+                      "00:00",
+                      "01:00",
+                      "02:00",
+                      "03:00",
+                      "04:00",
+                      "05:00",
+                      "06:00",
+                      "07:00",
+                      "08:00",
+                      "09:00",
+                      "10:00",
+                      "11:00",
+                      "12:00",
+                      "13:00",
+                      "14:00",
+                      "15:00",
+                      "16:00",
+                      "17:00",
+                      "18:00",
+                      "19:00",
+                      "20:00",
+                      "21:00",
+                      "22:00",
+                      "23:00"
+                    ],
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                    "type": "string"
+                  },
+                  "quiet_hours_start": {
+                    "description": "Local start of quiet hours, required with quiet hours and its end time.",
+                    "enum": [
+                      "00:00",
+                      "01:00",
+                      "02:00",
+                      "03:00",
+                      "04:00",
+                      "05:00",
+                      "06:00",
+                      "07:00",
+                      "08:00",
+                      "09:00",
+                      "10:00",
+                      "11:00",
+                      "12:00",
+                      "13:00",
+                      "14:00",
+                      "15:00",
+                      "16:00",
+                      "17:00",
+                      "18:00",
+                      "19:00",
+                      "20:00",
+                      "21:00",
+                      "22:00",
+                      "23:00"
+                    ],
                     "maxLength": 1000,
                     "minLength": 1,
                     "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
@@ -92584,6 +93440,10 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "smoking_allowed": {
+                    "description": "Whether guests may smoke or vape at the property.",
+                    "type": "boolean"
                   },
                   "soup": {
                     "description": "Authored soup information shown with the dish.",
@@ -93736,6 +94596,10 @@
                     "pattern": "\\S",
                     "type": "string"
                   },
+                  "commercial_photography_allowed": {
+                    "description": "Whether guests may take commercial photos or film at the property.",
+                    "type": "boolean"
+                  },
                   "dietary_notes": {
                     "description": "Merchant-stated dietary facts displayed with a dish.",
                     "items": {
@@ -93754,6 +94618,10 @@
                     "minLength": 1,
                     "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
                     "type": "string"
+                  },
+                  "events_allowed": {
+                    "description": "Whether guests may host events at the property.",
+                    "type": "boolean"
                   },
                   "featured": {
                     "description": "Highlight this item on the menu and homepage.",
@@ -93842,6 +94710,10 @@
                     "pattern": "\\S",
                     "type": "string"
                   },
+                  "pets_allowed": {
+                    "description": "Let guests know if they can bring pets.",
+                    "type": "boolean"
+                  },
                   "preparation": {
                     "description": "Preparation instructions shown to customers before a session or appointment.",
                     "maxLength": 10000,
@@ -93851,6 +94723,76 @@
                   },
                   "pricing_note": {
                     "description": "An explicitly stated price such as Market price; use only when no numeric price is set.",
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                    "type": "string"
+                  },
+                  "quiet_hours": {
+                    "description": "Hours when guests should keep noise to a minimum.",
+                    "type": "boolean"
+                  },
+                  "quiet_hours_end": {
+                    "description": "Local end of quiet hours, required with quiet hours and its start time.",
+                    "enum": [
+                      "00:00",
+                      "01:00",
+                      "02:00",
+                      "03:00",
+                      "04:00",
+                      "05:00",
+                      "06:00",
+                      "07:00",
+                      "08:00",
+                      "09:00",
+                      "10:00",
+                      "11:00",
+                      "12:00",
+                      "13:00",
+                      "14:00",
+                      "15:00",
+                      "16:00",
+                      "17:00",
+                      "18:00",
+                      "19:00",
+                      "20:00",
+                      "21:00",
+                      "22:00",
+                      "23:00"
+                    ],
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                    "type": "string"
+                  },
+                  "quiet_hours_start": {
+                    "description": "Local start of quiet hours, required with quiet hours and its end time.",
+                    "enum": [
+                      "00:00",
+                      "01:00",
+                      "02:00",
+                      "03:00",
+                      "04:00",
+                      "05:00",
+                      "06:00",
+                      "07:00",
+                      "08:00",
+                      "09:00",
+                      "10:00",
+                      "11:00",
+                      "12:00",
+                      "13:00",
+                      "14:00",
+                      "15:00",
+                      "16:00",
+                      "17:00",
+                      "18:00",
+                      "19:00",
+                      "20:00",
+                      "21:00",
+                      "22:00",
+                      "23:00"
+                    ],
                     "maxLength": 1000,
                     "minLength": 1,
                     "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
@@ -93867,6 +94809,10 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "smoking_allowed": {
+                    "description": "Whether guests may smoke or vape at the property.",
+                    "type": "boolean"
                   },
                   "soup": {
                     "description": "Authored soup information shown with the dish.",
@@ -102395,6 +103341,10 @@
                             "pattern": "\\S",
                             "type": "string"
                           },
+                          "commercial_photography_allowed": {
+                            "description": "Whether guests may take commercial photos or film at the property.",
+                            "type": "boolean"
+                          },
                           "dietary_notes": {
                             "description": "Merchant-stated dietary facts displayed with a dish.",
                             "items": {
@@ -102413,6 +103363,10 @@
                             "minLength": 1,
                             "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
                             "type": "string"
+                          },
+                          "events_allowed": {
+                            "description": "Whether guests may host events at the property.",
+                            "type": "boolean"
                           },
                           "featured": {
                             "description": "Highlight this item on the menu and homepage.",
@@ -102501,6 +103455,10 @@
                             "pattern": "\\S",
                             "type": "string"
                           },
+                          "pets_allowed": {
+                            "description": "Let guests know if they can bring pets.",
+                            "type": "boolean"
+                          },
                           "preparation": {
                             "description": "Preparation instructions shown to customers before a session or appointment.",
                             "maxLength": 10000,
@@ -102510,6 +103468,76 @@
                           },
                           "pricing_note": {
                             "description": "An explicitly stated price such as Market price; use only when no numeric price is set.",
+                            "maxLength": 1000,
+                            "minLength": 1,
+                            "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                            "type": "string"
+                          },
+                          "quiet_hours": {
+                            "description": "Hours when guests should keep noise to a minimum.",
+                            "type": "boolean"
+                          },
+                          "quiet_hours_end": {
+                            "description": "Local end of quiet hours, required with quiet hours and its start time.",
+                            "enum": [
+                              "00:00",
+                              "01:00",
+                              "02:00",
+                              "03:00",
+                              "04:00",
+                              "05:00",
+                              "06:00",
+                              "07:00",
+                              "08:00",
+                              "09:00",
+                              "10:00",
+                              "11:00",
+                              "12:00",
+                              "13:00",
+                              "14:00",
+                              "15:00",
+                              "16:00",
+                              "17:00",
+                              "18:00",
+                              "19:00",
+                              "20:00",
+                              "21:00",
+                              "22:00",
+                              "23:00"
+                            ],
+                            "maxLength": 1000,
+                            "minLength": 1,
+                            "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                            "type": "string"
+                          },
+                          "quiet_hours_start": {
+                            "description": "Local start of quiet hours, required with quiet hours and its end time.",
+                            "enum": [
+                              "00:00",
+                              "01:00",
+                              "02:00",
+                              "03:00",
+                              "04:00",
+                              "05:00",
+                              "06:00",
+                              "07:00",
+                              "08:00",
+                              "09:00",
+                              "10:00",
+                              "11:00",
+                              "12:00",
+                              "13:00",
+                              "14:00",
+                              "15:00",
+                              "16:00",
+                              "17:00",
+                              "18:00",
+                              "19:00",
+                              "20:00",
+                              "21:00",
+                              "22:00",
+                              "23:00"
+                            ],
                             "maxLength": 1000,
                             "minLength": 1,
                             "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
@@ -102526,6 +103554,10 @@
                             "maxItems": 100,
                             "type": "array",
                             "uniqueItems": true
+                          },
+                          "smoking_allowed": {
+                            "description": "Whether guests may smoke or vape at the property.",
+                            "type": "boolean"
                           },
                           "soup": {
                             "description": "Authored soup information shown with the dish.",
@@ -103143,6 +104175,10 @@
                             "pattern": "\\S",
                             "type": "string"
                           },
+                          "commercial_photography_allowed": {
+                            "description": "Whether guests may take commercial photos or film at the property.",
+                            "type": "boolean"
+                          },
                           "dietary_notes": {
                             "description": "Merchant-stated dietary facts displayed with a dish.",
                             "items": {
@@ -103161,6 +104197,10 @@
                             "minLength": 1,
                             "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
                             "type": "string"
+                          },
+                          "events_allowed": {
+                            "description": "Whether guests may host events at the property.",
+                            "type": "boolean"
                           },
                           "featured": {
                             "description": "Highlight this item on the menu and homepage.",
@@ -103249,6 +104289,10 @@
                             "pattern": "\\S",
                             "type": "string"
                           },
+                          "pets_allowed": {
+                            "description": "Let guests know if they can bring pets.",
+                            "type": "boolean"
+                          },
                           "preparation": {
                             "description": "Preparation instructions shown to customers before a session or appointment.",
                             "maxLength": 10000,
@@ -103258,6 +104302,76 @@
                           },
                           "pricing_note": {
                             "description": "An explicitly stated price such as Market price; use only when no numeric price is set.",
+                            "maxLength": 1000,
+                            "minLength": 1,
+                            "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                            "type": "string"
+                          },
+                          "quiet_hours": {
+                            "description": "Hours when guests should keep noise to a minimum.",
+                            "type": "boolean"
+                          },
+                          "quiet_hours_end": {
+                            "description": "Local end of quiet hours, required with quiet hours and its start time.",
+                            "enum": [
+                              "00:00",
+                              "01:00",
+                              "02:00",
+                              "03:00",
+                              "04:00",
+                              "05:00",
+                              "06:00",
+                              "07:00",
+                              "08:00",
+                              "09:00",
+                              "10:00",
+                              "11:00",
+                              "12:00",
+                              "13:00",
+                              "14:00",
+                              "15:00",
+                              "16:00",
+                              "17:00",
+                              "18:00",
+                              "19:00",
+                              "20:00",
+                              "21:00",
+                              "22:00",
+                              "23:00"
+                            ],
+                            "maxLength": 1000,
+                            "minLength": 1,
+                            "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                            "type": "string"
+                          },
+                          "quiet_hours_start": {
+                            "description": "Local start of quiet hours, required with quiet hours and its end time.",
+                            "enum": [
+                              "00:00",
+                              "01:00",
+                              "02:00",
+                              "03:00",
+                              "04:00",
+                              "05:00",
+                              "06:00",
+                              "07:00",
+                              "08:00",
+                              "09:00",
+                              "10:00",
+                              "11:00",
+                              "12:00",
+                              "13:00",
+                              "14:00",
+                              "15:00",
+                              "16:00",
+                              "17:00",
+                              "18:00",
+                              "19:00",
+                              "20:00",
+                              "21:00",
+                              "22:00",
+                              "23:00"
+                            ],
                             "maxLength": 1000,
                             "minLength": 1,
                             "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
@@ -103274,6 +104388,10 @@
                             "maxItems": 100,
                             "type": "array",
                             "uniqueItems": true
+                          },
+                          "smoking_allowed": {
+                            "description": "Whether guests may smoke or vape at the property.",
+                            "type": "boolean"
                           },
                           "soup": {
                             "description": "Authored soup information shown with the dish.",
@@ -105352,7 +106470,7 @@
     {
       "name": "update_product",
       "title": "Update product",
-      "description": "Edit a product and return its updated record. For a price change, supply the variant ID, price ID and unit_amount. Variants and prices merge by ID; omitted entries stay. Supplied options and text details replace their current values. Booking setup also creates sessions and publishes the offering.",
+      "description": "Edit a product and return its updated record. For a price change, supply the variant ID, price ID and unit_amount. Variants and prices merge by ID; omitted entries stay. Supplied options and details replace their current values by default. Use details_mode merge for focused fact edits, preserving unmentioned facts and clearing named facts with null. Booking setup also creates sessions and publishes the offering.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -105486,218 +106604,523 @@
           },
           "details": {
             "additionalProperties": false,
-            "description": "Named customer-facing facts for the product kind. This is a complete replacement map; preserve fields to retain. pricing_note contains explicitly stated price wording and requires empty numeric prices.",
+            "description": "Named customer-facing facts for the product kind. Omitted details stay unchanged. Supplied details replace their map by default, retaining featured unless supplied. With details_mode merge, only supplied facts change and null removes a named fact. pricing_note requires empty numeric prices.",
             "properties": {
               "allergens": {
-                "description": "Allergens the merchant states this dish contains.",
-                "items": {
-                  "maxLength": 1000,
-                  "minLength": 1,
-                  "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                  "type": "string"
-                },
-                "maxItems": 100,
-                "type": "array",
-                "uniqueItems": true
+                "anyOf": [
+                  {
+                    "description": "Allergens the merchant states this dish contains.",
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Allergens the merchant states this dish contains."
               },
               "cancellation_policy": {
-                "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
-                "maxLength": 10000,
-                "minLength": 1,
-                "pattern": "\\S",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The merchant’s stated cancellation terms, displayed publicly; this text does not automate refunds."
               },
               "care_instructions": {
-                "description": "How to care for the item, shown in its details.",
-                "maxLength": 10000,
-                "minLength": 1,
-                "pattern": "\\S",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "description": "How to care for the item, shown in its details.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "How to care for the item, shown in its details."
+              },
+              "commercial_photography_allowed": {
+                "description": "Whether guests may take commercial photos or film at the property.",
+                "type": [
+                  "boolean",
+                  "null"
+                ]
               },
               "dietary_notes": {
-                "description": "Merchant-stated dietary facts displayed with a dish.",
-                "items": {
-                  "maxLength": 1000,
-                  "minLength": 1,
-                  "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                  "type": "string"
-                },
-                "maxItems": 100,
-                "type": "array",
-                "uniqueItems": true
+                "anyOf": [
+                  {
+                    "description": "Merchant-stated dietary facts displayed with a dish.",
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Merchant-stated dietary facts displayed with a dish."
               },
               "dimensions": {
-                "description": "Item measurements including their units, shown in its details.",
-                "maxLength": 1000,
-                "minLength": 1,
-                "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "description": "Item measurements including their units, shown in its details.",
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Item measurements including their units, shown in its details."
+              },
+              "events_allowed": {
+                "description": "Whether guests may host events at the property.",
+                "type": [
+                  "boolean",
+                  "null"
+                ]
               },
               "featured": {
                 "description": "Highlight this item on the menu and homepage.",
-                "type": "boolean"
+                "type": [
+                  "boolean",
+                  "null"
+                ]
               },
               "guest_access": {
-                "description": "The spaces and facilities guests can use during their stay.",
-                "maxLength": 10000,
-                "minLength": 1,
-                "pattern": "\\S",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "description": "The spaces and facilities guests can use during their stay.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The spaces and facilities guests can use during their stay."
               },
               "house_rules": {
-                "description": "The host’s rules for guests staying in the home, shown with the listing.",
-                "maxLength": 10000,
-                "minLength": 1,
-                "pattern": "\\S",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "description": "The host’s rules for guests staying in the home, shown with the listing.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The host’s rules for guests staying in the home, shown with the listing."
               },
               "included_items": {
-                "description": "Items or work included in the stated price, shown in their own public section.",
-                "items": {
-                  "maxLength": 1000,
-                  "minLength": 1,
-                  "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                  "type": "string"
-                },
-                "maxItems": 100,
-                "type": "array",
-                "uniqueItems": true
+                "anyOf": [
+                  {
+                    "description": "Items or work included in the stated price, shown in their own public section.",
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Items or work included in the stated price, shown in their own public section."
               },
               "ingredients": {
-                "description": "Ingredients shown in the dish details.",
-                "items": {
-                  "maxLength": 1000,
-                  "minLength": 1,
-                  "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                  "type": "string"
-                },
-                "maxItems": 100,
-                "type": "array",
-                "uniqueItems": true
+                "anyOf": [
+                  {
+                    "description": "Ingredients shown in the dish details.",
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Ingredients shown in the dish details."
               },
               "interaction_with_guests": {
-                "description": "How guests can contact the host and what support is available.",
-                "maxLength": 10000,
-                "minLength": 1,
-                "pattern": "\\S",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "description": "How guests can contact the host and what support is available.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "How guests can contact the host and what support is available."
               },
               "materials": {
-                "description": "Materials the item is made from, shown in its details.",
-                "items": {
-                  "maxLength": 1000,
-                  "minLength": 1,
-                  "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                  "type": "string"
-                },
-                "maxItems": 100,
-                "type": "array",
-                "uniqueItems": true
+                "anyOf": [
+                  {
+                    "description": "Materials the item is made from, shown in its details.",
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Materials the item is made from, shown in its details."
               },
               "meeting_point": {
-                "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
-                "maxLength": 10000,
-                "minLength": 1,
-                "pattern": "\\S",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Instructions shown in the meeting section; meeting mode and video links are set in scheduling."
               },
               "noodle": {
-                "description": "Authored noodle information shown as dish facts; these do not establish purchasable variants.",
-                "items": {
-                  "maxLength": 1000,
-                  "minLength": 1,
-                  "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                  "type": "string"
-                },
-                "maxItems": 100,
-                "type": "array",
-                "uniqueItems": true
+                "anyOf": [
+                  {
+                    "description": "Authored noodle information shown as dish facts; these do not establish purchasable variants.",
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Authored noodle information shown as dish facts; these do not establish purchasable variants."
               },
               "other_details_to_note": {
-                "description": "Additional information guests should know before booking.",
-                "maxLength": 10000,
-                "minLength": 1,
-                "pattern": "\\S",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "description": "Additional information guests should know before booking.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Additional information guests should know before booking."
+              },
+              "pets_allowed": {
+                "description": "Let guests know if they can bring pets.",
+                "type": [
+                  "boolean",
+                  "null"
+                ]
               },
               "preparation": {
-                "description": "Preparation instructions shown to customers before a session or appointment.",
-                "maxLength": 10000,
-                "minLength": 1,
-                "pattern": "\\S",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "description": "Preparation instructions shown to customers before a session or appointment.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Preparation instructions shown to customers before a session or appointment."
               },
               "pricing_note": {
-                "description": "An explicitly stated price such as Market price; use only when no numeric price is set.",
-                "maxLength": 1000,
-                "minLength": 1,
-                "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "description": "An explicitly stated price such as Market price; use only when no numeric price is set.",
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "An explicitly stated price such as Market price; use only when no numeric price is set."
+              },
+              "quiet_hours": {
+                "description": "Hours when guests should keep noise to a minimum.",
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "quiet_hours_end": {
+                "anyOf": [
+                  {
+                    "description": "Local end of quiet hours, required with quiet hours and its start time.",
+                    "enum": [
+                      "00:00",
+                      "01:00",
+                      "02:00",
+                      "03:00",
+                      "04:00",
+                      "05:00",
+                      "06:00",
+                      "07:00",
+                      "08:00",
+                      "09:00",
+                      "10:00",
+                      "11:00",
+                      "12:00",
+                      "13:00",
+                      "14:00",
+                      "15:00",
+                      "16:00",
+                      "17:00",
+                      "18:00",
+                      "19:00",
+                      "20:00",
+                      "21:00",
+                      "22:00",
+                      "23:00"
+                    ],
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Local end of quiet hours, required with quiet hours and its start time."
+              },
+              "quiet_hours_start": {
+                "anyOf": [
+                  {
+                    "description": "Local start of quiet hours, required with quiet hours and its end time.",
+                    "enum": [
+                      "00:00",
+                      "01:00",
+                      "02:00",
+                      "03:00",
+                      "04:00",
+                      "05:00",
+                      "06:00",
+                      "07:00",
+                      "08:00",
+                      "09:00",
+                      "10:00",
+                      "11:00",
+                      "12:00",
+                      "13:00",
+                      "14:00",
+                      "15:00",
+                      "16:00",
+                      "17:00",
+                      "18:00",
+                      "19:00",
+                      "20:00",
+                      "21:00",
+                      "22:00",
+                      "23:00"
+                    ],
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Local start of quiet hours, required with quiet hours and its end time."
               },
               "sizes": {
-                "description": "Authored serving information; priced choices belong in variants.",
-                "items": {
-                  "maxLength": 1000,
-                  "minLength": 1,
-                  "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                  "type": "string"
-                },
-                "maxItems": 100,
-                "type": "array",
-                "uniqueItems": true
+                "anyOf": [
+                  {
+                    "description": "Authored serving information; priced choices belong in variants.",
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Authored serving information; priced choices belong in variants."
+              },
+              "smoking_allowed": {
+                "description": "Whether guests may smoke or vape at the property.",
+                "type": [
+                  "boolean",
+                  "null"
+                ]
               },
               "soup": {
-                "description": "Authored soup information shown with the dish.",
-                "items": {
-                  "maxLength": 1000,
-                  "minLength": 1,
-                  "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                  "type": "string"
-                },
-                "maxItems": 100,
-                "type": "array",
-                "uniqueItems": true
+                "anyOf": [
+                  {
+                    "description": "Authored soup information shown with the dish.",
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Authored soup information shown with the dish."
               },
               "tagline": {
-                "description": "A short sentence shown below the product title.",
-                "maxLength": 1000,
-                "minLength": 1,
-                "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "description": "A short sentence shown below the product title.",
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "A short sentence shown below the product title."
               },
               "toppings": {
-                "description": "Authored topping information; priced choices belong in variants.",
-                "items": {
-                  "maxLength": 1000,
-                  "minLength": 1,
-                  "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                  "type": "string"
-                },
-                "maxItems": 100,
-                "type": "array",
-                "uniqueItems": true
+                "anyOf": [
+                  {
+                    "description": "Authored topping information; priced choices belong in variants.",
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Authored topping information; priced choices belong in variants."
               },
               "what_to_bring": {
-                "description": "Items customers should bring, shown in the preparation section.",
-                "items": {
-                  "maxLength": 1000,
-                  "minLength": 1,
-                  "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
-                  "type": "string"
-                },
-                "maxItems": 100,
-                "type": "array",
-                "uniqueItems": true
+                "anyOf": [
+                  {
+                    "description": "Items customers should bring, shown in the preparation section.",
+                    "items": {
+                      "maxLength": 1000,
+                      "minLength": 1,
+                      "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                      "type": "string"
+                    },
+                    "maxItems": 100,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Items customers should bring, shown in the preparation section."
               },
               "your_property": {
-                "description": "The spaces and features guests should know about this home.",
-                "maxLength": 10000,
-                "minLength": 1,
-                "pattern": "\\S",
-                "type": "string"
+                "anyOf": [
+                  {
+                    "description": "The spaces and features guests should know about this home.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The spaces and features guests should know about this home."
               }
             },
             "type": "object"
+          },
+          "details_mode": {
+            "default": "replace",
+            "description": "Requires details. replace is the default complete replacement map, retaining featured unless supplied; null is refused. merge preserves unmentioned facts and null explicitly removes a named fact. Unknown keys are refused in either mode.",
+            "enum": [
+              "merge",
+              "replace"
+            ],
+            "type": "string"
           },
           "idempotency_key": {
             "description": "Required with booking setup. Repeat the same key with the same request for an identical retry.",
@@ -106550,6 +107973,10 @@
                     "pattern": "\\S",
                     "type": "string"
                   },
+                  "commercial_photography_allowed": {
+                    "description": "Whether guests may take commercial photos or film at the property.",
+                    "type": "boolean"
+                  },
                   "dietary_notes": {
                     "description": "Merchant-stated dietary facts displayed with a dish.",
                     "items": {
@@ -106568,6 +107995,10 @@
                     "minLength": 1,
                     "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
                     "type": "string"
+                  },
+                  "events_allowed": {
+                    "description": "Whether guests may host events at the property.",
+                    "type": "boolean"
                   },
                   "featured": {
                     "description": "Highlight this item on the menu and homepage.",
@@ -106656,6 +108087,10 @@
                     "pattern": "\\S",
                     "type": "string"
                   },
+                  "pets_allowed": {
+                    "description": "Let guests know if they can bring pets.",
+                    "type": "boolean"
+                  },
                   "preparation": {
                     "description": "Preparation instructions shown to customers before a session or appointment.",
                     "maxLength": 10000,
@@ -106665,6 +108100,76 @@
                   },
                   "pricing_note": {
                     "description": "An explicitly stated price such as Market price; use only when no numeric price is set.",
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                    "type": "string"
+                  },
+                  "quiet_hours": {
+                    "description": "Hours when guests should keep noise to a minimum.",
+                    "type": "boolean"
+                  },
+                  "quiet_hours_end": {
+                    "description": "Local end of quiet hours, required with quiet hours and its start time.",
+                    "enum": [
+                      "00:00",
+                      "01:00",
+                      "02:00",
+                      "03:00",
+                      "04:00",
+                      "05:00",
+                      "06:00",
+                      "07:00",
+                      "08:00",
+                      "09:00",
+                      "10:00",
+                      "11:00",
+                      "12:00",
+                      "13:00",
+                      "14:00",
+                      "15:00",
+                      "16:00",
+                      "17:00",
+                      "18:00",
+                      "19:00",
+                      "20:00",
+                      "21:00",
+                      "22:00",
+                      "23:00"
+                    ],
+                    "maxLength": 1000,
+                    "minLength": 1,
+                    "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
+                    "type": "string"
+                  },
+                  "quiet_hours_start": {
+                    "description": "Local start of quiet hours, required with quiet hours and its end time.",
+                    "enum": [
+                      "00:00",
+                      "01:00",
+                      "02:00",
+                      "03:00",
+                      "04:00",
+                      "05:00",
+                      "06:00",
+                      "07:00",
+                      "08:00",
+                      "09:00",
+                      "10:00",
+                      "11:00",
+                      "12:00",
+                      "13:00",
+                      "14:00",
+                      "15:00",
+                      "16:00",
+                      "17:00",
+                      "18:00",
+                      "19:00",
+                      "20:00",
+                      "21:00",
+                      "22:00",
+                      "23:00"
+                    ],
                     "maxLength": 1000,
                     "minLength": 1,
                     "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
@@ -106681,6 +108186,10 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "smoking_allowed": {
+                    "description": "Whether guests may smoke or vape at the property.",
+                    "type": "boolean"
                   },
                   "soup": {
                     "description": "Authored soup information shown with the dish.",
@@ -116969,18 +118478,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:b0d96a726392301b7388c905d65bfcb41dd24802e54adb015c2b5640e427a9c9",
-        "get_product": "sha256:0af628058c5f8b123e327e5937328b8f85dcaad8b80aca086baced38f1cce894",
+        "create_product": "sha256:242bc333e3635616843dcbb82ddfd82fbbcc3ad1dcc3c949cad128953e73d5e0",
+        "get_product": "sha256:af6135a2a3e6da30fd7eca2cfb56152278074bad5e7e4440ffe5d8f2e395fa28",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
-        "reconcile_products": "sha256:8c9ad41741c4f6511ae0bfb2b730dda33e1c1034ed790fe888b1fb447f682370",
+        "reconcile_products": "sha256:59219d4f19fab5e4816391ac24859a8938961fe50b4f336353b30a456f0903b3",
         "reorder_collections": "sha256:1ca15d17627f9313cf613371e44816f2ae36a2f215b343ad8f4f1d1c6fe7c171",
         "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
-        "update_menu": "sha256:26f888f2d4d2ac4e4bbab1ac591dd702394909545419eae6eedc876835334cbc",
-        "update_product": "sha256:53bcd6e10e5d7da28b4832ba83bbf80c41cb36a39ed03e3f3797b75fe8e54bd6"
+        "update_menu": "sha256:95bb0ecf7568225f3d27c41ee37b2da2405738e6a093e8e7b2ef8ec30b2a2583",
+        "update_product": "sha256:c56b1b6f641526808297a78943c4cf156d45cdaa65a2c55b82f980d2ee1fb281"
       }
     },
     {
@@ -117025,8 +118534,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
-        "create_product": "sha256:b0d96a726392301b7388c905d65bfcb41dd24802e54adb015c2b5640e427a9c9",
-        "get_product": "sha256:0af628058c5f8b123e327e5937328b8f85dcaad8b80aca086baced38f1cce894",
+        "create_product": "sha256:242bc333e3635616843dcbb82ddfd82fbbcc3ad1dcc3c949cad128953e73d5e0",
+        "get_product": "sha256:af6135a2a3e6da30fd7eca2cfb56152278074bad5e7e4440ffe5d8f2e395fa28",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
@@ -117090,7 +118599,7 @@
         "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
         "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
-        "get_product": "sha256:0af628058c5f8b123e327e5937328b8f85dcaad8b80aca086baced38f1cce894",
+        "get_product": "sha256:af6135a2a3e6da30fd7eca2cfb56152278074bad5e7e4440ffe5d8f2e395fa28",
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871",
@@ -117106,7 +118615,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:b0d96a726392301b7388c905d65bfcb41dd24802e54adb015c2b5640e427a9c9",
+        "create_product": "sha256:242bc333e3635616843dcbb82ddfd82fbbcc3ad1dcc3c949cad128953e73d5e0",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_website_draft": "sha256:fccf7d7281ba30d1e79163929e61abec1893c2e910460c4068364a65784a7bac",
@@ -117117,7 +118626,7 @@
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
-        "update_menu": "sha256:26f888f2d4d2ac4e4bbab1ac591dd702394909545419eae6eedc876835334cbc",
+        "update_menu": "sha256:95bb0ecf7568225f3d27c41ee37b2da2405738e6a093e8e7b2ef8ec30b2a2583",
         "update_organization_settings": "sha256:c7ab6bac088414e7f6397f3fcd00d9c8c79dd30b4575f35ed4050388748e1047",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
@@ -117132,7 +118641,7 @@
       },
       "toolContracts": {
         "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
-        "get_product": "sha256:0af628058c5f8b123e327e5937328b8f85dcaad8b80aca086baced38f1cce894",
+        "get_product": "sha256:af6135a2a3e6da30fd7eca2cfb56152278074bad5e7e4440ffe5d8f2e395fa28",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -117140,7 +118649,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "replace_product_weekly_schedule": "sha256:d4f5ba8f99874961aa0d9cb91f22c8ef2b640aeeeff6a52fc8e7ed758fbf4ae2",
         "set_product_booking_config": "sha256:727bf4fc651ced45ea84cc49b1c1e864366dbadac346e8dabdba56db426e1acc",
-        "update_product": "sha256:53bcd6e10e5d7da28b4832ba83bbf80c41cb36a39ed03e3f3797b75fe8e54bd6",
+        "update_product": "sha256:c56b1b6f641526808297a78943c4cf156d45cdaa65a2c55b82f980d2ee1fb281",
         "update_reservation_policy": "sha256:f1e5e7eda32993dc7be3ffc459ceb97517ed309bb144d2a5f29a0f0b082f784f"
       }
     },
@@ -117160,7 +118669,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0",
-        "update_product": "sha256:53bcd6e10e5d7da28b4832ba83bbf80c41cb36a39ed03e3f3797b75fe8e54bd6",
+        "update_product": "sha256:c56b1b6f641526808297a78943c4cf156d45cdaa65a2c55b82f980d2ee1fb281",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
     },
@@ -117176,14 +118685,14 @@
         "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_organization_analytics": "sha256:aad678e4cef26c11f2a5304b650d582662912ff4a1395bffb04b7d791778db43",
-        "get_product": "sha256:0af628058c5f8b123e327e5937328b8f85dcaad8b80aca086baced38f1cce894",
+        "get_product": "sha256:af6135a2a3e6da30fd7eca2cfb56152278074bad5e7e4440ffe5d8f2e395fa28",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
-        "update_product": "sha256:53bcd6e10e5d7da28b4832ba83bbf80c41cb36a39ed03e3f3797b75fe8e54bd6"
+        "update_product": "sha256:c56b1b6f641526808297a78943c4cf156d45cdaa65a2c55b82f980d2ee1fb281"
       }
     }
   ],
@@ -117211,7 +118720,7 @@
       "slug": "update-your-menu-with-an-ai-assistant",
       "contentHash": "sha256:aa8642030ebe66e3d27ab8abecff519d51ee2eaf11f7ee1e02875ee4e1ea987e",
       "toolContracts": {
-        "get_product": "sha256:0af628058c5f8b123e327e5937328b8f85dcaad8b80aca086baced38f1cce894",
+        "get_product": "sha256:af6135a2a3e6da30fd7eca2cfb56152278074bad5e7e4440ffe5d8f2e395fa28",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
@@ -117219,7 +118728,7 @@
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
         "reorder_collections": "sha256:1ca15d17627f9313cf613371e44816f2ae36a2f215b343ad8f4f1d1c6fe7c171",
         "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
-        "update_menu": "sha256:26f888f2d4d2ac4e4bbab1ac591dd702394909545419eae6eedc876835334cbc"
+        "update_menu": "sha256:95bb0ecf7568225f3d27c41ee37b2da2405738e6a093e8e7b2ef8ec30b2a2583"
       }
     },
     {
