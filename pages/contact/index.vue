@@ -146,7 +146,7 @@
                     class="h-full w-full border-0"
                     style="filter:grayscale(0.12)"
                     loading="lazy"
-                    referrerpolicy="no-referrer-when-downgrade"
+                    referrerpolicy="strict-origin-when-cross-origin"
                     sandbox="allow-scripts allow-same-origin"
                   />
                   <div v-else class="flex h-full w-full items-center justify-center">

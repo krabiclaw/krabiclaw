@@ -233,7 +233,7 @@
                 class="h-56 w-full border-t border-default"
                 style="border-width: 1px 0 0"
                 loading="lazy"
-                referrerpolicy="no-referrer-when-downgrade"
+                referrerpolicy="strict-origin-when-cross-origin"
               />
             </div>
           </section>

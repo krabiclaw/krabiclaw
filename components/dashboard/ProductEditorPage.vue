@@ -82,8 +82,8 @@
           <span v-if="stayAmenityPreview.length > 3" class="block pt-3 text-muted">+ {{ stayAmenityPreview.length - 3 }} more</span>
         </span>
         <span v-else-if="item.id === 'cancellation'" class="block space-y-2">
-          <span class="block">{{ item.summary }}{{ form.stay_cancellation_policy ? ' for short-term stays' : '' }}</span>
-          <span v-if="form.stay_long_term_cancellation_policy" class="block">{{ STAY_LONG_TERM_CANCELLATION_POLICIES[form.stay_long_term_cancellation_policy].label }} for long-term stays</span>
+          <span class="block">{{ item.summary }}{{ product?.stay?.cancellation_policy ? ' for short-term stays' : '' }}</span>
+          <span v-if="product?.stay?.long_term_cancellation_policy" class="block">{{ STAY_LONG_TERM_CANCELLATION_POLICIES[product.stay.long_term_cancellation_policy].label }} for long-term stays</span>
         </span>
         <span v-else :class="arrivalTab ? 'line-clamp-2 whitespace-pre-line break-words' : item.id === 'description' ? 'line-clamp-4' : undefined">{{ item.summary }}</span>
       </template>
@@ -596,7 +596,7 @@ function restorePreviewFocus() {
 }
 const photoAssets = computed(() => product.value ? uniqueMediaAssets([...(product.value.image ? [product.value.image] : []), ...product.value.gallery]) : [])
 const stayPhotos = computed(() => photoAssets.value.map(mediaStillUrl).filter((url): url is string => Boolean(url)))
-const stayAmenityPreview = computed(() => form.stay_amenities.map(code => ({ code, ...STAY_AMENITIES[code] })).sort((left, right) => left.label.localeCompare(right.label)))
+const stayAmenityPreview = computed(() => (product.value?.stay?.amenities ?? []).map(code => ({ code, ...STAY_AMENITIES[code] })).sort((left, right) => left.label.localeCompare(right.label)))
 const savedHouseRules = computed(() => product.value?.kind === 'stay' ? stayHouseRuleLines(product.value.details, value => formatTime(value, locale.value)) : [])
 // A product that is not there is not a page. A request that failed is a state
 // this level shows, because the product may well still exist.
@@ -1078,22 +1078,22 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
             {
               id: 'amenities',
               label: 'Amenities',
-              summary: form.stay_amenities.length
-                ? `${form.stay_amenities.length} ${form.stay_amenities.length === 1 ? 'amenity' : 'amenities'}`
+              summary: product.value.stay!.amenities.length
+                ? `${product.value.stay!.amenities.length} ${product.value.stay!.amenities.length === 1 ? 'amenity' : 'amenities'}`
                 : 'No amenities selected',
-              placeholder: !form.stay_amenities.length,
+              placeholder: !product.value.stay!.amenities.length,
               to: sectionPath('amenities'),
             },
             {
               id: 'cancellation',
               label: 'Cancellation policy',
-              summary: form.stay_cancellation_policy
-                ? STAY_CANCELLATION_POLICIES[form.stay_cancellation_policy].label
+              summary: product.value.stay!.cancellation_policy
+                ? STAY_CANCELLATION_POLICIES[product.value.stay!.cancellation_policy].label
                 : 'No policy set',
-              placeholder: !form.stay_cancellation_policy,
+              placeholder: !product.value.stay!.cancellation_policy,
               to: sectionPath('cancellation'),
             },
-            { id: 'availability', label: 'Availability', summary: `${form.min_nights} ${Number(form.min_nights) === 1 ? 'night' : 'nights'} minimum`, to: sectionPath('availability') },
+            { id: 'availability', label: 'Availability', summary: `${product.value.stay!.min_nights} ${product.value.stay!.min_nights === 1 ? 'night' : 'nights'} minimum`, to: sectionPath('availability') },
             { id: 'guests', label: 'Number of guests', summary: `${product.value.stay!.max_guests} ${product.value.stay!.max_guests === 1 ? 'guest' : 'guests'}`, to: sectionPath('guests') },
             { id: 'house-rules', label: 'House rules', summary: savedHouseRules.value.join('\n') || 'Add details', placeholder: !savedHouseRules.value.length, to: sectionPath('house-rules') },
             { id: 'team', label: 'Looked after by', summary: stayTeamSummary(), to: sectionPath('team') },
