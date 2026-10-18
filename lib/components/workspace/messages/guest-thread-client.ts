@@ -1,6 +1,7 @@
 import { isRecord } from '~/utils/api-clients'
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { EXPERIENCE_PRESENTATION } from '~/utils/product-presentation'
+import { normalizeVertical } from '~/utils/vertical-copy'
 import type {
   GuestThreadDeliveryFailureViewModel,
   GuestThreadDetailViewModel,
@@ -29,24 +30,27 @@ export type ThreadDetail = GuestThreadDetailViewModel
 
   There is no fourth list of nouns here. A reservation thread is named by
   `booking-presentation` — Reservation for a restaurant, Consultation for a
-  professional-services site — and a booking thread is always a seat on an
-  experience, which `product-presentation` already names. A contact thread has
-  no record behind it, and reads the way Airbnb's inbox reads one: a direct
-  message.
+  legal practice — and a booking thread is a Consultation for legal practice or
+  a seat on an experience. A contact thread has no record behind it, and reads
+  the way Airbnb's inbox reads one: a direct message.
 */
 export function threadRecordTitle(type: SubmissionType, vertical: string | null | undefined): string {
   if (type === 'contact') return 'Message'
   if (type === 'stay') return 'Stay'
-  if (type === 'booking') return EXPERIENCE_PRESENTATION.itemLabel
-  return resolveBookingPresentation('reservation', vertical).label
+  if (type === 'booking' && vertical && normalizeVertical(vertical) !== 'service') {
+    return EXPERIENCE_PRESENTATION.itemLabel
+  }
+  return resolveBookingPresentation(type === 'booking' ? 'booking' : 'reservation', vertical).label
 }
 
 /** The plural, for the filter that narrows the list to this kind. */
 export function threadFilterLabel(type: SubmissionType, vertical: string | null | undefined): string {
   if (type === 'contact') return 'Direct messages'
   if (type === 'stay') return 'Stays'
-  if (type === 'booking') return EXPERIENCE_PRESENTATION.itemLabelPlural
-  return resolveBookingPresentation('reservation', vertical).labelPlural
+  if (type === 'booking' && vertical && normalizeVertical(vertical) !== 'service') {
+    return EXPERIENCE_PRESENTATION.itemLabelPlural
+  }
+  return resolveBookingPresentation(type === 'booking' ? 'booking' : 'reservation', vertical).labelPlural
 }
 
 export function isThreadListResponse(value: unknown): value is ThreadListPage {

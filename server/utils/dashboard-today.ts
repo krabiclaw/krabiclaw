@@ -106,7 +106,7 @@ async function contentOpportunities(db: DbClient, organization: DashboardOrganiz
       WHERE organization_id=? AND row_role='root' AND status='draft' AND (kind='social_post' OR (kind='article' AND (metadata_json ->> '$.collection')='blog'))
       ${locationId ? 'AND location_id=?' : ''} ORDER BY updated_at DESC,id LIMIT 1`, [organization.id, ...(locationId ? [locationId] : [])]),
     queryFirst<{ id: string; name: string }>(db, `SELECT p.id,p.name FROM products p JOIN product_publications pub ON pub.product_id=p.id AND pub.organization_id=p.organization_id
-      WHERE p.organization_id=? AND p.active=1 AND pub.published=1
+      WHERE p.organization_id=? AND p.active=1 AND pub.published=1 AND p.kind <> 'service'
       ${locationId ? 'AND EXISTS (SELECT 1 FROM product_locations pl WHERE pl.product_id=p.id AND pl.organization_id=p.organization_id AND pl.location_id=? AND pl.published=1)' : ''}
       AND NOT EXISTS (SELECT 1 FROM media_placements mp JOIN media_assets ma ON ma.id=mp.asset_id AND ma.status='active' WHERE mp.owner_type='product' AND mp.owner_id=p.id AND mp.organization_id=p.organization_id AND mp.status='active' AND mp.slot IN ('image','gallery') AND ma.kind='image')
       ORDER BY p.name,p.id LIMIT 1`, [organization.id, ...(locationId ? [locationId] : [])]),
