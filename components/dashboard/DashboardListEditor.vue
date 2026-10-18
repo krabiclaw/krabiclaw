@@ -12,21 +12,23 @@
           <slot name="actions" />
           <slot v-if="!readOnly && editing && selected.length" name="selection-actions" :selected="selected" />
           <UButton
-            v-if="!readOnly && items.length"
+            v-if="!readOnly && (items.length || editing)"
             :label="editing ? 'Done' : 'Edit'"
             color="neutral"
             :variant="editing ? 'solid' : 'soft'"
+            :disabled="disabled"
             data-testid="list-editor-toggle"
             @click="editing = !editing"
           />
           <UButton
-            v-if="!readOnly"
+            v-if="!readOnly && addable"
             icon="i-lucide-plus"
             :aria-label="addLabel"
             :to="addTo"
             color="neutral"
             variant="soft"
             square
+            :disabled="disabled"
             data-testid="list-editor-add"
             @click="!addTo && $emit('add')"
           />
@@ -68,6 +70,7 @@
         <UCheckbox
           v-if="!readOnly && editing && selectable"
           :model-value="selected.includes(item.id)"
+          :disabled="disabled"
           :aria-label="`Select ${item.title}`"
           :data-testid="`list-editor-select-${item.id}`"
           @update:model-value="toggleSelected(item.id)"
@@ -87,6 +90,7 @@
           size="sm"
           square
           :loading="removingId === item.id"
+          :disabled="disabled"
           @click="$emit('remove', item)"
         />
 
@@ -122,7 +126,7 @@
               variant="ghost"
               size="sm"
               square
-              :disabled="index === 0"
+              :disabled="disabled || index === 0"
               @click="$emit('move', item, -1)"
             />
             <UButton
@@ -132,7 +136,7 @@
               variant="ghost"
               size="sm"
               square
-              :disabled="index === items.length - 1"
+              :disabled="disabled || index === items.length - 1"
               @click="$emit('move', item, 1)"
             />
           </template>
@@ -144,6 +148,7 @@
             variant="ghost"
             size="sm"
             square
+            :disabled="disabled"
             :to="item.to"
           />
         </div>
@@ -157,7 +162,7 @@ import { dashboardPanelActionsKey } from '~/lib/components/workspace/dashboard/d
 // Generic so a caller can hang its own row on the item and read it straight off
 // the `#item` slot. Without it every custom row had to look its record back up
 // by id for each field it rendered, which is both noisy and quadratic.
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   items: T[]
   title: string
   emptyTitle: string
@@ -166,6 +171,10 @@ const props = defineProps<{
   addLabel?: string
   /** A creation level is a link; inline list actions keep the add event. */
   addTo?: string
+  /** A list can finish its current edit before offering another item. */
+  addable?: boolean
+  /** Keep list controls unavailable while its owner commits a draft. */
+  disabled?: boolean
   readOnly?: boolean
   error?: string | null
   /** Lists with a persisted order gain move controls in the edit state. */
@@ -174,7 +183,7 @@ const props = defineProps<{
   removingId?: string | null
   /** Swaps the per-row remove control for a checkbox so several rows act at once. */
   selectable?: boolean
-}>()
+}>(), { addable: true, disabled: false })
 
 defineEmits<{
   add: []

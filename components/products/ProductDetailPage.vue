@@ -119,9 +119,13 @@
             </div>
           </div>
 
-          <section v-if="!compact && product.description" class="border-t border-default pt-8">
+          <section v-if="!compact && (product.description || stayDescriptionDetails.length)" class="border-t border-default pt-8" data-testid="product-description">
             <h2 v-if="vertical !== 'service'" class="saya-display text-2xl text-default sm:text-3xl">{{ isStay ? t('stay.about_this_place') : t('saya.experience_detail.what_youll_do') }}</h2>
-            <p class="mt-4 whitespace-pre-line text-base leading-relaxed text-muted sm:text-lg">{{ product.description }}</p>
+            <p v-if="product.description" class="mt-4 text-base leading-relaxed text-muted sm:text-lg" :class="isStay ? 'whitespace-pre-wrap break-words' : 'whitespace-pre-line'" :data-testid="isStay ? 'stay-description-listing-description' : undefined">{{ product.description }}</p>
+            <div v-for="detail in stayDescriptionDetails" :key="detail.key" class="mt-6" :data-testid="`stay-description-${detail.key}`">
+              <h3 class="text-lg font-semibold text-default">{{ detail.label }}</h3>
+              <p class="mt-3 whitespace-pre-wrap break-words text-base leading-relaxed text-muted sm:text-lg">{{ detail.value }}</p>
+            </div>
           </section>
 
           <!-- What this place offers (Amenities) -->
@@ -129,7 +133,7 @@
             <h2 class="saya-display text-2xl text-default sm:text-3xl">What this place offers</h2>
             <div class="mt-5 grid grid-cols-2 gap-4">
               <div v-for="amenity in stayAmenitiesList" :key="amenity.code" class="flex items-center gap-3">
-                <TenantIcon :name="amenity.icon" class="size-5 shrink-0 text-muted" />
+                <UIcon :name="amenity.icon" class="size-5 shrink-0 text-muted" aria-hidden="true" />
                 <span class="text-sm text-default">{{ amenity.label }}</span>
               </div>
             </div>
@@ -442,7 +446,6 @@
 </template>
 
 <script setup lang="ts">
-import type { TenantIconName } from '~/components/tenant/TenantIcon.vue'
 import WhoYouMeet from '~/components/booking/WhoYouMeet.vue'
 import type { ProductPresentation, PublicProduct } from '~/server/types/products'
 import { useSchemaOrg } from '#imports'
@@ -454,7 +457,7 @@ import { ga4Major } from '~/utils/ga4-projection'
 import { productLocationCollectionPath } from '~/utils/product-presentation'
 import { extractDietarySchemaUrls, type ProductCollectionSibling } from '~/utils/product-seo'
 import type { ProductDetailValue } from '~/shared/product-details'
-import { EXPERIENCE_ATTRIBUTE_HANDLES, productDetailFields, productDetailKey, PRICING_NOTE_HANDLE } from '~/shared/product-details'
+import { EXPERIENCE_ATTRIBUTE_HANDLES, productDetailFields, productDetailKey, PRICING_NOTE_HANDLE, STAY_DESCRIPTION_DETAIL_KEYS } from '~/shared/product-details'
 import type { PublicProductBooking, PublicProductLocation, PublicProductReview, PublicProductSession } from '~/server/utils/public-products'
 import { addressPlaceName, formatPostalAddress, schemaPostalAddress } from '~/utils/postal-address'
 import { formatTime } from '~/utils/timezone'
@@ -535,16 +538,7 @@ const stayCancellationPolicyLabel = computed(() => {
 const stayAmenitiesList = computed(() => {
   const stay = props.product.stay
   if (!stay) return []
-  return stay.amenities.map(code => {
-    return {
-      code,
-      label: STAY_AMENITIES[code].label,
-      icon: (code.includes('work') ? 'briefcase'
-        : code.includes('sparkles') ? 'sparkles'
-        : code.includes('home') ? 'home'
-        : 'check-circle') as TenantIconName,
-    }
-  })
+  return stay.amenities.map(code => ({ code, label: STAY_AMENITIES[code].label, icon: STAY_AMENITIES[code].icon }))
 })
 
 const { trackProductOrder, trackProductView } = useOrganizationConversionTracking()
@@ -778,10 +772,17 @@ function attribute<T>(handle: keyof PublicProduct['details'], read: (_value: Pro
 const asText = (value: ProductDetailValue) => (typeof value === 'string' && value.trim() ? value : null)
 const asList = (value: ProductDetailValue) => (Array.isArray(value) ? value.map(String).filter(Boolean) : null)
 const tagline = computed(() => attribute(EXPERIENCE_ATTRIBUTE_HANDLES.tagline, asText))
+const stayDescriptionDetails = computed(() => props.product.kind === 'stay'
+  ? productDetailFields('stay').flatMap(definition => {
+      if (!(STAY_DESCRIPTION_DETAIL_KEYS as readonly string[]).includes(definition.key)) return []
+      const value = props.product.details[definition.key]
+      return typeof value === 'string' && value.trim() ? [{ key: definition.key, label: definition.name, value }] : []
+    })
+  : [])
 const meetingPoint = computed(() => attribute(EXPERIENCE_ATTRIBUTE_HANDLES.meetingPoint, asText))
 const includedItems = computed(() => attribute(EXPERIENCE_ATTRIBUTE_HANDLES.includedItems, asList) ?? [])
 const whatToBring = computed(() => attribute(EXPERIENCE_ATTRIBUTE_HANDLES.whatToBring, asList) ?? [])
-const PLACED_ATTRIBUTE_HANDLES = new Set<string>(Object.values(EXPERIENCE_ATTRIBUTE_HANDLES))
+const PLACED_ATTRIBUTE_HANDLES = new Set<string>([...Object.values(EXPERIENCE_ATTRIBUTE_HANDLES), ...STAY_DESCRIPTION_DETAIL_KEYS])
 const thingsToKnow = computed(() => visibleDetails.value.filter((detail) => {
   const definition = productDetailFields(props.product.kind).find(entry => entry.id === detail.key)
   return !definition || !PLACED_ATTRIBUTE_HANDLES.has(productDetailKey(definition))

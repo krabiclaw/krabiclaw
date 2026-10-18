@@ -1,6 +1,12 @@
 <template>
-  <!-- One product: its rows are the things it holds, each a leaf below this level. -->
-  <DashboardIndexPanel id="product" :title="pageTitle" :auto-open="autoOpenTarget" :create="firstStep">
+  <DashboardIndexPanel
+    id="product"
+    :title="stayEditor ? 'Listing editor' : pageTitle"
+    :auto-open="autoOpenTarget"
+    :create="firstStep"
+    :paired-size="stayEditor ? 39 : undefined"
+    :footer-class="stayEditor ? 'pointer-events-none absolute inset-x-0 bottom-6 border-0 py-0' : undefined"
+  >
     <template v-if="product" #right>
       <DashboardResourceLocalization
       :organization-id="organizationId"
@@ -22,7 +28,71 @@
       :title="`${itemLabel} could not be loaded`"
       :description="loadError"
     />
-    <EditorNavigationList v-else :groups="navigationGroups" :active-item="level.child.value" />
+    <UTabs
+      v-if="stayEditor && !loadError"
+      :model-value="arrivalTab ? 'arrival' : 'space'"
+      :items="[{ label: 'Your space', value: 'space', disabled: saving }, { label: 'Arrival guide', value: 'arrival', disabled: saving }]"
+      :content="false"
+      color="neutral"
+      variant="pill"
+      class="mx-auto mb-10 w-full max-w-82"
+      :ui="{ list: 'rounded-full bg-muted', trigger: 'rounded-full data-[state=active]:text-highlighted', indicator: 'rounded-full bg-default shadow-sm' }"
+      aria-label="Listing editor sections"
+      @update:model-value="changeStayTab"
+    />
+    <UAlert v-if="arrivalTab && arrivalError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Arrival guide could not be loaded" :description="arrivalError" />
+    <p v-if="arrivalTab && !arrivalHome && !arrivalError" role="status" class="mx-auto w-full max-w-82 text-base text-muted">Loading arrival guide…</p>
+    <EditorNavigationList
+      v-if="!loadError && (!arrivalTab || (arrivalHome && !arrivalError))"
+      :groups="navigationGroups"
+      :active-item="level.child.value"
+      :variant="stayEditor ? 'cards' : 'rows'"
+      :class="stayEditor ? 'mx-auto w-full max-w-82 pb-24' : undefined"
+      :data-testid="stayEditor ? 'stay-editor-cards' : undefined"
+    >
+      <template v-if="stayEditor" #summary="{ item }">
+        <span v-if="arrivalTab && item.id === 'arrival-time'" class="grid grid-cols-2 gap-4 text-base">
+          <span class="block border-r border-default pr-4"><span class="block font-medium text-highlighted">Check-in</span><span class="mt-1 block">{{ form.check_in_time }}</span></span>
+          <span class="block"><span class="block font-medium text-highlighted">Checkout</span><span class="mt-1 block">{{ form.check_out_time }}</span></span>
+        </span>
+        <span v-else-if="item.id === 'name'" class="block text-xl font-medium leading-snug text-highlighted">{{ item.summary }}</span>
+        <template v-else-if="item.id === 'photo'">
+          <span class="block">{{ roomsSummary() }}</span>
+          <span v-if="stayPhotos.length" class="relative mt-6 block h-44" aria-hidden="true">
+            <img
+              v-for="(photo, index) in stayPhotos.slice(0, 3)"
+              :key="photo"
+              :src="photo"
+              alt=""
+              class="absolute left-1/2 top-0 h-44 w-36 rounded-3xl object-cover"
+              :class="index === 0 ? 'z-20 -translate-x-1/2' : index === 1 ? 'z-10 -translate-x-[90%] rotate-[-5deg] scale-90' : 'z-0 -translate-x-[10%] rotate-[5deg] scale-90'"
+            >
+            <span class="absolute left-1/2 top-3 z-30 -translate-x-1/2 rounded-full bg-default px-3 py-1 text-xs text-highlighted">{{ stayPhotos.length }} {{ stayPhotos.length === 1 ? 'photo' : 'photos' }}</span>
+          </span>
+          <span v-else class="mt-6 flex flex-col items-center gap-3 rounded-xl bg-muted px-4 py-8 text-sm">
+            <UIcon name="i-lucide-image-plus" class="size-8 text-dimmed" aria-hidden="true" />
+            Add your first photo
+          </span>
+        </template>
+        <span v-else-if="item.id === 'amenities' && stayAmenityPreview.length" class="mt-3 block space-y-2 text-sm text-highlighted">
+          <span v-for="amenity in stayAmenityPreview.slice(0, 3)" :key="amenity.code" class="flex items-center gap-3">
+            <UIcon :name="amenity.icon" class="size-6 shrink-0" aria-hidden="true" />
+            {{ amenity.label }}
+          </span>
+          <span v-if="stayAmenityPreview.length > 3" class="block pt-3 text-muted">+ {{ stayAmenityPreview.length - 3 }} more</span>
+        </span>
+        <span v-else-if="item.id === 'cancellation'" class="block space-y-2">
+          <span class="block">{{ item.summary }}{{ form.stay_cancellation_policy ? ' for short-term stays' : '' }}</span>
+          <span v-if="form.stay_long_term_cancellation_policy" class="block">{{ STAY_LONG_TERM_CANCELLATION_POLICIES[form.stay_long_term_cancellation_policy].label }} for long-term stays</span>
+        </span>
+        <span v-else :class="arrivalTab ? 'line-clamp-2 whitespace-pre-line break-words' : item.id === 'description' ? 'line-clamp-4' : undefined">{{ item.summary }}</span>
+      </template>
+    </EditorNavigationList>
+    <template v-if="stayEditor && (arrivalTab || stayPreviewUrl)" #footer>
+      <div class="flex justify-center">
+        <UButton :to="arrivalTab ? sectionPath('arrival-guide') : stayPreviewUrl ?? undefined" target="_blank" label="View" icon="i-lucide-eye" color="neutral" class="pointer-events-auto h-12 rounded-full px-6 shadow-lg" />
+      </div>
+    </template>
   </DashboardIndexPanel>
 </template>
 
@@ -32,10 +102,11 @@ import type { Collection, Product } from '~/server/types/products'
 import type { StayAmenity, StayCancellationPolicy, StayLongTermCancellationPolicy, StayPropertyType, StayPropertyTypeGroup } from '~/shared/stay-listing'
 import type { DashboardLocation } from '~/composables/useDashboardOrganization'
 import type { GalleryMediaItem } from '~/components/dashboard/DashboardMediaGalleryField.vue'
+import type { StayArrivalGuide, StayArrivalField } from '~/shared/stay-arrival'
 
 export const SECTION_KEYS = [
   'photo', 'kind', 'name', 'price', 'description', 'page', 'options', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections',
-  'stay', 'property-type', 'rooms', 'amenities', 'cancellation', 'team',
+  'stay', 'guests', 'availability', 'arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'house-rules', 'checkout-instructions', 'arrival-guide', 'property-type', 'rooms', 'amenities', 'cancellation', 'team',
 ] as const
 export type SectionKey = typeof SECTION_KEYS[number]
 export type BookingConcern = 'enabled' | 'duration' | 'capacity' | 'confirmation' | 'payment' | 'location' | 'assignment' | number
@@ -170,6 +241,13 @@ export interface ProductEditor {
    * lands where its Close would rather than back on the product.
    */
   save: (closeTo?: string, bookingConcern?: BookingConcern) => Promise<void>
+  /** Private StayHome fields remain outside the public Product and its draft. */
+  arrivalHome: ComputedRef<StayArrivalGuide | null>
+  arrivalDraft: Ref<StayArrivalGuide | null>
+  arrivalError: ComputedRef<string | null>
+  arrivalManage: ComputedRef<boolean>
+  arrivalChanged: (fields: readonly StayArrivalField[]) => boolean
+  saveArrival: (fields: readonly StayArrivalField[], closeTo?: string) => Promise<void>
 }
 
 export const productEditorKey = Symbol('product-editor') as InjectionKey<ProductEditor>
@@ -179,19 +257,25 @@ export const productEditorKey = Symbol('product-editor') as InjectionKey<Product
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
 import type { ProductDetailField, ProductDetailValue, ProductKind } from '~/shared/product-details'
-import { productDetailFields, PRODUCT_KINDS, PRODUCT_KIND_LABELS, assertProductKind, productDetailKey, PRICING_NOTE_HANDLE } from '~/shared/product-details'
+import { productDetailFields, PRODUCT_KINDS, PRODUCT_KIND_LABELS, assertProductKind, productDetailKey, PRICING_NOTE_HANDLE, STAY_DESCRIPTION_DETAIL_KEYS } from '~/shared/product-details'
 import { isCurrencyCode } from '~/shared/currencies'
 import { majorAmountToMinor, minorAmountToMajor, selectPrice, type Price } from '~/shared/prices'
 import { formatProductMoney } from '~/utils/product-money'
-import { isChannelPush } from '~/shared/channel-push'
+import { isChannelPush, type ChannelPush } from '~/shared/channel-push'
+import { isStayArrivalGuide } from '~/shared/stay-arrival'
 import type { ProductMutation } from '~/server/utils/product-management'
-import { presentationForProduct } from '~/utils/product-presentation'
+import { presentationForProduct, STAY_PRESENTATION } from '~/utils/product-presentation'
+import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
+import { mediaStillUrl } from '~/shared/media-placement-contract'
 import { MINUTE_TIME_PATTERN } from '~/utils/timezone'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
 import {
   STAY_PROPERTY_TYPES,
+  STAY_AMENITIES,
   STAY_PROPERTY_TYPE_GROUPS,
   STAY_CANCELLATION_POLICIES,
+  STAY_LONG_TERM_CANCELLATION_POLICIES,
+  STAY_CHECK_IN_METHODS,
   isStayPropertyType,
 } from '~/shared/stay-listing'
 
@@ -214,7 +298,7 @@ const catalogPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/p
  * which names its kind and the collection it will join.
  */
 function sectionPath(section: string) {
-  const query = isNew.value ? route.query : { location_id: locationId.value ?? undefined }
+  const query = isNew.value ? route.query : { location_id: locationId.value ?? undefined, ...(arrivalTab.value ? { guide: 'arrival' } : {}) }
   return router.resolve({ path: `${itemPath.value}/${section}`, query }).fullPath
 }
 
@@ -254,6 +338,16 @@ const sectionLabels: Record<SectionKey, string> = {
   'booking': 'Scheduling',
   'locations': 'Locations',
   'stay': 'Stay settings',
+  'guests': 'Number of guests',
+  'availability': 'Availability',
+  'arrival-time': 'Check-in & checkout',
+  'directions': 'Directions',
+  'check-in-method': 'Check-in method',
+  'wifi': 'Wifi details',
+  'house-manual': 'House manual',
+  'house-rules': 'House rules',
+  'checkout-instructions': 'Checkout instructions',
+  'arrival-guide': 'Arrival guide',
   'property-type': 'Property type',
   'rooms': 'Rooms and beds',
   'amenities': 'Amenities',
@@ -305,11 +399,111 @@ const { data: loaded, error: loadFailure, refresh } = await useAsyncData(
       dashboardApi(`/api/editor/organizations/${organizationId}/collections`, { validate: isCollectionList }),
       dashboardApi(id ? `/api/editor/organizations/${organizationId}/locations/${encodeURIComponent(id)}/products/${encodeURIComponent(productId.value)}` : `/api/editor/organizations/${organizationId}/products/${encodeURIComponent(productId.value)}`, { validate: isOne }),
     ])
-    return { collections: collectionResponse.collections, product: productResponse.product }
+    let previewToken: string | null = null
+    if (productResponse.product.kind === 'stay') {
+      const response = await dashboardApi(`/api/editor/organizations/${organizationId}/context`, { validate: isRecord })
+      if (!isRecord(response.context) || typeof response.context.previewToken !== 'string' || !response.context.previewToken) throw new Error('The listing preview could not be loaded.')
+      previewToken = response.context.previewToken
+    }
+    return { collections: collectionResponse.collections, product: productResponse.product, previewToken }
   },
 )
 const product = computed(() => loaded.value?.product ?? null)
 const collections = computed(() => loaded.value?.collections ?? [])
+const stayEditor = computed(() => product.value?.kind === 'stay')
+const ARRIVAL_SECTIONS = ['arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'checkout-instructions', 'arrival-guide']
+const arrivalTab = computed(() => stayEditor.value && (route.query.guide === 'arrival' || ARRIVAL_SECTIONS.includes(detailKey.value ?? '')))
+async function changeStayTab(value: string | number) {
+  if (saving.value || value === (arrivalTab.value ? 'arrival' : 'space')) return
+  revert()
+  await navigateTo(router.resolve({ path: itemPath.value, query: { location_id: locationId.value ?? undefined, ...(value === 'arrival' ? { guide: 'arrival' } : {}) } }).fullPath)
+}
+
+// The home's private arrival guide is read only inside its authenticated editor.
+// A role without operations access can continue editing the public Product.
+const arrivalUrl = () => `/api/dashboard/stay-homes/${encodeURIComponent(productId.value)}`
+const isArrivalResponse = (value: unknown): value is { home: StayArrivalGuide; manage: boolean } =>
+  isRecord(value) && isStayArrivalGuide(value.home) && typeof value.manage === 'boolean' && value.home.product_id === productId.value
+const isArrivalMutation = (value: unknown): value is { home: StayArrivalGuide; channel_push: ChannelPush | null } =>
+  isRecord(value) && isStayArrivalGuide(value.home) && value.home.product_id === productId.value && isChannelPush(value.channel_push)
+const { data: arrivalLoaded, error: arrivalFailure, refresh: refreshArrival } = await useAsyncData(
+  () => `dashboard-product-arrival:${organizationId}:${productId.value}:${arrivalTab.value ? 'open' : 'closed'}`,
+  async () => arrivalTab.value ? await dashboardApi(arrivalUrl(), { validate: isArrivalResponse }) : null,
+)
+const arrivalHome = computed(() => arrivalLoaded.value?.home ?? null)
+const arrivalManage = computed(() => arrivalLoaded.value?.manage === true)
+const arrivalError = computed(() => arrivalFailure.value ? getErrorMessage(arrivalFailure.value, 'The arrival guide could not be loaded') : null)
+const arrivalDraft = ref<StayArrivalGuide | null>(null)
+function revertArrival() {
+  const home = arrivalHome.value
+  arrivalDraft.value = home ? { product_id: home.product_id, check_in_method: home.check_in_method, check_in_instructions: home.check_in_instructions, wifi_network: home.wifi_network, wifi_password: home.wifi_password, directions: home.directions, house_manual: home.house_manual, checkout_instructions: home.checkout_instructions.map(instruction => ({ ...instruction })) } : null
+}
+// A read after a failed write updates saved state without erasing the edits
+// being submitted. A confirmed save below, or Cancel, resets the draft.
+watch(arrivalHome, () => { if (!saving.value) revertArrival() }, { immediate: true, flush: 'sync' })
+function arrivalChanged(fields: readonly StayArrivalField[]) {
+  return Boolean(arrivalHome.value && arrivalDraft.value && fields.some(field => JSON.stringify(arrivalHome.value![field]) !== JSON.stringify(arrivalDraft.value![field])))
+}
+async function saveArrival(fields: readonly StayArrivalField[], target?: string) {
+  if (saving.value) return
+  saving.value = true
+  saveError.value = null
+  try {
+    const draft = arrivalDraft.value
+    if (!draft || arrivalError.value) throw new Error('Load the arrival guide before saving it.')
+    if (!arrivalManage.value) throw new Error('Your role cannot edit this arrival guide.')
+    const body: Record<string, unknown> = {}
+    for (const field of fields) {
+      const value = draft[field]
+      body[field] = typeof value === 'string' ? (value.trim() ? (field === 'wifi_password' ? value : value.trim()) : null) : value
+    }
+    let saved: { home: StayArrivalGuide; channel_push: ChannelPush | null }
+    try {
+      saved = await dashboardApi(arrivalUrl(), { method: 'PATCH', body, validate: isArrivalMutation })
+    } catch (error) {
+      saveError.value = getErrorMessage(error, 'The arrival guide could not be saved')
+      // A failed response may follow a committed write. Show the persisted
+      // state again, and retain both failures if that read cannot complete.
+      try {
+        await refreshArrival()
+        if (arrivalFailure.value) throw arrivalFailure.value
+      } catch (readError) {
+        saveError.value += ` The arrival guide could not be read again: ${getErrorMessage(readError, 'Read failed')}`
+      }
+      return
+    }
+    await refreshArrival()
+    if (arrivalFailure.value) throw arrivalFailure.value
+    revertArrival()
+    if (saved.channel_push?.state === 'needs_review') {
+      saveError.value = `The home was saved. Its channel needs review. ${saved.channel_push.detail}`
+      return
+    }
+    await (target ? navigateTo(target) : level.close())
+  } catch (error) {
+    saveError.value = getErrorMessage(error, 'The arrival guide could not be saved')
+  } finally {
+    saving.value = false
+  }
+}
+const runtimeConfig = useRuntimeConfig()
+const stayPreviewUrl = computed(() => {
+  const row = product.value
+  const subdomain = dashboard.organization.value?.subdomain
+  const token = loaded.value?.previewToken
+  if (row?.kind !== 'stay' || !subdomain || !token) return null
+  const origin = tenantOrganizationOrigin({
+    platformDomain: String(runtimeConfig.public.platformDomain),
+    freeOrganizationDomain: String(runtimeConfig.public.freeOrganizationDomain),
+    subdomain,
+  })
+  if (!origin) return null
+  const url = new URL(STAY_PRESENTATION.productPath('', row.slug), origin)
+  url.searchParams.set('preview_token', token)
+  return url.toString()
+})
+const stayPhotos = computed(() => [product.value?.image, ...(product.value?.gallery ?? [])].map(mediaStillUrl).filter((url): url is string => Boolean(url)))
+const stayAmenityPreview = computed(() => form.stay_amenities.map(code => ({ code, ...STAY_AMENITIES[code] })).sort((left, right) => left.label.localeCompare(right.label)))
 // A product that is not there is not a page. A request that failed is a state
 // this level shows, because the product may well still exist.
 watchEffect(() => {
@@ -580,6 +774,9 @@ const sectionValid = computed(() => {
   if (editorKey.value === 'kind') return PRODUCT_KINDS.includes(form.kind as ProductKind)
   if (editorKey.value === 'name') return Boolean(form.name.trim())
   if (editorKey.value === 'stay') return !stayIncomplete()
+  if (editorKey.value === 'guests') return Number.isInteger(Number(form.max_guests)) && Number(form.max_guests) >= 1 && Number(form.max_guests) <= 99
+  if (editorKey.value === 'availability') return Number.isInteger(Number(form.min_nights)) && Number(form.min_nights) >= 1 && Number(form.min_nights) <= 365
+  if (editorKey.value === 'arrival-time') return MINUTE_TIME_PATTERN.test(form.check_in_time) && MINUTE_TIME_PATTERN.test(form.check_out_time)
   if (editorKey.value === 'property-type') {
     if (!form.stay_property_type && !form.stay_property_type_group) return true
     return Boolean(form.stay_property_type && form.stay_property_type_group && isStayPropertyType(form.stay_property_type_group, form.stay_property_type))
@@ -713,13 +910,27 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
   }]
   // A product that failed to load has nothing to summarize; the level shows the failure.
   if (!product.value) return []
+  if (arrivalTab.value) {
+    const home = arrivalHome.value
+    if (!home || arrivalError.value) return []
+    const rules = product.value.details.house_rules
+    return [{ id: 'arrival', items: [
+      { id: 'arrival-time', label: '', summary: `${form.check_in_time} · ${form.check_out_time}`, to: sectionPath('arrival-time') },
+      { id: 'directions', label: 'Directions', summary: home.directions || 'Add details', placeholder: !home.directions, to: sectionPath('directions') },
+      { id: 'check-in-method', label: 'Check-in method', summary: home.check_in_method ? STAY_CHECK_IN_METHODS[home.check_in_method].label : 'Add details', placeholder: !home.check_in_method, to: sectionPath('check-in-method') },
+      { id: 'wifi', label: 'Wifi details', summary: home.wifi_network || 'Add details', placeholder: !home.wifi_network, to: sectionPath('wifi') },
+      { id: 'house-manual', label: 'House manual', summary: home.house_manual || 'Add details', placeholder: !home.house_manual, to: sectionPath('house-manual') },
+      { id: 'house-rules', label: 'House rules', summary: typeof rules === 'string' && rules ? rules : 'Add details', placeholder: !rules, to: sectionPath('house-rules') },
+      { id: 'checkout-instructions', label: 'Checkout instructions', summary: home.checkout_instructions.length ? `${home.checkout_instructions.length} ${home.checkout_instructions.length === 1 ? 'instruction' : 'instructions'}` : 'Add details', placeholder: !home.checkout_instructions.length, to: sectionPath('checkout-instructions') },
+    ] }]
+  }
   // One flat list, the same for every kind: what the product is, what it costs,
   // how it is booked, and where it is offered and shown.
   return [{
     id: 'item',
     items: [
-      { id: 'photo', label: 'Photos', summary: image ? (product.value.gallery.length ? `${product.value.gallery.length + 1} photos` : '') : 'No photo yet', placeholder: !image, to: sectionPath('photo') },
-      { id: 'name', label: 'Name', summary: form.name || 'Not named yet', placeholder: !form.name, to: sectionPath('name') },
+      { id: 'photo', label: 'Photos', summary: stayEditor.value ? roomsSummary() : image ? (product.value.gallery.length ? `${product.value.gallery.length + 1} photos` : '') : 'No photo yet', placeholder: !image, to: sectionPath('photo') },
+      { id: 'name', label: stayEditor.value ? 'Title' : 'Name', summary: form.name || 'Not named yet', placeholder: !form.name, to: sectionPath('name') },
       { id: 'description', label: 'Description', summary: form.description || 'Nothing written yet', placeholder: !form.description, to: sectionPath('description') },
       // A service is shown by a page of its own. The page has one editor, in
       // Pages; this row is a way into it, and a page not made yet is made here.
@@ -765,7 +976,9 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
               placeholder: !form.stay_cancellation_policy,
               to: sectionPath('cancellation'),
             },
-            { id: 'stay', label: 'Stay settings', summary: staySummary(), to: sectionPath('stay') },
+            { id: 'availability', label: 'Availability', summary: `${form.min_nights} ${Number(form.min_nights) === 1 ? 'night' : 'nights'} minimum`, to: sectionPath('availability') },
+            { id: 'guests', label: 'Number of guests', summary: `${form.max_guests} ${Number(form.max_guests) === 1 ? 'guest' : 'guests'}`, to: sectionPath('guests') },
+            { id: 'house-rules', label: 'House rules', summary: typeof product.value.details.house_rules === 'string' ? product.value.details.house_rules : 'Add details', placeholder: !product.value.details.house_rules, to: sectionPath('house-rules') },
             { id: 'team', label: 'Looked after by', summary: stayTeamSummary(), to: sectionPath('team') },
           ]
         : []),
@@ -781,7 +994,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       {
         id: 'attributes',
         label: 'Details',
-        summary: listSummary(definitions.value.filter(definition => form.details[productDetailKey(definition)] !== undefined).map(definition => definition.name), 'None set'),
+        summary: listSummary(definitions.value.filter(definition => form.details[productDetailKey(definition)] !== undefined && !(STAY_DESCRIPTION_DETAIL_KEYS as readonly string[]).includes(definition.key) && definition.key !== 'house_rules').map(definition => definition.name), 'None set'),
         placeholder: !Object.keys(form.details).length,
         to: sectionPath('attributes'),
       },
@@ -791,7 +1004,15 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       ...(form.kind === 'stay' ? [] : [{ id: 'order-url', label: 'External link', summary: form.order_url || 'No external link', placeholder: !form.order_url, to: sectionPath('order-url') }]),
       ...(form.kind === 'stay' ? [] : [{ id: 'locations', label: 'Locations', summary: locationsSummary(), placeholder: !Object.keys(form.locations).length, to: sectionPath('locations') }]),
       { id: 'collections', label: sectionLabels.collections, summary: collectionsSummary(), placeholder: !form.collection_ids.length, to: sectionPath('collections') },
-      { id: 'publication', label: 'Status', summary: publicationSummary(), to: sectionPath('publication') },
+      {
+        id: 'publication',
+        label: stayEditor.value ? (form.published ? 'Listed' : 'Unlisted') : 'Status',
+        summary: stayEditor.value
+          ? (form.published ? (form.active ? 'Your listing is visible on your website.' : 'Your listing is visible. Bookings are paused.') : 'Your listing is hidden from your website. Publish it when you’re ready.')
+          : publicationSummary(),
+        status: stayEditor.value ? (form.published ? 'success' as const : 'neutral' as const) : undefined,
+        to: sectionPath('publication'),
+      },
     ].sort((left, right) => rowRank(left.id) - rowRank(right.id)),
   }]
 })
@@ -801,13 +1022,18 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
  * beside this index. A row that leads into a level of its own — Bookings,
  * Variants — would open that level too and push this index off the screen.
  */
-const LEAF_SECTIONS: readonly string[] = ['photo', 'name', 'description', 'price', 'kind', 'order-url', 'property-type', 'rooms', 'amenities', 'cancellation', 'stay', 'team']
-const autoOpenTarget = computed(() => navigationGroups.value[0]?.items.find(item => LEAF_SECTIONS.includes(item.id) && item.to === sectionPath(item.id))?.to ?? null)
+const LEAF_SECTIONS: readonly string[] = ['photo', 'name', 'description', 'price', 'kind', 'order-url', 'property-type', 'rooms', 'stay', 'guests', 'availability', 'arrival-time', 'directions', 'wifi', 'house-manual', 'house-rules', 'team']
+const autoOpenTarget = computed(() => navigationGroups.value[0]?.items.find(item => LEAF_SECTIONS.includes(item.id) && !(stayEditor.value && item.id === 'description') && item.to === sectionPath(item.id))?.to ?? null)
 
 // A service leads with what is changed most: who handles it, what it costs,
 // how it is booked and what its page says. Every other kind keeps the list as written.
 const SERVICE_ROW_ORDER = ['assignment', 'price', 'booking', 'description', 'page', 'locations', 'publication']
+const STAY_ROW_ORDER = ['publication', 'photo', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'house-rules', 'cancellation', 'team', 'options', 'attributes', 'kind', 'collections']
 function rowRank(id: string) {
+  if (form.kind === 'stay') {
+    const at = STAY_ROW_ORDER.indexOf(id)
+    return at === -1 ? STAY_ROW_ORDER.length : at
+  }
   if (form.kind !== 'service') return 0
   const at = SERVICE_ROW_ORDER.indexOf(id)
   return at === -1 ? SERVICE_ROW_ORDER.length : at
@@ -818,7 +1044,7 @@ function rowRank(id: string) {
  * than from a list of every section a product could ever have — a product being
  * created has only its name, and the rows already say so.
  */
-const openSections = computed(() => navigationGroups.value.flatMap(group => group.items.map(item => item.id)))
+const openSections = computed(() => [...navigationGroups.value.flatMap(group => group.items.map(item => item.id)), ...(stayEditor.value ? ['arrival-guide'] : [])])
 
 // A section this product does not have 404s. A watcher, not a setup-time check:
 // moving between leaves reuses this component.
@@ -826,6 +1052,9 @@ watchEffect(() => {
   // A product that failed to load has no rows, and every real section would
   // read as unsupported; the failure is shown instead, never a 404.
   if (!isNew.value && !product.value) return
+  // Private rows exist only after their home is read. A pending or failed
+  // read shows its own state rather than rejecting the concern being opened.
+  if (arrivalTab.value && (!arrivalHome.value || arrivalError.value)) return
   if (detailKey.value && !openSections.value.includes(detailKey.value)) {
     showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
   }
@@ -936,10 +1165,14 @@ function payload() {
       cancellation_policy: form.stay_cancellation_policy || null,
       long_term_cancellation_policy: form.stay_long_term_cancellation_policy || null,
     } } : {}),
-    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'stay' ? { stay: {
+    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'arrival-time' ? { stay: {
       check_in_time: form.check_in_time,
       check_out_time: form.check_out_time,
+    } } : {}),
+    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'guests' ? { stay: {
       max_guests: Number(form.max_guests),
+    } } : {}),
+    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'availability' ? { stay: {
       min_nights: Number(form.min_nights),
     } } : {}),
     ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'team' ? { stay: {
@@ -1152,6 +1385,7 @@ async function saveSchedule(weekday: number) {
 function revert() {
   saveError.value = null
   photoError.value = null
+  revertArrival()
   if (product.value) loadForm(product.value)
   schedule.value = savedSchedule.value.map(slot => ({ ...slot }))
 }
@@ -1380,5 +1614,11 @@ provide(productEditorKey, {
   removeSlot,
   revert,
   save,
+  arrivalHome,
+  arrivalDraft,
+  arrivalError,
+  arrivalManage,
+  arrivalChanged,
+  saveArrival,
 })
 </script>

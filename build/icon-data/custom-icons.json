@@ -1,4 +1,96 @@
 {
+  "krabi": {
+    "prefix": "krabi",
+    "info": {
+      "name": "KrabiClaw domain pictograms",
+      "author": { "name": "KrabiClaw" }
+    },
+    "width": 24,
+    "height": 24,
+    "icons": {
+      "towels": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect x=\"6\" y=\"3\" width=\"12\" height=\"5\" rx=\"2\"/><rect x=\"4\" y=\"8\" width=\"16\" height=\"6\" rx=\"2\"/><rect x=\"2\" y=\"14\" width=\"20\" height=\"7\" rx=\"2\"/><path d=\"M9 5.5h6M7 11h10M5 17.5h14\"/></g>"
+      },
+      "windmill": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"m9 13-2 9h10l-2-9M12 10l-6-8-3 3 9 5 6 8 3-3-9-5ZM12 10l8-6-3-3-5 9-8 6 3 3 5-9ZM11 22v-4h2v4\"/></g>"
+      },
+      "dining-table": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect x=\"2\" y=\"8\" width=\"20\" height=\"4\" rx=\"1\"/><path d=\"M5 12v10M19 12v10M8 8V3h8v5M8 3v5M16 3v5\"/></g>"
+      },
+      "hockey-rink": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect x=\"2\" y=\"4\" width=\"20\" height=\"16\" rx=\"5\"/><path d=\"M12 4v16M2 10h3v4H2m20-4h-3v4h3\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/></g>"
+      },
+      "skate-ramp": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M2 5h4c0 8 2 12 6 12s6-4 6-12h4v17H2ZM2 5V2m20 3V2M2 2h4m12 0h4\"/></g>"
+      },
+      "playground": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"m2 22 4-19h12l4 19M8 3v13M16 3v13M7 16h10v3H7ZM3 17h3m12 0h3\"/></g>"
+      },
+      "high-chair": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect x=\"7\" y=\"2\" width=\"10\" height=\"10\" rx=\"2\"/><path d=\"M5 12h14v3H5ZM8 15l-2 7M16 15l2 7M7 19h10M10 6h4\"/></g>"
+      },
+      "dome": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M2 20a10 16 0 0 1 20 0ZM9 20v-6h6v6M4 11h16M7 5l5 6 5-6M2 20l5-9m15 9-5-9\"/></g>"
+      },
+      "yurt": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M2 10 12 3l10 7M3 10v11h18V10ZM9 21v-7h6v7M6 10l6-7 6 7M6 13v5M18 13v5\"/></g>"
+      },
+      "treehouse": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M4 10 11 4l7 6M6 9v8h10V9M3 17h16M9 17v5M13 17v5M9 20h4M10 13h2M18 3a4 4 0 0 1 3 7l1 3h-4M18 17v5\"/></g>"
+      },
+      "lighthouse": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"m9 9-3 13h12L15 9M8 9h8M9 9V4h6v5M8 4l4-2 4 2M8 14h8M7 18h10M2 5l3 1m-3 4 3-1m17-4-3 1m3 4-3-1\"/></g>"
+      },
+      "dryer": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect x=\"4\" y=\"2\" width=\"16\" height=\"20\" rx=\"2\"/><path d=\"M4 7h16M8 4.5h.01M12 4.5h4\"/><circle cx=\"12\" cy=\"14\" r=\"5\"/><path d=\"M10 12c2 1-2 3 0 4m4-4c2 1-2 3 0 4\"/></g>"
+      },
+      "hair-dryer": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"m7 4 11 2v7L7 15a5.5 5.5 0 0 1 0-11ZM18 7l4-1v7l-4-1M7 15l1 6h4l-1-7M5 8v3\"/></g>"
+      },
+      "iron": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M3 17c1-6 6-9 12-9h4l2 10H3ZM9 8V5h8l2 3M3 21h18M9 13h.01M13 13h.01M17 13h.01\"/></g>"
+      },
+      "hanger": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M9 6a3 3 0 1 1 5 2c-1 1-2 1-2 3l9 6a1 1 0 0 1-.5 2H3.5a1 1 0 0 1-.5-2l9-6\"/></g>"
+      },
+      "crib": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M3 5v17M21 5v17M3 8h18M3 18h18M7.5 8v10M12 8v10M16.5 8v10\"/></g>"
+      },
+      "dishwasher": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect x=\"3\" y=\"2\" width=\"18\" height=\"20\" rx=\"2\"/><path d=\"M3 7h18M7 4.5h.01M11 4.5h6M6 18h12M7 17v-5a2 2 0 0 1 4 0v5m2 0v-5a2 2 0 0 1 4 0v5\"/></g>"
+      },
+      "oven": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect x=\"3\" y=\"2\" width=\"18\" height=\"20\" rx=\"2\"/><path d=\"M3 7h18M7 4.5h.01M12 4.5h.01M17 4.5h.01\"/><rect x=\"6\" y=\"10\" width=\"12\" height=\"9\" rx=\"1\"/><path d=\"M9 13h6\"/></g>"
+      },
+      "toaster": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect x=\"3\" y=\"9\" width=\"17\" height=\"11\" rx=\"3\"/><path d=\"M7 9V5c0-3 9-3 9 0v4M7 6h9M6 20v2M17 20v2M20 13h2v3M7 15h.01\"/></g>"
+      },
+      "barbecue": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M3 9h18a9 9 0 0 1-18 0ZM7 17l-2 5M17 17l2 5M6 20h12M7 6c-2-2 2-2 0-4m5 4c-2-2 2-2 0-4m5 4c-2-2 2-2 0-4\"/></g>"
+      },
+      "hammock": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M2 5v16M22 5v16M2 8c6 14 14 14 20 0M2 8c6 7 14 7 20 0M7 12l1 4m4-2v4m5-6-1 4\"/></g>"
+      },
+      "sauna": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M7 9c-3-3 3-3 0-6m5 6c-3-3 3-3 0-6m5 6c-3-3 3-3 0-6M3 13h18v5H3ZM5 18v4M19 18v4M3 15.5h18\"/></g>"
+      },
+      "elevator": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect x=\"3\" y=\"2\" width=\"18\" height=\"20\" rx=\"2\"/><path d=\"M12 9v13M7 22V9h10v13M7 5l1-1 1 1m6-1 1 1 1-1\"/></g>"
+      },
+      "ceiling-fan": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><circle cx=\"12\" cy=\"12\" r=\"2\"/><path d=\"M10 11C4 12 1 7 4 5c3-2 5 3 7 5m2 0c-1-6 4-9 6-6 2 3-3 5-5 7m0 2c6-1 9 4 6 6-3 2-5-3-7-5m-2 0c1 6-4 9-6 6-2-3 3-5 5-7\"/></g>"
+      },
+      "pool-table": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><rect x=\"2\" y=\"5\" width=\"20\" height=\"14\" rx=\"2\"/><path d=\"M5 5v2M19 5v2M12 5v2M5 17v2M19 17v2M12 17v2M6 15l5-4\"/><circle cx=\"16\" cy=\"10\" r=\"1.5\"/></g>"
+      },
+      "table-tennis": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M5 5c4-4 8-3 11 0s4 7 0 11c-2 2-5 2-7 1l-4 5-3-3 5-4C3 12 2 8 5 5ZM5 5l11 11\"/><circle cx=\"20\" cy=\"3\" r=\"2\"/></g>"
+      },
+      "bowling": {
+        "body": "<g fill=\"none\" stroke=\"currentColor\" stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\"><path d=\"M5 2h4l-1 6c0 3 3 4 3 8v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4c0-4 3-5 3-8ZM6 7h2\"/><circle cx=\"18\" cy=\"17\" r=\"5\"/><path d=\"M17 15h.01M20 16h.01M18 19h.01\"/></g>"
+      }
+    }
+  },
   "simple-icons": {
     "prefix": "simple-icons",
     "icons": {

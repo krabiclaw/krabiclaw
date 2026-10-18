@@ -156,6 +156,7 @@
               v-for="action in availableActions"
               :key="action.value"
               :label="action.label"
+              :icon="action.icon"
               :color="action.color"
               variant="ghost"
               block

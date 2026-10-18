@@ -12,10 +12,12 @@
   >
     <div v-if="p.isNew.value || p.product.value" class="space-y-6">
       <UFormField label="Property group">
-        <USelect
+        <URadioGroup
           v-model="selectedGroup"
           :items="groupItems"
-          placeholder="Choose a group"
+          variant="card"
+          indicator="hidden"
+          :ui="{ fieldset: 'grid grid-cols-2 gap-3' }"
           class="w-full"
         />
       </UFormField>
@@ -26,15 +28,10 @@
           :model-value="selectedType"
           :items="typeItems"
           variant="card"
+          indicator="hidden"
           class="w-full"
           @update:model-value="onSelectType"
-        >
-          <template #description="{ item }">
-            <span v-if="(item as any).description" class="mt-1 block text-xs text-muted">
-              {{ (item as any).description }}
-            </span>
-          </template>
-        </URadioGroup>
+        />
         <p v-else class="text-sm text-muted">Choose a property group to see matching property types.</p>
       </UFormField>
     </div>
@@ -57,6 +54,7 @@ const p = inject(productEditorKey)!
 const groupItems = Object.entries(STAY_PROPERTY_TYPE_GROUPS).map(([key, group]) => ({
   value: key,
   label: group.label,
+  icon: group.icon,
 }))
 
 const selectedGroup = computed({
@@ -82,6 +80,7 @@ const typeItems = computed(() => {
       value: typeKey,
       label: info.label,
       description: info.description,
+      icon: info.icon,
     }
   })
 })

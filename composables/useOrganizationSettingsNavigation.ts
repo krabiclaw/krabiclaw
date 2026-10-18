@@ -33,21 +33,21 @@ export function useOrganizationSettingsNavigation(organization: Ref<{ id: string
   const items = computed(() => {
     if (!base.value) return []
     return [
-      { id: 'website', label: 'Website', to: `${base.value}/website` },
-      { id: 'locations', label: 'Locations', to: `${base.value}/locations` },
-      { id: 'team', label: 'Team', to: `${base.value}/team` },
-      { id: 'integrations', label: 'Integrations', to: `${base.value}/integrations` },
+      { id: 'website', icon: 'i-lucide-panels-top-left', label: 'Website', to: `${base.value}/website` },
+      { id: 'locations', icon: 'i-lucide-map-pin', label: 'Locations', to: `${base.value}/locations` },
+      { id: 'team', icon: 'i-lucide-users', label: 'Team', to: `${base.value}/team` },
+      { id: 'integrations', icon: 'i-lucide-plug', label: 'Integrations', to: `${base.value}/integrations` },
       // "Team" is this organization's members; this is every account there is.
       ...(showPlatformAccounts.value
-        ? [{ id: 'platform-accounts', label: 'Platform accounts', to: `${base.value}/platform-accounts` }]
+        ? [{ id: 'platform-accounts', icon: 'i-lucide-shield-user', label: 'Platform accounts', to: `${base.value}/platform-accounts` }]
         : []),
       // The way to the account on a phone, where there is no header to carry an
       // avatar. Airbnb's mobile Menu lists "Account settings" in the same place,
       // second from last, above Log out (measured 2026-09-22).
-      { id: 'account', label: 'Account settings', to: '/dashboard/account/profile' },
+      { id: 'account', icon: 'i-lucide-user-round-cog', label: 'Account settings', to: '/dashboard/account/profile' },
       // Airbnb's "Switch to travelling": the last row before Log out.
-      { id: 'switch-personal', label: 'Switch to Personal', action: {} },
-      { id: 'log-out', label: 'Log out', action: {} },
+      { id: 'switch-personal', icon: 'i-lucide-repeat-2', label: 'Switch to Personal', action: {} },
+      { id: 'log-out', icon: 'i-lucide-log-out', label: 'Log out', action: {} },
     ]
   })
 

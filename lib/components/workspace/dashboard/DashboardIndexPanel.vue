@@ -4,7 +4,7 @@
     data-dashboard-index
     :class="level.mode.value === 'yield' ? 'hidden' : undefined"
     :data-yield="level.mode.value === 'yield' ? '' : undefined"
-    :default-size="pair ? 50 : undefined"
+    :default-size="pair ? (pairedSize ?? 50) : undefined"
     :ui="panelUi"
   >
     <template #header>
@@ -16,7 +16,7 @@
         Today's range — takes the title's place, and the title is announced only.
       -->
       <div class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-4 pb-2 pt-4 sm:pt-6" :class="dashboardGutterClass">
-        <DashboardNavbarLeading />
+        <slot name="leading"><DashboardNavbarLeading /></slot>
         <div v-if="$slots.center" class="flex min-w-0 flex-1 items-center">
           <h1 class="sr-only">{{ title }}</h1>
           <slot name="center" />
@@ -42,7 +42,7 @@
 
     <!-- A list whose order is itself a draft — sections, links — commits from here. -->
     <template v-if="$slots.footer" #footer>
-      <div class="shrink-0 border-t border-default py-3" :class="dashboardGutterClass">
+      <div class="shrink-0" :class="[dashboardGutterClass, footerClass ?? 'border-t border-default py-3']">
         <slot name="footer" />
       </div>
     </template>
@@ -86,6 +86,10 @@ const props = defineProps<{
   fill?: boolean
   /** The level is a column at every width rather than the frame: a menu, a statement, a calendar. */
   column?: DashboardColumn
+  /** Native DashboardPanel percentage when this index sits beside its child. */
+  pairedSize?: number
+  /** The record's persistent action may float over its scrollable summaries. */
+  footerClass?: string
   /** The level's one muted sentence under its title, as a leaf's `lead`. */
   lead?: string
 }>()
@@ -131,17 +135,21 @@ onNuxtReady(() => {
   if (!scope.active) return
   scope.run(() => {
     // A record being made opens its step at every width; any other index chooses only beside its child.
-    watch((): [RouteLocationRaw | null | undefined, boolean, RouteLevelMode, unknown] => [props.create ?? (pane.value ? props.autoOpen : null), pane.value, level.mode.value, route.query.editMode], ([target, , mode, editMode]) => {
+    watch((): [RouteLocationRaw | null | undefined, boolean, RouteLevelMode, unknown, string] => [props.create ?? (pane.value ? props.autoOpen : null), pane.value, level.mode.value, route.query.editMode, route.fullPath], ([target, , mode, editMode]) => {
       if (!target || mode !== 'index' || editMode) return
       // Only an arrival opens a child: the router is at this index's own URL.
       // An index on its way out still reads the route it rendered for, which
       // may be its bare URL; opening from there pulled the tenant back into the
       // screen they had just left.
-      if (router.currentRoute.value.path !== level.path.value) return
+      // A query change can select another tab or scope at this same path;
+      // wait for Nuxt's rendered route before opening that context's rows.
+      if (router.currentRoute.value.path !== level.path.value || router.currentRoute.value.fullPath !== route.fullPath) return
       // An index whose rows are still loading offers itself as the first row; its own URL opens nothing.
       if (router.resolve(target).path === level.path.value) return
       void navigateTo(target, { replace: true })
-    }, { immediate: true })
+    // The parent derives autoOpen from this route's tab and scope. Wait for
+    // those props to render before choosing a row from the arriving index.
+    }, { immediate: true, flush: 'post' })
   })
 })
 </script>

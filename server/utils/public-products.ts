@@ -137,8 +137,8 @@ export interface PublicProductReview {
   created_at: string
 }
 
-// previewAuthorized carries the site's one preview authorization down from the
-// request: a site that has not finished onboarding is readable only with it.
+// The site's signed preview authorization also lets the owner read saved
+// Products before their site or offering is ready for guests.
 async function loadProductOrganization(db: DbClient, organizationId: string, routeKind: ProductSurface, previewAuthorized: boolean) {
   const organization = await queryFirst<PublicProductOrganizationRow>(db, `
     SELECT id, name, vertical, theme_id, default_currency
@@ -185,17 +185,17 @@ export async function loadPublicProductCollection(
     if (!env) throw new Error('The organization environment is required to assess paid booking readiness')
     return setup ??= readStripeCheckoutSetup(db, organizationId, env)
   }
-  // Location publication is the public gate here: a product carried by the
-  // site but withheld at this branch is absent, not shown greyed out.
+  // Guests only see published, ready offerings. A signed site preview reads
+  // the same saved catalog before publication and booking setup are complete.
   const [catalogProducts, allCollections] = await Promise.all([
     locationSlug
-      ? listLocationProducts(db, { organizationId, locationId: locations[0]!.id, kind, publishedOnly: true, env, paymentSetup })
-      : listOrganizationProducts(db, { organizationId, kind, publishedOnly: true, env, paymentSetup }),
+      ? listLocationProducts(db, { organizationId, locationId: locations[0]!.id, kind, publishedOnly: !previewAuthorized, env, paymentSetup })
+      : listOrganizationProducts(db, { organizationId, kind, publishedOnly: !previewAuthorized, env, paymentSetup }),
     listCollections(db, { organizationId }),
   ])
   // Hydrated products already include their location publication flags. Reuse
   // that one catalog rather than hydrating and checking it again per branch.
-  const perLocation = locationSlug ? [catalogProducts] : locations.map(location =>
+  const perLocation = locationSlug || previewAuthorized ? [catalogProducts] : locations.map(location =>
     catalogProducts.filter(product => product.locations.some(entry => entry.location_id === location.id && entry.published)))
   const onlineProducts = locationSlug ? [] : catalogProducts.filter(product => Boolean(product.booking?.held_online || product.order_url))
   const seen = new Set<string>()
@@ -229,11 +229,10 @@ export async function loadPublicProductDetail(
     const location = collection?.locations[0]
     if (!collection || !location) return null
     const found = collection.products.find(product => product.slug === productSlug)
-    // The product must be published on this site and actually offered at this
-    // location: reaching it by slug alone would render a branch's page for
-    // something the site withholds, or something that branch does not sell.
-    const offeredHere = found?.locations.some(entry => entry.location_id === location.id && entry.published)
-    const publishedHere = found?.publications.some(entry => entry.organization_id === organizationId && entry.published)
+    // A preview may show a withheld offering, but it still belongs to this
+    // branch. The guest route also requires both publication switches.
+    const offeredHere = found?.locations.some(entry => entry.location_id === location.id && (previewAuthorized || entry.published))
+    const publishedHere = previewAuthorized || found?.publications.some(entry => entry.organization_id === organizationId && entry.published)
     const onThisSurface = found ? productSurfaceOf(collection.organization.vertical, found) === routeKind : false
     if (!found || !offeredHere || !publishedHere || !onThisSurface) return null
     const product = found
@@ -326,7 +325,7 @@ export async function loadPublicSiteProductDetail(
   if (!collection) return null
   const found = collection.products.find(product => product.slug === productSlug && productSurfaceOf(null, product) === routeKind)
   if (!found) return null
-  return projectPublicOffering(env, db, collection, found, locale, requestedScope, collection.presentation.productPath('', found.slug), sourceLocale)
+  return projectPublicOffering(env, db, collection, found, locale, requestedScope, collection.presentation.productPath('', found.slug), previewAuthorized, sourceLocale)
 }
 
 /** An authored page binds its offer by product ID, independent of the theme. */
@@ -355,7 +354,7 @@ export async function loadPublicPageProductDetail(
   const collection = await loadPublicProductCollection(db, organizationId, productSurfaceOf(null, { kind: assertProductKind(product.kind) }), previewAuthorized, undefined, env)
   const found = collection?.products.find(product => product.id === page.product_id)
   if (!collection || !found) return null
-  return projectPublicOffering(env, db, collection, found, locale, requestedScope, found.page?.path ?? pagePath, sourceLocale)
+  return projectPublicOffering(env, db, collection, found, locale, requestedScope, found.page?.path ?? pagePath, previewAuthorized, sourceLocale)
 }
 
 async function projectPublicOffering(
@@ -366,10 +365,11 @@ async function projectPublicOffering(
   locale: string,
   requestedScope: string | null | undefined,
   sourcePath: string,
+  previewAuthorized: boolean,
   sourceLocale?: string,
 ): Promise<PublicProductDetail | null> {
   const organizationId = collection.organization.id
-  const offeredAt = new Set(found.locations.filter(entry => entry.published && entry.active).map(entry => entry.location_id))
+  const offeredAt = new Set(found.locations.filter(entry => previewAuthorized || (entry.published && entry.active)).map(entry => entry.location_id))
   const locations = collection.locations.filter(location => offeredAt.has(location.id))
   const onlineAvailable = Boolean(found.booking?.held_online)
   let location: PublicProductLocation | null = null
@@ -489,7 +489,10 @@ export async function loadPublicProductSessions(
   detail: PublicProductDetail,
   env: CloudflareEnv,
 ): Promise<PublicProductSession[]> {
-  if (!detail.product.active || !detail.booking || detail.scopeRequired) return []
+  // A saved draft can be previewed before it is bookable. Its public booking
+  // API keeps its publication gate; previewing never opens that write path.
+  if (!detail.product.active || !detail.booking || detail.scopeRequired
+    || !detail.product.publications.some(publication => publication.organization_id === detail.organization.id && publication.published)) return []
   // A branch with no zone cannot state when anything starts, so it offers
   // nothing here rather than a time in a zone nobody chose.
   if (!detail.location) {

@@ -447,7 +447,7 @@ export async function listOrganizationProducts(db: DbClient, input: ProductListI
   const requireReadiness = input.publishedOnly === true && (input.bookableOnly || !input.kind || input.kind === 'experience' || input.kind === 'service' || input.kind === 'stay')
   const window = requireReadiness ? undefined : input.window
   const selection = `FROM products p
-    JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
+    LEFT JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id
     WHERE p.organization_id = ? AND (? = 0 OR (${PUBLIC_PRODUCT_SQL}))${input.kind ? ' AND p.kind = ?' : ''}${input.featured === undefined ? '' : " AND COALESCE(json_extract(p.details_json, '$.featured'), 0) = ?"}${input.assignedUserId ? ` AND (${ASSIGNED_SERVICE_SQL})` : ''}`
   const params = [input.organizationId, input.publishedOnly ? 1 : 0,
     ...(input.kind ? [input.kind] : []),

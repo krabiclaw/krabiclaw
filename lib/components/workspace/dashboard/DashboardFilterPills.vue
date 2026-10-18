@@ -10,8 +10,9 @@
       :key="item.value"
       :label="item.label"
       color="neutral"
-      :variant="model === item.value ? 'solid' : 'outline'"
+      :variant="model === item.value ? selectedVariant : 'outline'"
       class="h-10 rounded-full px-4 text-sm font-normal"
+      :class="selectedVariant === 'outline' && model === item.value ? 'ring-2 ring-inset ring-(color:--ui-text-highlighted) bg-default text-highlighted' : undefined"
       :role="role === 'tablist' ? 'tab' : undefined"
       :aria-selected="role === 'tablist' ? model === item.value : undefined"
       :aria-pressed="role !== 'tablist' ? model === item.value : undefined"
@@ -30,8 +31,11 @@ withDefaults(defineProps<{
   items: ReadonlyArray<{ value: string; label: string }>
   /** Semantics: 'group' for filter toggles (default), 'tablist' when selecting views/sections. */
   role?: 'group' | 'tablist'
+  /** Picker categories keep the selected pill outlined, as Airbnb's amenities. */
+  selectedVariant?: 'solid' | 'outline'
 }>(), {
   role: 'group',
+  selectedVariant: 'solid',
 })
 
 const model = defineModel<string>({ required: true })

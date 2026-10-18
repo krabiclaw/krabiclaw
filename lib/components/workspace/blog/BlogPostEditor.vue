@@ -211,7 +211,7 @@ const settingsGroups = computed<EditorNavigationGroup[]>(() => {
       id: 'about',
       label: 'About this post',
       items: [
-        row('category', `${ARTICLE_COLLECTIONS[form.collection].label} · Category`, categories.value?.find(category => category.id === form.category_id)?.name),
+        { ...row('category', `${ARTICLE_COLLECTIONS[form.collection].label} · Category`, categories.value?.find(category => category.id === form.category_id)?.name), icon: 'i-lucide-folder' },
         {
           id: 'excerpt',
           label: 'Excerpt',
@@ -225,7 +225,7 @@ const settingsGroups = computed<EditorNavigationGroup[]>(() => {
       id: 'publishing',
       label: 'Publishing',
       items: [
-        { id: 'publishing', to: `${postPath.value}/publishing`, label: 'Visibility', summary: publishingSummary.value },
+        { id: 'publishing', to: `${postPath.value}/publishing`, label: 'Visibility', icon: 'i-lucide-eye', summary: publishingSummary.value },
         row('url', 'URL', form.slug || generatedSlug.value, 'Generated from the headline'),
       ],
     },
@@ -236,6 +236,7 @@ const settingsGroups = computed<EditorNavigationGroup[]>(() => {
         {
           id: 'share',
           label: 'Share preview',
+          lead: { image: resolvedPrimaryImageUrl.value, icon: 'i-lucide-share-2' },
           to: `${postPath.value}/share`,
           summary: resolvedPrimaryImageUrl.value || resolvedPrimaryVideoUrl.value ? 'Set' : 'No image yet',
           placeholder: !resolvedPrimaryImageUrl.value && !resolvedPrimaryVideoUrl.value,

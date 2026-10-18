@@ -9,6 +9,7 @@ import { bookedPolicyFor, LONG_TERM_STAY_NIGHTS, stayCancellationRefund, type St
 import { executeRefund, requirePayment, type Payment } from '~/server/domain/payments'
 import { paymentsStripe } from '~/server/utils/stripe-connect'
 import { isRecord } from '~/server/utils/type-guards'
+import { isStayCheckInMethod, STAY_ARRIVAL_TEXT_LIMITS, STAY_CHECKOUT_DETAILS_LIMIT } from '~/shared/stay-arrival'
 import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
 import { createProduct, getProduct, setProductPublication, updateProduct } from '~/server/utils/product-management'
 import type { Product, UpdateProductInput } from '~/server/types/products'
@@ -340,8 +341,8 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
       JOIN organization o ON o.id = c.organization_id
       LEFT JOIN product_channel_mappings m ON m.organization_id = c.organization_id AND m.product_id = c.product_id AND m.provider = 'channex'
-     WHERE c.organization_id = ? ${productId ? 'AND c.product_id = ?' : ''} AND ${scope.sql}
-     ORDER BY p.name, p.id`, [organizationId, ...(productId ? [productId] : []), ...scope.params])
+     WHERE c.organization_id = ? ${productId !== null ? 'AND c.product_id = ?' : ''} AND ${scope.sql}
+     ORDER BY p.name, p.id`, [organizationId, ...(productId !== null ? [productId] : []), ...scope.params])
   if (!rows.length) return []
   const prices = await queryAll<Price & { product_id: string }>(db, `
     SELECT pr.*, v.product_id FROM prices pr
@@ -503,8 +504,7 @@ function homeAddress(body: Record<string, unknown>, prefix: string): Pick<NewSta
 /** What the home is and offers: product stay settings, checked by the product writer. */
 const LISTING_FIELDS = ['property_type_group', 'property_type', 'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy'] as const
 /** The arrival guide: private columns only this module reads and writes. */
-const ARRIVAL_TEXT = { check_in_instructions: 5000, wifi_network: 100, wifi_password: 100, directions: 5000, house_manual: 5000 } as const
-const ARRIVAL_FIELDS = [...Object.keys(ARRIVAL_TEXT) as Array<keyof typeof ARRIVAL_TEXT>, 'check_in_method', 'checkout_instructions'] as const
+const ARRIVAL_FIELDS = [...Object.keys(STAY_ARRIVAL_TEXT_LIMITS) as Array<keyof typeof STAY_ARRIVAL_TEXT_LIMITS>, 'check_in_method', 'checkout_instructions'] as const
 const LOCATION_FIELDS = ['address', 'latitude', 'longitude'] as const
 const EDITABLE_HOME_FIELDS = ['name', 'description', 'published', 'timezone', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'base_price_minor',
   'assigned_member_id', 'assigned_team_id', ...LISTING_FIELDS, ...ARRIVAL_FIELDS, ...LOCATION_FIELDS] as const
@@ -512,7 +512,7 @@ const EDITABLE_HOME_FIELDS = ['name', 'description', 'published', 'timezone', 'c
 /** The arrival guide fields a request names, checked; each problem names its field. */
 function arrivalPatch(body: Record<string, unknown>): Record<string, string | null> {
   const patch: Record<string, string | null> = {}
-  for (const [key, max] of Object.entries(ARRIVAL_TEXT)) {
+  for (const [key, max] of Object.entries(STAY_ARRIVAL_TEXT_LIMITS)) {
     if (!(key in body)) continue
     const value = body[key]
     // A wifi password is kept exactly as typed; spaces can be part of it.
@@ -522,7 +522,7 @@ function arrivalPatch(body: Record<string, unknown>): Record<string, string | nu
   }
   if ('check_in_method' in body) {
     const method = body.check_in_method
-    if (method !== null && !Object.hasOwn(STAY_CHECK_IN_METHODS, method as string)) fail(422, 'INVALID_DETAIL', `check_in_method must be one of ${Object.keys(STAY_CHECK_IN_METHODS).join(', ')}, or null`, 'check_in_method')
+    if (method !== null && !isStayCheckInMethod(method)) fail(422, 'INVALID_DETAIL', `check_in_method must be one of ${Object.keys(STAY_CHECK_IN_METHODS).join(', ')}, or null`, 'check_in_method')
     patch.check_in_method = method as string | null
   }
   if ('checkout_instructions' in body) {
@@ -538,7 +538,7 @@ function arrivalPatch(body: Record<string, unknown>): Record<string, string | nu
       if (tasks.has(task)) fail(422, 'INVALID_DETAIL', `${field}.task is already listed`, `${field}.task`)
       tasks.add(task)
       const text = typeof details === 'string' ? details.trim() : details
-      if (text !== null && (typeof text !== 'string' || !text || text.length > 500)) fail(422, 'INVALID_DETAIL', `${field}.details must contain 1 to 500 characters, or null`, `${field}.details`)
+      if (text !== null && (typeof text !== 'string' || !text || text.length > STAY_CHECKOUT_DETAILS_LIMIT)) fail(422, 'INVALID_DETAIL', `${field}.details must contain 1 to ${STAY_CHECKOUT_DETAILS_LIMIT} characters, or null`, `${field}.details`)
       if (task === 'additional' && text === null) fail(422, 'INVALID_DETAIL', 'Additional requests need their details', `${field}.details`)
       return { task: task as StayCheckoutTask, details: text as string | null }
     })

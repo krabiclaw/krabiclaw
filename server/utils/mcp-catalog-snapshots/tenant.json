@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:e67faccb7958ddebae38ff82713363b1f86dcd78b78e853167d012450cf26645",
-  "documentationFingerprint": "sha256:f3903d408629aae3c2de43965a05df7c6f0310ffcac78ad2109f2eab697bd665",
+  "fingerprint": "sha256:f8c60e3f6b86a8a0443f86a3deaf0fb1c6b2c7602f8742be16ba8b1334879508",
+  "documentationFingerprint": "sha256:2312df260d8f7a4da5c6d74a0b4b6d39e1ed2cd2f7dc5dc7a39f4392b6987fb9",
   "tools": [
     {
       "name": "add_organization_language",
@@ -6240,6 +6240,13 @@
                       "description": "Highlight this item on the menu and homepage.",
                       "type": "boolean"
                     },
+                    "guest_access": {
+                      "description": "The spaces and facilities guests can use during their stay.",
+                      "maxLength": 10000,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "type": "string"
+                    },
                     "house_rules": {
                       "description": "The host’s rules for guests staying in the home, shown with the listing.",
                       "maxLength": 10000,
@@ -6271,6 +6278,13 @@
                       "type": "array",
                       "uniqueItems": true
                     },
+                    "interaction_with_guests": {
+                      "description": "How guests can contact the host and what support is available.",
+                      "maxLength": 10000,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "type": "string"
+                    },
                     "materials": {
                       "description": "Materials the item is made from, shown in its details.",
                       "items": {
@@ -6301,6 +6315,13 @@
                       "maxItems": 100,
                       "type": "array",
                       "uniqueItems": true
+                    },
+                    "other_details_to_note": {
+                      "description": "Additional information guests should know before booking.",
+                      "maxLength": 10000,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "type": "string"
                     },
                     "preparation": {
                       "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -6370,6 +6391,13 @@
                       "maxItems": 100,
                       "type": "array",
                       "uniqueItems": true
+                    },
+                    "your_property": {
+                      "description": "The spaces and features guests should know about this home.",
+                      "maxLength": 10000,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "type": "string"
                     }
                   },
                   "type": "object"
@@ -6825,6 +6853,13 @@
                       "description": "Highlight this item on the menu and homepage.",
                       "type": "boolean"
                     },
+                    "guest_access": {
+                      "description": "The spaces and facilities guests can use during their stay.",
+                      "maxLength": 10000,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "type": "string"
+                    },
                     "house_rules": {
                       "description": "The host’s rules for guests staying in the home, shown with the listing.",
                       "maxLength": 10000,
@@ -6856,6 +6891,13 @@
                       "type": "array",
                       "uniqueItems": true
                     },
+                    "interaction_with_guests": {
+                      "description": "How guests can contact the host and what support is available.",
+                      "maxLength": 10000,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "type": "string"
+                    },
                     "materials": {
                       "description": "Materials the item is made from, shown in its details.",
                       "items": {
@@ -6886,6 +6928,13 @@
                       "maxItems": 100,
                       "type": "array",
                       "uniqueItems": true
+                    },
+                    "other_details_to_note": {
+                      "description": "Additional information guests should know before booking.",
+                      "maxLength": 10000,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "type": "string"
                     },
                     "preparation": {
                       "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -6955,6 +7004,13 @@
                       "maxItems": 100,
                       "type": "array",
                       "uniqueItems": true
+                    },
+                    "your_property": {
+                      "description": "The spaces and features guests should know about this home.",
+                      "maxLength": 10000,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "type": "string"
                     }
                   },
                   "type": "object"
@@ -18418,6 +18474,13 @@
                 "description": "Highlight this item on the menu and homepage.",
                 "type": "boolean"
               },
+              "guest_access": {
+                "description": "The spaces and facilities guests can use during their stay.",
+                "maxLength": 10000,
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
               "house_rules": {
                 "description": "The host’s rules for guests staying in the home, shown with the listing.",
                 "maxLength": 10000,
@@ -18449,6 +18512,13 @@
                 "type": "array",
                 "uniqueItems": true
               },
+              "interaction_with_guests": {
+                "description": "How guests can contact the host and what support is available.",
+                "maxLength": 10000,
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
               "materials": {
                 "description": "Materials the item is made from, shown in its details.",
                 "items": {
@@ -18479,6 +18549,13 @@
                 "maxItems": 100,
                 "type": "array",
                 "uniqueItems": true
+              },
+              "other_details_to_note": {
+                "description": "Additional information guests should know before booking.",
+                "maxLength": 10000,
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
               },
               "preparation": {
                 "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -18548,6 +18625,13 @@
                 "maxItems": 100,
                 "type": "array",
                 "uniqueItems": true
+              },
+              "your_property": {
+                "description": "The spaces and features guests should know about this home.",
+                "maxLength": 10000,
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
               }
             },
             "type": "object"
@@ -21328,6 +21412,13 @@
                     "description": "Highlight this item on the menu and homepage.",
                     "type": "boolean"
                   },
+                  "guest_access": {
+                    "description": "The spaces and facilities guests can use during their stay.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
                   "house_rules": {
                     "description": "The host’s rules for guests staying in the home, shown with the listing.",
                     "maxLength": 10000,
@@ -21359,6 +21450,13 @@
                     "type": "array",
                     "uniqueItems": true
                   },
+                  "interaction_with_guests": {
+                    "description": "How guests can contact the host and what support is available.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
                   "materials": {
                     "description": "Materials the item is made from, shown in its details.",
                     "items": {
@@ -21389,6 +21487,13 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "other_details_to_note": {
+                    "description": "Additional information guests should know before booking.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
                   },
                   "preparation": {
                     "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -21458,6 +21563,13 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "your_property": {
+                    "description": "The spaces and features guests should know about this home.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
                   }
                 },
                 "type": "object"
@@ -45733,6 +45845,13 @@
                     "description": "Highlight this item on the menu and homepage.",
                     "type": "boolean"
                   },
+                  "guest_access": {
+                    "description": "The spaces and facilities guests can use during their stay.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
                   "house_rules": {
                     "description": "The host’s rules for guests staying in the home, shown with the listing.",
                     "maxLength": 10000,
@@ -45764,6 +45883,13 @@
                     "type": "array",
                     "uniqueItems": true
                   },
+                  "interaction_with_guests": {
+                    "description": "How guests can contact the host and what support is available.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
                   "materials": {
                     "description": "Materials the item is made from, shown in its details.",
                     "items": {
@@ -45794,6 +45920,13 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "other_details_to_note": {
+                    "description": "Additional information guests should know before booking.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
                   },
                   "preparation": {
                     "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -45863,6 +45996,13 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "your_property": {
+                    "description": "The spaces and features guests should know about this home.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
                   }
                 },
                 "type": "object"
@@ -47091,6 +47231,13 @@
                               "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
                               "type": "string"
                             },
+                            "guest_access": {
+                              "description": "The spaces and facilities guests can use during their stay.",
+                              "maxLength": 10000,
+                              "minLength": 1,
+                              "pattern": "\\S",
+                              "type": "string"
+                            },
                             "house_rules": {
                               "description": "The host’s rules for guests staying in the home, shown with the listing.",
                               "maxLength": 10000,
@@ -47122,6 +47269,13 @@
                               "type": "array",
                               "uniqueItems": true
                             },
+                            "interaction_with_guests": {
+                              "description": "How guests can contact the host and what support is available.",
+                              "maxLength": 10000,
+                              "minLength": 1,
+                              "pattern": "\\S",
+                              "type": "string"
+                            },
                             "materials": {
                               "description": "Materials the item is made from, shown in its details.",
                               "items": {
@@ -47152,6 +47306,13 @@
                               "maxItems": 100,
                               "type": "array",
                               "uniqueItems": true
+                            },
+                            "other_details_to_note": {
+                              "description": "Additional information guests should know before booking.",
+                              "maxLength": 10000,
+                              "minLength": 1,
+                              "pattern": "\\S",
+                              "type": "string"
                             },
                             "preparation": {
                               "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -47221,6 +47382,13 @@
                               "maxItems": 100,
                               "type": "array",
                               "uniqueItems": true
+                            },
+                            "your_property": {
+                              "description": "The spaces and features guests should know about this home.",
+                              "maxLength": 10000,
+                              "minLength": 1,
+                              "pattern": "\\S",
+                              "type": "string"
                             }
                           },
                           "type": "object"
@@ -47309,6 +47477,13 @@
                           "description": "Highlight this item on the menu and homepage.",
                           "type": "boolean"
                         },
+                        "guest_access": {
+                          "description": "The spaces and facilities guests can use during their stay.",
+                          "maxLength": 10000,
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
                         "house_rules": {
                           "description": "The host’s rules for guests staying in the home, shown with the listing.",
                           "maxLength": 10000,
@@ -47340,6 +47515,13 @@
                           "type": "array",
                           "uniqueItems": true
                         },
+                        "interaction_with_guests": {
+                          "description": "How guests can contact the host and what support is available.",
+                          "maxLength": 10000,
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
                         "materials": {
                           "description": "Materials the item is made from, shown in its details.",
                           "items": {
@@ -47370,6 +47552,13 @@
                           "maxItems": 100,
                           "type": "array",
                           "uniqueItems": true
+                        },
+                        "other_details_to_note": {
+                          "description": "Additional information guests should know before booking.",
+                          "maxLength": 10000,
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
                         },
                         "preparation": {
                           "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -47439,6 +47628,13 @@
                           "maxItems": 100,
                           "type": "array",
                           "uniqueItems": true
+                        },
+                        "your_property": {
+                          "description": "The spaces and features guests should know about this home.",
+                          "maxLength": 10000,
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
                         }
                       },
                       "type": "object"
@@ -49590,6 +49786,13 @@
                                 "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
                                 "type": "string"
                               },
+                              "guest_access": {
+                                "description": "The spaces and facilities guests can use during their stay.",
+                                "maxLength": 10000,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "type": "string"
+                              },
                               "house_rules": {
                                 "description": "The host’s rules for guests staying in the home, shown with the listing.",
                                 "maxLength": 10000,
@@ -49621,6 +49824,13 @@
                                 "type": "array",
                                 "uniqueItems": true
                               },
+                              "interaction_with_guests": {
+                                "description": "How guests can contact the host and what support is available.",
+                                "maxLength": 10000,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "type": "string"
+                              },
                               "materials": {
                                 "description": "Materials the item is made from, shown in its details.",
                                 "items": {
@@ -49651,6 +49861,13 @@
                                 "maxItems": 100,
                                 "type": "array",
                                 "uniqueItems": true
+                              },
+                              "other_details_to_note": {
+                                "description": "Additional information guests should know before booking.",
+                                "maxLength": 10000,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "type": "string"
                               },
                               "preparation": {
                                 "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -49720,6 +49937,13 @@
                                 "maxItems": 100,
                                 "type": "array",
                                 "uniqueItems": true
+                              },
+                              "your_property": {
+                                "description": "The spaces and features guests should know about this home.",
+                                "maxLength": 10000,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "type": "string"
                               }
                             },
                             "type": "object"
@@ -71346,6 +71570,13 @@
                     "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
                     "type": "string"
                   },
+                  "guest_access": {
+                    "description": "The spaces and facilities guests can use during their stay.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
                   "house_rules": {
                     "description": "The host’s rules for guests staying in the home, shown with the listing.",
                     "maxLength": 10000,
@@ -71377,6 +71608,13 @@
                     "type": "array",
                     "uniqueItems": true
                   },
+                  "interaction_with_guests": {
+                    "description": "How guests can contact the host and what support is available.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
                   "materials": {
                     "description": "Materials the item is made from, shown in its details.",
                     "items": {
@@ -71407,6 +71645,13 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "other_details_to_note": {
+                    "description": "Additional information guests should know before booking.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
                   },
                   "preparation": {
                     "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -71476,6 +71721,13 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "your_property": {
+                    "description": "The spaces and features guests should know about this home.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
                   }
                 },
                 "type": "object"
@@ -73396,6 +73648,13 @@
                                 "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
                                 "type": "string"
                               },
+                              "guest_access": {
+                                "description": "The spaces and facilities guests can use during their stay.",
+                                "maxLength": 10000,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "type": "string"
+                              },
                               "house_rules": {
                                 "description": "The host’s rules for guests staying in the home, shown with the listing.",
                                 "maxLength": 10000,
@@ -73427,6 +73686,13 @@
                                 "type": "array",
                                 "uniqueItems": true
                               },
+                              "interaction_with_guests": {
+                                "description": "How guests can contact the host and what support is available.",
+                                "maxLength": 10000,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "type": "string"
+                              },
                               "materials": {
                                 "description": "Materials the item is made from, shown in its details.",
                                 "items": {
@@ -73457,6 +73723,13 @@
                                 "maxItems": 100,
                                 "type": "array",
                                 "uniqueItems": true
+                              },
+                              "other_details_to_note": {
+                                "description": "Additional information guests should know before booking.",
+                                "maxLength": 10000,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "type": "string"
                               },
                               "preparation": {
                                 "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -73526,6 +73799,13 @@
                                 "maxItems": 100,
                                 "type": "array",
                                 "uniqueItems": true
+                              },
+                              "your_property": {
+                                "description": "The spaces and features guests should know about this home.",
+                                "maxLength": 10000,
+                                "minLength": 1,
+                                "pattern": "\\S",
+                                "type": "string"
                               }
                             },
                             "type": "object"
@@ -76334,6 +76614,13 @@
                       "description": "Highlight this item on the menu and homepage.",
                       "type": "boolean"
                     },
+                    "guest_access": {
+                      "description": "The spaces and facilities guests can use during their stay.",
+                      "maxLength": 10000,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "type": "string"
+                    },
                     "house_rules": {
                       "description": "The host’s rules for guests staying in the home, shown with the listing.",
                       "maxLength": 10000,
@@ -76365,6 +76652,13 @@
                       "type": "array",
                       "uniqueItems": true
                     },
+                    "interaction_with_guests": {
+                      "description": "How guests can contact the host and what support is available.",
+                      "maxLength": 10000,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "type": "string"
+                    },
                     "materials": {
                       "description": "Materials the item is made from, shown in its details.",
                       "items": {
@@ -76395,6 +76689,13 @@
                       "maxItems": 100,
                       "type": "array",
                       "uniqueItems": true
+                    },
+                    "other_details_to_note": {
+                      "description": "Additional information guests should know before booking.",
+                      "maxLength": 10000,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "type": "string"
                     },
                     "preparation": {
                       "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -76464,6 +76765,13 @@
                       "maxItems": 100,
                       "type": "array",
                       "uniqueItems": true
+                    },
+                    "your_property": {
+                      "description": "The spaces and features guests should know about this home.",
+                      "maxLength": 10000,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "type": "string"
                     }
                   },
                   "type": "object"
@@ -76964,6 +77272,13 @@
                       "description": "Highlight this item on the menu and homepage.",
                       "type": "boolean"
                     },
+                    "guest_access": {
+                      "description": "The spaces and facilities guests can use during their stay.",
+                      "maxLength": 10000,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "type": "string"
+                    },
                     "house_rules": {
                       "description": "The host’s rules for guests staying in the home, shown with the listing.",
                       "maxLength": 10000,
@@ -76995,6 +77310,13 @@
                       "type": "array",
                       "uniqueItems": true
                     },
+                    "interaction_with_guests": {
+                      "description": "How guests can contact the host and what support is available.",
+                      "maxLength": 10000,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "type": "string"
+                    },
                     "materials": {
                       "description": "Materials the item is made from, shown in its details.",
                       "items": {
@@ -77025,6 +77347,13 @@
                       "maxItems": 100,
                       "type": "array",
                       "uniqueItems": true
+                    },
+                    "other_details_to_note": {
+                      "description": "Additional information guests should know before booking.",
+                      "maxLength": 10000,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "type": "string"
                     },
                     "preparation": {
                       "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -77094,6 +77423,13 @@
                       "maxItems": 100,
                       "type": "array",
                       "uniqueItems": true
+                    },
+                    "your_property": {
+                      "description": "The spaces and features guests should know about this home.",
+                      "maxLength": 10000,
+                      "minLength": 1,
+                      "pattern": "\\S",
+                      "type": "string"
                     }
                   },
                   "type": "object"
@@ -79500,6 +79836,13 @@
                     "description": "Highlight this item on the menu and homepage.",
                     "type": "boolean"
                   },
+                  "guest_access": {
+                    "description": "The spaces and facilities guests can use during their stay.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
                   "house_rules": {
                     "description": "The host’s rules for guests staying in the home, shown with the listing.",
                     "maxLength": 10000,
@@ -79531,6 +79874,13 @@
                     "type": "array",
                     "uniqueItems": true
                   },
+                  "interaction_with_guests": {
+                    "description": "How guests can contact the host and what support is available.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
                   "materials": {
                     "description": "Materials the item is made from, shown in its details.",
                     "items": {
@@ -79561,6 +79911,13 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "other_details_to_note": {
+                    "description": "Additional information guests should know before booking.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
                   },
                   "preparation": {
                     "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -79630,6 +79987,13 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "your_property": {
+                    "description": "The spaces and features guests should know about this home.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
                   }
                 },
                 "type": "object"
@@ -87387,6 +87751,13 @@
                           "pattern": "^(?=[\\s\\S]*\\S)[^\\r\\n]*$",
                           "type": "string"
                         },
+                        "guest_access": {
+                          "description": "The spaces and facilities guests can use during their stay.",
+                          "maxLength": 10000,
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
                         "house_rules": {
                           "description": "The host’s rules for guests staying in the home, shown with the listing.",
                           "maxLength": 10000,
@@ -87418,6 +87789,13 @@
                           "type": "array",
                           "uniqueItems": true
                         },
+                        "interaction_with_guests": {
+                          "description": "How guests can contact the host and what support is available.",
+                          "maxLength": 10000,
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
+                        },
                         "materials": {
                           "description": "Materials the item is made from, shown in its details.",
                           "items": {
@@ -87448,6 +87826,13 @@
                           "maxItems": 100,
                           "type": "array",
                           "uniqueItems": true
+                        },
+                        "other_details_to_note": {
+                          "description": "Additional information guests should know before booking.",
+                          "maxLength": 10000,
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
                         },
                         "preparation": {
                           "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -87517,6 +87902,13 @@
                           "maxItems": 100,
                           "type": "array",
                           "uniqueItems": true
+                        },
+                        "your_property": {
+                          "description": "The spaces and features guests should know about this home.",
+                          "maxLength": 10000,
+                          "minLength": 1,
+                          "pattern": "\\S",
+                          "type": "string"
                         }
                       },
                       "type": "object"
@@ -91690,6 +92082,13 @@
                     "description": "Highlight this item on the menu and homepage.",
                     "type": "boolean"
                   },
+                  "guest_access": {
+                    "description": "The spaces and facilities guests can use during their stay.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
                   "house_rules": {
                     "description": "The host’s rules for guests staying in the home, shown with the listing.",
                     "maxLength": 10000,
@@ -91721,6 +92120,13 @@
                     "type": "array",
                     "uniqueItems": true
                   },
+                  "interaction_with_guests": {
+                    "description": "How guests can contact the host and what support is available.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
                   "materials": {
                     "description": "Materials the item is made from, shown in its details.",
                     "items": {
@@ -91751,6 +92157,13 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "other_details_to_note": {
+                    "description": "Additional information guests should know before booking.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
                   },
                   "preparation": {
                     "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -91820,6 +92233,13 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "your_property": {
+                    "description": "The spaces and features guests should know about this home.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
                   }
                 },
                 "type": "object"
@@ -92879,6 +93299,13 @@
                     "description": "Highlight this item on the menu and homepage.",
                     "type": "boolean"
                   },
+                  "guest_access": {
+                    "description": "The spaces and facilities guests can use during their stay.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
                   "house_rules": {
                     "description": "The host’s rules for guests staying in the home, shown with the listing.",
                     "maxLength": 10000,
@@ -92910,6 +93337,13 @@
                     "type": "array",
                     "uniqueItems": true
                   },
+                  "interaction_with_guests": {
+                    "description": "How guests can contact the host and what support is available.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
                   "materials": {
                     "description": "Materials the item is made from, shown in its details.",
                     "items": {
@@ -92940,6 +93374,13 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "other_details_to_note": {
+                    "description": "Additional information guests should know before booking.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
                   },
                   "preparation": {
                     "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -93009,6 +93450,13 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "your_property": {
+                    "description": "The spaces and features guests should know about this home.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
                   }
                 },
                 "type": "object"
@@ -101394,6 +101842,13 @@
                             "description": "Highlight this item on the menu and homepage.",
                             "type": "boolean"
                           },
+                          "guest_access": {
+                            "description": "The spaces and facilities guests can use during their stay.",
+                            "maxLength": 10000,
+                            "minLength": 1,
+                            "pattern": "\\S",
+                            "type": "string"
+                          },
                           "house_rules": {
                             "description": "The host’s rules for guests staying in the home, shown with the listing.",
                             "maxLength": 10000,
@@ -101425,6 +101880,13 @@
                             "type": "array",
                             "uniqueItems": true
                           },
+                          "interaction_with_guests": {
+                            "description": "How guests can contact the host and what support is available.",
+                            "maxLength": 10000,
+                            "minLength": 1,
+                            "pattern": "\\S",
+                            "type": "string"
+                          },
                           "materials": {
                             "description": "Materials the item is made from, shown in its details.",
                             "items": {
@@ -101455,6 +101917,13 @@
                             "maxItems": 100,
                             "type": "array",
                             "uniqueItems": true
+                          },
+                          "other_details_to_note": {
+                            "description": "Additional information guests should know before booking.",
+                            "maxLength": 10000,
+                            "minLength": 1,
+                            "pattern": "\\S",
+                            "type": "string"
                           },
                           "preparation": {
                             "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -101524,6 +101993,13 @@
                             "maxItems": 100,
                             "type": "array",
                             "uniqueItems": true
+                          },
+                          "your_property": {
+                            "description": "The spaces and features guests should know about this home.",
+                            "maxLength": 10000,
+                            "minLength": 1,
+                            "pattern": "\\S",
+                            "type": "string"
                           }
                         },
                         "type": "object"
@@ -102114,6 +102590,13 @@
                             "description": "Highlight this item on the menu and homepage.",
                             "type": "boolean"
                           },
+                          "guest_access": {
+                            "description": "The spaces and facilities guests can use during their stay.",
+                            "maxLength": 10000,
+                            "minLength": 1,
+                            "pattern": "\\S",
+                            "type": "string"
+                          },
                           "house_rules": {
                             "description": "The host’s rules for guests staying in the home, shown with the listing.",
                             "maxLength": 10000,
@@ -102145,6 +102628,13 @@
                             "type": "array",
                             "uniqueItems": true
                           },
+                          "interaction_with_guests": {
+                            "description": "How guests can contact the host and what support is available.",
+                            "maxLength": 10000,
+                            "minLength": 1,
+                            "pattern": "\\S",
+                            "type": "string"
+                          },
                           "materials": {
                             "description": "Materials the item is made from, shown in its details.",
                             "items": {
@@ -102175,6 +102665,13 @@
                             "maxItems": 100,
                             "type": "array",
                             "uniqueItems": true
+                          },
+                          "other_details_to_note": {
+                            "description": "Additional information guests should know before booking.",
+                            "maxLength": 10000,
+                            "minLength": 1,
+                            "pattern": "\\S",
+                            "type": "string"
                           },
                           "preparation": {
                             "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -102244,6 +102741,13 @@
                             "maxItems": 100,
                             "type": "array",
                             "uniqueItems": true
+                          },
+                          "your_property": {
+                            "description": "The spaces and features guests should know about this home.",
+                            "maxLength": 10000,
+                            "minLength": 1,
+                            "pattern": "\\S",
+                            "type": "string"
                           }
                         },
                         "type": "object"
@@ -104391,6 +104895,13 @@
                 "description": "Highlight this item on the menu and homepage.",
                 "type": "boolean"
               },
+              "guest_access": {
+                "description": "The spaces and facilities guests can use during their stay.",
+                "maxLength": 10000,
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
               "house_rules": {
                 "description": "The host’s rules for guests staying in the home, shown with the listing.",
                 "maxLength": 10000,
@@ -104422,6 +104933,13 @@
                 "type": "array",
                 "uniqueItems": true
               },
+              "interaction_with_guests": {
+                "description": "How guests can contact the host and what support is available.",
+                "maxLength": 10000,
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
+              },
               "materials": {
                 "description": "Materials the item is made from, shown in its details.",
                 "items": {
@@ -104452,6 +104970,13 @@
                 "maxItems": 100,
                 "type": "array",
                 "uniqueItems": true
+              },
+              "other_details_to_note": {
+                "description": "Additional information guests should know before booking.",
+                "maxLength": 10000,
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
               },
               "preparation": {
                 "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -104521,6 +105046,13 @@
                 "maxItems": 100,
                 "type": "array",
                 "uniqueItems": true
+              },
+              "your_property": {
+                "description": "The spaces and features guests should know about this home.",
+                "maxLength": 10000,
+                "minLength": 1,
+                "pattern": "\\S",
+                "type": "string"
               }
             },
             "type": "object"
@@ -105355,6 +105887,13 @@
                     "description": "Highlight this item on the menu and homepage.",
                     "type": "boolean"
                   },
+                  "guest_access": {
+                    "description": "The spaces and facilities guests can use during their stay.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
                   "house_rules": {
                     "description": "The host’s rules for guests staying in the home, shown with the listing.",
                     "maxLength": 10000,
@@ -105386,6 +105925,13 @@
                     "type": "array",
                     "uniqueItems": true
                   },
+                  "interaction_with_guests": {
+                    "description": "How guests can contact the host and what support is available.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
+                  },
                   "materials": {
                     "description": "Materials the item is made from, shown in its details.",
                     "items": {
@@ -105416,6 +105962,13 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "other_details_to_note": {
+                    "description": "Additional information guests should know before booking.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
                   },
                   "preparation": {
                     "description": "Preparation instructions shown to customers before a session or appointment.",
@@ -105485,6 +106038,13 @@
                     "maxItems": 100,
                     "type": "array",
                     "uniqueItems": true
+                  },
+                  "your_property": {
+                    "description": "The spaces and features guests should know about this home.",
+                    "maxLength": 10000,
+                    "minLength": 1,
+                    "pattern": "\\S",
+                    "type": "string"
                   }
                 },
                 "type": "object"
@@ -115607,18 +116167,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:b705783dbf570c2110b99b7e08f2cb7b07891ad23d800e84e75e641f5ccf5c35",
-        "get_product": "sha256:c3fdf51ba48fe3462cf663273f0f9ea49c42be9d457298486ffe91d71b6a16a2",
+        "create_product": "sha256:0b928da9a8f477101a7cf9a65796f7aa03810c5bbfb7e63ab54431dc51e2eef8",
+        "get_product": "sha256:f8a5ba9bb342f8712339bc81107fff4ef176d5e834b67b07376d633ebe417ed8",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
-        "reconcile_products": "sha256:7f22136def6431436fa4b5036c7e149177fc5e956da7281eb19597390ec7c808",
+        "reconcile_products": "sha256:af303e50b154ee6819a427b3f6609064596fd0ec85ae33c39c8af793d5f79080",
         "reorder_collections": "sha256:1ca15d17627f9313cf613371e44816f2ae36a2f215b343ad8f4f1d1c6fe7c171",
         "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
-        "update_menu": "sha256:e6584d9728979ac3dd33bcec051dddc7870891da96453a35ec8a0b97fcb4577f",
-        "update_product": "sha256:a0922c53833049213f285effc25367cf18592c38afd4d74390d94d634bf19bf8"
+        "update_menu": "sha256:e6dc0f003aeeef5b249ad679816850b89c2b96ec4a1452be3ddf3a66633a1aef",
+        "update_product": "sha256:1194c06a4582edf41fff8d3846db10ed74b8ae5137275c37e16de63313a70b65"
       }
     },
     {
@@ -115663,8 +116223,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
-        "create_product": "sha256:b705783dbf570c2110b99b7e08f2cb7b07891ad23d800e84e75e641f5ccf5c35",
-        "get_product": "sha256:c3fdf51ba48fe3462cf663273f0f9ea49c42be9d457298486ffe91d71b6a16a2",
+        "create_product": "sha256:0b928da9a8f477101a7cf9a65796f7aa03810c5bbfb7e63ab54431dc51e2eef8",
+        "get_product": "sha256:f8a5ba9bb342f8712339bc81107fff4ef176d5e834b67b07376d633ebe417ed8",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
@@ -115728,7 +116288,7 @@
         "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
         "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
-        "get_product": "sha256:c3fdf51ba48fe3462cf663273f0f9ea49c42be9d457298486ffe91d71b6a16a2",
+        "get_product": "sha256:f8a5ba9bb342f8712339bc81107fff4ef176d5e834b67b07376d633ebe417ed8",
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871",
@@ -115744,7 +116304,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:b705783dbf570c2110b99b7e08f2cb7b07891ad23d800e84e75e641f5ccf5c35",
+        "create_product": "sha256:0b928da9a8f477101a7cf9a65796f7aa03810c5bbfb7e63ab54431dc51e2eef8",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_website_draft": "sha256:fccf7d7281ba30d1e79163929e61abec1893c2e910460c4068364a65784a7bac",
@@ -115755,7 +116315,7 @@
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
-        "update_menu": "sha256:e6584d9728979ac3dd33bcec051dddc7870891da96453a35ec8a0b97fcb4577f",
+        "update_menu": "sha256:e6dc0f003aeeef5b249ad679816850b89c2b96ec4a1452be3ddf3a66633a1aef",
         "update_organization_settings": "sha256:c7ab6bac088414e7f6397f3fcd00d9c8c79dd30b4575f35ed4050388748e1047",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
@@ -115770,7 +116330,7 @@
       },
       "toolContracts": {
         "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
-        "get_product": "sha256:c3fdf51ba48fe3462cf663273f0f9ea49c42be9d457298486ffe91d71b6a16a2",
+        "get_product": "sha256:f8a5ba9bb342f8712339bc81107fff4ef176d5e834b67b07376d633ebe417ed8",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -115778,7 +116338,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "replace_product_weekly_schedule": "sha256:d4f5ba8f99874961aa0d9cb91f22c8ef2b640aeeeff6a52fc8e7ed758fbf4ae2",
         "set_product_booking_config": "sha256:727bf4fc651ced45ea84cc49b1c1e864366dbadac346e8dabdba56db426e1acc",
-        "update_product": "sha256:a0922c53833049213f285effc25367cf18592c38afd4d74390d94d634bf19bf8",
+        "update_product": "sha256:1194c06a4582edf41fff8d3846db10ed74b8ae5137275c37e16de63313a70b65",
         "update_reservation_policy": "sha256:f1e5e7eda32993dc7be3ffc459ceb97517ed309bb144d2a5f29a0f0b082f784f"
       }
     },
@@ -115798,7 +116358,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0",
-        "update_product": "sha256:a0922c53833049213f285effc25367cf18592c38afd4d74390d94d634bf19bf8",
+        "update_product": "sha256:1194c06a4582edf41fff8d3846db10ed74b8ae5137275c37e16de63313a70b65",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
     },
@@ -115814,14 +116374,14 @@
         "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_organization_analytics": "sha256:aad678e4cef26c11f2a5304b650d582662912ff4a1395bffb04b7d791778db43",
-        "get_product": "sha256:c3fdf51ba48fe3462cf663273f0f9ea49c42be9d457298486ffe91d71b6a16a2",
+        "get_product": "sha256:f8a5ba9bb342f8712339bc81107fff4ef176d5e834b67b07376d633ebe417ed8",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
-        "update_product": "sha256:a0922c53833049213f285effc25367cf18592c38afd4d74390d94d634bf19bf8"
+        "update_product": "sha256:1194c06a4582edf41fff8d3846db10ed74b8ae5137275c37e16de63313a70b65"
       }
     }
   ],
@@ -115849,7 +116409,7 @@
       "slug": "update-your-menu-with-an-ai-assistant",
       "contentHash": "sha256:aa8642030ebe66e3d27ab8abecff519d51ee2eaf11f7ee1e02875ee4e1ea987e",
       "toolContracts": {
-        "get_product": "sha256:c3fdf51ba48fe3462cf663273f0f9ea49c42be9d457298486ffe91d71b6a16a2",
+        "get_product": "sha256:f8a5ba9bb342f8712339bc81107fff4ef176d5e834b67b07376d633ebe417ed8",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
@@ -115857,7 +116417,7 @@
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
         "reorder_collections": "sha256:1ca15d17627f9313cf613371e44816f2ae36a2f215b343ad8f4f1d1c6fe7c171",
         "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
-        "update_menu": "sha256:e6584d9728979ac3dd33bcec051dddc7870891da96453a35ec8a0b97fcb4577f"
+        "update_menu": "sha256:e6dc0f003aeeef5b249ad679816850b89c2b96ec4a1452be3ddf3a66633a1aef"
       }
     },
     {

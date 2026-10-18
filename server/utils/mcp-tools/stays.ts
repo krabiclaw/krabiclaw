@@ -1,3 +1,4 @@
+import { STAY_ARRIVAL_TEXT_LIMITS, STAY_CHECKOUT_DETAILS_LIMIT } from '~/shared/stay-arrival'
 import { organizationTool, type McpToolDefinition } from './shared'
 import { NOT_HANDLED, requiredString, type McpExecutorContext } from './execution'
 import { CHANNEL_PUSH_SCHEMA } from '~/shared/channel-push'
@@ -46,15 +47,15 @@ export const STAY_LISTING_SCHEMA = {
   cancellation_policy: nullableCode(STAY_CANCELLATION_POLICIES, 'Policy shown to guests for stays under 28 nights. It does not refund by itself.'),
   long_term_cancellation_policy: nullableCode(STAY_LONG_TERM_CANCELLATION_POLICIES, 'Policy shown to guests for stays of 28 nights or more.'),
 }
-const checkoutInstruction = { type: 'object', properties: { task: { type: 'string', enum: Object.keys(STAY_CHECKOUT_TASKS) }, details: { type: ['string', 'null'], minLength: 1, maxLength: 500, description: 'Required for additional.' } }, required: ['task', 'details'], additionalProperties: false }
+const checkoutInstruction = { type: 'object', properties: { task: { type: 'string', enum: Object.keys(STAY_CHECKOUT_TASKS) }, details: { type: ['string', 'null'], minLength: 1, maxLength: STAY_CHECKOUT_DETAILS_LIMIT, description: 'Required for additional.' } }, required: ['task', 'details'], additionalProperties: false }
 /** The private arrival guide: managers and assigned members read it; no public page carries it. */
 export const STAY_ARRIVAL_SCHEMA = {
   check_in_method: nullableCode(STAY_CHECK_IN_METHODS, 'How guests get in.'),
-  check_in_instructions: { type: ['string', 'null'], minLength: 1, maxLength: 5000 },
-  wifi_network: { type: ['string', 'null'], minLength: 1, maxLength: 100 },
-  wifi_password: { type: ['string', 'null'], minLength: 1, maxLength: 100 },
-  directions: { type: ['string', 'null'], minLength: 1, maxLength: 5000 },
-  house_manual: { type: ['string', 'null'], minLength: 1, maxLength: 5000 },
+  check_in_instructions: { type: ['string', 'null'], minLength: 1, maxLength: STAY_ARRIVAL_TEXT_LIMITS.check_in_instructions },
+  wifi_network: { type: ['string', 'null'], minLength: 1, maxLength: STAY_ARRIVAL_TEXT_LIMITS.wifi_network },
+  wifi_password: { type: ['string', 'null'], minLength: 1, maxLength: STAY_ARRIVAL_TEXT_LIMITS.wifi_password },
+  directions: { type: ['string', 'null'], minLength: 1, maxLength: STAY_ARRIVAL_TEXT_LIMITS.directions },
+  house_manual: { type: ['string', 'null'], minLength: 1, maxLength: STAY_ARRIVAL_TEXT_LIMITS.house_manual },
   checkout_instructions: { type: 'array', items: checkoutInstruction, description: 'What guests do before leaving, in order, each task once; replaces the whole list.' },
 }
 const homeAddress = { type: ['object', 'null'], properties: { address: text, city: nullableText, state: nullableText, country: { type: 'string', pattern: '^[A-Z]{2}$' }, zip_code: nullableText }, required: ['address', 'city', 'state', 'country', 'zip_code'] }

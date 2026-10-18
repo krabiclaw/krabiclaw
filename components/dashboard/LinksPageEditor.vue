@@ -314,7 +314,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => [
     id: 'page',
     items: [
       { id: 'title', label: 'Title', summary: form.title || 'Not named yet', placeholder: !form.title, to: `${linksPath.value}/title` },
-      { id: 'items', label: 'Links', summary: linksSummary(), placeholder: !items.value.length, to: `${linksPath.value}/items` },
+      { id: 'items', label: 'Links', icon: 'i-lucide-link', summary: linksSummary(), placeholder: !items.value.length, to: `${linksPath.value}/items` },
     ],
   },
 ])

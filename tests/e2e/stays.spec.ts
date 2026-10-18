@@ -23,7 +23,7 @@ async function tool<T>(request: APIRequestContext, baseURL: string, organization
   return { data: body.result!.structuredContent!, error: null }
 }
 
-test('a host creates a place to stay, sees its stay on Today, and records payment and cancellation', async ({ page, baseURL }) => {
+test('a host creates a place to stay, sees its stay on Today, and records payment and cancellation', async ({ page, browser, baseURL }, testInfo) => {
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
   const request = page.request
   await loginAs(request, baseURL!, 'user-e2e-lodging-host')
@@ -69,7 +69,305 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   await expect(stayTile).toHaveAccessibleName('Cliff Cabin')
   await stayTile.click()
   await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}`)
-  await expect(page.locator('#dashboard-panel-product').getByRole('heading', { name: 'Cliff Cabin', exact: true })).toBeVisible()
+  await expect(page.locator('#dashboard-panel-product').getByRole('heading', { name: 'Listing editor', exact: true })).toBeVisible()
+  await expect(page.getByTestId('editor-card-name')).toContainText('Cliff Cabin')
+
+  // Listing choices remain real, named controls; their writes are read through MCP.
+  await page.getByRole('link', { name: /Property type/ }).click()
+  const propertyPicker = page.locator('#dashboard-panel-product-property-type')
+  await propertyPicker.getByText('Unique space', { exact: true }).click()
+  await propertyPicker.getByText('Treehouse', { exact: true }).click()
+  await expect(propertyPicker.getByRole('radio', { name: /^Treehouse/ })).toBeChecked()
+  await page.screenshot({ path: testInfo.outputPath('property-choices-mobile.png') })
+  await propertyPicker.getByRole('button', { name: 'Save', exact: true }).click()
+  await page.getByRole('link', { name: /Amenities/ }).click()
+  const amenityOverview = page.locator('#dashboard-panel-product-amenities')
+  await amenityOverview.getByTestId('list-editor-add').click()
+  await expect(page).toHaveURL(new RegExp(`/products/${productId}/amenities/add`))
+  const amenityPicker = page.locator('#dashboard-panel-product-amenities-add')
+  const dryer = amenityPicker.getByRole('button', { name: 'Dryer', exact: true })
+  await dryer.focus()
+  await dryer.press('Space')
+  await expect(dryer).toHaveAttribute('aria-pressed', 'true')
+  await amenityPicker.getByTestId('amenity-categories-bathroom').click()
+  await expect(amenityPicker.getByTestId('amenity-categories-bathroom')).toHaveAttribute('aria-pressed', 'true')
+  await expect(amenityPicker.getByRole('button', { name: 'Bathtub', exact: true })).toBeVisible()
+  await expect(amenityPicker.getByRole('button', { name: 'Wifi', exact: true })).toHaveCount(0)
+  await expect(dryer).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('amenity-categories-mobile.png') })
+  // Search crosses category boundaries while retaining the unsaved selection.
+  await amenityPicker.getByRole('button', { name: 'Search amenities', exact: true }).click()
+  await amenityPicker.getByRole('searchbox', { name: 'Search amenities', exact: true }).fill('e2e-no-matching-amenity')
+  await expect(amenityPicker.getByRole('heading', { name: 'No amenities found', exact: true })).toBeVisible()
+  await amenityPicker.getByRole('button', { name: 'Cancel search', exact: true }).click()
+  await expect(amenityPicker.getByTestId('amenity-categories-all')).toHaveAttribute('aria-pressed', 'true')
+  await expect(dryer).toHaveAttribute('aria-pressed', 'true')
+  await amenityPicker.getByRole('button', { name: 'Search amenities', exact: true }).click()
+  await amenityPicker.getByRole('searchbox', { name: 'Search amenities', exact: true }).fill('Wifi')
+  const wifi = amenityPicker.getByRole('button', { name: 'Wifi', exact: true })
+  await expect(wifi).toBeVisible()
+  await wifi.click()
+  await expect(wifi).toHaveAttribute('aria-pressed', 'true')
+  await page.screenshot({ path: testInfo.outputPath('amenity-search-mobile.png') })
+  await amenityPicker.getByRole('button', { name: 'Done', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/products/${productId}/amenities$`))
+  const described = await call<{ product: { stay: { property_type_group: string; property_type: string; amenities: string[] } } }>('get_product', { product_id: productId })
+  expect(described.error).toBeNull()
+  expect(described.data!.product.stay).toMatchObject({ property_type_group: 'unique_homes', property_type: 'treehouse', amenities: ['dryer', 'wireless_internet'] })
+  await expect(amenityOverview.getByText('Dryer', { exact: true })).toBeVisible()
+  await expect(amenityOverview.getByText('Wifi', { exact: true })).toBeVisible()
+  await expect(amenityOverview.getByText('Bathtub', { exact: true })).toHaveCount(0)
+
+  // Editing the selected-only overview can be cancelled without changing saved amenities.
+  await amenityOverview.getByTestId('list-editor-toggle').click()
+  await amenityOverview.getByRole('button', { name: 'Remove Wifi', exact: true }).click()
+  await expect(amenityOverview.getByText('Wifi', { exact: true })).toHaveCount(0)
+  await amenityOverview.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(amenityOverview.getByText('Wifi', { exact: true })).toBeVisible()
+  const cancelledAmenities = await call<{ product: { stay: { amenities: string[] } } }>('get_product', { product_id: productId })
+  expect(cancelledAmenities.error).toBeNull()
+  expect(cancelledAmenities.data!.product.stay.amenities).toEqual(['dryer', 'wireless_internet'])
+
+  // Done commits a removal; a subsequent Add starts from that persisted selection.
+  await amenityOverview.getByTestId('list-editor-toggle').click()
+  await amenityOverview.getByRole('button', { name: 'Remove Wifi', exact: true }).click()
+  const removalSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products/${productId}`)
+  await amenityOverview.getByTestId('list-editor-toggle').click()
+  expect((await removalSaved).status()).toBe(200)
+  const removedAmenity = await call<{ product: { stay: { amenities: string[] } } }>('get_product', { product_id: productId })
+  expect(removedAmenity.error).toBeNull()
+  expect(removedAmenity.data!.product.stay.amenities).toEqual(['dryer'])
+  await expect(amenityOverview.getByRole('button', { name: 'Edit', exact: true })).toBeVisible()
+
+  // Removing the last amenity still leaves a way to commit the empty selection.
+  await amenityOverview.getByTestId('list-editor-toggle').click()
+  await amenityOverview.getByRole('button', { name: 'Remove Dryer', exact: true }).click()
+  await expect(amenityOverview.getByRole('button', { name: 'Done', exact: true })).toBeVisible()
+  const emptySaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products/${productId}`)
+  await amenityOverview.getByRole('button', { name: 'Done', exact: true }).click()
+  expect((await emptySaved).status()).toBe(200)
+  const emptyAmenities = await call<{ product: { stay: { amenities: string[] } } }>('get_product', { product_id: productId })
+  expect(emptyAmenities.error).toBeNull()
+  expect(emptyAmenities.data!.product.stay.amenities).toEqual([])
+  await expect(amenityOverview.getByRole('heading', { name: 'No amenities added yet', exact: true })).toBeVisible()
+
+  await amenityOverview.getByTestId('list-editor-add').click()
+  await expect(dryer).toHaveAttribute('aria-pressed', 'false')
+  await expect(wifi).toHaveAttribute('aria-pressed', 'false')
+  await dryer.click()
+  await wifi.click()
+  await amenityPicker.getByRole('button', { name: 'Done', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/products/${productId}/amenities$`))
+  await expect(amenityPicker).not.toBeVisible()
+  await expect(amenityOverview.getByText('Wifi', { exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('amenities-mobile.png') })
+  await page.setViewportSize({ width: 1440, height: 900 })
+
+  // Desktop Back returns from Add to the selected overview and discards its draft.
+  await amenityOverview.getByTestId('list-editor-add').click()
+  await expect(amenityPicker).toBeVisible()
+  const airConditioning = amenityPicker.getByRole('button', { name: 'Air conditioning', exact: true })
+  await expect(airConditioning).toHaveAttribute('aria-pressed', 'false')
+  await airConditioning.click()
+  await expect(airConditioning).toHaveAttribute('aria-pressed', 'true')
+  await amenityOverview.getByRole('link', { name: 'Back', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/products/${productId}/amenities$`))
+  await expect(amenityPicker).not.toBeVisible()
+  await expect(amenityOverview.getByText('Air conditioning', { exact: true })).toHaveCount(0)
+  const discardedAmenity = await call<{ product: { stay: { amenities: string[] } } }>('get_product', { product_id: productId })
+  expect(discardedAmenity.error).toBeNull()
+  expect(discardedAmenity.data!.product.stay.amenities).toEqual(['dryer', 'wireless_internet'])
+
+  const amenitiesCard = page.getByTestId('stay-editor-cards').getByTestId('editor-card-amenities')
+  await expect(amenitiesCard).toBeVisible()
+  await expect(amenitiesCard).toHaveAttribute('aria-current', 'page')
+  await expect(amenitiesCard).toContainText('Dryer')
+  await expect(amenitiesCard).toContainText('Wifi')
+  await amenitiesCard.scrollIntoViewIfNeeded()
+  await expect(amenitiesCard).toBeInViewport()
+  await page.screenshot({ path: testInfo.outputPath('amenities-desktop.png') })
+
+  // Each public description section is edited through its own leaf and read
+  // back through MCP, a fresh editor load and the actual guest renderer.
+  const listingDescription = 'A peaceful treehouse above the Krabi coast.'
+  const listingDetails = {
+    your_property: 'Two airy floors and a shaded deck overlook the limestone cliffs.',
+    guest_access: 'Guests have the whole treehouse and its private garden.',
+    interaction_with_guests: 'Your host is available by message throughout your stay.',
+    other_details_to_note: 'The treehouse is reached by a flight of outdoor stairs.',
+  }
+  const descriptionSections = [
+    { section: 'listing-description', label: 'Listing description', value: listingDescription },
+    { section: 'your_property', label: 'Your property', value: listingDetails.your_property },
+    { section: 'guest_access', label: 'Guest access', value: listingDetails.guest_access },
+    { section: 'interaction_with_guests', label: 'Interaction with guests', value: listingDetails.interaction_with_guests },
+    { section: 'other_details_to_note', label: 'Other details to note', value: listingDetails.other_details_to_note },
+  ]
+  await page.getByTestId('editor-card-description').click()
+  const descriptionOverview = page.locator('#dashboard-panel-product-description')
+  const descriptionSection = page.locator('#dashboard-panel-product-description-section')
+  // Switching a reused section leaf must not carry its uncommitted text into
+  // the next section's save.
+  await descriptionOverview.getByRole('link', { name: /^Guest access/ }).click()
+  await descriptionSection.getByRole('textbox', { name: 'Guest access', exact: true }).fill('Uncommitted access instructions.')
+  await descriptionOverview.getByRole('link', { name: /^Your property/ }).click()
+  await descriptionSection.getByRole('textbox', { name: 'Your property', exact: true }).fill(listingDetails.your_property)
+  await descriptionSection.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/products/${productId}/description$`))
+  const switchedDescription = await call<{ product: { details: Record<string, unknown> } }>('get_product', { product_id: productId })
+  expect(switchedDescription.error).toBeNull()
+  expect(switchedDescription.data!.product.details.your_property).toBe(listingDetails.your_property)
+  expect(switchedDescription.data!.product.details).not.toHaveProperty('guest_access')
+  for (const section of descriptionSections) {
+    if (section.section === 'your_property') continue
+    await descriptionOverview.getByRole('link', { name: new RegExp(`^${section.label}`) }).click()
+    await descriptionSection.getByRole('textbox', { name: section.label, exact: true }).fill(section.value)
+    await descriptionSection.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(page).toHaveURL(new RegExp(`/products/${productId}/description$`))
+    await expect(descriptionSection).not.toBeVisible()
+    await expect(descriptionOverview.getByRole('link', { name: new RegExp(`^${section.label}`) })).toContainText(section.value)
+  }
+  await descriptionOverview.getByRole('link', { name: /^Guest access/ }).click()
+  await expect(page).toHaveURL(new RegExp(`/products/${productId}/description/guest_access$`))
+  await page.reload()
+  await expect(descriptionSection.getByRole('textbox', { name: 'Guest access', exact: true })).toHaveValue(listingDetails.guest_access)
+  await descriptionSection.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/products/${productId}/description$`))
+  await descriptionOverview.getByRole('link', { name: /^Your property/ }).click()
+  await descriptionSection.getByRole('textbox', { name: 'Your property', exact: true }).fill('An unsaved replacement that must be discarded.')
+  await descriptionSection.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/products/${productId}/description$`))
+  await expect(descriptionOverview.getByRole('link', { name: /^Your property/ })).toContainText(listingDetails.your_property)
+  const descriptionRead = await call<{ product: { description: string; details: Record<string, unknown> } }>('get_product', { product_id: productId })
+  expect(descriptionRead.error).toBeNull()
+  expect(descriptionRead.data!.product.description).toBe(listingDescription)
+  expect(descriptionRead.data!.product.details).toMatchObject(listingDetails)
+  await expect(descriptionOverview).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('description-desktop.png') })
+
+  // The two cancellation periods retain their own policy. Reading more about
+  // another policy does not select it, and cancelling an edit changes neither.
+  await page.getByTestId('editor-card-cancellation').click()
+  const cancellationOverview = page.locator('#dashboard-panel-product-cancellation')
+  const cancellationPolicy = page.locator('#dashboard-panel-product-cancellation-policy')
+  await cancellationOverview.getByRole('link', { name: /^Short-term stays/ }).click()
+  await cancellationPolicy.getByText('Flexible', { exact: true }).click()
+  const moderateInfo = cancellationPolicy.getByRole('button', { name: 'More about Moderate', exact: true })
+  await moderateInfo.click()
+  await expect(moderateInfo).toHaveAttribute('aria-expanded', 'true')
+  await expect(cancellationPolicy.getByRole('radio', { name: /^Flexible/ })).toBeChecked()
+  await expect(cancellationPolicy.getByRole('radio', { name: /^Moderate/ })).not.toBeChecked()
+  await page.keyboard.press('Escape')
+  await cancellationPolicy.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/products/${productId}/cancellation$`))
+  await cancellationOverview.getByRole('link', { name: /^Long-term stays/ }).click()
+  await cancellationPolicy.getByText('Firm Long Term', { exact: true }).click()
+  await cancellationPolicy.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/products/${productId}/cancellation$`))
+  await expect(cancellationOverview.getByRole('link', { name: /^Short-term stays/ })).toContainText('Flexible')
+  await expect(cancellationOverview.getByRole('link', { name: /^Long-term stays/ })).toContainText('Firm Long Term')
+  await cancellationOverview.getByRole('link', { name: /^Short-term stays/ }).click()
+  await expect(page).toHaveURL(new RegExp(`/products/${productId}/cancellation/standard$`))
+  await page.reload()
+  await expect(cancellationPolicy.getByRole('radio', { name: /^Flexible/ })).toBeChecked()
+  await expect(cancellationPolicy).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('cancellation-short-term-desktop.png') })
+  await cancellationPolicy.getByText('Moderate', { exact: true }).click()
+  await cancellationPolicy.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/products/${productId}/cancellation$`))
+  const policiesRead = await call<{ product: { stay: { cancellation_policy: string; long_term_cancellation_policy: string } } }>('get_product', { product_id: productId })
+  expect(policiesRead.error).toBeNull()
+  expect(policiesRead.data!.product.stay).toMatchObject({ cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm' })
+  await expect(cancellationOverview).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('cancellation-desktop.png') })
+
+  // Saved settings are separate concerns; each save preserves the other
+  // concerns and a cancelled capacity edit restores the loaded value.
+  await page.getByTestId('editor-card-guests').click()
+  const guestsPanel = page.locator('#dashboard-panel-product-guests')
+  await guestsPanel.getByRole('spinbutton', { name: 'Guests', exact: true }).fill('6')
+  await guestsPanel.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(guestsPanel).not.toBeVisible()
+  await page.getByTestId('editor-card-guests').click()
+  await expect(page).toHaveURL(new RegExp(`/products/${productId}/guests$`))
+  await page.reload()
+  await expect(guestsPanel.getByRole('spinbutton', { name: 'Guests', exact: true })).toHaveValue('6')
+  await expect(guestsPanel).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('guests-desktop.png') })
+  await guestsPanel.getByRole('spinbutton', { name: 'Guests', exact: true }).fill('9')
+  await guestsPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(guestsPanel).not.toBeVisible()
+  await page.getByTestId('editor-card-availability').click()
+  const availabilityPanel = page.locator('#dashboard-panel-product-stay-availability')
+  await availabilityPanel.getByRole('spinbutton', { name: 'Minimum nights', exact: true }).fill('1')
+  await availabilityPanel.getByRole('button', { name: 'Save', exact: true }).click()
+  await expect(availabilityPanel).not.toBeVisible()
+  await page.getByTestId('editor-card-availability').click()
+  await expect(availabilityPanel.getByRole('spinbutton', { name: 'Minimum nights', exact: true })).toHaveValue('1')
+  await expect(availabilityPanel).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('availability-desktop.png') })
+  await availabilityPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(availabilityPanel).not.toBeVisible()
+  await page.getByRole('tab', { name: 'Arrival guide', exact: true }).click()
+  const arrivalPanel = page.locator('#dashboard-panel-product-arrival-time')
+  await arrivalPanel.getByLabel(/^Check-in from/).fill('16:00')
+  await arrivalPanel.getByLabel(/^Checkout by/).fill('10:00')
+  const arrivalSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products/${productId}`)
+  await arrivalPanel.getByRole('button', { name: 'Save', exact: true }).click()
+  expect((await arrivalSaved).status()).toBe(200)
+  await expect(arrivalPanel.getByRole('button', { name: 'Cancel', exact: true })).toBeEnabled()
+  await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/arrival-time`) && url.searchParams.get('guide') === 'arrival')
+  await page.reload()
+  await expect(arrivalPanel.getByLabel(/^Check-in from/)).toHaveValue('16:00')
+  await expect(arrivalPanel.getByLabel(/^Checkout by/)).toHaveValue('10:00')
+  await expect(arrivalPanel).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('arrival-time-desktop.png') })
+  await arrivalPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await page.getByRole('tab', { name: 'Your space', exact: true }).click()
+  await expect(arrivalPanel).not.toBeVisible()
+  const settingsRead = await call<{ product: { description: string; details: Record<string, unknown>; stay: Record<string, unknown> } }>('get_product', { product_id: productId })
+  expect(settingsRead.error).toBeNull()
+  expect(settingsRead.data!.product).toMatchObject({ description: listingDescription, details: listingDetails, stay: {
+    check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1,
+    amenities: ['dryer', 'wireless_internet'], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
+  } })
+
+  // View opens the saved draft on its actual tenant route. Preview access is
+  // carried by the signed link; a separate guest cannot read the hidden stay.
+  const previewLink = page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true })
+  const previewURL = new URL((await previewLink.getAttribute('href'))!, baseURL!)
+  expect(previewURL.pathname).toMatch(/^\/stays\//)
+  expect(previewURL.searchParams.get('preview_token')).toBeTruthy()
+  const openedPreview = page.waitForEvent('popup')
+  await previewLink.click()
+  const preview = await openedPreview
+  await expect(preview.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
+  for (const section of descriptionSections) {
+    await expect(preview.getByTestId(`stay-description-${section.section}`)).toHaveCount(1)
+    await expect(preview.getByTestId(`stay-description-${section.section}`)).toContainText(section.value)
+    await expect(preview.getByText(section.value, { exact: true })).toHaveCount(1)
+  }
+  await expect(preview.locator('article')).toContainText('Sleeps 6')
+  await expect(preview.locator('article')).toContainText('Flexible cancellation policy')
+  await expect(preview.locator('article')).toContainText('Firm Long Term: Full refund up to 30 days before check-in.')
+  const publicRead = await preview.request.get(new URL(previewURL.pathname.replace(/^\/stays\//, '/api/public/stays/'), previewURL).href)
+  expect(publicRead.status(), await publicRead.text()).toBe(200)
+  expect((await publicRead.json() as { product: unknown }).product).toMatchObject({ description: listingDescription, details: listingDetails, stay: {
+    check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1,
+    cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
+  } })
+  await preview.screenshot({ path: testInfo.outputPath('stay-preview-desktop.png') })
+  const anonymous = await browser.newContext()
+  try {
+    previewURL.searchParams.delete('preview_token')
+    const hidden = await anonymous.request.get(previewURL.href)
+    expect(hidden.status()).toBe(404)
+    expect(await hidden.text()).not.toContain('Cliff Cabin')
+  } finally {
+    await anonymous.close()
+    await preview.close()
+  }
+  await page.setViewportSize({ width: 390, height: 844 })
 
   // A stay arriving today holds its nights; another on them is refused.
   const checkIn = localDay(0)
@@ -84,7 +382,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   // Today lists the arrival and opens the stay.
   await page.goto(`/dashboard/${slug}`)
   // Today's card names the guest by first name and the moment: arriving, at the home's check-in time.
-  const arrival = page.getByRole('link', { name: /3:00\sPM Ana arrives today with 2 guests/ })
+  const arrival = page.getByRole('link', { name: /4:00\sPM Ana arrives today with 2 guests/ })
   await expect(arrival).toHaveAttribute('href', `/dashboard/${slug}/bookings/stay/${stay.data!.stay.id}`)
   await arrival.click()
   await expect(page.getByRole('heading', { name: 'Ana Silva', level: 2, exact: true })).toBeVisible()
@@ -112,11 +410,11 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   // The editor created the home without a nightly price, so it has no base price; its currency is the organization's.
   expect((await homes.json() as { homes: unknown[] }).homes).toEqual([{
     product_id: productId, name: 'Cliff Cabin', location_id: location.id, timezone: TIME_ZONE, currency: 'THB', base_price_minor: null, base_price_tax_behavior: null,
-    check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: null, channel: null,
+    check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1, assigned_member_id: null, assigned_team_id: null, channel: null,
     check_in_instructions: null, photos: [],
-    // Created in the editor with no listing details, at a provisioned location Google never placed, and not yet listed.
-    description: '', published: false, address: homeAddress, latitude: null, longitude: null,
-    property_type_group: null, property_type: null, bedrooms: null, beds: null, bathrooms: null, amenities: [], cancellation_policy: null, long_term_cancellation_policy: null,
+    // The editor's listing choices persist through the native home projection too.
+    description: listingDescription, published: false, address: homeAddress, latitude: null, longitude: null,
+    property_type_group: 'unique_homes', property_type: 'treehouse', bedrooms: null, beds: null, bathrooms: null, amenities: ['dryer', 'wireless_internet'], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
     check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
   }])
 
@@ -157,7 +455,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   expect(mcpCalendar.data!.nights).toEqual([expect.objectContaining({ date: closedNight, closed: true })])
 })
 
-test('a cleaner sees only assigned-home arrivals and departures on Today and Upcoming', async ({ page, browser, baseURL }) => {
+test('a cleaner sees only assigned-home arrivals and departures on Today and Upcoming', async ({ page, browser, baseURL }, testInfo) => {
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates local stays and uses disposable actors')
   await loginAs(page.request, baseURL!, 'user-e2e-lodging-host')
   const headers = authRequestHeaders(baseURL!)
@@ -183,7 +481,7 @@ test('a cleaner sees only assigned-home arrivals and departures on Today and Upc
     expect(locations.data!.locations).toHaveLength(1)
     const madeHome = await page.request.post(api('stay-homes'), { data: { name: 'Assigned Cabin', timezone: TIME_ZONE, address: '1 Test Road', city: 'Krabi', country: 'TH',
       state: null, zip_code: null, phone: null, email: null, check_in_time: '15:00', check_out_time: '11:00', max_guests: 4, min_nights: 1,
-      base_price_minor: null, idempotency_key: crypto.randomUUID() } })
+      base_price_minor: 320_000, idempotency_key: crypto.randomUUID() } })
     expect(madeHome.status(), await madeHome.text()).toBe(201)
     const assignedHome = (await madeHome.json() as { home: { product_id: string; location_id: string } }).home
     const otherHome = await call<{ product: { id: string } }>('create_product', { kind: 'stay', name: 'Other Cabin', idempotency_key: crypto.randomUUID(), stay: {
@@ -201,6 +499,407 @@ test('a cleaner sees only assigned-home arrivals and departures on Today and Upc
       expect(made.status(), await made.text()).toBe(201)
       stays.push((await made.json() as { stay: { id: string } }).stay)
     }
+
+    // The host's arrival guide writes through the existing private home API.
+    // Each concern saves only its own fields; public house rules stay public.
+    const productPath = `/dashboard/${slug}/products/${assignedHome.product_id}`
+    const guide = {
+      directions: 'Use the side gate by the blue postbox.',
+      wifi_network: 'Cabin guest network',
+      wifi_password: ' island breeze 42 ',
+      house_manual: 'Turn off the air conditioning whenever you leave the cabin.',
+      check_in_method: 'keypad',
+      check_in_instructions: 'Enter 4826 then turn the brass handle.',
+      checkout_instructions: [{ task: 'gather_towels', details: 'Leave used towels in the basket by the bathroom.' }],
+    }
+    const houseRules = 'Quiet hours start at 10 pm. Please keep the garden gate closed.'
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto(`${productPath}/photo`)
+    await page.getByRole('tab', { name: 'Arrival guide', exact: true }).click()
+    await expect(page.getByRole('tab', { name: 'Arrival guide', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await page.getByTestId('editor-card-directions').click()
+    const directionsPanel = page.locator('#dashboard-panel-product-directions')
+    await directionsPanel.getByRole('textbox', { name: 'Directions', exact: true }).fill(guide.directions)
+    const arrivalEndpoint = `/api/dashboard/stay-homes/${assignedHome.product_id}`
+    const interceptArrival = (url: URL) => url.pathname === arrivalEndpoint
+    let interruptedWrites = 0
+    await page.route(interceptArrival, async route => {
+      if (route.request().method() !== 'PATCH') return await route.continue()
+      interruptedWrites += 1
+      await route.abort('failed')
+    })
+    const failedDirectionWrite = page.waitForEvent('requestfailed', request => request.method() === 'PATCH' && new URL(request.url()).pathname === arrivalEndpoint)
+    await directionsPanel.getByRole('button', { name: 'Save', exact: true }).click()
+    expect((await failedDirectionWrite).failure()).toEqual({ errorText: 'net::ERR_FAILED' })
+    await expect(directionsPanel.getByText('Failed to fetch', { exact: false })).toBeVisible()
+    await expect(directionsPanel.getByRole('textbox', { name: 'Directions', exact: true })).toHaveValue(guide.directions)
+    await expect(directionsPanel.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
+    expect(interruptedWrites).toBe(1)
+    const unwrittenGuide = await call<{ home: { directions: string | null } }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(0), to: localDay(2) })
+    expect(unwrittenGuide.error).toBeNull()
+    expect(unwrittenGuide.data!.home.directions).toBeNull()
+    await page.unroute(interceptArrival)
+    await directionsPanel.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(directionsPanel).not.toBeVisible()
+    await page.getByTestId('editor-card-directions').click()
+    await expect(page).toHaveURL(url => url.pathname === `${productPath}/directions`)
+    await page.reload()
+    await expect(directionsPanel.getByRole('textbox', { name: 'Directions', exact: true })).toHaveValue(guide.directions)
+    await directionsPanel.getByRole('textbox', { name: 'Directions', exact: true }).fill('This unsaved route must not replace the saved directions.')
+    await directionsPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(directionsPanel).not.toBeVisible()
+    await page.getByTestId('editor-card-wifi').click()
+    const wifiPanel = page.locator('#dashboard-panel-product-wifi')
+    await wifiPanel.getByRole('textbox', { name: 'Wifi network', exact: true }).fill(guide.wifi_network)
+    await wifiPanel.getByLabel('Wifi password', { exact: true }).fill(guide.wifi_password)
+    await wifiPanel.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(wifiPanel).not.toBeVisible()
+    await page.getByTestId('editor-card-wifi').click()
+    await wifiPanel.getByRole('textbox', { name: 'Wifi network', exact: true }).fill('An uncommitted network name')
+    await page.getByTestId('editor-card-house-manual').click()
+    const manualPanel = page.locator('#dashboard-panel-product-house-manual')
+    await manualPanel.getByRole('textbox', { name: 'House manual', exact: true }).fill(guide.house_manual)
+    await manualPanel.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(manualPanel).not.toBeVisible()
+    await page.getByTestId('editor-card-wifi').click()
+    await expect(wifiPanel.getByRole('textbox', { name: 'Wifi network', exact: true })).toHaveValue(guide.wifi_network)
+    await expect(wifiPanel.getByLabel('Wifi password', { exact: true })).toHaveValue(guide.wifi_password)
+    await wifiPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(wifiPanel).not.toBeVisible()
+    await page.getByTestId('editor-card-check-in-method').click()
+    const methodOverview = page.locator('#dashboard-panel-product-check-in-method')
+    await methodOverview.getByRole('link', { name: 'Choose check-in method', exact: true }).click()
+    const methodPanel = page.locator('#dashboard-panel-product-check-in-method-choice')
+    await methodPanel.getByText('Keypad', { exact: true }).click()
+    await expect(methodPanel.getByRole('radio', { name: /^Keypad/ })).toBeChecked()
+    await methodPanel.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(page).toHaveURL(url => url.pathname === `${productPath}/check-in-method`)
+    await methodOverview.getByRole('link', { name: 'Edit check-in instructions', exact: true }).click()
+    const instructionsPanel = page.locator('#dashboard-panel-product-check-in-instructions')
+    await instructionsPanel.getByRole('textbox', { name: 'Check-in instructions', exact: true }).fill(guide.check_in_instructions)
+    await instructionsPanel.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(page).toHaveURL(url => url.pathname === `${productPath}/check-in-method`)
+    await page.getByTestId('editor-card-house-rules').click()
+    const rulesPanel = page.locator('#dashboard-panel-product-house-rules')
+    await rulesPanel.getByRole('textbox', { name: 'House rules', exact: true }).fill(houseRules)
+    await rulesPanel.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(rulesPanel).not.toBeVisible()
+    await page.getByTestId('editor-card-checkout-instructions').click()
+    const checkoutOverview = page.locator('#dashboard-panel-product-checkout-instructions')
+    await checkoutOverview.getByRole('link', { name: 'Add instructions', exact: true }).click()
+    const instructionChoices = page.locator('#dashboard-panel-product-checkout-instruction-choices')
+    await instructionChoices.getByRole('link', { name: 'Gather used towels', exact: true }).click()
+    const checkoutPanel = page.locator('#dashboard-panel-product-checkout-instruction')
+    await checkoutPanel.getByRole('textbox', { name: 'Gather used towels', exact: true }).fill(guide.checkout_instructions[0]!.details)
+    await checkoutPanel.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(page).toHaveURL(url => url.pathname === `${productPath}/checkout-instructions`)
+    await checkoutOverview.getByTestId('list-editor-toggle').click()
+    await checkoutOverview.getByRole('button', { name: 'Remove Gather used towels', exact: true }).click()
+    await checkoutOverview.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(checkoutOverview.getByRole('link', { name: /Gather used towels/ })).toContainText(guide.checkout_instructions[0]!.details)
+    await checkoutOverview.getByRole('link', { name: /Gather used towels/ }).click()
+    await checkoutPanel.getByRole('button', { name: 'Remove instruction', exact: true }).click()
+    await expect(page).toHaveURL(url => url.pathname === `${productPath}/checkout-instructions`)
+    const removedInstruction = await call<{ home: { checkout_instructions: unknown[] } }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(0), to: localDay(2) })
+    expect(removedInstruction.error).toBeNull()
+    expect(removedInstruction.data!.home.checkout_instructions).toEqual([])
+    await checkoutOverview.getByRole('link', { name: 'Add instructions', exact: true }).click()
+    await instructionChoices.getByRole('link', { name: 'Gather used towels', exact: true }).click()
+    await checkoutPanel.getByRole('textbox', { name: 'Gather used towels', exact: true }).fill(guide.checkout_instructions[0]!.details)
+    await checkoutPanel.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(page).toHaveURL(url => url.pathname === `${productPath}/checkout-instructions`)
+
+    const guideRead = await call<{ home: Record<string, unknown> }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(0), to: localDay(2) })
+    expect(guideRead.error).toBeNull()
+    expect(guideRead.data!.home).toMatchObject(guide)
+    const managerGuide = await page.request.get(api(`stay-homes/${assignedHome.product_id}`))
+    expect(managerGuide.status(), await managerGuide.text()).toBe(200)
+    expect(managerGuide.headers()['cache-control']).toBe('private, no-store, max-age=0')
+    expect(await managerGuide.json()).toMatchObject({ manage: true, home: guide })
+    const publicRules = await call<{ product: { details: { house_rules: string } } }>('get_product', { product_id: assignedHome.product_id })
+    expect(publicRules.error).toBeNull()
+    expect(publicRules.data!.product.details.house_rules).toBe(houseRules)
+    await expect(checkoutOverview).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath('arrival-editor-desktop.png') })
+
+    // The private View remains on the authenticated dashboard. The public
+    // preview and its API contain the house rules and none of the private guide.
+    const privateView = page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true })
+    const privateURL = new URL((await privateView.getAttribute('href'))!, baseURL!)
+    expect(privateURL.pathname).toBe(`${productPath}/arrival-guide`)
+    expect(privateURL.searchParams.has('preview_token')).toBe(false)
+    const privateOpened = page.waitForEvent('popup')
+    await privateView.click()
+    const privatePreview = await privateOpened
+    const privateGuide = privatePreview.getByTestId('arrival-guide-preview')
+    await expect(privateGuide).toBeVisible()
+    for (const value of [guide.directions, guide.wifi_network, guide.wifi_password, guide.house_manual, guide.check_in_instructions, guide.checkout_instructions[0]!.details, houseRules]) await expect(privateGuide).toContainText(value)
+    await privatePreview.screenshot({ path: testInfo.outputPath('arrival-guide-preview-desktop.png') })
+    await privatePreview.close()
+    const anonymous = await browser.newContext({ baseURL: baseURL! })
+    try {
+      const privateDenied = await anonymous.request.get(privateURL.href, { maxRedirects: 0 })
+      expect(privateDenied.status()).toBe(302)
+      const loginURL = new URL(privateDenied.headers().location!, baseURL!)
+      expect(loginURL.pathname).toBe('/login')
+      expect(loginURL.searchParams.get('redirect')).toBe(`${privateURL.pathname}${privateURL.search}`)
+      const homeDenied = await anonymous.request.get(api(`stay-homes/${assignedHome.product_id}`))
+      expect(homeDenied.status()).toBe(401)
+      expect(await homeDenied.json()).toMatchObject({ data: { code: 'UNAUTHORIZED' } })
+    } finally { await anonymous.close() }
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto(`${productPath}/wifi?guide=arrival`)
+    await expect(wifiPanel.getByRole('textbox', { name: 'Wifi network', exact: true })).toHaveValue(guide.wifi_network)
+    await expect(wifiPanel).toBeVisible()
+    await wifiPanel.getByTestId('dashboard-navbar-close').hover()
+    await expect(wifiPanel.getByRole('button', { name: 'Save', exact: true })).toBeInViewport()
+    await page.screenshot({ path: testInfo.outputPath('arrival-wifi-mobile.png') })
+    await wifiPanel.getByRole('textbox', { name: 'Wifi network', exact: true }).fill('A cancelled mobile network draft')
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await expect(wifiPanel.getByRole('textbox', { name: 'Wifi network', exact: true })).toHaveValue('A cancelled mobile network draft')
+    await page.setViewportSize({ width: 390, height: 844 })
+    await wifiPanel.getByRole('link', { name: 'Close', exact: true }).click()
+    await expect(page).toHaveURL(url => url.pathname === productPath && url.searchParams.get('guide') === 'arrival')
+    const cancelledGuide = await call<{ home: Record<string, unknown> }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(0), to: localDay(2) })
+    expect(cancelledGuide.error).toBeNull()
+    expect(cancelledGuide.data!.home).toMatchObject(guide)
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.getByRole('tab', { name: 'Your space', exact: true }).click()
+    await expect(page).toHaveURL(url => url.pathname === `${productPath}/photo` && !url.searchParams.has('guide'))
+    const publicView = page.locator('#dashboard-panel-product').getByRole('link', { name: 'View', exact: true })
+    await expect(publicView).toHaveAttribute('href', /preview_token=/)
+    const publicURL = new URL((await publicView.getAttribute('href'))!, baseURL!)
+    expect(publicURL.searchParams.get('preview_token')).toBeTruthy()
+    const publicOpened = page.waitForEvent('popup')
+    await publicView.click()
+    const publicPreview = await publicOpened
+    await expect(publicPreview.getByRole('heading', { name: 'Assigned Cabin', level: 1, exact: true })).toBeVisible()
+    await expect(publicPreview.getByText(houseRules, { exact: true })).toBeVisible()
+    const publicResponse = await publicPreview.request.get(new URL(publicURL.pathname.replace(/^\/stays\//, '/api/public/stays/'), publicURL).href)
+    expect(publicResponse.status(), await publicResponse.text()).toBe(200)
+    const publicPayload = await publicResponse.json() as { product: { stay: Record<string, unknown> } }
+    for (const field of Object.keys(guide)) expect(publicPayload.product.stay).not.toHaveProperty(field)
+    const publicHTML = await publicPreview.content()
+    const publicJSON = JSON.stringify(publicPayload)
+    for (const value of [guide.directions, guide.wifi_network, guide.wifi_password.trim(), guide.house_manual, guide.check_in_instructions, guide.checkout_instructions[0]!.details]) {
+      expect(publicHTML).not.toContain(value)
+      expect(publicJSON).not.toContain(value)
+    }
+    await publicPreview.close()
+
+    // Reading the new private home endpoint follows the same assigned-home
+    // scope as Today. A member can read the guide but cannot change it.
+    const assignedGuide = await cleaner.request.get(api(`stay-homes/${assignedHome.product_id}`))
+    expect(assignedGuide.status(), await assignedGuide.text()).toBe(200)
+    expect(await assignedGuide.json()).toMatchObject({ manage: false, home: guide })
+    const memberWrite = await cleaner.request.patch(api(`stay-homes/${assignedHome.product_id}`), { data: { wifi_password: 'A member must not replace this' } })
+    expect(memberWrite.status()).toBe(403)
+    expect(await memberWrite.json()).toMatchObject({ data: { code: 'STAY_ROLE_REQUIRED' } })
+    const hiddenGuide = await cleaner.request.get(api(`stay-homes/${otherHome.data!.product.id}`))
+    expect(hiddenGuide.status()).toBe(404)
+    expect(await hiddenGuide.json()).toMatchObject({ data: { code: 'HOME_NOT_FOUND' } })
+    const outsider = await browser.newContext({ baseURL: baseURL! })
+    try {
+      await loginAs(outsider.request, baseURL!, 'user-e2e-mcp-fresh-inaccessible')
+      const outsideGuide = await outsider.request.get(api(`stay-homes/${assignedHome.product_id}`))
+      expect(outsideGuide.status()).toBe(404)
+      expect(await outsideGuide.json()).toMatchObject({ data: { code: 'ORGANIZATION_NOT_FOUND' } })
+    } finally { await outsider.close() }
+    const protectedGuide = await call<{ home: Record<string, unknown> }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(0), to: localDay(2) })
+    expect(protectedGuide.error).toBeNull()
+    expect(protectedGuide.data!.home).toMatchObject(guide)
+
+    // Calendar edits target one explicit home and inclusive selected nights.
+    // Native and MCP readers independently verify every saved override.
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const calendarPath = `/dashboard/${slug}/calendar?product_id=${assignedHome.product_id}`
+    await page.goto(`/dashboard/${slug}/calendar?product_id=missing-home`)
+    await expect(page.getByText('That place to stay is not available in this organization.', { exact: true })).toBeVisible()
+    await expect(page.getByTestId('stay-night-inspector')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Assigned Cabin', exact: true })).toHaveCount(0)
+    await page.goto(calendarPath)
+    const calendar = page.locator('#dashboard-panel-stay-night-calendar')
+    const inspector = page.getByTestId('stay-night-inspector')
+    await expect(calendar.getByRole('button', { name: 'Assigned Cabin', exact: true })).toBeVisible()
+    await expect(calendar.getByText(`${TIME_ZONE} · THB`, { exact: true })).toBeVisible()
+    await calendar.locator(`[data-reka-calendar-cell-trigger][data-value="${localDay(0)}"]:not([data-outside-view])`).click()
+    await expect(inspector.getByText('Reserved', { exact: true })).toBeVisible()
+    await inspector.getByRole('button', { name: 'Select nights', exact: true }).click()
+    const dates = page.getByRole('dialog', { name: 'Select nights', exact: true })
+    await dates.getByLabel('Start night', { exact: true }).fill(localDay(5))
+    await dates.getByLabel('End night (optional)', { exact: true }).fill(localDay(7))
+    await dates.getByRole('button', { name: 'Edit selected nights', exact: true }).click()
+    await expect(dates).not.toBeVisible()
+    const openNights = inspector.getByRole('switch', { name: 'Open selected nights', exact: true })
+    await expect(openNights).toBeChecked()
+    await openNights.click()
+    await expect(openNights).not.toBeChecked()
+    const blockedResponse = await page.request.get(`${api(`stay-homes/${assignedHome.product_id}/calendar`)}&from=${localDay(5)}&to=${localDay(8)}`)
+    expect(blockedResponse.status(), await blockedResponse.text()).toBe(200)
+    const blocked = await blockedResponse.json() as { nights: import('../../server/domain/stays').StayNight[] }
+    expect(blocked.nights).toEqual([5, 6, 7].map(offset => expect.objectContaining({ date: localDay(offset), closed: true, available: false, price_minor: 320_000, stay_id: null })))
+    await openNights.click()
+    await expect(openNights).toBeChecked()
+    await inspector.getByRole('button', { name: /^Nightly price/ }).click()
+    await inspector.getByRole('textbox', { name: 'Nightly price (THB)', exact: true }).fill('4200')
+    await inspector.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toContainText('4,200')
+    const priced = await call<{ nights: import('../../server/domain/stays').StayNight[] }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(5), to: localDay(8) })
+    expect(priced.error).toBeNull()
+    expect(priced.data!.nights).toEqual([5, 6, 7].map(offset => expect.objectContaining({ date: localDay(offset), closed: false, available: true, price_minor: 420_000 })))
+    await inspector.getByRole('button', { name: 'Custom settings', exact: true }).click()
+    await inspector.getByRole('button', { name: 'Minimum nights', exact: true }).click()
+    await inspector.getByRole('spinbutton', { name: 'Minimum nights on arrival', exact: true }).fill('2')
+    await inspector.getByRole('spinbutton', { name: 'Minimum nights through stay', exact: true }).fill('3')
+    await inspector.getByRole('button', { name: 'Save', exact: true }).click()
+    await inspector.getByRole('button', { name: 'Custom settings', exact: true }).click()
+    await inspector.getByRole('button', { name: 'Maximum nights', exact: true }).click()
+    await inspector.getByRole('spinbutton', { name: 'Maximum nights', exact: true }).fill('7')
+    await inspector.getByRole('button', { name: 'Save', exact: true }).click()
+    await inspector.getByRole('button', { name: 'Custom settings', exact: true }).click()
+    await inspector.getByRole('button', { name: 'Check-in and checkout', exact: true }).click()
+    for (const label of ['Allow check-in', 'Allow checkout']) {
+      await inspector.getByRole('combobox', { name: label, exact: true }).click()
+      await page.getByRole('option', { name: 'Not allowed', exact: true }).click()
+    }
+    await inspector.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(inspector.getByRole('button', { name: 'Custom settings', exact: true })).toBeVisible()
+    const restrictedResponse = await page.request.get(`${api(`stay-homes/${assignedHome.product_id}/calendar`)}&from=${localDay(5)}&to=${localDay(8)}`)
+    expect(restrictedResponse.status(), await restrictedResponse.text()).toBe(200)
+    expect((await restrictedResponse.json() as { nights: import('../../server/domain/stays').StayNight[] }).nights)
+      .toEqual([5, 6, 7].map(offset => expect.objectContaining({ date: localDay(offset), closed: false, price_minor: 420_000, min_stay_arrival: 2, min_stay_through: 3, max_stay: 7, closed_to_arrival: true, closed_to_departure: true })))
+    await page.screenshot({ path: testInfo.outputPath('nightly-calendar-desktop.png') })
+
+    // Changing only the price across a mixed range preserves each night's own
+    // stay restrictions, then restoring the base price preserves them again.
+    await inspector.getByRole('button', { name: 'Select nights', exact: true }).click()
+    await dates.getByLabel('Start night', { exact: true }).fill(localDay(6))
+    await dates.getByLabel('End night (optional)', { exact: true }).fill(localDay(8))
+    await dates.getByRole('button', { name: 'Edit selected nights', exact: true }).click()
+    await expect(dates).not.toBeVisible()
+    await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toContainText('Mixed prices')
+    await inspector.getByRole('button', { name: /^Nightly price/ }).click()
+    await inspector.getByRole('textbox', { name: 'Nightly price (THB)', exact: true }).fill('4300')
+    await inspector.getByRole('button', { name: 'Save', exact: true }).click()
+    await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toContainText('4,300')
+    const mixed = await call<{ nights: import('../../server/domain/stays').StayNight[] }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(5), to: localDay(9) })
+    expect(mixed.error).toBeNull()
+    expect(mixed.data!.nights).toEqual([5, 6, 7, 8].map(offset => expect.objectContaining({ date: localDay(offset), price_minor: offset === 5 ? 420_000 : 430_000,
+      min_stay_arrival: offset < 8 ? 2 : null, min_stay_through: offset < 8 ? 3 : null, max_stay: offset < 8 ? 7 : null,
+      closed_to_arrival: offset < 8, closed_to_departure: offset < 8, closed: false })))
+    await inspector.getByRole('button', { name: /^Nightly price/ }).click()
+    await inspector.getByRole('button', { name: 'Restore base nightly price', exact: true }).click()
+    await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toContainText('3,200')
+    const restored = await call<{ nights: import('../../server/domain/stays').StayNight[] }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(6), to: localDay(9) })
+    expect(restored.error).toBeNull()
+    expect(restored.data!.nights).toEqual([6, 7, 8].map(offset => expect.objectContaining({ date: localDay(offset), price_minor: 320_000,
+      min_stay_arrival: offset < 8 ? 2 : null, min_stay_through: offset < 8 ? 3 : null, max_stay: offset < 8 ? 7 : null,
+      closed_to_arrival: offset < 8, closed_to_departure: offset < 8 })))
+
+    // Returning the visible month to Today retains the distant selection and
+    // its draft without reading all the intervening years of nights.
+    const distantNight = localDay(4000)
+    await inspector.getByRole('button', { name: 'Select nights', exact: true }).click()
+    await dates.getByLabel('Start night', { exact: true }).fill(distantNight)
+    await dates.getByLabel('End night (optional)', { exact: true }).fill('')
+    await dates.getByRole('button', { name: 'Edit selected nights', exact: true }).click()
+    await expect(dates).not.toBeVisible()
+    await inspector.getByRole('button', { name: /^Nightly price/ }).click()
+    await inspector.getByRole('textbox', { name: 'Nightly price (THB)', exact: true }).fill('5100')
+    const visibleMonth = new Date(`${localDay(0).slice(0, 7)}-01T00:00:00Z`)
+    const visibleFrom = new Date(visibleMonth.getTime() - 7 * 86_400_000).toISOString().slice(0, 10)
+    const visibleTo = new Date(Date.UTC(visibleMonth.getUTCFullYear(), visibleMonth.getUTCMonth() + 1, 8)).toISOString().slice(0, 10)
+    const calendarEndpoint = `/api/dashboard/stay-homes/${assignedHome.product_id}/calendar`
+    const returnedWindows: string[] = []
+    const observeCalendarRead = (request: import('@playwright/test').Request) => {
+      const url = new URL(request.url())
+      if (request.method() === 'GET' && url.pathname === calendarEndpoint) returnedWindows.push(`${url.searchParams.get('from')}:${url.searchParams.get('to')}`)
+    }
+    page.on('request', observeCalendarRead)
+    const visibleMonthRead = page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === calendarEndpoint
+      && new URL(response.url()).searchParams.get('from') === visibleFrom && new URL(response.url()).searchParams.get('to') === visibleTo, { timeout: 10_000 })
+    const distantSelectionRead = page.waitForResponse(response => response.request().method() === 'GET' && new URL(response.url()).pathname === calendarEndpoint
+      && new URL(response.url()).searchParams.get('from') === distantNight && new URL(response.url()).searchParams.get('to') === localDay(4001), { timeout: 10_000 })
+    await calendar.getByRole('button', { name: 'Today', exact: true }).click()
+    for (const response of await Promise.all([visibleMonthRead, distantSelectionRead])) expect(response.status(), await response.text()).toBe(200)
+    await expect(page).toHaveURL(url => url.searchParams.get('month') === localDay(0).slice(0, 7))
+    await expect(inspector.getByRole('textbox', { name: 'Nightly price (THB)', exact: true })).toBeEnabled()
+    await expect(inspector.getByRole('textbox', { name: 'Nightly price (THB)', exact: true })).toHaveValue('5100')
+    await expect(inspector.getByRole('button', { name: 'Select nights', exact: true })).toContainText(distantNight.slice(0, 4))
+    expect([...new Set(returnedWindows)].sort()).toEqual([`${visibleFrom}:${visibleTo}`, `${distantNight}:${localDay(4001)}`].sort())
+    page.off('request', observeCalendarRead)
+    await inspector.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await inspector.getByRole('button', { name: 'Select nights', exact: true }).click()
+    await expect(dates.getByLabel('Start night', { exact: true })).toHaveValue(distantNight)
+    await dates.getByLabel('Start night', { exact: true }).fill(localDay(6))
+    await dates.getByLabel('End night (optional)', { exact: true }).fill(localDay(8))
+    await dates.getByRole('button', { name: 'Edit selected nights', exact: true }).click()
+    await expect(dates).not.toBeVisible()
+    await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toContainText('3,200')
+
+    // The mobile sheet and desktop inspector share one draft; cancelling it
+    // returns to the saved price and leaves the persisted range unchanged.
+    await page.setViewportSize({ width: 390, height: 844 })
+    await calendar.getByRole('button', { name: /^Edit / }).click()
+    await inspector.getByRole('button', { name: /^Nightly price/ }).click()
+    await inspector.getByRole('textbox', { name: 'Nightly price (THB)', exact: true }).fill('9999')
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await expect(inspector.getByRole('textbox', { name: 'Nightly price (THB)', exact: true })).toHaveValue('9999')
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(inspector.getByRole('textbox', { name: 'Nightly price (THB)', exact: true })).toHaveValue('9999')
+    await inspector.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(inspector.getByRole('button', { name: /^Nightly price/ })).toContainText('3,200')
+    await expect(inspector.getByText(`${TIME_ZONE} · THB`, { exact: true })).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath('nightly-calendar-mobile.png') })
+    const cancelledPrice = await page.request.get(`${api(`stay-homes/${assignedHome.product_id}/calendar`)}&from=${localDay(6)}&to=${localDay(9)}`)
+    expect(cancelledPrice.status(), await cancelledPrice.text()).toBe(200)
+    expect((await cancelledPrice.json() as { nights: import('../../server/domain/stays').StayNight[] }).nights.map(night => night.price_minor)).toEqual([320_000, 320_000, 320_000])
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await inspector.getByRole('button', { name: 'Custom settings', exact: true }).click()
+    await inspector.getByRole('button', { name: 'Reset all night settings', exact: true }).click()
+    await expect(inspector.getByText('Remove all selected nights’ custom prices, closures and stay rules.', { exact: false })).toBeVisible()
+    await inspector.getByRole('button', { name: 'Reset all night settings', exact: true }).click()
+    await expect(inspector.getByRole('button', { name: 'Custom settings', exact: true })).toBeVisible()
+    const reset = await call<{ nights: import('../../server/domain/stays').StayNight[] }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(6), to: localDay(9) })
+    expect(reset.error).toBeNull()
+    expect(reset.data!.nights).toEqual([6, 7, 8].map(offset => expect.objectContaining({ date: localDay(offset), price_minor: 320_000, closed: false,
+      min_stay_arrival: null, min_stay_through: null, max_stay: null, closed_to_arrival: false, closed_to_departure: false })))
+
+    // Opening occupied nights changes only the host closure. The reservation
+    // remains the canonical reason those nights cannot be booked again.
+    await inspector.getByRole('button', { name: 'Select nights', exact: true }).click()
+    await dates.getByLabel('Start night', { exact: true }).fill(localDay(0))
+    await dates.getByLabel('End night (optional)', { exact: true }).fill(localDay(1))
+    await dates.getByRole('button', { name: 'Edit selected nights', exact: true }).click()
+    await expect(dates).not.toBeVisible()
+    await expect(inspector.getByText('Reserved', { exact: true })).toBeVisible()
+    await expect(openNights).toBeChecked()
+    await openNights.click()
+    await expect(openNights).not.toBeChecked()
+    await openNights.click()
+    await expect(openNights).toBeChecked()
+    const occupied = await call<{ nights: import('../../server/domain/stays').StayNight[] }>('get_stay_calendar', { product_id: assignedHome.product_id, from: localDay(0), to: localDay(2) })
+    expect(occupied.error).toBeNull()
+    expect(occupied.data!.nights).toEqual([0, 1].map(offset => expect.objectContaining({ date: localDay(offset), stay_id: stays[0]!.id, available: false, closed: false })))
+    const calendarStay = inspector.getByRole('link', { name: 'View stay', exact: true })
+    const calendarStayURL = new URL((await calendarStay.getAttribute('href'))!, baseURL!)
+    expect(calendarStayURL.pathname).toBe(`/dashboard/${slug}/calendar/stay/${stays[0]!.id}`)
+    expect(calendarStayURL.searchParams.get('product_id')).toBe(assignedHome.product_id)
+    expect(calendarStayURL.searchParams.get('month')).toBe(localDay(0).slice(0, 7))
+    await page.screenshot({ path: testInfo.outputPath('nightly-calendar-reserved-desktop.png') })
+    await calendarStay.click()
+    await expect(page).toHaveURL(calendarStayURL.href)
+    const calendarStayDetails = page.locator('#dashboard-panel-stay-details')
+    await expect(calendarStayDetails.getByRole('heading', { name: 'Ana Silva', level: 2, exact: true })).toBeVisible()
+    await page.setViewportSize({ width: 390, height: 844 })
+    const stayBack = calendarStayDetails.getByTestId('dashboard-navbar-back')
+    await expect(stayBack).toBeVisible()
+    await expect(stayBack).toHaveAttribute('href', `/dashboard/${slug}/calendar${calendarStayURL.search}`)
+    await stayBack.click()
+    await expect(page).toHaveURL(`/dashboard/${slug}/calendar${calendarStayURL.search}`)
+    await expect(calendar).toBeVisible()
+    await expect(calendar.getByRole('button', { name: 'Assigned Cabin', exact: true })).toBeVisible()
+
     const todayResponse = await cleaner.request.get(api('today'))
     expect(todayResponse.status(), await todayResponse.text()).toBe(200)
     const today = await todayResponse.json() as import('../../shared/dashboard-today').TodayFeedPayload

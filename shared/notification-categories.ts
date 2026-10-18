@@ -82,6 +82,17 @@ export const NOTIFICATION_CATEGORY_LABELS = {
   product_news: 'KrabiClaw news',
 } as const satisfies Record<NotificationCategory, string>
 
+export const NOTIFICATION_CATEGORY_ICONS = {
+  account_security: 'i-lucide-shield-check',
+  reservations_bookings: 'i-lucide-calendar-check',
+  guest_messages: 'i-lucide-message-circle',
+  team_messages: 'i-lucide-messages-square',
+  reviews: 'i-lucide-star',
+  review_requests: 'i-lucide-message-square-heart',
+  organization_and_billing: 'i-lucide-credit-card',
+  product_news: 'i-lucide-megaphone',
+} as const satisfies Record<NotificationCategory, string>
+
 /** The state a settings row previews, without restating the channel names twice. */
 export function describeNotificationSetting(setting: NotificationCategorySetting): string {
   const channels = ([['Email', setting.email], ['WhatsApp', setting.whatsapp], ['Push', setting.push]] as const)

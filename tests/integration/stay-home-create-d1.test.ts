@@ -11,7 +11,7 @@ import listHomesRoute from '../../server/api/dashboard/stay-homes/index.get.ts'
 import editHomeRoute from '../../server/api/dashboard/stay-homes/[productId].patch.ts'
 import { getLocation, updateLocation } from '../../server/utils/location-management.ts'
 import { getProduct } from '../../server/utils/product-management.ts'
-import { createStayHome, stayHomeInput } from '../../server/domain/stays.ts'
+import { createStayHome, readStayHome, stayHomeInput } from '../../server/domain/stays.ts'
 
 // A home added by hand through the native app's route: its details are
 // checked field by field, it becomes a new location and an unpublished stay,
@@ -109,6 +109,9 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
 
     // Read back through other paths: the homes list, the location and the stay's publication.
     assert.deepEqual((await call(owner, 'GET')).body.homes, [created.body.home])
+    await assert.rejects(readStayHome(db, { organizationId: ORG, actorId: 'owner', manage: true }, ''), {
+      status: 404, data: { code: 'HOME_NOT_FOUND' },
+    })
     const location = (await getLocation(db, ORG, made.location_id))!
     assert.deepEqual({ title: location.title, timezone: location.timezone, phone: location.phone, email: location.email, address: location.address }, {
       title: 'Cliff Cabin', timezone: 'America/Denver', phone: '+14355550100', email: 'host@example.test',
@@ -163,6 +166,7 @@ test('a home added by hand is a new location and an unpublished stay, checked, r
     assert.deepEqual(refusal(await edit(owner, { bathrooms: 1.25 })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.bathrooms' })
     assert.deepEqual(refusal(await edit(owner, { amenities: ['wireless_internet', 'jetpack'] })), { status: 400, code: 'INVALID_STAY_FIELD', field: 'stay.amenities' })
     assert.deepEqual(refusal(await edit(owner, { check_in_method: 'drone' })), { status: 422, code: 'INVALID_DETAIL', field: 'check_in_method' })
+    assert.deepEqual(refusal(await edit(owner, { check_in_method: ['keypad'] })), { status: 422, code: 'INVALID_DETAIL', field: 'check_in_method' })
     assert.deepEqual(refusal(await edit(owner, { checkout_instructions: [{ task: 'lock_up', details: null }, { task: 'lock_up', details: null }] })), { status: 422, code: 'INVALID_DETAIL', field: 'checkout_instructions[1].task' })
     assert.deepEqual(refusal(await edit(owner, { latitude: 38.57 })), { status: 422, code: 'INVALID_DETAIL', field: 'longitude' })
     assert.deepEqual(refusal(await edit(owner, { latitude: 91, longitude: -109.55 })), { status: 422, code: 'INVALID_DETAIL', field: 'latitude' })
