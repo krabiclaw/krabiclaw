@@ -261,7 +261,8 @@ import { productDetailFields, PRODUCT_KINDS, PRODUCT_KIND_LABELS, assertProductK
 import { isCurrencyCode } from '~/shared/currencies'
 import { majorAmountToMinor, minorAmountToMajor, selectPrice, type Price } from '~/shared/prices'
 import { formatProductMoney } from '~/utils/product-money'
-import { isChannelPush, type ChannelPush } from '~/shared/channel-push'
+import { isSuccessfulChannelPush, type SuccessfulChannelPush } from '~/shared/channel-push'
+import { ApiClientError } from '~/utils/api-clients'
 import { isStayArrivalGuide } from '~/shared/stay-arrival'
 import type { ProductMutation } from '~/server/utils/product-management'
 import { presentationForProduct, STAY_PRESENTATION } from '~/utils/product-presentation'
@@ -383,7 +384,7 @@ const isProductList = (value: unknown): value is { success: true, products: Prod
 const isOne = (value: unknown): value is { success: true, product: Product } =>
   isRecord(value) && isRecord(value.product)
 const isMutation = (value: unknown): value is { success: true; product: ProductMutation } =>
-  isOne(value) && value.success === true && 'channel_push' in value.product && isChannelPush(value.product.channel_push)
+  isOne(value) && value.success === true && 'channel_push' in value.product && isSuccessfulChannelPush(value.product.channel_push)
 
 
 // The product in this scope, read before the level renders. Keyed by location
@@ -424,8 +425,8 @@ async function changeStayTab(value: string | number) {
 const arrivalUrl = () => `/api/dashboard/stay-homes/${encodeURIComponent(productId.value)}`
 const isArrivalResponse = (value: unknown): value is { home: StayArrivalGuide; manage: boolean } =>
   isRecord(value) && isStayArrivalGuide(value.home) && typeof value.manage === 'boolean' && value.home.product_id === productId.value
-const isArrivalMutation = (value: unknown): value is { home: StayArrivalGuide; channel_push: ChannelPush | null } =>
-  isRecord(value) && isStayArrivalGuide(value.home) && value.home.product_id === productId.value && isChannelPush(value.channel_push)
+const isArrivalMutation = (value: unknown): value is { home: StayArrivalGuide; channel_push: SuccessfulChannelPush | null } =>
+  isRecord(value) && isStayArrivalGuide(value.home) && value.home.product_id === productId.value && isSuccessfulChannelPush(value.channel_push)
 const { data: arrivalLoaded, error: arrivalFailure, refresh: refreshArrival } = await useAsyncData(
   () => `dashboard-product-arrival:${organizationId}:${productId.value}:${arrivalTab.value ? 'open' : 'closed'}`,
   async () => arrivalTab.value ? await dashboardApi(arrivalUrl(), { validate: isArrivalResponse }) : null,
@@ -457,9 +458,8 @@ async function saveArrival(fields: readonly StayArrivalField[], target?: string)
       const value = draft[field]
       body[field] = typeof value === 'string' ? (value.trim() ? (field === 'wifi_password' ? value : value.trim()) : null) : value
     }
-    let saved: { home: StayArrivalGuide; channel_push: ChannelPush | null }
     try {
-      saved = await dashboardApi(arrivalUrl(), { method: 'PATCH', body, validate: isArrivalMutation })
+      await dashboardApi(arrivalUrl(), { method: 'PATCH', body, validate: isArrivalMutation })
     } catch (error) {
       saveError.value = getErrorMessage(error, 'The arrival guide could not be saved')
       // A failed response may follow a committed write. Show the persisted
@@ -475,10 +475,6 @@ async function saveArrival(fields: readonly StayArrivalField[], target?: string)
     await refreshArrival()
     if (arrivalFailure.value) throw arrivalFailure.value
     revertArrival()
-    if (saved.channel_push?.state === 'needs_review') {
-      saveError.value = `The home was saved. Its channel needs review. ${saved.channel_push.detail}`
-      return
-    }
     await (target ? navigateTo(target) : level.close())
   } catch (error) {
     saveError.value = getErrorMessage(error, 'The arrival guide could not be saved')
@@ -1262,17 +1258,12 @@ async function commit(bookingConcern?: BookingConcern) {
     if (bookingConcern !== undefined) {
       await saveBooking(bookingConcern)
     } else {
-      const saved = await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, {
+      await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, {
         method: 'PATCH', body: payload(), validate: isMutation,
       })
       if (editorKey.value === 'publication') await savePublication()
       if (editorKey.value === 'locations') await saveLocation()
       if (editorKey.value === 'collections') await saveCollections()
-      if (saved.product.channel_push?.state === 'needs_review') {
-        await reload()
-        saveError.value = `The home was saved. Its channel needs review. ${saved.product.channel_push.detail}`
-        return
-      }
     }
     await reload()
     // A booking write changes what the schedule is: its start times, whether the
@@ -1281,6 +1272,9 @@ async function commit(bookingConcern?: BookingConcern) {
     await (closeTo.value ? navigateTo(closeTo.value) : level.close())
   } catch (error) {
     saveError.value = getErrorMessage(error, `Failed to save ${itemLabel.value.toLowerCase()}`)
+    if (error instanceof ApiClientError && (error.data.committed === true || (isRecord(error.data.data) && error.data.data.committed === true))) {
+      try { await reload() } catch (readError) { saveError.value += ` ${getErrorMessage(readError, 'The saved listing could not be read again')}` }
+    }
   } finally {
     saving.value = false
   }

@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:f8c60e3f6b86a8a0443f86a3deaf0fb1c6b2c7602f8742be16ba8b1334879508",
-  "documentationFingerprint": "sha256:2312df260d8f7a4da5c6d74a0b4b6d39e1ed2cd2f7dc5dc7a39f4392b6987fb9",
+  "fingerprint": "sha256:1318d4e4e4aeee12de4b8f3c3599a54b06141703adc98874c37878b8f8907b8c",
+  "documentationFingerprint": "sha256:88ee78bc5c2c4a8f3e0b98f651f3ae1b3ba186543b4103551fd41046fb129594",
   "tools": [
     {
       "name": "add_organization_language",
@@ -8779,25 +8779,9 @@
                       "detail"
                     ],
                     "type": "object"
-                  },
-                  {
-                    "properties": {
-                      "detail": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "state": {
-                        "const": "needs_review"
-                      }
-                    },
-                    "required": [
-                      "state",
-                      "detail"
-                    ],
-                    "type": "object"
                   }
                 ],
-                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
+                "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed only when delivery completed. A failed channel update returns a committed error.",
                 "type": [
                   "object",
                   "null"
@@ -30345,25 +30329,9 @@
                       "detail"
                     ],
                     "type": "object"
-                  },
-                  {
-                    "properties": {
-                      "detail": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "state": {
-                        "const": "needs_review"
-                      }
-                    },
-                    "required": [
-                      "state",
-                      "detail"
-                    ],
-                    "type": "object"
                   }
                 ],
-                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
+                "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed only when delivery completed. A failed channel update returns a committed error.",
                 "type": [
                   "object",
                   "null"
@@ -35494,25 +35462,9 @@
                       "detail"
                     ],
                     "type": "object"
-                  },
-                  {
-                    "properties": {
-                      "detail": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "state": {
-                        "const": "needs_review"
-                      }
-                    },
-                    "required": [
-                      "state",
-                      "detail"
-                    ],
-                    "type": "object"
                   }
                 ],
-                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
+                "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed only when delivery completed. A failed channel update returns a committed error.",
                 "type": [
                   "object",
                   "null"
@@ -41462,25 +41414,9 @@
                       "detail"
                     ],
                     "type": "object"
-                  },
-                  {
-                    "properties": {
-                      "detail": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "state": {
-                        "const": "needs_review"
-                      }
-                    },
-                    "required": [
-                      "state",
-                      "detail"
-                    ],
-                    "type": "object"
                   }
                 ],
-                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
+                "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed only when delivery completed. A failed channel update returns a committed error.",
                 "type": [
                   "object",
                   "null"
@@ -56083,25 +56019,9 @@
                       "detail"
                     ],
                     "type": "object"
-                  },
-                  {
-                    "properties": {
-                      "detail": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "state": {
-                        "const": "needs_review"
-                      }
-                    },
-                    "required": [
-                      "state",
-                      "detail"
-                    ],
-                    "type": "object"
                   }
                 ],
-                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
+                "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed only when delivery completed. A failed channel update returns a committed error.",
                 "type": [
                   "object",
                   "null"
@@ -56490,25 +56410,9 @@
                   "detail"
                 ],
                 "type": "object"
-              },
-              {
-                "properties": {
-                  "detail": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "state": {
-                    "const": "needs_review"
-                  }
-                },
-                "required": [
-                  "state",
-                  "detail"
-                ],
-                "type": "object"
               }
             ],
-            "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
+            "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed only when delivery completed. A failed channel update returns a committed error.",
             "type": [
               "object",
               "null"
@@ -77173,22 +77077,6 @@
                         "detail"
                       ],
                       "type": "object"
-                    },
-                    {
-                      "properties": {
-                        "detail": {
-                          "minLength": 1,
-                          "type": "string"
-                        },
-                        "state": {
-                          "const": "needs_review"
-                        }
-                      },
-                      "required": [
-                        "state",
-                        "detail"
-                      ],
-                      "type": "object"
                     }
                   ],
                   "type": [
@@ -78416,25 +78304,9 @@
                       "detail"
                     ],
                     "type": "object"
-                  },
-                  {
-                    "properties": {
-                      "detail": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "state": {
-                        "const": "needs_review"
-                      }
-                    },
-                    "required": [
-                      "state",
-                      "detail"
-                    ],
-                    "type": "object"
                   }
                 ],
-                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
+                "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed only when delivery completed. A failed channel update returns a committed error.",
                 "type": [
                   "object",
                   "null"
@@ -94308,7 +94180,7 @@
     {
       "name": "set_stay_nights",
       "title": "Set stay nights",
-      "description": "Close or open nights, set a nightly price, or set stay rules for a date range at one place to stay. Fields left out keep each night’s value; price_minor null returns to the base price; reset removes the range’s overrides. Updates the website’s bookable nights and, when connected, pushes prices, availability and stay rules to the home’s Airbnb listing through Channex. Returns channel_push with any delivery failure.",
+      "description": "Close or open nights, set a nightly price, or set stay rules for a date range at one place to stay. Fields left out keep each night’s value; price_minor null returns to the base price; reset removes the range’s overrides. Updates the website’s bookable nights and, when connected, pushes prices, availability and stay rules to the home’s Airbnb listing through Channex. Returns channel_push on success. A failed channel update raises CHANNEL_PUSH_FAILED with committed:true; read the calendar before retrying.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -94400,25 +94272,9 @@
                   "detail"
                 ],
                 "type": "object"
-              },
-              {
-                "properties": {
-                  "detail": {
-                    "minLength": 1,
-                    "type": "string"
-                  },
-                  "state": {
-                    "const": "needs_review"
-                  }
-                },
-                "required": [
-                  "state",
-                  "detail"
-                ],
-                "type": "object"
               }
             ],
-            "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
+            "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed only when delivery completed. A failed channel update returns a committed error.",
             "type": [
               "object",
               "null"
@@ -105788,22 +105644,6 @@
                       "detail"
                     ],
                     "type": "object"
-                  },
-                  {
-                    "properties": {
-                      "detail": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "state": {
-                        "const": "needs_review"
-                      }
-                    },
-                    "required": [
-                      "state",
-                      "detail"
-                    ],
-                    "type": "object"
                   }
                 ],
                 "type": [
@@ -114928,25 +114768,9 @@
                       "detail"
                     ],
                     "type": "object"
-                  },
-                  {
-                    "properties": {
-                      "detail": {
-                        "minLength": 1,
-                        "type": "string"
-                      },
-                      "state": {
-                        "const": "needs_review"
-                      }
-                    },
-                    "required": [
-                      "state",
-                      "detail"
-                    ],
-                    "type": "object"
                   }
                 ],
-                "description": "What the home's connected channel took from this change: null when the home has no channel; needs_review with the reason when the channel did not take it.",
+                "description": "What the home's connected channel took from this change: null when no channel push is needed; pushed only when delivery completed. A failed channel update returns a committed error.",
                 "type": [
                   "object",
                   "null"
@@ -116174,11 +115998,11 @@
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
-        "reconcile_products": "sha256:af303e50b154ee6819a427b3f6609064596fd0ec85ae33c39c8af793d5f79080",
+        "reconcile_products": "sha256:80466731cc5aac60917a1ce5752c2d3542156115c40512bda517b3eca3dc6a11",
         "reorder_collections": "sha256:1ca15d17627f9313cf613371e44816f2ae36a2f215b343ad8f4f1d1c6fe7c171",
         "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
         "update_menu": "sha256:e6dc0f003aeeef5b249ad679816850b89c2b96ec4a1452be3ddf3a66633a1aef",
-        "update_product": "sha256:1194c06a4582edf41fff8d3846db10ed74b8ae5137275c37e16de63313a70b65"
+        "update_product": "sha256:6913255e94da51abc234add8a5b2f514666b9844f890601771d42ba345b8a394"
       }
     },
     {
@@ -116338,7 +116162,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "replace_product_weekly_schedule": "sha256:d4f5ba8f99874961aa0d9cb91f22c8ef2b640aeeeff6a52fc8e7ed758fbf4ae2",
         "set_product_booking_config": "sha256:727bf4fc651ced45ea84cc49b1c1e864366dbadac346e8dabdba56db426e1acc",
-        "update_product": "sha256:1194c06a4582edf41fff8d3846db10ed74b8ae5137275c37e16de63313a70b65",
+        "update_product": "sha256:6913255e94da51abc234add8a5b2f514666b9844f890601771d42ba345b8a394",
         "update_reservation_policy": "sha256:f1e5e7eda32993dc7be3ffc459ceb97517ed309bb144d2a5f29a0f0b082f784f"
       }
     },
@@ -116358,7 +116182,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0",
-        "update_product": "sha256:1194c06a4582edf41fff8d3846db10ed74b8ae5137275c37e16de63313a70b65",
+        "update_product": "sha256:6913255e94da51abc234add8a5b2f514666b9844f890601771d42ba345b8a394",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
     },
@@ -116381,7 +116205,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
-        "update_product": "sha256:1194c06a4582edf41fff8d3846db10ed74b8ae5137275c37e16de63313a70b65"
+        "update_product": "sha256:6913255e94da51abc234add8a5b2f514666b9844f890601771d42ba345b8a394"
       }
     }
   ],
@@ -116393,7 +116217,7 @@
         "create_location": "sha256:b25656237d93d456c98da74d8281ec6d1d05435e6a7657a18c14b82654b79b9b",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
-        "get_stay": "sha256:2acd49c4e0b53e4090d68a33bdb8551a39879326d61db0e6438673625d2b4af6",
+        "get_stay": "sha256:9a13594b951339411e59e4425f62d60e3056430eab9698c77c93572cfaf19d48",
         "invite_organization_member": "sha256:f520b4ade47c9c5a5faef9859564f32d1c9dddfd285efdcc27fa099fa60e8a24",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_organization_members": "sha256:f47eb37ec4cfa1df500db883fdd207db7e2228a3839d64e08f4e52351f85b10e",
@@ -116478,7 +116302,7 @@
         "create_table_reservation": "sha256:412c62d5987f89d7d7c7bf57ac2038c65f4101181bb4762341e0a937766c948b",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
-        "get_stay": "sha256:2acd49c4e0b53e4090d68a33bdb8551a39879326d61db0e6438673625d2b4af6",
+        "get_stay": "sha256:9a13594b951339411e59e4425f62d60e3056430eab9698c77c93572cfaf19d48",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_product_bookings": "sha256:ea80e0cc56ffb5b12058725b9644f50e50af6191c4a44493fb0be538224d7373",
         "list_reservation_inquiries": "sha256:85cb564470d0026c00b8727287edb2a6c2d403fec987c2ac13f4aaaa28e5d171",

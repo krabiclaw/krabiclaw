@@ -13,8 +13,8 @@ import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organiz
 import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, type TenantPageEditorInput } from '~/server/utils/content/pages'
 import { loadOrganizationTemplate } from '~/server/utils/content/publishing'
 import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
-import { requireChannelPush } from '~/server/integrations/channex/ari'
-import type { ChannelPush } from '~/shared/channel-push'
+import { completeChannelPush, requireChannelPush, type ChannelPushCompletion } from '~/server/integrations/channex/ari'
+import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
@@ -563,7 +563,7 @@ export function resolveVariantPrice(variant: ProductVariant, selection: PriceSel
 interface Actor { actorId: string }
 
 /** A write receipt, never a field on a stored or read Product. */
-export type ProductMutation = Product & { channel_push: ChannelPush | null }
+export type ProductMutation = Product & { channel_push: SuccessfulChannelPush | null }
 
 export function slugCandidate(base: string, attempt: number): string {
   const normalized = base.toLowerCase().normalize('NFKD').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, PRODUCT_LIMITS.slug)
@@ -1670,14 +1670,16 @@ export async function updateProduct(db: DbClient, input: {
   const env = input.env
   const reprice = input.patch.variants !== undefined || input.patch.stay?.min_nights !== undefined
   const complete = async (product: Product): Promise<ProductMutation> => {
-    let channelPush: ChannelPush | null = null
+    let channelPush: ChannelPushCompletion = null
     if (product.kind === 'stay' && reprice && !input.deferStayNightPush) {
       if (!env) throw new HTTPError({ statusCode: 503, message: 'The saved home requires its organization environment to update the channel', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', committed: true, product_id: product.id, updated_at: product.updated_at } })
       const { pushStayHomeNights } = await import('~/server/domain/stays')
       channelPush = await pushStayHomeNights(db, env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product)
     }
-    await publishStayProducts(env, [product])
-    return { ...product, channel_push: channelPush }
+    return completeChannelPush(channelPush, { product_id: product.id, updated_at: product.updated_at }, async () => {
+      await publishStayProducts(env, [product])
+      return product
+    })
   }
   const dedupeKey = input.idempotencyKey ? `product-update:${input.organizationId}:${input.productId}:${input.idempotencyKey}` : null
   const requestHash = dedupeKey ? await creationRequestHash({ patch: input.patch, booking: input.booking?.data ?? null }) : null
@@ -2231,18 +2233,30 @@ export async function reconcileProducts(db: DbClient, input: {
   })
   const reprice = new Set(input.products.flatMap(product => product.product_id && (product.variants !== undefined || product.stay?.min_nights !== undefined) ? [product.product_id] : []))
   const complete = async (products: Product[]): Promise<ProductMutation[]> => {
-    const results: ProductMutation[] = []
+    const results: Array<{ product: Product; channelPush: ChannelPushCompletion }> = []
     for (const product of products) {
-      let channelPush: ChannelPush | null = null
+      let channelPush: ChannelPushCompletion = null
       if (product.kind === 'stay' && reprice.has(product.id)) {
-        if (!input.env) throw new HTTPError({ statusCode: 503, message: 'The saved home requires its organization environment to update the channel', data: { code: 'ORGANIZATION_ENVIRONMENT_REQUIRED', field: 'env', committed: true, product_id: product.id, updated_at: product.updated_at } })
-        const { pushStayHomeNights } = await import('~/server/domain/stays')
-        channelPush = await pushStayHomeNights(db, input.env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product)
+        if (!input.env) channelPush = new Error('The saved home requires its organization environment to update the channel')
+        else {
+          const { pushStayHomeNights } = await import('~/server/domain/stays')
+          channelPush = await pushStayHomeNights(db, input.env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product)
+        }
       }
-      results.push({ ...product, channel_push: channelPush })
+      results.push({ product, channelPush })
     }
-    await publishStayProducts(input.env, products)
-    return results
+    const publication = publishStayProducts(input.env, products)
+    const completed = await Promise.allSettled(results.map(({ product, channelPush }) => completeChannelPush(channelPush,
+      { product_id: product.id, updated_at: product.updated_at }, async () => { await publication; return product })))
+    const failures = [...new Set(completed.flatMap(result => result.status === 'rejected' ? [result.reason] : []))]
+    if (failures.length === 1) throw failures[0]
+    const channelFailed = failures.some(error => error instanceof HTTPError && error.data?.code === 'CHANNEL_PUSH_FAILED')
+    if (failures.length) throw new HTTPError({ statusCode: 503,
+      message: failures.map(error => error instanceof Error ? error.message : String(error)).join(' '),
+      data: { code: channelFailed ? 'CHANNEL_PUSH_FAILED' : 'POST_WRITE_COMPLETION_FAILED', field: channelFailed ? 'channel_push' : 'completion', committed: true,
+        failures: failures.map(error => error instanceof HTTPError ? error.data : { reason: error instanceof Error ? error.message : String(error) }) },
+      cause: new AggregateError(failures, 'The saved catalog has incomplete channel updates') })
+    return completed.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
   }
   const dedupeKey = input.idempotencyKey ? `catalog-reconcile:${input.organizationId}:${input.idempotencyKey}` : null
   const requestHash = dedupeKey ? await creationRequestHash({ products: input.products, deactivateMissing: input.deactivateMissing ?? false }) : null

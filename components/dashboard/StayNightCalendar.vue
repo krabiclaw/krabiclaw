@@ -101,13 +101,13 @@ import StayNightInspector, { type NightConcern, type NightDraft, type NightEditF
 import EditorNavigationList from './EditorNavigationList.vue'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor, minorAmountToMajor } from '~/shared/prices'
-import { isChannelPush, type ChannelPush } from '~/shared/channel-push'
+import { isSuccessfulChannelPush, type SuccessfulChannelPush } from '~/shared/channel-push'
 import { STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES } from '~/shared/stay-listing'
 import { addLocalDays, formatCalendarDate, isValidCalendarDate, isValidInstant, isValidTimezone } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
 
 type Home = Pick<StayHome, 'product_id' | 'name' | 'timezone' | 'currency' | 'base_price_minor' | 'min_nights' | 'cancellation_policy' | 'long_term_cancellation_policy'>
-interface CalendarPayload { home: Home; nights: StayNight[]; channel_push?: ChannelPush | null }
+interface CalendarPayload { home: Home; nights: StayNight[]; channel_push?: SuccessfulChannelPush | null }
 const props = defineProps<{ productId: string; homes: Pick<StayHome, 'product_id' | 'name' | 'timezone'>[]; manage: boolean; homeError: string }>()
 const route = useRoute()
 const level = useRouteLevel()
@@ -147,7 +147,7 @@ function isCalendar(value: unknown): value is CalendarPayload {
     || !(home.cancellation_policy === null || typeof home.cancellation_policy === 'string' && Object.hasOwn(STAY_CANCELLATION_POLICIES, home.cancellation_policy))
     || !(home.long_term_cancellation_policy === null || typeof home.long_term_cancellation_policy === 'string' && Object.hasOwn(STAY_LONG_TERM_CANCELLATION_POLICIES, home.long_term_cancellation_policy))) return false
   if (!isValidTimezone(home.timezone)) return false
-  return (value.channel_push === undefined || isChannelPush(value.channel_push)) && value.nights.every(item => isRecord(item) && isValidCalendarDate(item.date)
+  return (value.channel_push === undefined || isSuccessfulChannelPush(value.channel_push)) && value.nights.every(item => isRecord(item) && isValidCalendarDate(item.date)
     && typeof item.available === 'boolean' && typeof item.closed === 'boolean' && nullableText(item.stay_id) && nullableAmount(item.price_minor)
     && nullableRule(item.min_stay_arrival) && nullableRule(item.min_stay_through) && nullableRule(item.max_stay)
     && typeof item.closed_to_arrival === 'boolean' && typeof item.closed_to_departure === 'boolean'
@@ -195,13 +195,12 @@ const concern = ref<NightConcern>('summary')
 const drawerOpen = ref(false)
 const busy = ref(false)
 const writeError = ref('')
-const notice = ref('')
 const datesOpen = ref(false)
 const dateDraft = reactive({ start: '', end: '' })
 const dateError = ref('')
 const draft = reactive<NightDraft>({ price_minor: '', min_stay_arrival: '', min_stay_through: '', max_stay: '', closed_to_arrival: 'keep', closed_to_departure: 'keep' })
 const dirtyFields = ref<NightEditField[]>([])
-const inspectorProps = computed(() => ({ orgSlug: String(route.params.orgSlug), home: data.value!.home, nights: selectedNights.value, dateLabel: dateLabel.value, manage: props.manage, busy: busy.value || status.value === 'pending', error: writeError.value, notice: notice.value || [...new Set(selectedNights.value.flatMap(night => night.channel?.state === 'needs_review' && night.channel.detail ? [night.channel.detail] : []))].join(' '), concern: concern.value, draft, dirty: dirtyFields.value.length > 0 }))
+const inspectorProps = computed(() => ({ orgSlug: String(route.params.orgSlug), home: data.value!.home, nights: selectedNights.value, dateLabel: dateLabel.value, manage: props.manage, busy: busy.value || status.value === 'pending', error: writeError.value, notice: [...new Set(selectedNights.value.flatMap(night => night.channel?.state === 'needs_review' && night.channel.detail ? [night.channel.detail] : []))].join(' '), concern: concern.value, draft, dirty: dirtyFields.value.length > 0 }))
 const overviewGroups = computed(() => [{ id: 'home', items: [
   { id: 'price', label: 'Pricing', summary: data.value?.home.base_price_minor == null ? 'No base nightly price set' : `${money(data.value.home.base_price_minor)} per night`, to: `/dashboard/${String(route.params.orgSlug)}/products/${props.productId}/price` },
   { id: 'availability', label: 'Availability', summary: `${data.value?.home.min_nights} night minimum`, to: `/dashboard/${String(route.params.orgSlug)}/products/${props.productId}/availability` },
@@ -228,7 +227,6 @@ function clearSelection() {
   selection.value = { start: undefined, end: undefined }
   drawerOpen.value = false
   edit('summary')
-  notice.value = ''
 }
 function closeDrawer(open: boolean) {
   if (busy.value) return
@@ -271,18 +269,18 @@ async function write(patch: Record<string, boolean | number | null>) {
   if (selectedCount.value > 500 || selectedNights.value.length !== selectedCount.value) { writeError.value = 'Choose at most 500 loaded nights.'; return }
   busy.value = true
   writeError.value = ''
-  notice.value = ''
   try {
     const response = await api(`/api/dashboard/stay-homes/${encodeURIComponent(props.productId)}/nights`, { method: 'PUT', body: { ...selectedRange.value, ...patch }, validate: isCalendar })
     if (!Object.hasOwn(response, 'channel_push')) throw new Error('The saved nights did not report their channel outcome.')
     await refresh()
     if (error.value) throw error.value
-    notice.value = response.channel_push?.state === 'needs_review' ? response.channel_push.detail : ''
     edit('summary')
   } catch (cause) {
     writeError.value = getErrorMessage(cause, 'The nights could not be saved')
-    await refresh()
-    if (error.value) writeError.value += ` ${getErrorMessage(error.value, 'The saved calendar could not be read back')}`
+    try {
+      await refresh()
+      if (error.value) throw error.value
+    } catch (readError) { writeError.value += ` ${getErrorMessage(readError, 'The saved calendar could not be read back')}` }
   } finally { busy.value = false }
 }
 async function save() {
@@ -307,7 +305,6 @@ async function save() {
 }
 watch(selection, (value) => {
   edit('summary')
-  notice.value = ''
   if (value.end && !pane.value) drawerOpen.value = true
 })
 const realtime = useDashboardInvalidations()

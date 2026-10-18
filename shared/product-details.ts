@@ -1,4 +1,4 @@
-import { PRODUCT_LIMITS } from './product-limits'
+import { PRODUCT_LIMITS } from './product-limits.ts'
 
 /** Named product facts shared by validation, CMS, MCP, localization and templates. */
 export const PRODUCT_KINDS = ['dish', 'experience', 'service', 'item', 'stay'] as const
@@ -6,7 +6,7 @@ export const PRODUCT_KIND_LABELS = { dish: 'Food or drink', experience: 'Experie
 export type ProductKind = typeof PRODUCT_KINDS[number]
 /** The recognizable kind choices used by the CMS. */
 export const PRODUCT_KIND_ICONS = {
-  dish: 'i-lucide-utensils', experience: 'i-lucide-compass', service: 'i-lucide-handshake', item: 'i-lucide-package', stay: 'i-lucide-house',
+  dish: 'i-lucide-utensils', experience: 'i-lucide-compass', service: 'i-lucide-scale', item: 'i-lucide-package', stay: 'i-lucide-house',
 } as const satisfies Record<ProductKind, string>
 export type ProductDetailValue = string | string[] | boolean
 export type ProductDetails = Partial<Record<ProductDetailKey, ProductDetailValue>>

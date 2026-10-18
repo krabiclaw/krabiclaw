@@ -166,9 +166,12 @@ async function settleStayPayment(db: DbClient, stripe: Stripe, env: CloudflareEn
     }
   }
   if (!stayId) throw new Error('Converted stay hold has no stay')
-  await completeStayFromCheckout(db, env, payment.organization_id, stayId)
-  const outcomes = await Promise.allSettled([notifyPaymentFinancialEvent(db, stripe, env, await requirePayment(db, payment.organization_id, payment.id), capture), notifyStayBooked(env, db, payment.organization_id, stayId)])
-  raiseSettledFailures('Captured stay delivery', payment.id, outcomes, ['capture notification', 'stay confirmation'])
+  const outcomes = await Promise.allSettled([
+    completeStayFromCheckout(db, env, payment.organization_id, stayId),
+    requirePayment(db, payment.organization_id, payment.id).then(recorded => notifyPaymentFinancialEvent(db, stripe, env, recorded, capture)),
+    notifyStayBooked(env, db, payment.organization_id, stayId),
+  ])
+  raiseSettledFailures('Captured stay completion', payment.id, outcomes, ['channel and publication', 'capture notification', 'stay confirmation'])
 }
 
 export function paymentEventKey(event:Pick<Stripe.Event,'id'|'account'|'livemode'>):string{return `payments:${event.account??'unscoped'}:${Number(event.livemode)}:${event.id}`}

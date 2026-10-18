@@ -4,7 +4,36 @@ import { currencyFractionDigits, type CurrencyCode } from '~/shared/currencies'
 import { channexRequest, ChannexError, type ChannexEnv } from './client'
 import { ChannexDataError, object } from './data'
 import { HTTPError } from 'nitro'
-import type { ChannelPush } from '~/shared/channel-push'
+import type { ChannelPush, SuccessfulChannelPush } from '~/shared/channel-push'
+
+/** A raw push failure is not a persisted review outcome. Its writer must complete it. */
+export type ChannelPushCompletion = ChannelPush | Error | null
+
+/** Publish committed state before reporting every failed completion step. */
+export async function completeChannelPush<T extends object>(outcome: ChannelPushCompletion, context: {
+  product_id: string; updated_at?: string; ranges?: ReadonlyArray<readonly [string, string]>; stay_id?: string; version?: number
+}, complete: () => Promise<T>): Promise<T & { channel_push: SuccessfulChannelPush | null }> {
+  let completed: { ok: true; value: T } | { ok: false; error: unknown }
+  try { completed = { ok: true, value: await complete() } } catch (error) { completed = { ok: false, error } }
+  if (outcome instanceof Error || outcome?.state === 'needs_review') {
+    const reason = outcome instanceof Error ? outcome.message : outcome.detail
+    const failures = [reason, ...(!completed.ok ? [completed.error instanceof Error ? completed.error.message : String(completed.error)] : [])]
+    throw new HTTPError({ statusCode: 503, message: `The changes were saved, but the channel update did not complete. ${failures.join(' ')} Reload the calendar before retrying.`,
+      data: { ...context, ...(context.ranges ? { ranges: context.ranges.map(([from, to]) => ({ from, to })) } : {}),
+        code: 'CHANNEL_PUSH_FAILED', field: 'channel_push', committed: true, reason,
+        ...(outcome instanceof Error ? { channel_outcome: 'unknown' } : { channel_push: outcome }) },
+      cause: !completed.ok ? new AggregateError([outcome, completed.error], failures.join(' ')) : outcome instanceof Error ? outcome : undefined })
+  }
+  if (!completed.ok) {
+    const error = completed.error
+    if (error instanceof HTTPError && error.data?.committed === true) throw error
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new HTTPError({ statusCode: 503, message: `The changes were saved, but their completion failed. ${reason}`,
+      data: { ...context, ...(context.ranges ? { ranges: context.ranges.map(([from, to]) => ({ from, to })) } : {}),
+        code: 'POST_WRITE_COMPLETION_FAILED', field: 'completion', committed: true, reason, channel_push: outcome }, cause: error })
+  }
+  return { ...completed.value, channel_push: outcome }
+}
 
 /**
  * Outbound availability, prices and stay rules for a home connected through

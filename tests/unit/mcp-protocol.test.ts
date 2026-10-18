@@ -42,7 +42,7 @@ test('asMcpError falls back to internal for a plain Error', () => {
   assert.equal(mapped.message, 'boom')
 })
 
-test('a business guard preserves its action and excludes unrelated error details', () => {
+test('domain failures preserve actions and recovery receipts without private details', () => {
   const error = Object.assign(new Error('Upgrade required'), { statusCode: 402, data: {
     code: 'LANGUAGE_ENTITLEMENT_REQUIRED', dashboard_url: '/dashboard/kanpai/payments?tab=plan',
     credential: 'private-value', customer_email: 'private@example.com',
@@ -50,6 +50,39 @@ test('a business guard preserves its action and excludes unrelated error details
   const mapped = asMcpError(error)
   assert.equal(mapped.kind, 'tool_execution')
   assert.deepEqual(mapped.data, { status: 402, code: 'LANGUAGE_ENTITLEMENT_REQUIRED', dashboard_url: '/dashboard/kanpai/payments?tab=plan' })
+
+  const reason = 'Channex rejected part of the update.'
+  const details: Record<string, unknown> = {
+    code: 'CHANNEL_PUSH_FAILED', field: 'channel_push', committed: true, product_id: 'home-1', stay_id: 'stay-1', version: 3,
+    updated_at: '2030-01-01T00:00:00.000Z', reason,
+    ranges: [{ from: '2030-01-01', to: '2030-01-03', provider_payload: 'private-value' }],
+    channel_push: { state: 'needs_review', detail: reason, provider_payload: { credential: 'private-value' } },
+    credential: 'private-value', customer_email: 'private@example.com', cause: { provider_token: 'private-value' },
+  }
+  const channelError = Object.assign(new Error(reason), { statusCode: 503, data: details })
+  assert.equal(asMcpError(channelError).kind, 'transport')
+  const recovery = {
+    status: 503, code: 'CHANNEL_PUSH_FAILED', field: 'channel_push', committed: true, product_id: 'home-1', stay_id: 'stay-1', version: 3,
+    updated_at: '2030-01-01T00:00:00.000Z', reason, ranges: [{ from: '2030-01-01', to: '2030-01-03' }],
+    channel_push: { state: 'needs_review', detail: reason },
+  }
+  assert.deepEqual(asMcpError(channelError).data, recovery)
+  details.code = 'POST_WRITE_COMPLETION_FAILED'
+  details.channel_push = { state: 'pushed', detail: null }
+  assert.deepEqual(asMcpError(channelError).data, { ...recovery, code: 'POST_WRITE_COMPLETION_FAILED', channel_push: { state: 'pushed', detail: null } })
+
+  details.code = 'CHANNEL_PUSH_FAILED'
+  details.ranges = [{ from: 'private@example.com', to: '2030-01-03' }]
+  details.channel_push = { state: 'needs_review', detail: '' }
+  details.stay_id = 'private@example.com'
+  details.version = -1
+  details.updated_at = 'private@example.com'
+  details.channel_outcome = 'unknown'
+  assert.deepEqual(asMcpError(channelError).data, {
+    status: 503, code: 'CHANNEL_PUSH_FAILED', field: 'channel_push', committed: true, product_id: 'home-1', reason, channel_outcome: 'unknown',
+  })
+  details.committed = 'yes'
+  assert.deepEqual(asMcpError(channelError).data, { status: 503, code: 'CHANNEL_PUSH_FAILED', product_id: 'home-1' })
 })
 
 test('incomplete setup retains the status and missing field paths without private data', () => {
