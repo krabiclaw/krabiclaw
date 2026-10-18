@@ -604,9 +604,7 @@ test('Pottery House enforces its published languages and localized catalog', asy
 test.describe('NCLS representative journeys', () => {
   test.describe.configure({ mode: 'default' })
 
-  // What the navigation says, not how it lays out: whether it wraps or overflows
-  // is what a browser at that width shows you in a second.
-  test('header and footer carry the site\'s navigation', async ({ page }) => {
+  test('header and footer carry the site\'s navigation', async ({ page }, testInfo) => {
     await openTenantPage(page, `${blawbyBaseURL}/`, blawbyExtraHeaders)
     for (const label of ['Services', 'Pricing', 'About', 'Contact', 'Blog', 'Donate'])
       await expect(page.locator('header').getByRole('link', { name: label, exact: true })).toBeVisible()
@@ -618,6 +616,57 @@ test.describe('NCLS representative journeys', () => {
     // The bottom bar links the site's own published policies.
     for (const [label, path] of [['Privacy', '/policies/privacy'], ['Terms', '/policies/terms']] as const)
       await expect(page.locator('footer').getByRole('link', { name: label, exact: true })).toHaveAttribute('href', path)
+
+    for (const [name, path] of [
+      ['home', '/'],
+      ['article', '/article/when-you-disagree-with-the-schools-evaluation-your-right-to-an-independent-educational-evaluation'],
+    ] as const) {
+      const response = await openTenantPage(page, `${blawbyBaseURL}${path}`, blawbyExtraHeaders)
+      expect(response?.status()).toBe(200)
+      await waitForNuxtHydration(page)
+      for (const width of [320, 375, 390, 1440]) {
+        await page.setViewportSize({ width, height: 900 })
+        const header = page.locator('header')
+        const logo = header.locator('[data-site-logo] img:visible')
+        await expect(logo).toBeVisible()
+        await expect.poll(() => logo.evaluate(image => image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0)).toBe(true)
+        const logoBounds = await logo.boundingBox()
+        const action = header.locator('[data-tenant-button]')
+        await expect(action).toBeVisible()
+        const actionBounds = await action.boundingBox()
+        expect(logoBounds).not.toBeNull()
+        expect(actionBounds).not.toBeNull()
+        expect(logoBounds!.width).toBeGreaterThan(0)
+        expect(logoBounds!.x).toBeGreaterThanOrEqual(0)
+        expect(logoBounds!.x + logoBounds!.width).toBeLessThanOrEqual(actionBounds!.x)
+        expect(actionBounds!.x + actionBounds!.width).toBeLessThanOrEqual(width)
+        expect(await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth))).toBeLessThanOrEqual(width)
+        if (width < 1024) {
+          const menu = header.locator('summary')
+          await expect(menu).toBeVisible()
+          const menuBounds = await menu.boundingBox()
+          expect(menuBounds).not.toBeNull()
+          expect(actionBounds!.x + actionBounds!.width).toBeLessThanOrEqual(menuBounds!.x)
+          expect(menuBounds!.x + menuBounds!.width).toBeLessThanOrEqual(width)
+          if (name === 'home') await menu.click()
+          else await menu.press('Enter')
+          await expect(header.locator('details')).toHaveJSProperty('open', true)
+          await expect(header.locator('details').getByRole('link', { name: 'Services', exact: true })).toBeVisible()
+          expect(await page.evaluate(() => Math.max(document.documentElement.scrollWidth, document.body.scrollWidth))).toBeLessThanOrEqual(width)
+          await menu.press('Enter')
+          await expect(header.locator('details')).toHaveJSProperty('open', false)
+        } else {
+          const dimensions = await logo.evaluate(image => {
+            if (!(image instanceof HTMLImageElement)) throw new Error('The tenant logo is not an image')
+            const bounds = image.getBoundingClientRect()
+            return { width: bounds.width, height: bounds.height, ratio: image.naturalWidth / image.naturalHeight }
+          })
+          expect(dimensions.height).toBe(64)
+          expect(dimensions.width).toBeCloseTo(Math.min(224, dimensions.height * dimensions.ratio), 1)
+        }
+        await page.screenshot({ path: testInfo.outputPath(`ncls-header-${name}-${width}.png`) })
+      }
+    }
   })
 
   // One reader walking the site. Each route is a different page recipe, so the
