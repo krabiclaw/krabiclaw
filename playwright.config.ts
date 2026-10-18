@@ -44,6 +44,7 @@ const localWorkerEnvironment = [
   'EMAIL_DELIVERY_MODE=log_only',
   'WHATSAPP_DELIVERY_MODE=log_only',
   'ZARAZ_ANALYTICS=absent',
+  `MEDIA_BASE_URL=http://localhost:${port}/__media`,
   `EMAIL_REPLY_SECRET=${process.env.EMAIL_REPLY_SECRET}`,
   `BETTER_AUTH_URL=http://localhost:${port}`,
   `NUXT_PUBLIC_PLATFORM_DOMAIN=http://localhost:${port}`,

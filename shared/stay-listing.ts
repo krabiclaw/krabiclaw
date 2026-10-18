@@ -7,6 +7,20 @@
  * described here maps one to one onto its Airbnb listing.
  */
 
+/** The privacy of the accommodation offered, independently of its building type. */
+export const STAY_LISTING_TYPES = {
+  entire_place: { label: 'Entire place', description: 'Guests have the whole property to themselves.', schemaType: 'EntirePlace' },
+  private_room: { label: 'Room', description: 'Guests have a private room and may share other areas.', schemaType: 'PrivateRoom' },
+  shared_room: { label: 'Shared room', description: 'Guests share the sleeping area with other people.', schemaType: 'SharedRoom' },
+} as const
+export type StayListingType = keyof typeof STAY_LISTING_TYPES
+
+export const STAY_PROPERTY_SIZE_UNITS = {
+  square_meters: { label: 'Square meters', symbol: 'm²' },
+  square_feet: { label: 'Square feet', symbol: 'sq ft' },
+} as const
+export type StayPropertySizeUnit = keyof typeof STAY_PROPERTY_SIZE_UNITS
+
 /** Airbnb's property types ("Which is most like your place?"), with Airbnb's description of each. */
 export const STAY_PROPERTY_TYPES = {
   apartment: { icon: 'i-lucide-building-2', label: "Rental unit", description: "A rented place within a multi-unit residential building or complex." },

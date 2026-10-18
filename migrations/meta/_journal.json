@@ -71,6 +71,13 @@
       "when": 1792296878544,
       "tag": "0009_organization_services",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1792309754838,
+      "tag": "0010_stay_property_details",
+      "breakpoints": true
     }
   ]
 }

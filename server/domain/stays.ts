@@ -10,7 +10,7 @@ import { executeRefund, requirePayment, type Payment } from '~/server/domain/pay
 import { paymentsStripe } from '~/server/utils/stripe-connect'
 import { isRecord } from '~/server/utils/type-guards'
 import { isStayCheckInMethod, STAY_ARRIVAL_TEXT_LIMITS, STAY_CHECKOUT_DETAILS_LIMIT } from '~/shared/stay-arrival'
-import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
+import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
 import { createProduct, getProduct, setProductPublication, updateProduct } from '~/server/utils/product-management'
 import type { Product, UpdateProductInput } from '~/server/types/products'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -24,7 +24,7 @@ import { stayThreadQueries } from '~/server/domain/requests'
 import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planStayMessages } from '~/server/domain/scheduled-guest-messages'
 import { arrangeProductPhotos, readProductPhotos, type MediaPlacementItem } from '~/server/utils/media-placement'
-import { deleteMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
+import { deleteMediaAsset, getMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
 import { sanitizeFilename, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
 import { MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, sniffMediaMimeType } from '~/server/utils/media-mime'
 import { mediaStillUrl, MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
@@ -154,6 +154,12 @@ export interface StayHome {
   longitude: number | null
   property_type_group: StayPropertyTypeGroup | null
   property_type: StayPropertyType | null
+  listing_type: StayListingType | null
+  total_floors: number | null
+  listing_floor: number | null
+  year_built: number | null
+  property_size: number | null
+  property_size_unit: StayPropertySizeUnit | null
   bedrooms: number | null
   beds: number | null
   bathrooms: number | null
@@ -331,7 +337,8 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
 async function stayHomesWhere(db: DbClient, organizationId: string, productId: string | null, scope: { sql: string; params: string[] }): Promise<StayHome[]> {
   const rows = await queryAll<Record<string, unknown>>(db, `
     SELECT p.id AS product_id, p.name, p.description, c.location_id, l.timezone, l.address, l.latitude, l.longitude, o.default_currency,
-           c.check_in_time, c.check_out_time, c.max_guests, c.min_nights, c.property_type_group, c.property_type, c.bedrooms, c.beds, c.bathrooms, c.amenities,
+           c.check_in_time, c.check_out_time, c.max_guests, c.min_nights, c.property_type_group, c.property_type,
+           c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
            c.cancellation_policy, c.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
            c.directions, c.house_manual, c.checkout_instructions, c.assigned_member_id, c.assigned_team_id,
            COALESCE((SELECT pp.published FROM product_publications pp WHERE pp.organization_id = c.organization_id AND pp.product_id = c.product_id), 0) AS published,
@@ -363,6 +370,9 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       address: stayAddress(row.address), latitude: nullableNumber(row.latitude), longitude: nullableNumber(row.longitude),
       property_type_group: nullableText(row.property_type_group) as StayPropertyTypeGroup | null,
       property_type: nullableText(row.property_type) as StayPropertyType | null,
+      listing_type: nullableText(row.listing_type) as StayListingType | null,
+      total_floors: nullableNumber(row.total_floors), listing_floor: nullableNumber(row.listing_floor), year_built: nullableNumber(row.year_built),
+      property_size: nullableNumber(row.property_size), property_size_unit: nullableText(row.property_size_unit) as StayPropertySizeUnit | null,
       bedrooms: nullableNumber(row.bedrooms), beds: nullableNumber(row.beds), bathrooms: nullableNumber(row.bathrooms),
       amenities: JSON.parse(String(row.amenities)) as StayAmenity[],
       cancellation_policy: nullableText(row.cancellation_policy) as StayCancellationPolicy | null,
@@ -502,7 +512,7 @@ function homeAddress(body: Record<string, unknown>, prefix: string): Pick<NewSta
 }
 
 /** What the home is and offers: product stay settings, checked by the product writer. */
-const LISTING_FIELDS = ['property_type_group', 'property_type', 'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy'] as const
+const LISTING_FIELDS = ['property_type_group', 'property_type', 'listing_type', 'total_floors', 'listing_floor', 'year_built', 'property_size', 'property_size_unit', 'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy'] as const
 /** The arrival guide: private columns only this module reads and writes. */
 const ARRIVAL_FIELDS = [...Object.keys(STAY_ARRIVAL_TEXT_LIMITS) as Array<keyof typeof STAY_ARRIVAL_TEXT_LIMITS>, 'check_in_method', 'checkout_instructions'] as const
 const LOCATION_FIELDS = ['address', 'latitude', 'longitude'] as const
@@ -802,9 +812,23 @@ function homePhoto(home: StayHome, photoId: string): StayPhoto {
   return photo
 }
 
-/** Add a photo after the home's others; the first photo a home gets is its cover. The file is kept in the organization's media library. */
-export async function addStayHomePhoto(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, productId: string, file: unknown): Promise<StayHome> {
+/** Add an uploaded File or an explicit { asset_id } from the organization's library after the home's current photos. */
+export async function addStayHomePhoto(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, productId: string, input: unknown): Promise<StayHome> {
   const home = await managedHome(db, access, productId)
+  if (!(input instanceof File) && isRecord(input)) {
+    if (typeof input.asset_id !== 'string' || !input.asset_id.trim()) fail(422, 'PHOTO_REQUIRED', 'Choose the library photo by its asset_id', 'asset_id')
+    const unknown = Object.keys(input).find(key => key !== 'asset_id')
+    if (unknown) fail(422, 'INVALID_PHOTO_FIELD', `${unknown} cannot be changed here`, unknown)
+    const asset = await getMediaAsset(db, input.asset_id, access.organizationId)
+    if (!asset || asset.status !== 'active') fail(404, 'PHOTO_NOT_FOUND', 'That photo is not in this organization\'s media library', 'asset_id')
+    if (asset.kind !== 'image') fail(415, 'UNSUPPORTED_PHOTO_TYPE', 'Choose an image from the media library', 'asset_id')
+    if (home.photos.some(photo => photo.id === asset.id)) fail(409, 'PHOTO_ALREADY_ADDED', 'That photo is already on this home', 'asset_id')
+    // Read the home on the server for every append. The complete arrangement
+    // guards against another write between this read and its atomic commit.
+    // A library asset was not created here and is never removed on failure.
+    return await arrangeHomePhotos(db, env, access, principal, home, [...home.photos.map(photo => photo.id), asset.id])
+  }
+  const file = input
   if (!(file instanceof File)) fail(422, 'PHOTO_REQUIRED', 'Send the photo as the multipart field image', 'image')
   if (file.size > MAX_IMAGE_BYTES) fail(413, 'PHOTO_TOO_LARGE', `A photo can be at most ${MAX_IMAGE_BYTES / 1024 / 1024} MB`, 'image')
   if (home.photos.length >= MAX_ORDERED_MEDIA_ASSETS) fail(422, 'PHOTO_LIMIT', `A home holds at most ${MAX_ORDERED_MEDIA_ASSETS} photos`, 'image')
