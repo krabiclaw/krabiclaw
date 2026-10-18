@@ -13,7 +13,7 @@ export const CATALOG_PLAN_SCHEMA_VERSION = 12
 export const CATALOG_APPLY_JOURNAL_SCHEMA_VERSION = 1
 export const CATALOG_APPLY_JOURNAL_KIND = 'stripe-catalog-apply-journal'
 export const CATALOG_PLAN_KIND = 'stripe-catalog-plan'
-export const OFFERED_PLAN_IDS = Object.freeze([...NEW_SALE_PAID_PLAN_IDS, 'site_language'])
+export const OFFERED_PLAN_IDS = Object.freeze([...NEW_SALE_PAID_PLAN_IDS, 'site_language', 'strategy'])
 export const RETIRED_PLAN_IDS = Object.freeze(['commerce', 'marketing', 'managed', 'seo_accelerator'])
 export const RETIRED_ADDON_TYPES = Object.freeze(['translation', 'seasonal', 'gbp_setup'])
 export const CATALOG_PLAN_SCOPES = Object.freeze(['full', 'offers-only', 'retirement-only'])
@@ -32,6 +32,7 @@ const DESTRUCTIVE_OPERATION_TYPES = new Set(['archive_product', 'clear_product_d
 const CANONICAL_PRODUCT_METADATA_KEYS = Object.freeze([
   'plan_id',
   'product_family',
+  'service',
   'highlighted',
   'badge',
   'monthly_price_id',
@@ -88,6 +89,16 @@ export const PLAN_DEFINITIONS = Object.freeze([
     productFamily: 'site_language',
     amountCents: 500,
     annualAmountCents: 6000,
+    highlighted: false,
+    features: [],
+  },
+  {
+    // A service KrabiClaw's people perform, added to a business's plan subscription as its own item.
+    name: 'SEO and marketing strategy',
+    description: 'Julia leads your SEO strategy, hand-writes ranking blog posts, meets with you weekly and is on chat with you.',
+    planId: 'strategy',
+    productFamily: 'services',
+    amountCents: 200000,
     highlighted: false,
     features: [],
   },
@@ -308,6 +319,7 @@ function canonicalProductMetadata(definition, priceRef, annualPriceRef, imageSha
   }
   if (definition.productFamily) metadata.product_family = definition.productFamily
   else metadata.plan_id = definition.planId
+  if (definition.productFamily === 'services') metadata.service = definition.planId
   if (definition.badge) metadata.badge = definition.badge
   if (annualPriceRef) metadata.annual_price_id = annualPriceRef
   if (existingMetadata.seat_price_id) metadata.seat_price_id = String(existingMetadata.seat_price_id)
@@ -443,7 +455,10 @@ function productCatalogId(product) {
   const family = typeof product?.metadata?.product_family === 'string'
     ? product.metadata.product_family.trim().toLowerCase()
     : ''
-  return family === 'site_language' ? family : ''
+  if (family === 'site_language') return family
+  // A service product is named by its `service` key; the family only groups them.
+  if (family === 'services') return typeof product?.metadata?.service === 'string' ? product.metadata.service.trim() : ''
+  return ''
 }
 
 function retiredCatalogFamily(product) {
@@ -585,7 +600,7 @@ export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductId
           marketing_features: definition.features.map(name => ({ name })),
           metadata: {
             ...(definition.productFamily
-              ? { product_family: definition.productFamily }
+              ? { product_family: definition.productFamily, ...(definition.productFamily === 'services' ? { service: definition.planId } : {}) }
               : { plan_id: definition.planId }),
             highlighted: definition.highlighted ? 'true' : 'false',
             ...(definition.badge ? { badge: definition.badge } : {}),

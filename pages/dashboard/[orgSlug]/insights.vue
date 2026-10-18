@@ -399,7 +399,7 @@
           <!-- The service, offered where its evidence is; it starts in Payments → Plan. -->
           <section v-if="!ads.managed" class="rounded-2xl p-6 ring ring-default" data-testid="insights-managed-ads">
             <h2 class="text-xl font-semibold text-highlighted">Get more from this budget</h2>
-            <p class="mt-2 text-base text-muted">Chris and Julia manage your campaigns — building, pausing and budgeting them against these numbers — for 10% of ad spend, billed with your KrabiClaw fees.</p>
+            <p class="mt-2 text-base text-muted">Chris hand-manages your campaigns against these numbers — budgets, creative direction and conversion rate — with a weekly meeting, for 10% of ad spend billed with your KrabiClaw fees.</p>
             <UButton class="mt-4" label="See managed ads" :to="`/dashboard/${scope?.orgSlug}/payments?tab=plan`" />
           </section>
           <section>

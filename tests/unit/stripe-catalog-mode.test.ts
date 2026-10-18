@@ -96,7 +96,7 @@ test('Business catalog consolidates new sales without repricing existing contrac
   assert.deepEqual(plan.providerSnapshot.subscriptions, original.subscriptions)
   assert.equal(plan.providerSnapshotSha256, sha256Json(original))
   assert.deepEqual(plan.operations.filter(operation => operation.type.includes('subscription')), [])
-  assert.deepEqual(plan.operations.filter(operation => operation.type === 'create_product').map(operation => operation.planId), ['business', 'site_language'])
+  assert.deepEqual(plan.operations.filter(operation => operation.type === 'create_product').map(operation => operation.planId), ['business', 'site_language', 'strategy'])
   const businessPrice = plan.operations.find(operation => operation.type === 'create_price' && operation.planId === 'business')
   assert.deepEqual(businessPrice?.params, {
     currency: 'usd', recurring: { interval: 'month', interval_count: 1 },
