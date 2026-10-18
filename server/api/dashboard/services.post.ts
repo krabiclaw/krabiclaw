@@ -4,7 +4,7 @@ import { jsonResponse, readRequiredBody } from '~/server/utils/api-response'
 import { getDashboardContext } from '~/server/utils/dashboard-context'
 import { assertRoleAllows } from '~/server/utils/member-access'
 import { agreeToService, endService, isService, listServices } from '~/server/utils/organization-services'
-import { endStrategy, readStrategy, startStrategy, strategyOffer } from '~/server/utils/strategy-service'
+import { endStrategy, readStrategy, startStrategy } from '~/server/utils/strategy-service'
 
 /** Starting or ending a service uses the shared billing permission, from the dashboard itself. */
 export default defineHandler(async (event) => {
@@ -22,6 +22,6 @@ export default defineHandler(async (event) => {
     if (body.action === 'agree') await agreeToService(db, env, organization.id, body.service, userId)
     else await endService(db, organization.id, body.service, userId)
   }
-  const [agreements, strategy, offer] = await Promise.all([listServices(db, organization.id), readStrategy(env, db, organization.id), strategyOffer(env)])
-  return jsonResponse({ success: true, services: { ...agreements, strategy }, strategy_offer: offer })
+  const [agreements, strategy] = await Promise.all([listServices(db, organization.id), readStrategy(env, db, organization.id)])
+  return jsonResponse({ success: true, services: { ...agreements, strategy } })
 })

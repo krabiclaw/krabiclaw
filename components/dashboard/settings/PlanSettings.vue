@@ -56,7 +56,7 @@
         <template v-if="services?.strategy">
           <p>Julia's service ends now. Stripe credits the unused part of this period to your next invoice.</p>
         </template>
-        <template v-else-if="strategyOffer">
+        <template v-else>
           <p>Julia leads your SEO strategy, hand-writes blog posts written to rank, meets with you weekly and is on chat with you.</p>
           <p>It costs <strong class="text-highlighted">{{ paymentMoney(strategyOffer.amount, strategyOffer.currency) }} per {{ strategyOffer.interval }}</strong>, added to your plan's subscription and billed to the same card. Stripe charges today's share now and the full amount with each plan renewal. You can turn it off here at any time.</p>
         </template>
@@ -73,7 +73,7 @@ import EditorNavigationList from '~/components/dashboard/EditorNavigationList.vu
 import type { EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import { authClient } from '~/lib/auth-client'
-import { additionalLocationPrice, INCLUDED_LOCATIONS, STARTER_PLAN_ID, isKnownBillingPlan, isNewSalePlan } from '~/shared/billing-model'
+import { additionalLocationPrice, INCLUDED_LOCATIONS, SERVICE_PRICES, STARTER_PLAN_ID, isKnownBillingPlan, isNewSalePlan } from '~/shared/billing-model'
 import { isLocationCount } from '~/composables/useOrganizationSubscription'
 import { paymentMoney } from '~/shared/payment-display'
 import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
@@ -96,13 +96,13 @@ const busy = ref(false)
 // The services the business is on: a consent row each, read with the plan.
 type Strategy = { item_id: string; amount: number; currency: string; interval: string; since: string }
 type Services = { managed_ads: { id: string; agreed_at: string } | null; strategy: Strategy | null }
-type StrategyOffer = { price_id: string; amount: number; currency: string; interval: string }
 const isStrategy = (value: unknown): value is Strategy => isRecord(value) && typeof value.item_id === 'string' && Number.isSafeInteger(value.amount) && isCurrencyCode(value.currency) && typeof value.since === 'string'
-const isServices = (value: unknown): value is { success: true; services: Services; strategy_offer: StrategyOffer } => isRecord(value) && value.success === true && isRecord(value.services) && (value.services.managed_ads === null || (isRecord(value.services.managed_ads) && typeof value.services.managed_ads.agreed_at === 'string')) && (value.services.strategy === null || isStrategy(value.services.strategy)) && isRecord(value.strategy_offer) && Number.isSafeInteger(value.strategy_offer.amount) && isCurrencyCode(value.strategy_offer.currency)
+const isServices = (value: unknown): value is { success: true; services: Services } => isRecord(value) && value.success === true && isRecord(value.services) && (value.services.managed_ads === null || (isRecord(value.services.managed_ads) && typeof value.services.managed_ads.agreed_at === 'string')) && (value.services.strategy === null || isStrategy(value.services.strategy))
 const { data: servicesResource, error: servicesError, refresh: refreshServices } = await useAsyncData(`dashboard-services:${String(route.params.orgSlug)}`, () => dashboardApi('/api/dashboard/services', { validate: isServices }))
 // Unknown until read: a failed read shows its error above and offers no service action.
 const services = computed(() => servicesResource.value?.services)
-const strategyOffer = computed(() => servicesResource.value?.strategy_offer)
+// The offer's price is the catalog's, the same source the Stripe product was created from.
+const strategyOffer = { amount: SERVICE_PRICES.strategy.monthly, currency: 'USD' as const, interval: 'month' }
 const managedAdsOpen = ref(false)
 const strategyOpen = ref(false)
 // Stripe owns the strategy item: starting adds it to the plan subscription, ending removes it, both prorated by Stripe.
@@ -238,9 +238,9 @@ const groups = computed<EditorNavigationGroup[]>(() => [{
     ...(services.value ? [{ id: 'service:managed_ads', label: 'Managed ads', summary: services.value.managed_ads
       ? `On since ${formatExactDateTime(services.value.managed_ads.agreed_at)} · 10% of Google Ads spend, billed with your fees.`
       : 'Chris manages your Google Ads campaigns, creative and conversion rate, with a weekly meeting · 10% of ad spend.', action: { label: services.value.managed_ads ? 'Turn off' : 'Turn on' } }] : []),
-    ...(services.value && strategyOffer.value ? [{ id: 'service:strategy', label: 'SEO and marketing strategy', summary: services.value.strategy
+    ...(services.value ? [{ id: 'service:strategy', label: 'SEO and marketing strategy', summary: services.value.strategy
       ? `On since ${formatExactDateTime(services.value.strategy.since)} · ${paymentMoney(services.value.strategy.amount, services.value.strategy.currency)} per ${services.value.strategy.interval}, billed with your plan.`
-      : `Julia leads your SEO strategy, hand-writes ranking blog posts, meets with you weekly and is on chat with you · ${paymentMoney(strategyOffer.value.amount, strategyOffer.value.currency)} per ${strategyOffer.value.interval}.`, action: { label: services.value.strategy ? 'Turn off' : onStarter.value ? 'Choose a plan' : 'Turn on' } }] : []),
+      : `Julia leads your SEO strategy, hand-writes ranking blog posts, meets with you weekly and is on chat with you · ${paymentMoney(strategyOffer.amount, strategyOffer.currency)} per ${strategyOffer.interval}.`, action: { label: services.value.strategy ? 'Turn off' : onStarter.value ? 'Choose a plan' : 'Turn on' } }] : []),
   ],
 }])
 

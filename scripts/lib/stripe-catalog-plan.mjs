@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { basename, dirname } from 'node:path'
-import { NEW_SALE_PAID_PLAN_IDS, PAID_PLAN_PRICES, planPriceTiers } from '../../shared/billing-model.ts'
+import { NEW_SALE_PAID_PLAN_IDS, PAID_PLAN_PRICES, SERVICE_PRICES, planPriceTiers } from '../../shared/billing-model.ts'
 
 export const CATALOG_PLAN_SCHEMA_VERSION = 12
 export const CATALOG_APPLY_JOURNAL_SCHEMA_VERSION = 1
@@ -98,7 +98,7 @@ export const PLAN_DEFINITIONS = Object.freeze([
     description: 'Julia leads your SEO strategy, hand-writes ranking blog posts, meets with you weekly and is on chat with you.',
     planId: 'strategy',
     productFamily: 'services',
-    amountCents: 200000,
+    amountCents: SERVICE_PRICES.strategy.monthly,
     highlighted: false,
     features: [],
   },

@@ -32,6 +32,11 @@ export const PAID_PLAN_PRICES: Readonly<Record<NewSalePlanId, { monthly: number;
   [BUSINESS_PLAN_ID]: Object.freeze({ monthly: 9900 }),
 })
 
+/** Services KrabiClaw's people perform, priced in USD cents per month and sold beside the plan. */
+export const SERVICE_PRICES = Object.freeze({
+  strategy: Object.freeze({ monthly: 200000 }),
+})
+
 /** Locations every plan's price includes. */
 export const INCLUDED_LOCATIONS = 2
 

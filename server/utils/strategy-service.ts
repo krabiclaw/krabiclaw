@@ -52,12 +52,6 @@ export async function readStrategy(env: CloudflareEnv, db: DbClient, organizatio
   return { item_id: item.id, price_id: item.price.id, amount: item.price.unit_amount, currency: item.price.currency.toUpperCase(), interval: item.price.recurring?.interval ?? 'month', since: new Date(item.created * 1000).toISOString() }
 }
 
-/** The price the business would agree to, for the consent dialog. */
-export async function strategyOffer(env: CloudflareEnv): Promise<{ price_id: string; amount: number; currency: string; interval: string }> {
-  const price = await strategyPrice(getStripe(env))
-  return { price_id: price.id, amount: price.unit_amount as number, currency: price.currency.toUpperCase(), interval: price.recurring?.interval ?? 'month' }
-}
-
 export async function startStrategy(env: CloudflareEnv, db: DbClient, organizationId: string): Promise<StrategyService> {
   const found = await planSubscription(env, db, organizationId)
   if (!found || !['active', 'trialing'].includes(found.subscription.status)) throw new HTTPError({ statusCode: 409, statusMessage: 'Choose a plan before adding the strategy service; it is billed with the plan.' })
