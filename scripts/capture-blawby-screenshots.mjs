@@ -396,6 +396,11 @@ try {
       }
       await sharp({ create: { ...dimensions, channels: 3, background: 'white' } }).composite(clips).png().toFile(filePath)
       if (inventoryMode) {
+        const finalUrl = new URL(page.url()).href
+        if (finalUrl !== new URL(targetUrl).href) {
+          throw new Error(`${routeConfig.path} final URL mismatch at ${viewportName}: expected ${targetUrl}, found ${finalUrl}`)
+        }
+        const htmlLang = await page.locator('html').getAttribute('lang')
         const mainText = await page.locator('main').innerText().catch(async error => {
           throw new Error(`${routeConfig.path} could not read main content at ${viewportName} (${page.url()}): ${JSON.stringify(await failureDetails())}`, { cause: error })
         })
@@ -406,6 +411,7 @@ try {
           throw new Error(`${routeConfig.path} failed at ${viewportName}: ${JSON.stringify(details)}`)
         }
         manifest.screenshots.push({ route_name: routeName, route: routeConfig.path, viewport: viewportName,
+          final_url: finalUrl, html_lang: htmlLang,
           status: response.status(), file: portablePath(args.outDir, filePath),
           contentSize: cssContentSize, imageSize: dimensions,
           pageErrors: [...pageErrors], failedFirstParty: [...failedFirstParty], consoleErrors: [...consoleErrors],
