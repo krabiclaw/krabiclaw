@@ -52,10 +52,24 @@ const localizationObject = { oneOf: [
 
 export const LOCALES_TOOLS: McpToolDefinition[] = [
   organizationTool({
-    name: 'set_organization_language',
-    description: 'Add a website language for private authoring, publish its translations, or disable its public routes. Publishing shows only authored translations. Adding and publishing require the website’s language entitlement.',
-    domain: 'locales', minimumRole: 'admin', inputSchema: { locale: { type: 'string', enum: PLATFORM_LOCALES.map(item => item.locale) }, action: { type: 'string', enum: ['add', 'publish', 'disable'] } },
-    required: ['locale', 'action'],
+    name: 'add_organization_language',
+    description: 'Add a website language for private authoring. Requires the website’s language entitlement. A new language starts disabled; an existing language keeps its publication status and translations while its stored label is refreshed from the platform catalog.',
+    domain: 'locales', minimumRole: 'admin', inputSchema: { locale: { type: 'string', enum: PLATFORM_LOCALES.map(item => item.locale) } },
+    required: ['locale'],
+    outputSchema: { type: 'object', properties: { locales: { type: 'array', items: organizationLocaleObject } }, required: ['locales'], additionalProperties: false },
+  }),
+  organizationTool({
+    name: 'publish_organization_language',
+    description: 'Publish an added website language’s authored translations on public routes. Requires the website’s language entitlement and a translated homepage. Missing translations remain unavailable; the source language is unchanged.',
+    domain: 'locales', minimumRole: 'admin', inputSchema: { locale: { type: 'string', enum: PLATFORM_LOCALES.map(item => item.locale) } },
+    required: ['locale'],
+    outputSchema: { type: 'object', properties: { locales: { type: 'array', items: organizationLocaleObject } }, required: ['locales'], additionalProperties: false },
+  }),
+  organizationTool({
+    name: 'disable_organization_language',
+    description: 'Disable an existing website language’s public routes while preserving its translations for private authoring. The source language cannot be disabled.',
+    domain: 'locales', minimumRole: 'admin', inputSchema: { locale: { type: 'string', enum: PLATFORM_LOCALES.map(item => item.locale) } },
+    required: ['locale'],
     outputSchema: { type: 'object', properties: { locales: { type: 'array', items: organizationLocaleObject } }, required: ['locales'], additionalProperties: false },
   }),
   organizationTool({
@@ -167,13 +181,16 @@ export const LOCALES_TOOLS: McpToolDefinition[] = [
 
 export async function handleLocalesTools(ctx: McpExecutorContext): Promise<unknown> {
   const { toolName, args, organization } = ctx
-  if (toolName === 'set_organization_language') {
-    const input = { organizationId: organization.organizationId, locale: requiredString(args, 'locale') }
-    const action = requiredString(args, 'action')
-    if (action === 'add') await addOrganizationLanguage(organization.db, organization.env, input)
-    else if (action === 'publish') await publishOrganizationLanguage(organization.db, organization.env, input)
-    else if (action === 'disable') await disableOrganizationLanguage(organization.db, input)
-    else throw new Error('Invalid language action')
+  if (toolName === 'add_organization_language') {
+    await addOrganizationLanguage(organization.db, organization.env, { organizationId: organization.organizationId, locale: requiredString(args, 'locale') })
+    return await listOrganizationLocales(organization.db, organization.organizationId)
+  }
+  if (toolName === 'publish_organization_language') {
+    await publishOrganizationLanguage(organization.db, organization.env, { organizationId: organization.organizationId, locale: requiredString(args, 'locale') })
+    return await listOrganizationLocales(organization.db, organization.organizationId)
+  }
+  if (toolName === 'disable_organization_language') {
+    await disableOrganizationLanguage(organization.db, { organizationId: organization.organizationId, locale: requiredString(args, 'locale') })
     return await listOrganizationLocales(organization.db, organization.organizationId)
   }
   if (toolName === 'delete_organization_language') {
