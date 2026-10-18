@@ -373,6 +373,7 @@ for (const width of [390, 1440]) {
       await expect(page.getByRole('heading', { name: policy.title, exact: true, level: 1 })).toBeVisible()
       await expect(page.locator('main')).toContainText(policy.body)
       await expect(page.locator('.kc-parallax-hero')).toHaveCount(0)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth), policy.path).toBeLessThanOrEqual(width)
     }
     expect(errors).toEqual([])
   })
