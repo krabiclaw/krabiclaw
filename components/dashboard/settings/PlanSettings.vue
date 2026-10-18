@@ -58,7 +58,7 @@
         </template>
         <template v-else>
           <p>Julia leads your SEO strategy, hand-writes blog posts written to rank, meets with you weekly and is on chat with you.</p>
-          <p>It costs <strong class="text-highlighted">{{ paymentMoney(strategyOffer.amount, strategyOffer.currency) }} per {{ strategyOffer.interval }}</strong>, added to your plan's subscription and billed to the same card. Stripe charges today's share now and the full amount with each plan renewal. You can turn it off here at any time.</p>
+          <p>It costs <strong class="text-highlighted">{{ paymentMoney(strategyOffer.amount, strategyOffer.currency) }} per {{ strategyOffer.interval }}</strong>, added to your plan's subscription and billed to the same card. Stripe invoices and charges today's share as soon as you agree, then the full amount with each plan renewal. You can turn it off here at any time.</p>
         </template>
       </div>
     </DashboardListItemDialog>
@@ -105,6 +105,9 @@ const services = computed(() => servicesResource.value?.services)
 const strategyOffer = { amount: SERVICE_PRICES.strategy.monthly, currency: 'USD' as const, interval: 'month' }
 const managedAdsOpen = ref(false)
 const strategyOpen = ref(false)
+// A new attempt each time the dialog opens: a retried submit deduplicates at Stripe, a later consent does not.
+const strategyAttempt = ref('')
+watch(strategyOpen, (open) => { if (open) strategyAttempt.value = crypto.randomUUID() })
 // Stripe owns the strategy item: starting adds it to the plan subscription, ending removes it, both prorated by Stripe.
 async function toggleStrategy() {
   if (!services.value) return
@@ -112,7 +115,7 @@ async function toggleStrategy() {
   sheetError.value = ''
   successMessage.value = ''
   try {
-    const updated = await dashboardApi('/api/dashboard/services', { method: 'POST', body: { service: 'strategy', action: services.value.strategy ? 'end' : 'agree' }, validate: isServices })
+    const updated = await dashboardApi('/api/dashboard/services', { method: 'POST', body: { service: 'strategy', action: services.value.strategy ? 'end' : 'agree', attempt: strategyAttempt.value }, validate: isServices })
     servicesResource.value = updated
     await refreshBilling()
     strategyOpen.value = false

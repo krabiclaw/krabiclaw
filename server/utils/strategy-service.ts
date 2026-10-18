@@ -52,18 +52,23 @@ export async function readStrategy(env: CloudflareEnv, db: DbClient, organizatio
   return { item_id: item.id, price_id: item.price.id, amount: item.price.unit_amount, currency: item.price.currency.toUpperCase(), interval: item.price.recurring?.interval ?? 'month', since: new Date(item.created * 1000).toISOString() }
 }
 
-export async function startStrategy(env: CloudflareEnv, db: DbClient, organizationId: string): Promise<StrategyService> {
+/** One consent attempt: the browser names it, so a retry of the same attempt is deduplicated and a later attempt is not. */
+export function isAttemptId(value: unknown): value is string {
+  return typeof value === 'string' && /^[A-Za-z0-9-]{8,64}$/u.test(value)
+}
+
+export async function startStrategy(env: CloudflareEnv, db: DbClient, organizationId: string, attempt: string): Promise<StrategyService> {
   const found = await planSubscription(env, db, organizationId)
   if (!found || !['active', 'trialing'].includes(found.subscription.status)) throw new HTTPError({ statusCode: 409, statusMessage: 'Choose a plan before adding the strategy service; it is billed with the plan.' })
   if (strategyItem(found.subscription)) throw new HTTPError({ statusCode: 409, statusMessage: 'The strategy service is already on' })
   const price = await strategyPrice(found.stripe)
-  // Stripe prorates today's share onto the next invoice and charges the plan's card; a declined card fails here, not later.
+  // Stripe invoices today's prorated share at once and charges the plan's card; a declined card fails here and adds nothing.
   const updated = await found.stripe.subscriptions.update(found.subscription.id, {
     items: [{ price: price.id, quantity: 1 }],
-    proration_behavior: 'create_prorations',
+    proration_behavior: 'always_invoice',
     payment_behavior: 'error_if_incomplete',
     expand: ['items.data.price.product'],
-  }, { idempotencyKey: `strategy-start:${organizationId}:${found.subscription.id}:${price.id}` })
+  }, { idempotencyKey: `strategy-start:${organizationId}:${attempt}` })
   const item = strategyItem(updated)
   if (!item) throw new Error('Stripe did not add the strategy item to the subscription')
   const read = await readStrategy(env, db, organizationId)
@@ -71,10 +76,10 @@ export async function startStrategy(env: CloudflareEnv, db: DbClient, organizati
   return read
 }
 
-export async function endStrategy(env: CloudflareEnv, db: DbClient, organizationId: string): Promise<void> {
+export async function endStrategy(env: CloudflareEnv, db: DbClient, organizationId: string, attempt: string): Promise<void> {
   const found = await planSubscription(env, db, organizationId)
   const item = found && strategyItem(found.subscription)
   if (!found || !item) throw new HTTPError({ statusCode: 409, statusMessage: 'The strategy service is not on' })
-  await found.stripe.subscriptionItems.del(item.id, { proration_behavior: 'create_prorations' }, { idempotencyKey: `strategy-end:${organizationId}:${item.id}` })
+  await found.stripe.subscriptionItems.del(item.id, { proration_behavior: 'create_prorations' }, { idempotencyKey: `strategy-end:${organizationId}:${attempt}` })
   if (await readStrategy(env, db, organizationId)) throw new Error('The strategy item is still on the subscription')
 }
