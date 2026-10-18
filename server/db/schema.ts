@@ -1577,7 +1577,7 @@ export const inventory_levels = sqliteTable("inventory_levels", {
 export const organization_services = sqliteTable("organization_services", {
 	id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
-	service: text({ enum: ["managed_ads"] }).notNull(),
+	service: text({ enum: ["managed_ads", "strategy"] }).notNull(),
 	terms_version: text().notNull(),
 	agreed_by_user_id: text().references(() => user.id, { onDelete: "set null" }),
 	agreed_at: text().notNull(),

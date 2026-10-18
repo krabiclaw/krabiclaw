@@ -1001,7 +1001,7 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
   assert.equal((await listServices(db, ORG)).managed_ads, null)
   const statusRead = await call('/api/dashboard/services?org=payments')
   assert.equal(statusRead.status, 200)
-  assert.deepEqual(await statusRead.json(), { success: true, services: { managed_ads: null } })
+  assert.deepEqual(await statusRead.json(), { success: true, services: { managed_ads: null, strategy: null } })
   assert.deepEqual(await db.prepare('SELECT ended_at,ended_by_user_id FROM organization_services WHERE id=?').bind(agreement.id).first(), { ended_at: '2026-10-03T10:00:00.000Z', ended_by_user_id: 'verified' })
   await assert.rejects(() => endService(db, ORG, 'managed_ads', 'other'), /This service is not on/u)
   await assert.rejects(() => releaseIntegration(env, ORG, 'google-ads'), /Google Ads API error \(503\)/u)

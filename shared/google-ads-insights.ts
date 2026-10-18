@@ -14,7 +14,7 @@ export const googleAdsInsightsSchema = z.discriminatedUnion('status', [
     period: z.object({ startDate: z.string(), endDate: z.string() }),
     totals: z.object({ costMicros: count, clicks: count, impressions: count, conversions: z.number().nonnegative(), averageCpcMicros: count }),
     campaigns: z.array(z.object({ id: z.string(), name: z.string(), status: z.string(), costMicros: count, clicks: count, impressions: count, conversions: z.number().nonnegative() })),
-    /** Whether Chris and Julia manage these campaigns under the managed-ads agreement. */
+    /** Whether Chris manages these campaigns under the managed-ads agreement. */
     managed: z.boolean(),
   }),
   z.object({

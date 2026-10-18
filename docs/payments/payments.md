@@ -428,8 +428,9 @@ business does not touch buyers' Customers.
 
 ### Managed ads
 
-Managed ads is a service: Chris and Julia run a business's Google Ads
-campaigns for 10% of its ad spend. Connecting a Google Ads account costs
+Managed ads is a service: Chris hand-manages a business's Google Ads
+campaigns (budgets, creative direction, conversion rate) with a weekly
+meeting, for 10% of its ad spend. Connecting a Google Ads account costs
 nothing and feeds Insights → Google Ads; the fee follows the business's
 agreement, recorded in `organization_services` (`managed_ads`, who agreed,
 when, which terms) from Payments → Plan → Services. Reporting days follow the
@@ -451,6 +452,15 @@ Metronome prices it at the ad-spend rate on the Payments rate card:
 `get_payments_usage` show it as `ad_spend_rate_percent`. A Google Ads account
 in a currency other than USD, or a day whose spend changed after it was queued,
 fails the task for that business rather than being converted or overwritten.
+
+**SEO and marketing strategy** is Julia's service: she leads the SEO strategy,
+hand-writes ranking blog posts, meets weekly and is on chat with the business,
+for $2,000 per month. Stripe owns it entirely: the catalog product carries
+`product_family=services` and `service=strategy` (never a `plan_id`, so Better
+Auth keeps resolving the plan from the plan item), and agreeing in Payments →
+Plan → Services adds that price as a second item on the plan subscription with
+prorations; ending it removes the item. The item's presence is the state
+(`server/utils/strategy-service.ts`); nothing is stored in the application.
 
 Activation verifies the live operating-usage contract, its current 10% ad-spend
 rate and collection configuration, the operating Customer's default payment
