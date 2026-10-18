@@ -3,7 +3,6 @@ import { getRouterParam, readBody } from 'nitro/h3'
 import { INTEGRATION_SCOPES } from '~/shared/organization-settings'
 import { jsonResponse, rethrowHttpError } from '~/server/utils/api-response'
 import { requireIntegrationAccount } from '~/server/utils/auth'
-import { readIntegration } from '~/server/utils/organization-integrations'
 import { requireOrganizationAccess } from '~/server/utils/location-access'
 import { selectGoogleAdsCustomer } from '~/server/utils/google-ads'
 
@@ -23,8 +22,6 @@ export default defineHandler(async (event) => {
   }
 
   const { env, session, organization } = await requireOrganizationAccess(event, organizationId)
-  const current = await readIntegration(env.DB, organization.id, 'google_ads')
-  if (current) return jsonResponse({ error: 'Disconnect Google Ads before connecting again.' }, { status: 409 })
   await requireIntegrationAccount(env, accountId, {
     userId: session.user.id, currentAccountId: null,
     providerId: 'google',
@@ -32,7 +29,7 @@ export default defineHandler(async (event) => {
   })
 
   try {
-    await selectGoogleAdsCustomer(env, organization.id, accountId, customerId, customerName, { revision: null })
+    await selectGoogleAdsCustomer(env, organization.id, accountId, customerId, customerName)
     return jsonResponse({ success: true, customer_id: customerId, customer_name: customerName })
   } catch (error) {
     rethrowHttpError(error)
