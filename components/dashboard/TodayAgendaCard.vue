@@ -8,6 +8,7 @@
     :data-card-priority="item.priority"
     class="group block transition-colors hover:bg-elevated focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary"
     :ui="{ body: 'flex min-h-36 items-center justify-between gap-4 sm:min-h-40 sm:gap-6' }"
+    @click="onCardClick"
   >
     <div class="min-w-0 flex-1">
       <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold text-highlighted">
@@ -41,8 +42,24 @@
 <script setup lang="ts">
 import { NuxtLink } from '#components'
 import type { TodayCard } from '~/shared/dashboard-today'
+import { useDashboardTelemetry } from '~/composables/useDashboardTelemetry'
 
-defineProps<{
+const props = defineProps<{
   item: TodayCard
+  surface?: string
 }>()
+
+const telemetry = useDashboardTelemetry()
+
+function onCardClick() {
+  telemetry.track({
+    action: 'today_card_click',
+    surface: props.surface ?? 'today',
+    cardId: props.item.id,
+    cardPriority: props.item.priority,
+    cardKind: props.item.bookingKind ?? undefined,
+    locationId: props.item.locationId ?? undefined,
+    targetPath: props.item.to,
+  })
+}
 </script>
