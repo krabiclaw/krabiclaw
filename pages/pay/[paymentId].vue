@@ -105,6 +105,7 @@
 <script setup lang="ts">
 import { loadStripe, type Stripe, type StripeElements, type StripePaymentElement } from '@stripe/stripe-js'
 import { paymentMoney } from '~/shared/payment-display'
+import { cardBrandLabel } from '~/composables/usePaymentsSettings'
 import { formatCalendarDate, formatTimestamp } from '~/utils/timezone'
 import { STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, stayNightlyGroups } from '~/shared/stay-listing'
 import { isRecord, publicApiMutation, publicApiRequest } from '~/utils/api-clients'
@@ -145,7 +146,7 @@ const methodLabel = computed(() => {
   if (!method) return ''
   if (method.wallet) return method.wallet.replace('_', ' ')
   if (method.bank_name && method.last4) return `${method.bank_name} •••• ${method.last4}`
-  return method.brand && method.last4 ? `${method.brand} •••• ${method.last4}` : method.type
+  return method.brand && method.last4 ? `${cardBrandLabel(method.brand)} •••• ${method.last4}` : method.type
 })
 
 const money = (minor: number) => paymentMoney(minor, handoff.value!.currency)
