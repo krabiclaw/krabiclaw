@@ -1,7 +1,7 @@
 import type { Product, PublicProduct } from '~/server/types/products'
 import { isExperience } from '~/utils/product-presentation'
 import { formatProductMoney } from '~/utils/product-money'
-import { selectPrice, type PriceSelection } from '~/shared/prices'
+import { selectPrice, type Price, type PriceSelection } from '~/shared/prices'
 import { DESCRIPTION_MAX_LENGTH, truncateForSeo } from '~/utils/social-metadata'
 
 /**
@@ -27,6 +27,10 @@ export interface ProductCollectionSibling {
   id: string
   name: string
   slug: string
+  /** Its picture, as a card shows it. */
+  image_url: string | null
+  /** The lowest price on offer where the page is read. */
+  price: Price | null
 }
 
 /** Links per product page. Bounded so a 60-item collection does not turn every
@@ -62,7 +66,10 @@ export function selectProductCollectionSiblings(
   const rotated = index === -1
     ? inCollection
     : [...inCollection.slice(index + 1), ...inCollection.slice(0, index)]
-  return rotated.slice(0, limit).map(({ id, name, slug }) => ({ id, name, slug }))
+  return rotated.slice(0, limit).map(({ id, name, slug, image, variants }) => ({
+    id, name, slug, image_url: image?.public_url ?? null,
+    price: variants.map(variant => selectPrice(variant.prices, selection)).filter((price): price is Price => price !== null).sort((left, right) => left.unit_amount - right.unit_amount)[0] ?? null,
+  }))
 }
 
 /** Everything the composed description reads. All of it is product data. */

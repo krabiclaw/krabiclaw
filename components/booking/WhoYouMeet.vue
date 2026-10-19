@@ -16,11 +16,12 @@
         </div>
       </li>
     </ul>
+    <TenantButton v-if="contactTo && status === 'success' && hosts.length" variant="outline" class="mt-6" :to="contactTo">{{ t('booking.message_host') }}</TenantButton>
   </section>
 </template>
 <script setup lang="ts">
 import { useProductHosts } from '~/composables/useProductHosts'
-const props = defineProps<{ organizationId: string; productId: string; slug: string; sessionId?: string }>()
+const props = defineProps<{ organizationId: string; productId: string; slug: string; sessionId?: string; /** Where a guest writes to the host about this offering. */ contactTo?: string }>()
 const { t } = useI18n()
 const { data, error, status, refresh } = await useProductHosts(() => props)
 const hosts = computed(() => data.value?.hosts ?? [])
