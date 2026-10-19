@@ -8,7 +8,6 @@
   <DashboardIndexPanel
     :id="personalScope ? 'account-calendar' : 'org-calendar'"
     title="Calendar"
-    column="wide"
   >
     <template #right>
       <div class="flex items-center gap-1">

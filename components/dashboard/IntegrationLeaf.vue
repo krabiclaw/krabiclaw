@@ -34,7 +34,7 @@
       :description="connection.lastError || 'The last sync failed.'"
     />
 
-    <!-- The service KrabiClaw's people offer on this connection; it starts and stops in Payments → Plan. -->
+    <!-- The service KrabiClaw's people offer on this connection; it starts and stops in its own leaf under Payments → Plan. -->
     <NuxtLink
       v-if="definition.service"
       :to="planTo"
@@ -104,7 +104,7 @@ const emit = defineEmits<{ disconnect: [] }>()
 
 const route = useRoute()
 const definition = computed(() => integrationDefinition(props.integration))
-const planTo = computed(() => `/dashboard/${String(route.params.orgSlug)}/payments?tab=plan`)
+const planTo = computed(() => `/dashboard/${String(route.params.orgSlug)}/payments/managed-ads`)
 const connectedOn = computed(() => props.connection
   ? new Date(props.connection.connectedAt).toLocaleDateString(undefined, { dateStyle: 'medium' })
   : '')

@@ -480,13 +480,21 @@ own failures.
 **Leaf width is fixed from `lg`.** Below `lg` a level is the whole screen or a
 drawer and uses all of it. From `lg` the content column is `max-w-xl`, so a
 field does not stretch across a wide pane; it caps the right edge, never the
-left. A leaf that needs more width is a grid editor and says so. An index that
-is a column rather than the frame names which column in `DashboardIndexPanel
-column`: `leaf` (Menu, Catalog, a booking's notes), `reading` (Earnings,
-Payments, Past activity) or `wide` (Insights, Today, Calendar); beside a child
-every index is `leaf`. The widths live in `dashboardColumnWidths`; a page never
-states one. A column's title heads it, as a leaf's does. Every level title is
-`dashboardTitleClass`.
+left. A leaf that needs more width is a grid editor and says so.
+
+**A level alone in the frame is one of three things, and the empty right side
+of a desktop window is never the fourth.** Content that scales — a grid, a
+table, a calendar, a chart, cards — takes the frame: Today, Calendar, Catalog,
+Insights, Photos, Transactions name no column. A settings index pairs with its
+first row where there is a pane, as Account settings, Integrations, Payments
+and Earnings do: its rows are leaves beside it and `autoOpen` names the first.
+Only a list of records with nothing of its own to open — Notifications, Past
+activity, Paid, Platform accounts — or a true single-concern screen (Menu, a
+booking's notes, a calendar day) stands alone as a column, and says which in
+`DashboardIndexPanel column`: `reading` for the records, `leaf` for the screen.
+Beside a child every index is `leaf`. The widths live in
+`dashboardColumnWidths`; a page never states one. A column's title heads it,
+as a leaf's does. Every level title is `dashboardTitleClass`.
 
 **Short text is bare.** A name, title, headline, slug or link renders as a
 borderless 22–26px field with a counter, the way Airbnb's title and custom
@@ -624,12 +632,13 @@ parent. The logical parent is the same parent Back uses. Pane topology is
 independent of whether the level contains records, fields, settings, media, or
 another index.
 
-Destination roots stand alone and use the frame: Today, Calendar, Catalog,
-Messages, Menu, and each Menu destination — Website, Locations, Team,
-Integrations, Earnings, Payments, Insights, Notifications — as Airbnb's
-`/hosting/listings` grid does. Within a destination, levels pair with their
-parent: Pages, Blog, Reviews and Q&A, and Brand render as `Website | Pages`, and
-a Catalog entry renders beside Catalog.
+Destination roots stand alone: Today, Calendar, Catalog, Messages, Menu, and
+each Menu destination — Website, Locations, Team, Integrations, Earnings,
+Payments, Insights, Notifications — as Airbnb's `/hosting/listings` grid does.
+A root that is a grid or a chart uses the frame; a root that is settings opens
+its first row beside it (Leaf width, above). Within a destination, levels pair
+with their parent: Pages, Blog, Reviews and Q&A, and Brand render as
+`Website | Pages`, and a Catalog entry renders beside Catalog.
 
 **Auto-selection.** Auto-selection answers whether an index may choose one of
 its own children on arrival. It does not determine whether the index has a

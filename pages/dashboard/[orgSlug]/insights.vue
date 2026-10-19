@@ -1,5 +1,5 @@
 <template>
-  <DashboardIndexPanel id="organization-insights" title="Insights" column="wide">
+  <DashboardIndexPanel id="organization-insights" title="Insights">
     <div class="space-y-6 pb-10">
       <UAlert
         v-if="loadError"
@@ -400,7 +400,7 @@
           <section v-if="!ads.managed" class="rounded-2xl p-6 ring ring-default" data-testid="insights-managed-ads">
             <h2 class="text-xl font-semibold text-highlighted">Get more from this budget</h2>
             <p class="mt-2 text-base text-muted">Chris hand-manages your campaigns against these numbers — budgets, creative direction and conversion rate — with a weekly meeting, for 10% of ad spend billed with your KrabiClaw fees.</p>
-            <UButton class="mt-4" label="See managed ads" :to="`/dashboard/${scope?.orgSlug}/payments?tab=plan`" />
+            <UButton class="mt-4" label="See managed ads" :to="`/dashboard/${scope?.orgSlug}/payments/managed-ads`" />
           </section>
           <section>
             <header class="mb-4"><h2 class="font-semibold text-highlighted">Campaigns by spend</h2></header>
