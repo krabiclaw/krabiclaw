@@ -454,7 +454,7 @@
         :can-go-back="bookingStep > 1 && !submitting"
         @back="bookingStep = 1"
       >
-        <ProductBookingSteps :controller="bookingController" :confirmation-mode="booking.confirmation_mode" :payment-required="booking.online_payment_required && (offer?.unit_amount ?? 0) > 0" />
+        <ProductBookingSteps :controller="bookingController" :confirmation-mode="booking.confirmation_mode" :payment-required="booking.online_payment_required && (bookingController.selectedPrice.value?.unit_amount ?? 0) > 0" />
       </BookingModal>
       <BookingModal
         v-else-if="isStay && canBook"

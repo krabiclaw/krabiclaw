@@ -55,7 +55,7 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
   if (cancellationToken && !tokenMatches) throw new Error('Booking cancellation capability does not match its request')
   const receiptUrl = tokenMatches && organization.public_url
     ? `${organization.public_url.replace(/\/$/, '')}${formatTenantLocalePath('/bookings/confirmed', locale, sourceLocale)}?id=${requestId}#${token}`
-    : env.NUXT_PUBLIC_PLATFORM_DOMAIN ? new URL('/account', env.NUXT_PUBLIC_PLATFORM_DOMAIN).toString() : null
+    : null
   const [{ contactPhone, contactEmail }, ownerInboxUrl, paid] = await Promise.all([
     resolveLocationContact(db, organizationId, record.location_id),
     buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: record.location_id ?? undefined, threadId: requestId }),

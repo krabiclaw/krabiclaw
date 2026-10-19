@@ -46,7 +46,7 @@ export async function notifyTableReservationCreated(env: CloudflareEnv, db: DbCl
   const locale = request.payload.guest.locale ?? sourceLocale
   const cancellation = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', requestId)
   const matches = await hashReservationCancelToken(cancellation.token) === request.payload.cancellation.token_hash
-  const receiptUrl = matches && organization.public_url ? `${organization.public_url.replace(/\/$/, '')}${formatTenantLocalePath('/reservations/confirmed', locale, sourceLocale)}?id=${requestId}#${cancellation.token}` : env.NUXT_PUBLIC_PLATFORM_DOMAIN ? new URL('/account', env.NUXT_PUBLIC_PLATFORM_DOMAIN).toString() : null
+  const receiptUrl = matches && organization.public_url ? `${organization.public_url.replace(/\/$/, '')}${formatTenantLocalePath('/reservations/confirmed', locale, sourceLocale)}?id=${requestId}#${cancellation.token}` : null
   const [location, { contactPhone, contactEmail }, ownerInboxUrl, paid] = await Promise.all([
     queryFirst<{ title: string }>(db, 'SELECT title FROM business_locations WHERE organization_id = ? AND id = ?', [organizationId, record.location_id]),
     resolveLocationContact(db, organizationId, record.location_id),

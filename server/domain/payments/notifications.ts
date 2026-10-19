@@ -22,10 +22,10 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   const organization = await queryFirst<{ name: string; slug: string }>(db, 'SELECT name,slug FROM organization WHERE id=?', [payment.organization_id])
   if (!organization && !await queryFirst(db, 'SELECT organization_id FROM payment_servicing_tenants WHERE organization_id=? AND stripe_account_id=? AND livemode=?', [payment.organization_id, payment.stripe_account_id, payment.livemode])) throw new Error('Payments notification has no tenant or retained servicing identity')
   // A booking, reservation or stay paid on the site is confirmed to its guest by
-  // the confirmation email, which states what they paid, and a failed attempt is
-  // said on the page they are paying on. Their money moving back is told here.
+  // the confirmation email, which states what they paid. A failure is told here:
+  // a bank or pay-later method can fail after the guest has left the pay page.
   const checkout = payment.subject_type === 'booking' || payment.subject_type === 'reservation' || payment.subject_type === 'stay'
-  const guestKind = (input.kind.startsWith('refund_') || (!checkout && input.kind.startsWith('payment_'))) ? input.kind as GuestPaymentNotificationKind : null
+  const guestKind = (input.kind.startsWith('refund_') || input.kind === 'payment_failed' || (!checkout && input.kind.startsWith('payment_'))) ? input.kind as GuestPaymentNotificationKind : null
   // A deleted merchant and an unclaimed contact have no application audience.
   // The verified return can still claim the purchase and then notify its buyer.
   if (!organization && (!payment.buyer_user_id || !guestKind)) return
@@ -61,7 +61,9 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   const details = {
     organizationName: organization?.name ?? null, amount: input.amount, currency: payment.currency, productTitle: snapshot.title, action: deepLink ? { url: deepLink, label: 'View details' } : null,
     // A checkout whose booking was taken before the payment completed is refunded without being asked.
-    refundReason: payment.state === 'recovery' ? 'What you paid for was taken before your payment completed, so your booking could not be made and your payment is refunded in full.' : null,
+    refundReason: payment.state !== 'recovery' ? null
+      : input.kind === 'refund_pending' ? 'What you paid for was taken before your payment completed, so your booking could not be made and your payment will be refunded in full.'
+        : input.kind === 'refund_succeeded' ? 'What you paid for was taken before your payment completed, so your booking could not be made and your payment has been refunded in full.' : null,
   }
   const event: PaymentNotificationEvent = input.kind === 'dispute_needs_response' ? { ...details, kind: input.kind, responseDueBy: input.responseDueBy } : { ...details, kind: input.kind }
   const ownerMessage = organization ? ownerPaymentMessage(event) : undefined

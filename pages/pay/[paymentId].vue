@@ -222,7 +222,8 @@ const offeringPath = computed(() => {
   if (value.kind !== 'experience' && value.kind !== 'stay' && !value.location_slug) return ''
   return localePath(presentationForProduct(organization.vertical, { kind: value.kind as ProductKind }).productPath(value.location_slug ?? '', value.product_slug))
 })
-const termsPath = computed(() => offeringPath.value ? `${offeringPath.value}#things-to-know` : '')
+// A stay's booked policy is always among its things to know; any other offering states its terms on its page.
+const termsPath = computed(() => !offeringPath.value ? '' : handoff.value?.stay ? `${offeringPath.value}#things-to-know` : offeringPath.value)
 
 // Airbnb's "Choose when to pay": now with any method, or later with the method that pays in installments.
 const LATER_TYPES = ['klarna', 'affirm', 'afterpay_clearpay']
@@ -309,9 +310,18 @@ async function reviewMethod() {
   }
 }
 
-watch(when, () => {
+// The button waits for Stripe to show the chosen list, so nothing is submitted from the one before.
+watch(when, async () => {
   review.value = null
-  elements?.update({ paymentMethodTypes: shownTypes(), amount: handoff.value!.subtotal })
+  if (!elements) return
+  ready.value = false
+  try {
+    await elements.update({ paymentMethodTypes: shownTypes(), amount: handoff.value!.subtotal })
+  } catch (cause) {
+    actionError.value = getErrorMessage(cause, t('payment.unavailable'))
+    return
+  }
+  ready.value = true
 })
 
 function changeMethod() {
