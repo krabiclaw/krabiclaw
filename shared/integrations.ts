@@ -11,6 +11,7 @@ export type IntegrationKey =
   | 'google-ads'
   | 'google-search-console'
   | 'google-calendar'
+  | 'airbnb'
   | 'facebook'
   | 'instagram'
   | 'discord'
@@ -135,6 +136,20 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
     prompts: [
       'What’s booked tomorrow?',
       'Block next Friday afternoon',
+    ],
+  },
+  {
+    key: 'airbnb', name: 'Airbnb', logo: 'i-simple-icons-airbnb', group: 'day',
+    purpose: 'Sync listings, reservations, rates, and guest messages directly to your dashboard.',
+    does: [
+      'Syncs confirmed Airbnb reservations and arrivals/departures to your Today agenda',
+      'Imports Airbnb messages into unified guest threads so you can reply in real time',
+      'Synchronizes calendar availability, nightly prices, and minimum stay rules',
+    ],
+    prompts: [
+      'What are our upcoming Airbnb check-ins?',
+      'Check if there are any unread Airbnb guest messages',
+      'What is the nightly rate on Airbnb next weekend?',
     ],
   },
 ]

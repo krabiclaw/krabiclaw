@@ -37,7 +37,7 @@
                     <path d="M14 10H4v14h8c0 6-2 10-7 14l4 4c8-6 11-13 11-23V10h-6Zm24 0H28v14h8c0 6-2 10-7 14l4 4c8-6 11-13 11-23V10h-6Z" />
                   </svg>
                   <blockquote class="relative">
-                    <p class="text-lg text-[var(--blawby-primary)]">{{ review.content }}</p>
+                    <p class="text-lg text-default">{{ review.content }}</p>
                   </blockquote>
                   <figcaption class="relative mt-6 flex items-center justify-between border-t border-default pt-6">
                     <div>

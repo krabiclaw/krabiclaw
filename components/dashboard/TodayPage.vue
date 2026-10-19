@@ -41,6 +41,7 @@
           v-for="item in visibleItems"
           :key="item.id"
           :item="item"
+          :surface="activeRange"
         />
       </div>
 
@@ -80,6 +81,7 @@ import { bookingCountLabel, resolveAggregateBookingPresentation } from '~/utils/
 import { getErrorMessage } from '~/utils/errors'
 import { agendaToTodayCard, todayFeedSchema, type TodayCard, type TodayFeedPayload } from '~/shared/dashboard-today'
 import type { AgendaItem, AgendaPayload } from '~/server/utils/dashboard-agenda'
+import { useDashboardTelemetry } from '~/composables/useDashboardTelemetry'
 
 useSeoMeta({ title: 'Today | KrabiClaw', robots: 'noindex, nofollow' })
 
@@ -95,6 +97,7 @@ const ranges: Array<{ label: string; value: TodayRange }> = [
 
 const route = useRoute()
 const router = useRouter()
+const telemetry = useDashboardTelemetry()
 const dashboardApi = props.personalScope ? applicationFetch : useDashboardApi()
 const apiBase = props.personalScope ? '/api/account' : '/api/dashboard'
 const realtime = useDashboardInvalidations()
@@ -115,7 +118,20 @@ const { data: todayData, pending, error: todayError, refresh: refreshToday } = a
 
 const rangeModel = computed<string>({
   get: () => activeRange.value,
-  set: value => { activeRange.value = value === 'upcoming' ? 'upcoming' : 'today' },
+  set: value => {
+    const next = value === 'upcoming' ? 'upcoming' : 'today'
+    if (next !== activeRange.value) {
+      activeRange.value = next
+      if (!props.personalScope) {
+        telemetry.track({
+          action: 'today_range_switch',
+          surface: 'today',
+          range: next,
+          locationId: typeof route.query.locationId === 'string' ? route.query.locationId : undefined,
+        })
+      }
+    }
+  },
 })
 const todayVisibleCount = ref(PAGE_SIZE)
 const upcomingItems = ref<TodayCard[]>([])
@@ -241,14 +257,38 @@ watch(todayKey, () => { todayData.value = undefined }, { flush: 'sync' })
 watch(activeRange, async range => {
   if (range === 'upcoming' && !upcomingItems.value.length) await loadUpcoming()
 })
-watch(filterSignature, () => {
+watch(filterSignature, (newSig, oldSig) => {
   todayVisibleCount.value = PAGE_SIZE
   resetUpcoming()
   upcomingCursor.value = null
+  if (!props.personalScope && oldSig !== undefined && newSig !== oldSig) {
+    telemetry.track({
+      action: 'today_filter_change',
+      surface: activeRange.value,
+      range: activeRange.value,
+      locationId: typeof route.query.locationId === 'string' ? route.query.locationId : undefined,
+      metadata: {
+        filterSignature: newSig,
+      },
+    })
+  }
 }, { flush: 'sync' })
-watch(todayData, async () => {
+watch(todayData, async (data) => {
   resetUpcoming()
   if (activeRange.value === 'upcoming') await loadUpcoming()
+  if (!props.personalScope && data) {
+    telemetry.track({
+      action: 'today_view',
+      surface: activeRange.value,
+      range: activeRange.value,
+      locationId: typeof route.query.locationId === 'string' ? route.query.locationId : undefined,
+      metadata: {
+        totalCards: data.cards.length,
+        attentionCount: data.cards.filter(c => c.priority === 'attention').length,
+        scheduledCount: data.cards.filter(c => c.priority === 'schedule').length,
+      },
+    })
+  }
 }, { flush: 'post' })
 watch(realtime.event, event => {
   if (event?.type === 'thread.created' || event?.type === 'thread.changed' || event?.type === 'notification.created'

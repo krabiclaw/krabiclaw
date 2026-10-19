@@ -230,6 +230,11 @@ async function integrationsSummary(db: DbClient, env: CloudflareEnv, organizatio
     const summary = integrationSummary(integrations.find(integration => integration.provider === provider) ?? null)
     return summary && { ...summary, connected_through: owners.get(summary.account_id) ?? null }
   }
+  const channex = await queryFirst<{ status: string; connected_at: string | null }>(
+    db,
+    'SELECT status, connected_at FROM channex_connections WHERE organization_id = ?',
+    [organizationId],
+  )
   return {
     services: { managed_ads: (await listServices(db, organizationId)).managed_ads !== null },
     google_maps: locations.map(location => ({ ...location, address: formatPostalAddress(parsePostalAddress(location.address)) || null })),
@@ -240,6 +245,10 @@ async function integrationsSummary(db: DbClient, env: CloudflareEnv, organizatio
     facebook: connected('facebook'),
     instagram: connected('instagram'),
     discord: connected('discord'),
+    airbnb: channex ? {
+      status: channex.status,
+      connected_at: channex.connected_at,
+    } : null,
   }
 }
 
