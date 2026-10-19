@@ -255,7 +255,10 @@ export async function createTableReservation(event: H3Event, input: {
   // attempted before either failure is raised.
   const followUps = await Promise.allSettled([
     notifyTableReservationCreated(env, db, organizationId, id),
-    operator ? Promise.resolve({ recorded: false, reason: 'operator_creation' }) : recordOrganizationConversionEvent(db, event.req, {
+    operator ? Promise.resolve({ recorded: false, reason: 'operator_creation' })
+      // A preview is the host looking at their own site, not a guest's conversion.
+      : event.context.previewAuthorized === true ? Promise.resolve({ recorded: false, reason: 'preview' })
+      : recordOrganizationConversionEvent(db, event.req, {
       organizationId: organization.id,
       eventName: 'reservation_submit',
       stage: 'submitted',

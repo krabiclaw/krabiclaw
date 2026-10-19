@@ -359,7 +359,10 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
 
   const followUps = await Promise.allSettled([
     notifyProductBookingCreated(env, db, organization.id, threadId, cancellation.token),
-    operator ? Promise.resolve({ recorded: false, reason: 'operator_creation', quotedValue: null }) : recordBookingMeasurement(),
+    operator ? Promise.resolve({ recorded: false, reason: 'operator_creation', quotedValue: null })
+      // A preview is the host looking at their own site, not a guest's conversion.
+      : event.context.previewAuthorized === true ? Promise.resolve({ recorded: false, reason: 'preview', quotedValue: null })
+      : recordBookingMeasurement(),
   ])
   // Only the owner notification can fail the request. Measurement is reported beside the
   // committed result: a guest told a confirmed submission failed would submit again.

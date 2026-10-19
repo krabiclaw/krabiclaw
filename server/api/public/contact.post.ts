@@ -111,7 +111,8 @@ export default defineHandler(async (event) => {
   const followUps = await Promise.allSettled([
     notifyContactSubmitted(env, db, {
       organizationId: organization.id, locale: language.locale, locationId: assignedLocationId, organizationName: organization.name, contactId: id, guestName: name, email, subject: subject || topic || null, message, consentAcknowledged, }),
-    recordOrganizationConversionEvent(db, event.req, {
+    // A preview is the host looking at their own site, not a guest's conversion.
+    event.context.previewAuthorized === true ? Promise.resolve({ recorded: false, reason: 'preview' }) : recordOrganizationConversionEvent(db, event.req, {
     organizationId: organization.id,
     eventName: 'contact_submit',
     stage: 'submitted',
