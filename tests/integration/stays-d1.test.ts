@@ -550,15 +550,17 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     const signed = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
     const buyer = signed.response!.user.id
     const cookie = signed.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+    // The checkout's own anonymous guest owns the stay until the paying browser proves the purchase.
+    const checkoutGuest = (await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })).response!.user.id
     // The stay a captured checkout made, as its conversion leaves it: the hold converted to it, the payment captured for it.
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'checkout:stay-pay', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest, guest_email: 'ana@example.com' })
-    await db.prepare("UPDATE stays SET user_id = ?, cancellation_policy = 'moderate' WHERE id = ?").bind(buyer, stay.id).run()
+    await db.prepare("UPDATE stays SET user_id = ?, cancellation_policy = 'moderate' WHERE id = ?").bind(checkoutGuest, stay.id).run()
     const nightly = ['2026-11-01', '2026-11-02', '2026-11-03'].map(date => ({ date, price_minor: 15_000 }))
     const purchase = { product_id: cabin.id, location_id: 'cabin-site', timezone: 'America/Denver', check_in_date: '2026-11-01', check_out_date: '2026-11-04', adults: 2, children: 0, infants: 0, total_minor: 45_000, currency: 'USD', cancellation_policy: 'moderate', nightly, guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null } }
     await db.prepare(`INSERT INTO payments (id, organization_id, buyer_user_id, stripe_account_id, livemode, subject_type, subject_id, location_id, currency, amount, captured_amount, state, stripe_payment_intent_id, price_snapshot_json, created_at, updated_at)
-      VALUES ('stay-pay', ?, ?, 'acct_seller', 0, 'stay', ?, 'cabin-site', 'USD', 45000, 45000, 'captured', 'pi_stay-pay', ?, ?, ?)`).bind(ORG, buyer, stay.id, JSON.stringify({ title: 'Cabin', quantity: 1, price: { unit_amount: 45_000, currency: 'USD' }, method_configuration_id: 'pmc_test', stay: purchase }), NOW, NOW).run()
+      VALUES ('stay-pay', ?, ?, 'acct_seller', 0, 'stay', ?, 'cabin-site', 'USD', 45000, 45000, 'captured', 'pi_stay-pay', ?, ?, ?)`).bind(ORG, checkoutGuest, stay.id, JSON.stringify({ title: 'Cabin', quantity: 1, price: { unit_amount: 45_000, currency: 'USD' }, method_configuration_id: 'pmc_test', stay: purchase }), NOW, NOW).run()
     await db.prepare(`INSERT INTO payment_checkout_holds (id, organization_id, product_id, location_id, timezone, buyer_user_id, payment_id, quantity, amount, currency, starts_at, ends_at, status, converted_stay_id, expires_at, created_at)
-      VALUES ('stay-hold', ?, ?, 'cabin-site', 'America/Denver', ?, 'stay-pay', 2, 45000, 'USD', '2026-11-01', '2026-11-04', 'converted', ?, '2099-01-01T00:00:00.000Z', ?)`).bind(ORG, cabin.id, buyer, stay.id, NOW).run()
+      VALUES ('stay-hold', ?, ?, 'cabin-site', 'America/Denver', ?, 'stay-pay', 2, 45000, 'USD', '2026-11-01', '2026-11-04', 'converted', ?, '2099-01-01T00:00:00.000Z', ?)`).bind(ORG, cabin.id, checkoutGuest, stay.id, NOW).run()
     const claim = crypto.randomUUID() + crypto.randomUUID()
     await db.prepare("INSERT INTO payment_attempts (id, payment_id, idempotency_key, stripe_payment_intent_id, return_token, status, expires_at, created_at, updated_at) VALUES ('a:stay-pay', 'stay-pay', 'checkout:stay', 'pi_stay-pay', ?, 'open', '2099-01-01T00:00:00.000Z', ?, ?)").bind(claim, NOW, NOW).run()
     await db.prepare("INSERT INTO payment_claims (token_hash, payment_id, expires_at) VALUES (?, 'stay-pay', '2099-01-01T00:00:00.000Z')").bind(await tokenHash(claim)).run()
@@ -579,12 +581,17 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     app.get('/api/public/guest-stays/:activityId', guestStayRoute)
     const call = (path: string, init: RequestInit = {}) => app.request(Object.assign(new Request(`https://org.proof.example${path}`, { ...init, headers: { cookie, 'content-type': 'application/json' } }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
 
+    const activityId = stay.request_id ?? stay.id
+    // Before the return, the paying browser cannot read a stay that is not yet its own.
+    assert.equal((await call(`/api/public/guest-stays/${activityId}`)).status, 404)
     const back = await call('/api/public/payments/stay-pay/return', { method: 'POST', body: JSON.stringify({ claim }) })
     assert.equal(back.status, 200)
-    const activityId = stay.request_id ?? stay.id
     assert.deepEqual(await back.json(), { state: 'paid', kind: 'stay', activity_id: activityId })
     assert.deepEqual(await db.prepare("SELECT claimed_user_id FROM payment_claims WHERE payment_id = 'stay-pay'").first(), { claimed_user_id: buyer })
-    // The confirmation page reads the stay it names, with what was paid and the policy it was booked under.
+    // The claim moved the stay, its payment and its hold to the browser that paid.
+    assert.deepEqual(await db.prepare("SELECT (SELECT user_id FROM stays WHERE id = ?) AS stay, (SELECT buyer_user_id FROM payments WHERE id = 'stay-pay') AS payment, (SELECT buyer_user_id FROM payment_checkout_holds WHERE id = 'stay-hold') AS hold").bind(stay.id).first(), { stay: buyer, payment: buyer, hold: buyer })
+    // The confirmation page reads the stay it names. What was paid and the policy come from the conversion
+    // seeded above (conversion is covered by its own tests); this checks the receipt read shows them.
     const read = await call(`/api/public/guest-stays/${activityId}`)
     assert.equal(read.status, 200)
     const body = await read.json() as { stay: { id: string; paid_minor: number; cancellation_policy: string; guest_email: string }; cancellation: { policy: string; paid_minor: number } | null }

@@ -487,16 +487,17 @@ test('a payment back on the business’s site claims for that site’s buyer and
   const signedIn = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
   const buyer = signedIn.response!.user.id
   const cookie = signedIn.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
-  // A table deposit checkout as the site's booking made it: the guest's request waiting on payment, its hold, and no reservation yet.
+  // A table deposit checkout as the site's booking made it, owned by the anonymous guest that booking created: the request waiting
+  // on payment, its hold, and no reservation yet. The return claims all of it for the signed-in buyer.
   const startsAt = '2099-10-01T13:00:00.000Z', endsAt = '2099-10-01T15:00:00.000Z'
   await db.prepare("INSERT INTO business_locations(id,organization_id,slug,title,status,timezone,opening_hours) VALUES('dining',?,'dining','Dining','active','UTC',?)").bind(ORG, JSON.stringify({ periods: [{ open: { day: 0, hour: 0, minute: 0 } }] })).run()
   await upsertLocationReservationConfig(db, { organizationId: ORG, locationId: 'dining', patch: { slot_capacity: 1 }, actorId: 'verified', env })
   const receipt = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET, 'deposit-request')
-  const opening = { id: 'deposit-request', kind: 'reservation' as const, organization_id: ORG, location_id: 'dining', user_id: buyer, review_id: null, conversation_state: 'waiting_on_guest' as const, resolved_at: null, payload: { ...threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com', phone: '+12025550123' }), cancellation: { token_hash: await hashReservationCancelToken(receipt.token), expires_at: receipt.expiresAt, used_at: null } }, created_at: NOW, updated_at: NOW }
+  const opening = { id: 'deposit-request', kind: 'reservation' as const, organization_id: ORG, location_id: 'dining', user_id: 'guest', review_id: null, conversation_state: 'waiting_on_guest' as const, resolved_at: null, payload: { ...threadPayloadForGuest({ name: 'Verified', email: 'verified@example.com', phone: '+12025550123' }), cancellation: { token_hash: await hashReservationCancelToken(receipt.token), expires_at: receipt.expiresAt, used_at: null } }, created_at: NOW, updated_at: NOW }
   await db.batch(requestInsertQueries(opening).map(write => db.prepare(write.query).bind(...write.params)))
   const terms = { policy_type: 'reservation', free_cancellation_until_minutes: null, reschedule_allowed: true, reschedule_cutoff_minutes: null, deposit_required: true, deposit_amount: 10000, deposit_currency: 'USD', deposit_tax_behavior: 'exclusive' }
-  await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,location_id,currency,amount,price_snapshot_json,created_at,updated_at) VALUES('deposit',?,?,'acct_seller',0,'reservation','dining','USD',10000,?,?,?)").bind(ORG, buyer, JSON.stringify({ title: 'Dining reservation deposit', reservation: terms }), NOW, NOW).run()
-  await db.prepare("INSERT INTO payment_checkout_holds(id,organization_id,location_id,timezone,buyer_user_id,request_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at) VALUES('deposit-hold',?,'dining','UTC',?,'deposit-request','deposit',1,10000,'USD',?,?,'active','2099-09-30T00:00:00.000Z',?)").bind(ORG, buyer, startsAt, endsAt, NOW).run()
+  await db.prepare("INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,location_id,currency,amount,price_snapshot_json,created_at,updated_at) VALUES('deposit',?,?,'acct_seller',0,'reservation','dining','USD',10000,?,?,?)").bind(ORG, 'guest', JSON.stringify({ title: 'Dining reservation deposit', reservation: terms }), NOW, NOW).run()
+  await db.prepare("INSERT INTO payment_checkout_holds(id,organization_id,location_id,timezone,buyer_user_id,request_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at) VALUES('deposit-hold',?,'dining','UTC',?,'deposit-request','deposit',1,10000,'USD',?,?,'active','2099-09-30T00:00:00.000Z',?)").bind(ORG, 'guest', startsAt, endsAt, NOW).run()
   const claims: Record<string, string> = {}
   for (const id of ['deposit', 'clearing', 'declined']) {
    claims[id] = crypto.randomUUID() + crypto.randomUUID()
