@@ -61,8 +61,11 @@ test('native online review uses canonical Products, holds capacity, and releases
     const invalidCalendar = await page.request.post(`/api/organizations/${org}/members/${self.id}/calendar`, { data })
     expect(invalidCalendar.status(), await invalidCalendar.text()).toBe(400)
   }
-  const hours = await page.request.put(`/api/organizations/${org}/members/${self.id}/scheduling`, { data: { timezone: 'UTC', weekly: [{ weekday: tomorrow.getUTCDay(), start: '14:00', end: '14:45' }], time_off: [], expected_updated_at: null } })
+  // The attorney hosts the consultations, and guests meet them through their published profile.
+  const host = { name: 'Consultation attorney', photo_url: null, bio: 'Reviews family law questions before your appointment.' }
+  const hours = await page.request.put(`/api/organizations/${org}/members/${self.id}/scheduling`, { data: { timezone: 'UTC', weekly: [{ weekday: tomorrow.getUTCDay(), start: '14:00', end: '14:45' }], time_off: [], expected_updated_at: null, public_name: host.name, public_bio: host.bio, public_approved: true } })
   expect(hours.status(), await hours.text()).toBe(200)
+  expect((await hours.json()).scheduling).toMatchObject({ public_name: host.name, public_bio: host.bio, public_approved: 1 })
   for (let index = 0; index < 2; index++) {
     const create = await page.request.post(`${editor}/products`, { data: { kind: 'service', active: true, details: { preparation: 'Bring a list of questions for your consultation', cancellation_policy: 'Contact us at least one day before your appointment to cancel.' }, name: `Local consultation ${stamp}-${index}`, description: 'A local test service for reviewing the native consultation flow.', variants: [{ name: 'Online', prices: [{ unit_amount: 0, currency: 'USD' }] }] } })
     expect(create.status(), await create.text()).toBe(201)
@@ -88,7 +91,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     await page.goto(`/dashboard/north-carolina-legal-services/products/${products[0]!.id}/booking`)
     const bookingPath = `/dashboard/north-carolina-legal-services/products/${products[0]!.id}/booking`
     await expect(page.getByRole('link', { name: 'Guest limit One guest per session' })).toBeVisible()
-    await expect(page.getByRole('link', { name: 'Who guests meet Assigned team member', exact: true })).toBeVisible()
+    await expect(page.getByRole('link', { name: `Host ${self.name}`, exact: true })).toBeVisible()
     await expect(page.getByRole('link', { name: 'Meeting location Online', exact: true })).toBeVisible()
     // Online, the times are the provider's own hours; the offering has no weekly list of its own.
     await expect(page.getByRole('link', { name: "Bookable times Your provider's working hours", exact: true })).toHaveAttribute('href', `/dashboard/north-carolina-legal-services/team/${self.id}/hours`)
@@ -274,7 +277,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     await page.getByRole('link', { name: 'Full service details →', exact: true }).click()
     await expect(page).toHaveURL(new RegExp(`${service.path}$`))
     await expect(page.getByRole('heading', { name: products[0]!.name, exact: true, level: 1 })).toBeVisible()
-    const providerSection=page.locator('section[aria-label="Who you’ll meet"]')
+    const providerSection=page.locator('section[aria-label="Meet your host"]')
     await waitForNuxtHydration(page)
     const failedProvider=page.waitForResponse(response=>new URL(response.url()).pathname===`/api/public/products/${products[0]!.slug}/provider`)
     await page.getByRole('button',{name:/^Select a time /}).first().click()
@@ -288,8 +291,9 @@ test('native online review uses canonical Products, holds capacity, and releases
     await providerSection.getByRole('button',{name:'Try again',exact:true}).click()
     const providerResponse=await providerRetry
     expect(providerResponse.status(),await providerResponse.text()).toBe(200)
-    expect((await providerResponse.json()).provider).toBeNull()
-    await expect(providerSection).toHaveCount(0)
+    expect((await providerResponse.json()).hosts).toEqual([host])
+    await expect(providerSection.getByText(host.name,{exact:true})).toBeVisible()
+    await expect(providerSection.getByText(host.bio,{exact:true})).toBeVisible()
     await expect(page.getByRole('button',{name:'Try again',exact:true})).toHaveCount(0)
     await page.locator('main').screenshot({path:'/tmp/pr1240-provider-recovered.png'})
     await expect(page.locator('[data-block-type="hero"]')).toHaveCount(0)
@@ -410,7 +414,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     for(const [sessionId,status]of [[sessions[1].id,404],['missing-session',404],['',400]]) {
       const invalidProvider=await request.get(`/api/public/products/${products[0]!.slug}/provider`,{headers,params:{session_id:String(sessionId)}})
       expect(invalidProvider.status(),await invalidProvider.text()).toBe(status)
-      expect((await invalidProvider.json()).provider).toBeUndefined()
+      expect((await invalidProvider.json()).hosts).toBeUndefined()
     }
     const ambiguousProvider=await request.get(`/api/public/products/${products[0]!.slug}/provider?session_id=${sessions[0].id}&session_id=${sessions[1].id}`,{headers})
     expect(ambiguousProvider.status(),await ambiguousProvider.text()).toBe(400)
