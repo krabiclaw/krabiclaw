@@ -162,6 +162,9 @@ test('renderPlansMarkdown generates accurate, machine-readable markdown specific
   assert.ok(md.includes('Custom Domain: Not included'))
   assert.ok(md.includes('- **Locations**: 2 included\n'))
   assert.ok(md.includes('- **Locations**: 2 included, then $49 per additional location per month\n'))
+  assert.ok(md.includes('## Add-ons\n'))
+  assert.ok(md.includes('- **Managed ads**: 10% of monthly ad spend. Chris hand-manages'))
+  assert.ok(md.includes('- **SEO and marketing strategy**: $2,000 per month. Julia leads'))
 })
 
 

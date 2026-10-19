@@ -118,9 +118,9 @@ export function articleFacebookPostPath(orgSlug: string, articleId: string, loca
   return `${organizationBase(orgSlug)}/website/posts/new/body?${query}`
 }
 
-export function insightsPath(orgSlug: string, range?: { startDate: string; endDate: string }): string {
+export function insightsPath(orgSlug: string, query?: { startDate: string; endDate: string; tab?: 'ads' }): string {
   const path = `${organizationBase(orgSlug)}/insights`
-  return range ? `${path}?${new URLSearchParams(range)}` : path
+  return query ? `${path}?${new URLSearchParams(query)}` : path
 }
 
 export function bookingEditorPath(orgSlug: string, kind: 'reservation' | 'booking', requestId: string): string {

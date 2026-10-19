@@ -836,7 +836,10 @@ function recordExternalOrderClick() {
  * A dish is a MenuItem and a shop's goods are a Product: that is what the
  * surface sells, and `presentation.structuredDataType` names it. An experience
  * is a class that runs at a stated time, which is an Event — several of them
- * are an EventSeries, with each occurrence carried as a subEvent.
+ * are an EventSeries. Google reads an occurrence only as its own top-level
+ * Event with its own address and Offer, so the soonest occurrences are emitted
+ * that way and joined to the series by @id; the series states how many there
+ * are in one AggregateOffer rather than repeating every offer.
  *
  * A bookable experience with nothing scheduled is the one case that reads back
  * down to Product. An Event is defined by its `startDate`, and this one has no
@@ -896,11 +899,18 @@ function sessionOffer(session: PublicProductSession) {
   }
 }
 
-/** One occurrence, as its own dated Event under the series. */
+/** Upcoming occurrences marked up as their own Events; the series counts the rest. */
+const SCHEMA_EVENT_LIMIT = 10
+const schemaSeriesId = computed(() => `${canonicalProductUrl.value}#event-series`)
+
+/** One occurrence, as its own dated Event belonging to the series. */
 function sessionEvent(session: PublicProductSession) {
   return {
     '@type': 'Event',
+    '@id': `${canonicalProductUrl.value}#event-${session.id}`,
+    superEvent: { '@id': schemaSeriesId.value },
     name: props.product.name,
+    image: props.product.image?.public_url,
     startDate: session.starts_at,
     endDate: session.ends_at,
     eventAttendanceMode: props.location ? 'https://schema.org/OfflineEventAttendanceMode' : 'https://schema.org/OnlineEventAttendanceMode',
@@ -979,8 +989,11 @@ useSchemaOrg(computed(() => {
   const first = list[0]
   const last = list[list.length - 1]
   const dietUrls = extractDietarySchemaUrls(props.product)
-  return {
+  const upcoming = type === 'EventSeries' ? list.slice(0, SCHEMA_EVENT_LIMIT).map(sessionEvent) : []
+  const price = offer.value
+  const node = {
     '@type': type,
+    ...(type === 'EventSeries' ? { '@id': schemaSeriesId.value } : {}),
     name: props.product.name,
     description: props.product.description,
     image: props.product.image?.public_url,
@@ -993,9 +1006,18 @@ useSchemaOrg(computed(() => {
           eventAttendanceMode: props.location ? 'https://schema.org/OfflineEventAttendanceMode' : 'https://schema.org/OnlineEventAttendanceMode',
           eventStatus: 'https://schema.org/EventScheduled',
           location: schemaPlace.value,
-          // One offer per occurrence, so the markup says when each seat is for.
-          offers: list.map(sessionOffer),
-          ...(type === 'EventSeries' ? { subEvent: list.map(sessionEvent) } : {}),
+          // A single class carries its seat's own offer; a series states every
+          // occurrence's seat once, and each marked-up Event carries its own.
+          offers: type === 'EventSeries'
+            ? {
+                '@type': 'AggregateOffer',
+                ...(price ? { lowPrice: minorAmountToMajor(price.unit_amount, price.currency), highPrice: minorAmountToMajor(price.unit_amount, price.currency), priceCurrency: price.currency } : {}),
+                offerCount: list.length,
+                availability: isAvailable.value && list.some(session => !session.is_full) ? 'https://schema.org/InStock' : 'https://schema.org/SoldOut',
+                url: canonicalProductUrl.value,
+              }
+            : sessionOffer(first),
+          ...(type === 'EventSeries' ? { subEvent: upcoming.map(event => ({ '@id': event['@id'] })) } : {}),
         }
       : {
           // An offer node states an amount, so a product priced in words has none to
@@ -1025,5 +1047,6 @@ useSchemaOrg(computed(() => {
       reviewRating: { '@type': 'Rating', ratingValue: review.rating, bestRating: 5 },
     })),
   }
+  return upcoming.length ? [node, ...upcoming] : node
 }))
 </script>

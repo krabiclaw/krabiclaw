@@ -17,6 +17,19 @@
       <BillingPlanCard v-for="(plan, index) in plans" :key="plan.id" :plan="plan" photo :front-image="frontImage(plan.id)" :sequence="index" />
     </div>
     <p class="kc-pricing-plans__hint">Prices in USD. Paid subscription billed monthly.</p>
+    <!-- The services, offered under the plans they are added to; each starts only in Payments → Plan → Services. -->
+    <div class="kc-pricing-addons" data-parity-section="add-ons">
+      <h3 class="kc-pricing-addons__title">Add-ons</h3>
+      <p class="kc-pricing-addons__lede">Services from KrabiClaw's own people, added to a paid plan from Payments → Plan → Services.</p>
+      <ul class="kc-pricing-addons__list">
+        <li v-for="service in services" :key="service.name" class="kc-pricing-addon">
+          <h4>{{ service.name }}</h4>
+          <p class="kc-pricing-addon__price">{{ service.price }}</p>
+          <p>{{ service.description }}</p>
+          <p class="kc-pricing-addon__billing">{{ service.billing }}</p>
+        </li>
+      </ul>
+    </div>
   </section>
 </template>
 
@@ -26,7 +39,7 @@ import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import { blockTextOrNull, blockMedia } from '~/utils/tenant-page-block-data'
 import { useSchemaOrg } from '#imports'
 import type { Plan } from '~/composables/usePlans'
-import { STARTER_PLAN_ID, NEW_SALE_PAID_PLAN_IDS } from '~/shared/billing-model'
+import { STARTER_PLAN_ID, NEW_SALE_PAID_PLAN_IDS, SERVICES, SERVICE_PRICES } from '~/shared/billing-model'
 
 /**
  * KrabiClaw's plans, published on KrabiClaw's own pages.
@@ -50,6 +63,7 @@ function frontImage(planId: string): string | undefined {
   return index >= 0 ? blockMedia(props.block, `items.${index}.image`)[0]?.public_url ?? undefined : undefined
 }
 
+const services = [SERVICES.managed_ads, SERVICES.strategy]
 const eyebrow = computed(() => blockTextOrNull(props.block.data.eyebrow))
 const title = computed(() => blockTextOrNull(props.block.data.title))
 const description = computed(() => blockTextOrNull(props.block.data.description))
@@ -82,6 +96,9 @@ useSchemaOrg(computed(() => {
   if (variant.value !== 'pricing') return []
   const offers = plans.value.map(offerFor).filter((offer): offer is NonNullable<ReturnType<typeof offerFor>> => offer !== null)
   if (!offers.length) return []
+  // The strategy service has a fixed monthly price; managed ads is a share of spend, which an Offer cannot state.
+  offers.push({ '@type': 'Offer', name: SERVICES.strategy.name, priceCurrency: 'USD', description: SERVICES.strategy.description,
+    priceSpecification: [{ '@type': 'UnitPriceSpecification', price: String(SERVICE_PRICES.strategy.monthly / 100), priceCurrency: 'USD', billingDuration: 'P1M' }] })
   return {
     '@type': 'OfferCatalog',
     '@id': `${pageUrl}#offers`,
@@ -95,5 +112,16 @@ useSchemaOrg(computed(() => {
 .kc-pricing-plans { background: #171b31; padding: 0 0 5rem; }
 .kc-pricing-plans__rail { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; max-width: 88rem; margin: 0 auto; padding: 0 2rem; }
 .kc-pricing-plans__hint { text-align: center; color: #bbc0cf; font-size: .8rem; margin: 2rem 1.5rem 0; }
+.kc-pricing-addons { max-width: 88rem; margin: 4rem auto 0; padding: 0 2rem; }
+.kc-pricing-addons__title { color: #fff; font-size: 1.5rem; font-weight: 700; letter-spacing: -.01em; margin: 0; }
+.kc-pricing-addons__lede { color: #bbc0cf; margin: .5rem 0 1.5rem; }
+.kc-pricing-addons__list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1.5rem; }
+.kc-pricing-addon { background: #fff; color: #222840; border-radius: 14px; padding: clamp(1.5rem, 3vw, 2.5rem); }
+.kc-pricing-addon h4 { font-size: 1.35rem; font-weight: 700; margin: 0; }
+.kc-pricing-addon__price { font-size: 1.9rem; font-weight: 600; line-height: 1.1; margin: .75rem 0 1rem; }
+.kc-pricing-addon p { margin: 0; }
+.kc-pricing-addon p + p { margin-top: .6rem; }
+.kc-pricing-addon__billing { color: #5a6072; font-size: .9rem; }
+@media (max-width: 1100px) { .kc-pricing-addons { max-width: 42rem; padding-inline: 1.25rem; } .kc-pricing-addons__list { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 1100px) { .kc-pricing-plans__rail { grid-template-columns: minmax(0, 1fr); max-width: 42rem; padding-inline: 1.25rem; } }
 </style>
