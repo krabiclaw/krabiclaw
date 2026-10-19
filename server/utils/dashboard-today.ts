@@ -13,7 +13,7 @@ import { loadOwnerPictures } from '~/server/notifications/hero'
 import { getAnalyticsReport, resolveOrganizationAnalyticsContext } from '~/server/utils/analytics-report'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { linkedAccountAccessToken, type CloudflareEnv } from '~/server/utils/auth'
-import { getGoogleAdsPerformanceSummary } from '~/server/utils/google-ads'
+import { getGoogleAdsCustomer, getGoogleAdsPerformanceSummary } from '~/server/utils/google-ads'
 import { getBlogPost } from '~/server/utils/content/publishing'
 
 export interface TodayFeedQuery {
@@ -106,16 +106,18 @@ async function performanceCard(db: DbClient, organization: DashboardOrganization
 async function googleAdsCard(db: DbClient, env: CloudflareEnv, organization: DashboardOrganizationRow, now: Date): Promise<TodayCard | null> {
   const connection = await readIntegration(db, organization.id, 'google_ads')
   if (!connection) return null
-  const context = await resolveOrganizationAnalyticsContext(db, organization.id)
-  const endDate = addLocalDays(localDateAt(now, context.timezone), -1)
-  const startDate = addLocalDays(endDate, -6)
   const { accessToken } = await linkedAccountAccessToken(env, connection.account_id)
+  // Google reports a day in the account's own time zone, so a complete day is one that has closed there.
+  const customer = await getGoogleAdsCustomer(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, connection.target_id)
+  const endDate = addLocalDays(localDateAt(now, customer.timeZone), -1)
+  const startDate = addLocalDays(endDate, -6)
   const summary = await getGoogleAdsPerformanceSummary(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, connection.target_id, startDate, endDate)
   if (summary.costMicros === 0) return null
   const spend = new Intl.NumberFormat('en', { style: 'currency', currency: summary.currencyCode, maximumFractionDigits: 2 }).format(summary.costMicros / 1_000_000)
-  const conversions = Math.round(summary.conversions)
+  // Conversions can be fractional, as Google attributes them.
+  const conversions = summary.conversions.toLocaleString('en', { maximumFractionDigits: 1 })
   return card({ id: `google-ads:${startDate}:${endDate}`, to: insightsPath(organization.slug, { startDate, endDate, tab: 'ads' }), priority: 'opportunity',
-    eyebrow: 'Google Ads, your last 7 complete days', headline: conversions === 0 ? `${spend} on ads, no conversions` : `${spend} on ads, ${conversions.toLocaleString('en')} ${conversions === 1 ? 'conversion' : 'conversions'}`,
+    eyebrow: 'Google Ads, your last 7 complete days', headline: summary.conversions === 0 ? `${spend} on ads, no conversions` : `${spend} on ads, ${conversions} ${summary.conversions === 1 ? 'conversion' : 'conversions'}`,
     description: `${summary.clicks.toLocaleString('en')} ${summary.clicks === 1 ? 'click' : 'clicks'} from ${connection.target_name}. See your campaigns in Insights.`, imageIcon: 'i-lucide-megaphone' })
 }
 
