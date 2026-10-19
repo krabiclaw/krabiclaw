@@ -73,7 +73,7 @@ import EditorNavigationList from '~/components/dashboard/EditorNavigationList.vu
 import type { EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import { authClient } from '~/lib/auth-client'
-import { additionalLocationPrice, INCLUDED_LOCATIONS, SERVICE_PRICES, STARTER_PLAN_ID, isKnownBillingPlan, isNewSalePlan } from '~/shared/billing-model'
+import { additionalLocationPrice, INCLUDED_LOCATIONS, SERVICE_PRICES, STARTER_PLAN_ID, isKnownBillingPlan, isNewSalePlan, SERVICES } from '~/shared/billing-model'
 import { isLocationCount } from '~/composables/useOrganizationSubscription'
 import { paymentMoney } from '~/shared/payment-display'
 import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
@@ -238,12 +238,12 @@ const groups = computed<EditorNavigationGroup[]>(() => [{
   id: 'services',
   label: 'Services',
   items: [
-    ...(services.value ? [{ id: 'service:managed_ads', label: 'Managed ads', summary: services.value.managed_ads
+    ...(services.value ? [{ id: 'service:managed_ads', label: SERVICES.managed_ads.name, summary: services.value.managed_ads
       ? `On since ${formatExactDateTime(services.value.managed_ads.agreed_at)} · 10% of Google Ads spend, billed with your fees.`
-      : 'Chris manages your Google Ads campaigns, creative and conversion rate, with a weekly meeting · 10% of ad spend.', action: { label: services.value.managed_ads ? 'Turn off' : 'Turn on' } }] : []),
-    ...(services.value ? [{ id: 'service:strategy', label: 'SEO and marketing strategy', summary: services.value.strategy
+      : `${SERVICES.managed_ads.description} · ${SERVICES.managed_ads.price}.`, action: { label: services.value.managed_ads ? 'Turn off' : 'Turn on' } }] : []),
+    ...(services.value ? [{ id: 'service:strategy', label: SERVICES.strategy.name, summary: services.value.strategy
       ? `On since ${formatExactDateTime(services.value.strategy.since)} · ${paymentMoney(services.value.strategy.amount, services.value.strategy.currency)} per ${services.value.strategy.interval}, billed with your plan.`
-      : `Julia leads your SEO strategy, hand-writes ranking blog posts, meets with you weekly and is on chat with you · ${paymentMoney(strategyOffer.amount, strategyOffer.currency)} per ${strategyOffer.interval}.`, action: { label: services.value.strategy ? 'Turn off' : 'Turn on' } }] : []),
+      : `${SERVICES.strategy.description} · ${paymentMoney(strategyOffer.amount, strategyOffer.currency)} per ${strategyOffer.interval}.`, action: { label: services.value.strategy ? 'Turn off' : 'Turn on' } }] : []),
   ],
 }])
 

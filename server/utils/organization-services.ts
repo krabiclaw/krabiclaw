@@ -1,4 +1,5 @@
 import { HTTPError } from 'nitro'
+import { AD_SPEND_RATE } from '~/shared/billing-model'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { linkedAccountAccessToken, type CloudflareEnv } from '~/server/utils/auth'
 import { getStripe } from '~/server/utils/billing'
@@ -37,7 +38,7 @@ export async function agreeToService(db: DbClient, env: CloudflareEnv, organizat
   if (!account || account.status !== 'active' || !contract || contract.ending_before || !pricing) {
     throw new HTTPError({ statusCode: 409, message: 'Set up active Payments billing in Plan before turning on managed ads. Choose a plan with Payments if your business does not have billing set up.' })
   }
-  if (pricing.ad_spend_rate !== 0.1) throw new HTTPError({ statusCode: 409, message: 'Your Payments contract does not have the managed ads rate. Contact support to complete billing setup.' })
+  if (pricing.ad_spend_rate !== AD_SPEND_RATE) throw new HTTPError({ statusCode: 409, message: 'Your Payments contract does not have the managed ads rate. Contact support to complete billing setup.' })
   const customer = await getStripe(env).customers.retrieve(account.stripe_billing_customer_id)
   if (customer.deleted || !customer.invoice_settings.default_payment_method) {
     throw new HTTPError({ statusCode: 409, message: 'Add a payment method and set it as default in Payments before turning on managed ads.' })

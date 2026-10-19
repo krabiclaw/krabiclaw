@@ -37,6 +37,29 @@ export const SERVICE_PRICES = Object.freeze({
   strategy: Object.freeze({ monthly: 200000 }),
 })
 
+/** Managed ads' share of the connected account's spend: the flat `payments_ad_spend` rate on the Payments rate card. */
+export const AD_SPEND_RATE = 0.1
+
+/**
+ * The services as they are offered everywhere — the pricing page and its
+ * Markdown, the plan screen, Insights and Today — each turned on and off only
+ * in Payments → Plan → Services.
+ */
+export const SERVICES = Object.freeze({
+  managed_ads: Object.freeze({
+    name: 'Managed ads',
+    description: 'Chris hand-manages the campaigns in your connected Google Ads account — budgets, creative direction and conversion rate — and meets with you weekly.',
+    price: `${AD_SPEND_RATE * 100}% of monthly ad spend`,
+    billing: 'Billed with your KrabiClaw usage fees. Connecting Google Ads and reading its results in Insights is free.',
+  }),
+  strategy: Object.freeze({
+    name: 'SEO and marketing strategy',
+    description: 'Julia leads your SEO strategy, hand-writes blog posts written to rank, meets with you weekly and is on chat with you.',
+    price: `$${(SERVICE_PRICES.strategy.monthly / 100).toLocaleString('en-US')} per month`,
+    billing: 'Added to your plan subscription and billed monthly by Stripe, prorated from the day you agree.',
+  }),
+})
+
 /** Locations every plan's price includes. */
 export const INCLUDED_LOCATIONS = 2
 
