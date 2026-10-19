@@ -1105,7 +1105,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       // reached from the overview. Until it takes bookings the row leads there first.
       ...(form.kind === 'service' || form.kind === 'experience'
         ? [product.value.booking
-            ? { id: 'assignment', label: 'Host', summary: assignmentSummary(), placeholder: !form.assigned_team_id && !form.assigned_member_id, to: `${sectionPath('booking')}/assignment` }
+            ? { id: 'assignment', label: 'Host', summary: assignmentSummary(), placeholder: !form.assigned_team_id && !form.assigned_member_id, to: sectionPath('booking/assignment') }
             : { id: 'assignment', label: 'Host', summary: 'Set up bookings first', placeholder: true, to: sectionPath('booking') }]
         : []),
       { id: 'options', label: 'Variants', summary: product.value.variants.length > 1 ? `${product.value.variants.length} variants` : 'One version', to: sectionPath('options') },

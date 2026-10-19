@@ -67,7 +67,7 @@ export function selectProductCollectionSiblings(
     ? inCollection
     : [...inCollection.slice(index + 1), ...inCollection.slice(0, index)]
   return rotated.slice(0, limit).map(({ id, name, slug, image, variants }) => ({
-    id, name, slug, image_url: image?.public_url ?? null,
+    id, name, slug, image_url: (image?.kind === 'video' ? image.thumbnail_url : image?.public_url) ?? null,
     price: variants.map(variant => selectPrice(variant.prices, selection)).filter((price): price is Price => price !== null).sort((left, right) => left.unit_amount - right.unit_amount)[0] ?? null,
   }))
 }

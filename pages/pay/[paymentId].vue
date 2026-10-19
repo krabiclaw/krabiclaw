@@ -77,7 +77,7 @@
               <div v-if="review" class="flex items-center justify-between gap-4">
                 <div class="space-y-1" data-payment-method>
                   <p class="font-medium text-sm text-highlighted">{{ methodLabel }}</p>
-                  <p class="text-xs text-muted">{{ t('payment.surcharge_applies') }}</p>
+                  <p v-if="review.surcharge > 0" class="text-xs text-muted">{{ t('payment.surcharge_applies') }}</p>
                 </div>
                 <UButton color="neutral" variant="soft" size="sm" :label="t('payment.change_method')" :disabled="working" @click="changeMethod" />
               </div>

@@ -58,11 +58,11 @@ async function handoffSubject(db: DbClient, organizationId: string, payment: Pay
     : null
   if ((payment.subject_type === 'booking' || payment.subject_type === 'reservation') && !hold) throw new Error('Payment has no checkout hold for its time')
   const productId = snapshot.stay?.product_id ?? snapshot.product_id
+  // A payment outlives its product: a deleted product leaves its kind unknown, and the summary omits what depends on it.
   const product = productId ? await queryFirst<{ kind: string }>(db, 'SELECT kind FROM products WHERE id=? AND organization_id=?', [productId, organizationId]) : null
-  if (productId && !product) throw new Error('Payment product not found')
   const [ownerType, ownerId] = productId ? ['product', productId] as const : ['business_location', hold?.location_id ?? payment.location_id] as const
   const picture = ownerId ? (await loadOwnerPictures(db, organizationId, ownerType, [ownerId])).get(ownerId) ?? null : null
-  return { kind: product?.kind ?? payment.subject_type, image_url: picture?.imageUrl ?? null, starts_at: hold?.starts_at ?? null, ends_at: hold?.ends_at ?? null, timezone: hold?.timezone ?? null }
+  return { kind: product?.kind ?? (productId ? null : payment.subject_type), image_url: picture?.imageUrl ?? null, starts_at: hold?.starts_at ?? null, ends_at: hold?.ends_at ?? null, timezone: hold?.timezone ?? null }
 }
 
 /** What the pay page needs to mount Stripe's Payment Element on the connected account. */
