@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type Stripe from 'stripe'
-import { assertStripeCatalogPrices, recurringPriceAmount, selectStripeCatalogPrice } from '../../server/utils/stripe-catalog.ts'
+import { assertStripeCatalogPrices, isCurrentBusinessPrice, planSubscriptionItems, recurringPriceAmount, selectRentalUnitPrice, selectStripeCatalogPrice } from '../../server/utils/stripe-catalog.ts'
 import { PRICING_COMPARISON, comparisonValue } from '../../shared/pricing-comparison.ts'
 import { getPlanEntitlements } from '../../server/utils/billing-entitlements.ts'
 import { classifyStripePlanChange } from '../../shared/stripe-ga4.ts'
-import { additionalLocationPrice, assertNewSalePlan, coveredLocations } from '../../shared/billing-model.ts'
+import { additionalLocationPrice, additionalRentalUnitPrice, assertNewSalePlan, businessMonthlyAmount, coveredLocations, coveredRentalUnits } from '../../shared/billing-model.ts'
 import { renderPlansMarkdown } from '../../server/routes/pricing.md.get.ts'
 import type { Plan } from '../../server/utils/billing-plans.ts'
 
@@ -44,7 +44,7 @@ test('missing, wrong-currency and fabricated zero paid prices cannot become the 
 test('each additional location is USD 49 a month or USD 588 a year on every paid plan', () => {
   assert.throws(() => assertStripeCatalogPrices('growth', price('price-month', 'month', 4900, 8900)), /monthly price/)
   assert.throws(() => assertStripeCatalogPrices('growth', monthly, price('price-year', 'year', 58800, 4900)), /annual price/)
-  assert.throws(() => assertStripeCatalogPrices('business', price('price-business-month', 'month', 9900, 9900)), /monthly price/)
+  assert.throws(() => assertStripeCatalogPrices('business', price('price-business-month', 'month', 14900, 9900)), /monthly price/)
   assert.equal(coveredLocations('free', null), 2)
   assert.equal(coveredLocations('growth', 1), 2)
   assert.equal(coveredLocations('growth', 2), 2)
@@ -54,14 +54,14 @@ test('each additional location is USD 49 a month or USD 588 a year on every paid
   assert.equal(additionalLocationPrice('year'), '$588 per additional location per year')
 })
 
-test('Business requires the approved USD 99 monthly offer and rejects an invented annual offer', () => {
-  const business = price('price-business-month', 'month', 9900)
+test('Business requires the approved USD 149 monthly offer and rejects an invented annual offer', () => {
+  const business = price('price-business-month', 'month', 14900)
   assertStripeCatalogPrices('business', business)
-  for (const amount of [0, 4900, 8900, 14900]) {
+  for (const amount of [0, 4900, 8900, 9900]) {
     assert.throws(() => assertStripeCatalogPrices('business', withPlanAmount(business, amount)), /monthly price/)
   }
   assert.throws(() => assertStripeCatalogPrices('business', { ...business, currency: 'eur' }), /monthly price/)
-  assert.throws(() => assertStripeCatalogPrices('business', business, price('price-business-year', 'year', 118800)), /no authorized annual price/)
+  assert.throws(() => assertStripeCatalogPrices('business', business, price('price-business-year', 'year', 178800)), /no authorized annual price/)
   for (const retired of ['commerce', 'marketing']) assert.throws(() => assertNewSalePlan(retired), /Unknown paid plan/)
   assert.throws(() => assertStripeCatalogPrices('invented_plan', business), /Unknown paid plan/)
 })
@@ -162,6 +162,10 @@ test('renderPlansMarkdown generates accurate, machine-readable markdown specific
   assert.ok(md.includes('Custom Domain: Not included'))
   assert.ok(md.includes('- **Locations**: 2 included\n'))
   assert.ok(md.includes('- **Locations**: 2 included, then $49 per additional location per month\n'))
+  assert.ok(!md.includes('Rental units'))
+  const business = renderPlansMarkdown([{ ...dummyPlans[1]!, id: 'business', name: 'Business', prices: [{ id: 'p_business', amount: 14900, currency: 'usd', interval: 'month' }] }])
+  assert.ok(business.includes('$149/month'))
+  assert.ok(business.includes('- **Rental units**: 2 included, then $19 per additional rental unit per month. A rental unit is one independently bookable home'))
   assert.ok(md.includes('## Add-ons\n'))
   assert.ok(md.includes('- **Managed ads**: 10% of monthly ad spend. Chris hand-manages'))
   assert.ok(md.includes('- **SEO and marketing strategy**: $2,000 per month. Julia leads'))
@@ -172,10 +176,54 @@ test('the current contract charge uses its exact native price and quantity, incl
   const flat = { ...monthly, id: 'price-original-flat', billing_scheme: 'per_unit', tiers_mode: null, tiers: undefined, unit_amount: 8900 } as unknown as Stripe.Price
   assert.equal(recurringPriceAmount(flat, 1), 8900)
   assert.equal(recurringPriceAmount(flat, 3), 26700)
-  const business = price('price-business-month', 'month', 9900)
-  assert.equal(recurringPriceAmount(business, 2), 9900)
-  assert.equal(recurringPriceAmount(business, 5), 24600)
+  const business = price('price-business-month', 'month', 14900)
+  assert.equal(recurringPriceAmount(business, 2), 14900)
+  assert.equal(recurringPriceAmount(business, 5), 29600)
   assert.throws(() => recurringPriceAmount(business, null), /quantity/)
   assert.throws(() => recurringPriceAmount(business, -1), /quantity/)
   assert.throws(() => recurringPriceAmount({ ...business, tiers: undefined }, 2), /billing scheme/)
+})
+
+// #1493's sample portfolios: 149 + 49 × max(0, locations − 2) + 19 × max(0, units − 2) dollars a month.
+test('the current Business offer bills locations and rental units with two independent allowances', () => {
+  const samples: Array<[string, number, number, number]> = [
+    ['one rental unit', 0, 1, 149], ['two rental units', 0, 2, 149], ['three rental units', 0, 3, 168],
+    ['five rental units', 0, 5, 206], ['six apartments in one building', 0, 6, 225], ['six villas at separate addresses', 0, 6, 225],
+    ['twenty rental units', 0, 20, 491], ['no rental units and no other locations', 0, 0, 149],
+    ['three restaurants', 3, 0, 198], ['one restaurant with six cabins', 1, 6, 225],
+  ]
+  for (const [portfolio, locations, units, dollars] of samples) assert.equal(businessMonthlyAmount(locations, units), dollars * 100, portfolio)
+  assert.equal(coveredRentalUnits(0), 2)
+  assert.equal(coveredRentalUnits(4), 6)
+  assert.throws(() => coveredRentalUnits(-1), /quantity/)
+  assert.equal(additionalRentalUnitPrice(), '$19 per additional rental unit per month')
+})
+
+const unitProduct = { id: 'prod-units', active: true, metadata: { product_family: 'rental_units', monthly_price_id: 'price-unit' } } as unknown as Stripe.Product
+const unitPrice = { id: 'price-unit', product: 'prod-units', active: true, currency: 'usd', billing_scheme: 'per_unit', unit_amount: 1900, transform_quantity: null,
+  recurring: { interval: 'month', interval_count: 1, usage_type: 'licensed' } } as unknown as Stripe.Price
+
+test('the Additional rental unit price must be the one per-unit USD 19 monthly price the offer names', () => {
+  assert.equal(selectRentalUnitPrice([unitProduct], [unitPrice]).id, 'price-unit')
+  assert.throws(() => selectRentalUnitPrice([], [unitPrice]), /0 active Additional rental unit products/)
+  assert.throws(() => selectRentalUnitPrice([unitProduct, { ...unitProduct, id: 'prod-units-2' } as Stripe.Product], [unitPrice]), /2 active/)
+  for (const wrong of [{ unit_amount: 2900 }, { currency: 'eur' }, { recurring: { interval: 'year', interval_count: 1, usage_type: 'licensed' } }, { recurring: { interval: 'month', interval_count: 1, usage_type: 'metered' } }, { active: false }]) {
+    assert.throws(() => selectRentalUnitPrice([unitProduct], [{ ...unitPrice, ...wrong } as Stripe.Price]), /per-unit USD 1900 cent monthly price/)
+  }
+})
+
+test('a Business subscription bills rental units only on the current price; an earlier Business price keeps its contract', () => {
+  const plan = (amount: number, planId = 'business') => ({ id: `si-${planId}`, quantity: 3, price: { ...price(`price-${planId}-${amount}`, 'month', amount), product: { id: `prod-${planId}`, metadata: { plan_id: planId } } } })
+  const units = (quantity: number) => ({ id: 'si-units', quantity, price: { ...unitPrice, product: unitProduct } })
+  const strategy = { id: 'si-strategy', quantity: 1, price: { id: 'price-strategy', product: { id: 'prod-strategy', metadata: { product_family: 'services', service: 'strategy' } } } }
+  const subscription = (...items: unknown[]) => ({ id: 'sub-business', items: { data: items } }) as unknown as Stripe.Subscription
+  assert.equal(isCurrentBusinessPrice(plan(14900).price as unknown as Stripe.Price), true)
+  assert.equal(isCurrentBusinessPrice(plan(9900).price as unknown as Stripe.Price), false)
+  const current = planSubscriptionItems(subscription(plan(14900), units(4), strategy))
+  assert.deepEqual([current.plan.id, current.rentalUnits?.quantity], ['si-business', 4])
+  assert.equal(planSubscriptionItems(subscription(plan(9900))).rentalUnits, null)
+  assert.throws(() => planSubscriptionItems(subscription(plan(9900), units(1))), /without the current Business price/)
+  assert.throws(() => planSubscriptionItems(subscription(plan(4900, 'growth'), units(1))), /without the current Business price/)
+  assert.throws(() => planSubscriptionItems(subscription(units(1))), /exactly one plan price/)
+  assert.throws(() => planSubscriptionItems(subscription(plan(14900), units(1), units(2))), /more than one Additional rental unit/)
 })

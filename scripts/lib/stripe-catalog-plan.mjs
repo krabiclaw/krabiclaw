@@ -7,13 +7,13 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { basename, dirname } from 'node:path'
-import { NEW_SALE_PAID_PLAN_IDS, PAID_PLAN_PRICES, SERVICE_PRICES, planPriceTiers } from '../../shared/billing-model.ts'
+import { ADDITIONAL_RENTAL_UNIT_PRICE, NEW_SALE_PAID_PLAN_IDS, PAID_PLAN_PRICES, SERVICE_PRICES, additionalRentalUnitPrice, planPriceTiers } from '../../shared/billing-model.ts'
 
-export const CATALOG_PLAN_SCHEMA_VERSION = 12
+export const CATALOG_PLAN_SCHEMA_VERSION = 13
 export const CATALOG_APPLY_JOURNAL_SCHEMA_VERSION = 1
 export const CATALOG_APPLY_JOURNAL_KIND = 'stripe-catalog-apply-journal'
 export const CATALOG_PLAN_KIND = 'stripe-catalog-plan'
-export const OFFERED_PLAN_IDS = Object.freeze([...NEW_SALE_PAID_PLAN_IDS, 'site_language', 'strategy'])
+export const OFFERED_PLAN_IDS = Object.freeze([...NEW_SALE_PAID_PLAN_IDS, 'rental_units', 'site_language', 'strategy'])
 export const RETIRED_PLAN_IDS = Object.freeze(['commerce', 'marketing', 'managed', 'seo_accelerator'])
 export const RETIRED_ADDON_TYPES = Object.freeze(['translation', 'seasonal', 'gbp_setup'])
 export const CATALOG_PLAN_SCOPES = Object.freeze(['full', 'offers-only', 'retirement-only'])
@@ -65,13 +65,17 @@ export const PLAN_DEFINITIONS = Object.freeze([
   },
   {
     name: 'Business',
-    description: 'Everything in Growth, plus online payments and Google Ads campaigns run from your dashboard and ChatGPT.',
+    description: 'Everything in Growth, plus online payments, direct stay booking and Google Ads campaigns run from your dashboard and ChatGPT.',
     planId: 'business',
     amountCents: PAID_PLAN_PRICES.business.monthly,
     perLocation: true,
     highlighted: false,
     features: [
       'Everything in Growth',
+      `2 rental units included, then ${additionalRentalUnitPrice()}`,
+      'Locations with only rental units are not billed as locations',
+      'Direct stay booking with online payment',
+      'The KrabiClaw iOS app at no extra cost for your whole team',
       'Online payments for paid bookings and one-time orders',
       'Buyer receipts and purchase history',
       'Refund, dispute and payout management',
@@ -81,6 +85,17 @@ export const PLAN_DEFINITIONS = Object.freeze([
       'Ad spend, clicks, impressions and conversions in your analytics',
       '10% of monthly ad spend for campaigns we manage.',
     ],
+  },
+  {
+    // Each rental unit beyond the ones Business includes, added to a Business subscription as its own item.
+    name: 'Additional rental unit',
+    description: `Each independently bookable home beyond the 2 included with Business: ${additionalRentalUnitPrice()}.`,
+    planId: 'rental_units',
+    productFamily: 'rental_units',
+    amountCents: ADDITIONAL_RENTAL_UNIT_PRICE,
+    unitLabel: 'rental unit',
+    highlighted: false,
+    features: [],
   },
   {
     name: 'Site Language',
@@ -349,7 +364,7 @@ function productPatch(
     marketing_features: definition.features.map(name => ({ name })),
     metadata,
     default_price: priceRef,
-    ...(definition.perLocation ? { unit_label: 'location' } : {}),
+    ...(definition.perLocation ? { unit_label: 'location' } : definition.unitLabel ? { unit_label: definition.unitLabel } : {}),
   }
   if (imageRef) patch.images = [imageRef]
   return patch
@@ -376,7 +391,7 @@ function desiredCanonicalProductState(definition, priceRef, annualPriceRef, imag
     marketing_features: definition.features.map(name => ({ name })),
     metadata: canonicalProductMetadata(definition, priceRef, annualPriceRef, imageSha256, existingMetadata),
     default_price: priceRef,
-    unit_label: definition.perLocation ? 'location' : existingUnitLabel,
+    unit_label: definition.perLocation ? 'location' : definition.unitLabel ?? existingUnitLabel,
   })
 }
 
@@ -455,7 +470,7 @@ function productCatalogId(product) {
   const family = typeof product?.metadata?.product_family === 'string'
     ? product.metadata.product_family.trim().toLowerCase()
     : ''
-  if (family === 'site_language') return family
+  if (family === 'site_language' || family === 'rental_units') return family
   // A service product is named by its `service` key; the family only groups them.
   if (family === 'services') return typeof product?.metadata?.service === 'string' ? product.metadata.service.trim() : ''
   return ''

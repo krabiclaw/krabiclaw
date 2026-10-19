@@ -8,17 +8,24 @@
  * A subscription's quantity is the number of locations it covers (see
  * `planPriceTiers`), which is what Better Auth records as `seats` and what its
  * `upgrade` endpoint changes; no plan has a member-seat price.
+ *
+ * Business also carries the Additional rental unit price as a line item, so
+ * Better Auth's Checkout adds it and its scheduled downgrade removes it. Its
+ * quantity is each business's own: the Checkout hook in auth.ts sets it on the
+ * copy of the plan its request is given.
  */
 import type Stripe from 'stripe'
 import type { StripePlan } from '@better-auth/stripe'
 import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
 import {
+  BUSINESS_PLAN_ID,
   isKnownRecurringPlan,
   isNewSalePlan,
 } from '~/shared/billing-model'
 import {
   assertStripeCatalogPrices,
   PLAN_PRICE_LIST_EXPAND,
+  selectRentalUnitPrice,
   selectStripeCatalogPrice,
 } from '~/server/utils/stripe-catalog'
 
@@ -58,6 +65,7 @@ export async function getBetterAuthStripePlans(
     pricesByProduct.set(productId, productPrices)
   }
 
+  const rentalUnitPrice = selectRentalUnitPrice(products, prices)
   const plans: StripePlan[] = []
   const planIds = new Set<string>()
 
@@ -101,6 +109,7 @@ export async function getBetterAuthStripePlans(
       throw new Error(`Stripe product ${product.id} currency metadata does not match its canonical price`)
     }
 
+    const lineItems = planId === BUSINESS_PLAN_ID ? [{ price: rentalUnitPrice.id, quantity: 1 }] : undefined
     plans.push({
       name: planId,
       priceId: monthly.id,
@@ -109,12 +118,13 @@ export async function getBetterAuthStripePlans(
       ...(yearly?.lookup_key?.trim() ? { annualDiscountLookupKey: yearly.lookup_key.trim() } : {}),
       limits: getPlanEntitlements(planId),
       group: 'krabiclaw',
+      ...(lineItems ? { lineItems } : {}),
     })
     // Put the current offer first: Better Auth selects upgrades by plan name,
     // but resolves webhook identity by every configured exact price ID.
     for (const price of billablePrices) {
       if (price.id === monthly.id || price.id === yearly?.id) continue
-      plans.push({ name: planId, priceId: price.id, limits: getPlanEntitlements(planId), group: 'krabiclaw' })
+      plans.push({ name: planId, priceId: price.id, limits: getPlanEntitlements(planId), group: 'krabiclaw', ...(lineItems ? { lineItems } : {}) })
     }
     planIds.add(planId)
   }
@@ -145,6 +155,8 @@ function stripePlanCacheScope(env?: ApiRecord): string {
  * Keeps one validated Stripe catalog snapshot per account and coalesces
  * concurrent refreshes. A refresh failure remains an error; callers must not
  * turn an unavailable or invalid catalog into an apparently valid checkout.
+ * Each call answers its own copy, so a request that sets its plan's line items
+ * changes them for itself alone.
  */
 export function createStripePlanLoader(
   stripe: Stripe,
@@ -156,10 +168,10 @@ export function createStripePlanLoader(
     const key = cacheScope
     const now = Date.now()
     const snapshot = stripePlanSnapshots.get(key)
-    if (snapshot && snapshot.expiresAt > now) return snapshot.plans
+    if (snapshot && snapshot.expiresAt > now) return copyPlans(snapshot.plans)
 
     const existing = stripePlanPending.get(key)
-    if (existing) return existing
+    if (existing) return copyPlans(await existing)
 
     const refresh = getBetterAuthStripePlans(stripe, env)
       .then((plans) => {
@@ -168,6 +180,10 @@ export function createStripePlanLoader(
       })
       .finally(() => stripePlanPending.delete(key))
     stripePlanPending.set(key, refresh)
-    return refresh
+    return copyPlans(await refresh)
   }
+}
+
+function copyPlans(plans: StripePlan[]): StripePlan[] {
+  return plans.map(plan => ({ ...plan, ...(plan.lineItems ? { lineItems: plan.lineItems.map(item => ({ ...item })) } : {}) }))
 }

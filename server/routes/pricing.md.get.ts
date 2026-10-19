@@ -4,7 +4,7 @@ import { useRuntimeConfig } from 'nitro/runtime-config'
 import { cloudflareEnv, textResponse } from '~/server/utils/api-response'
 import { getCachedPlans, type EnvWithOrganizationCache, type Plan } from '~/server/utils/billing-plans'
 import { TENANT_TYPES } from '~/utils/tenant-routing'
-import { additionalLocationPrice, INCLUDED_LOCATIONS, SERVICES } from '~/shared/billing-model'
+import { additionalLocationPrice, additionalRentalUnitPrice, BUSINESS_PLAN_ID, INCLUDED_LOCATIONS, INCLUDED_RENTAL_UNITS, SERVICES } from '~/shared/billing-model'
 
 export function renderPlansMarkdown(plans: Plan[]): string {
   const lines: string[] = [
@@ -26,6 +26,9 @@ export function renderPlansMarkdown(plans: Plan[]): string {
     lines.push(`- **Locations**: ${INCLUDED_LOCATIONS} included${monthlyPrice
       ? `, then ${additionalLocationPrice('month')}${annualPrice ? ` (${additionalLocationPrice('year')})` : ''}`
       : ''}`)
+    if (plan.id === BUSINESS_PLAN_ID) {
+      lines.push(`- **Rental units**: ${INCLUDED_RENTAL_UNITS} included, then ${additionalRentalUnitPrice()}. A rental unit is one independently bookable home, counted once however many channels list it; a location with only rental units is not billed as a location.`)
+    }
     lines.push(`- **Tagline**: ${plan.tagline}`)
 
     if (plan.limits) {

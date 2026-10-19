@@ -45,7 +45,7 @@ Review-request sending and WhatsApp business notifications follow their paid ent
 
 [#939](https://github.com/paulchrisluke/krabiclaw/issues/939) and #941 retain their approved-design/released-UI gates. This profile reconciliation does not approve final launch collateral, replace their design source, or complete either issue.
 
-Owner-approved pricing consolidation (2026-10-15): the current packages are Basic, Growth and Business. Business includes Growth, payments and managed advertising. Usage charges and Google ad spend remain separate as described in the [current pricing](https://krabiclaw.com/pricing). Commerce and Marketing remain existing customer contracts and are unavailable for new subscriptions. Current public amounts, names and bullets remain Stripe-owned.
+Owner-approved pricing consolidation (2026-10-15): the current packages are Basic, Growth and Business. Business includes Growth, payments and managed advertising. Owner-approved Business price (2026-10-19, #1493): $149 per month with 2 locations and 2 rental units included, then $49 per additional location and $19 per additional rental unit per month; a location with only rental units is billed by its units. One Business plan covers lodging; there is no separate lodging subscription, and the iOS app is a free companion to the account. Usage charges and Google ad spend remain separate as described in the [current pricing](https://krabiclaw.com/pricing). Commerce and Marketing remain existing customer contracts and are unavailable for new subscriptions. Current public amounts, names and bullets remain Stripe-owned.
 
 ### Paul's voice
 

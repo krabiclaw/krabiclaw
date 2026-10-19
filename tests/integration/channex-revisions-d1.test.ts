@@ -14,7 +14,7 @@ import { applyBookingRevision, runRevisionFeed } from '../../server/integrations
 
 const ORG = 'org'
 const OWNER = 'owner-user'
-const channexEnv = { CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k' }
+const channexEnv = { CHANNEX_BASE_URL: 'https://channex.test/api/v1', CHANNEX_API_KEY: 'k', BETTER_AUTH_SECRET: 'stay-billing-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_no_provider_requests' }
 
 // A booking keeps its creation time across modifications and cancellation;
 // only its revisions carry later times.

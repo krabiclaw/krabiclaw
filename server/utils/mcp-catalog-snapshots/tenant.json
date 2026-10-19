@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:ea541cfd997c2e8440afc91f1af581a352e50cdc2fdc99f7ddcf356f6b4d351b",
-  "documentationFingerprint": "sha256:6f349bcc8ec0b84ddc32ce90460a0408bb679e6e2fab4d09f09a51869a9100b0",
+  "fingerprint": "sha256:360b4dc7077d398bddcbe60a702d58ae57b308edf74820347cc083d25ac3c2a5",
+  "documentationFingerprint": "sha256:16a8c632b206d5f690a162488c7ea11e17b93f882bb258388b27aae0fcf67a40",
   "tools": [
     {
       "name": "add_organization_language",
@@ -15381,7 +15381,7 @@
     {
       "name": "create_location",
       "title": "Create location",
-      "description": "Add a location to the selected business website. Every plan includes 2 locations; on Growth and Business each additional location is $49 per month, added to the plan by its owner in Billing first, and a location beyond those the plan covers is refused. Repeat the same idempotency key with the same details on retry.",
+      "description": "Add a location to the selected business website. Every plan includes 2 locations; on Growth and Business each additional location is $49 per month, added to the plan by its owner in Billing first, and a location beyond those the plan covers is refused. On the current Business price a location with only rental units is billed by its units instead: 2 included, then $19 per additional rental unit per month. Repeat the same idempotency key with the same details on retry.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -16872,7 +16872,7 @@
     {
       "name": "create_product",
       "title": "Create product",
-      "description": "Add a catalog item, experience, service or place to stay. Experiences need booking duration, capacity, location and actual times, or an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and stay settings), keeps its public house rules in details, and is priced per night by its variant price; guests book it on the site and pay in full, so it takes no order_url and publishes only once it has a nightly price and online payments are set up. Repeat the same idempotency key on retry.",
+      "description": "Add a catalog item, experience, service or place to stay. Experiences need booking duration, capacity, location and actual times, or an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and stay settings), keeps its public house rules in details, and is priced per night by its variant price; guests book it on the site and pay in full, so it takes no order_url and publishes only once it has a nightly price and online payments are set up. On the current Business price each home is a rental unit: 2 included, then $19 per additional rental unit per month, added to the plan by its owner in Billing first; a home beyond those the plan covers is refused. Repeat the same idempotency key on retry.",
       "inputSchema": {
         "$defs": {
           "content_ai_assistance": {
@@ -118538,7 +118538,7 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:696f40a1cd04e6d99fe349b292429d4858e32954510547927b8d013c6fac44aa",
+        "create_product": "sha256:cd94947b0db82f22327ccdd8af1449aa920438398a27b76c5ae39c210f85cf7d",
         "get_product": "sha256:b9e0be9c62e11923243eb43b719fe76e3b8b022e719a56ea9654915300dee8cd",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
@@ -118594,7 +118594,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
-        "create_product": "sha256:696f40a1cd04e6d99fe349b292429d4858e32954510547927b8d013c6fac44aa",
+        "create_product": "sha256:cd94947b0db82f22327ccdd8af1449aa920438398a27b76c5ae39c210f85cf7d",
         "get_product": "sha256:b9e0be9c62e11923243eb43b719fe76e3b8b022e719a56ea9654915300dee8cd",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -118675,7 +118675,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:696f40a1cd04e6d99fe349b292429d4858e32954510547927b8d013c6fac44aa",
+        "create_product": "sha256:cd94947b0db82f22327ccdd8af1449aa920438398a27b76c5ae39c210f85cf7d",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_website_draft": "sha256:fccf7d7281ba30d1e79163929e61abec1893c2e910460c4068364a65784a7bac",
@@ -118761,7 +118761,7 @@
       "slug": "what-you-can-edit-through-chatgpt",
       "contentHash": "sha256:905c93516a47893cb0aaae5b0410e2e5d5b984efc0ee3115be584bfd09d69aca",
       "toolContracts": {
-        "create_location": "sha256:b25656237d93d456c98da74d8281ec6d1d05435e6a7657a18c14b82654b79b9b",
+        "create_location": "sha256:037aa077585a9224a7c3be37ea22682aa14188996133d401984f0946511cc502",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_stay": "sha256:9a13594b951339411e59e4425f62d60e3056430eab9698c77c93572cfaf19d48",
