@@ -10,8 +10,7 @@
  * their payments run in Stripe test mode, on production too, so a visitor can
  * pay with a test card and nothing is charged.
  *
- * They are named by subdomain, not id: the lodging demo is re-created after
- * each staging database epoch and Better Auth gives it a new id each time.
+ * They are named by subdomain, not id.
  */
 
 export const DEMO_SUBDOMAINS = new Set([
@@ -23,6 +22,8 @@ export const DEMO_SUBDOMAINS = new Set([
 export const DEMO_HOSTS = new Set([
   'demo.krabiclaw.com',
   'demo.localhost',
+  'cedar-legal-demo.krabiclaw.com',
+  'cedar-legal-demo.localhost',
 ])
 
 export function isDemoOrganization(organization?: { subdomain?: string | null } | null): boolean {

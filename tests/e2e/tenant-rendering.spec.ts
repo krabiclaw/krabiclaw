@@ -480,7 +480,7 @@ for (const tenant of tenants) {
   })
 }
 
-// The staging lodging demo's studio (docs/operations/lodging-demo.md), Stripe
+// The staging lodging demo's studio, Stripe
 // test mode ready: reached from the home page's link, it opens the booking
 // dialog from the card and walks a guest to the contact step. Nothing is
 // submitted. A pressed "Check availability" once flipped the dialog's checkbox shut.
@@ -620,7 +620,7 @@ test.describe('NCLS representative journeys', () => {
 
     for (const [name, path] of [
       ['home', '/'],
-      ['article', '/article/when-you-disagree-with-the-schools-evaluation-your-right-to-an-independent-educational-evaluation'],
+      ['article', '/blog/when-you-disagree-with-the-schools-evaluation-your-right-to-an-independent-educational-evaluation'],
     ] as const) {
       const response = await openTenantPage(page, `${blawbyBaseURL}${path}`, blawbyExtraHeaders)
       expect(response?.status()).toBe(200)
@@ -677,7 +677,7 @@ test.describe('NCLS representative journeys', () => {
   test('renders every route reachable from the header', async ({ page }) => {
     const journeys = [
       { path: '/pricing', text: /pricing|income|calculator/i },
-      { path: '/article/writing-your-own-will-how-it-works', text: /will|North Carolina/i },
+      { path: '/blog/writing-your-own-will-how-it-works', text: /will|North Carolina/i },
       { path: '/contact', text: /contact|message/i },
       { path: '/schedule', text: /consultation|schedule/i },
       { path: '/blog', text: /blog|legal/i },

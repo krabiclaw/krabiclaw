@@ -41,6 +41,9 @@ export interface OrganizationSettings {
   palette: SitePalette | null
   palette_source: 'custom' | 'template' | null
   font_preset: OrganizationFontPreset
+  button_shape?: 'pill' | 'rounded' | 'sharp'
+  button_casing?: 'uppercase' | 'none'
+  heading_casing?: 'uppercase' | 'none'
   default_currency: CurrencyCode
   /** The business's reporting clock: the day boundaries of its analytics. */
   timezone: string
@@ -68,6 +71,9 @@ export interface UpdateOrganizationSettingsRequest {
   font_preset?: OrganizationFontPreset
   default_currency?: CurrencyCode
   timezone?: string
+  button_shape?: 'pill' | 'rounded' | 'sharp'
+  button_casing?: 'uppercase' | 'none'
+  heading_casing?: 'uppercase' | 'none'
   press_email?: string
   partnerships_email?: string
   catering_email?: string

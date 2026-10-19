@@ -236,6 +236,9 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
               name: { type: ['string', 'null'] },
               brand_description: { type: ['string', 'null'] },
               font_preset: { type: 'string', enum: [...ORGANIZATION_FONT_PRESETS] },
+              button_shape: { type: 'string', enum: ['pill', 'rounded', 'sharp'] },
+              button_casing: { type: 'string', enum: ['uppercase', 'none'] },
+              heading_casing: { type: 'string', enum: ['uppercase', 'none'] },
               palette: { type: ['object', 'null'], description: 'The colors the site renders, light and dark: its own, or its template\'s. Null on the platform template.', properties: { light: PALETTE_COLORS_SCHEMA, dark: PALETTE_COLORS_SCHEMA } },
               palette_source: { type: ['string', 'null'], enum: ['custom', 'template', null] },
               announcement: ANNOUNCEMENT_SCHEMA,
@@ -263,13 +266,16 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
     }),
   organizationTool({
       name: 'update_organization_settings',
-      description: "Change the selected site’s brand, description, website font, colors, contact email, default currency, visitor announcement banner/popup or Live/Draft status. Only supplied settings change. An announcement replaces all its fields, and null removes it. Logos and announcement images are separate media placements; this tool does not change them. Returns the updated settings. Published website settings change immediately; this does not create a short post, blog article or social publication.",
+      description: "Change the selected site’s brand, description, website font, colors, button and heading styling, contact email, default currency, visitor announcement banner/popup or Live/Draft status. Only supplied settings change. An announcement replaces all its fields, and null removes it. Logos and announcement images are separate media placements; this tool does not change them. Returns the updated settings. Published website settings change immediately; this does not create a short post, blog article or social publication.",
       domain: 'organizations',
       minimumRole: 'admin',
       inputSchema: {
         name: { type: 'string' },
         brand_description: { type: 'string' },
         font_preset: { type: 'string', enum: [...ORGANIZATION_FONT_PRESETS], description: `Website heading and body fonts, on every template: ${ORGANIZATION_FONT_OPTIONS.map(option => `${option.value} (${option.label})`).join(', ')}. Thai, Vietnamese and Japanese text renders in every choice.` },
+        button_shape: { type: 'string', enum: ['pill', 'rounded', 'sharp'], description: 'Button corner styling: pill (fully rounded), rounded (subtle radius), or sharp (square corners).' },
+        button_casing: { type: 'string', enum: ['uppercase', 'none'], description: 'Button text casing: uppercase or none (natural case).' },
+        heading_casing: { type: 'string', enum: ['uppercase', 'none'], description: 'Display heading casing: uppercase or none (natural case).' },
         palette: {
           type: ['object', 'null'],
           description: `Saya and Blawby website colors, each with a light and a dark value. Roles: ${SITE_PALETTE_ROLES.map(entry => `${entry.role} (${entry.rule})`).join(' ')} Start from a starter (${STARTER_PALETTES.map(entry => entry.id).join(', ')}) and/or name only the roles to change; colors are #RRGGBB or a plain description such as "forest green". Borders and tints are derived. null returns to the template's colors. The result reports any text or button pair below WCAG AA contrast.`,

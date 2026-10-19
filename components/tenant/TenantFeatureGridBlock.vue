@@ -85,7 +85,7 @@
             <img :src="feature.media[0].public_url!" :alt="feature.title" width="64" height="64" loading="lazy" class="size-full rounded object-cover">
           </div>
           <TenantFeatureIcon v-else-if="feature.icon && !isBlawby" :name="feature.icon" class="size-8 text-primary mb-6" />
-          <h3 :class="isBlawby ? 'mt-4 blawby-display text-xl font-bold uppercase text-[var(--blawby-primary)]' : 'tenant-display text-xl font-bold text-highlighted'">
+          <h3 class="mt-4 tenant-display text-xl font-bold text-highlighted">
             {{ feature.title }}
           </h3>
           <TenantRichText v-if="feature.body" unstyled class="prose prose-sm max-w-none text-default" :class="isBlawby ? 'mt-4 text-sm' : 'mt-3 text-sm text-muted'" :content="feature.body" />

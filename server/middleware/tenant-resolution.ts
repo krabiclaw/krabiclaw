@@ -40,6 +40,9 @@ interface TenantRow {
   font_preset: unknown;
   font_preset_type: string | null;
   palette: string | null;
+  button_shape: string | null;
+  button_casing: string | null;
+  heading_casing: string | null;
 }
 
 const TENANT_MEDIA_SELECT_SQL = `(SELECT COALESCE(json_group_array(json_object(
@@ -61,7 +64,10 @@ const TENANT_SELECT_SQL = `SELECT o.id, o.theme_id, o.subdomain, o.status, o.onb
              EXISTS (SELECT 1 FROM content_documents d WHERE d.organization_id = o.id AND d.kind = 'page' AND d.row_role = 'root' AND d.path = '/policies/terms') AS terms_policy,
              o.settings_json ->> '$.config.font_preset' AS font_preset,
              json_type(o.settings_json, '$.config.font_preset') AS font_preset_type,
-             o.settings_json ->> '$.config.palette' AS palette`
+             o.settings_json ->> '$.config.palette' AS palette,
+             o.settings_json ->> '$.config.button_shape' AS button_shape,
+             o.settings_json ->> '$.config.button_casing' AS button_casing,
+             o.settings_json ->> '$.config.heading_casing' AS heading_casing`
 
 // KrabiClaw's own tenant is the one active organization running the platform
 // template. Platform hosts differ per environment (localhost, staging, the
@@ -203,6 +209,13 @@ function setResolvedTenantContext(
   const palette = isPaletteTemplate(templateSlug)
     ? resolveSitePalette(templateSlug, tenant.palette === null ? undefined : parseSitePalette(JSON.parse(tenant.palette)))
     : null
+  const recipe = (tenant.button_shape || tenant.button_casing || tenant.heading_casing)
+    ? {
+        ...(tenant.button_shape === 'pill' || tenant.button_shape === 'rounded' || tenant.button_shape === 'sharp' ? { buttonShape: tenant.button_shape } : {}),
+        ...(tenant.button_casing === 'uppercase' || tenant.button_casing === 'none' ? { buttonCasing: tenant.button_casing } : {}),
+        ...(tenant.heading_casing === 'uppercase' || tenant.heading_casing === 'none' ? { headingCasing: tenant.heading_casing } : {}),
+      }
+    : undefined
 
   event.context.organizationId = tenant.id
   event.context.themeId = metadata.themeId
@@ -219,6 +232,7 @@ function setResolvedTenantContext(
     template: resolvedTemplate,
     fontPreset,
     palette,
+    recipe,
     logos,
     social_profiles: connectedSocialProfiles(tenant),
     policies: [

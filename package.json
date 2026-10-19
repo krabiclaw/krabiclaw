@@ -55,6 +55,7 @@
     "test:mcp:edit": "node --env-file-if-exists=.env scripts/check-mcp-edit-flow.mjs",
     "test:mcp:image": "node --env-file-if-exists=.env scripts/check-mcp-image-flow.mjs",
     "test:mcp:ops": "node --env-file-if-exists=.env scripts/check-mcp-ops-flow.mjs",
+    "test:mcp:legal": "node --env-file-if-exists=.env scripts/check-mcp-legal-demo.mjs",
     "test:mcp:prod": "node scripts/test-mcp-oauth.mjs --base-url https://krabiclaw.com",
     "canary:prod": "node scripts/canary-prod.mjs",
     "canary:notifications": "node scripts/canary-notifications.mjs",

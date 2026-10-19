@@ -40,6 +40,17 @@
   --blawby-accent-100:      var(--tenant-accent-100);
   --blawby-accent-200:      var(--tenant-accent-200);
   --blawby-accent-strong:   var(--tenant-accent-strong);
+
+  /* Semantic Button & Typography Recipe Tokens */
+  --site-button-radius:     9999px;
+  --site-button-transform:  none;
+  --site-button-tracking:   normal;
+  --site-button-weight:     500;
+  --site-button-bg:         var(--primary, var(--site-action, #18181b));
+  --site-button-text:       var(--on-primary, var(--site-on-action, #ffffff));
+  --site-button-hover-bg:   var(--primary, var(--site-action, #18181b));
+  --site-button-ring:       var(--primary, var(--site-action, #18181b));
+  --site-display-transform: none;
 }
 
 .blawby-theme {
@@ -56,6 +67,17 @@
   --ui-border-inverted:    var(--blawby-primary-dark);
   --ui-text-inverted:      var(--site-surface);
   --ui-radius:             0.5rem;
+
+  /* Blawby Button & Typography Recipe Tokens */
+  --site-button-radius:     0.5rem;
+  --site-button-transform:  uppercase;
+  --site-button-tracking:   0.05em;
+  --site-button-weight:     600;
+  --site-button-bg:         var(--site-accent, #c19855);
+  --site-button-text:       var(--site-on-accent, #ffffff);
+  --site-button-hover-bg:   var(--blawby-accent-strong, #9e7939);
+  --site-button-ring:       var(--blawby-accent, #c19855);
+  --site-display-transform: uppercase;
 
   --text-xs: 0.75rem;
   --text-xs--line-height: 1rem;
@@ -116,6 +138,10 @@
   --blawby-accent-100:      color-mix(in oklab, var(--site-surface) 45%, var(--site-ground));
   --blawby-accent-200:      color-mix(in oklab, var(--site-text) 7%, var(--site-surface));
   --ui-text-inverted:       var(--site-text);
+  --site-button-bg:         var(--site-accent, #c19855);
+  --site-button-text:       var(--site-on-accent, #ffffff);
+  --site-button-hover-bg:   var(--blawby-accent-strong, color-mix(in oklab, var(--site-accent) 80%, white));
+  --site-button-ring:       var(--blawby-accent, #c19855);
 }
 
 .blawby-shell .prose :where(h1, h2, h3, h4) {
@@ -184,6 +210,7 @@
   font-weight: 400;
   letter-spacing: -0.01em;
   line-height: 1.15;
+  text-transform: var(--site-display-transform, none);
 }
 
 .tenant-display-lg,

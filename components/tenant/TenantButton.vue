@@ -5,7 +5,6 @@
     :type="type"
     :disabled="disabled || loading"
     :class="classes"
-    :data-blawby-critical-button="isBlawby ? '' : undefined"
     data-tenant-button
     @click="handleClick"
   >
@@ -20,7 +19,6 @@
     role="button"
     :tabindex="disabled || loading ? -1 : 0"
     :class="classes"
-    :data-blawby-critical-button="isBlawby ? '' : undefined"
     data-tenant-button
     @keydown.enter.prevent="activateControl"
     @keydown.space.prevent="activateControl"
@@ -41,7 +39,6 @@
     :class="classes"
     :aria-disabled="disabled || loading || undefined"
     :tabindex="disabled || loading ? -1 : undefined"
-    :data-blawby-critical-button="isBlawby ? '' : undefined"
     data-tenant-button
     @click="handleClick"
   >
@@ -53,7 +50,6 @@
 
 <script setup lang="ts">
 import { NuxtLink } from '#components'
-import type { TenantContext } from '~/composables/useTenantOrganization'
 
 defineOptions({ inheritAttrs: false })
 
@@ -84,12 +80,6 @@ const props = withDefaults(defineProps<{
   block: false,
 })
 
-const tenantContext = useState<TenantContext | null>('tenant-context', () => null)
-const isBlawby = computed(() => {
-  const org = tenantContext.value?.organization
-  return org?.template?.slug === 'blawby' || org?.vertical === 'service'
-})
-
 const emit = defineEmits<{
   click: [event: Event]
 }>()
@@ -108,54 +98,32 @@ function activateControl(event: KeyboardEvent) {
   }
 }
 
-const sayaSizeClasses = {
+const sizeClasses = {
   sm: 'px-4 py-2 text-xs',
-  md: 'px-6 py-3 text-sm min-[1920px]:px-4 min-[1920px]:py-4 min-[1920px]:text-base min-[2560px]:px-5 min-[2560px]:py-5 min-[2560px]:text-lg',
-  lg: 'px-6 py-3.5 text-base min-[1920px]:px-6 min-[1920px]:py-5 min-[2560px]:px-8 min-[2560px]:py-6',
+  md: 'px-5 py-3 text-sm min-[1920px]:px-4 min-[1920px]:py-4 min-[1920px]:text-base min-[2560px]:px-5 min-[2560px]:py-5 min-[2560px]:text-lg',
+  lg: 'px-7 py-3.5 text-base min-[1920px]:px-6 min-[1920px]:py-5 min-[2560px]:px-8 min-[2560px]:py-6',
 }
 
-const blawbySizeClasses = {
-  sm: 'px-4 py-2 text-xs',
-  md: 'px-4 py-3 text-sm min-[1920px]:px-4 min-[1920px]:py-4 min-[1920px]:text-base min-[2560px]:px-5 min-[2560px]:py-5 min-[2560px]:text-lg',
-  lg: 'px-8 py-4 text-lg min-[1920px]:px-4 min-[1920px]:py-4 min-[1920px]:text-base min-[2560px]:px-5 min-[2560px]:py-5 min-[2560px]:text-lg',
-}
-
-const sayaVariantClasses = {
+const variantClasses = {
   primary: {
-    solid: 'bg-primary text-on-primary hover:opacity-90',
-    soft: 'bg-primary/10 text-primary hover:bg-primary/15',
-    outline: 'border border-primary bg-transparent text-primary hover:bg-primary/10',
-    ghost: 'bg-transparent text-primary hover:bg-primary/10',
+    solid: 'bg-[var(--site-button-bg,var(--site-action))] text-[var(--site-button-text,var(--site-on-action,#fff))] hover:bg-[var(--site-button-hover-bg,var(--site-action))] hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--site-button-ring,var(--site-action))] focus-visible:ring-offset-2',
+    soft: 'bg-[var(--tenant-primary-100,rgba(37,53,108,0.1))] text-[var(--tenant-primary,var(--site-action))] hover:bg-[var(--tenant-primary-200,rgba(37,53,108,0.15))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--site-button-ring,var(--site-action))] focus-visible:ring-offset-2',
+    outline: 'border border-[var(--site-button-ring,var(--site-action))] bg-transparent text-[var(--tenant-primary,var(--site-action))] hover:bg-[var(--tenant-primary-100,rgba(37,53,108,0.1))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--site-button-ring,var(--site-action))] focus-visible:ring-offset-2',
+    ghost: 'bg-transparent text-[var(--tenant-primary,var(--site-action))] hover:bg-[var(--tenant-primary-100,rgba(37,53,108,0.1))] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--site-button-ring,var(--site-action))] focus-visible:ring-offset-2',
   },
   error: {
-    solid: 'bg-red-600 text-white hover:opacity-90',
-    soft: 'bg-red-600/10 text-red-600 hover:bg-red-600/15',
-    outline: 'border border-red-600 bg-transparent text-red-600 hover:bg-red-600/10',
-    ghost: 'bg-transparent text-red-600 hover:bg-red-600/10',
-  },
-}
-
-const blawbyVariantClasses = {
-  primary: {
-    solid: 'bg-[var(--site-accent)] text-[var(--site-on-accent)] hover:bg-[var(--blawby-accent-strong)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--blawby-accent)] focus-visible:ring-offset-2',
-    soft: 'bg-[var(--blawby-accent-100)] text-[var(--blawby-primary)] hover:bg-[var(--blawby-accent-200)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--blawby-accent)] focus-visible:ring-offset-2',
-    outline: 'bg-[var(--blawby-accent-100)] text-[var(--blawby-primary)] hover:bg-[var(--blawby-accent-200)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--blawby-accent)] focus-visible:ring-offset-2',
-    ghost: 'bg-transparent text-[var(--blawby-primary)] hover:bg-[var(--blawby-accent-100)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--blawby-accent)] focus-visible:ring-offset-2',
-  },
-  error: {
-    solid: 'bg-red-600 text-white hover:opacity-90',
-    soft: 'bg-red-600/10 text-red-600 hover:bg-red-600/15',
-    outline: 'border border-red-600 bg-transparent text-red-600 hover:bg-red-600/10',
-    ghost: 'bg-transparent text-red-600 hover:bg-red-600/10',
+    solid: 'bg-red-600 text-white hover:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2',
+    soft: 'bg-red-600/10 text-red-600 hover:bg-red-600/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2',
+    outline: 'border border-red-600 bg-transparent text-red-600 hover:bg-red-600/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2',
+    ghost: 'bg-transparent text-red-600 hover:bg-red-600/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-600 focus-visible:ring-offset-2',
   },
 }
 
 const classes = computed(() => [
-  isBlawby.value
-    ? 'inline-flex items-center justify-center gap-2 rounded-lg font-semibold uppercase no-underline transition disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--blawby-accent)] focus-visible:ring-offset-2'
-    : 'inline-flex items-center justify-center gap-2 rounded-full font-medium no-underline transition disabled:opacity-60 disabled:pointer-events-none cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2',
-  isBlawby.value ? blawbySizeClasses[props.size] : sayaSizeClasses[props.size],
-  isBlawby.value ? blawbyVariantClasses[props.color][props.variant] : sayaVariantClasses[props.color][props.variant],
+  'inline-flex items-center justify-center gap-2 no-underline transition disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
+  'rounded-[var(--site-button-radius,9999px)] [text-transform:var(--site-button-transform,none)] [letter-spacing:var(--site-button-tracking,normal)] font-[var(--site-button-weight,500)]',
+  sizeClasses[props.size],
+  variantClasses[props.color][props.variant],
   props.block && 'w-full',
 ])
 
