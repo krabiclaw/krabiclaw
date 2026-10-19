@@ -314,14 +314,17 @@ async function reviewMethod() {
 watch(when, async () => {
   review.value = null
   if (!elements) return
+  // The radios are disabled while working, so one switch finishes before the next.
+  working.value = true
   ready.value = false
   try {
     await elements.update({ paymentMethodTypes: shownTypes(), amount: handoff.value!.subtotal })
+    ready.value = true
   } catch (cause) {
     actionError.value = getErrorMessage(cause, t('payment.unavailable'))
-    return
+  } finally {
+    working.value = false
   }
-  ready.value = true
 })
 
 function changeMethod() {
