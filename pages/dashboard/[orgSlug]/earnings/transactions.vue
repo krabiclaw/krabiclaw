@@ -5,7 +5,7 @@
     and what, the amount — a total and Export CSV at the foot. A line opens the
     record it paid for.
   -->
-  <DashboardIndexPanel id="earnings-transactions" title="Transactions" column="reading">
+  <DashboardIndexPanel id="earnings-transactions" title="Transactions">
     <div>
       <div class="mb-8 flex flex-wrap items-center gap-2">
         <UDropdownMenu :items="monthItems" :content="{ align: 'start' }" :ui="{ content: 'w-56' }">

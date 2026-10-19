@@ -2,7 +2,6 @@
   <DashboardIndexPanel
     :id="personalScope ? 'account-today' : 'org-today'"
     title="Today"
-    column="wide"
   >
     <template #right>
       <!-- An account has one agenda and nothing to narrow it by. -->
