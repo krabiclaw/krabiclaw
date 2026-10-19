@@ -1,3 +1,4 @@
+import { assertPublishedHost } from '~/server/utils/public-provider'
 import { creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
 import { locationAllowsBooking } from '~/shared/reservation-hours'
@@ -149,7 +150,9 @@ export async function prepareProductBookingConfig(db: DbClient, input: {
   const assignedMember = patch.assigned_member_id === undefined ? current?.assigned_member_id ?? null : patch.assigned_member_id as string | null
   const assignedTeam = patch.assigned_team_id === undefined ? current?.assigned_team_id ?? null : patch.assigned_team_id as string | null
   const mode = (patch.scheduling_mode ?? current?.scheduling_mode ?? 'legacy') as ProductBookingConfigRecord['scheduling_mode']
-  if (mode === 'provider' ? Boolean(assignedMember) === Boolean(assignedTeam) : Boolean(assignedMember || assignedTeam)) badRequest('Choose the business schedule, one member, or one team')
+  // The host is who runs it, a member or a team; in provider mode their own hours are also the schedule.
+  if (assignedMember && assignedTeam) badRequest('Choose one host: a member or a team')
+  if (mode === 'provider' && !assignedMember && !assignedTeam) badRequest('Choose the member or team whose working hours guests book')
   // Online, the provider's own hours are the schedule; there is no business clock to hold it in.
   if (heldOnline && mode !== 'provider') badRequest('An online offering is held by a member or a team: assign who provides it')
   if (patch.scheduling_mode !== undefined || patch.assigned_member_id !== undefined || patch.assigned_team_id !== undefined) {
@@ -259,7 +262,8 @@ function resolvedDuration(config: ProductBookingConfigRecord): number {
 }
 
 async function sessionProviders(db: DbClient, config: ProductBookingConfigRecord): Promise<Array<string | null>> {
-  if (!config.assigned_team_id) return [null]
+  // A team's members each hold their own sessions only when their hours are the schedule.
+  if (config.scheduling_mode !== 'provider' || !config.assigned_team_id) return [null]
   const members = await queryAll<{ id: string }>(db, `SELECT m.id FROM team t JOIN teamMember tm ON tm.teamId=t.id JOIN member m ON m.userId=tm.userId AND m.organizationId=t.organizationId JOIN member_scheduling ms ON ms.member_id=m.id AND ms.organization_id=m.organizationId WHERE t.id=? AND t.organizationId=? ORDER BY m.id`, [config.assigned_team_id, config.organization_id])
   return members.map(member => member.id)
 }
@@ -684,6 +688,8 @@ export async function prepareProductBookingSetup(db: DbClient, input: {
   if (booking.default_capacity !== null && (!Number.isSafeInteger(booking.default_capacity) || booking.default_capacity <= 0)) badRequest('Provide places per session, or explicit null for unlimited places')
   const { location_id: locationId, weekly_slots: weeklySlots, sessions: oneOffSessions, ...patch } = booking
   const { query: configQuery, config } = await prepareProductBookingConfig(db, { ...input, patch: { ...patch, held_online: locationId === null }, productInSameBatch: input.productInSameBatch })
+  // Setting up bookings publishes the offering, and guests see who hosts it.
+  await assertPublishedHost(db, input.organizationId, config)
   const queries: BatchQuery[] = [configQuery]
   // The offering is created only if a guest could book something now, at the location as it was read.
   let locationGuard: BatchQuery = { query: 's.location_id IS NULL', params: [] }

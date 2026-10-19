@@ -1,3 +1,4 @@
+import { calculateMapEmbedUrl } from '~/server/utils/google-places'
 import { HTTPError } from 'nitro'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { parseGoogleReviewMetadata, type GoogleReviewMetadata } from '~/shared/google-review'
@@ -51,12 +52,15 @@ export interface PublicProductLocation {
   maps_url: string | null
   latitude: number | null
   longitude: number | null
+  /** Where it is on a map: the location's place, coordinates or address. */
+  map_embed_url: string | null
 }
 
-type PublicProductLocationRow = Omit<PublicProductLocation, 'address'> & { address: string | null }
+type PublicProductLocationRow = Omit<PublicProductLocation, 'address' | 'map_embed_url'> & { address: string | null }
 
 function publicProductLocation(row: PublicProductLocationRow): PublicProductLocation {
-  return { ...row, address: parsePostalAddress(row.address) }
+  const address = parsePostalAddress(row.address)
+  return { ...row, address, map_embed_url: calculateMapEmbedUrl({ title: row.title, maps_url: row.maps_url, latitude: row.latitude, longitude: row.longitude, address }) }
 }
 
 export interface PublicProductCollection {

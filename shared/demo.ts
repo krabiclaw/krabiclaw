@@ -2,10 +2,11 @@
  * Canonical demo organization and host contracts.
  *
  * Demo organizations are synthetic showcase businesses, not real ones: the
- * "Ember & Slice" restaurant (production, copied to staging by snapshot) and
- * the "Saltleaf Stays" lodging demo that scripts/provision-lodging-demo.ts
- * creates. Their data is non-customer demo data, only platform admins change
- * their site settings and languages, they are never crawled or indexed, and
+ * "Ember & Slice" restaurant (production, copied to staging by snapshot), the
+ * "Saltleaf Stays" lodging demo that scripts/provision-lodging-demo.ts
+ * creates, and the "Cedar Legal Demo" law office that shows a paid legal
+ * consultation from booking to payment. Their data is non-customer demo data,
+ * only platform admins change their site settings and languages, they are never crawled or indexed, and
  * their payments run in Stripe test mode, on production too, so a visitor can
  * pay with a test card and nothing is charged.
  *
@@ -16,6 +17,7 @@
 export const DEMO_SUBDOMAINS = new Set([
   'demo',
   'saltleaf-stays-demo',
+  'cedar-legal-demo',
 ])
 
 export const DEMO_HOSTS = new Set([

@@ -1102,33 +1102,34 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page.locator('#dashboard-panel-catalog [data-testid="dashboard-navbar-back"]')).toHaveCount(0)
   })
 
-  test('Cedar billing tabs show its actual payment methods and Basic plan', async ({ page, baseURL }) => {
+  test('a Basic business\'s billing tabs show its actual payment methods and Basic plan', async ({ page, baseURL }) => {
     await page.setViewportSize(PHONE)
     const mobileNav = page.getByTestId('dashboard-mobile-nav')
-    // Cedar is an existing fictional Basic business with no billing customer.
+    // KrabiClaw Review Legal is our own fictional Basic business with no billing
+    // customer. (Cedar Legal Demo is now on Business to demo paid consultations.)
     // The copied Ember subscription belongs to LIVE Stripe, not this TEST key.
-    expect(['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Cedar owner impersonation is confined to isolated local D1').toBe(true)
+    expect(['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Owner impersonation is confined to isolated local D1').toBe(true)
     const principalResponse = await page.request.get('/api/auth/get-session')
     expect(principalResponse.status(), await principalResponse.text()).toBe(200)
     const principal = await principalResponse.json() as { user: { id: string; role: string } }
     expect(principal.user.role).toBe('admin')
-    const cedarId = '5WebMejsoVLyZLHC29wHH5GbQx1jlvCd'
-    const cedarOwnerId = 'ivUlJc9BoyZeFszowpbUEjh1pugcDHiT'
-    const cedar = '/dashboard/cedar-legal-demo'
+    const basicId = 'OcMePkke1szEqCjfyHDYS6l26JenCLcg'
+    const basicOwnerId = '3TW7uQfi4mzTcCqIWPltcwBxav3F67HZ'
+    const basic = '/dashboard/krabiclaw-review-legal'
     let impersonated = false
     try {
-      const impersonation = await page.request.post('/api/auth/admin/impersonate-user', { headers: authRequestHeaders(baseURL!), data: { userId: cedarOwnerId } })
+      const impersonation = await page.request.post('/api/auth/admin/impersonate-user', { headers: authRequestHeaders(baseURL!), data: { userId: basicOwnerId } })
       expect(impersonation.status(), await impersonation.text()).toBe(200)
       impersonated = true
-      expect(await impersonation.json()).toMatchObject({ user: { id: cedarOwnerId }, session: { impersonatedBy: principal.user.id } })
-      const activated = await page.request.post('/api/auth/organization/set-active', { headers: authRequestHeaders(baseURL!), data: { organizationId: cedarId } })
+      expect(await impersonation.json()).toMatchObject({ user: { id: basicOwnerId }, session: { impersonatedBy: principal.user.id } })
+      const activated = await page.request.post('/api/auth/organization/set-active', { headers: authRequestHeaders(baseURL!), data: { organizationId: basicId } })
       expect(activated.status(), await activated.text()).toBe(200)
-      const billingResponse = await page.request.get(`/api/billing/status?organizationId=${cedarId}`)
+      const billingResponse = await page.request.get(`/api/billing/status?organizationId=${basicId}`)
       expect(billingResponse.status(), await billingResponse.text()).toBe(200)
       const billing = await billingResponse.json()
-      expect(billing).toMatchObject({ billing: { plan: 'free', organizationId: cedarId }, userRole: 'owner' })
+      expect(billing).toMatchObject({ billing: { plan: 'free', organizationId: basicId }, userRole: 'owner' })
       expect(billing.billing.stripeCustomerId).toBeUndefined()
-      const methods = await page.request.get(`/api/billing/payment-methods?organizationId=${cedarId}`)
+      const methods = await page.request.get(`/api/billing/payment-methods?organizationId=${basicId}`)
       expect(methods.status(), await methods.text()).toBe(200)
       expect(await methods.json()).toEqual({ payment_methods: [] })
       // The column reads the plan and its usage billing on arrival, whichever tab is open.
@@ -1137,10 +1138,10 @@ test.describe('dashboard pane hierarchy', () => {
         return url.pathname === '/api/billing/status' && url.searchParams.get('includePrice') === 'true'
       })
       const usageBilling = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/payments/billing')
-      await open(page, `${cedar}/payments`)
+      await open(page, `${basic}/payments`)
       const payments = page.locator('#dashboard-panel-organization-payments')
       // On a phone the tab is rows and nothing opens on its own; the row states the actual cards.
-      await expect(page).toHaveURL(`${cedar}/payments`)
+      await expect(page).toHaveURL(`${basic}/payments`)
       await expect(payments.getByRole('link', { name: /^Payment methods/ })).toBeVisible()
       await expect(payments.getByText('No payment methods saved yet.', { exact: true })).toBeVisible()
       // UAlert renders its message in this slot, including native provider errors.
@@ -1151,16 +1152,16 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(methodsLeaf.getByText('No payment methods saved yet.', { exact: true })).toBeVisible()
       await expect(methodsLeaf.getByRole('button', { name: 'Add payment method', exact: true })).toBeVisible()
       await methodsLeaf.getByTestId('dashboard-navbar-close').click()
-      await expect(page).toHaveURL(`${cedar}/payments`)
-      await expect(payments.getByTestId('dashboard-navbar-back')).toHaveAttribute('href', `${cedar}/earnings`)
+      await expect(page).toHaveURL(`${basic}/payments`)
+      await expect(payments.getByTestId('dashboard-navbar-back')).toHaveAttribute('href', `${basic}/earnings`)
       await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'])
 
       await payments.getByRole('tab', { name: 'Plan', exact: true }).click()
-      await expect(page).toHaveURL(`${cedar}/payments?tab=plan`)
+      await expect(page).toHaveURL(`${basic}/payments?tab=plan`)
       const planResponse = await planBilling
       expect(planResponse.status(), await planResponse.text()).toBe(200)
       const plan = await planResponse.json()
-      expect(plan).toMatchObject({ success: true, billing: { plan: 'free', organizationId: cedarId }, userRole: 'owner' })
+      expect(plan).toMatchObject({ success: true, billing: { plan: 'free', organizationId: basicId }, userRole: 'owner' })
       expect(plan.billing.stripeSubscriptionId).toBeUndefined()
       expect(plan.billing.subscriptionPrice).toBeUndefined()
       const usageResponse = await usageBilling
@@ -1174,11 +1175,11 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(plans).toBeVisible()
       await expect(plans.getByRole('button', { name: 'Switch to Growth', exact: true })).toBeVisible()
       await plans.getByTestId('dashboard-navbar-close').click()
-      await expect(page).toHaveURL(`${cedar}/payments?tab=plan`)
+      await expect(page).toHaveURL(`${basic}/payments?tab=plan`)
 
       // A Basic business without an operating billing customer gets the actual
       // setup action, and cannot record a billable agreement by submitting it.
-      const servicesBefore = await page.request.get('/api/dashboard/services?org=cedar-legal-demo')
+      const servicesBefore = await page.request.get('/api/dashboard/services?org=krabiclaw-review-legal')
       expect(servicesBefore.status(), await servicesBefore.text()).toBe(200)
       expect(await servicesBefore.json()).toEqual({ success: true, services: { managed_ads: null, strategy: null } })
       await payments.getByRole('link', { name: /^Managed ads/ }).click()
@@ -1186,7 +1187,7 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(managedAds.getByText('Before turning it on, connect a Google Ads account billed in USD and set up active Payments billing with a default payment method.', { exact: true })).toBeVisible()
       await expect(managedAds.getByRole('link', { name: 'Payment methods', exact: true })).toHaveCount(0)
       await managedAds.getByRole('link', { name: 'Choose a plan with Payments', exact: true }).click()
-      await expect(page).toHaveURL(`${cedar}/payments/plan`)
+      await expect(page).toHaveURL(`${basic}/payments/plan`)
       await expect(plans).toBeVisible()
       await plans.getByTestId('dashboard-navbar-close').click()
       await payments.getByRole('link', { name: /^Managed ads/ }).click()
@@ -1197,11 +1198,11 @@ test.describe('dashboard pane hierarchy', () => {
       const setupMessage = 'Set up active Payments billing in Plan before turning on managed ads. Choose a plan with Payments if your business does not have billing set up.'
       await expect(managedAds.getByText(setupMessage, { exact: true })).toBeVisible()
       await expect(payments.getByText('Managed ads is off.', { exact: true })).toHaveCount(0)
-      const servicesAfter = await page.request.get('/api/dashboard/services?org=cedar-legal-demo')
+      const servicesAfter = await page.request.get('/api/dashboard/services?org=krabiclaw-review-legal')
       expect(servicesAfter.status(), await servicesAfter.text()).toBe(200)
       expect(await servicesAfter.json()).toEqual({ success: true, services: { managed_ads: null, strategy: null } })
       await managedAds.getByTestId('dashboard-navbar-close').click()
-      await expect(page).toHaveURL(`${cedar}/payments?tab=plan`)
+      await expect(page).toHaveURL(`${basic}/payments?tab=plan`)
     } finally {
       try {
         if (impersonated) {

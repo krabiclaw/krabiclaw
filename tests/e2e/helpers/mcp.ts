@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { APIRequestContext, APIResponse } from '@playwright/test'
+import { expect, type APIRequestContext, type APIResponse } from '@playwright/test'
 import { loginAs } from './auth'
 import { E2E_DEMO_ORGANIZATION_ID } from '../test-env'
 
@@ -149,4 +149,49 @@ export async function loginAsFreshMcpUser(request: APIRequestContext, baseURL: s
   const userId = `user-e2e-mcp-fresh-${label}`
   await loginAs(request, baseURL, userId)
   return userId
+}
+
+type MemberSchedulingRecord = {
+  timezone: string
+  weekly: Array<{ weekday: number; start: string; end: string }>
+  time_off: Array<{ start: string; end: string }>
+  public_name: string | null
+  public_photo_url: string | null
+  public_bio: string | null
+  public_approved: number
+  updated_at: string
+}
+
+/**
+ * A bookable offering or a stay is published only with a host whose profile
+ * guests can see. This publishes the signed-in member's own profile through
+ * set_member_scheduling, keeping their hours, and returns that member with the
+ * restore of the profile it replaced. A member who had no scheduling record is
+ * left with one that has no hours and no published profile.
+ */
+export async function publishOwnHostProfile(request: APIRequestContext, baseURL: string, organizationId: string, publicName: string) {
+  const call = async <T>(toolName: string, args: Record<string, unknown>) => {
+    const response = await mcpRequest(request, baseURL, { method: 'tools/call', toolName, args: { organization_id: organizationId, ...args } })
+    expect(response.status(), await response.text()).toBe(200)
+    return mcpData<T>(await response.json())
+  }
+  const { members } = await call<{ members: Array<{ id: string; self: boolean; scheduling: MemberSchedulingRecord | null }> }>('get_member_scheduling', {})
+  const self = members.find(member => member.self)
+  expect(self, 'the signed-in user is a member of the organization').toBeTruthy()
+  const memberId = self!.id
+  const previous = self!.scheduling
+  const hours = { timezone: previous?.timezone ?? 'UTC', weekly: previous?.weekly ?? [], time_off: previous?.time_off ?? [] }
+  const published = await call<{ scheduling: MemberSchedulingRecord }>('set_member_scheduling', {
+    member_id: memberId, ...hours, expected_updated_at: previous?.updated_at ?? null,
+    public_name: publicName, public_photo_url: previous?.public_photo_url ?? null, public_bio: previous?.public_bio ?? null, public_approved: true,
+  })
+  expect(published.scheduling).toMatchObject({ public_name: publicName, public_approved: 1 })
+  const restore = async () => {
+    const profile = { public_name: previous?.public_name ?? null, public_photo_url: previous?.public_photo_url ?? null, public_bio: previous?.public_bio ?? null }
+    const { scheduling: current } = await call<{ scheduling: MemberSchedulingRecord }>('get_member_scheduling', { member_id: memberId })
+    await call('set_member_scheduling', { member_id: memberId, ...hours, expected_updated_at: current.updated_at, ...profile, public_approved: Boolean(previous?.public_approved) })
+    const { scheduling: restored } = await call<{ scheduling: MemberSchedulingRecord }>('get_member_scheduling', { member_id: memberId })
+    expect(restored).toMatchObject({ ...hours, ...profile, public_approved: previous?.public_approved ?? 0 })
+  }
+  return { memberId, restore }
 }

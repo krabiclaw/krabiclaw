@@ -32,8 +32,8 @@
         </div>
       </section>
 
-      <!-- What happens next -->
-      <aside class="border border-default bg-muted p-7 sm:p-8">
+      <!-- What happens next: the stated terms, when the business stated any. -->
+      <aside v-if="nextSteps.length || nextStepsNotesHtml" class="border border-default bg-muted p-7 sm:p-8">
         <p class="saya-eyebrow mb-5 text-muted">{{ nextStepsKicker }}</p>
         <ol v-if="nextStepsStyle === 'numbered'" class="m-0 flex list-none flex-col gap-5 p-0">
           <li v-for="(step, i) in nextSteps" :key="i" class="flex gap-4 text-sm leading-relaxed text-muted">
@@ -50,6 +50,7 @@
         </div>
         <TenantButton v-if="ctaLabel && ctaTo" :to="ctaTo" block class="mt-7">{{ ctaLabel }}</TenantButton>
       </aside>
+      <TenantButton v-else-if="ctaLabel && ctaTo" :to="ctaTo" variant="outline" block>{{ ctaLabel }}</TenantButton>
 
       <GuestAccountPrompt :email="guestEmail" />
     </div>

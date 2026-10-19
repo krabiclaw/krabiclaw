@@ -1,7 +1,7 @@
 import { expect, test, type APIRequestContext, type Page, type WebSocket } from '@playwright/test'
 import sharp from 'sharp'
 import { authRequestHeaders, loginAs } from './helpers/auth'
-import { mcpRequest } from './helpers/mcp'
+import { mcpRequest, publishOwnHostProfile } from './helpers/mcp'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations'
 import type { Product } from '../../server/types/products'
 
@@ -590,7 +590,7 @@ test('a host describes a place to stay through its focused editors and previews 
     { '@type': 'PropertyValue', name: 'listingFloor', value: 2 },
     { '@type': 'PropertyValue', name: 'yearBuilt', value: 2019 },
   ]))
-  await expect(preview.locator('article')).toContainText('Sleeps 6')
+  await expect(preview.locator('article')).toContainText('6 guests')
   await expect(preview.locator('article')).toContainText('Flexible cancellation policy')
   await expect(preview.locator('article')).toContainText('Firm Long Term: Full refund up to 30 days before check-in.')
   const publicRead = await request.get(new URL(previewURL.pathname.replace(/^\/stays\//, '/api/public/stays/'), previewURL).href)
@@ -602,7 +602,9 @@ test('a host describes a place to stay through its focused editors and previews 
     cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
   } })
   for (const key of ['pets_allowed', 'events_allowed', 'smoking_allowed', 'quiet_hours', 'commercial_photography_allowed', 'quiet_hours_start', 'quiet_hours_end', 'house_rules']) expect(publicProduct.details).not.toHaveProperty(key)
-  await expect(preview.getByRole('heading', { name: 'House rules', exact: true })).toHaveCount(0)
+  // With no rules set, House rules holds only the home's own times and party, as Airbnb's does.
+  const houseRules = preview.getByRole('heading', { name: 'House rules', exact: true }).locator('xpath=..').getByRole('listitem')
+  await expect(houseRules).toHaveText(['Check-in after 4:00 PM', 'Checkout before 10:00 AM', '6 guests maximum'])
   await page.screenshot({ path: testInfo.outputPath('stay-preview-desktop.png') })
   await previewModal.getByRole('tab', { name: 'Mobile view', exact: true }).click()
   await expect(page).toHaveURL(url => url.searchParams.get('previewViewport') === 'mobile')
@@ -925,7 +927,7 @@ test("a host uploads, arranges, describes and removes a place to stay's photos",
 test('a host lists, pauses and unlists a priced place to stay', async ({ page, browser, baseURL }, testInfo) => {
   test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
-  const { slug, organizationId, call, productId } = await createStayHome(page, baseURL!)
+  const { request, slug, organizationId, call, productId } = await createStayHome(page, baseURL!)
   const { previewLink, previewModal, previewIframe } = previewLocators(page)
   await page.setViewportSize({ width: 1440, height: 900 })
   // The guest page is the one the editor previews, without the preview token.
@@ -953,6 +955,17 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
   expect(pricedProduct.data!.product.publications.find(item => item.organization_id === organizationId)!.published).toBe(false)
   const publicationPath = `/dashboard/${slug}/products/${productId}/publication`
   const publicationEndpoint = `/api/editor/organizations/${organizationId}/products/${productId}/publication`
+  // Guests see who looks after a home, so it is listed only with a host whose profile is published.
+  const hostless = await request.put(`${baseURL}${publicationEndpoint}`, { data: { published: true } })
+  expect(hostless.status(), await hostless.text()).toBe(409)
+  expect((await hostless.json()).data).toEqual({ code: 'HOST_REQUIRED', field: 'host' })
+  const unlisted = await call<{ product: Product }>('get_product', { product_id: productId })
+  expect(unlisted.data!.product.publications.find(item => item.organization_id === organizationId)!.published).toBe(false)
+  // The organization is this test's own, so the host's published profile is left with it.
+  const host = await publishOwnHostProfile(request, baseURL!, organizationId, 'Cliff Cabin host')
+  const hosted = await call<{ product: Product }>('update_product', { product_id: productId, stay: { assigned_member_id: host.memberId } })
+  expect(hosted.error).toBeNull()
+  expect(hosted.data!.product.stay).toMatchObject({ assigned_member_id: host.memberId, assigned_team_id: null })
   const productEndpoint = `/api/editor/organizations/${organizationId}/products/${productId}`
   const publicationBodies: unknown[] = []
   const availabilityBodies: unknown[] = []
@@ -1005,6 +1018,7 @@ test('a host lists, pauses and unlists a priced place to stay', async ({ page, b
     const guestResponse = await guest.goto(previewURL.href)
     expect(guestResponse!.status()).toBe(200)
     await expect(guest.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
+    await expect(guest.locator('section[aria-label="Meet your host"]').getByText('Cliff Cabin host', { exact: true })).toBeVisible()
     await expect(guest.getByRole('button', { name: 'Check availability', exact: true }).last()).toBeVisible()
     await page.goto(`${publicationPath}/availability`)
     const availability = page.locator('#dashboard-panel-product-availability')
@@ -1355,7 +1369,7 @@ test('a cleaner sees only assigned-home arrivals and departures on Today and Upc
     const savedGuestRules = pendingRulesPreview.locator('iframe[title="Listing preview"]').contentFrame()
     await expect(savedGuestRules.getByRole('heading', { name: 'Assigned Cabin', exact: true, level: 1 })).toBeVisible()
     await expect(savedGuestRules.getByText(houseRules, { exact: true })).toBeVisible()
-    await expect(savedGuestRules.locator('article')).toContainText('Sleeps 4')
+    await expect(savedGuestRules.locator('article')).toContainText('4 guests')
     await expect(savedGuestRules.getByText('No pets', { exact: true })).toHaveCount(0)
     await expect(savedGuestRules.getByText('Events allowed', { exact: true })).toHaveCount(0)
     await pendingRulesPreview.getByRole('button', { name: 'Close', exact: true }).click()
