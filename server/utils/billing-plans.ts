@@ -6,6 +6,7 @@ import {
   assertStripeCatalogPrices,
   PLAN_PRICE_LIST_EXPAND,
   planPriceAmount,
+  selectRentalUnitPrice,
   selectStripeCatalogPrice,
 } from './stripe-catalog'
 import {
@@ -270,6 +271,13 @@ export async function fetchStripeProducts(
     startingAfter = prices.data[prices.data.length - 1]?.id
   }
 
+  // Business is sold with its Additional rental unit price; a catalog without it cannot sell Business as published.
+  try {
+    selectRentalUnitPrice(products, Object.values(priceLookup).flat())
+  } catch (error) {
+    throw new BillingPlansError('BILLING_PLANS_INVALID_CATALOG', error instanceof Error ? error.message : 'Invalid Additional rental unit catalog', error)
+  }
+
   const plans: Plan[] = []
 
   const productsByNewSalePlan = new Map<string, Stripe.Product[]>()
@@ -377,7 +385,7 @@ const PLANS_CACHE_TTL_SECONDS = 3600
 // stub under `nuxt dev`, and Nuxt's useRuntimeConfig() is the real one.
 function plansCacheKey(buildId: string | undefined): string {
   if (!buildId) throw new BillingPlansError('BILLING_PLANS_UNAVAILABLE', 'Billing plans cache has no build id to key on')
-  return `stripe-plans:v7:${buildId}`
+  return `stripe-plans:v8:${buildId}`
 }
 
 // Single-instance in-flight guard — prevents a cache stampede where multiple

@@ -1,6 +1,6 @@
 import { getPlanEntitlements } from '../server/utils/billing-entitlements'
 import { PLATFORM_LOCALES } from './platform-locales'
-import { additionalLocationPrice, INCLUDED_LOCATIONS, isKnownRecurringPlan } from './billing-model'
+import { additionalLocationPrice, additionalRentalUnitPrice, BUSINESS_PLAN_ID, INCLUDED_LOCATIONS, INCLUDED_RENTAL_UNITS, isKnownRecurringPlan } from './billing-model'
 
 const ADDITIONAL_LANGUAGE_NAMES = new Intl.ListFormat('en', { type: 'conjunction' }).format(
   PLATFORM_LOCALES.filter(({ locale }) => locale !== 'en')
@@ -37,6 +37,9 @@ export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly P
     { id: 'locations.included', label: 'Locations', detail: `${INCLUDED_LOCATIONS} locations included on every plan. Growth and Business add more at ${additionalLocationPrice()}.`, planValue: planId => isKnownRecurringPlan(planId)
       ? `${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}`
       : `${INCLUDED_LOCATIONS} included` },
+    { id: 'rental-units.included', label: 'Rental units', detail: `Each independently bookable home, counted once however many channels list it. On Business, ${INCLUDED_RENTAL_UNITS} are included, then ${additionalRentalUnitPrice()}, and a location with only rental units is not billed as a location.`, planValue: planId => planId === BUSINESS_PLAN_ID
+      ? `${INCLUDED_RENTAL_UNITS} included, then ${additionalRentalUnitPrice()}`
+      : 'Billed as locations' },
     { id: 'locations.management', label: 'Locations and calendar', detail: 'Manage location details and available dates.', included: 'Included' },
     { id: 'posts.website', label: 'Website posts', detail: 'Create and publish posts on your website.', included: 'Included' },
     { id: 'social.external-channels', label: 'Facebook, Instagram and Discord publishing', detail: 'Explicit publishing to connected channels requires provider permissions and valid media.', entitlement: 'managed_service' },

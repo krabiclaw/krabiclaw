@@ -1,7 +1,8 @@
 import { HTTPError } from 'nitro'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedHomeSql, isOrganizationWideRole, organizationAdapter, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
-import { organizationEventQuery } from '~/server/utils/organization-events'
+import { creationDedupeKey, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
+import { billingCapacity, capacityRefusalError, rentalUnitLimit } from '~/server/utils/billing'
 import { coordinatesFailure, createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
 import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { visitRefundQueries } from '~/server/domain/payments/visit-refund'
@@ -761,17 +762,25 @@ export async function releaseUnassignableHomes(env: GuestInboxPublicationEnv, db
 }
 
 /**
- * Add a place to stay: a new location of this organization (its plan's
- * location billing applies) and an unpublished stay at it, priced per night in
- * the organization's currency. A home added by hand and one imported from a
- * channel are made here, the same way. The key replays both writes.
+ * Add a place to stay: a new location of this organization and an unpublished
+ * stay at it, priced per night in the organization's currency. On the current
+ * Business offer the home is a rental unit and its location is not billed;
+ * on every other plan the location is. A home added by hand and one imported
+ * from a channel are made here, the same way. The key replays both writes.
  */
 export async function createStayHome(env: Parameters<typeof createLocation>[0], db: DbClient, access: StayAccess, home: NewStayHome, idempotencyKey: string): Promise<StayHome> {
   requireManager(access)
+  // The units are checked before the location exists, so a refused home leaves
+  // no empty location behind; a replay of a home already begun goes on.
+  const capacity = await billingCapacity(env, db, access.organizationId)
+  if (capacity.rentalUnits && capacity.rentalUnits.used >= capacity.rentalUnits.covered
+    && !await readCreationRecord(db, creationDedupeKey('location', access.organizationId, idempotencyKey))) {
+    throw capacityRefusalError(rentalUnitLimit(capacity, 'add the home'))
+  }
   const located = await createLocation(env, db as D1Database, access.organizationId, {
     title: home.name, timezone: home.timezone, phone: home.phone, email: home.email,
     address: postalAddress(home),
-  }, access.actorId, { idempotencyKey })
+  }, access.actorId, { idempotencyKey, holdsHome: true })
   if (located.status !== 201) locationFailure(located)
   const location = 'location' in located.data ? located.data.location : undefined
   if (!location || typeof location.id !== 'string' || !location.id.trim()) fail(502, 'INVALID_LOCATION_RESPONSE', 'Location creation did not return the location id', 'data.location.id')

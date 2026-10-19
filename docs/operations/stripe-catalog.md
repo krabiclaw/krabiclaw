@@ -2,9 +2,28 @@
 
 `scripts/seed-stripe.mjs` reconciles the new-sale recurring catalog for Basic
 (free, with no Stripe product), Growth (`$49` per month or `$588` per year), and
-Business (`$99` per month). Business includes Growth's features, online payments
+Business (`$149` per month). Business includes Growth's features, online payments
 and managed Google Ads campaigns, and has no annual price. Every plan includes
 2 locations; Growth and Business charge `$49` per additional location per month (`$588` per year on annual Growth).
+Business also includes 2 rental units and sells each additional one through the
+Additional rental unit product (`product_family=rental_units`, never a `plan_id`):
+one per-unit `$19` monthly price, `unit_label` `rental unit`. Its subscription item
+exists only while the business pays for more units than the 2 included, and its
+quantity is the additional units. Business subscriptions on the earlier `$99`
+price keep it, bill every location and bill no rental units.
+
+A Business subscription therefore has two items, which Stripe's portal cannot
+confirm. New Business Checkout is still Better Auth's: the Business plan carries
+the rental unit price as a line item, and the Checkout hook in `auth.ts` sets its
+quantity to the business's units past the included ones (or leaves it out).
+Better Auth's scheduled downgrade to Growth removes the item. An existing
+subscription moves to Business, or changes its Business locations and units, on
+Payments → Plan → Business: Stripe's invoice preview, then one subscription
+update with the same proration date (`always_invoice`), read back from Stripe;
+Better Auth's webhook records the plan and location quantity as for any update.
+`/api/billing/plans` and the Better Auth plan loader both refuse a catalog without
+exactly one active Additional rental unit product at that price, so apply the
+offers before deploying an application that sells it.
 
 Each paid plan price is one graduated Stripe price whose subscription quantity
 is the number of locations it covers: the first tier (up to 2) is a flat fee of
@@ -61,7 +80,7 @@ application and provider catalog compatible throughout the cutover:
    native quantity confirmation after its product and price are archived.
 4. Generate and apply an `--retirement-only` plan. It archives the retired
    families only after proving exactly one active canonical Growth and Business
-   product, their USD 49 and USD 99 monthly prices, and Growth's USD 588 annual
+   product, their USD 49 and USD 149 monthly prices, and Growth's USD 588 annual
    price. It emits no offer product, price or image mutations and does not need
    local product images.
 

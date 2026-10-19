@@ -1,5 +1,5 @@
 import type Stripe from 'stripe'
-import { assertNewSalePlan, PAID_PLAN_PRICES, planPriceTiers } from '~/shared/billing-model'
+import { ADDITIONAL_RENTAL_UNIT_PRICE, assertNewSalePlan, BUSINESS_PLAN_ID, isKnownRecurringPlan, PAID_PLAN_PRICES, planPriceTiers } from '~/shared/billing-model'
 
 /**
  * Each new-sale plan is one fixed application offer. Stripe catalog metadata may
@@ -37,6 +37,61 @@ function hasPlanTiers(price: Stripe.Price, amount: number, interval: 'month' | '
         && tier.flat_amount === (want.flat_amount ?? null)
         && tier.unit_amount === (want.unit_amount ?? null)
     })
+}
+
+/**
+ * A Business price is the current offer when it charges the current amount on
+ * the current tiers. Business prices sold before it remain the contracts of
+ * the subscriptions on them: they bill every location and no rental units.
+ */
+export function isCurrentBusinessPrice(price: Stripe.Price): boolean {
+  return price.recurring?.interval === 'month' && price.recurring.interval_count === 1
+    && hasPlanTiers(price, PAID_PLAN_PRICES[BUSINESS_PLAN_ID].monthly, 'month')
+}
+
+/** The catalog family of the Additional rental unit product, which never carries a `plan_id`. */
+export const RENTAL_UNITS_FAMILY = 'rental_units'
+
+/** The Additional rental unit price Business is sold with: per unit, USD 19, monthly. */
+export function assertRentalUnitPrice(price: Stripe.Price | undefined, productId: string): asserts price is Stripe.Price {
+  if (!price || price.active === false || price.currency?.toLowerCase() !== 'usd' || price.billing_scheme !== 'per_unit'
+    || price.unit_amount !== ADDITIONAL_RENTAL_UNIT_PRICE || price.transform_quantity
+    || price.recurring?.interval !== 'month' || price.recurring.interval_count !== 1 || price.recurring.usage_type !== 'licensed') {
+    throw new Error(`Stripe product ${productId} must sell additional rental units at the per-unit USD ${ADDITIONAL_RENTAL_UNIT_PRICE} cent monthly price`)
+  }
+}
+
+/** The one active Additional rental unit product's canonical price, from a catalog listing. */
+export function selectRentalUnitPrice(products: Stripe.Product[], prices: Stripe.Price[]): Stripe.Price {
+  const matching = products.filter(product => product.active && product.metadata?.product_family === RENTAL_UNITS_FAMILY)
+  if (matching.length !== 1) throw new Error(`Stripe catalog has ${matching.length} active Additional rental unit products; exactly one is required`)
+  const product = matching[0]!
+  const priceId = product.metadata.monthly_price_id?.trim()
+  const price = prices.find(row => row.id === priceId && (typeof row.product === 'string' ? row.product : row.product.id) === product.id)
+  assertRentalUnitPrice(price, product.id)
+  return price
+}
+
+/**
+ * A plan subscription's items by what they bill: the one plan item, and the
+ * Additional rental unit item when the business pays for more units than its
+ * plan includes. Products must be expanded.
+ */
+export function planSubscriptionItems(subscription: Stripe.Subscription): { plan: Stripe.SubscriptionItem; rentalUnits: Stripe.SubscriptionItem | null } {
+  const product = (item: Stripe.SubscriptionItem) => {
+    if (typeof item.price.product === 'string' || item.price.product.deleted) throw new Error(`Stripe subscription ${subscription.id} item ${item.id} product is not readable`)
+    return item.price.product
+  }
+  const plans = subscription.items.data.filter(item => isKnownRecurringPlan(product(item).metadata.plan_id))
+  if (plans.length !== 1) throw new Error(`Stripe subscription ${subscription.id} must contain exactly one plan price`)
+  const units = subscription.items.data.filter(item => product(item).metadata.product_family === RENTAL_UNITS_FAMILY)
+  if (units.length > 1) throw new Error(`Stripe subscription ${subscription.id} has more than one Additional rental unit item`)
+  const plan = plans[0]!
+  const rentalUnits = units[0] ?? null
+  if (rentalUnits && (product(plan).metadata.plan_id !== BUSINESS_PLAN_ID || !isCurrentBusinessPrice(plan.price))) {
+    throw new Error(`Stripe subscription ${subscription.id} bills rental units without the current Business price`)
+  }
+  return { plan, rentalUnits }
 }
 
 /** The plan amount a canonical price charges for its included locations. */
