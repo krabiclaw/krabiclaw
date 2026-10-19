@@ -50,6 +50,7 @@ export interface IntegrationsSummary {
   facebook: ConnectedIntegration | null
   instagram: ConnectedIntegration | null
   discord: ConnectedIntegration | null
+  airbnb: { status: string; connected_at: string | null } | null
 }
 
 /** The summary the list shows, and what a leaf refreshes after it changes a connection. */
@@ -110,6 +111,13 @@ const rows = computed<Record<IntegrationKey, Pick<EditorNavigationItem, 'summary
     'facebook': connection(s?.facebook ?? null),
     'instagram': connection(s?.instagram ?? null, s?.instagram ? `@${s.instagram.target_name}` : undefined),
     'discord': connection(s?.discord ?? null, s?.discord ? `#${s.discord.target_name}` : undefined),
+    'airbnb': (() => {
+      const a = s?.airbnb
+      if (!a || a.status === 'not_connected') return { summary: 'Not connected', status: 'neutral' as const }
+      if (a.status === 'connected') return { summary: 'Connected', status: 'success' as const }
+      if (a.status === 'needs_review') return { summary: 'Needs review', status: 'error' as const }
+      return { summary: a.status, status: 'neutral' as const }
+    })(),
   }
 })
 

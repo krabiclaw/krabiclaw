@@ -88,8 +88,8 @@
           <h3 :class="isBlawby ? 'mt-4 blawby-display text-xl font-bold uppercase text-[var(--blawby-primary)]' : 'tenant-display text-xl font-bold text-highlighted'">
             {{ feature.title }}
           </h3>
-          <TenantRichText v-if="feature.body" unstyled class="prose prose-sm max-w-none" :class="isBlawby ? 'mt-4 text-sm text-[var(--blawby-primary)]' : 'mt-3 text-sm text-muted'" :content="feature.body" />
-          <p v-else-if="feature.description" :class="isBlawby ? 'mt-4 text-sm text-[var(--blawby-primary)]' : 'mt-3 text-sm leading-relaxed text-muted'">{{ feature.description }}</p>
+          <TenantRichText v-if="feature.body" unstyled class="prose prose-sm max-w-none text-default" :class="isBlawby ? 'mt-4 text-sm' : 'mt-3 text-sm text-muted'" :content="feature.body" />
+          <p v-else-if="feature.description" class="text-default" :class="isBlawby ? 'mt-4 text-sm' : 'mt-3 text-sm leading-relaxed text-muted'">{{ feature.description }}</p>
         </article>
       </div>
       <div v-if="ctaLabel && ctaUrl" :class="isBlawby ? 'mt-10 flex justify-center' : 'mt-12 flex justify-center'">
@@ -120,8 +120,15 @@ const isBlawby = computed(() => organization.template?.slug === 'blawby' || orga
 
 const isArticles = computed(() => blockText(props.block.data.source) === 'organization_posts' || props.page.recipe === 'blog')
 
-const features = computed(() => blockRecords(props.block.data.items).map(item => {
-  const mediaRecords = blockRecords(item.media)
+const features = computed(() => blockRecords(props.block.data.items).map((item, index) => {
+  const blockMedia = props.block.media?.filter(asset =>
+    asset.slot === `items.${index}.image` ||
+    asset.slot === `items.${index}.media` ||
+    asset.slot === `items.${index}` ||
+    asset.slot === `features.${index}.image` ||
+    asset.slot === `features.${index}`
+  ) ?? []
+  const mediaRecords = blockMedia.length ? blockMedia : blockRecords(item.media)
   return {
     title: blockText(item.title),
     description: blockText(item.description),

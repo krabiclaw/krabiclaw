@@ -2147,8 +2147,9 @@ export const team_threads = sqliteTable("team_threads", {
 	id: text().primaryKey(),
 	organization_id: text().notNull().references(() => organization.id, { onDelete: "cascade" }),
 	stay_id: text(),
+	location_id: text(),
 	created_by_user_id: text().references(() => user.id, { onDelete: "set null" }),
-	// SHA-256 of the stay and the sorted member ids the conversation was started
+	// SHA-256 of the stay, location, and the sorted member ids the conversation was started
 	// with: starting the same conversation again, or twice at once, finds this one.
 	participants_key: text().notNull(),
 	// The newest message's time, or the creation time before the first message.
@@ -2156,10 +2157,12 @@ export const team_threads = sqliteTable("team_threads", {
 	created_at: text().default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`).notNull(),
 }, (table) => [
 	foreignKey({ columns: [table.organization_id, table.stay_id], foreignColumns: [stays.organization_id, stays.id], name: "team_threads_stay_scope_fk" }).onDelete("no action"),
+	foreignKey({ columns: [table.organization_id, table.location_id], foreignColumns: [business_locations.organization_id, business_locations.id], name: "team_threads_location_scope_fk" }).onDelete("cascade"),
 	unique("team_threads_org_id_unique").on(table.organization_id, table.id),
 	uniqueIndex("team_threads_participants_unique").on(table.organization_id, table.participants_key),
 	index("team_threads_org_activity_idx").on(table.organization_id, table.last_message_at),
 	index("team_threads_org_stay_idx").on(table.organization_id, table.stay_id),
+	index("team_threads_org_location_idx").on(table.organization_id, table.location_id),
 	check("team_threads_instants_check", sql`strftime('%Y-%m-%dT%H:%M:%fZ', last_message_at, '+0 days') IS last_message_at AND strftime('%Y-%m-%dT%H:%M:%fZ', created_at, '+0 days') IS created_at`),
 ]);
 

@@ -25,10 +25,10 @@
                 />
               </span>
               <span class="grow">
-                <span class="font-semibold" :class="index === selected ? 'text-highlighted' : 'text-muted'">{{ feature.title }}.</span>
+                <span class="font-semibold" :class="index === selected ? 'text-highlighted' : 'text-default'">{{ feature.title }}.</span>
                 {{ ' ' }}
-                <TenantRichText v-if="feature.body" :content="feature.body" unstyled class="inline" />
-                <span v-else>{{ feature.description }}</span>
+                <TenantRichText v-if="feature.body" :content="feature.body" unstyled class="inline text-default" />
+                <span v-else class="text-default">{{ feature.description }}</span>
               </span>
             </button>
           </div>

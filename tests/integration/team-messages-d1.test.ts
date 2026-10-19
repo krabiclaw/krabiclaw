@@ -89,6 +89,22 @@ test('members talk in team conversations, see unread state and receive recorded 
     assert.equal(about.created, true)
     assert.notEqual(about.id, direct.id)
 
+    // A location conversation needs a location the caller can see, and reuses the existing thread.
+    await assert.rejects(createTeamThread(env, db, cleaner, { memberIds: ['owner'], locationId: 'nonexistent-location' }), refused(404, 'LOCATION_NOT_FOUND', 'locationId'))
+    // cook is not yet assigned to cabin-site, so cook cannot start a location conversation for it
+    await assert.rejects(createTeamThread(env, db, cook, { memberIds: ['owner'], locationId: 'cabin-site' }), refused(404, 'LOCATION_NOT_FOUND', 'locationId'))
+    const floorChat = await createTeamThread(env, db, owner, { memberIds: ['cook'], locationId: 'cabin-site' })
+    assert.equal(floorChat.created, true)
+    assert.notEqual(floorChat.id, direct.id)
+    assert.notEqual(floorChat.id, about.id)
+
+    // Assigning cook to cabin-site gives cook access to reuse and view the location conversation
+    await db.prepare('UPDATE business_locations SET assigned_member_id = ? WHERE id = ?').bind('m-cook', 'cabin-site').run()
+    assert.deepEqual(await createTeamThread(env, db, cook, { memberIds: ['owner'], locationId: 'cabin-site' }), { id: floorChat.id, created: false })
+    const cookFloorView = (await listTeamThreads(env, db, cook, { locationId: 'cabin-site' })).find(thread => thread.id === floorChat.id)!
+    assert.equal(cookFloorView.locationId, 'cabin-site')
+    assert.deepEqual(cookFloorView.location, { id: 'cabin-site', title: 'Pine Cabin', slug: 'cabin', timezone: 'America/Denver' })
+
     // One message per key; the same key with different words is refused.
     await assert.rejects(sendTeamMessage(env, db, cleaner, direct.id, { body: '  ', photos: [], idempotencyKey: 'empty', senderName: 'cleaner' }), refused(422, 'EMPTY_MESSAGE', 'body'))
     await assert.rejects(sendTeamMessage(env, db, cleaner, direct.id, { body: 'hi', photos: [], idempotencyKey: undefined, senderName: 'cleaner' }), refused(400, 'MISSING_IDEMPOTENCY_KEY', 'idempotencyKey'))
@@ -137,7 +153,7 @@ test('members talk in team conversations, see unread state and receive recorded 
     // Someone without a seat cannot read or write it, and does not see it.
     await assert.rejects(listTeamMessages(db, cook, direct.id, {}), refused(404, 'TEAM_THREAD_NOT_FOUND', 'threadId'))
     await assert.rejects(sendTeamMessage(env, db, cook, direct.id, { body: 'hi', photos: [], idempotencyKey: 'cook', senderName: 'cook' }), refused(404, 'TEAM_THREAD_NOT_FOUND', 'threadId'))
-    assert.deepEqual((await listTeamThreads(env, db, cook)).map(thread => thread.id), [raced[0].id])
+    assert.deepEqual((await listTeamThreads(env, db, cook)).map(thread => thread.id).sort(), [floorChat.id, raced[0].id].sort())
 
     // Reassigning the home to another member clears it from the first.
     await Promise.all([

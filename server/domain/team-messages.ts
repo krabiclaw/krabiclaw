@@ -1,6 +1,6 @@
 import { HTTPError } from 'nitro'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
-import { assertRoleAllows, listAllOrganizationMembers, organizationAdapter, type MemberAccessPrincipal } from '~/server/utils/member-access'
+import { assertLocationAccess, assertRoleAllows, listAllOrganizationMembers, organizationAdapter, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { creationRequestHash, organizationEventQuery } from '~/server/utils/organization-events'
 import { publishDashboardInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { notifyTeamMessage } from '~/server/utils/notifications'
@@ -69,12 +69,21 @@ export interface TeamStaySummary {
   status: 'pending' | 'confirmed' | 'cancelled'
 }
 
+export interface TeamLocationSummary {
+  id: string
+  title: string
+  slug: string
+  timezone: string
+}
+
 export interface TeamThread {
   id: string
   createdAt: string
   lastMessageAt: string
   stayId: string | null
+  locationId: string | null
   stay: TeamStaySummary | null
+  location: TeamLocationSummary | null
   participants: TeamParticipant[]
   lastMessage: { id: string; senderId: string | null; body: string; attachmentCount: number; createdAt: string } | null
   unread: boolean
@@ -136,20 +145,34 @@ async function publishThreadChanged(env: GuestInboxPublicationEnv, organizationI
 }
 
 /** The caller's conversations, newest activity first. */
-export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: TeamAccess): Promise<TeamThread[]> {
-  const threads = await queryAll<{ id: string; stay_id: string | null; last_message_at: string; created_at: string; unread_count: number }>(db, `
-    SELECT t.id, t.stay_id, t.last_message_at, t.created_at,
+export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: TeamAccess, filter?: { locationId?: string; stayId?: string }): Promise<TeamThread[]> {
+  const whereClauses = [
+    't.organization_id = ?',
+    's.member_id = ?',
+  ]
+  const params: unknown[] = [access.userId, access.organizationId, access.memberId]
+  if (filter?.locationId) {
+    whereClauses.push('t.location_id = ?')
+    params.push(filter.locationId)
+  }
+  if (filter?.stayId) {
+    whereClauses.push('t.stay_id = ?')
+    params.push(filter.stayId)
+  }
+  const threads = await queryAll<{ id: string; stay_id: string | null; location_id: string | null; last_message_at: string; created_at: string; unread_count: number }>(db, `
+    SELECT t.id, t.stay_id, t.location_id, t.last_message_at, t.created_at,
            (SELECT COUNT(*) FROM team_messages m
              WHERE m.organization_id = t.organization_id AND m.thread_id = t.id AND m.sender_user_id IS NOT ?
                AND (s.last_read_at IS NULL OR m.created_at > s.last_read_at)) AS unread_count
       FROM team_threads t
       JOIN team_thread_members s ON s.organization_id = t.organization_id AND s.thread_id = t.id
-     WHERE t.organization_id = ? AND s.member_id = ?
-     ORDER BY t.last_message_at DESC, t.id DESC`, [access.userId, access.organizationId, access.memberId])
+     WHERE ${whereClauses.join(' AND ')}
+     ORDER BY t.last_message_at DESC, t.id DESC`, params)
   if (!threads.length) return []
   const ids = d1JsonStringSet(threads.map(thread => thread.id))
   const stayIds = threads.flatMap(thread => thread.stay_id ? [thread.stay_id] : [])
-  const [seats, lastMessages, stays, members] = await Promise.all([
+  const locationIds = threads.flatMap(thread => thread.location_id ? [thread.location_id] : [])
+  const [seats, lastMessages, stays, locations, members] = await Promise.all([
     queryAll<{ thread_id: string; member_id: string }>(db, `SELECT thread_id, member_id FROM team_thread_members
       WHERE organization_id = ? AND thread_id IN (SELECT value FROM json_each(?)) ORDER BY thread_id, created_at, member_id`, [access.organizationId, ids]),
     queryAll<{ id: string; thread_id: string; sender_user_id: string | null; body: string; created_at: string }>(db, `
@@ -161,6 +184,9 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
       SELECT s.id, s.product_id, p.name AS home_name, s.check_in_date, s.check_out_date, s.status FROM stays s
         JOIN products p ON p.organization_id = s.organization_id AND p.id = s.product_id
        WHERE s.organization_id = ? AND s.id IN (SELECT value FROM json_each(?))`, [access.organizationId, d1JsonStringSet(stayIds)]) : [],
+    locationIds.length ? queryAll<{ id: string; title: string; slug: string; timezone: string }>(db, `
+      SELECT id, title, slug, timezone FROM business_locations
+       WHERE organization_id = ? AND id IN (SELECT value FROM json_each(?))`, [access.organizationId, d1JsonStringSet(locationIds)]) : [],
     membersById(env, access.organizationId),
   ])
   const photos = await listMessagePhotos(db, 'team_message', lastMessages.map(message => message.id))
@@ -172,6 +198,8 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
     })
     const stayRow = thread.stay_id ? stays.find(stay => stay.id === thread.stay_id) : null
     if (thread.stay_id && !stayRow) throw new Error(`Team conversation ${thread.id} names stay ${thread.stay_id}, which was not found`)
+    const locationRow = thread.location_id ? locations.find(location => location.id === thread.location_id) : null
+    if (thread.location_id && !locationRow) throw new Error(`Team conversation ${thread.id} names location ${thread.location_id}, which was not found`)
     const last = lastMessages.find(message => message.thread_id === thread.id)
     const unreadCount = Number(thread.unread_count)
     return {
@@ -179,7 +207,9 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
       createdAt: thread.created_at,
       lastMessageAt: thread.last_message_at,
       stayId: thread.stay_id,
+      locationId: thread.location_id,
       stay: stayRow ? { id: stayRow.id, productId: stayRow.product_id, homeName: stayRow.home_name, checkInDate: stayRow.check_in_date, checkOutDate: stayRow.check_out_date, status: stayRow.status } : null,
+      location: locationRow ? { id: locationRow.id, title: locationRow.title, slug: locationRow.slug, timezone: locationRow.timezone } : null,
       participants,
       lastMessage: last ? { id: last.id, senderId: last.sender_user_id, body: last.body, attachmentCount: photos.get(last.id)?.length ?? 0, createdAt: last.created_at } : null,
       unread: unreadCount > 0,
@@ -189,17 +219,18 @@ export async function listTeamThreads(env: CloudflareEnv, db: DbClient, access: 
 }
 
 /**
- * Start a conversation with other members, optionally about one stay the
- * caller can see. A conversation started with exactly these members about the
- * same stay (or about none) is reused rather than duplicated, also when two
+ * Start a conversation with other members, optionally about one stay or location
+ * the caller can see. A conversation started with exactly these members about
+ * the same target (or about none) is reused rather than duplicated, also when two
  * starts race.
  */
-export async function createTeamThread(env: TeamEnv, db: DbClient, access: TeamAccess, input: { memberIds: unknown; stayId?: unknown }): Promise<{ id: string; created: boolean }> {
-  const { memberIds, stayId } = input
+export async function createTeamThread(env: TeamEnv, db: DbClient, access: TeamAccess, input: { memberIds: unknown; stayId?: unknown; locationId?: unknown }): Promise<{ id: string; created: boolean }> {
+  const { memberIds, stayId, locationId } = input
   if (!Array.isArray(memberIds) || memberIds.length === 0 || memberIds.length > MAX_THREAD_MEMBERS || memberIds.some(id => typeof id !== 'string' || !id)) {
     fail(422, 'INVALID_TEAM_MEMBERS', `memberIds must list 1 to ${MAX_THREAD_MEMBERS} member user ids`, 'memberIds')
   }
   if (stayId !== undefined && (typeof stayId !== 'string' || !stayId)) fail(422, 'INVALID_STAY_ID', 'stayId must name a stay', 'stayId')
+  if (locationId !== undefined && (typeof locationId !== 'string' || !locationId)) fail(422, 'INVALID_LOCATION_ID', 'locationId must name a location', 'locationId')
   const members = await listAllOrganizationMembers(await organizationAdapter(env), access.organizationId)
   const byUser = new Map(members.map(member => [member.user.id, member]))
   const unknown = (memberIds as string[]).filter(id => !byUser.has(id))
@@ -214,16 +245,28 @@ export async function createTeamThread(env: TeamEnv, db: DbClient, access: TeamA
       throw error
     }
   }
+  if (typeof locationId === 'string') {
+    try {
+      await assertLocationAccess(db, { ...access.principal, locationId })
+    } catch (error) {
+      if (HTTPError.isError(error) && error.status === 404) fail(404, 'LOCATION_NOT_FOUND', 'That location is not one you can see', 'locationId')
+      throw error
+    }
+  }
   const seatIds = [access.memberId, ...others.map(id => byUser.get(id)!.id)]
-  const participantsKey = await creationRequestHash({ stay_id: stayId ?? null, member_ids: [...seatIds].sort() })
+  const participantsKey = await creationRequestHash({
+    stay_id: stayId ?? null,
+    location_id: locationId ?? null,
+    member_ids: [...seatIds].sort(),
+  })
   const id = crypto.randomUUID()
   const now = new Date().toISOString()
   // The unique key makes a repeated or concurrent start find the first conversation.
   await executeBatch(db, [
     {
-      query: `INSERT INTO team_threads (id, organization_id, stay_id, created_by_user_id, participants_key, last_message_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)
+      query: `INSERT INTO team_threads (id, organization_id, stay_id, location_id, created_by_user_id, participants_key, last_message_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
               ON CONFLICT (organization_id, participants_key) DO NOTHING`,
-      params: [id, access.organizationId, stayId ?? null, access.userId, participantsKey, now, now],
+      params: [id, access.organizationId, stayId ?? null, locationId ?? null, access.userId, participantsKey, now, now],
     },
     ...seatIds.map(memberId => ({
       query: 'INSERT INTO team_thread_members (thread_id, organization_id, member_id, last_read_at, created_at) SELECT id, organization_id, ?, ?, ? FROM team_threads WHERE id = ?',
