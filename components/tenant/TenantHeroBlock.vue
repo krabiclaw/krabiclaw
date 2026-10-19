@@ -198,7 +198,7 @@
               {{ title }}
             </template>
           </h1>
-          <div v-if="isBlawby && descriptionParts.length" class="mt-6 text-left text-lg leading-8 text-[var(--blawby-primary)]">
+          <div v-if="isBlawby && descriptionParts.length" class="mt-6 text-left text-lg leading-8 text-default">
             <div v-for="(part, index) in descriptionParts" :key="index" class="flex items-start gap-3">
               <TenantRichText :content="part" unstyled class="blawby-page-hero-copy contents prose prose-lg max-w-none" />
             </div>
@@ -285,9 +285,10 @@ const overviewProse = computed(() => {
   return (absorbed ? (blockText(absorbed.data.markdown) || blockText(absorbed.data.body)) : null) || heroProse || description.value
 })
 const overviewActions = computed(() => {
+  const isServiceOffering = isBlawby.value && (props.page.recipe === 'service' || props.page.path.startsWith('/services/'))
   const direct = [
     { label: ctaLabel.value, url: ctaUrl.value },
-    { label: secondaryLabel.value, url: secondaryUrl.value },
+    ...(isServiceOffering ? [] : [{ label: secondaryLabel.value, url: secondaryUrl.value }]),
   ].filter((action): action is { label: string; url: string } => Boolean(action.label && action.url))
   if (direct.length) return direct
 
