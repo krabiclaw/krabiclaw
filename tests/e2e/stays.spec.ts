@@ -590,7 +590,7 @@ test('a host describes a place to stay through its focused editors and previews 
     { '@type': 'PropertyValue', name: 'listingFloor', value: 2 },
     { '@type': 'PropertyValue', name: 'yearBuilt', value: 2019 },
   ]))
-  await expect(preview.locator('article')).toContainText('Sleeps 6')
+  await expect(preview.locator('article')).toContainText('6 guests')
   await expect(preview.locator('article')).toContainText('Flexible cancellation policy')
   await expect(preview.locator('article')).toContainText('Firm Long Term: Full refund up to 30 days before check-in.')
   const publicRead = await request.get(new URL(previewURL.pathname.replace(/^\/stays\//, '/api/public/stays/'), previewURL).href)
@@ -1355,7 +1355,7 @@ test('a cleaner sees only assigned-home arrivals and departures on Today and Upc
     const savedGuestRules = pendingRulesPreview.locator('iframe[title="Listing preview"]').contentFrame()
     await expect(savedGuestRules.getByRole('heading', { name: 'Assigned Cabin', exact: true, level: 1 })).toBeVisible()
     await expect(savedGuestRules.getByText(houseRules, { exact: true })).toBeVisible()
-    await expect(savedGuestRules.locator('article')).toContainText('Sleeps 4')
+    await expect(savedGuestRules.locator('article')).toContainText('4 guests')
     await expect(savedGuestRules.getByText('No pets', { exact: true })).toHaveCount(0)
     await expect(savedGuestRules.getByText('Events allowed', { exact: true })).toHaveCount(0)
     await pendingRulesPreview.getByRole('button', { name: 'Close', exact: true }).click()

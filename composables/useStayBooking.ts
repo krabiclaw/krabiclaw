@@ -3,6 +3,7 @@ import type { PublicProduct } from '~/server/types/products'
 import type { PublicStayCalendar, PublicStayNight, StayQuote } from '~/server/domain/stays'
 import { formatMinorAmount } from '~/shared/prices'
 import { isCurrencyCode } from '~/shared/currencies'
+import { stayNightlyGroups } from '~/shared/stay-listing'
 import { addLocalDays, formatCalendarDate, isValidInstant } from '~/utils/timezone'
 import { isRecord, normalizeApiError, publicApiMutation, publicApiRequest } from '~/utils/api-clients'
 import type { ContactFormState } from '~/components/booking/BookingContactForm.vue'
@@ -177,13 +178,9 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     const guests = adults.value + children.value
     return `${guests} ${t(guests === 1 ? 'saya.experience_detail.guest' : 'saya.experience_detail.guests')}`
   })
-  /** The quote's nights grouped by price, the way a receipt reads: "$120 × 3 nights". */
-  const breakdown = computed(() => {
-    if (!quote.value) return []
-    const groups = new Map<number, number>()
-    for (const entry of quote.value.nightly) groups.set(entry.price_minor, (groups.get(entry.price_minor) ?? 0) + 1)
-    return [...groups].map(([price, count]) => ({ label: t('stay.nightly_line', { price: money(price), nights: nightsLabel(count) }), amount: money(price * count) }))
-  })
+  const breakdown = computed(() => quote.value
+    ? stayNightlyGroups(quote.value.nightly.map(entry => entry.price_minor)).map(({ price, nights }) => ({ label: t('stay.nightly_line', { price: money(price), nights: nightsLabel(nights) }), amount: money(price * nights) }))
+    : [])
 
   /**
    * Choose where the dialog opens. Opening is the modal checkbox's job: the

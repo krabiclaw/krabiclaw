@@ -6,195 +6,96 @@
     buyer confirms. Nothing is charged until Pay.
   -->
   <main class="platform-theme min-h-screen bg-default px-5 py-10 lg:py-14 text-default">
-    <div class="mx-auto max-w-6xl">
-      <!-- Back button and Page Title -->
-      <div class="mb-8 flex items-center gap-4">
+    <div class="mx-auto max-w-5xl">
+      <div class="mb-8 flex items-center gap-4 lg:-ml-14">
         <button
           type="button"
-          class="flex size-10 items-center justify-center rounded-full border border-default hover:bg-muted transition text-default"
+          class="flex size-10 items-center justify-center rounded-full hover:bg-muted transition text-default"
           :aria-label="t('payment.cancel')"
           @click="leave"
         >
           <PlatformIcon name="arrow-left" class="size-4" />
         </button>
-        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-highlighted">{{ t('payment.title') }}</h1>
+        <h1 class="text-2xl sm:text-[32px] font-semibold tracking-tight text-highlighted">{{ t('payment.title') }}</h1>
       </div>
 
       <USkeleton v-if="status === 'idle' || status === 'pending'" class="h-64 w-full rounded-2xl" />
       <UAlert v-else-if="loadError" color="error" :title="t('payment.unavailable')" :description="loadError" />
-      <div v-else-if="handoff" class="grid gap-10 lg:grid-cols-[1fr_400px] xl:grid-cols-[1fr_440px] items-start">
-        <!-- Left Column: Reservation / Appointment Details, Payment, and Agreement -->
-        <div class="space-y-8 min-w-0">
-          <!-- Reservation / Appointment details -->
-          <section class="space-y-4">
-            <h2 class="text-xl font-semibold text-highlighted">
-              {{ handoff.stay ? 'Your trip' : 'Your appointment' }}
-            </h2>
+      <!-- Airbnb's Confirm and pay: the method and the one button on the left, what is being bought on the right. -->
+      <div v-else-if="handoff" class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-16 items-start">
+        <aside class="lg:sticky lg:top-8 lg:order-2 min-w-0 rounded-2xl border border-default bg-default p-6 space-y-5" data-payment-summary>
+          <div class="flex gap-4 items-center">
+            <img v-if="handoff.image_url" :src="handoff.image_url" alt="" class="size-24 shrink-0 rounded-xl object-cover">
+            <h2 class="min-w-0 text-lg font-semibold leading-snug text-highlighted">{{ handoff.title }}</h2>
+          </div>
+          <p v-if="policySummary" class="text-sm text-default">{{ policySummary }}</p>
 
-            <div v-if="handoff.stay" class="space-y-4" data-payment-stay>
-              <div class="flex justify-between items-baseline">
-                <div>
-                  <h3 class="font-medium text-sm text-highlighted">Dates</h3>
-                  <p class="text-sm text-muted mt-0.5">
-                    {{ formatCalendarDate(handoff.stay.check_in_date, locale, { month: 'short', day: 'numeric' }) }} – {{ formatCalendarDate(handoff.stay.check_out_date, locale, { month: 'short', day: 'numeric', year: 'numeric' }) }}
-                  </p>
-                </div>
+          <div v-if="handoff.stay" class="border-t border-default pt-5" data-payment-stay>
+            <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.dates') }}</h3>
+            <p class="mt-1 text-sm text-default">{{ stayRange }}</p>
+          </div>
+          <div v-else-if="handoff.starts_at && handoff.ends_at && handoff.timezone" class="border-t border-default pt-5" data-payment-time>
+            <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.date') }}</h3>
+            <p class="mt-1 text-sm text-default">{{ formatTimestamp(handoff.starts_at, locale, handoff.timezone, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' }) }}</p>
+            <p class="text-sm text-default">{{ formatTimestamp(handoff.starts_at, locale, handoff.timezone, { hour: 'numeric', minute: '2-digit' }) }} – {{ formatTimestamp(handoff.ends_at, locale, handoff.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) }}</p>
+          </div>
+          <div v-if="guests" class="border-t border-default pt-5">
+            <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.guests') }}</h3>
+            <p class="mt-1 text-sm text-default">{{ guests }}</p>
+          </div>
+
+          <div class="border-t border-default pt-5 space-y-2">
+            <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.price_details') }}</h3>
+            <dl class="space-y-2 text-sm">
+              <div v-for="line in priceLines" :key="line.label" class="flex justify-between gap-4">
+                <dt class="text-default">{{ line.label }}</dt>
+                <dd class="tabular-nums text-default">{{ line.amount }}</dd>
               </div>
-              <div class="flex justify-between items-baseline">
-                <div>
-                  <h3 class="font-medium text-sm text-highlighted">Guests</h3>
-                  <p class="text-sm text-muted mt-0.5">
-                    {{ handoff.stay.adults + handoff.stay.children }} {{ (handoff.stay.adults + handoff.stay.children) === 1 ? 'guest' : 'guests' }}
-                  </p>
-                </div>
+              <div v-if="review && review.surcharge > 0" class="flex justify-between gap-4" data-payment-surcharge>
+                <dt class="text-default">{{ t('payment.surcharge') }}</dt>
+                <dd class="tabular-nums text-default">{{ paymentMoney(review.surcharge, review.currency) }}</dd>
               </div>
-            </div>
+            </dl>
+          </div>
 
-            <div v-else class="space-y-4">
-              <div class="flex justify-between items-baseline">
-                <div>
-                  <h3 class="font-medium text-sm text-highlighted">{{ handoff.title }}</h3>
-                  <p class="text-sm text-muted mt-0.5">
-                    {{ handoff.quantity > 1 ? `Quantity: ${handoff.quantity}` : 'Confirmed booking' }}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </section>
+          <div class="flex justify-between items-baseline border-t border-default pt-5">
+            <span class="font-semibold text-highlighted">{{ t('payment.total') }} <span class="underline">{{ handoff.currency }}</span></span>
+            <span class="font-semibold text-highlighted tabular-nums" data-payment-total>
+              {{ paymentMoney(review ? review.total : handoff.subtotal, handoff.currency) }}
+            </span>
+          </div>
+        </aside>
 
-          <hr class="border-default" />
-
-          <!-- Payment Section -->
-          <section class="space-y-4">
-            <div class="flex items-center justify-between">
-              <h2 class="text-xl font-semibold text-highlighted">Pay with</h2>
-              <span class="inline-flex items-center gap-1.5 text-xs text-muted">
-                <PlatformIcon name="shield-check" class="size-4 text-emerald-500" />
-                Guaranteed secure
-              </span>
-            </div>
-
-            <UAlert v-if="handoff.state === 'paid'" color="success" :title="t('payment.already_paid')" />
-            <UAlert v-else-if="handoff.state !== 'open'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
-            <div v-else class="space-y-4">
-              <!-- Stripe's form stays mounted; a reviewed method is shown read-only until the buyer changes it. -->
-              <div v-show="!review" ref="mount" class="min-h-40 rounded-xl border border-default p-4 bg-elevated" />
-
-              <div v-if="review" class="rounded-xl border border-default bg-elevated p-4 flex items-center justify-between">
+        <div class="lg:order-1 min-w-0 space-y-6">
+          <UAlert v-if="handoff.state === 'paid'" color="success" :title="t('payment.already_paid')" />
+          <UAlert v-else-if="handoff.state !== 'open'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
+          <template v-else>
+            <section class="rounded-2xl border border-default p-5 space-y-4">
+              <h2 class="text-lg font-semibold text-highlighted">{{ t('payment.pay_with') }}</h2>
+              <!-- Stripe's form stays mounted; a method that carries a surcharge is shown read-only until the buyer pays or changes it. -->
+              <div v-show="!review" ref="mount" class="min-h-40" />
+              <div v-if="review" class="flex items-center justify-between gap-4">
                 <div class="space-y-1" data-payment-method>
                   <p class="font-medium text-sm text-highlighted">{{ methodLabel }}</p>
-                  <p v-if="handoff.surcharge_basis_points !== null" class="text-xs text-muted">
-                    {{ review.surcharge > 0 ? t('payment.surcharge_applies') : t('payment.no_surcharge') }}
-                  </p>
+                  <p class="text-xs text-muted">{{ t('payment.surcharge_applies') }}</p>
                 </div>
-                <UButton variant="outline" size="sm" :label="t('payment.change_method')" :disabled="working" @click="changeMethod" />
+                <UButton color="neutral" variant="soft" size="sm" :label="t('payment.change_method')" :disabled="working" @click="changeMethod" />
               </div>
+            </section>
 
-              <UAlert v-if="actionError" color="error" :description="actionError" />
-            </div>
-          </section>
+            <UAlert v-if="actionError" color="error" :description="actionError" />
 
-          <hr class="border-default" />
-
-          <!-- Ground rules / Notes -->
-          <section class="space-y-3">
-            <h2 class="text-xl font-semibold text-highlighted">
-              {{ handoff.stay ? 'Ground rules' : 'Before your session' }}
-            </h2>
-            <p v-if="handoff.stay" class="text-sm text-muted leading-relaxed">
-              We ask every guest to remember a few simple things about what makes a great guest:
-              Follow the house rules, treat your Host's home like your own, and communicate with your host if issues arise.
-            </p>
-            <p v-else class="text-sm text-muted leading-relaxed">
-              Please ensure your contact information is accurate and prepare any questions or documents for your appointment.
-            </p>
-          </section>
-
-          <hr class="border-default" />
-
-          <!-- Policies and Primary Confirm CTA -->
-          <section class="space-y-4 pt-2">
-            <p class="text-xs text-muted leading-relaxed">
-              By selecting the button below, I agree to the Host's House Rules, Ground Rules for guests, and that KrabiClaw can charge my payment method for the amount stated.
-            </p>
-
-            <div v-if="handoff.state === 'open'" class="pt-2">
-              <UButton
-                v-if="!review"
-                size="xl"
-                block
-                :label="t('payment.review')"
-                :loading="working"
-                :disabled="!ready"
-                class="font-semibold py-3.5 text-base"
-                @click="reviewMethod"
-              />
-              <UButton
-                v-else
-                size="xl"
-                block
-                :label="t('payment.pay', { amount: paymentMoney(review.total, review.currency) })"
-                :loading="working"
-                class="font-semibold py-3.5 text-base"
-                @click="pay"
-              />
-            </div>
-            <div class="text-center">
-              <button type="button" class="text-xs text-muted hover:text-highlighted underline" :disabled="working" @click="leave">
-                {{ t('payment.cancel') }}
-              </button>
-            </div>
-          </section>
-        </div>
-
-        <!-- Right Column: Sticky Reservation Summary Card -->
-        <div class="lg:sticky lg:top-8 min-w-0">
-          <div class="rounded-2xl border border-default bg-elevated p-6 shadow-sm space-y-5">
-            <!-- Property / Service Header -->
-            <div class="flex gap-4 items-center">
-              <div class="size-20 shrink-0 rounded-xl bg-muted border border-default flex items-center justify-center overflow-hidden">
-                <TenantIcon v-if="handoff.stay" name="home" class="size-8 text-dimmed" />
-                <PlatformIcon v-else name="calendar" class="size-8 text-dimmed" />
-              </div>
-              <div class="min-w-0 flex-1">
-                <p class="text-xs text-muted font-medium uppercase tracking-wider">{{ handoff.stay ? 'Place to stay' : 'Appointment' }}</p>
-                <h3 class="font-semibold text-highlighted text-base truncate mt-0.5">{{ handoff.title }}</h3>
-                <p v-if="handoff.quantity > 1" class="text-xs text-muted mt-0.5">Quantity: {{ handoff.quantity }}</p>
-              </div>
-            </div>
-
-            <hr class="border-default" />
-
-            <!-- Price Details -->
-            <div class="space-y-3">
-              <h4 class="font-semibold text-sm text-highlighted">Price details</h4>
-              <dl class="space-y-2 text-sm">
-                <div class="flex justify-between items-baseline">
-                  <dt class="text-muted">
-                    {{ handoff.stay ? `${handoff.stay.nights} nights` : handoff.title }}
-                  </dt>
-                  <dd class="tabular-nums text-highlighted font-medium">
-                    {{ paymentMoney(handoff.subtotal, handoff.currency) }}
-                  </dd>
-                </div>
-                <div v-if="review && review.surcharge > 0" class="flex justify-between items-baseline" data-payment-surcharge>
-                  <dt class="text-muted">{{ t('payment.surcharge') }}</dt>
-                  <dd class="tabular-nums text-highlighted font-medium">{{ paymentMoney(review.surcharge, review.currency) }}</dd>
-                </div>
-              </dl>
-            </div>
-
-            <hr class="border-default" />
-
-            <!-- Total -->
-            <div class="flex justify-between items-baseline">
-              <span class="font-semibold text-base text-highlighted">{{ t('payment.total') }} ({{ handoff.currency }})</span>
-              <span class="font-bold text-lg text-highlighted tabular-nums" data-payment-total>
-                {{ paymentMoney(review ? review.total : handoff.subtotal, handoff.currency) }}
-              </span>
-            </div>
-            <p class="text-xs text-muted">Charged in full at confirmation.</p>
-          </div>
+            <p class="text-xs text-muted leading-relaxed">{{ t('payment.agreement') }}</p>
+            <UButton
+              size="xl"
+              block
+              :label="review ? t('payment.pay', { amount: paymentMoney(review.total, review.currency) }) : t('payment.confirm')"
+              :loading="working"
+              :disabled="!review && !ready"
+              class="font-semibold py-3.5 text-base"
+              @click="review ? pay() : confirmAndPay()"
+            />
+          </template>
         </div>
       </div>
     </div>
@@ -204,7 +105,8 @@
 <script setup lang="ts">
 import { loadStripe, type Stripe, type StripeElements, type StripePaymentElement } from '@stripe/stripe-js'
 import { paymentMoney } from '~/shared/payment-display'
-import { formatCalendarDate } from '~/utils/timezone'
+import { formatCalendarDate, formatTimestamp } from '~/utils/timezone'
+import { STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, stayNightlyGroups } from '~/shared/stay-listing'
 import { isRecord, publicApiMutation, publicApiRequest } from '~/utils/api-clients'
 import type { paymentHandoff, reviewPayment, confirmPayment } from '~/server/domain/payments/intent'
 
@@ -246,6 +148,36 @@ const methodLabel = computed(() => {
   return method.brand && method.last4 ? `${method.brand} •••• ${method.last4}` : method.type
 })
 
+const money = (minor: number) => paymentMoney(minor, handoff.value!.currency)
+const nightsLabel = (count: number) => count === 1 ? t('stay.one_night') : t('stay.nights_count', { count })
+const guestsLabel = (count: number) => `${count} ${t(count === 1 ? 'saya.experience_detail.guest' : 'saya.experience_detail.guests')}`
+const stayRange = computed(() => {
+  const stay = handoff.value?.stay
+  return stay ? `${formatCalendarDate(stay.check_in_date, locale.value, { month: 'short', day: 'numeric' })} – ${formatCalendarDate(stay.check_out_date, locale.value, { month: 'short', day: 'numeric', year: 'numeric' })}` : ''
+})
+// A party is shown where it was chosen: a stay's guests, an experience's places.
+const guests = computed(() => {
+  const value = handoff.value
+  if (!value) return ''
+  if (value.stay) return guestsLabel(value.stay.adults + value.stay.children)
+  return value.kind === 'experience' || value.kind === 'reservation' ? guestsLabel(value.quantity) : ''
+})
+const policySummary = computed(() => {
+  const policy = handoff.value?.stay?.cancellation_policy
+  if (!policy) return ''
+  return policy.startsWith('long_term_')
+    ? STAY_LONG_TERM_CANCELLATION_POLICIES[policy.slice('long_term_'.length) as keyof typeof STAY_LONG_TERM_CANCELLATION_POLICIES].summary
+    : STAY_CANCELLATION_POLICIES[policy as keyof typeof STAY_CANCELLATION_POLICIES].summary
+})
+/** How the total adds up, the way Airbnb's receipt reads: "$120.00 × 2 nights", "$95.00 × 1 guest". */
+const priceLines = computed(() => {
+  const value = handoff.value
+  if (!value) return []
+  if (value.stay) return stayNightlyGroups(value.stay.nightly).map(({ price, nights }) => ({ label: t('stay.nightly_line', { price: money(price), nights: nightsLabel(nights) }), amount: money(price * nights) }))
+  if (value.quantity === 1) return [{ label: value.title, amount: money(value.subtotal) }]
+  return [{ label: t('payment.unit_line', { price: money(value.unit_amount), count: guests.value || value.quantity }), amount: money(value.subtotal) }]
+})
+
 // Stripe's Payment Element on the business's own account, in deferred mode: the
 // method is created first so the server can price it before anything is confirmed.
 // It mounts once both the open handoff and its container exist: the container
@@ -273,6 +205,16 @@ watch([handoff, mount], async ([value, container]) => {
     actionError.value = getErrorMessage(cause, t('payment.unavailable'))
   }
 }, { immediate: true })
+
+/**
+ * Airbnb's one button. The method is priced first; with no surcharge the
+ * reviewed total is the one on screen, so it is paid at once. A surcharge is
+ * shown, and the buyer pays the new total with a second press.
+ */
+async function confirmAndPay() {
+  await reviewMethod()
+  if (review.value && review.value.surcharge === 0) await pay()
+}
 
 async function reviewMethod() {
   if (working.value || !stripe || !elements) return

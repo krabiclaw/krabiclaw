@@ -277,7 +277,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     const providerSection=page.locator('section[aria-label="Who you’ll meet"]')
     await waitForNuxtHydration(page)
     const failedProvider=page.waitForResponse(response=>new URL(response.url()).pathname===`/api/public/products/${products[0]!.slug}/provider`)
-    await page.getByRole('button',{name:'Select a time',exact:true}).first().click()
+    await page.getByRole('button',{name:/^Select a time /}).first().click()
     expect((await failedProvider).status()).toBe(503)
     await page.getByRole('button',{name:'Close booking form',exact:true}).click()
     await expect(providerSection.getByText('Profile could not be loaded',{exact:true})).toBeVisible()

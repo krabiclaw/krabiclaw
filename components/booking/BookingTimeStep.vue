@@ -76,29 +76,24 @@
       <p v-if="dates.length > 0 && days.length === 0" class="py-6 text-sm text-muted">{{ t('saya.experience_detail.no_availability', { count: dates.length }) }}</p>
       <section v-for="day in days" :key="day.key" :ref="(el) => setDayRef(el, day.key)" class="pt-4 first:pt-0">
         <h3 class="saya-display mb-3 text-lg">{{ day.label }}</h3>
-        <div class="flex flex-col gap-2">
+        <!-- Airbnb's times: a grid of pills, the chosen one filled. -->
+        <div class="grid grid-cols-3 gap-2 sm:grid-cols-4">
           <button
             v-for="slot in day.slots"
             :key="slot.session_id ?? slot.time_slot"
             type="button"
             :disabled="slot.disabled"
             :aria-label="`${formatTime(slot.time_slot, locale)} ${slot.availabilityLabel}`"
-            class="flex w-full items-center justify-between gap-4 rounded-lg border border-default px-4 py-3.5 text-left transition-colors"
+            :aria-pressed="isSelected(day, slot)"
+            :title="slot.availabilityLabel"
+            class="flex min-h-11 flex-col items-center justify-center rounded-lg border px-2 py-2 text-sm font-medium transition-colors"
             :class="[
-              slot.disabled ? 'cursor-default bg-muted' : 'cursor-pointer hover:border-inverted',
-              (slot.session_id ? modelValue?.sessionId === slot.session_id : modelValue?.day === day.key && modelValue?.time === slot.time_slot) ? 'border-primary ring-1 ring-inset ring-primary' : '',
+              isSelected(day, slot) ? 'border-inverted bg-inverted text-inverted' : slot.disabled ? 'cursor-default border-default text-muted line-through' : 'cursor-pointer border-default text-default hover:border-inverted',
             ]"
             @click="selectSlot(day, slot)"
           >
-            <span class="font-medium text-default" :class="slot.isClosedOrFull ? 'text-muted line-through' : ''">
-              {{ formatTime(slot.time_slot, locale) }}
-            </span>
-            <span
-              class="text-sm"
-              :class="slot.isClosedOrFull ? 'text-muted' : slot.scarce ? 'font-medium text-primary' : 'text-muted'"
-            >
-              {{ slot.availabilityLabel }}
-            </span>
+            {{ formatTime(slot.time_slot, locale) }}
+            <span v-if="slot.scarce && !slot.isClosedOrFull" class="text-[11px] font-normal" :class="isSelected(day, slot) ? undefined : 'text-primary'">{{ slot.availabilityLabel }}</span>
           </button>
         </div>
       </section>
@@ -238,6 +233,11 @@ const selectedSummary = computed(() => {
   const dayPart = props.modelValue.label.split(',')[0]
   return `${dayPart} · ${formatTime(props.modelValue.time, locale.value)}`
 })
+
+function isSelected(day: { key: string }, slot: { time_slot: string; session_id?: string }): boolean {
+  const value = props.modelValue
+  return Boolean(value && (slot.session_id ? value.sessionId === slot.session_id : value.day === day.key && value.time === slot.time_slot))
+}
 
 function selectSlot(day: { key: string; label: string }, slot: { time_slot: string; session_id?: string; disabled: boolean }) {
   if (slot.disabled) return

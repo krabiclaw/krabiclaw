@@ -220,13 +220,7 @@
                     {{ product.stay ? t('stay.price_per_night', { price: priceLabel(product, group.location_id) }) : priceLabel(product, group.location_id) }}
                   </span>
                   <template v-if="product.stay">
-                    <span class="flex items-center gap-1">
-                      <TenantIcon name="user-group" class="size-3.5" />
-                      {{ t('stay.sleeps', { count: product.stay.max_guests }) }}
-                    </span>
-                    <span v-if="product.stay.bedrooms !== null">{{ t('stay.bedrooms', { count: product.stay.bedrooms }) }}</span>
-                    <span v-if="product.stay.beds !== null">{{ t('stay.beds', { count: product.stay.beds }) }}</span>
-                    <span v-if="product.stay.bathrooms !== null">{{ t('stay.bathrooms', { count: product.stay.bathrooms }) }}</span>
+                    <span v-for="spec in staySpecLabels(product.stay, t)" :key="spec">{{ spec }}</span>
                   </template>
                   <span v-if="product.booking?.duration_minutes" class="flex items-center gap-1">
                     <TenantIcon name="clock" class="size-3.5" />
@@ -258,7 +252,7 @@ import type { CurrencyCode } from '~/shared/currencies'
 import { formatProductMoney, formatProductPriceRange, summarizeProductPrices } from '~/utils/product-money'
 import { minorAmountToMajor, type Price } from '~/shared/prices'
 import { PRICING_NOTE_HANDLE } from '~/shared/product-details'
-import { groupProductsByCollection, productCtaKey, productLocationCollectionPath } from '~/utils/product-presentation'
+import { groupProductsByCollection, productCtaKey, productLocationCollectionPath, staySpecLabels } from '~/utils/product-presentation'
 import { addressPlaceName, type PostalAddress } from '~/utils/postal-address'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 import { extractDietarySchemaUrls } from '~/utils/product-seo'
