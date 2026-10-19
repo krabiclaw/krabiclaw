@@ -28,10 +28,10 @@ definePageMeta({ layout: 'dashboard' })
 useSeoMeta({ title: 'SEO and marketing strategy | KrabiClaw', robots: 'noindex, nofollow' })
 
 const route = useRoute()
-const level = useRouteLevel()
 const dashboardApi = useDashboardApi()
 const { formatExactDateTime } = useHumanTime()
-const parent = computed(() => level.to.value ?? `/dashboard/${String(route.params.orgSlug)}/payments`)
+// Sibling leaves under the same Payments column.
+const parent = computed(() => `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/payments`)
 const [{ servicesResource, services }, { billing, refreshBilling }] = await Promise.all([useOrganizationServices(), useOrganizationBilling()])
 const on = computed(() => !!services.value?.strategy)
 const needsPlan = computed(() => !on.value && billing.value?.plan === STARTER_PLAN_ID && !billing.value.stripeSubscriptionId)

@@ -33,10 +33,10 @@ definePageMeta({ layout: 'dashboard' })
 useSeoMeta({ title: 'Managed ads | KrabiClaw', robots: 'noindex, nofollow' })
 
 const route = useRoute()
-const level = useRouteLevel()
 const dashboardApi = useDashboardApi()
 const { formatExactDateTime } = useHumanTime()
-const parent = computed(() => level.to.value ?? `/dashboard/${String(route.params.orgSlug)}/payments`)
+// Sibling leaves under the same Payments column.
+const parent = computed(() => `/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/payments`)
 const [{ servicesResource, services, refreshServices, servicesError }, { billing }, { usage }] = await Promise.all([useOrganizationServices(), useOrganizationBilling(), usePaymentsUsage()])
 const on = computed(() => !!services.value?.managed_ads)
 const busy = ref(false)
