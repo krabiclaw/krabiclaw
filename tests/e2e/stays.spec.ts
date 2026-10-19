@@ -602,7 +602,9 @@ test('a host describes a place to stay through its focused editors and previews 
     cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
   } })
   for (const key of ['pets_allowed', 'events_allowed', 'smoking_allowed', 'quiet_hours', 'commercial_photography_allowed', 'quiet_hours_start', 'quiet_hours_end', 'house_rules']) expect(publicProduct.details).not.toHaveProperty(key)
-  await expect(preview.getByRole('heading', { name: 'House rules', exact: true })).toHaveCount(0)
+  // With no rules set, House rules holds only the home's own times and party, as Airbnb's does.
+  const houseRules = preview.getByRole('heading', { name: 'House rules', exact: true }).locator('xpath=..').getByRole('listitem')
+  await expect(houseRules).toHaveText(['Check-in after 4:00 PM', 'Checkout before 10:00 AM', '6 guests maximum'])
   await page.screenshot({ path: testInfo.outputPath('stay-preview-desktop.png') })
   await previewModal.getByRole('tab', { name: 'Mobile view', exact: true }).click()
   await expect(page).toHaveURL(url => url.searchParams.get('previewViewport') === 'mobile')
