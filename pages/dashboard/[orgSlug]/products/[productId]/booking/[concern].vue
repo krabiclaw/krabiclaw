@@ -23,7 +23,18 @@
         <UFormField name="assigned_member_id" label="Host">
           <p v-if="membersError" role="alert" class="mb-3 text-error">Team members could not be loaded.</p>
           <p v-else-if="membersStatus !== 'success'" class="mb-3 text-muted">Loading team members…</p>
-          <URadioGroup v-else v-model="host" :items="hostOptions" variant="card" class="w-full" />
+          <URadioGroup v-else v-model="host" :items="hostOptions" variant="card" indicator="end" color="neutral" class="w-full" :ui="{ item: 'items-center', wrapper: 'flex items-center gap-4' }">
+            <template #label="{ item }">
+              <span class="flex items-center gap-4">
+                <UAvatar :src="item.avatar ?? undefined" :alt="item.label" :icon="item.team ? 'i-lucide-users' : undefined" size="xl" />
+                <span>
+                  <span class="block font-medium text-highlighted">{{ item.label }}</span>
+                  <span class="block text-sm font-normal" :class="item.published ? 'text-muted' : 'text-warning'">{{ item.state }}</span>
+                </span>
+              </span>
+            </template>
+          </URadioGroup>
+          <UButton v-if="unpublishedHost" class="mt-4" color="neutral" variant="outline" :to="`/dashboard/${route.params.orgSlug}/team/${unpublishedHost.id}/profile`">Edit {{ unpublishedHost.name }}'s profile</UButton>
         </UFormField>
         <SettingRow v-model="hostHours" :disabled="!host || p.form.held_online" label="Book the host's working hours" description="Guests choose from the host's own hours instead of the weekly schedule." />
       </div>
@@ -82,9 +93,12 @@ const hostHours = computed({
 })
 const profileState = (published: boolean) => published ? 'Profile published' : 'Profile not published: guests can\'t see it yet'
 // Offered only once the list has loaded; see the template's loading and error states.
+// A chosen member guests can't see yet: their profile is one step away.
+const unpublishedHost = computed(() => members.value?.members.find(member => `member:${member.id}` === host.value && member.scheduling?.public_approved !== 1) ?? null)
+// Each host as guests will see them: the published photo, else the account picture.
 const hostOptions = computed(() => members.value ? [
-  ...members.value.members.map(member => ({ label: member.name, description: profileState(member.scheduling?.public_approved === 1), value: `member:${member.id}` })),
-  ...members.value.teams.map(team => ({ label: team.name, description: 'A team: guests see every member with a published profile', value: `team:${team.id}` })),
+  ...members.value.members.map(member => ({ label: member.name, avatar: member.scheduling?.public_photo_url || member.image, published: member.scheduling?.public_approved === 1, team: false, state: profileState(member.scheduling?.public_approved === 1), value: `member:${member.id}` })),
+  ...members.value.teams.map(team => ({ label: team.name, avatar: null, published: true, team: true, state: `${team.members.length} ${team.members.length === 1 ? 'member' : 'members'}: guests see each one with a published profile`, value: `team:${team.id}` })),
 ] : [])
 const setting = computed(() => settings[concern.value as keyof typeof settings] ?? { title: '', lead: '' })
 watchEffect(() => {
