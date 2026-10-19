@@ -86,7 +86,7 @@
           <p v-if="subtitle" class="kc-parallax-intro__subtitle">{{ subtitle }}</p>
 
           <!-- One action: sign up when signed out, the dashboard when signed in. -->
-          <div v-if="ctaLabel && ctaUrl" ref="heroActions" class="kc-parallax-intro__actions" :inert="heroActionCovered" :style="{ pointerEvents: heroActionCovered ? 'none' : undefined }">
+          <div v-if="ctaLabel && ctaUrl" class="kc-parallax-intro__actions">
             <PlatformAccountCta :label="ctaLabel" :to="ctaUrl" size="xl" />
           </div>
         </div>
@@ -236,73 +236,6 @@ const transitionImage = computed(() => {
 })
 
 const homeHero = ref<HTMLElement | null>(null)
-const heroActions = ref<HTMLElement | null>(null)
-const heroActionCovered = ref(true)
-const heroAlphaMasks = new Map<string, { width: number, height: number, pixels: Uint8ClampedArray } | null>()
-
-async function loadHeroAlphaMasks() {
-  if (!homeHero.value) return
-  const images = Array.from(homeHero.value.querySelectorAll<HTMLImageElement>('picture img')).slice(1)
-  await Promise.all(images.map(async (image) => {
-    let source = image.currentSrc
-    if (source && heroAlphaMasks.has(source)) return
-    try {
-      await image.decode()
-      source = image.currentSrc
-      if (heroAlphaMasks.has(source)) return
-      // Reserve this source before fetching so resize cannot fetch it twice.
-      heroAlphaMasks.set(source, null)
-      const response = await fetch(source)
-      if (!response.ok) throw new Error('Artwork unavailable')
-      const bitmap = await createImageBitmap(await response.blob())
-      const canvas = document.createElement('canvas')
-      canvas.width = bitmap.width
-      canvas.height = bitmap.height
-      const context = canvas.getContext('2d', { willReadFrequently: true })!
-      context.drawImage(bitmap, 0, 0)
-      heroAlphaMasks.set(source, { width: canvas.width, height: canvas.height, pixels: context.getImageData(0, 0, canvas.width, canvas.height).data })
-      bitmap.close()
-    }
-    catch {
-      // Unknown pixels keep the CTA inert; a later resize can reload them.
-      heroAlphaMasks.delete(source)
-    }
-  }))
-  updateHeroActionCoverage()
-}
-
-function updateHeroActionCoverage() {
-  const hero = homeHero.value
-  const action = heroActions.value
-  if (!hero || !action) return
-  const target = action.getBoundingClientRect()
-  const clip = hero.getBoundingClientRect()
-  let covered = target.top < clip.top || target.bottom > clip.bottom
-  for (const image of Array.from(hero.querySelectorAll<HTMLImageElement>('picture img')).slice(1)) {
-    const mask = heroAlphaMasks.get(image.currentSrc)
-    // Keep interaction disabled until each covering plane's pixels are known.
-    if (!mask) {
-      covered = true
-      continue
-    }
-    const bounds = image.getBoundingClientRect()
-    const foreground = image.parentElement?.classList.contains('kc-parallax-hero__foreground')
-    const scale = (foreground ? Math.max : Math.min)(bounds.width / mask.width, bounds.height / mask.height)
-    const left = bounds.left + (bounds.width - mask.width * scale) / 2
-    for (let y = Math.max(target.top, bounds.top); !covered && y < Math.min(target.bottom, bounds.bottom); y++) {
-      const sourceY = Math.floor((y - bounds.top) / scale)
-      if (sourceY < 0 || sourceY >= mask.height) continue
-      for (let x = target.left; x < target.right; x++) {
-        const sourceX = Math.floor((x - left) / scale)
-        if (sourceX >= 0 && sourceX < mask.width && mask.pixels[(sourceY * mask.width + sourceX) * 4 + 3]! > 0) {
-          covered = true
-          break
-        }
-      }
-    }
-  }
-  heroActionCovered.value = covered
-}
 let homeHeroFrame: number | null = null
 let homeHeroScrollListener: (() => void) | null = null
 
@@ -311,7 +244,6 @@ function renderHomeParallax() {
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     homeHero.value.style.setProperty('--kc-parallax-offset', String(Math.max(0, window.scrollY)) + 'px')
   }
-  updateHeroActionCoverage()
 }
 
 function scheduleHomeParallax() {
@@ -324,20 +256,14 @@ function scheduleHomeParallax() {
 
 onMounted(() => {
   if (props.page.path !== '/') return
+  // When CSS scroll-driven animations are supported, the compositor handles parallax natively without JS scroll listeners.
+  if (typeof CSS !== 'undefined' && CSS.supports && CSS.supports('(animation-timeline: view()) and (animation-range: entry)')) {
+    return
+  }
   renderHomeParallax()
   homeHeroScrollListener = scheduleHomeParallax
   window.addEventListener('scroll', homeHeroScrollListener, { passive: true })
 })
-
-onMounted(() => {
-  if (props.page.path !== '/') return
-  void loadHeroAlphaMasks()
-  window.addEventListener('resize', refreshHeroActionCoverage)
-})
-
-function refreshHeroActionCoverage() {
-  void loadHeroAlphaMasks()
-}
 
 const ROTATION_INTERVAL_MS = 2600
 const rotatingIndex = ref(0)
@@ -351,7 +277,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', refreshHeroActionCoverage)
   if (rotationTimer !== null) clearInterval(rotationTimer)
   if (homeHeroScrollListener) window.removeEventListener('scroll', homeHeroScrollListener)
   if (homeHeroFrame !== null) window.cancelAnimationFrame(homeHeroFrame)
@@ -648,15 +573,74 @@ const gradientClass = computed(() => GRADIENT_CLASS[props.page.path] ?? GRADIENT
   }
 }
 
+@keyframes kc-parallax-layer-exit {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(0, calc(100% * var(--kc-layer-compensation)), 0);
+  }
+}
+
+@keyframes kc-parallax-mark-exit {
+  from {
+    transform: translate3d(-50%, 0, 0);
+  }
+  to {
+    transform: translate3d(-50%, calc(1600px / var(--kc-scene-ratio)), 0);
+  }
+}
+
+@keyframes kc-hero-copy-fade {
+  0%, 55% {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  80%, 100% {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+@supports ((animation-timeline: view()) and (animation-range: entry)) {
+  .kc-parallax-hero {
+    view-timeline: --kc-hero-timeline block;
+  }
+
+  .kc-parallax-hero__layer {
+    animation: kc-parallax-layer-exit linear both;
+    animation-timeline: --kc-hero-timeline;
+    animation-range: exit 0% exit 100%;
+  }
+
+  .kc-parallax-hero__mark {
+    animation: kc-parallax-mark-exit linear both;
+    animation-timeline: --kc-hero-timeline;
+    animation-range: exit 0% exit 100%;
+  }
+
+  .kc-parallax-hero__copy {
+    animation: kc-hero-copy-fade linear both;
+    animation-timeline: --kc-hero-timeline;
+    animation-range: exit 0% exit 100%;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .kc-parallax-hero__layer {
+    animation: none;
     transform: none;
     will-change: auto;
   }
 
   .kc-parallax-hero__mark {
+    animation: none;
     transform: translateX(-50%);
     will-change: auto;
+  }
+
+  .kc-parallax-hero__copy {
+    animation: none;
   }
 }
 .kc-parallax-hero__foreground::after {
