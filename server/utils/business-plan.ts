@@ -5,7 +5,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { getOrganizationBillingStatus, getStripe } from '~/server/utils/billing'
 import { createStripePlanLoader } from '~/server/utils/better-auth-stripe'
 import { isCurrentBusinessPrice, planSubscriptionItems, recurringPriceAmount } from '~/server/utils/stripe-catalog'
-import { BUSINESS_PLAN_ID, INCLUDED_LOCATIONS, INCLUDED_RENTAL_UNITS } from '~/shared/billing-model'
+import { BUSINESS_PLAN_ID, coveredLocations, INCLUDED_LOCATIONS, INCLUDED_RENTAL_UNITS } from '~/shared/billing-model'
 
 /**
  * Moving an existing subscription to Business, or changing what a Business
@@ -87,16 +87,19 @@ async function planChange(env: CloudflareEnv, db: DbClient, organizationId: stri
     rentalUnits = wholeAtLeast(request.rentalUnits, Math.max(INCLUDED_RENTAL_UNITS, status.businessUsage.rentalUnits), 'rental_units', 'rental units')
   }
   const additional = rentalUnits === null ? 0 : rentalUnits - INCLUDED_RENTAL_UNITS
-  if (price === current.plan.price.id && locations === current.plan.quantity && additional === (current.rentalUnits?.quantity ?? 0)) {
+  // A quantity below the included locations bills the same flat tier, so a plan
+  // item at 1 already covers 2: covering them is no change to that item.
+  const sameLocations = price === current.plan.price.id && locations === coveredLocations(BUSINESS_PLAN_ID, current.plan.quantity)
+  if (sameLocations && additional === (current.rentalUnits?.quantity ?? 0)) {
     refuse(409, 'Your plan already covers these.', 'PLAN_UNCHANGED')
   }
-  const items: Stripe.SubscriptionUpdateParams.Item[] = [{ id: current.plan.id, price, quantity: locations }]
+  const items: Stripe.SubscriptionUpdateParams.Item[] = [sameLocations ? { id: current.plan.id } : { id: current.plan.id, price, quantity: locations }]
   if (current.rentalUnits) items.push(additional > 0 ? { id: current.rentalUnits.id, quantity: additional } : { id: current.rentalUnits.id, deleted: true })
   else if (additional > 0) items.push({ price: rentalUnitPrice, quantity: additional })
 
   const planPrice = earlierBusiness ? current.plan.price : await stripe.prices.retrieve(offer.priceId, { expand: ['tiers'] })
   const unitPrice = additional > 0 ? await stripe.prices.retrieve(rentalUnitPrice) : null
-  const recurring = recurringPriceAmount(planPrice, locations) + (unitPrice ? recurringPriceAmount(unitPrice, additional) : 0)
+  const recurring = recurringPriceAmount(planPrice, sameLocations ? current.plan.quantity : locations) + (unitPrice ? recurringPriceAmount(unitPrice, additional) : 0)
   return { subscription, items, change: { locations, rentalUnits }, recurring }
 }
 
@@ -144,11 +147,11 @@ export async function confirmBusinessChange(env: CloudflareEnv, db: DbClient, or
   const after = await stripe.subscriptions.retrieve(planned.subscription.id, { expand: ['items.data.price.product', 'items.data.price.tiers'] })
   const items = planSubscriptionItems(after)
   const read: BusinessChange = {
-    locations: items.plan.quantity ?? 0,
+    locations: coveredLocations(BUSINESS_PLAN_ID, items.plan.quantity),
     rentalUnits: isCurrentBusinessPrice(items.plan.price) ? INCLUDED_RENTAL_UNITS + (items.rentalUnits?.quantity ?? 0) : null,
   }
   const planItem = planned.items[0]!
-  if (items.plan.price.id !== planItem.price || read.locations !== planned.change.locations || read.rentalUnits !== planned.change.rentalUnits) {
+  if (items.plan.price.id !== (planItem.price ?? planned.subscription.items.data.find(item => item.id === planItem.id)?.price.id) || read.locations !== planned.change.locations || read.rentalUnits !== planned.change.rentalUnits) {
     throw new Error(`Stripe subscription ${after.id} does not read back the confirmed Business change`)
   }
   return read
