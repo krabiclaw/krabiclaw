@@ -537,5 +537,13 @@
   "stay.error_no_check_out": "ไม่สามารถเช็กเอาต์ในวันนั้นได้",
   "saya.footer.stays": "ที่พัก",
   "saya.stays.collection_title": "ที่พักของ {organization}",
-  "saya.stays.meta_description": "ที่พักที่จองได้กับ {organization}"
+  "saya.stays.meta_description": "ที่พักที่จองได้กับ {organization}",
+  "payment.verifying": "กำลังยืนยันการชำระเงินของคุณ…",
+  "payment.processing": "การชำระเงินของคุณกำลังดำเนินการ",
+  "payment.processing_help": "ธนาคารของคุณยังคงยืนยันการชำระเงินนี้อยู่ คุณจะได้รับอีเมลเมื่อเสร็จสมบูรณ์",
+  "payment.refunded": "ไม่สามารถทำการจองนี้ให้เสร็จสมบูรณ์ได้",
+  "payment.refunded_help": "สิ่งที่คุณชำระเงินถูกจองไปก่อนที่การชำระเงินของคุณจะเสร็จสมบูรณ์ จึงจะคืนเงินให้คุณเต็มจำนวน",
+  "stay.confirmed_message": "การเข้าพักของคุณที่ {home} ได้รับการจองและชำระเงินแล้ว",
+  "stay.cancellation_policy": "นโยบายการยกเลิก",
+  "stay.receipt_missing_description": "รายละเอียดการเข้าพักของคุณอยู่ในอีเมลยืนยัน และในบัญชี KrabiClaw ของคุณเมื่อคุณสร้างบัญชีด้วยอีเมลที่ใช้จอง"
 }

@@ -170,7 +170,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     const checkout = await createPaymentCheckout(db, env, {
       subjectType: 'booking', organizationId, buyerUserId: operator ? null : await ensureInteractionUser(event, env), productId: snapshot.product_id, variantId: snapshot.variant_id,
       sessionId, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize,
-      idempotencyKey, returnOrigin: env.NUXT_PUBLIC_PLATFORM_DOMAIN, following: () => [],
+      idempotencyKey, following: () => [],
     })
     return creationResult({ success: true, status: 'checkout', replayed: true, ...checkout }, { status: 200 })
   }
@@ -273,7 +273,7 @@ export async function createProductBooking(event: H3Event, context: BookingCreat
     const checkout = await createPaymentCheckout(db, env, {
       subjectType: 'booking', organizationId, buyerUserId: userId, productId: product.id, variantId: productVariantId,
       sessionId: session.id, requestId: threadId, requestFingerprint: await hashIdentifier(JSON.stringify({ guestName, guestEmail, phone: normalizedGuestPhone, notes })), quantity: partySize, idempotencyKey: checkoutKey,
-      returnOrigin: env.NUXT_PUBLIC_PLATFORM_DOMAIN,
+     
       following: paymentId => requestInsertQueries({
         kind: 'booking', id: threadId, organization_id: organizationId, location_id: session.location_id,
         user_id: userId, review_id: null, conversation_state: 'waiting_on_guest', resolved_at: null,
@@ -444,7 +444,7 @@ export async function createStayBooking(event: H3Event, context: { organizationI
     : { product_id: home.product_id, check_in_date: String(request.check_in_date), check_out_date: String(request.check_out_date), adults: Number(request.adults), children: Number(request.children), infants: Number(request.infants) }
   const checkout = await createPaymentCheckout(db, env, {
     subjectType: 'stay', organizationId, buyerUserId: await ensureInteractionUser(event, env), requestId: null, requestFingerprint: fingerprint,
-    quantity: stay.adults + stay.children, idempotencyKey, returnOrigin: env.NUXT_PUBLIC_PLATFORM_DOMAIN, following: () => [],
+    quantity: stay.adults + stay.children, idempotencyKey, following: () => [],
     stay, guest, quote,
   })
   // The held nights close on the home's channel now, not when the payment lands.

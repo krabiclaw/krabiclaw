@@ -28,7 +28,6 @@ interface CheckoutInputBase {
   requestFingerprint: string
   quantity: number
   idempotencyKey: string
-  returnOrigin: string
   following: (paymentId: string) => BatchQuery[]
 }
 export type CheckoutInput = CheckoutInputBase & (
@@ -61,8 +60,6 @@ export interface PaymentHandoff { payment_id: string; pay_path: string; purchase
 /** Stripe's PaymentIntent owns payment; one atomic batch owns the guest request, expiring capacity hold and immutable purchase. */
 export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, input: CheckoutInput, retry = false) {
   if (!Number.isSafeInteger(input.quantity) || input.quantity < 1 || input.quantity > 99 || !input.idempotencyKey.trim() || input.idempotencyKey.trim().length > 200) throw new HTTPError({ statusCode: 400, statusMessage: 'A quantity of 1–99 and an idempotency key of 1–200 characters are required' })
-  const origin = new URL(input.returnOrigin)
-  if (origin.protocol !== 'https:' || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) throw new Error('Payments return origin must be an HTTPS origin')
   const key = `checkout:${input.organizationId}:${input.idempotencyKey.trim()}`
   const previous = await queryFirst<{id:string;payment_id:string;stripe_payment_intent_id:string|null;expires_at:string;return_token:string;status:string}>(db,'SELECT id,payment_id,stripe_payment_intent_id,expires_at,return_token,status FROM payment_attempts WHERE idempotency_key=?',[key])
   if(previous?.status==='failed')throw new HTTPError({statusCode:409,statusMessage:'Checkout was rejected; start a new request',data:{code:'checkout_failed'}})

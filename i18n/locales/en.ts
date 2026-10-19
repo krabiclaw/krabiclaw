@@ -20,7 +20,12 @@ export default {
     "confirm": "Confirm and pay",
     "pay": "Pay {amount}",
     "cancel": "Cancel",
-    "declined": "The payment was not completed."
+    "declined": "The payment was not completed.",
+    "verifying": "Confirming your payment…",
+    "processing": "Your payment is processing",
+    "processing_help": "Your bank is still confirming this payment. You will get an email when it completes.",
+    "refunded": "This booking could not be completed",
+    "refunded_help": "What you paid for was taken before your payment completed, so your payment is being refunded in full."
   },
   "site_pages": {
       "home": "Home",
@@ -54,6 +59,9 @@ export default {
   },
   "stay": {
     "confirmed_title": "Your stay is confirmed",
+    "confirmed_message": "Your stay at {home} is booked and paid.",
+    "cancellation_policy": "Cancellation policy",
+    "receipt_missing_description": "Your stay is in your confirmation email, and in your KrabiClaw account once you create one with the email you booked with.",
     "your_stay": "Your stay",
     "check_in": "Check-in",
     "check_out": "Checkout",

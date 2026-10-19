@@ -6,7 +6,7 @@ authentic legal practice standards). It lives at:
 - `https://cedar-legal.krabiclaw.com` (with redirect from `cedar-legal-demo.krabiclaw.com`)
 
 It is registered as a demo organization in `shared/demo.ts` under subdomain
-`cedar-legal-demo` with production ID `5WebMejsoVLyZLHC29wHH5GbQx1jlvCd`. Only
+`cedar-legal` (its slug is still `cedar-legal-demo`) with production ID `5WebMejsoVLyZLHC29wHH5GbQx1jlvCd`. Only
 platform admins manage its site settings and domains.
 
 ## Domain Boundaries & Canonical MCP Management

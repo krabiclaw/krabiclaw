@@ -1,4 +1,4 @@
-import type { StayCancellationPolicy, StayLongTermCancellationPolicy } from './stay-listing'
+import { STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, type StayCancellationPolicy, type StayLongTermCancellationPolicy } from './stay-listing'
 import { localDateTimeToInstant } from '../utils/timezone'
 
 /**
@@ -14,6 +14,13 @@ export const LONG_TERM_STAY_NIGHTS = 28
 /** The policy a stay was booked under: one of the home's two, chosen by the stay's length. */
 export type StayBookedPolicy = StayCancellationPolicy | `long_term_${StayLongTermCancellationPolicy}`
 export const STAY_BOOKED_POLICIES = ['flexible', 'moderate', 'limited', 'firm', 'strict', 'long_term_firm', 'long_term_strict'] as const satisfies readonly StayBookedPolicy[]
+
+/** The terms of the policy a stay was booked under, in Airbnb's words. */
+export function bookedPolicyTerms(policy: StayBookedPolicy) {
+  return policy.startsWith('long_term_')
+    ? STAY_LONG_TERM_CANCELLATION_POLICIES[policy.slice('long_term_'.length) as StayLongTermCancellationPolicy]
+    : STAY_CANCELLATION_POLICIES[policy as StayCancellationPolicy]
+}
 
 export function bookedPolicyFor(nights: number, home: { cancellation_policy: StayCancellationPolicy | null; long_term_cancellation_policy: StayLongTermCancellationPolicy | null }): StayBookedPolicy | null {
   if (nights >= LONG_TERM_STAY_NIGHTS) return home.long_term_cancellation_policy === null ? null : `long_term_${home.long_term_cancellation_policy}`

@@ -537,5 +537,13 @@
   "stay.error_no_check_out": "Không thể trả phòng vào ngày đó.",
   "saya.footer.stays": "Chỗ ở",
   "saya.stays.collection_title": "Chỗ ở của {organization}",
-  "saya.stays.meta_description": "Chỗ ở bạn có thể đặt với {organization}."
+  "saya.stays.meta_description": "Chỗ ở bạn có thể đặt với {organization}.",
+  "payment.verifying": "Đang xác nhận thanh toán của bạn…",
+  "payment.processing": "Thanh toán của bạn đang được xử lý",
+  "payment.processing_help": "Ngân hàng của bạn vẫn đang xác nhận khoản thanh toán này. Bạn sẽ nhận được email khi hoàn tất.",
+  "payment.refunded": "Không thể hoàn tất đặt chỗ này",
+  "payment.refunded_help": "Mục bạn thanh toán đã được người khác đặt trước khi thanh toán của bạn hoàn tất, vì vậy khoản thanh toán của bạn đang được hoàn lại toàn bộ.",
+  "stay.confirmed_message": "Kỳ lưu trú của bạn tại {home} đã được đặt và thanh toán.",
+  "stay.cancellation_policy": "Chính sách hủy",
+  "stay.receipt_missing_description": "Thông tin kỳ lưu trú có trong email xác nhận của bạn và trong tài khoản KrabiClaw khi bạn tạo tài khoản bằng email đã dùng để đặt."
 }
