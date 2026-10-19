@@ -178,9 +178,9 @@ const collectionObject = {
 } as const
 
 const bookingPolicyFields = {
-  scheduling_mode: { type: 'string', enum: ['legacy', 'provider'] },
-  assigned_member_id: { type: ['string', 'null'], description: 'One organization member for provider scheduling. Clear assigned_team_id when choosing a member.' },
-  assigned_team_id: { type: ['string', 'null'], description: 'Better Auth team whose available members can host bookings. Clear assigned_member_id when choosing a team.' },
+  scheduling_mode: { type: 'string', enum: ['legacy', 'provider'], description: 'legacy books the weekly schedule; provider books the host\'s own working hours and needs a host.' },
+  assigned_member_id: { type: ['string', 'null'], description: 'The host: one organization member guests see on the page. Publishing requires a host with a published profile. Clear assigned_team_id when choosing a member.' },
+  assigned_team_id: { type: ['string', 'null'], description: 'The host as a Better Auth team; guests see its members with published profiles. Clear assigned_member_id when choosing a team.' },
   confirmation_mode: { type: 'string', enum: ['instant', 'review'], default: 'instant', description: 'instant confirms immediately (default); review waits for staff approval.' },
   online_payment_required: { type: 'boolean', default: false, description: 'True requires online payment when booking; false is the default and does not collect online.' },
   held_online: { type: 'boolean', description: 'True holds the offering online: its times are its provider\'s working hours, in the provider\'s timezone. Requires scheduling_mode provider with an assigned member or team.' },

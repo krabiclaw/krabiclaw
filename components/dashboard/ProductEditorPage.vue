@@ -231,6 +231,8 @@ export interface ProductForm {
 /** The product's draft and what its leaves show or do beside their one field. */
 export interface ProductEditor {
   form: ProductForm
+  /** The host by its loaded name, or what is missing. */
+  assignmentSummary: ComputedRef<string>
   product: ComputedRef<Product | null>
   /** Saved publication state, separate from the visibility leaf's draft. */
   published: ComputedRef<boolean>
@@ -960,7 +962,7 @@ function listSummary(values: readonly string[], empty: string) {
 const { data: schedulingMembers, error: schedulingMembersError } = await useMemberSchedulingList(() => dashboard.organization.value?.id)
 /** The assignee by its loaded name; a read failure, a pending read or an unknown id says so. */
 function assignmentSummary(): string {
-  if (!form.assigned_team_id && !form.assigned_member_id) return 'The business schedule'
+  if (!form.assigned_team_id && !form.assigned_member_id) return 'Choose a host'
   if (schedulingMembersError.value) return 'Team members could not be loaded'
   if (!schedulingMembers.value) return 'Loading team members…'
   if (form.assigned_team_id) return schedulingMembers.value.teams.find(team => team.id === form.assigned_team_id)?.name ?? 'Assigned team not found in this business'
@@ -1099,13 +1101,12 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
             { id: 'team', label: 'Looked after by', summary: stayTeamSummary(), to: sectionPath('team') },
           ]
         : []),
-      // The person a service's consultations are booked with: the existing
-      // assignment concern, reached from the overview. It belongs to bookings,
-      // so until the service takes bookings the row leads there first.
-      ...(form.kind === 'service'
+      // Who hosts an experience or consultation: the bookings' host concern,
+      // reached from the overview. Until it takes bookings the row leads there first.
+      ...(form.kind === 'service' || form.kind === 'experience'
         ? [product.value.booking
-            ? { id: 'assignment', label: 'Assigned team member', summary: assignmentSummary(), to: `${sectionPath('booking')}/assignment` }
-            : { id: 'assignment', label: 'Assigned team member', summary: 'Set up bookings first', placeholder: true, to: sectionPath('booking') }]
+            ? { id: 'assignment', label: 'Host', summary: assignmentSummary(), placeholder: !form.assigned_team_id && !form.assigned_member_id, to: `${sectionPath('booking')}/assignment` }
+            : { id: 'assignment', label: 'Host', summary: 'Set up bookings first', placeholder: true, to: sectionPath('booking') }]
         : []),
       { id: 'options', label: 'Variants', summary: product.value.variants.length > 1 ? `${product.value.variants.length} variants` : 'One version', to: sectionPath('options') },
       {
@@ -1825,6 +1826,7 @@ async function saveProductLocalization(locale: string, submitted: Record<string,
 useSeoMeta({ title: () => `${pageTitle.value} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
 provide(productEditorKey, {
   form,
+  assignmentSummary: computed(assignmentSummary),
   product,
   published,
   bookingOffering,

@@ -148,7 +148,8 @@ export default {
     "review_notice": "Your request is reviewed before your appointment is confirmed.",
     "instant_notice": "Your appointment is confirmed when you book.",
     "sessions_failed": "Available times could not be loaded. Please try again.",
-    "provider_title": "Who you’ll meet",
+    "provider_title": "Meet your host",
+    "hosted_by": "Hosted by {name}",
     "provider_loading": "Loading profile…",
     "provider_failed": "Profile could not be loaded",
     "provider_retry": "Try again"

@@ -57,6 +57,7 @@
           <p class="saya-kicker mb-3">{{ collectionName }}</p>
           <h1 class="saya-display-md text-3xl text-default sm:text-4xl lg:text-5xl">{{ displayTitle }}</h1>
           <p v-if="tagline" class="mx-auto mt-4 max-w-2xl text-base text-muted sm:text-lg">{{ tagline }}</p>
+          <HostedBy v-if="booking" class="mt-5 justify-center" :organization-id="organizationId" :product-id="product.id" :slug="product.slug" :session-id="bookingController.selectedSession.value?.id" />
           <ProductVariantPrices v-if="!booking && !isStay" :product="product" :location-ids="[location?.id ?? null]" :currency="currency" class="mx-auto mt-6 max-w-xl text-base" />
           <div class="mt-4 flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-sm text-muted">
               <template v-if="averageRating">
@@ -93,6 +94,7 @@
               {{ stayPropertyTypeLabel ? `${stayPropertyTypeLabel} in ${stayPlaceName}` : displayTitle }}
             </h2>
             <p class="mt-1 text-default">{{ staySpecsSummary }}</p>
+            <HostedBy class="mt-6 border-t border-default pt-6" :organization-id="organizationId" :product-id="product.id" :slug="product.slug" />
             <dl v-if="stayPropertyFacts.length" class="mt-5 grid gap-x-6 gap-y-4 text-sm sm:grid-cols-2">
               <div v-for="fact in stayPropertyFacts" :key="fact.label">
                 <dt class="text-muted">{{ fact.label }}</dt>
@@ -215,6 +217,8 @@
               />
             </div>
           </section>
+
+          <WhoYouMeet v-if="booking || isStay" class="mt-10" :organization-id="organizationId" :product-id="product.id" :slug="product.slug" :session-id="bookingController.selectedSession.value?.id" />
 
           <section v-if="thingsToKnow.length" class="mt-10 border-t border-default pt-10">
             <h2 class="saya-display text-2xl text-default sm:text-3xl">{{ t('saya.experience_detail.things_to_know') }}</h2>
@@ -439,13 +443,13 @@
         </div>
       </section>
     </article>
-    <div v-if="booking" class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8"><WhoYouMeet :organization-id="organizationId" :organization-name="organizationName || location?.title || ''" :product-id="product.id" :slug="product.slug" :session-id="bookingController.selectedSession.value?.id" /></div>
     <slot name="content" :can-book="canBook" />
   </div>
 </template>
 
 <script setup lang="ts">
 import WhoYouMeet from '~/components/booking/WhoYouMeet.vue'
+import HostedBy from '~/components/booking/HostedBy.vue'
 import UpcomingSessions from '~/components/booking/UpcomingSessions.vue'
 import type { ProductPresentation, PublicProduct } from '~/server/types/products'
 import type { Accommodation, PropertyValue } from 'nuxt-schema-org/schema'

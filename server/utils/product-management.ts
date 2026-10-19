@@ -1,6 +1,7 @@
 import { isStayAmenity, stayCodes, STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayAmenity, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { ASSIGNED_SERVICE_SQL } from '~/server/utils/member-access'
+import { assertPublishedHost } from '~/server/utils/public-provider'
 import type { ProductBookingSetupInput, SessionAvailability } from '~/server/utils/availability'
 import { HTTPError } from 'nitro'
 import { d1JsonArray, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -82,6 +83,12 @@ export const PUBLIC_PRODUCT_SQL = `pub.published = 1 AND (p.kind <> 'experience'
 function stayOrderUrl(kind: ProductKind, orderUrl: string | null): string | null {
   if (kind === 'stay' && orderUrl !== null) invalid('A place to stay is booked on this site; it takes no external booking link')
   return orderUrl
+}
+
+/** A guest-facing booking names its host: an experience or consultation that books on the site, or a place to stay. */
+async function assertHostForPublication(db: DbClient, organizationId: string, product: Pick<Product, 'kind' | 'order_url' | 'booking' | 'stay'>): Promise<void> {
+  if (product.kind === 'stay') return assertPublishedHost(db, organizationId, product.stay)
+  if ((product.kind === 'experience' || product.kind === 'service') && product.booking && !product.order_url) return assertPublishedHost(db, organizationId, product.booking)
 }
 
 /**
@@ -1908,10 +1915,10 @@ export async function setProductPublication(db: DbClient, input: {
 }): Promise<void> {
   const product = await requireOrganizationProduct(db, input)
   if (input.published) await assertStayBookable(db, input.organizationId, product)
+  const alreadyPublished = product.publications.some(publication => publication.organization_id === input.organizationId && publication.published)
+  if (input.published && !alreadyPublished) await assertHostForPublication(db, input.organizationId, product)
   let readiness: Awaited<ReturnType<typeof productBookingReadiness>> | undefined
-  let alreadyPublished = false
   if (input.published && (product.kind === 'experience' || product.booking)) {
-    alreadyPublished = product.publications.some(publication => publication.organization_id === input.organizationId && publication.published)
     readiness = await productBookingReadiness(db, input.organizationId, product, { requireAllocation: !alreadyPublished, env: input.env })
     if (!readiness.ready) throw new HTTPError({ statusCode: 409, statusMessage: 'This offering needs booking and payment setup before it can be published', data: { code: 'EXPERIENCE_BOOKING_INCOMPLETE', product_id: product.id, missing: readiness.missing } })
   }
@@ -1949,6 +1956,7 @@ export async function setProductLocation(db: DbClient, input: {
   let readiness: Awaited<ReturnType<typeof productBookingReadiness>> | undefined
   if (location.published && (product.kind === 'experience' || product.booking)) {
     const newPublication = !currentLocation?.published
+    if (newPublication) await assertHostForPublication(db, input.organizationId, product)
     const prospective = { ...product, locations: [...product.locations.filter(existing => existing.location_id !== input.locationId), location] }
     readiness = await productBookingReadiness(db, input.organizationId, prospective, { locationId: input.locationId, prepareAllocation: newPublication, requireActive: newPublication, env: input.env })
     if (!readiness.ready) throw new HTTPError({ statusCode: 409, statusMessage: 'This offering needs booking and payment setup at this location before it can be published', data: { code: 'EXPERIENCE_BOOKING_INCOMPLETE', product_id: product.id, location_id: input.locationId, missing: readiness.missing } })
