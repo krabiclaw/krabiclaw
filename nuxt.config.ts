@@ -131,6 +131,13 @@ export default defineNuxtConfig({
 
   compatibilityDate: '2024-11-01',
 
+  // Each layout links its surface stylesheet (/_nuxt/surfaces/*.css), preloaded
+  // by server/plugins/public-resource-hints.ts and cached across pages. Inlining
+  // it as well put the whole stylesheet into every HTML response a second time.
+  features: {
+    inlineStyles: false,
+  },
+
   experimental: {
     // Nuxt 5 consumes this runtime option before the current schema exposes it.
     // @ts-expect-error Nuxt 5 native Nitro mode is required for this Worker.
