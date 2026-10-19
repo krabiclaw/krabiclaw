@@ -114,8 +114,19 @@ const { t, locale } = useI18n()
 // The nights are read once the calendar is on screen: inline on the page, and in the dialog however it opened, including a press made before hydration.
 onMounted(() => { if (!calendar.value) void props.controller.loadCalendar() })
 
-const monthOffset = ref(0)
 const today = computed(() => calendar.value?.home.today ?? new Date().toISOString().slice(0, 10))
+const offsetForDate = (dateStr: string | null | undefined): number => {
+  if (!dateStr) return 0
+  const [fromYear, fromMonth] = today.value.split('-').map(Number) as [number, number]
+  const [toYear, toMonth] = dateStr.split('-').map(Number) as [number, number]
+  return Math.max(0, (toYear - fromYear) * 12 + (toMonth - fromMonth))
+}
+const monthOffset = ref(offsetForDate(checkIn.value))
+watch(calendar, () => {
+  if (checkIn.value && monthOffset.value === 0) {
+    monthOffset.value = offsetForDate(checkIn.value)
+  }
+})
 const firstOfMonth = (offset: number) => {
   const [year, month] = today.value.split('-').map(Number) as [number, number]
   return new Date(Date.UTC(year, month - 1 + offset, 1)).toISOString().slice(0, 10)
