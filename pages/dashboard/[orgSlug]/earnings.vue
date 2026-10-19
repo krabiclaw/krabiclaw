@@ -3,9 +3,10 @@
     Airbnb's Earnings page: a Performance card with this month's total, the
     year's bars, Paid and Upcoming and a way into the details; then Upcoming
     and Paid payouts as cards, and monthly Reports. The cog opens Payments
-    (payouts, plan, fees). A card on Menu, so Back returns there.
+    (payouts, plan, fees). A card on Menu, so Back returns there. Beside a pane
+    it opens on Performance, the details its own card leads to.
   -->
-  <DashboardIndexPanel id="earnings" title="Earnings" column="reading">
+  <DashboardIndexPanel id="earnings" title="Earnings" :auto-open="`${level.path.value}/performance`">
     <template #right>
       <UDropdownMenu :items="settingsItems" :content="{ align: 'end' }" :ui="{ content: 'w-60' }">
         <UButton icon="i-lucide-settings" color="neutral" variant="soft" square aria-label="Settings and documents" />

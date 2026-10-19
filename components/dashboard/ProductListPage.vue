@@ -5,7 +5,7 @@
     location, opening that location's menu, so the locations need no filter of
     their own; every other offering is its own card, opening the one Product editor.
   -->
-  <DashboardIndexPanel id="catalog" title="Catalog" column="wide">
+  <DashboardIndexPanel id="catalog" title="Catalog">
     <template #right>
       <UButton :to="`${level.path.value}/new/kind`" icon="i-lucide-plus" color="neutral" variant="soft" square aria-label="Add" data-testid="catalog-add" />
     </template>

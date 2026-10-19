@@ -2,8 +2,9 @@ import type { ComputedRef, InjectionKey } from 'vue'
 
 /**
  * The widths a level's content may take instead of the frame. A page names
- * which one it is and never a size: a leaf and anything edited like one, a page
- * read top to bottom, and a grid that needs the room.
+ * which one it is and never a size: a leaf and anything edited like one, or a
+ * list of records read top to bottom. A grid, a table, a calendar or a chart
+ * names none and takes the frame, as Airbnb's listings, calendar and insights do.
  *
  * Content always starts at the panel's gutter, the same edge as the top nav,
  * and is never centred. Below `lg` a level is the whole screen or a drawer and
@@ -12,7 +13,6 @@ import type { ComputedRef, InjectionKey } from 'vue'
 export const dashboardColumnWidths = {
   leaf: 'lg:max-w-xl',
   reading: 'lg:max-w-3xl',
-  wide: 'lg:max-w-5xl'
 } as const
 
 export type DashboardColumn = keyof typeof dashboardColumnWidths

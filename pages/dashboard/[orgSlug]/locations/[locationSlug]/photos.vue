@@ -1,5 +1,5 @@
 <template>
-  <DashboardIndexPanel id="location-photos" title="Photos" column="reading">
+  <DashboardIndexPanel id="location-photos" title="Photos">
     <div>
       <div class="space-y-6">
 
