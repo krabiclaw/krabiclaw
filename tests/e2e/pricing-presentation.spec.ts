@@ -16,12 +16,18 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   expect(JSON.stringify(document), 'complete canonical pricing document').toContain('billing_features')
   const comparison = page.locator('[data-parity-section="comparison"]')
   await expect(comparison).toBeVisible()
-  await expect(comparison.locator('tr[data-feature-id]')).toHaveCount(31)
+  await expect(comparison.locator('tr[data-feature-id]')).toHaveCount(32)
   const locations = comparison.locator('tr[data-feature-id="locations.included"]')
   await expect(locations.locator('td')).toHaveText([
     '2 included',
     '2 included, then $49 per additional location per month',
     '2 included, then $49 per additional location per month',
+  ])
+  // Business alone bills rental units; Basic and Growth bill each home's location.
+  await expect(comparison.locator('tr[data-feature-id="rental-units.included"] td')).toHaveText([
+    'Billed as locations',
+    'Billed as locations',
+    '2 included, then $19 per additional rental unit per month',
   ])
   const teamAvailability = comparison.locator('tr[data-feature-id="bookings.member-availability"]')
   await expect(teamAvailability).toContainText('Team availability')
