@@ -1,3 +1,4 @@
+import { createReplayableReservationCancelToken } from '~/server/utils/reservation-cancel-token'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
@@ -504,10 +505,10 @@ test('members see only the homes they look after and change nothing; a home with
   }
 })
 
-test('a business’s site shows a guest the stay their own browser booked there, and nothing else', { timeout: 120_000 }, async () => {
+test('a business’s site shows a guest the stay its signed link names, from any browser, and nothing else', { timeout: 120_000 }, async () => {
   const { runtime, db, env: bindings } = await boot()
   try {
-    const env = { ...bindings, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+    const env = { ...bindings, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', EMAIL_REPLY_SECRET: 'local-stay-reply', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
     const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
     const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'site-stay', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest, guest_email: 'ana@example.com' })
     // The anonymous Better Auth user the site's checkout made the stay for.
@@ -515,31 +516,35 @@ test('a business’s site shows a guest the stay their own browser booked there,
       const signed = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
       return { id: signed.response!.user.id, cookie: signed.headers.getSetCookie().map(value => value.split(';')[0]).join('; ') }
     }
-    const [booker, stranger] = [await signIn(), await signIn()]
+    const booker = await signIn()
     await db.prepare("UPDATE stays SET user_id = ?, cancellation_policy = 'moderate' WHERE id = ?").bind(booker.id, stay.id).run()
     // The guest's stay is read by its activity ID: its conversation's, as the account reads it.
     const activityId = stay.request_id ?? stay.id
-    const read = (organizationId: string, cookie?: string) => {
+    // The link the confirmation email and the paid return carry, signed with the site's secret.
+    const link = (await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET, activityId)).token
+    const otherLink = (await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET, 'another-stay')).token
+    const read = (organizationId: string, token?: string) => {
       const app = new H3()
       app.use((event) => { event.context.organizationId = organizationId })
       app.get('/api/public/guest-stays/:activityId', guestStayRoute)
-      return app.request(Object.assign(new Request(`https://org.proof.example/api/public/guest-stays/${activityId}`, { headers: cookie ? { cookie } : {} }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+      return app.request(Object.assign(new Request(`https://org.proof.example/api/public/guest-stays/${activityId}`, { headers: token ? { authorization: `Bearer ${token}` } : {} }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
     }
 
-    const own = await read(ORG, booker.cookie)
+    // No session is sent: the link alone opens the stay, as from the email on another device.
+    const own = await read(ORG, link)
     assert.equal(own.status, 200)
     const body = await own.json() as { organization_id: string; stay: { id: string; guest_email: string; cancellation_policy: string; check_in_date: string; check_out_date: string }; home: { name: string; check_in_time: string; check_out_time: string }; cancellation: unknown }
     assert.deepEqual({ organization_id: body.organization_id, id: body.stay.id, email: body.stay.guest_email, policy: body.stay.cancellation_policy, dates: [body.stay.check_in_date, body.stay.check_out_date], home: body.home, cancellation: body.cancellation },
       { organization_id: ORG, id: stay.id, email: 'ana@example.com', policy: 'moderate', dates: ['2026-11-01', '2026-11-04'], home: { name: 'Cabin', organization_name: 'Org', check_in_time: '16:00', check_out_time: '10:00' }, cancellation: null })
-    assert.equal((await read('another-org', booker.cookie)).status, 404)
-    assert.equal((await read(ORG, stranger.cookie)).status, 404)
+    assert.equal((await read('another-org', link)).status, 404)
+    assert.equal((await read(ORG, otherLink)).status, 404)
     assert.equal((await read(ORG)).status, 401)
   } finally {
     await runtime.dispose()
   }
 })
 
-test('a stay paid on a business’s site returns to that site’s stay confirmation, for the browser that paid', { timeout: 120_000 }, async t => {
+test('a stay paid on a business’s site returns to that site’s stay confirmation, whose link opens it from any browser', { timeout: 120_000 }, async t => {
   const { runtime, db, env: bindings } = await boot()
   try {
     // A demo business on the live platform pays in Stripe test mode, which bills no usage.
@@ -579,20 +584,24 @@ test('a stay paid on a business’s site returns to that site’s stay confirmat
     app.use((event) => { event.context.organizationId = ORG })
     app.post('/api/public/payments/:paymentId/return', paymentReturnRoute)
     app.get('/api/public/guest-stays/:activityId', guestStayRoute)
-    const call = (path: string, init: RequestInit = {}) => app.request(Object.assign(new Request(`https://org.proof.example${path}`, { ...init, headers: { cookie, 'content-type': 'application/json' } }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    const call = (path: string, init: RequestInit = {}, headers: Record<string, string> = { cookie }) => app.request(Object.assign(new Request(`https://org.proof.example${path}`, { ...init, headers: { ...headers, 'content-type': 'application/json' } }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
 
     const activityId = stay.request_id ?? stay.id
-    // Before the return, the paying browser cannot read a stay that is not yet its own.
-    assert.equal((await call(`/api/public/guest-stays/${activityId}`)).status, 404)
+    // The stay is read by its signed link, not by a browser's session: none, or a forged one, opens nothing.
+    assert.equal((await call(`/api/public/guest-stays/${activityId}`)).status, 401)
+    assert.equal((await call(`/api/public/guest-stays/${activityId}`, {}, { authorization: 'Bearer forged' })).status, 404)
     const back = await call('/api/public/payments/stay-pay/return', { method: 'POST', body: JSON.stringify({ claim }) })
     assert.equal(back.status, 200)
-    assert.deepEqual(await back.json(), { state: 'paid', kind: 'stay', activity_id: activityId })
+    const returned = await back.json() as { state: string; kind: string; activity_id: string; receipt_token: string }
+    assert.deepEqual({ state: returned.state, kind: returned.kind, activity_id: returned.activity_id }, { state: 'paid', kind: 'stay', activity_id: activityId })
+    assert.equal(typeof returned.receipt_token, 'string')
     assert.deepEqual(await db.prepare("SELECT claimed_user_id FROM payment_claims WHERE payment_id = 'stay-pay'").first(), { claimed_user_id: buyer })
     // The claim moved the stay, its payment and its hold to the browser that paid.
     assert.deepEqual(await db.prepare("SELECT (SELECT user_id FROM stays WHERE id = ?) AS stay, (SELECT buyer_user_id FROM payments WHERE id = 'stay-pay') AS payment, (SELECT buyer_user_id FROM payment_checkout_holds WHERE id = 'stay-hold') AS hold").bind(stay.id).first(), { stay: buyer, payment: buyer, hold: buyer })
-    // The confirmation page reads the stay it names. What was paid and the policy come from the conversion
-    // seeded above (conversion is covered by its own tests); this checks the receipt read shows them.
-    const read = await call(`/api/public/guest-stays/${activityId}`)
+    // The confirmation page reads the stay its link names, here from a browser with no session at all, as
+    // the emailed link is opened. What was paid and the policy come from the conversion seeded above
+    // (conversion is covered by its own tests); this checks the receipt read shows them.
+    const read = await call(`/api/public/guest-stays/${activityId}`, {}, { authorization: `Bearer ${returned.receipt_token}` })
     assert.equal(read.status, 200)
     const body = await read.json() as { stay: { id: string; paid_minor: number; cancellation_policy: string; guest_email: string }; cancellation: { policy: string; paid_minor: number } | null }
     assert.deepEqual({ id: body.stay.id, paid: body.stay.paid_minor, policy: body.stay.cancellation_policy, email: body.stay.guest_email, quote: body.cancellation && { policy: body.cancellation.policy, paid: body.cancellation.paid_minor } },

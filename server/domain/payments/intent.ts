@@ -174,7 +174,7 @@ export async function confirmPayment(db: DbClient, stripe: Stripe, env: Cloudfla
  */
 export type PaymentReturn =
   | { state: 'paid'; kind: 'booking' | 'reservation'; request_id: string; cancellation_token: string }
-  | { state: 'paid'; kind: 'stay'; activity_id: string }
+  | { state: 'paid'; kind: 'stay'; activity_id: string; receipt_token: string }
   /** Stripe is still clearing the payment; nothing is booked until it captures. */
   | { state: 'processing' }
   /** Captured, but what it paid for was taken first; the payment is refunded in full. */
@@ -191,7 +191,7 @@ async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment
     // The stay is read by its activity ID, as the guest's account reads it.
     const stay = await queryFirst<{ id: string }>(db, 'SELECT COALESCE(request_id,id) AS id FROM stays WHERE id=? AND organization_id=?', [hold.converted_stay_id, payment.organization_id])
     if (!stay) throw new Error('Converted stay hold has no stay')
-    return { state: 'paid', kind: 'stay', activity_id: stay.id }
+    return { state: 'paid', kind: 'stay', activity_id: stay.id, receipt_token: (await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', stay.id)).token }
   }
   if (payment.subject_type !== 'booking' && payment.subject_type !== 'reservation') throw new Error(`Payment subject ${payment.subject_type} has no guest confirmation`)
   if (!hold.request_id) throw new Error('Captured visit payment has no guest request')
