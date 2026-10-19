@@ -5,7 +5,8 @@
     the card will cost — with any surcharge Stripe permits for it — before the
     buyer confirms. Nothing is charged until Pay.
   -->
-  <main class="platform-theme min-h-screen bg-default px-5 py-10 lg:py-14 text-default">
+  <!-- White, as Airbnb's checkout is: Stripe's fields are white and sit on the page, not in a panel. -->
+  <main class="platform-theme min-h-screen bg-white px-5 py-10 lg:py-14 text-default dark:bg-default">
     <div class="mx-auto max-w-5xl">
       <div class="mb-8 flex items-center gap-4 lg:-ml-14">
         <button
@@ -23,7 +24,7 @@
       <UAlert v-else-if="loadError" color="error" :title="t('payment.unavailable')" :description="loadError" />
       <!-- Airbnb's Confirm and pay: the method and the one button on the left, what is being bought on the right. -->
       <div v-else-if="handoff" class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-16 items-start">
-        <aside class="lg:sticky lg:top-8 lg:order-2 min-w-0 rounded-2xl border border-default bg-default p-6 space-y-5" data-payment-summary>
+        <aside class="lg:sticky lg:top-8 lg:order-2 min-w-0 rounded-2xl border border-default bg-white p-6 space-y-5 dark:bg-default" data-payment-summary>
           <div class="flex gap-4 items-center">
             <img v-if="handoff.image_url" :src="handoff.image_url" alt="" class="size-24 shrink-0 rounded-xl object-cover">
             <h2 class="min-w-0 text-lg font-semibold leading-snug text-highlighted">{{ handoff.title }}</h2>
