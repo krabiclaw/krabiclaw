@@ -70,7 +70,8 @@
           <UAlert v-if="handoff.state === 'paid'" color="success" :title="t('payment.already_paid')" />
           <UAlert v-else-if="handoff.state !== 'open'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
           <template v-else>
-            <section class="rounded-2xl border border-default p-5 space-y-4">
+            <!-- No frame around Stripe's form: its fields are the only boxes, as on Airbnb's page. -->
+            <section class="space-y-4">
               <h2 class="text-lg font-semibold text-highlighted">{{ t('payment.pay_with') }}</h2>
               <!-- Stripe's form stays mounted; a method that carries a surcharge is shown read-only until the buyer pays or changes it. -->
               <div v-show="!review" ref="mount" class="min-h-40" />
@@ -196,9 +197,13 @@ watch([handoff, mount], async ([value, container]) => {
       // The method is created here and attached by the server, which prices it before anything is confirmed.
       paymentMethodCreation: 'manual',
       ...(value.customer_session_client_secret ? { customerSessionClientSecret: value.customer_session_client_secret } : {}),
-      appearance: { theme: document.documentElement.classList.contains('dark') ? 'night' : 'stripe' },
+      // Airbnb lists the ways to pay as radio rows divided by hairlines, not boxed tabs.
+      appearance: {
+        theme: document.documentElement.classList.contains('dark') ? 'night' : 'stripe',
+        rules: { '.AccordionItem': { border: 'none', boxShadow: 'none', paddingLeft: '0px', paddingRight: '0px' } },
+      },
     })
-    paymentElement = elements.create('payment', { layout: 'tabs' })
+    paymentElement = elements.create('payment', { layout: { type: 'accordion', defaultCollapsed: false, radios: 'always', spacedAccordionItems: false } })
     paymentElement.on('ready', () => { ready.value = true })
     paymentElement.on('change', () => { if (review.value) review.value = null })
     paymentElement.mount(container)
