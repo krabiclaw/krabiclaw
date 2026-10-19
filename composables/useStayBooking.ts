@@ -191,11 +191,6 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
     bookingStep.value = step
   }
 
-  // The nights are read when the dialog opens, however it opened, including
-  // a press made before the page hydrated.
-  watch(bookingOpen, (open) => {
-    if (open && !calendar.value) void loadCalendar()
-  })
 
   async function submitBooking(contact: ContactFormState) {
     if (submitting.value) return

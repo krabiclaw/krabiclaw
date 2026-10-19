@@ -102,6 +102,8 @@ defineEmits<{ next: [] }>()
 const { calendar, calendarPending, calendarError, checkIn, checkOut, adults, children, infants, maxGuests, quote, quotePending, bookingError,
   nightCount, breakdown, rangeLabel, guestsLabel, canCheckIn, canCheckOut, selectDay, clearDates, money, nightsLabel, dateLabel, checkout, enquiryPath } = props.controller
 const { t, locale } = useI18n()
+// The nights are read once the calendar is on screen: inline on the page, and in the dialog however it opened, including a press made before hydration.
+onMounted(() => { if (!calendar.value) void props.controller.loadCalendar() })
 
 const monthOffset = ref(0)
 const today = computed(() => calendar.value?.home.today ?? new Date().toISOString().slice(0, 10))
