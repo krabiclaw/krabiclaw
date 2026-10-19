@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:80a639be9c5fca70332f0363793616644cf9b198f0db2cba4081d127da0e86d1",
-  "documentationFingerprint": "sha256:556ba2be1b6979660fe8138d937949d665c5aaa643303ac4362d84e9127b6166",
+  "fingerprint": "sha256:ea541cfd997c2e8440afc91f1af581a352e50cdc2fdc99f7ddcf356f6b4d351b",
+  "documentationFingerprint": "sha256:6f349bcc8ec0b84ddc32ce90460a0408bb679e6e2fab4d09f09a51869a9100b0",
   "tools": [
     {
       "name": "add_organization_language",
@@ -44642,6 +44642,21 @@
                   "null"
                 ]
               },
+              "button_casing": {
+                "enum": [
+                  "uppercase",
+                  "none"
+                ],
+                "type": "string"
+              },
+              "button_shape": {
+                "enum": [
+                  "pill",
+                  "rounded",
+                  "sharp"
+                ],
+                "type": "string"
+              },
               "canonical_url": {
                 "type": [
                   "string",
@@ -44701,6 +44716,13 @@
                   "string",
                   "null"
                 ]
+              },
+              "heading_casing": {
+                "enum": [
+                  "uppercase",
+                  "none"
+                ],
+                "type": "string"
               },
               "id": {
                 "type": "string"
@@ -105728,7 +105750,7 @@
     {
       "name": "update_organization_settings",
       "title": "Update organization settings",
-      "description": "Change the selected site’s brand, description, website font, colors, contact email, default currency, visitor announcement banner/popup or Live/Draft status. Only supplied settings change. An announcement replaces all its fields, and null removes it. Logos and announcement images are separate media placements; this tool does not change them. Returns the updated settings. Published website settings change immediately; this does not create a short post, blog article or social publication.",
+      "description": "Change the selected site’s brand, description, website font, colors, button and heading styling, contact email, default currency, visitor announcement banner/popup or Live/Draft status. Only supplied settings change. An announcement replaces all its fields, and null removes it. Logos and announcement images are separate media placements; this tool does not change them. Returns the updated settings. Published website settings change immediately; this does not create a short post, blog article or social publication.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -105792,6 +105814,23 @@
           "brand_description": {
             "type": "string"
           },
+          "button_casing": {
+            "description": "Button text casing: uppercase or none (natural case).",
+            "enum": [
+              "uppercase",
+              "none"
+            ],
+            "type": "string"
+          },
+          "button_shape": {
+            "description": "Button corner styling: pill (fully rounded), rounded (subtle radius), or sharp (square corners).",
+            "enum": [
+              "pill",
+              "rounded",
+              "sharp"
+            ],
+            "type": "string"
+          },
           "careers_email": {
             "type": "string"
           },
@@ -105841,6 +105880,14 @@
               "lora",
               "playfair-display",
               "cormorant-garamond"
+            ],
+            "type": "string"
+          },
+          "heading_casing": {
+            "description": "Display heading casing: uppercase or none (natural case).",
+            "enum": [
+              "uppercase",
+              "none"
             ],
             "type": "string"
           },
@@ -118640,7 +118687,7 @@
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
         "update_menu": "sha256:4ab27009a3a126aed4b328f7f1db8b4cc7e321f720da7e5a16d82f8badb202d8",
-        "update_organization_settings": "sha256:c7ab6bac088414e7f6397f3fcd00d9c8c79dd30b4575f35ed4050388748e1047",
+        "update_organization_settings": "sha256:b5488027b9a151e5759c0cf78e9010b60ff1d07ba783525d50e30cc233f2ef94",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
     },

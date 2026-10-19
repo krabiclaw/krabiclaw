@@ -57,4 +57,3 @@ MCP_CREDENTIAL_LOGIN=1 MCP_BASE_URL=https://krabiclaw.com node --env-file=.env s
 
 The verified end-to-end flow is published on KrabiClaw's customer documentation:
 - Live article: `https://krabiclaw.com/docs/how-to-set-up-a-lawyer-website-using-chatgpt-claude-and-mcp`
-- Publisher script: `scripts/publish-lawyer-setup-doc-mcp.mjs`
