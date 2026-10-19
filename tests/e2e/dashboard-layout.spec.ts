@@ -1041,7 +1041,10 @@ test.describe('dashboard pane hierarchy', () => {
     await expectPanes(page, ['organization-integrations', 'integration-google-maps'])
 
     // Payments is one page with Airbnb's tabs, reached from the Earnings cog; Payments is the first tab.
-    // Beside a pane each tab opens its first row: How you get paid, then the plan.
+    // Beside a pane each tab opens its first row: the plan from its deep link, How you get paid, then the plan again from the tab.
+    await open(page, `${ORG}/payments?tab=plan`)
+    await expect(page).toHaveURL(`${ORG}/payments/plan`)
+    await expectPanes(page, ['organization-payments', 'organization-plan'])
     await open(page, `${ORG}/payments?tab=payouts`)
     await expect(page).toHaveURL(`${ORG}/payments/payout-method`)
     await expectPanes(page, ['organization-payments', 'organization-payout-method'])
@@ -1142,6 +1145,13 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(payments.getByText('No payment methods saved yet.', { exact: true })).toBeVisible()
       // UAlert renders its message in this slot, including native provider errors.
       await expect(payments.locator('[data-slot="description"]')).toHaveCount(0)
+      // The row opens the cards as a drawer, with the same actual state and the way to add one.
+      await payments.getByRole('link', { name: /^Payment methods/ }).click()
+      const methodsLeaf = page.getByRole('dialog', { name: 'Payment methods', exact: true })
+      await expect(methodsLeaf.getByText('No payment methods saved yet.', { exact: true })).toBeVisible()
+      await expect(methodsLeaf.getByRole('button', { name: 'Add payment method', exact: true })).toBeVisible()
+      await methodsLeaf.getByTestId('dashboard-navbar-close').click()
+      await expect(page).toHaveURL(`${cedar}/payments`)
       await expect(payments.getByTestId('dashboard-navbar-back')).toHaveAttribute('href', `${cedar}/earnings`)
       await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'])
 
