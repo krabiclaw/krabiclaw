@@ -197,7 +197,8 @@ const days = computed(() => {
     const slots = d.slots.map((s) => {
       const isClosedOrFull = s.is_closed || s.is_full
       const tooSmall = !isClosedOrFull && s.remaining !== null && s.remaining < props.guests
-      const scarce = !isClosedOrFull && !tooSmall && s.remaining !== null && s.remaining <= 3
+      // A one-guest appointment is never "1 left": scarcity means places in a shared session.
+      const scarce = !isClosedOrFull && !tooSmall && s.remaining !== null && s.remaining <= 3 && s.capacity !== null && s.capacity > 1
       const disabled = isClosedOrFull || tooSmall
       const availabilityLabel = s.is_closed
         ? t('saya.location.closed')
