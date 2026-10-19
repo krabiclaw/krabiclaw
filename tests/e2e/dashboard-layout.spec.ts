@@ -1128,6 +1128,12 @@ test.describe('dashboard pane hierarchy', () => {
       const methods = await page.request.get(`/api/billing/payment-methods?organizationId=${cedarId}`)
       expect(methods.status(), await methods.text()).toBe(200)
       expect(await methods.json()).toEqual({ payment_methods: [] })
+      // The column reads the plan and its usage billing on arrival, whichever tab is open.
+      const planBilling = page.waitForResponse(response => {
+        const url = new URL(response.url())
+        return url.pathname === '/api/billing/status' && url.searchParams.get('includePrice') === 'true'
+      })
+      const usageBilling = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/payments/billing')
       await open(page, `${cedar}/payments`)
       const payments = page.locator('#dashboard-panel-organization-payments')
       // On a phone the tab is rows and nothing opens on its own; the row states the actual cards.
@@ -1139,11 +1145,6 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(payments.getByTestId('dashboard-navbar-back')).toHaveAttribute('href', `${cedar}/earnings`)
       await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'])
 
-      const planBilling = page.waitForResponse(response => {
-        const url = new URL(response.url())
-        return url.pathname === '/api/billing/status' && url.searchParams.get('includePrice') === 'true'
-      })
-      const usageBilling = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/payments/billing')
       await payments.getByRole('tab', { name: 'Plan', exact: true }).click()
       await expect(page).toHaveURL(`${cedar}/payments?tab=plan`)
       const planResponse = await planBilling
