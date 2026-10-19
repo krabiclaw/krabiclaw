@@ -7,6 +7,15 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { notifyPaymentFinancialEvent } from './notifications'
 import { readPaymentOrder } from './orders'
 import { recordPaymentRefunded } from '~/server/domain/booking-analytics'
+import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
+
+/** What a guest paid on the site for one booking, reservation or stay, net of refunds; null when it was not paid online. */
+export async function paidOnline(db: DbClient, organizationId: string, subjectType: 'booking' | 'reservation' | 'stay', subjectId: string): Promise<{ amount: number; currency: CurrencyCode } | null> {
+  const row = await queryFirst<{ amount: number; currency: string }>(db, 'SELECT captured_amount - refunded_amount AS amount, currency FROM payments WHERE organization_id=? AND subject_type=? AND subject_id=? AND captured_amount>0', [organizationId, subjectType, subjectId])
+  if (!row) return null
+  if (!isCurrencyCode(row.currency)) throw new Error('Paid payment has an unsupported currency')
+  return { amount: row.amount, currency: row.currency }
+}
 
 export interface Payment {
   id: string

@@ -250,7 +250,7 @@
 
           <WhoYouMeet v-if="booking || isStay" class="mt-10" :organization-id="organizationId" :product-id="product.id" :slug="product.slug" :session-id="bookingController.selectedSession.value?.id" :contact-to="compact ? undefined : enquiryPath" />
 
-          <section v-if="thingsToKnow.length" class="mt-10 border-t border-default pt-10">
+          <section v-if="thingsToKnow.length" id="things-to-know" class="mt-10 scroll-mt-24 border-t border-default pt-10">
             <h2 class="saya-display text-2xl text-default sm:text-3xl">{{ t('saya.experience_detail.things_to_know') }}</h2>
             <div class="mt-5 grid gap-x-10 gap-y-6 sm:grid-cols-2" :class="isStay ? 'lg:grid-cols-3' : undefined">
               <div v-for="detail in thingsToKnow" :key="detail.key">
@@ -454,7 +454,7 @@
         :can-go-back="bookingStep > 1 && !submitting"
         @back="bookingStep = 1"
       >
-        <ProductBookingSteps :controller="bookingController" :confirmation-mode="booking.confirmation_mode" />
+        <ProductBookingSteps :controller="bookingController" :confirmation-mode="booking.confirmation_mode" :payment-required="booking.online_payment_required && (offer?.unit_amount ?? 0) > 0" />
       </BookingModal>
       <BookingModal
         v-else-if="isStay && canBook"

@@ -89,7 +89,7 @@ const receiptRows = computed(() => {
     { label: t('stay.check_out'), value: `${day(stay.check_out_date)} · ${formatTime(home.check_out_time, locale.value)}` },
     { label: t('stay.nights'), value: String(nights) },
     { label: t('stay.guests'), value: String(stay.adults + stay.children) },
-    { label: t('stay.paid_total'), value: paymentMoney(stay.paid_minor, stay.currency) },
+    { label: t('payment.paid'), value: paymentMoney(stay.paid_minor, stay.currency) },
   ]
 })
 
