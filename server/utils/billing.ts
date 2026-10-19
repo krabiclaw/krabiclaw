@@ -293,15 +293,13 @@ export function capacityRefusalOf(error: unknown): CapacityRefusal | null {
  * attempt was rolled back whole, so the second is the only write. Past the
  * plan, it throws the 402 refusal naming `action`; any other failure is
  * rethrown as it is.
- *
- * `guardsFor` narrows the guards on the second run (see createLocation).
  */
 export async function executeWithinCapacity(
   env: CloudflareEnv,
   db: DbClient,
   organizationId: string,
   writes: BatchQuery[],
-  options: { operation?: string; action: string; guardsFor?: (capacity: BillingCapacity) => BatchQuery[] },
+  options: { operation?: string; action: string },
 ): Promise<D1Result[]> {
   const usage = await readBillingUsage(db, organizationId)
   try {
@@ -311,7 +309,7 @@ export async function executeWithinCapacity(
   }
   const capacity = await billingCapacity(env, db, organizationId)
   try {
-    return await executeBatch(db, [...writes, ...(options.guardsFor ?? (value => capacityGuards(organizationId, value)))(capacity)], { operation: options.operation })
+    return await executeBatch(db, [...writes, ...capacityGuards(organizationId, capacity)], { operation: options.operation })
   } catch (error) {
     const failed = isUsageGuardFailure(error)
     if (!failed) throw error

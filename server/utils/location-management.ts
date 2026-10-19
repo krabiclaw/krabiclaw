@@ -9,7 +9,7 @@ import { refreshSocialCard } from '~/server/utils/social-card'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { prepareContentDocumentDeletion } from '~/server/utils/content/documents'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
-import { capacityGuards, capacityRefusalOf, executeWithinCapacity } from '~/server/utils/billing'
+import { capacityRefusalOf, executeWithinCapacity } from '~/server/utils/billing'
 import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 
 type SetupEnv = CloudflareEnv;
@@ -208,7 +208,10 @@ export async function createLocation(
   organizationId: string,
   input: CreateLocationInput,
   userId: string,
-  /** `holdsHome`: the location is made for the home created at it next (see createStayHome). */
+  /**
+   * `holdsHome`: made inactive for the home created at it next, which makes it
+   * active once it holds the home (see createStayHome).
+   */
   options: { refreshSocialCardAfterCreate?: boolean; idempotencyKey?: string; holdsHome?: boolean } = {},
 ) {
   const key = options.idempotencyKey?.trim();
@@ -333,7 +336,7 @@ export async function createLocation(
             assigned_member_id, assigned_team_id,
             created_at, updated_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         params: [
           id,
@@ -356,6 +359,7 @@ export async function createLocation(
           input.price_level ?? null,
           normalizedTimezone,
           input.max_capacity ?? null,
+          options.holdsHome ? 'inactive' : 'active',
           input.seo_title ?? null,
           input.seo_description ?? null,
           input.canonical_url ?? null,
@@ -380,12 +384,7 @@ export async function createLocation(
       }));
       statements.push(publicResourceCacheInvalidationQuery(organizationId, 'location_created'));
 
-      await executeWithinCapacity(env, db, organizationId, statements, {
-        action: 'create it',
-        // On the current Business offer a location made to hold a home is billed
-        // by that home, which createStayHome checks against the plan's rental units.
-        guardsFor: capacity => options.holdsHome && capacity.billsRentalUnits ? [] : capacityGuards(organizationId, capacity),
-      });
+      await executeWithinCapacity(env, db, organizationId, statements, { action: 'create it' });
       created = await loadLocation(db, organizationId, id, true);
       if (!created) throw new HTTPError({ statusCode: 500, statusMessage: 'Created location could not be read back', data: { code: 'LOCATION_NOT_READABLE', field: 'location.id' } });
       break;

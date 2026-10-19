@@ -76,7 +76,7 @@ const saveLabel = computed(() => preview.value
 const busy = ref(false)
 const error = ref('')
 const success = ref('')
-// One attempt per confirmation: a retried submit deduplicates at Stripe, a later change does not.
+// One attempt per previewed invoice: a retried confirmation of it deduplicates at Stripe, and a new preview is a new attempt.
 let attempt = crypto.randomUUID()
 
 async function save() {
@@ -88,6 +88,7 @@ async function save() {
   try {
     if (!preview.value) {
       preview.value = (await dashboardApi('/api/dashboard/plan-change', { method: 'POST', body: { action: 'preview', ...change }, validate: isPreview })).preview
+      attempt = crypto.randomUUID()
       return
     }
     const organizationId = dashboard.organization.value?.id
@@ -95,11 +96,12 @@ async function save() {
     if (switching.value) await recordBillingAnalyticsIntent(dashboardApi, { organizationId, subscriptionId: billing.value?.stripeSubscriptionId ?? null, action: 'upgrade', ...getBillingAnalyticsContext() })
     await dashboardApi('/api/dashboard/plan-change', { method: 'POST', body: { action: 'confirm', ...change, prorationDate: preview.value.prorationDate, attempt }, validate: isConfirmed })
     if (switching.value) trackSubscriptionUpgrade(BUSINESS_PLAN_ID, organizationId)
-    attempt = crypto.randomUUID()
     preview.value = null
     await refreshBilling()
     success.value = 'Stripe confirmed the change. Your plan has been updated.'
   } catch (cause) {
+    // Stripe keeps a declined confirmation under its attempt; after fixing the card the business reviews a fresh invoice.
+    preview.value = null
     error.value = getErrorMessage(cause, 'Your plan could not be changed')
   } finally {
     busy.value = false

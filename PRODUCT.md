@@ -87,8 +87,8 @@ included, then $49 per additional location and $19 per additional rental unit pe
 month. A rental unit is one independently bookable home (a `stay` product, counted
 once however many channels list it); a location holding only homes is billed by
 its units, not as a location. The iOS app is included with every account at no
-charge. Commerce, Marketing and Business subscriptions on the earlier $99 price
-remain existing contracts with their original prices and entitlements. One organization
+charge. Commerce ($89), Marketing ($99) and Business subscriptions on the earlier
+$99 price remain existing contracts with their original prices and entitlements. One organization
 subscription covers its sites. Customer display names, Stripe product IDs, price IDs and lookup keys
 are separate concepts. Renaming a plan label does not authorize an ID migration.
 

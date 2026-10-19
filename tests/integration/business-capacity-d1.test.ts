@@ -132,6 +132,19 @@ test('the current Business offer counts and limits rental units and the location
     // Deleting the cabin leaves the bistro operating as before; it frees a unit.
     await deleteProduct(db, { organizationId: 'inn', productId: cabin.id, env })
     assert.deepEqual(await usage('inn'), { locations: 2, rentalUnits: 3 })
+    // Two homes arriving together for the last unit: one is made, the other refused, and no billed location is left without its home.
+    const bare = `SELECT COUNT(*) AS n FROM business_locations l WHERE l.organization_id = 'inn' AND l.status = 'active'
+      AND NOT EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.location_id = l.id) AND NOT EXISTS (SELECT 1 FROM product_locations pl WHERE pl.location_id = l.id)`
+    const bareBefore = await db.prepare(bare).first('n')
+    await updateProduct(db, { env, organizationId: 'inn', productId: villas[1]!.product_id, actor, patch: { active: false } })
+    assert.deepEqual(await usage('inn'), { locations: 2, rentalUnits: 2 })
+    const together = await Promise.allSettled([home('inn', 'race-1'), home('inn', 'race-2')])
+    assert.deepEqual(together.map(result => result.status).sort(), ['fulfilled', 'rejected'])
+    assert.equal((together.find(result => result.status === 'rejected') as PromiseRejectedResult).reason.data.code, 'RENTAL_UNIT_LIMIT')
+    assert.deepEqual(await usage('inn'), { locations: 2, rentalUnits: 3 })
+    assert.equal(await db.prepare(bare).first('n'), bareBefore)
+    const made = (together.find(result => result.status === 'fulfilled') as PromiseFulfilledResult<{ location_id: string }>).value
+    assert.equal(await db.prepare('SELECT status FROM business_locations WHERE id = ?').bind(made.location_id).first('status'), 'active')
     // A location made active again is refused when the plan has no slot for it.
     const diner = await place('inn', 'Diner')
     assert.equal(diner.status, 402)
@@ -146,12 +159,12 @@ test('the current Business offer counts and limits rental units and the location
     // ── A Business subscription on the earlier price keeps its contract: every location is billed, units are not limited.
     stripeItems = [planItem(9900, 6)]
     assert.deepEqual(await billingCapacity(env, db, 'inn'), {
-      plan: 'business', billsRentalUnits: false, locations: { used: 5, covered: 2 }, rentalUnits: null,
+      plan: 'business', billsRentalUnits: false, locations: { used: 6, covered: 2 }, rentalUnits: null,
     })
-    await db.prepare("UPDATE subscription SET seats = 6 WHERE referenceId = 'inn'").run()
+    await db.prepare("UPDATE subscription SET seats = 7 WHERE referenceId = 'inn'").run()
     assert.equal((await homeAt('inn', bistroId, 'Second Cabin')).kind, 'stay')
     assert.equal((await home('inn', 'villa-5')).name, 'Home villa-5')
-    await assert.rejects(home('inn', 'villa-6'), { status: 402, data: { error: 'Your plan covers 6 locations. Add a location to your plan in Billing (2 included, then $49 per additional location per month), then create it.', code: 'LOCATION_LIMIT', locations: { used: 6, covered: 6 } } })
+    await assert.rejects(home('inn', 'villa-6'), { status: 402, data: { error: 'Your plan covers 7 locations. Add a location to your plan in Billing (2 included, then $49 per additional location per month), then create it.', code: 'LOCATION_LIMIT', locations: { used: 7, covered: 7 } } })
 
     // ── #1493's portfolios, counted from the homes and locations themselves.
     await organization('portfolio', 'growth', 40, null)

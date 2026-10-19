@@ -764,9 +764,12 @@ export async function releaseUnassignableHomes(env: GuestInboxPublicationEnv, db
 /**
  * Add a place to stay: a new location of this organization and an unpublished
  * stay at it, priced per night in the organization's currency. On the current
- * Business offer the home is a rental unit and its location is not billed;
- * on every other plan the location is. A home added by hand and one imported
- * from a channel are made here, the same way. The key replays both writes.
+ * Business offer the home is a rental unit and its location is not billed: the
+ * location is made inactive and made active once it holds the home, so a home
+ * refused past the plan's units leaves no billed location behind, and the same
+ * key completes it later. On every other plan the location is billed when it is
+ * made. A home added by hand and one imported from a channel are made here, the
+ * same way. The key replays every write.
  */
 export async function createStayHome(env: Parameters<typeof createLocation>[0], db: DbClient, access: StayAccess, home: NewStayHome, idempotencyKey: string): Promise<StayHome> {
   requireManager(access)
@@ -780,7 +783,7 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
   const located = await createLocation(env, db as D1Database, access.organizationId, {
     title: home.name, timezone: home.timezone, phone: home.phone, email: home.email,
     address: postalAddress(home),
-  }, access.actorId, { idempotencyKey, holdsHome: true })
+  }, access.actorId, { idempotencyKey, holdsHome: capacity.billsRentalUnits })
   if (located.status !== 201) locationFailure(located)
   const location = 'location' in located.data ? located.data.location : undefined
   if (!location || typeof location.id !== 'string' || !location.id.trim()) fail(502, 'INVALID_LOCATION_RESPONSE', 'Location creation did not return the location id', 'data.location.id')
@@ -795,6 +798,10 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
       stay: { location_id: locationId, check_in_time: home.check_in_time, check_out_time: home.check_out_time, max_guests: home.max_guests, min_nights: home.min_nights, assigned_member_id: null, assigned_team_id: null },
     },
   })
+  if (capacity.billsRentalUnits) {
+    const activated = await updateLocation(db as D1Database, access.organizationId, locationId, { status: 'active' }, access.actorId, env)
+    if (activated.status !== 200) locationFailure(activated)
+  }
   return await readStayHome(db, access, product.id)
 }
 
