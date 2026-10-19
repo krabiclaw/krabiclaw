@@ -1287,6 +1287,8 @@ async function guestStayCancellation(db: DbClient, organizationId: string, stayI
 
 /** A guest's own stay as their account reads it: the stay, its home and host, and what cancelling returns now. */
 export interface GuestStay {
+  /** The business the stay is with: a business's site shows only its own. */
+  organization_id: string
   stay: StayDetail
   home: { name: string; organization_name: string; check_in_time: string; check_out_time: string }
   /** Null once the stay is cancelled, or for a stay not paid on the site. */
@@ -1306,7 +1308,7 @@ export async function readGuestStay(db: DbClient, buyerUserId: string, activityI
   const stay = await getStay(db, { organizationId: owned.organization_id, actorId: buyerUserId, manage: true }, owned.id)
   const cancellation = owned.status !== 'cancelled' && owned.paid_online === 1
     ? (await guestStayCancellation(db, owned.organization_id, owned.id, buyerUserId, new Date().toISOString())).quote : null
-  return { stay, home: { name: owned.name, organization_name: owned.organization_name, check_in_time: owned.check_in_time, check_out_time: owned.check_out_time }, cancellation }
+  return { organization_id: owned.organization_id, stay, home: { name: owned.name, organization_name: owned.organization_name, check_in_time: owned.check_in_time, check_out_time: owned.check_out_time }, cancellation }
 }
 
 /**

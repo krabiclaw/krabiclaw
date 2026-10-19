@@ -326,9 +326,19 @@ referrer sees it. Stripe's Payment Element, mounted on the connected account in
 deferred mode with the business's payment method configuration, collects the
 method; `POST /api/public/payments/<id>/review` attaches it to the intent and
 returns what the card will cost; `POST .../confirm` confirms exactly the reviewed
-method and total, and the browser completes any 3DS with `handleNextAction` before
-returning to `/account` with the claim. A succeeded confirmation settles at once
-through `reconcilePaymentIntent`, and again, idempotently, from the webhook.
+method and total, and the browser completes any 3DS with `handleNextAction`. A
+method that leaves the site comes back to the same pay page on the business's host
+(Stripe's `return_url` carries the claim in its query). The pay page then calls
+`POST .../return` (`completePaymentReturn`): Stripe is asked whether the intent
+succeeded, the purchase is claimed for the site's Better Auth buyer (the anonymous
+user the booking made), the capture alert is sent, and the response names the
+business's own receipt — `/bookings/confirmed` or `/reservations/confirmed` with
+the request's replayable cancellation token, as an unpaid booking's confirmation,
+or `/bookings/stay` for a stay, read by that browser's session through
+`GET /api/public/guest-stays/<activity id>`. A payment still `processing` claims
+nothing and the pay page says it is clearing; a capture whose booking was taken
+first is refunded and the pay page says so. A succeeded confirmation settles at
+once through `reconcilePaymentIntent`, and again, idempotently, from the webhook.
 
 **Surcharge.** A business that opts in sets `surcharge_basis_points` on its
 connected account. Stripe's native surcharge preview (`amount_details.surcharge`,

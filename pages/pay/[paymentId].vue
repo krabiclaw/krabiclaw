@@ -67,7 +67,10 @@
         </aside>
 
         <div class="lg:order-1 min-w-0 space-y-6">
-          <UAlert v-if="handoff.state === 'paid'" color="success" :title="t('payment.already_paid')" />
+          <p v-if="completing" class="text-sm text-muted">{{ t('payment.verifying') }}</p>
+          <UAlert v-if="outcome === 'processing'" color="info" :title="t('payment.processing')" :description="t('payment.processing_help')" />
+          <UAlert v-else-if="outcome === 'refunded'" color="warning" :title="t('payment.refunded')" :description="t('payment.refunded_help')" />
+          <UAlert v-else-if="paid || handoff.state === 'paid'" color="success" :title="t('payment.already_paid')" />
           <UAlert v-else-if="handoff.state !== 'open'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
           <template v-else>
             <!-- No frame around Stripe's form: its fields are the only boxes, as on Airbnb's page. -->
@@ -84,19 +87,18 @@
               </div>
             </section>
 
-            <UAlert v-if="actionError" color="error" :description="actionError" />
-
             <p class="text-xs text-muted leading-relaxed">{{ t('payment.agreement') }}</p>
             <UButton
               size="xl"
               block
               :label="review ? t('payment.pay', { amount: paymentMoney(review.total, review.currency) }) : t('payment.confirm')"
-              :loading="working"
+              :loading="working || completing"
               :disabled="!review && !ready"
               class="font-semibold py-3.5 text-base"
               @click="review ? pay() : confirmAndPay()"
             />
           </template>
+          <UAlert v-if="actionError" color="error" :description="actionError" />
         </div>
       </div>
     </div>
@@ -108,25 +110,31 @@ import { loadStripe, type Stripe, type StripeElements, type StripePaymentElement
 import { paymentMoney } from '~/shared/payment-display'
 import { cardBrandLabel } from '~/composables/usePaymentsSettings'
 import { formatCalendarDate, formatTimestamp } from '~/utils/timezone'
-import { STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, stayNightlyGroups } from '~/shared/stay-listing'
+import { stayNightlyGroups } from '~/shared/stay-listing'
+import { bookedPolicyTerms } from '~/shared/stay-cancellation'
 import { isRecord, publicApiMutation, publicApiRequest } from '~/utils/api-clients'
-import type { paymentHandoff, reviewPayment, confirmPayment } from '~/server/domain/payments/intent'
+import type { paymentHandoff, reviewPayment, confirmPayment, PaymentReturn } from '~/server/domain/payments/intent'
 
 definePageMeta({ layout: 'standalone' })
 useResponseHeader('cache-control').value = 'private, no-store'
 useHead({ meta: [{ name: 'referrer', content: 'no-referrer' }, { name: 'robots', content: 'noindex, nofollow' }] })
-const { t, locale } = useI18n()
+const { t, locale, localePath } = useI18n()
 const route = useRoute()
 const paymentId = String(route.params.paymentId)
-// The claim the checkout handed this browser, in the fragment: no server, log or referrer sees it.
-const claim = computed(() => route.hash.slice(1))
+// A method that left the site comes back here from Stripe, the claim in its return URL's query.
+const returned = typeof route.query.claim === 'string'
+// Otherwise the claim the checkout handed this browser is in the fragment: no server, log or referrer sees it.
+const claim = computed(() => typeof route.query.claim === 'string' ? route.query.claim : route.hash.slice(1))
 
 type Handoff = Awaited<ReturnType<typeof paymentHandoff>>
 type Review = Awaited<ReturnType<typeof reviewPayment>>
 type Confirmation = Awaited<ReturnType<typeof confirmPayment>>
 const isHandoff = (value: unknown): value is Handoff => isRecord(value) && value.payment_id === paymentId && typeof value.title === 'string' && Number.isSafeInteger(value.subtotal) && typeof value.currency === 'string' && typeof value.stripe_account_id === 'string' && typeof value.publishable_key === 'string' && Array.isArray(value.payment_method_types) && value.payment_method_types.every(type => typeof type === 'string') && ['open', 'paid', 'failed', 'expired'].includes(String(value.state))
 const isReview = (value: unknown): value is Review => isRecord(value) && typeof value.payment_method_id === 'string' && Number.isSafeInteger(value.subtotal) && Number.isSafeInteger(value.surcharge) && value.total === (value.subtotal as number) + (value.surcharge as number) && isRecord(value.method)
-const isConfirmation = (value: unknown): value is Confirmation => isRecord(value) && typeof value.status === 'string' && typeof value.requires_action === 'boolean' && typeof value.return_url === 'string'
+const isConfirmation = (value: unknown): value is Confirmation => isRecord(value) && typeof value.status === 'string' && typeof value.requires_action === 'boolean'
+const isReturn = (value: unknown): value is PaymentReturn => isRecord(value) && (value.state === 'processing' || value.state === 'refunded' || (value.state === 'paid' && (
+  (value.kind === 'stay' && typeof value.activity_id === 'string')
+  || ((value.kind === 'booking' || value.kind === 'reservation') && typeof value.request_id === 'string' && typeof value.cancellation_token === 'string'))))
 
 const { data: handoff, status, error } = await useAsyncData(`payment-handoff:${paymentId}`, () => publicApiRequest<Handoff>(`/api/public/payments/${encodeURIComponent(paymentId)}`, { query: { claim: claim.value }, validate: isHandoff }), { server: false, immediate: Boolean(claim.value) })
 const loadError = computed(() => !claim.value ? t('payment.unavailable') : error.value ? getErrorMessage(error.value, t('payment.unavailable')) : '')
@@ -137,6 +145,9 @@ const ready = ref(false)
 const working = ref(false)
 const actionError = ref('')
 const review = ref<Review | null>(null)
+const completing = ref(false)
+const paid = ref(false)
+const outcome = ref<'processing' | 'refunded' | null>(null)
 let stripe: Stripe | null = null
 let mounting = false
 let elements: StripeElements | null = null
@@ -166,10 +177,7 @@ const guests = computed(() => {
 })
 const policySummary = computed(() => {
   const policy = handoff.value?.stay?.cancellation_policy
-  if (!policy) return ''
-  return policy.startsWith('long_term_')
-    ? STAY_LONG_TERM_CANCELLATION_POLICIES[policy.slice('long_term_'.length) as keyof typeof STAY_LONG_TERM_CANCELLATION_POLICIES].summary
-    : STAY_CANCELLATION_POLICIES[policy as keyof typeof STAY_CANCELLATION_POLICIES].summary
+  return policy ? bookedPolicyTerms(policy).summary : ''
 })
 /** How the total adds up, the way Airbnb's receipt reads: "$120.00 × 2 nights", "$95.00 × 1 guest". */
 const priceLines = computed(() => {
@@ -179,6 +187,11 @@ const priceLines = computed(() => {
   if (value.quantity === 1) return [{ label: value.title, amount: money(value.subtotal) }]
   return [{ label: t('payment.unit_line', { price: money(value.unit_amount), count: guests.value || value.quantity }), amount: money(value.subtotal) }]
 })
+
+// A paid purchase, or one Stripe sent back here, goes on to its receipt.
+watch(handoff, (value) => {
+  if (value && !import.meta.server && (value.state === 'paid' || (returned && value.state === 'open'))) void complete()
+}, { immediate: true })
 
 // Stripe's Payment Element on the business's own account, in deferred mode: the
 // method is created first so the server can price it before anything is confirmed.
@@ -200,7 +213,7 @@ watch([handoff, mount], async ([value, container]) => {
       // Airbnb lists the ways to pay as radio rows divided by hairlines, not boxed tabs.
       appearance: {
         theme: document.documentElement.classList.contains('dark') ? 'night' : 'stripe',
-        rules: { '.AccordionItem': { border: 'none', boxShadow: 'none', paddingLeft: '0px', paddingRight: '0px' } },
+        rules: { '.AccordionItem': { border: 'none', boxShadow: 'none', paddingLeft: '0px', paddingRight: '0px', backgroundColor: 'transparent' } },
       },
     })
     paymentElement = elements.create('payment', { layout: { type: 'accordion', defaultCollapsed: false, radios: 'always', spacedAccordionItems: false } })
@@ -259,7 +272,7 @@ async function pay() {
     } else if (confirmed.status !== 'succeeded' && confirmed.status !== 'processing') {
       throw new Error(t('payment.declined'))
     }
-    await navigateTo(confirmed.return_url, { external: true })
+    paid.value = true
   } catch (cause) {
     actionError.value = getErrorMessage(cause, t('payment.declined'))
     // A decline leaves the intent waiting for another method; the review it was for is over.
@@ -267,6 +280,28 @@ async function pay() {
     if (elements && handoff.value) elements.update({ amount: handoff.value.subtotal })
   } finally {
     working.value = false
+  }
+  if (paid.value) await complete()
+}
+
+/**
+ * The business's site confirms what was paid for, as it does an unpaid
+ * booking: its own receipt page. A payment still clearing, or one refunded
+ * because what it paid for was taken first, is said so here.
+ */
+async function complete() {
+  if (completing.value) return
+  completing.value = true
+  actionError.value = ''
+  try {
+    const done = await publicApiMutation<PaymentReturn>(`/api/public/payments/${encodeURIComponent(paymentId)}/return`, { method: 'POST', body: { claim: claim.value }, validate: isReturn })
+    if (done.state !== 'paid') outcome.value = done.state
+    else if (done.kind === 'stay') await navigateTo({ path: localePath('/bookings/stay'), query: { id: done.activity_id } }, { replace: true })
+    else await navigateTo({ path: localePath(done.kind === 'booking' ? '/bookings/confirmed' : '/reservations/confirmed'), query: { id: done.request_id }, hash: `#${done.cancellation_token}` }, { replace: true })
+  } catch (cause) {
+    actionError.value = getErrorMessage(cause, t('payment.unavailable'))
+  } finally {
+    completing.value = false
   }
 }
 

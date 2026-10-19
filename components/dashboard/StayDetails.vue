@@ -102,7 +102,7 @@
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
 import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import type { GuestStay, StayDetail, StayPaymentMethod } from '~/server/domain/stays'
-import { STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES } from '~/shared/stay-listing'
+import { bookedPolicyTerms } from '~/shared/stay-cancellation'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
 import { formatCalendarDate, localDateAt } from '~/utils/timezone'
@@ -130,13 +130,7 @@ const stay = computed(() => data.value?.stay ?? null)
 const manage = computed(() => !props.personalScope && data.value !== null && 'manage' in data.value! && data.value.manage === true)
 const home = computed(() => data.value && 'home' in data.value ? data.value.home : null)
 const cancellation = computed(() => data.value && 'cancellation' in data.value ? data.value.cancellation : null)
-const policy = computed(() => {
-  const code = stay.value?.cancellation_policy
-  if (!code) return null
-  return code.startsWith('long_term_')
-    ? STAY_LONG_TERM_CANCELLATION_POLICIES[code.slice('long_term_'.length) as keyof typeof STAY_LONG_TERM_CANCELLATION_POLICIES]
-    : STAY_CANCELLATION_POLICIES[code as keyof typeof STAY_CANCELLATION_POLICIES]
-})
+const policy = computed(() => stay.value?.cancellation_policy ? bookedPolicyTerms(stay.value.cancellation_policy) : null)
 const paymentPath = computed(() => stay.value?.online_payment ? `/dashboard/${route.params.orgSlug}/bookings/payment/${encodeURIComponent(stay.value.online_payment.payment_id)}` : '')
 watch(realtime.event, event => {
   if (event?.type === 'stay.changed' && (event.stayId === props.stayId || (event.stayId === null && event.productId === stay.value?.product_id))) void refresh()

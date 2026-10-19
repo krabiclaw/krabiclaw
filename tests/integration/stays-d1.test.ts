@@ -8,6 +8,11 @@ import * as schema from '../../server/db/schema.ts'
 import { createProduct, deleteProduct, getProduct, removeProductLocation, setProductLocation, updateProduct } from '../../server/utils/product-management.ts'
 import { applyChannelBooking, cancelStay, createStay, deleteStayPayment, getStay, listStays, readStayCalendar, recordStayPayment, setStayNights, updateStay, type StayAccess } from '../../server/domain/stays.ts'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations.ts'
+import { H3 } from 'nitro/h3'
+import { createAuth } from '../../server/utils/auth.ts'
+import guestStayRoute from '../../server/api/public/guest-stays/[activityId].get.ts'
+import paymentReturnRoute from '../../server/api/public/payments/[paymentId]/return.post.ts'
+import { tokenHash } from '../../server/domain/payments/buyer.ts'
 
 const ORG = 'org'
 const OWNER = 'owner-user'
@@ -494,6 +499,97 @@ test('members see only the homes they look after and change nothing; a home with
     await assert.rejects(cancelStay(db, env, cleaner, cabinStay.id, { expected_version: 1 }), code('STAY_ROLE_REQUIRED'))
     await assert.rejects(deleteProduct(db, { env, organizationId: ORG, productId: cabin.id }), /has bookings or stays/)
     assert.equal((await getProduct(db, ORG, cabin.id)).id, cabin.id)
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('a business’s site shows a guest the stay their own browser booked there, and nothing else', { timeout: 120_000 }, async () => {
+  const { runtime, db, env: bindings } = await boot()
+  try {
+    const env = { ...bindings, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', STRIPE_SECRET_KEY: 'sk_test_local_boundary' }
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
+    const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'site-stay', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest, guest_email: 'ana@example.com' })
+    // The anonymous Better Auth user the site's checkout made the stay for.
+    const signIn = async () => {
+      const signed = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
+      return { id: signed.response!.user.id, cookie: signed.headers.getSetCookie().map(value => value.split(';')[0]).join('; ') }
+    }
+    const [booker, stranger] = [await signIn(), await signIn()]
+    await db.prepare("UPDATE stays SET user_id = ?, cancellation_policy = 'moderate' WHERE id = ?").bind(booker.id, stay.id).run()
+    // The guest's stay is read by its activity ID: its conversation's, as the account reads it.
+    const activityId = stay.request_id ?? stay.id
+    const read = (organizationId: string, cookie?: string) => {
+      const app = new H3()
+      app.use((event) => { event.context.organizationId = organizationId })
+      app.get('/api/public/guest-stays/:activityId', guestStayRoute)
+      return app.request(Object.assign(new Request(`https://org.proof.example/api/public/guest-stays/${activityId}`, { headers: cookie ? { cookie } : {} }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    }
+
+    const own = await read(ORG, booker.cookie)
+    assert.equal(own.status, 200)
+    const body = await own.json() as { organization_id: string; stay: { id: string; guest_email: string; cancellation_policy: string; check_in_date: string; check_out_date: string }; home: { name: string; check_in_time: string; check_out_time: string }; cancellation: unknown }
+    assert.deepEqual({ organization_id: body.organization_id, id: body.stay.id, email: body.stay.guest_email, policy: body.stay.cancellation_policy, dates: [body.stay.check_in_date, body.stay.check_out_date], home: body.home, cancellation: body.cancellation },
+      { organization_id: ORG, id: stay.id, email: 'ana@example.com', policy: 'moderate', dates: ['2026-11-01', '2026-11-04'], home: { name: 'Cabin', organization_name: 'Org', check_in_time: '16:00', check_out_time: '10:00' }, cancellation: null })
+    assert.equal((await read('another-org', booker.cookie)).status, 404)
+    assert.equal((await read(ORG, stranger.cookie)).status, 404)
+    assert.equal((await read(ORG)).status, 401)
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('a stay paid on a business’s site returns to that site’s stay confirmation, for the browser that paid', { timeout: 120_000 }, async t => {
+  const { runtime, db, env: bindings } = await boot()
+  try {
+    // A demo business on the live platform pays in Stripe test mode, which bills no usage.
+    const env = { ...bindings, BETTER_AUTH_URL: 'https://org.proof.example', BETTER_AUTH_SECRET: 'local-stay-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-stay-reply', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only', STRIPE_SECRET_KEY: 'sk_live_local_boundary', STRIPE_TEST_SECRET_KEY: 'sk_test_local_boundary' }
+    // The guest's notices are written in the business's source language.
+    await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('org-en', ?, 'en', 1, 'published')").bind(ORG).run()
+    const cabin = await home(db, env, { name: 'Cabin', location: 'cabin-site' })
+    const signed = await createAuth(env).api.signInAnonymous({ headers: new Headers(), returnHeaders: true })
+    const buyer = signed.response!.user.id
+    const cookie = signed.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
+    // The stay a captured checkout made, as its conversion leaves it: the hold converted to it, the payment captured for it.
+    const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'checkout:stay-pay', check_in_date: '2026-11-01', check_out_date: '2026-11-04', ...guest, guest_email: 'ana@example.com' })
+    await db.prepare("UPDATE stays SET user_id = ?, cancellation_policy = 'moderate' WHERE id = ?").bind(buyer, stay.id).run()
+    const nightly = ['2026-11-01', '2026-11-02', '2026-11-03'].map(date => ({ date, price_minor: 15_000 }))
+    const purchase = { product_id: cabin.id, location_id: 'cabin-site', timezone: 'America/Denver', check_in_date: '2026-11-01', check_out_date: '2026-11-04', adults: 2, children: 0, infants: 0, total_minor: 45_000, currency: 'USD', cancellation_policy: 'moderate', nightly, guest: { name: 'Ana', email: 'ana@example.com', phone: null, notes: null } }
+    await db.prepare(`INSERT INTO payments (id, organization_id, buyer_user_id, stripe_account_id, livemode, subject_type, subject_id, location_id, currency, amount, captured_amount, state, stripe_payment_intent_id, price_snapshot_json, created_at, updated_at)
+      VALUES ('stay-pay', ?, ?, 'acct_seller', 0, 'stay', ?, 'cabin-site', 'USD', 45000, 45000, 'captured', 'pi_stay-pay', ?, ?, ?)`).bind(ORG, buyer, stay.id, JSON.stringify({ title: 'Cabin', quantity: 1, price: { unit_amount: 45_000, currency: 'USD' }, method_configuration_id: 'pmc_test', stay: purchase }), NOW, NOW).run()
+    await db.prepare(`INSERT INTO payment_checkout_holds (id, organization_id, product_id, location_id, timezone, buyer_user_id, payment_id, quantity, amount, currency, starts_at, ends_at, status, converted_stay_id, expires_at, created_at)
+      VALUES ('stay-hold', ?, ?, 'cabin-site', 'America/Denver', ?, 'stay-pay', 2, 45000, 'USD', '2026-11-01', '2026-11-04', 'converted', ?, '2099-01-01T00:00:00.000Z', ?)`).bind(ORG, cabin.id, buyer, stay.id, NOW).run()
+    const claim = crypto.randomUUID() + crypto.randomUUID()
+    await db.prepare("INSERT INTO payment_attempts (id, payment_id, idempotency_key, stripe_payment_intent_id, return_token, status, expires_at, created_at, updated_at) VALUES ('a:stay-pay', 'stay-pay', 'checkout:stay', 'pi_stay-pay', ?, 'open', '2099-01-01T00:00:00.000Z', ?, ?)").bind(claim, NOW, NOW).run()
+    await db.prepare("INSERT INTO payment_claims (token_hash, payment_id, expires_at) VALUES (?, 'stay-pay', '2099-01-01T00:00:00.000Z')").bind(await tokenHash(claim)).run()
+    const charge = { id: 'ch_stay', object: 'charge', livemode: false, amount: 45_000, currency: 'usd', created: 1_790_000_000, payment_intent: 'pi_stay-pay', payment_method: 'pm_card', receipt_url: 'https://pay.stripe.com/receipts/stay', billing_details: { email: 'ana@example.com' } }
+    const originalFetch = globalThis.fetch
+    t.mock.method(globalThis, 'fetch', async (request: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(request instanceof Request ? request.url : String(request))
+      if (url.origin !== 'https://api.stripe.com') return originalFetch(request, init)
+      assert.equal(init?.method, 'GET')
+      assert.equal(new Headers(init?.headers).get('stripe-account'), 'acct_seller')
+      if (url.pathname === '/v1/charges/ch_stay') return Response.json(charge)
+      assert.equal(url.pathname, '/v1/payment_intents/pi_stay-pay')
+      return Response.json({ id: 'pi_stay-pay', object: 'payment_intent', livemode: false, currency: 'usd', amount: 45_000, amount_received: 45_000, status: 'succeeded', customer: null, application_fee_amount: null, latest_charge: charge, metadata: { krabiclaw_payment_id: 'stay-pay' } })
+    })
+    const app = new H3()
+    app.use((event) => { event.context.organizationId = ORG })
+    app.post('/api/public/payments/:paymentId/return', paymentReturnRoute)
+    app.get('/api/public/guest-stays/:activityId', guestStayRoute)
+    const call = (path: string, init: RequestInit = {}) => app.request(Object.assign(new Request(`https://org.proof.example${path}`, { ...init, headers: { cookie, 'content-type': 'application/json' } }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+
+    const back = await call('/api/public/payments/stay-pay/return', { method: 'POST', body: JSON.stringify({ claim }) })
+    assert.equal(back.status, 200)
+    const activityId = stay.request_id ?? stay.id
+    assert.deepEqual(await back.json(), { state: 'paid', kind: 'stay', activity_id: activityId })
+    assert.deepEqual(await db.prepare("SELECT claimed_user_id FROM payment_claims WHERE payment_id = 'stay-pay'").first(), { claimed_user_id: buyer })
+    // The confirmation page reads the stay it names, with what was paid and the policy it was booked under.
+    const read = await call(`/api/public/guest-stays/${activityId}`)
+    assert.equal(read.status, 200)
+    const body = await read.json() as { stay: { id: string; paid_minor: number; cancellation_policy: string; guest_email: string }; cancellation: { policy: string; paid_minor: number } | null }
+    assert.deepEqual({ id: body.stay.id, paid: body.stay.paid_minor, policy: body.stay.cancellation_policy, email: body.stay.guest_email, quote: body.cancellation && { policy: body.cancellation.policy, paid: body.cancellation.paid_minor } },
+      { id: stay.id, paid: 45_000, policy: 'moderate', email: 'ana@example.com', quote: { policy: 'moderate', paid: 45_000 } })
   } finally {
     await runtime.dispose()
   }

@@ -537,5 +537,13 @@
   "stay.error_no_check_out": "その日はチェックアウトできません。",
   "saya.footer.stays": "宿泊先",
   "saya.stays.collection_title": "{organization}の宿泊先",
-  "saya.stays.meta_description": "{organization}で予約できる宿泊先。"
+  "saya.stays.meta_description": "{organization}で予約できる宿泊先。",
+  "payment.verifying": "お支払いを確認しています…",
+  "payment.processing": "お支払いを処理しています",
+  "payment.processing_help": "銀行がこのお支払いを確認中です。完了するとメールでお知らせします。",
+  "payment.refunded": "この予約を完了できませんでした",
+  "payment.refunded_help": "お支払いが完了する前にご予約の枠が埋まったため、お支払いは全額返金されます。",
+  "stay.confirmed_message": "{home}でのご宿泊の予約とお支払いが完了しました。",
+  "stay.cancellation_policy": "キャンセルポリシー",
+  "stay.receipt_missing_description": "ご宿泊の詳細は確認メールに記載されています。予約時のメールアドレスでKrabiClawアカウントを作成すると、アカウントでも確認できます。"
 }
