@@ -29,7 +29,7 @@ export type BillingPlanId = StarterPlanId | KnownRecurringPlanId
 /** Fixed USD recurring offers. An absent annual amount authorizes no annual offer. */
 export const PAID_PLAN_PRICES: Readonly<Record<NewSalePlanId, { monthly: number; annual?: number }>> = Object.freeze({
   [GROWTH_PLAN_ID]: Object.freeze({ monthly: 4900, annual: 58800 }),
-  [BUSINESS_PLAN_ID]: Object.freeze({ monthly: 9900 }),
+  [BUSINESS_PLAN_ID]: Object.freeze({ monthly: 14900 }),
 })
 
 /** Services KrabiClaw's people perform, priced in USD cents per month and sold beside the plan. */
@@ -95,6 +95,43 @@ export function coveredLocations(plan: string, quantity: number | null | undefin
   if (!isKnownRecurringPlan(plan)) return INCLUDED_LOCATIONS
   if (!Number.isSafeInteger(quantity) || (quantity as number) < 1) throw new Error(`Subscription location quantity ${String(quantity)} is invalid`)
   return Math.max(INCLUDED_LOCATIONS, quantity as number)
+}
+
+/**
+ * Rental units the current Business offer includes. A rental unit is one
+ * independently bookable home; on that offer, a location that holds only homes
+ * is billed by its units and not as a location.
+ */
+export const INCLUDED_RENTAL_UNITS = 2
+
+/** USD cents for each rental unit beyond the included ones, per month. Business has no annual offer. */
+export const ADDITIONAL_RENTAL_UNIT_PRICE = 1900
+
+/** Stripe's phrasing for the per-unit charge after the included allowance: "$19 per additional rental unit per month". */
+export function additionalRentalUnitPrice(): string {
+  return `$${ADDITIONAL_RENTAL_UNIT_PRICE / 100} per additional rental unit per month`
+}
+
+/**
+ * The rental units a Business subscription on the current offer covers: the
+ * included ones plus the quantity of its additional-unit item, which it has
+ * only when it pays for more.
+ */
+export function coveredRentalUnits(additional: number | null | undefined): number {
+  const quantity = additional ?? 0
+  if (!Number.isSafeInteger(quantity) || quantity < 0) throw new Error(`Subscription rental unit quantity ${String(additional)} is invalid`)
+  return INCLUDED_RENTAL_UNITS + quantity
+}
+
+/**
+ * The current Business offer's monthly subscription amount in USD cents for
+ * the locations and rental units it covers, before taxes and Payments fees:
+ * 149 + 49 × max(0, locations − 2) + 19 × max(0, units − 2) dollars.
+ */
+export function businessMonthlyAmount(locations: number, rentalUnits: number): number {
+  return PAID_PLAN_PRICES[BUSINESS_PLAN_ID].monthly
+    + ADDITIONAL_LOCATION_PRICES.monthly * Math.max(0, locations - INCLUDED_LOCATIONS)
+    + ADDITIONAL_RENTAL_UNIT_PRICE * Math.max(0, rentalUnits - INCLUDED_RENTAL_UNITS)
 }
 
 /**

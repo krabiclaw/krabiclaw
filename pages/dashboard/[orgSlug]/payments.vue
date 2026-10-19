@@ -37,7 +37,7 @@
 import EditorNavigationList, { type EditorNavigationGroup, type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import { authClient } from '~/lib/auth-client'
-import { additionalLocationPrice, INCLUDED_LOCATIONS, SERVICE_PRICES, STARTER_PLAN_ID, isNewSalePlan, SERVICES } from '~/shared/billing-model'
+import { additionalLocationPrice, additionalRentalUnitPrice, BUSINESS_PLAN_ID, INCLUDED_LOCATIONS, INCLUDED_RENTAL_UNITS, SERVICE_PRICES, STARTER_PLAN_ID, isNewSalePlan, SERVICES } from '~/shared/billing-model'
 import { paymentMoney } from '~/shared/payment-display'
 import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
 import { cardBrandLabel, connectStatusPresentation, useConnectAccount, useOrganizationBilling, useOrganizationServices, usePaymentMethods, usePaymentsUsage } from '~/composables/usePaymentsSettings'
@@ -65,7 +65,7 @@ const tabs: Array<{ label: string; value: Tab }> = [
 const LEAF_TABS: Record<string, Tab> = {
   'invoices': 'payments', 'payment-methods': 'payments',
   'payout-method': 'payouts', 'surcharge': 'payouts',
-  'plan': 'plan', 'locations': 'plan', 'cancel': 'plan', 'managed-ads': 'plan', 'strategy': 'plan',
+  'plan': 'plan', 'locations': 'plan', 'business': 'plan', 'cancel': 'plan', 'managed-ads': 'plan', 'strategy': 'plan',
 }
 const childTab = computed<Tab | null>(() => (level.child.value && LEAF_TABS[level.child.value]) || null)
 const queryTab = computed<Tab | null>(() => route.query.tab === 'plan' || route.query.tab === 'payouts' || route.query.tab === 'payments' ? route.query.tab : null)
@@ -117,9 +117,16 @@ const locationsSummary = computed(() => {
   const locations = billing.value?.locations
   if (!locations) return ''
   if (onStarter.value) return `${locations.used} of ${INCLUDED_LOCATIONS} included. Growth and Business add more locations.`
-  if (!isNewSalePlan(billing.value?.plan)) return `${locations.used} in use, ${locations.covered} on your existing plan. Stripe shows the price before you confirm a change.`
+  if (billing.value?.billsRentalUnits) return `${locations.used} in use, not counting locations with only rental units, ${locations.covered} on your plan · ${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}`
+  if (!isNewSalePlan(billing.value?.plan) || billing.value?.plan === BUSINESS_PLAN_ID) return `${locations.used} in use, ${locations.covered} on your existing plan. Stripe shows the price before you confirm a change.`
   return `${locations.used} in use, ${locations.covered} on your plan · ${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice(billing.value?.billingInterval)}`
 })
+const rentalUnitsSummary = computed(() => {
+  const units = billing.value?.rentalUnits
+  return units ? `${units.used} in use, ${units.covered} on your plan · ${INCLUDED_RENTAL_UNITS} included, then ${additionalRentalUnitPrice()}` : ''
+})
+// Business bills its locations and rental units together, so both rows open its leaf.
+const quantityLeaf = computed(() => billing.value?.plan === BUSINESS_PLAN_ID ? 'business' : 'locations')
 const locationsChangeable = computed(() => !!billing.value && !onStarter.value && billing.value.subscriptionStatus === 'active' && !scheduledPlan.value && !billing.value.cancelAtPeriodEnd)
 
 const paymentRows = computed<EditorNavigationItem[]>(() => {
@@ -140,7 +147,8 @@ const payoutRows = computed<EditorNavigationItem[]>(() => [
 ])
 const planRows = computed<EditorNavigationItem[]>(() => [
   { id: 'plan', label: currentPlan.value?.name ?? 'Plan', summary: planSummary.value, to: to('plan') },
-  ...(billing.value ? [{ id: 'locations', label: 'Locations', summary: locationsSummary.value, ...(locationsChangeable.value ? { to: to('locations') } : {}) }] : []),
+  ...(billing.value ? [{ id: 'locations', label: 'Locations', summary: locationsSummary.value, ...(locationsChangeable.value ? { to: to(quantityLeaf.value) } : {}) }] : []),
+  ...(billing.value?.rentalUnits ? [{ id: 'rental-units', label: 'Rental units', summary: rentalUnitsSummary.value, ...(locationsChangeable.value ? { to: to('business') } : {}) }] : []),
   ...(usage.value?.pricing ? [{ id: 'fees', label: 'Payments fees', summary: `${usage.value.pricing.captured_volume_rate_percent}% of payment volume, plus Stripe fees.${usage.value.pricing.ad_spend_rate_percent === null ? '' : ` ${usage.value.pricing.ad_spend_rate_percent}% of monthly ad spend for campaigns we manage.`} Fees aren’t returned after a refund or dispute.` }] : []),
   ...(usage.value && usage.value.configured === false && billing.value && getPlanEntitlements(billing.value.plan).payments === true ? [{ id: 'usage:pending', label: 'Payments fees', summary: 'Getting ready. Fees for payments you take before then are billed once it’s done.' }] : []),
   ...(usage.value?.account && ['servicing', 'closing'].includes(usage.value.account.status) ? [{ id: 'usage:finalize', label: 'Previous Payments billing', summary: 'Charges from earlier payments still apply; end it once they are settled.', action: { label: 'End' } }] : []),
