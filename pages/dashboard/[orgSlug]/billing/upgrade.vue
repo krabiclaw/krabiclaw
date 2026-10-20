@@ -7,10 +7,10 @@
   <DashboardLeafPanel
     id="organization-upgrade"
     :title="onStarter ? 'Choose a plan' : 'Upgrade to Business'"
-    :lead="onStarter ? 'Change or cancel at any time. Stripe shows the total before you pay.' : 'Everything in Growth, plus what is listed here. Stripe shows the change on your bill before it is made.'"
+    :lead="onStarter ? 'Change or cancel at any time. Stripe shows the total before you pay.' : `${formatRecurring(PAID_PLAN_PRICES[BUSINESS_PLAN_ID].monthly - PAID_PLAN_PRICES[GROWTH_PLAN_ID].monthly, 'USD')} more than ${planName(GROWTH_PLAN_ID)}. Stripe charges the difference for the rest of this period.`"
     :footer="dashboard.canUpdateBilling.value"
     :saving="busy"
-        :error="error"
+    :error="error"
     save-label="Continue"
     @save="upgrade"
   >
@@ -33,7 +33,7 @@
 
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
-import { BUSINESS_PLAN_ID, GROWTH_PLAN_ID, INCLUDED_RENTAL_UNITS, PAID_PLAN_PRICES, STARTER_PLAN_ID, additionalRentalUnitPrice, type NewSalePlanId } from '~/shared/billing-model'
+import { BUSINESS_PLAN_ID, GROWTH_PLAN_ID, PAID_PLAN_PRICES, PAYMENTS_FEE, STARTER_PLAN_ID, type NewSalePlanId } from '~/shared/billing-model'
 import { useOrganizationBilling } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard' })
@@ -51,11 +51,12 @@ watchEffect(() => {
   if (status && (status.plan === BUSINESS_PLAN_ID || status.cancelAtPeriodEnd || status.scheduledPlan)) showError({ statusCode: 404, statusMessage: 'There is no upgrade for this plan' })
 })
 
+// What Business adds to Growth, each with the one line that says what it is.
 const changes: EditorNavigationItem[] = [
-  { id: 'payments', label: 'Online payments and direct stay booking' },
-  { id: 'rental-units', label: 'Rental units', summary: `${INCLUDED_RENTAL_UNITS} included, then ${additionalRentalUnitPrice()}` },
-  { id: 'google-ads', label: 'Google Ads campaigns' },
-  { id: 'ios', label: 'The iOS app' },
+  { id: 'payments', label: 'Online payments and direct stay booking', summary: PAYMENTS_FEE },
+  { id: 'google-ads', label: 'Google Ads campaigns', summary: 'Create, clone and budget search campaigns; results in Insights' },
+  { id: 'ios', label: 'The iOS app', summary: 'For your whole team' },
+  { id: 'messaging', label: 'Guest messaging and arrival guides', summary: 'Scheduled check-in and checkout messages' },
 ]
 
 const planName = (id: string) => plans.value.find(plan => plan.id === id)?.name ?? id

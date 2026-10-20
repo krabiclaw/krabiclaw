@@ -81,7 +81,6 @@
           :loading="saving"
           :disabled="disabled"
           :desktop-cancel="desktopCancel"
-          :note="note"
           leaf
           @cancel="cancel"
           @save="$emit('save')"
@@ -128,8 +127,6 @@ const props = withDefaults(defineProps<{
   footer?: boolean
   /** Keep the explicit Cancel action beside a focused lodging editor. */
   desktopCancel?: boolean
-  /** What stands between the leaf and its commit, in one line where Save would be. */
-  note?: string
 }>(), { saving: false, disabled: false, error: '', saveLabel: 'Save', footer: true })
 
 const emit = defineEmits<{ save: []; cancel: [] }>()

@@ -3,15 +3,14 @@
     SEO and marketing strategy: what Julia does and what it costs, what agreeing
     needs as a row that says where it stands, and the consent that adds it to the
     plan's subscription, which Stripe prorates and bills. Until the plan allows
-    it the footer says what is left. The same leaf turns it off.
+    it the line under the row says what is left. The same leaf turns it off.
   -->
   <DashboardLeafPanel
     id="organization-strategy"
     :title="SERVICES.strategy.name"
-    :footer="dashboard.canUpdateBilling.value"
+    :footer="dashboard.canUpdateBilling.value && (on || onPaidPlan)"
     :saving="busy"
     :disabled="!services"
-    :note="on || onPaidPlan ? undefined : 'Choose a plan to turn this on.'"
     :error="error"
     :save-label="on ? 'Turn off' : 'Agree and turn on'"
     @save="toggle"
@@ -26,7 +25,8 @@
     </div>
     <template v-else>
       <EditorNavigationList class="mt-6" :groups="[{ id: 'requirements', items: requirementRows }]" />
-      <p v-if="onPaidPlan" class="mt-6 text-sm text-muted">By turning it on you agree to {{ formatPrice(SERVICE_PRICES.strategy.monthly) }} per month, added to your plan's subscription and charged to its card.</p>
+      <p v-if="!onPaidPlan" class="mt-6 text-sm text-muted">Choose a plan to turn this on.</p>
+      <p v-else class="mt-6 text-sm text-muted">By turning it on you agree to {{ formatPrice(SERVICE_PRICES.strategy.monthly) }} per month, added to your plan's subscription and charged to its card.</p>
     </template>
   </DashboardLeafPanel>
 </template>
@@ -50,7 +50,7 @@ const on = computed(() => !!services.value?.strategy)
 const onPaidPlan = computed(() => !!billing.value?.stripeSubscriptionId && ['active', 'trialing'].includes(billing.value.subscriptionStatus ?? ''))
 const planName = computed(() => billing.value?.subscriptionPrice?.name ?? plans.value.find(plan => plan.id === billing.value?.plan)?.name ?? 'your plan')
 const requirementRows = computed<EditorNavigationItem[]>(() => [{
-  id: 'paid-plan', label: 'Paid plan', icon: onPaidPlan.value ? 'i-lucide-circle-check' : 'i-lucide-circle', iconTone: onPaidPlan.value ? 'success' : 'muted',
+  id: 'paid-plan', label: 'Paid plan', mark: onPaidPlan.value ? 'met' : 'open',
   summary: onPaidPlan.value ? `On ${planName.value}` : `On ${planName.value}${dashboard.canUpdateBilling.value ? ' · Choose a plan' : ''}`,
   ...(onPaidPlan.value || !dashboard.canUpdateBilling.value || !level.to.value ? {} : { to: `${level.to.value}/upgrade` }),
 }])

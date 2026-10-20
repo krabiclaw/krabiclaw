@@ -88,32 +88,21 @@ test.describe('Plan and billing', () => {
           const wide = width >= 1024
           const suffix = `${width}-${scheme}`
 
-          // The index: the plan, Choose a plan, the two services and Cancel only when there is a plan to cancel.
+          // The index: the plan as its one card, then the locations it bills and the two services. No portal without a Stripe customer.
           await open(page, `${BASIC}/billing`)
           const index = page.locator('#dashboard-panel-organization-billing')
           await expect(index.getByRole('heading', { name: 'Plan and billing', exact: true })).toBeVisible()
-          await expect(index.locator('[data-testid^="editor-row-"]')).toHaveCount(4)
-          await expect(index.getByTestId('editor-row-plan')).toContainText('Free')
-          await expect(index.getByTestId('editor-row-upgrade')).toContainText('Choose a plan')
-          await expect(index.getByTestId('editor-row-upgrade')).toContainText('Growth $49/mo or Business $149/mo')
+          const card = index.getByTestId('billing-plan-card')
+          await expect(card).toContainText('Basic')
+          await expect(card).toContainText('Free')
+          await expect(card.getByRole('link', { name: 'Choose a plan', exact: true })).toBeVisible()
+          await expect(index.locator('[data-testid^="editor-row-"]')).toHaveCount(3)
+          await expect(index.getByTestId('editor-row-locations')).toContainText('in use · 2 included')
           await expect(index.getByTestId('editor-row-managed-ads')).toContainText('Off10% of monthly ad spend')
           await expect(index.getByTestId('editor-row-strategy')).toContainText('Off$2,000/mo')
-          // Beside a pane the index opens its first row, the plan; on a narrower screen it is the screen.
-          if (wide) {
-            await expect(page).toHaveURL(`${BASIC}/billing/plan`)
-            await expect(page.locator('#dashboard-panel-organization-plan').getByText('Locations', { exact: true })).toBeVisible()
-          }
-          else await expect(page).toHaveURL(`${BASIC}/billing`)
+          // Beside a pane the index opens the plan's one change; on a narrower screen it is the screen.
+          await expect(page).toHaveURL(wide ? `${BASIC}/billing/upgrade` : `${BASIC}/billing`)
           await capture(page, testInfo.outputPath(`billing-index-${suffix}.png`))
-
-          // The plan leaf: what Basic includes, and the way to a paid plan.
-          await open(page, `${BASIC}/billing/plan`)
-          const plan = page.locator('#dashboard-panel-organization-plan')
-          await expect(plan.getByTestId('plan-hero')).toContainText('Basic')
-          await expect(plan.getByTestId('plan-hero')).toContainText('Free')
-          await expect(plan.getByTestId('editor-row-locations')).toContainText('of 2 included')
-          await expect(plan.getByTestId('editor-row-upgrade')).toContainText('Choose a plan')
-          await capture(page, testInfo.outputPath(`billing-plan-basic-${suffix}.png`))
 
           // Choose a plan: Growth and Business as two cards, Continue only once one is chosen.
           await open(page, `${BASIC}/billing/upgrade`)
@@ -132,11 +121,11 @@ test.describe('Plan and billing', () => {
           await expect(ads.getByTestId('editor-row-google-ads')).toContainText('Not connected in USD · Connect')
           await expect(ads.getByTestId('editor-row-business-plan')).toContainText('On Basic · Upgrade')
           await expect(ads.getByTestId('editor-row-payment-method')).toContainText('None saved')
-          // No consent until every requirement holds: the footer says what is left instead.
+          // No consent until every requirement holds: the line under the rows says what is left.
           await expect(ads.getByRole('button', { name: 'Agree and turn on', exact: true })).toHaveCount(0)
-          await expect(page.getByText('Connect Google Ads in USD, upgrade to Business and add a payment method to turn this on.', { exact: true })).toBeVisible()
+          await expect(ads.getByText('Connect Google Ads in USD, upgrade to Business and add a payment method to turn this on.', { exact: true })).toBeVisible()
           // Without a plan there is no Stripe customer, so the portal is not offered.
-          await expect(ads.getByTestId('editor-row-payment-method').getByText('Add', { exact: true })).toHaveCount(0)
+          await expect(ads.getByTestId('editor-row-payment-method')).not.toContainText('Add')
           await capture(page, testInfo.outputPath(`billing-managed-ads-off-${suffix}.png`))
         }
       }
@@ -159,27 +148,23 @@ test.describe('Plan and billing', () => {
           const suffix = `${width}-${scheme}`
           await open(page, `${GROWTH}/billing`)
           const index = page.locator('#dashboard-panel-organization-billing')
-          await expect(index.getByTestId('editor-row-plan')).toContainText('Growth · $49/mo · Renews')
-          await expect(index.getByTestId('editor-row-upgrade')).toContainText('Upgrade to Business')
-          await expect(index.getByTestId('editor-row-upgrade')).toContainText('$149/mo · online payments, direct stay booking, Google Ads')
-          await expect(index.getByTestId('editor-row-portal')).toContainText('Payment method and invoices')
-          await expect(index.getByTestId('editor-row-cancel')).toBeVisible()
+          const card = index.getByTestId('billing-plan-card')
+          await expect(card).toContainText('Growth')
+          await expect(card).toContainText('$49/mo')
+          await expect(card).toContainText(/Renews \w{3} \d{1,2}, \d{4}/)
+          await expect(card.getByRole('link', { name: 'Upgrade to Business', exact: true })).toBeVisible()
+          await expect(index.getByTestId('editor-row-locations')).toContainText('included, then $49 per additional location per month')
+          await expect(index.getByTestId('editor-row-portal')).toContainText('Card, invoices and receipts, cancel')
+          await expect(index.getByTestId('editor-row-cancel')).toHaveCount(0)
           await capture(page, testInfo.outputPath(`billing-index-growth-${suffix}.png`))
-
-          await open(page, `${GROWTH}/billing/plan`)
-          const plan = page.locator('#dashboard-panel-organization-plan')
-          await expect(plan.getByTestId('plan-hero')).toContainText('$49/mo')
-          await expect(plan.getByText(/^Your plan renews on /)).toBeVisible()
-          await expect(plan.getByTestId('editor-row-upgrade')).toContainText('Upgrade to Business')
-          await expect(plan.getByTestId('editor-row-portal')).toContainText('Payment method and invoices')
-          await capture(page, testInfo.outputPath(`billing-plan-growth-${suffix}.png`))
 
           await open(page, `${GROWTH}/billing/upgrade`)
           const upgrade = page.locator('#dashboard-panel-organization-upgrade')
           await expect(upgrade.getByRole('heading', { name: 'Upgrade to Business', exact: true })).toBeVisible()
           await expect(upgrade.getByText('$149/mo', { exact: true })).toBeVisible()
           await expect(upgrade.locator('[data-testid^="editor-row-"]')).toHaveCount(4)
-          await expect(upgrade.getByTestId('editor-row-rental-units')).toContainText('2 included, then $19 per additional rental unit per month')
+          await expect(upgrade.getByText('$100/mo more than Growth. Stripe charges the difference for the rest of this period.', { exact: true })).toBeVisible()
+          await expect(upgrade.getByTestId('editor-row-payments')).toContainText('1.4% of payment volume, plus Stripe fees')
           await expect(upgrade.getByRole('button', { name: 'Continue', exact: true })).toBeEnabled()
           await expect(upgrade.getByRole('radio')).toHaveCount(0)
           await capture(page, testInfo.outputPath(`billing-upgrade-${suffix}.png`))

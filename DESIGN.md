@@ -102,7 +102,7 @@ The destinations are files under `O`, and their URLs are their files:
 | Integrations | `O/integrations` |
 | Earnings | `O/earnings` |
 | Payments | `O/payments` — the organization's own Stripe account and payouts |
-| Plan and billing | `O/billing` — the plan, Upgrade to Business, the services sold beside it, Stripe's billing portal, Cancel plan |
+| Plan and billing | `O/billing` — the plan as one card with its one change (Upgrade to Business, Choose a plan), the locations it bills, the services sold beside it, and Stripe's portal for the card, invoices and cancelling |
 | Insights | `O/insights` |
 | Notifications | `O/notifications` |
 | Platform accounts | `O/platform-accounts` |
@@ -921,8 +921,8 @@ one says so where it lives:
 
 - **Plan and billing.** What the organization pays KrabiClaw: its plan, the
   one-step Upgrade to Business, the services sold beside it with their
-  requirements as ✓/✗ rows, and Stripe's billing portal for cards and
-  invoices. Owners change it, admins read it, members have no row. Airbnb
+  requirements as met or open rows, and Stripe's billing portal for the card,
+  invoices and cancelling. Owners change it, admins read it, members have no row. Airbnb
   charges hosts no plan, so it has no equivalent.
 - **Platform accounts.** A Menu row no tenant sees: every account on the
   platform, and impersonation. It is shown only to a user whose Better Auth

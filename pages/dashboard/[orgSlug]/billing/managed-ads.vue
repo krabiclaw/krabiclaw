@@ -2,16 +2,15 @@
   <!--
     Managed ads: what Chris does and what it costs, then what agreeing needs as
     rows that each say where they stand and open where they are met. The
-    consent appears once every row holds; until then the footer says what is
-    left. The same leaf turns it off.
+    consent appears once every row holds; until then the line under the rows
+    says what is left. The same leaf turns it off.
   -->
   <DashboardLeafPanel
     id="organization-managed-ads"
     :title="SERVICES.managed_ads.name"
-    :footer="dashboard.canUpdateBilling.value"
+    :footer="dashboard.canUpdateBilling.value && (on || met)"
     :saving="busy"
     :disabled="!services"
-    :note="on || !requirements || met ? undefined : outstanding"
     :error="error || (requirementsError ? getErrorMessage(requirementsError, 'What managed ads needs could not be checked') : '')"
     :save-label="on ? 'Turn off' : 'Agree and turn on'"
     @save="toggle"
@@ -27,7 +26,8 @@
     </div>
     <template v-else-if="requirements">
       <EditorNavigationList class="mt-6" :groups="[{ id: 'requirements', items: requirementRows }]" @act="act" />
-      <p v-if="met" class="mt-6 text-sm text-muted">By turning it on you agree to {{ SERVICES.managed_ads.price }}, read from Google each day and billed on your plan's invoice. Google bills the ad spend itself to your Google Ads account.</p>
+      <p v-if="!met" class="mt-6 text-sm text-muted">{{ outstanding }}</p>
+      <p v-else class="mt-6 text-sm text-muted">By turning it on you agree to {{ SERVICES.managed_ads.price }}, read from Google each day and billed on your plan's invoice. Google bills the ad spend itself to your Google Ads account.</p>
     </template>
   </DashboardLeafPanel>
 </template>
@@ -68,7 +68,7 @@ const priceLine = `${SERVICES.managed_ads.price[0]!.toUpperCase()}${SERVICES.man
 // Each row names where it stands and, while it does not hold, what meets it:
 // a check once it holds, an open circle until then, and a link only where there is somewhere to go.
 const row = (id: string, label: string, holds: boolean, state: string, open: Pick<EditorNavigationItem, 'to' | 'action'>): EditorNavigationItem =>
-  ({ id, label, summary: state, icon: holds ? 'i-lucide-circle-check' : 'i-lucide-circle', iconTone: holds ? 'success' : 'muted', ...(holds || !dashboard.canUpdateBilling.value ? {} : open) })
+  ({ id, label, summary: state, mark: holds ? 'met' : 'open', ...(holds || !dashboard.canUpdateBilling.value ? {} : open) })
 const currentPlan = computed(() => billing.value?.subscriptionPrice?.name ?? plans.value.find(plan => plan.id === billing.value?.plan)?.name ?? 'your plan')
 const requirementRows = computed<EditorNavigationItem[]>(() => {
   const state = requirements.value
@@ -78,7 +78,7 @@ const requirementRows = computed<EditorNavigationItem[]>(() => {
     row('google-ads', 'Google Ads', state.google_ads_usd, state.google_ads_usd ? 'Connected, billed in USD' : `Not connected in USD${manage ? ' · Connect' : ''}`, { to: `/dashboard/${encodeURIComponent(orgSlug)}/integrations/google-ads` }),
     row('business-plan', 'Business plan', state.business_plan, state.business_plan ? 'On Business' : `On ${currentPlan.value}${manage ? ' · Upgrade' : ''}`, { to: level.to.value ? `${level.to.value}/upgrade` : undefined }),
     // Stripe's portal needs the plan's customer, which only a paid plan has.
-    row('payment-method', 'Default payment method', state.default_payment_method, state.default_payment_method ? 'Saved' : 'None saved', state.business_plan ? { action: { label: 'Add' } } : {}),
+    row('payment-method', 'Default payment method', state.default_payment_method, state.default_payment_method ? 'Saved' : `None saved${state.business_plan && manage ? ' · Add' : ''}`, state.business_plan ? { action: { opens: true } } : {}),
   ]
 })
 // What is left, in the footer where the consent will be.
