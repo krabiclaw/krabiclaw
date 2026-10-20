@@ -51,7 +51,7 @@ const onPaidPlan = computed(() => !!billing.value?.stripeSubscriptionId && ['act
 const planName = computed(() => billing.value?.subscriptionPrice?.name ?? plans.value.find(plan => plan.id === billing.value?.plan)?.name ?? 'your plan')
 const requirementRows = computed<EditorNavigationItem[]>(() => [{
   id: 'paid-plan', label: 'Paid plan', mark: onPaidPlan.value ? 'met' : 'open',
-  summary: onPaidPlan.value ? `On ${planName.value}` : `On ${planName.value}${dashboard.canUpdateBilling.value ? ' · Choose a plan' : ''}`,
+  summary: `On ${planName.value}`,
   ...(onPaidPlan.value || !dashboard.canUpdateBilling.value || !level.to.value ? {} : { to: `${level.to.value}/upgrade` }),
 }])
 

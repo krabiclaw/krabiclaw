@@ -65,20 +65,19 @@ const requirements = computed(() => checked.value?.requirements.managed_ads ?? n
 const met = computed(() => !!requirements.value && Object.values(requirements.value).every(Boolean))
 const priceLine = `${SERVICES.managed_ads.price[0]!.toUpperCase()}${SERVICES.managed_ads.price.slice(1)}, added to your plan's invoice.`
 
-// Each row names where it stands and, while it does not hold, what meets it:
-// a check once it holds, an open circle until then, and a link only where there is somewhere to go.
+// Each row names where it stands: a check once it holds, an open circle until
+// then, and a chevron only where there is somewhere to go to meet it.
 const row = (id: string, label: string, holds: boolean, state: string, open: Pick<EditorNavigationItem, 'to' | 'action'>): EditorNavigationItem =>
   ({ id, label, summary: state, mark: holds ? 'met' : 'open', ...(holds || !dashboard.canUpdateBilling.value ? {} : open) })
 const currentPlan = computed(() => billing.value?.subscriptionPrice?.name ?? plans.value.find(plan => plan.id === billing.value?.plan)?.name ?? 'your plan')
 const requirementRows = computed<EditorNavigationItem[]>(() => {
   const state = requirements.value
   if (!state) return []
-  const manage = dashboard.canUpdateBilling.value
   return [
-    row('google-ads', 'Google Ads', state.google_ads_usd, state.google_ads_usd ? 'Connected, billed in USD' : `Not connected in USD${manage ? ' · Connect' : ''}`, { to: `/dashboard/${encodeURIComponent(orgSlug)}/integrations/google-ads` }),
-    row('business-plan', 'Business plan', state.business_plan, state.business_plan ? 'On Business' : `On ${currentPlan.value}${manage ? ' · Upgrade' : ''}`, { to: level.to.value ? `${level.to.value}/upgrade` : undefined }),
+    row('google-ads', 'Google Ads', state.google_ads_usd, state.google_ads_usd ? 'Connected, billed in USD' : 'Not connected in USD', { to: `/dashboard/${encodeURIComponent(orgSlug)}/integrations/google-ads` }),
+    row('business-plan', 'Business plan', state.business_plan, state.business_plan ? 'On Business' : `On ${currentPlan.value}`, { to: level.to.value ? `${level.to.value}/upgrade` : undefined }),
     // Stripe's portal needs the plan's customer, which only a paid plan has.
-    row('payment-method', 'Default payment method', state.default_payment_method, state.default_payment_method ? 'Saved' : `None saved${state.business_plan && manage ? ' · Add' : ''}`, state.business_plan ? { action: { opens: true } } : {}),
+    row('payment-method', 'Default payment method', state.default_payment_method, state.default_payment_method ? 'Saved' : 'None saved', state.business_plan ? { action: { opens: true } } : {}),
   ]
 })
 // What is left, in the footer where the consent will be.

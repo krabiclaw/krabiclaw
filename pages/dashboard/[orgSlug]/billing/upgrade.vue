@@ -7,7 +7,7 @@
   <DashboardLeafPanel
     id="organization-upgrade"
     :title="onStarter ? 'Choose a plan' : 'Upgrade to Business'"
-    :lead="onStarter ? 'Change or cancel at any time. Stripe shows the total before you pay.' : `${formatRecurring(PAID_PLAN_PRICES[BUSINESS_PLAN_ID].monthly - PAID_PLAN_PRICES[GROWTH_PLAN_ID].monthly, 'USD')} more than ${planName(GROWTH_PLAN_ID)}. Stripe charges the difference for the rest of this period.`"
+    :lead="onStarter ? 'Change or cancel at any time. Stripe shows the total before you pay.' : `${formatRecurring(PAID_PLAN_PRICES[BUSINESS_PLAN_ID].monthly - PAID_PLAN_PRICES[GROWTH_PLAN_ID].monthly, 'USD')} more than ${planName(GROWTH_PLAN_ID)}. Stripe charges the difference for the rest of this period${billing?.currentPeriodEnd ? `, then ${formatRecurring(PAID_PLAN_PRICES[BUSINESS_PLAN_ID].monthly, 'USD')} from ${formatExactDateTime(billing.currentPeriodEnd)}` : ''}.`"
     :footer="dashboard.canUpdateBilling.value"
     :saving="busy"
     :error="error"
@@ -42,6 +42,7 @@ const dashboard = useDashboardOrganization()
 const { startOrganizationCheckout } = useOrganizationSubscription()
 const { plans, formatRecurring } = await usePlans()
 const { billing } = await useOrganizationBilling()
+const { formatExactDateTime } = useHumanTime()
 const onStarter = computed(() => billing.value?.plan === STARTER_PLAN_ID && !billing.value.stripeSubscriptionId)
 useSeoMeta({ title: () => `${onStarter.value ? 'Choose a plan' : 'Upgrade to Business'} | KrabiClaw`, robots: 'noindex, nofollow' })
 

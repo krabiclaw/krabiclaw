@@ -117,7 +117,7 @@ const firstLeaf = computed(() => change.value?.to ?? to('managed-ads'))
 const locationsRow = computed<EditorNavigationItem | null>(() => {
   const used = billing.value?.usage.locations
   if (used === undefined) return null
-  return { id: 'locations', label: 'Locations', summary: onStarter.value ? `${used} in use · ${INCLUDED_LOCATIONS} included` : `${used} in use · ${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}` }
+  return { id: 'locations', label: 'Locations', summary: onStarter.value ? `${used} in use · ${INCLUDED_LOCATIONS} included · ${nameOf(STARTER_PLAN_ID)} stops at ${INCLUDED_LOCATIONS}` : `${used} in use · ${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}` }
 })
 
 const serviceRows = computed<EditorNavigationItem[]>(() => {
