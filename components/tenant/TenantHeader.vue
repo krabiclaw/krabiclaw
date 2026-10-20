@@ -15,7 +15,7 @@
         </SiteLogo>
       </NuxtLink>
 
-      <nav data-tenant-critical-nav class="hidden min-w-0 items-center justify-center gap-1 overflow-hidden whitespace-nowrap font-semibold uppercase lg:flex" :aria-label="navAriaLabel">
+      <nav data-tenant-critical-nav class="hidden min-w-0 items-center justify-center-safe gap-1 overflow-x-auto whitespace-nowrap font-semibold uppercase lg:flex" :aria-label="navAriaLabel">
         <NuxtLink
           v-for="item in navItems"
           :key="item.path"
