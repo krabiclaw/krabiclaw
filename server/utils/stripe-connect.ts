@@ -402,7 +402,12 @@ async function checkoutReadiness(db: DbClient, env: CloudflareEnv, organizationI
   const account = await stripe.v2.core.accounts.retrieve(saved.stripeAccountId!, { include: STRIPE_CONNECT_ACCOUNT_INCLUDE })
   const connected = await projectStripeConnectedAccount(db, accountProjection(saved, account))
   if (connected.status !== 'ready' || account.livemode !== saved.livemode) return { ready: false as const, statusCode: 409, statusMessage: 'Complete the business’s Stripe account setup before requiring online collection', handoff }
-  return { ready: true as const, stripe, account, connected, parent: keys.methodConfiguration!, handoff }
+  // Stripe Tax is calculated by hosted Checkout only; checkout refuses an on-site payment for a business registered for it.
+  const [taxSettings, registrations] = await Promise.all([
+    stripe.tax.settings.retrieve({}, { stripeAccount: account.id }),
+    stripe.tax.registrations.list({ status: 'active', limit: 1 }, { stripeAccount: account.id }),
+  ])
+  return { ready: true as const, stripe, account, connected, parent: keys.methodConfiguration!, handoff, automaticTax: taxSettings.status === 'active' && registrations.data.length > 0 }
 }
 
 /**
@@ -412,7 +417,8 @@ async function checkoutReadiness(db: DbClient, env: CloudflareEnv, organizationI
  */
 export async function acceptedPaymentMethods(db: DbClient, env: CloudflareEnv, organizationId: string): Promise<{ types: string[]; country: string | null }> {
   const readiness = await checkoutReadiness(db, env, organizationId)
-  if (!readiness.ready) return { types: [], country: null }
+  // Not ready, or registered for Stripe Tax which checkout refuses: it takes no payment on the site.
+  if (!readiness.ready || readiness.automaticTax) return { types: [], country: null }
   const methods = await connectedMethodConfiguration(readiness.stripe, readiness.account.id, readiness.parent)
   // A configuration the business must still fix takes no payment, as checkout refuses it.
   if ('problem' in methods) return { types: [], country: null }
@@ -431,11 +437,7 @@ export async function requireStripeCheckoutAcceptance(db: DbClient, env: Cloudfl
   // Which methods the business offers is its Stripe payment method configuration's to decide.
   const methods = await connectedMethodConfiguration(stripe, account.id, readiness.parent)
   if ('problem' in methods) throw new HTTPError({ statusCode: 409, statusMessage: methods.problem, data: handoff })
-  const [taxSettings, registrations] = await Promise.all([
-    stripe.tax.settings.retrieve({}, { stripeAccount: account.id }),
-    stripe.tax.registrations.list({ status: 'active', limit: 1 }, { stripeAccount: account.id }),
-  ])
-  return { connected: { ...connected, stripeAccountId: account.id }, methodConfigurationId: methods.configuration.id, automaticTax: taxSettings.status === 'active' && registrations.data.length > 0 }
+  return { connected: { ...connected, stripeAccountId: account.id }, methodConfigurationId: methods.configuration.id, automaticTax: readiness.automaticTax }
 }
 
 export async function refreshStripeConnectedAccount(
