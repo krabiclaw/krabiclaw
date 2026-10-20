@@ -372,8 +372,9 @@ test('the business search API refuses what the picker would never send', async (
   expect(detailsMalformed.status(), await detailsMalformed.text()).toBe(400)
 })
 
-// Ember & Slice is on Commerce, billed for the 2 included locations, and has
-// both. A third is refused by the createLocation every surface shares, and the
+// Ember & Slice is on Business, billed for the 2 included locations, and has
+// both; neither holds only rental units, so both count. A third is refused by
+// the createLocation every surface shares, and the
 // new location's own level offers to add a location to the plan instead of its sections.
 test('a location beyond the ones the plan pays for is refused until the plan covers it', async ({ page, baseURL }) => {
   await loginAs(page.request, baseURL!, 'user-e2e-demo-owner')
@@ -383,13 +384,13 @@ test('a location beyond the ones the plan pays for is refused until the plan cov
     return (await response.json() as { billing: { plan: string; locations: { used: number; covered: number } } }).billing
   }
   const before = await status()
-  expect(before.plan).toBe('commerce')
+  expect(before.plan).toBe('business')
   expect(before.locations).toEqual({ used: 2, covered: 2 })
 
   const refused = await page.request.post('/api/dashboard/locations?org=ember-slice-demo', { data: { title: 'Third branch', timezone: 'America/New_York' } })
   expect(refused.status(), await refused.text()).toBe(402)
   expect(await refused.json()).toEqual({
-    error: 'Your plan covers 2 locations. Add a location to your plan in Billing (2 included, then $49 per additional location per month), then create it.',
+    error: 'Your plan covers 2 locations besides those with only rental units. Add a location to your plan in Billing (2 included, then $49 per additional location per month), then create it.',
     code: 'LOCATION_LIMIT',
     locations: { used: 2, covered: 2 },
   })

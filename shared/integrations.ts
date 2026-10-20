@@ -1,4 +1,3 @@
-import { SERVICES } from './billing-model'
 /**
  * What each integration is, in the words the dashboard shows: the one canonical
  * description the Integrations index and every leaf read. Each entry says what
@@ -36,7 +35,6 @@ export interface IntegrationDefinition {
   /** Prompts the KrabiClaw app answers with this connection; brackets mark what the reader fills in. */
   prompts: readonly string[]
   /** A service KrabiClaw's people offer on this connection, named with its price; sold in Payments → Plan. */
-  service?: { name: string; summary: string }
 }
 
 export const INTEGRATIONS: readonly IntegrationDefinition[] = [
@@ -119,7 +117,6 @@ export const INTEGRATIONS: readonly IntegrationDefinition[] = [
       'Lists your campaigns, and on the Business plan creates, clones, pauses and budgets Search campaigns when you ask',
       'With managed ads on, reads each finished day’s spend for the 10% fee',
     ],
-    service: { name: SERVICES.managed_ads.name, summary: `${SERVICES.managed_ads.description} · ${SERVICES.managed_ads.price}` },
     prompts: [
       'Create a Search campaign for [page] with a daily budget of [amount]',
       'Pause any campaign that spent money this week without a conversion',

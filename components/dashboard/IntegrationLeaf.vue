@@ -34,20 +34,6 @@
       :description="connection.lastError || 'The last sync failed.'"
     />
 
-    <!-- The service KrabiClaw's people offer on this connection; it starts and stops in its own leaf under Payments → Plan. -->
-    <NuxtLink
-      v-if="definition.service"
-      :to="planTo"
-      class="-mx-4 flex items-center gap-4 px-4 py-4 hover:bg-elevated"
-      data-testid="integration-service"
-    >
-      <UIcon name="i-lucide-users" class="size-5 shrink-0 text-dimmed" />
-      <span class="min-w-0 flex-1">
-        <span class="block font-medium text-highlighted">{{ definition.service.name }}<template v-if="serviceOn"> · On</template></span>
-        <span class="block text-sm text-muted">{{ definition.service.summary }}</span>
-      </span>
-      <UIcon name="i-lucide-chevron-right" class="size-5 shrink-0 text-muted" />
-    </NuxtLink>
 
     <section>
       <h2 class="text-base font-semibold text-highlighted">What it does here</h2>
@@ -96,15 +82,11 @@ const props = withDefaults(defineProps<{
   integration: IntegrationKey
   connection: IntegrationLeafConnection | null
   disconnecting?: boolean
-  /** Whether the business is on the service the integration offers. */
-  serviceOn?: boolean
-}>(), { disconnecting: false, serviceOn: false })
+}>(), { disconnecting: false })
 
 const emit = defineEmits<{ disconnect: [] }>()
 
-const route = useRoute()
 const definition = computed(() => integrationDefinition(props.integration))
-const planTo = computed(() => `/dashboard/${String(route.params.orgSlug)}/payments/managed-ads`)
 const connectedOn = computed(() => props.connection
   ? new Date(props.connection.connectedAt).toLocaleDateString(undefined, { dateStyle: 'medium' })
   : '')

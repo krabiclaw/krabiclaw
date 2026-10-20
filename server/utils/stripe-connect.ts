@@ -16,6 +16,7 @@ export type StripeConnectStatus =
   | 'ready'
 
 export type StripeCapabilityStatus = 'active' | 'pending' | 'restricted' | 'unsupported'
+export type StripeCapabilityResolution = 'contact_stripe' | 'no_resolution' | 'provide_info'
 
 export interface StripeConnectRequirement {
   awaitingActionFrom: 'stripe' | 'user'
@@ -65,6 +66,8 @@ export interface StripeConnectProjection {
   country: string | null
   livemode: boolean
   cardPaymentsStatus: StripeCapabilityStatus | null
+  /** Stripe's resolution for each reason the card payments capability is not active. */
+  cardPaymentsResolutions: StripeCapabilityResolution[]
   requirements: StripeConnectRequirement[]
   stripeRefreshedAt: string
   financialContractSupported?: boolean
@@ -168,16 +171,24 @@ export function buildStripeConnectOnboardingUrls(
   return { returnUrl: returnUrl.toString(), refreshUrl: refreshUrl.toString() }
 }
 
+/**
+ * The account's state from Stripe's own reasons. A restricted capability whose
+ * every reason Stripe resolves itself (`no_resolution`: verification pending,
+ * status being determined) is under review, not waiting on the business; only
+ * `provide_info` asks the business to act, and `contact_stripe` restricts it.
+ */
 export function deriveStripeConnectStatus(input: {
   cardPaymentsStatus: StripeCapabilityStatus | null
+  cardPaymentsResolutions: StripeCapabilityResolution[]
   requirements: StripeConnectRequirement[]
 }): Exclude<StripeConnectStatus, 'creating' | 'creation_failed'> {
   const userActionDue = input.requirements.some(requirement =>
     requirement.awaitingActionFrom === 'user'
     && (requirement.deadlineStatus === 'currently_due' || requirement.deadlineStatus === 'past_due'))
-  if (userActionDue) return 'action_required'
+  if (userActionDue || input.cardPaymentsResolutions.includes('provide_info')) return 'action_required'
   if (input.cardPaymentsStatus === 'active') return 'ready'
-  if (input.cardPaymentsStatus === 'restricted' || input.cardPaymentsStatus === 'unsupported') return 'restricted'
+  if (input.cardPaymentsStatus === 'unsupported' || input.cardPaymentsResolutions.includes('contact_stripe')) return 'restricted'
+  if (input.cardPaymentsStatus === 'restricted' && input.cardPaymentsResolutions.length === 0) return 'restricted'
   return 'pending_review'
 }
 
@@ -336,7 +347,8 @@ function accountProjection(
   refreshedAt = new Date().toISOString(),
 ): StripeConnectProjection {
   const country = account.identity?.country
-  const cardPaymentsStatus = account.configuration?.merchant?.capabilities?.card_payments?.status
+  const cardPayments = account.configuration?.merchant?.capabilities?.card_payments
+  const cardPaymentsStatus = cardPayments?.status
   return {
     reservationId: reservation.id,
     organizationId: reservation.organizationId,
@@ -345,6 +357,7 @@ function accountProjection(
     country: country ? country.toUpperCase() : null,
     livemode: account.livemode,
     cardPaymentsStatus: cardPaymentsStatus === undefined ? null : cardPaymentsStatus,
+    cardPaymentsResolutions: (cardPayments?.status_details ?? []).map(detail => detail.resolution),
     financialContractSupported: account.dashboard==='express' && account.defaults?.responsibilities?.fees_collector==='application' && account.defaults.responsibilities.losses_collector==='stripe',
     requirements: normalizeAccountRequirements(account),
     stripeRefreshedAt: refreshedAt,

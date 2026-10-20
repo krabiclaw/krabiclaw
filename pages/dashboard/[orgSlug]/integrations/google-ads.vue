@@ -13,7 +13,6 @@
     <IntegrationLeaf
       integration="google-ads"
       :connection="ads && { name: ads.target_name, connectedAt: ads.connected_at, through: ads.connected_through, status: ads.status, lastError: ads.last_error }"
-      :service-on="integrations.summary.value?.services.managed_ads ?? false"
       :disconnecting="disconnecting"
       @disconnect="disconnect"
     >
@@ -62,9 +61,10 @@ const { data, refresh, error: loadError } = await useAsyncData(
 const selected = ref<string | undefined>()
 
 const options = computed(() => (data.value?.accounts ?? []).map(account => ({
-  label: account.descriptiveName ? `${account.descriptiveName} (${account.formattedCustomerId})` : account.formattedCustomerId,
+  label: `${account.descriptiveName ? `${account.descriptiveName} (${account.formattedCustomerId})` : account.formattedCustomerId}${account.isManager ? ' · manager account' : ''}`,
   value: account.customerId,
-  disabled: Boolean(account.error),
+  // A manager account holds other accounts and has no campaigns or results of its own.
+  disabled: Boolean(account.error) || account.isManager === true,
 })))
 // Google's reason for each account it would not describe, shown under the picker.
 const accountErrors = computed(() => (data.value?.accounts ?? []).filter(account => account.error).map(account => `${account.formattedCustomerId}: ${account.error}`))
