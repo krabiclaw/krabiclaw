@@ -39,7 +39,7 @@ test('the migration chain applies from zero and builds every table the schema de
   }
 })
 
-test('room-details migration preserves authored rooms and photo memberships without deriving room facts from listing totals', () => {
+test('room migrations preserve authored facts and photo memberships without deriving room facts from listing totals or amenities', () => {
   const database = new Database(':memory:')
   database.pragma('foreign_keys = ON')
   try {
@@ -72,6 +72,24 @@ test('room-details migration preserves authored rooms and photo memberships with
     assert.deepEqual(database.prepare('SELECT * FROM media_placements').all(), placements)
     assert.deepEqual(database.prepare('SELECT * FROM product_stay_configs ORDER BY product_id').all(), listings)
     assert.equal(database.prepare("SELECT count(*) AS count FROM product_stay_photo_rooms WHERE product_id = 'counts-only-home'").get()!.count, 0)
+
+    // The next migration adds membership without assigning a listing-wide
+    // amenity to any particular room or disturbing already authored facts.
+    database.prepare("UPDATE product_stay_photo_rooms SET sleeping_arrangements = '[{\"type\":\"queen\",\"count\":2}]', private_attached_bathroom = 0, details_version = 4 WHERE id = 'bedroom'").run()
+    database.prepare("UPDATE product_stay_configs SET amenities = '[\"tv\",\"wireless_internet\"]' WHERE product_id = 'authored-home'").run()
+    const authoredRooms = database.prepare('SELECT * FROM product_stay_photo_rooms ORDER BY sort_order').all()
+    const authoredListings = database.prepare('SELECT * FROM product_stay_configs ORDER BY product_id').all()
+
+    database.exec(readFileSync('migrations/0016_stay_room_amenities.sql', 'utf8'))
+
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_rooms ORDER BY sort_order').all(), authoredRooms)
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_configs ORDER BY product_id').all(), authoredListings)
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_room_memberships').all(), memberships)
+    assert.deepEqual(database.prepare('SELECT * FROM media_placements').all(), placements)
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_room_amenities').all(), [])
+    assert.equal(database.prepare("SELECT count(*) AS count FROM product_stay_photo_rooms WHERE product_id = 'counts-only-home'").get()!.count, 0)
+    assert.throws(() => database.prepare("INSERT INTO product_stay_photo_room_amenities (organization_id, product_id, room_id, amenity_code) VALUES ('org', 'authored-home', 'bedroom', 'invented_amenity')").run(), /product_stay_photo_room_amenities_code_check/)
+    assert.throws(() => database.prepare("INSERT INTO product_stay_photo_room_amenities (organization_id, product_id, room_id, amenity_code) VALUES ('org', 'counts-only-home', 'bedroom', 'tv')").run(), /FOREIGN KEY constraint failed/)
     assert.deepEqual(database.pragma('foreign_key_check'), [])
   } finally {
     database.close()

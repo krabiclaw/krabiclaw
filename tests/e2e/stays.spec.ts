@@ -1546,8 +1546,8 @@ test('a host authors a room photo tour and shares the same rooms through CMS, MC
   const allPhotosPath = `${photoPath}/photos`
   const photoOverview = page.locator('#dashboard-panel-product-photo')
   const allPhotos = page.locator('#dashboard-panel-product-all-photos')
-  type PhotoProduct = { image: { asset_id: string } | null; gallery: Array<{ asset_id: string }>; stay: { photo_rooms: StayPhotoRoom[] } }
-  const unknownRoomDetails = { sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1 }
+  type PhotoProduct = { image: { asset_id: string } | null; gallery: Array<{ asset_id: string }>; stay: { amenities: string[]; photo_rooms: StayPhotoRoom[] } }
+  const unknownRoomDetails = { sleeping_arrangements: null, private_attached_bathroom: null, details_version: 1, amenities: [] }
   const uploadedPhotos: Array<{ id: string; url: string }> = []
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto(allPhotosPath)
@@ -1570,6 +1570,7 @@ test('a host authors a room photo tour and shares the same rooms through CMS, MC
   const beforeRooms = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
   expect(beforeRooms.error).toBeNull()
   expect(beforeRooms.data!.product.stay.photo_rooms).toEqual([])
+  expect(beforeRooms.data!.product.stay.amenities).toEqual([])
   await page.goto(photoPath)
   // Rooms are authored choices with stable identities. An empty authored room
   // keeps the guest gallery flat until the host gives every room a photo.
@@ -1654,11 +1655,68 @@ test('a host authors a room photo tour and shares the same rooms through CMS, MC
   await privacyPanel.getByRole('button', { name: 'Save', exact: true }).click()
   await expect(page).toHaveURL(`${baseURL}${roomPath}`)
   await page.setViewportSize({ width: 1440, height: 900 })
-  const bedroomFacts: Pick<StayPhotoRoom, 'sleeping_arrangements' | 'private_attached_bathroom' | 'details_version'> = { sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true, details_version: 8 }
+  const bedroomFacts: Pick<StayPhotoRoom, 'sleeping_arrangements' | 'private_attached_bathroom' | 'details_version' | 'amenities'> = { sleeping_arrangements: [{ type: 'queen', count: 1 }], private_attached_bathroom: true, details_version: 8, amenities: [] }
   const savedRoomFacts = await call<{ product: PhotoProduct & { stay: { beds: number; bedrooms: number; bathrooms: number } } }>('get_product', { product_id: productId })
   expect(savedRoomFacts.error).toBeNull()
   expect(savedRoomFacts.data!.product.stay.photo_rooms[0]).toEqual({ id: bedroomId, type: 'bedroom', photo_ids: [], ...bedroomFacts })
   expect(savedRoomFacts.data!.product.stay).toMatchObject({ beds: 3, bedrooms: 2, bathrooms: 1 })
+
+  // Room selection uses the same amenity catalog. Cancel keeps both owners
+  // unchanged; a saved room choice also declares it on the listing.
+  const amenityPanel = page.locator('#dashboard-panel-product-room-amenities')
+  await roomGrid.getByRole('link', { name: /^Amenities/ }).click()
+  await expect(amenityPanel.getByRole('heading', { name: 'Add amenities', exact: true })).toBeVisible()
+  await expect(amenityPanel.getByTestId('room-amenities-suggested')).toHaveAttribute('aria-pressed', 'true')
+  await expect(amenityPanel.getByRole('checkbox')).toHaveCount(11)
+  await expect(amenityPanel.getByRole('button', { name: 'Done', exact: true })).toBeDisabled()
+  await amenityPanel.getByRole('checkbox', { name: 'Bed linens', exact: true }).check()
+  await expect(amenityPanel.getByRole('checkbox', { name: 'Bed linens', exact: true })).toBeChecked()
+  await amenityPanel.getByRole('button', { name: 'Search amenities', exact: true }).click()
+  await amenityPanel.getByRole('searchbox', { name: 'Search amenities', exact: true }).fill('Wifi')
+  await expect(amenityPanel.getByRole('checkbox', { name: 'Wifi', exact: true })).toBeVisible()
+  await amenityPanel.getByRole('button', { name: 'Cancel search', exact: true }).click()
+  await expect(amenityPanel.getByTestId('room-amenities-suggested')).toHaveAttribute('aria-pressed', 'true')
+  await expect(amenityPanel.getByRole('checkbox')).toHaveCount(11)
+  await expect(amenityPanel.getByRole('checkbox', { name: 'Bed linens', exact: true })).toBeChecked()
+  await amenityPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(page).toHaveURL(`${baseURL}${roomPath}`)
+  const cancelledRoomAmenities = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(cancelledRoomAmenities.error).toBeNull()
+  expect(cancelledRoomAmenities.data!.product.stay.amenities).toEqual([])
+  expect(cancelledRoomAmenities.data!.product.stay.photo_rooms[0]).toEqual({ id: bedroomId, type: 'bedroom', photo_ids: [], ...bedroomFacts })
+
+  await roomGrid.getByRole('link', { name: /^Amenities/ }).click()
+  await amenityPanel.getByRole('checkbox', { name: 'Bed linens', exact: true }).check()
+  await amenityPanel.getByTestId('room-amenities-all').click()
+  await expect(amenityPanel.getByTestId('room-amenities-all')).toHaveAttribute('aria-pressed', 'true')
+  await amenityPanel.getByRole('button', { name: 'Search amenities', exact: true }).click()
+  await amenityPanel.getByRole('searchbox', { name: 'Search amenities', exact: true }).fill('Wifi')
+  await expect(amenityPanel.getByRole('checkbox')).toHaveCount(2)
+  await amenityPanel.getByRole('checkbox', { name: 'Wifi', exact: true }).check()
+  const concurrentAmenities = await call('update_stay_photo_room', { product_id: productId, room_id: bedroomId, expected_details_version: 8, amenities: ['bed_linens'] })
+  expect(concurrentAmenities.error).toBeNull()
+  const staleAmenities = page.waitForResponse(response => new URL(response.url()).pathname === `/api/dashboard/stay-homes/${productId}/rooms/${bedroomId}` && response.request().method() === 'PATCH')
+  await amenityPanel.getByRole('button', { name: 'Done', exact: true }).click()
+  const staleAmenityResponse = await staleAmenities
+  expect(staleAmenityResponse.status()).toBe(409)
+  expect(staleAmenityResponse.request().postDataJSON()).toEqual({ expected_details_version: 8, amenities: ['bed_linens', 'wireless_internet'] })
+  await expect(amenityPanel).toContainText('The room details changed')
+  await expect(amenityPanel.getByRole('checkbox', { name: 'Wifi', exact: true })).toBeChecked()
+  await amenityPanel.getByRole('button', { name: 'Use saved details', exact: true }).click()
+  await expect(amenityPanel.getByRole('checkbox', { name: 'Wifi', exact: true })).not.toBeChecked()
+  await expect(amenityPanel.getByRole('button', { name: 'Done', exact: true })).toBeDisabled()
+  await amenityPanel.getByRole('checkbox', { name: 'Wifi', exact: true }).check()
+  await amenityPanel.getByRole('button', { name: 'Done', exact: true }).click()
+  await expect(page).toHaveURL(`${baseURL}${roomPath}`)
+  bedroomFacts.amenities = ['wireless_internet', 'bed_linens']
+  bedroomFacts.details_version = 10
+  const savedRoomAmenities = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(savedRoomAmenities.error).toBeNull()
+  expect(savedRoomAmenities.data!.product.stay.amenities).toEqual(['wireless_internet', 'bed_linens'])
+  expect(savedRoomAmenities.data!.product.stay.photo_rooms[0]).toEqual({ id: bedroomId, type: 'bedroom', photo_ids: [], ...bedroomFacts })
+  await expect(roomGrid.getByRole('link', { name: /^Amenities/ })).toContainText('Bed linens')
+  await expect(roomGrid.getByRole('link', { name: /^Amenities/ })).toContainText('Wifi')
+
   await roomGrid.getByRole('button', { name: 'Add photos', exact: true }).click()
   const addBedroomPhotos = page.getByRole('dialog', { name: 'Add photos to Bedroom', exact: true })
   await addBedroomPhotos.getByRole('button', { name: 'Select photo 1', exact: true }).click()
@@ -1669,6 +1727,22 @@ test('a host authors a room photo tour and shares the same rooms through CMS, MC
   await expect(roomGrid.getByRole('link', { name: /^Open Photo \d+$/ })).toHaveCount(2)
   await expect(roomGrid.getByRole('link', { name: /^Sleeping arrangements/ }).getByText('1 queen bed', { exact: true })).toBeInViewport({ ratio: 1 })
   await page.screenshot({ path: testInfo.outputPath('room-details-host-desktop.png'), animations: 'disabled' })
+  await expect(roomGrid.getByRole('link', { name: /^Amenities/ })).toContainText('Bed linens')
+  await expect(roomGrid.getByRole('link', { name: /^Amenities/ })).toContainText('Wifi')
+  await roomGrid.getByRole('link', { name: /^Amenities/ }).click()
+  await expect(amenityPanel.getByTestId('room-amenities-suggested')).toHaveAttribute('aria-pressed', 'true')
+  await expect(amenityPanel.getByRole('checkbox', { name: 'Bed linens', exact: true })).toBeChecked()
+  await expect(amenityPanel.getByRole('checkbox', { name: 'Wifi', exact: true })).toHaveCount(0)
+  await amenityPanel.getByTestId('room-amenities-all').click()
+  await expect(amenityPanel.getByRole('checkbox', { name: 'Wifi', exact: true })).toBeChecked()
+  await expect(amenityPanel.getByRole('checkbox', { name: 'Bed linens', exact: true })).toBeChecked()
+  await amenityPanel.getByTestId('room-amenities-suggested').click()
+  await page.screenshot({ path: testInfo.outputPath('room-amenities-host-desktop.png'), animations: 'disabled' })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.screenshot({ path: testInfo.outputPath('room-amenities-host-mobile.png'), animations: 'disabled' })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await amenityPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(page).toHaveURL(`${baseURL}${roomPath}`)
   await roomGrid.getByRole('link', { name: /^Sleeping arrangements/ }).click()
   await expect(bedPanel.getByRole('spinbutton', { name: 'Queen', exact: true })).toHaveValue('1')
   await expect(bedPanel.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
@@ -1692,6 +1766,13 @@ test('a host authors a room photo tour and shares the same rooms through CMS, MC
   ])
   const livingRoomId = livingRoomProduct.data!.product.stay.photo_rooms[1]!.id
   await expect(page).toHaveURL(`${baseURL}${photoPath}/rooms/${livingRoomId}`)
+  const livingRoomAmenities = await call('update_stay_photo_room', { product_id: productId, room_id: livingRoomId, expected_details_version: 1, amenities: ['tv'] })
+  expect(livingRoomAmenities.error).toBeNull()
+  const livingRoomFacts = { ...unknownRoomDetails, details_version: 2, amenities: ['tv'] }
+  const amenityOnlyRoom = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
+  expect(amenityOnlyRoom.error).toBeNull()
+  expect(amenityOnlyRoom.data!.product.stay.amenities).toEqual(['tv', 'wireless_internet', 'bed_linens'])
+  expect(amenityOnlyRoom.data!.product.stay.photo_rooms[1]).toEqual({ id: livingRoomId, type: 'living_room', photo_ids: [], ...livingRoomFacts })
   await roomGrid.getByRole('link', { name: 'Back', exact: true }).click()
   await expect(page).toHaveURL(`${baseURL}${photoPath}`)
   await previewLink.click()
@@ -1704,6 +1785,13 @@ test('a host authors a room photo tour and shares the same rooms through CMS, MC
   await expect(preview.getByRole('heading', { name: "Where you'll sleep", exact: true })).toBeVisible()
   await expect(guestBedroom).toContainText('1 queen bed')
   await expect(guestBedroom).toContainText('Private attached bathroom')
+  await expect(guestBedroom).toContainText('Bed linens')
+  await expect(guestBedroom).toContainText('Wifi')
+  const guestLivingRoom = preview.getByTestId(`stay-room-details-${livingRoomId}`)
+  await expect(guestLivingRoom).toBeVisible()
+  await expect(guestLivingRoom).toContainText('TV')
+  await expect(guestLivingRoom).not.toContainText('Private attached bathroom')
+  await expect(guestLivingRoom).not.toContainText('No sleeping arrangements')
   await guestBedroom.scrollIntoViewIfNeeded()
   await page.screenshot({ path: testInfo.outputPath('room-guest-sleeping-desktop.png'), animations: 'disabled' })
   await page.setViewportSize({ width: 390, height: 844 })
@@ -1734,7 +1822,7 @@ test('a host authors a room photo tour and shares the same rooms through CMS, MC
   await page.setViewportSize({ width: 1440, height: 900 })
   const authoredRooms = [
     { id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id], ...bedroomFacts },
-    { id: livingRoomId, type: 'living_room', photo_ids: [green.id], ...unknownRoomDetails },
+    { id: livingRoomId, type: 'living_room', photo_ids: [green.id], ...livingRoomFacts },
   ]
   const roomHome = await request.get(api(`stay-homes/${productId}`))
   expect(roomHome.status(), await roomHome.text()).toBe(200)
@@ -1758,7 +1846,9 @@ test('a host authors a room photo tour and shares the same rooms through CMS, MC
   publicProductURL.pathname = publicProductURL.pathname.replace(/^\/stays\//, '/api/public/stays/')
   const authoredPublicRead = await request.get(publicProductURL.href)
   expect(authoredPublicRead.status(), await authoredPublicRead.text()).toBe(200)
-  expect((await authoredPublicRead.json() as { product: PhotoProduct }).product.stay.photo_rooms).toEqual(authoredRooms)
+  const authoredPublicProduct = (await authoredPublicRead.json() as { product: PhotoProduct }).product
+  expect(authoredPublicProduct.stay.photo_rooms).toEqual(authoredRooms)
+  expect(authoredPublicProduct.stay.amenities).toEqual(['tv', 'wireless_internet', 'bed_linens'])
   await preview.getByRole('button', { name: 'Show all 3 photos', exact: true }).click()
   const publicTour = preview.locator('[data-photo-tour]')
   await expect(publicTour).toBeVisible()
@@ -1767,6 +1857,9 @@ test('a host authors a room photo tour and shares the same rooms through CMS, MC
   await expect(publicTour.locator('section img')).toHaveCount(3)
   await expect(publicTour.locator(`#photo-room-${bedroomId}`)).toContainText('1 queen bed')
   await expect(publicTour.locator(`#photo-room-${bedroomId}`)).toContainText('Private attached bathroom')
+  await expect(publicTour.locator(`#photo-room-${bedroomId}`)).toContainText('Bed linens')
+  await expect(publicTour.locator(`#photo-room-${bedroomId}`)).toContainText('Wifi')
+  await expect(publicTour.locator(`#photo-room-${livingRoomId}`)).toContainText('TV')
   for (const [index, photo] of uploadedPhotos.entries()) await expect(publicTour.locator('section img').nth(index)).toHaveAttribute('src', photo.url)
   await page.screenshot({ path: testInfo.outputPath('stay-guest-photo-tour-desktop.png') })
   await page.setViewportSize({ width: 390, height: 844 })
@@ -1791,6 +1884,7 @@ test('a host authors a room photo tour and shares the same rooms through CMS, MC
   const roomDeletedProduct = await call<{ product: PhotoProduct }>('get_product', { product_id: productId })
   expect(roomDeletedProduct.error).toBeNull()
   expect(roomDeletedProduct.data!.product.stay.photo_rooms).toEqual([{ id: bedroomId, type: 'bedroom', photo_ids: [red.id, blue.id], ...bedroomFacts }])
+  expect(roomDeletedProduct.data!.product.stay.amenities).toEqual(['tv', 'wireless_internet', 'bed_linens'])
   expect([roomDeletedProduct.data!.product.image!.asset_id, ...roomDeletedProduct.data!.product.gallery.map(asset => asset.asset_id)]).toEqual([red.id, blue.id, green.id])
   await expect(photoOverview.getByTestId(`stay-photo-room-${bedroomId}`)).toContainText('2 photos')
   await expect(photoOverview.getByTestId('stay-additional-photos')).toContainText('1 photo')

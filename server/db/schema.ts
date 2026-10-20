@@ -6,7 +6,7 @@ import { sqliteTable, integer, text, real, unique, uniqueIndex, index, check, fo
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
 import type { CONTENT_DOCUMENT_KINDS } from "../../shared/content-registries"
 import { NOTIFICATION_CATEGORIES, PUSH_ONLY_CATEGORIES, type NotificationCategory } from "../../shared/notification-categories"
-import { STAY_MAP_SHARING_MODES } from "../../shared/stay-listing"
+import { STAY_AMENITIES, STAY_MAP_SHARING_MODES, type StayAmenity } from "../../shared/stay-listing"
 import { STAY_PHOTO_ROOM_TYPES, type StayPhotoRoomType } from "../../shared/stay-photos"
 
 export const account = sqliteTable("account", {
@@ -1219,6 +1219,18 @@ export const product_stay_photo_room_memberships = sqliteTable("product_stay_pho
 	foreignKey({ columns: [table.organization_id, table.asset_id], foreignColumns: [media_assets.organization_id, media_assets.id], name: "product_stay_photo_room_memberships_asset_fk" }).onDelete("cascade"),
 	index("product_stay_photo_room_memberships_room_idx").on(table.organization_id, table.product_id, table.room_id),
 	index("product_stay_photo_room_memberships_asset_idx").on(table.organization_id, table.asset_id),
+]);
+
+// Room references to canonical listing amenities; removing a room keeps the listing facts.
+export const product_stay_photo_room_amenities = sqliteTable("product_stay_photo_room_amenities", {
+	organization_id: text().notNull(),
+	product_id: text().notNull(),
+	room_id: text().notNull(),
+	amenity_code: text().$type<StayAmenity>().notNull(),
+}, table => [
+	primaryKey({ columns: [table.organization_id, table.product_id, table.room_id, table.amenity_code] }),
+	foreignKey({ columns: [table.organization_id, table.product_id, table.room_id], foreignColumns: [product_stay_photo_rooms.organization_id, product_stay_photo_rooms.product_id, product_stay_photo_rooms.id], name: "product_stay_photo_room_amenities_room_fk" }).onDelete("cascade"),
+	check("product_stay_photo_room_amenities_code_check", sql`amenity_code IN (${sql.raw(Object.keys(STAY_AMENITIES).map(code => `'${code}'`).join(', '))})`),
 ]);
 
 // Workspace-owned reply text, optionally scheduled for explicitly named homes.

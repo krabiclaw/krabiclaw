@@ -79,6 +79,7 @@ import MediaPicker from '~/lib/components/workspace/media/MediaPicker.vue'
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
 import { mediaStillUrl } from '~/shared/media-placement-contract'
 import { stayPhotoRoomName } from '~/shared/stay-photos'
+import { STAY_AMENITIES } from '~/shared/stay-listing'
 import { isNavigationFailure } from 'vue-router'
 import { getErrorMessage } from '~/utils/errors'
 
@@ -117,6 +118,12 @@ const roomDetails = computed<EditorNavigationGroup[]>(() => {
       placeholder: current.private_attached_bathroom === null,
       to: `${level.path.value}/privacy`,
     }] : []),
+    {
+      id: 'amenities', label: 'Amenities',
+      summary: current.amenities.length ? current.amenities.map(code => STAY_AMENITIES[code].label).join(', ') : 'Add amenities',
+      placeholder: current.amenities.length === 0,
+      to: `${level.path.value}/amenities`,
+    },
   ] }]
 })
 const items = computed(() => {
