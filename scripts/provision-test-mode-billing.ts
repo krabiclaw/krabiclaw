@@ -5,7 +5,8 @@
 // that asks Stripe (a Business plan's items, saved payment methods) fails there.
 //
 // This gives every current subscription in the copy its test-mode equivalent in
-// the target's Stripe account: the same plan on the catalog's current price, the
+// the target's Stripe account: the same plan at the price Better Auth knows it by
+// (an offered plan's current price; a retired plan's own contract price), the
 // same location quantity, Business's rental-unit line, billed by invoice so no
 // card is needed. The rows are then pointed at those objects. A rerun finds the
 // objects it made before by the live IDs they carry, so nothing is duplicated.
@@ -42,7 +43,9 @@ const rows = d1<Row>(`SELECT s.id, s.referenceId, s.plan, s.seats, s.stripeSubsc
   FROM subscription s LEFT JOIN organization o ON o.id = s.referenceId
  WHERE s.status NOT IN ('canceled', 'incomplete_expired') AND s.stripeSubscriptionId IS NOT NULL`)
 
-// The catalog's current offer per plan is the first entry the app configures Better Auth with.
+// Each plan's price as the app configures Better Auth with it: the first entry is
+// an offered plan's current offer, and a retired plan's contract price, which is
+// what a subscription still on that plan pays.
 const plans = new Map<string, Awaited<ReturnType<typeof getBetterAuthStripePlans>>[number]>()
 for (const plan of await getBetterAuthStripePlans(stripe)) if (!plans.has(plan.name)) plans.set(plan.name, plan)
 
@@ -90,6 +93,11 @@ for (const row of rows) {
       days_until_due: 30,
       metadata: { ...source, krabiclaw_source_subscription: row.stripeSubscriptionId!, referenceId: row.referenceId, plan: row.plan },
     }, { idempotencyKey: `test-mode-billing:subscription:v3:${row.stripeSubscriptionId}` })
+  // A subscription found by its source ID is used only if it is the one made for this row.
+  const ownCustomer = typeof subscription.customer === 'string' ? subscription.customer : subscription.customer.id
+  if (ownCustomer !== customer.id || subscription.metadata.referenceId !== row.referenceId || subscription.metadata.plan !== row.plan || !['active', 'trialing', 'past_due'].includes(subscription.status)) {
+    throw new Error(`Test-mode subscription ${subscription.id} does not match ${row.referenceId}'s ${row.plan} subscription`)
+  }
   d1(`UPDATE subscription SET stripeCustomerId = ${sqlString(customer.id)}, stripeSubscriptionId = ${sqlString(subscription.id)}, stripeScheduleId = NULL WHERE id = ${sqlString(row.id)};
 UPDATE organization SET stripeCustomerId = ${sqlString(customer.id)} WHERE id = ${sqlString(row.referenceId)};`)
   provisioned++
