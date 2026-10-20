@@ -1,31 +1,16 @@
 <template>
-  <DashboardLeafPanel
-    id="location-address"
-    title="Address"
-    :saving="editor.saving.value"
-    :disabled="editor.saveDisabled.value"
-    :error="editor.editorError.value ?? ''"
-    @cancel="editor.revert"
-    @save="editor.save"
-  >
-    <div class="space-y-6">
-      <UFormField label="Street"><UTextarea v-model="editor.detailsForm.addressLines" :rows="3" autofocus class="w-full" /></UFormField>
-      <UFormField label="Neighbourhood"><UInput v-model="editor.detailsForm.sublocality" class="w-full" /></UFormField>
-      <UFormField label="City"><UInput v-model="editor.detailsForm.locality" class="w-full" /></UFormField>
-      <UFormField label="State or province"><UInput v-model="editor.detailsForm.administrativeArea" class="w-full" /></UFormField>
-      <UFormField label="Postcode"><UInput v-model="editor.detailsForm.postalCode" class="w-full" /></UFormField>
-      <UFormField label="Country"><UInput v-model="editor.detailsForm.regionCode" class="w-full" placeholder="TH" /></UFormField>
-    </div>
-    <UAlert v-if="editor.validationMessage.value" class="mt-6" color="error" variant="soft" :description="editor.validationMessage.value" />
-  </DashboardLeafPanel>
+  <LocationAddressEditor :organization-id="organizationId" :location-id="locationId" />
 </template>
 
 <script setup lang="ts">
-import { useLocationEditor } from '~/lib/components/workspace/settings/LocationSettingsPage.vue'
+import LocationAddressEditor from '~/lib/components/workspace/location/LocationAddressEditor.vue'
 
 definePageMeta({ layout: 'dashboard' })
 
 const dashboardLocation = useDashboardLocation()
 const organizationId = await useDashboardOrganizationId()
-const editor = await useLocationEditor(organizationId, dashboardLocation.currentLocationId, 'address')
+// Nuxt mounts this page for one resolved slug. Keep its canonical ID while a
+// successful save refreshes the context and moves a renamed slug's route.
+const locationId = dashboardLocation.currentLocationId.value
+if (!locationId) throw showNotFound('Location not found')
 </script>
