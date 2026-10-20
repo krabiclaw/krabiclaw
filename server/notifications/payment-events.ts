@@ -31,7 +31,6 @@ export type PaymentNotificationEvent = PaymentNotificationInput & (
   | { kind: 'dispute_won' | 'dispute_lost' | 'dispute_closed' }
   | { kind: 'payout_paid'; arrivalDate?: string | null }
   | { kind: 'payout_failed' }
-  | { kind: 'usage_invoice_paid' | 'usage_invoice_payment_failed' | 'usage_invoice_action_required' }
 )
 
 function paymentMessage(event: PaymentNotificationEvent, audience: 'owner' | 'guest'): NotificationMessage {
@@ -102,20 +101,6 @@ function paymentMessage(event: PaymentNotificationEvent, audience: 'owner' | 'gu
       title = 'Payout failed'
       amountLabel = 'Payout amount'
       intro = 'Review your payout details in Stripe.'
-      break
-    case 'usage_invoice_paid':
-      title = 'Payments invoice paid'
-      amountLabel = 'Amount paid'
-      break
-    case 'usage_invoice_payment_failed':
-      title = 'Payments invoice payment failed'
-      amountLabel = 'Amount due'
-      intro = 'Review your payment method in Stripe.'
-      break
-    case 'usage_invoice_action_required':
-      title = 'Action required for your Payments invoice'
-      amountLabel = 'Amount due'
-      intro = 'Complete the payment in Stripe.'
       break
     default:
       throw new Error('Unsupported Payments notification event')

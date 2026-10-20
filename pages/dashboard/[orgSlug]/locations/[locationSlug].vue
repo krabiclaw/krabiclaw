@@ -18,28 +18,17 @@
 
     <!--
       The location before it exists: the sections creating it will not go
-      without, walked in order. A plan already paying for every location the site
-      has is extended first, through Stripe's confirmation.
+      without, walked in order. Basic includes its locations and no more; a paid
+      plan bills each one past those at the end of the period.
     -->
     <template v-if="isNew">
-      <div v-if="atLimit && planLocations" data-location-limit class="space-y-4">
-        <h2 class="text-xl font-bold leading-snug text-highlighted">
-          {{ onPaidPlan ? 'Add a location to your plan' : 'Choose a plan for more locations' }}
-        </h2>
+      <div v-if="atLimit" data-location-limit class="space-y-4">
+        <h2 class="text-xl font-bold leading-snug text-highlighted">Choose a plan for more locations</h2>
         <p class="text-base text-muted">
-          <template v-if="onPaidPlan">
-            Your site has {{ planLocations.used }} locations, and your plan covers {{ planLocations.covered }}.
-            Plans include {{ INCLUDED_LOCATIONS }}, then {{ locationPrice }}.
-            Stripe shows what changes on your bill before you confirm.
-          </template>
-          <template v-else>
-            Basic includes {{ INCLUDED_LOCATIONS }} locations. Growth and Business include {{ INCLUDED_LOCATIONS }},
-            then {{ locationPrice }}.
-          </template>
+          Basic includes {{ INCLUDED_LOCATIONS }} locations. Growth and Business include {{ INCLUDED_LOCATIONS }},
+          then {{ additionalLocationPrice() }}.
         </p>
-        <UAlert v-if="limitError" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="limitError" />
-        <UButton v-if="onPaidPlan" label="Add a location to your plan" :loading="limitBusy" @click="addLocationToPlan" />
-        <UButton v-else label="Choose a plan" :to="`/dashboard/${route.params.orgSlug}/billing/upgrade`" />
+        <UButton label="Choose a plan" :to="`/dashboard/${route.params.orgSlug}/billing/upgrade`" />
       </div>
       <template v-else>
         <UAlert v-if="newLocation.createError.value" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="newLocation.createError.value" />
@@ -71,7 +60,6 @@ import { formatPostalAddress } from '~/utils/postal-address'
 import type { LocationReservationConfig } from '~/server/utils/reservations'
 import { NEW_LOCATION_SECTIONS, useNewLocation } from '~/lib/components/workspace/settings/LocationSettingsPage.vue'
 import { additionalLocationPrice, INCLUDED_LOCATIONS, isKnownRecurringPlan } from '~/shared/billing-model'
-import { isLocationCount } from '~/composables/useOrganizationSubscription'
 import { timezoneLabel } from '~/utils/timezone'
 
 // A location is a tile on Locations, a row on Menu; Locations is its pane and its Back.
@@ -127,34 +115,18 @@ watchEffect(() => {
   }
 })
 
-// What the plan pays for, read when a location is about to be added.
-type LocationBilling = { plan: string; billingInterval?: 'month' | 'year'; locations: { used: number; covered: number } }
+// The plan and its locations in use, read when a location is about to be added.
+type LocationBilling = { plan: string; usage: { locations: number } }
 const isLocationBilling = (value: unknown): value is { success: true; billing: LocationBilling } =>
-  isRecord(value) && value.success === true && isRecord(value.billing) && typeof value.billing.plan === 'string' && isLocationCount(value.billing.locations)
+  isRecord(value) && value.success === true && isRecord(value.billing) && typeof value.billing.plan === 'string'
+  && isRecord(value.billing.usage) && Number.isSafeInteger(value.billing.usage.locations)
 const { data: billingResponse, error: billingError } = await useAsyncData(
   computed(() => `location-new-billing:${organizationId}:${isNew.value}`),
   async () => isNew.value ? await dashboardApi('/api/billing/status', { validate: isLocationBilling }) : null,
 )
 if (billingError.value) throw billingError.value
-const planLocations = computed(() => billingResponse.value?.billing.locations ?? null)
-const atLimit = computed(() => isNew.value && planLocations.value !== null && planLocations.value.used >= planLocations.value.covered)
-const onPaidPlan = computed(() => isKnownRecurringPlan(billingResponse.value?.billing.plan))
-const locationPrice = computed(() => additionalLocationPrice(billingResponse.value?.billing.billingInterval))
-const { setPlanLocations } = useOrganizationSubscription()
-const limitBusy = ref(false)
-const limitError = ref('')
-async function addLocationToPlan() {
-  if (!planLocations.value || limitBusy.value) return
-  limitBusy.value = true
-  limitError.value = ''
-  try {
-    await setPlanLocations(organizationId, planLocations.value.used + 1)
-  } catch (error) {
-    limitError.value = getErrorMessage(error, 'The location could not be added to your plan')
-  } finally {
-    limitBusy.value = false
-  }
-}
+const atLimit = computed(() => isNew.value && !!billingResponse.value && !isKnownRecurringPlan(billingResponse.value.billing.plan)
+  && billingResponse.value.billing.usage.locations >= INCLUDED_LOCATIONS)
 
 const locationId = computed(() => dashboardLocation.currentLocationId.value)
 

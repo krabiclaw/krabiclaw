@@ -136,9 +136,6 @@ const ownerPayments: PaymentNotificationEvent[] = [
   { ...payment, kind: 'dispute_closed' },
   { ...payment, kind: 'payout_paid', amount: 25000, productTitle: null, arrivalDate: 'Oct 7, 2026', action: { ...payment.action, label: 'View payout' } },
   { ...payment, kind: 'payout_failed', amount: 25000, productTitle: null, action: { ...payment.action, label: 'View payout' } },
-  { ...payment, kind: 'usage_invoice_paid', amount: 140, productTitle: null, action: { ...payment.action, label: 'View invoice' } },
-  { ...payment, kind: 'usage_invoice_payment_failed', amount: 140, productTitle: null, action: { ...payment.action, label: 'View invoice' } },
-  { ...payment, kind: 'usage_invoice_action_required', amount: 140, productTitle: null, action: { ...payment.action, label: 'Pay invoice' } },
 ]
 
 const guestPayments: GuestPaymentNotificationEvent[] = [

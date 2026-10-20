@@ -1,43 +1,45 @@
 # Stripe catalog operator plan
 
 `scripts/seed-stripe.mjs` reconciles the new-sale recurring catalog for Basic
-(free, with no Stripe product), Growth (`$49` per month or `$588` per year), and
-Business (`$149` per month). Business includes Growth's features, online payments
-and managed Google Ads campaigns, and has no annual price. Every plan includes
-2 locations; Growth and Business charge `$49` per additional location per month (`$588` per year on annual Growth).
-Business also includes 2 rental units and sells each additional one through the
-Additional rental unit product (`product_family=rental_units`, never a `plan_id`):
-one per-unit `$19` monthly price, `unit_label` `rental unit`. Its subscription item
-exists only while the business pays for more units than the 2 included, and its
-quantity is the additional units. Business subscriptions on the earlier `$99`
-price keep it, bill every location and bill no rental units.
+(free, with no Stripe product), Growth (`$49` per month) and Business (`$149`
+per month). Business includes Growth's features, online payments and managed
+Google Ads campaigns. Each plan price is one flat monthly price billed at
+quantity 1; there is no annual offer.
 
-A Business subscription therefore has two items, which Stripe's portal cannot
-confirm. New Business Checkout is still Better Auth's: the Business plan carries
-the rental unit price as a line item, and the Checkout hook in `auth.ts` sets its
-quantity to the business's units past the included ones (or leaves it out).
-Better Auth's scheduled downgrade to Growth removes the item. An existing
-subscription moves to Business, or changes its Business locations and units, on
-Payments → Plan → Business: Stripe's invoice preview, then one subscription
-update with the same proration date (`always_invoice`), read back from Stripe;
-Better Auth's webhook records the plan and location quantity as for any update.
-`/api/billing/plans` and the Better Auth plan loader both refuse a catalog without
-exactly one active Additional rental unit product at that price, so apply the
-offers before deploying an application that sells it.
+Everything else a plan bills is a metered price on a Stripe billing meter, each
+its own product with `product_family` set to the meter key (never a `plan_id`):
 
-Each paid plan price is one graduated Stripe price whose subscription quantity
-is the number of locations it covers: the first tier (up to 2) is a flat fee of
-the plan amount, the second is the per-location amount for every further unit.
-The product's `unit_label` is `location`. Keeping it one price on one
-subscription item is what lets Better Auth's plan changes and its location
-quantity changes (`seats`) use Stripe's portal confirmation, which refuses
-subscriptions with more than one item. `shared/billing-model.ts` owns the fixed
-USD amounts and the tiers (`planPriceTiers`). Commerce (`$89`), Marketing (`$99`),
+| `product_family` | Meter event | Formula | Price | Plans |
+| --- | --- | --- | --- | --- |
+| `locations` | `krabiclaw_locations` | `last` | graduated: 2 included, then $49 per additional location per month | Growth, Business |
+| `captured_volume` | `krabiclaw_captured_volume` | `sum` | 0.014 cents per cent (1.4% of payment volume) | Business |
+| `stripe_cost` | `krabiclaw_stripe_cost` | `sum` | 1 cent per cent (Stripe fees at cost) | Business |
+| `ad_spend` | `krabiclaw_ad_spend` | `sum` | 0.1 cents per cent (10% of monthly ad spend) | Business |
+
+`BILLING_METERS` in `shared/billing-model.ts` owns these definitions and their
+Stripe phrasing. The plan creates a missing meter (`create_meter`, mapping
+`stripe_customer_id` and `value`) before the price on it, reuses an active meter
+with the same event name, and refuses one that aggregates differently. A meter's
+formula cannot change; deactivate a wrong one in Stripe before planning. The
+metered prices are the plans' Better Auth `lineItems`, so Checkout adds them and
+Growth → Business is one `subscription.upgrade` (`docs/payments/payments.md`).
+`/api/billing/plans` and the Better Auth plan loader both refuse a catalog
+without exactly one active product per meter at its published price, so apply
+the offers before deploying an application that sells them.
+
+The graduated per-location plan prices sold before #1503 and the annual Growth
+price are retired for new sales by the full plan's `deactivate_price`
+operations. Rental units are not billed: the Additional rental unit product
+(`product_family=rental_units`) is a retired family, so the full plan clears its
+default price, deactivates its prices and archives it. Subscriptions on any of
+them keep their items until they change plan.
+
+Commerce (`$89`), Marketing (`$99`),
 Managed (`$149`) and SEO Accelerator (`$349`) are retired from new offers. Every
 product and price, including already-archived products and inactive or one-time prices, is
 read into the reviewed snapshot. Only products whose metadata explicitly names
-`plan_id=commerce|marketing|managed|seo_accelerator` or
-`addon_type=translation|seasonal|gbp_setup` are retired; unknown products are never classified by name. For each still-active
+`plan_id=commerce|marketing|managed|seo_accelerator`,
+`addon_type=translation|seasonal|gbp_setup` or `product_family=rental_units` are retired; unknown products are never classified by name. For each still-active
 retired product whose default price is active, the plan first clears that exact
 default price, then deactivates every independently active price before archiving
 the product, including duplicates. Inactive products are never cleared or
@@ -50,9 +52,8 @@ Auth Stripe owns their subscription lifecycle. Historical fulfillment rows
 remain raw read-only audit history.
 
 The script does not create one-time credit, add-on, or auto-top-up products, and
-it never changes a price amount or writes a subscription. Business retains the
-usage charges: 1.4% of payment volume, plus Stripe fees, and 10% of monthly ad
-spend for campaigns we manage. Ad spend is separate.
+it never changes a price amount or writes a subscription. Google bills the ad
+spend itself; the ad-spend meter bills only KrabiClaw's 10%.
 
 The default mode is read-only. It proves the exact Stripe account, lists every
 product and all of its active and inactive prices, writes no product/price/file
@@ -80,8 +81,7 @@ application and provider catalog compatible throughout the cutover:
    native quantity confirmation after its product and price are archived.
 4. Generate and apply an `--retirement-only` plan. It archives the retired
    families only after proving exactly one active canonical Growth and Business
-   product, their USD 49 and USD 149 monthly prices, and Growth's USD 588 annual
-   price. It emits no offer product, price or image mutations and does not need
+   product and their flat USD 49 and USD 149 monthly prices. It emits no offer product, price or image mutations and does not need
    local product images.
 
 ```bash

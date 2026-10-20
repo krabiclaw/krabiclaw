@@ -18,7 +18,7 @@ import { listGuestThreads } from '../../server/domain/guest-threads/repository.t
 import { receiveGuestWebReply } from '../../server/domain/guest-threads/inbound-email.ts'
 import { acknowledgeBuyerThreadEntries } from '../../server/utils/notification-acknowledgement.ts'
 import { retainPaymentsForTenantDeletion } from '../../server/domain/payments/retention.ts'
-import { deliverPaymentsUsage, finalizePaymentsBilling, paymentsUsageStatus, reconcileNativeBillingCredit } from '../../server/domain/payments/usage.ts'
+import { deliverPaymentsUsage } from '../../server/domain/payments/usage.ts'
 import { agreeToService, endService, listServices, SERVICE_TERMS_VERSION } from '../../server/utils/organization-services.ts'
 import { storeIntegration, readIntegration } from '../../server/utils/organization-integrations.ts'
 import { releaseIntegration } from '../../server/utils/integration-release.ts'
@@ -342,7 +342,9 @@ test('MCP financial reads return bounded reports and authenticated detail links 
   assert.equal(detail.dashboard_url,'https://proof.example/dashboard/payments/bookings/payment/report')
   const usage = await call('get_payments_usage')
   assert.deepEqual(usage.pending,[{currency:'USD',kind:'stripe_cost',event_count:1,amount:100,billing_currency:'USD',billing_amount:100,action_required:true}])
+  // The fees are read in Plan and billing, beside the subscription that bills them.
   assert.equal(usage.dashboard_url,'https://proof.example/dashboard/payments/billing')
+  assert.deepEqual({configured:usage.configured,pricing:usage.pricing,source:usage.source},{configured:false,pricing:null,source:'Stripe'})
   const originalFetch = globalThis.fetch
   const payoutReads:string[]=[]
   const fetchMock = t.mock.method(globalThis,'fetch',async (request,init) => {
@@ -718,13 +720,11 @@ test('tenant deletion refuses a connected account retained for another tenant wi
   await payable(db,'retention-conflict')
   await db.prepare("INSERT INTO stripe_connected_accounts(id,organization_id,stripe_account_id,country,livemode,status,card_payments_status,requirements_json,created_at,updated_at)VALUES('connected',?,'acct_seller','US',0,'ready','active','[]',?,?)").bind(ORG,NOW,NOW).run()
   await db.prepare("INSERT INTO payment_servicing_tenants(organization_id,stripe_account_id,livemode,retained_at)VALUES('deleted-other-tenant','acct_seller',0,?)").bind(NOW).run()
-  await db.prepare("INSERT INTO payment_billing_accounts(organization_id,stripe_billing_customer_id,contract_start_at,currency,status,updated_at)VALUES(?,'cus_billing',?,'USD','active',?)").bind(ORG,NOW,NOW).run()
   await assert.rejects(()=>retainPaymentsForTenantDeletion(db,ORG),/conflicting Payments servicing ownership/u)
   assert.equal(await db.prepare('SELECT organization_id FROM payment_servicing_tenants WHERE stripe_account_id=? AND livemode=0').bind('acct_seller').first('organization_id'),'deleted-other-tenant')
   assert.equal(await db.prepare('SELECT stripe_account_id FROM stripe_connected_accounts WHERE organization_id=?').bind(ORG).first('stripe_account_id'),'acct_seller')
   assert.equal(await db.prepare('SELECT id FROM organization WHERE id=?').bind(ORG).first('id'),ORG)
   assert.equal(await db.prepare("SELECT status FROM payment_checkout_holds WHERE payment_id='retention-conflict'").first('status'),'active')
-  assert.equal(await db.prepare('SELECT status FROM payment_billing_accounts WHERE organization_id=?').bind(ORG).first('status'),'active')
  }finally{await runtime.dispose()}
 })
 
@@ -737,83 +737,62 @@ test('an expired payment hold no longer consumes session capacity', {timeout:120
  }finally{await runtime.dispose()}
 })
 
-test('owner-serviced credits leave the usage batch without hiding credits or starving later delivery', {timeout:120000},async(t)=>{
- t.mock.timers.enable({apis:['Date'],now:new Date('2026-10-05T00:00:00.000Z')})
+test('Payments usage reaches its Stripe meters once, a correction as a negative value, and a rejected event keeps Stripe’s reason', {timeout:120000},async(t)=>{
  const {db,runtime}=await boot();try{
-  const customer='11111111-1111-4111-8111-111111111111',contractId='22222222-2222-4222-8222-222222222222',rateCard='33333333-3333-4333-8333-333333333333'
-  const start='2026-09-01T00:00:00.000Z',occurred='2026-09-30T23:00:00.000Z'
-  await db.prepare("INSERT INTO payment_billing_accounts(organization_id,stripe_billing_customer_id,metronome_customer_id,metronome_contract_id,contract_start_at,currency,status,updated_at)VALUES(?,'cus_operating',?,?,?,'USD','servicing',?)").bind(ORG,customer,contractId,start,NOW).run()
-  const credits=Array.from({length:100},(_,index)=>({id:`credit-${String(index).padStart(3,'0')}`,source:`fee-credit:${index}`,createdAt:new Date(Date.parse(NOW)+index*1000).toISOString()}))
-  await db.batch(credits.map(credit=>db.prepare("INSERT INTO payment_usage_events(id,organization_id,kind,currency,amount,source_id,provider_occurred_at,created_at)VALUES(?,?,'stripe_cost_adjustment','USD',-100,?,?,?)").bind(credit.id,ORG,credit.source,occurred,credit.createdAt)))
-  const before=(await db.prepare('SELECT * FROM payment_usage_events ORDER BY created_at').all()).results
-  assert.equal(before.length,100)
-  assert.deepEqual(before.map(event=>event.id),credits.map(credit=>credit.id))
-  const native={id:contractId,customer_id:customer,uniqueness_key:`payments:${ORG}`,rate_card_id:rateCard,starting_at:start,customer_billing_provider_configuration:{customer_id:customer,billing_provider:'stripe',delivery_method:'direct_to_billing_provider',configuration:{stripe_customer_id:'cus_operating',stripe_collection_method:'charge_automatically'},delivery_method_configuration:{stripe_account_id:'acct_platform'}}}
-  const invoice={id:'44444444-4444-4444-8444-444444444444',customer_id:customer,contract_id:contractId,type:'USAGE',status:'FINALIZED',start_timestamp:start,end_timestamp:NOW,credit_type:{id:'55555555-5555-4555-8555-555555555555',name:'USD (cents)'},total:10000,external_invoice:null}
-  let ended=true
-  const ingests:unknown[][]=[],creditReads:string[]=[],originalFetch=globalThis.fetch
-  // External reads are inputs; failed writes never fabricate native acceptance or settlement.
-  t.mock.method(globalThis,'fetch',async(input,init)=>{
+  await db.prepare('UPDATE organization SET "stripeCustomerId"=? WHERE id=?').bind('cus_operating',ORG).run()
+  await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at,timezone) VALUES('platform','KrabiClaw','krabiclaw','krabiclaw','{}','krabiclaw-theme-v1','USD','active','complete','flat','service',?,'America/Los_Angeles')`).bind(NOW).run()
+  await payable(db,'billable')
+  const events=[
+   ['volume','billable','captured_volume','USD',10000,'capture:billable'],
+   ['cost',null,'stripe_cost','USD',320,'fee:txn_1:revision:1'],
+   ['correction',null,'stripe_cost_adjustment','USD',-30,'fee:txn_1:revision:2'],
+   ['ads',null,'ad_spend','USD',50000,'google_ads:1234567890:2026-09-30'],
+  ] as const
+  await db.batch(events.map(([id,payment,kind,currency,amount,source],index)=>db.prepare('INSERT INTO payment_usage_events(id,organization_id,payment_id,kind,currency,amount,source_id,provider_occurred_at,created_at)VALUES(?,?,?,?,?,?,?,?,?)').bind(id,ORG,payment,kind,currency,amount,source,NOW,new Date(Date.parse(NOW)+index*1000).toISOString())))
+  const sent:Array<{event_name:string|null;customer:string|null;value:string|null;identifier:string|null;key:string|null}>=[]
+  let answer:'ok'|'unavailable'|'invalid'='unavailable'
+  const originalFetch=globalThis.fetch
+  t.mock.method(globalThis,'fetch',async(input:RequestInfo|URL,init?:RequestInit)=>{
    const url=new URL(input instanceof Request?input.url:String(input))
-   if(url.origin==='https://api.metronome.com'){
-    const body=init?.body?JSON.parse(String(init.body)):undefined
-    const readContract={...native,...(ended?{ending_before:'2026-10-02T00:00:00.000Z'}:{})}
-    if(url.pathname==='/v2/contracts/get'){assert.equal(init?.method,'POST');assert.deepEqual(body,{customer_id:customer,contract_id:contractId});return Response.json({data:readContract})}
-    if(url.pathname==='/v2/contracts/list'){assert.equal(init?.method,'POST');assert.deepEqual(body,{customer_id:customer,limit:20});return Response.json({data:[readContract]})}
-    if(url.pathname===`/v1/customers/${customer}/invoices`){assert.equal(init?.method,'GET');assert.equal(url.searchParams.get('contract_id'),contractId);return Response.json({data:[invoice]})}
-    // The billable capture reopens the ended contract through the documented path before delivery.
-    if(url.pathname==='/v1/contracts/updateEndDate'){assert.equal(init?.method,'POST');assert.deepEqual(body,{customer_id:customer,contract_id:contractId});ended=false;return Response.json({data:{id:contractId}})}
-    assert.equal(url.pathname,'/v1/ingest')
-    assert.equal(init?.method,'POST')
-    assert.ok(Array.isArray(body))
-    ingests.push(body)
-    return Response.json({message:'Ingest unavailable at the external test boundary'},{status:503})
-   }
-   if(url.origin==='https://api.stripe.com'){
-    assert.equal(init?.method,'GET')
-    if(url.pathname==='/v1/account')return Response.json({id:'acct_platform',object:'account',livemode:false})
-    assert.equal(url.pathname,'/v1/credit_notes/cn_owner_credit')
-    creditReads.push(url.pathname)
-    return Response.json({error:{type:'invalid_request_error',code:'resource_missing',message:'No such credit_note'}},{status:404,headers:{'stripe-should-retry':'false'}})
-   }
-   return originalFetch(input,init)
+   if(url.origin!=='https://api.stripe.com')return originalFetch(input,init)
+   assert.equal(url.pathname,'/v1/billing/meter_events')
+   const body=new URLSearchParams(String(init?.body))
+   sent.push({event_name:body.get('event_name'),customer:body.get('payload[stripe_customer_id]'),value:body.get('payload[value]'),identifier:body.get('identifier'),key:new Headers(init?.headers).get('idempotency-key')})
+   if(answer==='unavailable')return Response.json({error:{type:'api_error',message:'Meter events are unavailable at the test boundary'}},{status:500,headers:{'stripe-should-retry':'false'}})
+   if(answer==='invalid')return Response.json({error:{type:'invalid_request_error',message:'No active meter was found for event_name krabiclaw_ad_spend'}},{status:400})
+   return Response.json({object:'billing.meter_event',event_name:body.get('event_name'),identifier:body.get('identifier'),payload:{},timestamp:1,created:1,livemode:false})
   })
-  const env={DB:db,STRIPE_SECRET_KEY:'sk_test_credit_boundary',METRONOME_API_KEY:'metronome_external_boundary',METRONOME_RATE_CARD_ID:rateCard} as CloudflareEnv
-  const began=Date.now()
-  // Credits on a closed contract are set aside for owner servicing, not billed and not lost.
+  const env={DB:db,STRIPE_SECRET_KEY:'sk_test_meter_boundary'} as CloudflareEnv
+  // Stripe unavailable: the event keeps the reason and stays deliverable.
+  await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/unavailable at the test boundary/u)
+  assert.deepEqual(await db.prepare("SELECT delivery_at,dead_letter_at,error FROM payment_usage_events WHERE id='volume'").first(),{delivery_at:null,dead_letter_at:null,error:'Meter events are unavailable at the test boundary'})
+  // Delivered: each to its meter, the correction negative, the repeat of the first under the same identifier and key.
+  answer='ok'
+  assert.deepEqual(await deliverPaymentsUsage(db,env,ORG),{delivered:4})
+  assert.deepEqual(sent.slice(1).map(({identifier,key,...row})=>row),[
+   {event_name:'krabiclaw_captured_volume',customer:'cus_operating',value:'10000'},
+   {event_name:'krabiclaw_stripe_cost',customer:'cus_operating',value:'320'},
+   {event_name:'krabiclaw_stripe_cost',customer:'cus_operating',value:'-30'},
+   {event_name:'krabiclaw_ad_spend',customer:'cus_operating',value:'50000'},
+  ])
+  assert.equal(sent[1]!.identifier,sent[0]!.identifier)
+  assert.equal(sent[1]!.key,sent[1]!.identifier)
+  assert.equal(sent[1]!.identifier,`payments:${await tokenHash('capture:billable')}`)
+  assert.equal(new Set(sent.slice(1).map(row=>row.identifier)).size,4)
+  assert.equal(await db.prepare('SELECT COUNT(*) n FROM payment_usage_events WHERE delivery_at IS NOT NULL AND error IS NULL').first('n'),4)
+  assert.equal(await db.prepare("SELECT COUNT(*) n FROM analytics_events WHERE organization_id='platform' AND payload_json->>'$.event_name'='payments_volume_billed' AND payload_json->>'$.properties.volume_minor'=10000").first('n'),1)
   assert.deepEqual(await deliverPaymentsUsage(db,env,ORG),{delivered:0})
-  const finished=Date.now(),after=(await db.prepare('SELECT * FROM payment_usage_events ORDER BY created_at').all()).results
-  assert.equal(after.length,100)
-  assert.deepEqual(after.map(({error,dead_letter_at,...event})=>event),before.map(({error,dead_letter_at,...event})=>event))
-  const error='Closed-period actual-cost credit requires native Stripe credit memo settlement; retained for owner servicing'
-  for(const event of after){assert.equal(event.error,error);assert.equal(typeof event.dead_letter_at,'string');assert.ok(Date.parse(String(event.dead_letter_at))>=began&&Date.parse(String(event.dead_letter_at))<=finished)}
-  assert.equal(ingests.length,0)
-  const status=await paymentsUsageStatus(db,env,ORG)
-  assert.equal(status.account?.status,'closed')
-  assert.deepEqual(status.pending,[{currency:'USD',kind:'stripe_cost_adjustment',event_count:100,amount:-10000,billing_amount:-10000,invalid_basis:0,error}])
-  assert.deepEqual(status.credits.map(event=>({id:event.id,source_id:event.source_id,amount:event.amount,error:event.error})),credits.map(credit=>({id:credit.id,source_id:credit.source,amount:-100,error})))
-  // A later capture reopens the contract and is delivered; held credits stay owner-serviced.
-  await db.prepare("INSERT INTO payment_usage_events(id,organization_id,kind,currency,amount,source_id,provider_occurred_at,created_at)VALUES('billable',?,'captured_volume','USD',10000,'capture:billable',?,?)").bind(ORG,NOW,new Date(Date.parse(NOW)+100000).toISOString()).run()
-  for(let attempt=0;attempt<2;attempt++)await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),failure=>{assert.ok(failure instanceof HTTPError);assert.equal(failure.status,502);assert.equal(failure.data?.provider_status,503);return true})
-  assert.equal(ended,false)
-  assert.equal(ingests.length,2)
-  assert.deepEqual(ingests[1],ingests[0])
-  assert.equal(ingests[0]?.length,1)
-  const ingest=ingests[0]?.[0] as {customer_id:string;timestamp:string;event_type:string;properties:Record<string,string>}
-  assert.equal(ingest.customer_id,customer)
-  assert.equal(ingest.timestamp,NOW)
-  assert.equal(ingest.event_type,'payments_captured_volume')
-  assert.equal(ingest.properties.payment_source,'capture:billable')
-  assert.equal(ingest.properties.amount_minor,'10000')
-  await assert.rejects(()=>reconcileNativeBillingCredit(db,getStripe(env),env,{organizationId:ORG,userId:'verified',role:'owner'},credits[0]!.id,'cn_owner_credit'),failure=>{assert.ok(failure instanceof Stripe.errors.StripeInvalidRequestError);assert.equal(failure.code,'resource_missing');return true})
-  assert.deepEqual(creditReads,['/v1/credit_notes/cn_owner_credit'])
-  const retained=(await db.prepare('SELECT * FROM payment_usage_events ORDER BY created_at').all()).results
-  assert.equal(retained.length,101)
-  assert.deepEqual(retained.slice(0,100),after.slice(0,100))
-  assert.equal(retained[100]?.delivery_at,null)
-  assert.equal(retained[100]?.dead_letter_at,null)
-  assert.equal(retained[100]?.billing_timestamp,NOW)
-  assert.match(String(retained[100]?.error),/Metronome request failed \(503\)/u)
+  assert.equal(sent.length,5)
+  // Stripe refuses an event outright: it is set aside with Stripe’s reason, not retried.
+  answer='invalid'
+  await db.prepare("INSERT INTO payment_usage_events(id,organization_id,kind,currency,amount,source_id,provider_occurred_at,created_at)VALUES('late',?,'ad_spend','USD',100,'google_ads:1234567890:2026-10-01',?,?)").bind(ORG,NOW,NOW).run()
+  await assert.rejects(()=>deliverPaymentsUsage(db,env,ORG),/No active meter/u)
+  const late=await db.prepare("SELECT delivery_at,dead_letter_at,error FROM payment_usage_events WHERE id='late'").first<{delivery_at:string|null;dead_letter_at:string|null;error:string}>()
+  assert.equal(late?.delivery_at,null)
+  assert.equal(typeof late?.dead_letter_at,'string')
+  assert.equal(late?.error,'No active meter was found for event_name krabiclaw_ad_spend')
+  assert.deepEqual(await deliverPaymentsUsage(db,env,ORG),{delivered:0})
+  assert.equal(sent.length,6)
  }finally{await runtime.dispose()}
 })
 
@@ -989,7 +968,7 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
  t.mock.timers.enable({ apis: ['Date'], now: new Date('2026-10-01T12:00:00.000Z') })
  const { db, runtime } = await boot()
  try {
-  const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-managed-ads-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_managed_ads_boundary', METRONOME_API_KEY: 'managed-ads-external-boundary', METRONOME_RATE_CARD_ID: 'rate-card' }
+  const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_URL: 'https://proof.example', BETTER_AUTH_SECRET: 'local-managed-ads-proof-secret-long-enough', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', STRIPE_SECRET_KEY: 'sk_test_managed_ads_boundary' }
   await db.prepare("INSERT INTO member(id,organizationId,userId,role) VALUES('billing-owner',?,'verified','owner')").bind(ORG).run()
   await db.prepare("INSERT INTO account(id,accountId,providerId,userId,password) VALUES('billing-credential','verified','credential','verified',?)").bind(await hashPassword('ManagedAdsProof123!')).run()
   const login = await createAuth(env).api.signInEmail({ body: { email: 'verified@example.com', password: 'ManagedAdsProof123!' }, asResponse: true })
@@ -1003,50 +982,39 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
   }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
   const agree = () => agreeToService(db, env, ORG, 'managed_ads', 'verified')
   const noConsent = async () => assert.equal(await db.prepare('SELECT COUNT(*) AS count FROM organization_services WHERE organization_id=?').bind(ORG).first('count'), 0)
-  // An unconfigured business gets a concrete setup step before any consent is written.
-  await assert.rejects(agree, /Set up active Payments billing in Plan/u)
+  // A business without the Business subscription gets a concrete setup step before any consent is written.
+  await assert.rejects(agree, /Choose Business in Plan/u)
   await noConsent()
-  await db.prepare("INSERT INTO payment_billing_accounts(organization_id,stripe_billing_customer_id,metronome_customer_id,metronome_contract_id,contract_start_at,currency,status,updated_at) VALUES(?,'cus_operating','meter-customer','contract','2026-09-01T00:00:00.000Z','USD','active',?)").bind(ORG, NOW).run()
   await db.prepare('UPDATE organization SET "stripeCustomerId"=? WHERE id=?').bind('cus_operating', ORG).run()
-  let ending: string | undefined, defaultCard: string | null = 'pm_default', currency = 'USD', rate = 0.1, collectionCustomer = 'cus_operating', providerUnavailable = false
+  await db.prepare("INSERT INTO subscription(id,plan,referenceId,status,seats,stripeSubscriptionId,stripeCustomerId,periodEnd,billingInterval) VALUES('sub-row','business',?,'active',1,'sub_operating','cus_operating',?,'month')").bind(ORG, Math.floor(Date.parse('2026-11-01T00:00:00.000Z') / 1000)).run()
+  let defaultCard: string | null = 'pm_default', currency = 'USD', rate: string | null = '0.1', providerUnavailable = false
   let timeZone: string | undefined = 'America/New_York'
   let deliveryUnavailable = false
   let googleReads = 0
-  const ingests: Array<Array<{ transaction_id: string; properties: { pricing_amount: string } }>> = []
-  const nativeContract = () => ({ id: 'contract', customer_id: 'meter-customer', uniqueness_key: `payments:${ORG}`, rate_card_id: 'rate-card', starting_at: '2026-09-01T00:00:00.000Z', ...(ending ? { ending_before: ending } : {}), customer_billing_provider_configuration: { customer_id: 'meter-customer', billing_provider: 'stripe', delivery_method: 'direct_to_billing_provider', configuration: { stripe_customer_id: collectionCustomer, stripe_collection_method: 'charge_automatically' }, delivery_method_configuration: { stripe_account_id: 'acct_platform' } } })
-  const credit = { id: 'usd-cents', name: 'USD (cents)' }
-  const kinds = ['volume', 'cost', 'ads'] as const
+  const ingests: Array<{ identifier: string | null; value: string | null }> = []
+  const item = (id: string, metadata: Record<string, string>, price: Record<string, unknown>) => ({ id, object: 'subscription_item', price: { id: `price_${id}`, object: 'price', currency: 'usd', product: { id: `prod_${id}`, object: 'product', metadata }, ...price } })
+  const metered = (family: string, decimal: string) => item(family, { product_family: family }, { billing_scheme: 'per_unit', unit_amount: null, unit_amount_decimal: decimal, recurring: { interval: 'month', interval_count: 1, usage_type: 'metered' } })
   // Only the provider HTTP boundary is controlled. D1, the agreement operation,
-  // Better Auth's linked-account token reader and native billing validation run.
+  // Better Auth's subscription and linked-account readers and the outbox run.
   t.mock.method(globalThis, 'fetch', async (input, init) => {
    const url = new URL(input instanceof Request ? input.url : String(input))
    if (url.origin === 'https://api.stripe.com') {
+    if (url.pathname === '/v1/billing/meter_events') {
+     assert.equal(init?.method, 'POST')
+     const body = new URLSearchParams(String(init?.body))
+     assert.equal(body.get('event_name'), 'krabiclaw_ad_spend')
+     assert.equal(body.get('payload[stripe_customer_id]'), 'cus_operating')
+     ingests.push({ identifier: body.get('identifier'), value: body.get('payload[value]') })
+     return deliveryUnavailable ? Response.json({ error: { type: 'api_error', message: 'Native ingestion unavailable at test boundary' } }, { status: 500, headers: { 'stripe-should-retry': 'false' } }) : Response.json({ object: 'billing.meter_event', identifier: body.get('identifier') })
+    }
     assert.equal(init?.method, 'GET')
-    if (url.pathname === '/v1/account') return Response.json({ id: 'acct_platform', object: 'account', livemode: false })
     if (url.pathname === '/v1/payment_methods/pm_default') return Response.json({ id: 'pm_default', object: 'payment_method', customer: 'cus_operating' })
-    // The Business plan item, on a retired price, so nothing bills rental units.
-    if (url.pathname === '/v1/subscriptions/sub_managed_ads') return Response.json({ id: 'sub_managed_ads', object: 'subscription', status: 'active', customer: 'cus_operating', items: { object: 'list', data: [{ id: 'si_plan', object: 'subscription_item', quantity: 2, price: { id: 'price_business', object: 'price', currency: 'usd', unit_amount: 14900, recurring: { interval: 'month', interval_count: 1 }, product: { id: 'prod_business', object: 'product', metadata: { plan_id: 'business' } } } }] } })
+    if (url.pathname === '/v1/subscriptions/sub_operating') return Response.json({ id: 'sub_operating', object: 'subscription', customer: 'cus_operating', livemode: false, default_payment_method: null, items: { object: 'list', data: [
+     item('business', { plan_id: 'business' }, { billing_scheme: 'per_unit', unit_amount: 14900, recurring: { interval: 'month', interval_count: 1, usage_type: 'licensed' } }),
+     metered('captured_volume', '0.014'), metered('stripe_cost', '1'), ...(rate === null ? [] : [metered('ad_spend', rate)]),
+    ] } })
     assert.equal(url.pathname, '/v1/customers/cus_operating')
     return Response.json({ id: 'cus_operating', object: 'customer', invoice_settings: { default_payment_method: defaultCard } })
-   }
-   if (url.origin === 'https://api.metronome.com') {
-    const body = init?.body ? JSON.parse(String(init.body)) : undefined
-    if (url.pathname === '/v2/contracts/get') return Response.json({ data: nativeContract() })
-    if (url.pathname === '/v2/contracts/list') return Response.json({ data: [nativeContract()] })
-    if (url.pathname === '/v1/customers/meter-customer/invoices') return Response.json({ data: [] })
-    if (url.pathname === '/v1/contract-pricing/rate-cards/get') return Response.json({ data: { id: 'rate-card', fiat_credit_type: credit } })
-    if (url.pathname === '/v1/contracts/getContractRateSchedule') return Response.json({ data: kinds.map((kind, index) => ({ entitled: true, rate_card_id: 'rate-card', product_id: kind, list_rate: { rate_type: 'FLAT', credit_type: credit, price: [0.014, 1, rate][index] } })) })
-    if (url.pathname === '/v1/contract-pricing/products/get') return Response.json({ data: { type: 'USAGE', current: { billable_metric_id: body.id } } })
-    if (url.pathname.startsWith('/v1/billable-metrics/')) {
-     const kind = url.pathname.split('/').at(-1)
-     const events = kind === 'volume' ? ['payments_captured_volume'] : kind === 'cost' ? ['payments_stripe_cost', 'payments_stripe_cost_adjustment'] : ['payments_ad_spend']
-     return Response.json({ data: { aggregation_type: 'SUM', aggregation_key: 'pricing_amount', event_type_filter: { in_values: events }, property_filters: [{ name: 'pricing_amount', exists: true }, { name: 'currency', exists: true, in_values: ['USD'] }] } })
-    }
-    if (url.pathname === '/v1/contracts/updateEndDate') { ending = body.ending_before; return Response.json({ data: { id: 'contract' } }) }
-    if (url.pathname === '/v1/ingest') {
-     ingests.push(body)
-     return deliveryUnavailable ? Response.json({ message: 'Native ingestion unavailable at test boundary' }, { status: 503 }) : new Response(null, { status: 200 })
-    }
    }
    if (url.origin === 'https://googleads.googleapis.com') {
     googleReads++
@@ -1062,20 +1030,14 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
    }
    throw new Error(`Unexpected provider request: ${url.origin}${url.pathname}`)
   })
-  ending = '2026-10-02T00:00:00.000Z'
-  await assert.rejects(agree, /Set up active Payments billing/u)
-  ending = undefined
-  collectionCustomer = 'cus_foreign'
-  await assert.rejects(agree, /Native Payments collection/u)
-  collectionCustomer = 'cus_operating'
-  rate = 0.2
-  await assert.rejects(agree, /does not have the managed ads rate/u)
-  rate = 0.1
-  await assert.rejects(agree, /Managed ads needs the Business plan/u)
-  await noConsent()
-  await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, seats, stripeSubscriptionId, stripeCustomerId, periodEnd, billingInterval) VALUES ('managed-ads-business','business',?,'active',2,'sub_managed_ads','cus_operating',4102444800,'month')").bind(ORG).run()
+  // A subscription without the ad-spend price, or with another rate, cannot bill the service.
+  for (const wrong of [null, '0.2']) {
+   rate = wrong
+   await assert.rejects(agree, /Choose Business in Plan/u)
+  }
+  rate = '0.1'
   defaultCard = null
-  await assert.rejects(agree, /Add a default payment method in Plan and billing/u)
+  await assert.rejects(agree, /Add a payment method and set it as default/u)
   defaultCard = 'pm_default'
   await assert.rejects(agree, /Connect a Google Ads account billed in USD/u)
   const token = await symmetricEncrypt({ key: env.BETTER_AUTH_SECRET, data: 'managed-ads-token' })
@@ -1102,7 +1064,6 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
   assert.deepEqual(await db.prepare('SELECT id,service,terms_version,agreed_by_user_id,agreed_at,ended_by_user_id,ended_at FROM organization_services WHERE organization_id=?').bind(ORG).first(), { id: agreement.id, service: 'managed_ads', terms_version: SERVICE_TERMS_VERSION.managed_ads, agreed_by_user_id: 'verified', agreed_at: '2026-10-01T12:00:00.000Z', ended_by_user_id: null, ended_at: null })
   assert.equal((await listServices(db, ORG)).managed_ads?.id, agreement.id)
   await assert.rejects(agree, /This service is already on/u)
-  await assert.rejects(() => finalizePaymentsBilling(db, env, { organizationId: ORG, userId: 'verified', role: 'owner' }), /Turn off managed ads in Plan/u)
   await assert.rejects(() => releaseIntegration(env, ORG, 'google-ads'), /Turn off managed ads in Plan/u)
   await assert.rejects(() => selectGoogleAdsCustomer(env, ORG, 'ads-linked', '2222222222', 'Replacement'), /Turn off managed ads in Plan/u)
   assert.equal((await readIntegration(db, ORG, 'google_ads'))?.target_id, '1234567890')
@@ -1157,19 +1118,16 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
   assert.deepEqual((await runDaily()).result, { billed: 1, skipped: 0 })
   assert.equal(googleReads, readsBeforeDelivery, 'queued spend no longer needs the old Google identity')
   assert.equal(ingests.length, 5)
-  assert.deepEqual(ingests[0], ingests[1], 'failed delivery preserves the native transaction')
-  assert.deepEqual(ingests[1], ingests[2], 'concurrent failed deliveries preserve the native transaction')
-  assert.deepEqual(ingests[0], ingests[3], 'a failed zero-spend ingest retries the same native transaction')
-  assert.equal(ingests[3]?.[0]?.properties.pricing_amount, '0')
-  assert.equal(ingests[4]?.[0]?.properties.pricing_amount, '1250')
+  assert.deepEqual(ingests[0], ingests[1], 'failed delivery preserves the meter event identifier')
+  assert.deepEqual(ingests[1], ingests[2], 'concurrent failed deliveries preserve the meter event identifier')
+  assert.deepEqual(ingests[0], ingests[3], 'a failed zero-spend event retries under the same identifier')
+  assert.equal(ingests[3]?.value, '0')
+  assert.equal(ingests[4]?.value, '1250')
   const delivered = (await db.prepare("SELECT id,delivery_at FROM payment_usage_events WHERE kind='ad_spend' ORDER BY source_id").all()).results
   assert.deepEqual(delivered.map(row => row.id), captured.map(row => row.id))
   assert.ok(delivered.every(row => row.delivery_at === '2026-10-04T10:00:00.000Z'))
   assert.deepEqual((await runDaily()).result, { billed: 0, skipped: 1 })
   assert.equal(ingests.length, 5)
-  await db.prepare("UPDATE payment_billing_accounts SET status='servicing' WHERE organization_id=?").bind(ORG).run()
-  assert.equal((await finalizePaymentsBilling(db, env, { organizationId: ORG, userId: 'verified', role: 'owner' })).closed, true)
-  assert.deepEqual(await db.prepare('SELECT status FROM payment_billing_accounts WHERE organization_id=?').bind(ORG).first(), { status: 'closed' })
  } finally { await runtime.dispose() }
 })
 

@@ -34,7 +34,7 @@ export async function unrecordedAdSpendDays(db: DbClient, env: CloudflareEnv, or
 
 /** The connection is needed until Google's last managed days have been counted. */
 export async function requireRecordedManagedSpend(db: DbClient, env: CloudflareEnv, organizationId: string): Promise<void> {
- if ((await listServices(db, organizationId)).managed_ads) throw new HTTPError({ statusCode: 409, message: 'Turn off managed ads in Plan before changing Google Ads or ending Payments billing.' })
+ if ((await listServices(db, organizationId)).managed_ads) throw new HTTPError({ statusCode: 409, message: 'Turn off managed ads in Plan before changing Google Ads.' })
  if ((await unrecordedAdSpendDays(db, env, organizationId)).length) {
   throw new HTTPError({ statusCode: 409, message: 'Keep Google Ads connected until your prior managed spend has been counted. We count each day after two days; contact support if it remains pending.' })
  }
@@ -43,8 +43,8 @@ export async function requireRecordedManagedSpend(db: DbClient, env: CloudflareE
 /**
  * The managed ads service's usage fee: a share of what the business spent on Google
  * Ads, read from Google for one finished day and queued as an `ad_spend` usage
- * event. Metronome prices it at the rate on the Payments rate card and bills it
- * with the rest of the business's operating usage. Google reports an account in
+ * event, which the outbox reports to the Stripe ad-spend meter and the
+ * Business subscription bills at its metered rate. Google reports an account in
  * its own currency; the fee is USD, so only USD accounts are billed and any
  * other currency fails here rather than being converted by guesswork.
  */

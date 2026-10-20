@@ -69,11 +69,12 @@ function stripeReadAdapter(stripe, assertMode) {
     products: stripe.products,
     prices: stripe.prices,
     subscriptions: stripe.subscriptions,
+    meters: stripe.billing.meters,
   }
 }
 
 function stripeMutationAdapter(stripe) {
-  return { products: stripe.products, prices: stripe.prices }
+  return { products: stripe.products, prices: stripe.prices, meters: stripe.billing.meters }
 }
 
 function describeImageFiles() {

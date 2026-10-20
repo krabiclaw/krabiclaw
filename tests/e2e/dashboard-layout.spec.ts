@@ -1178,7 +1178,7 @@ test.describe('dashboard pane hierarchy', () => {
       // The server refuses a consent the page would not offer, and records nothing.
       const rejected = await page.request.post('/api/dashboard/services?org=krabiclaw-review-legal', { headers: authRequestHeaders(baseURL!), data: { service: 'managed_ads', action: 'agree' } })
       expect(rejected.status(), await rejected.text()).toBe(409)
-      expect((await rejected.json() as { message: string }).message).toBe('Set up active Payments billing in Plan and billing before turning on managed ads.')
+      expect((await rejected.json() as { message: string }).message).toBe('Managed ads is billed on the Business plan. Choose Business in Plan and billing before turning on managed ads.')
       const servicesAfter = await page.request.get('/api/dashboard/services?org=krabiclaw-review-legal')
       expect(servicesAfter.status(), await servicesAfter.text()).toBe(200)
       expect(await servicesAfter.json()).toEqual({ success: true, services: { managed_ads: null, strategy: null } })
