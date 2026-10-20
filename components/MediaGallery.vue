@@ -1,5 +1,5 @@
 <template>
-  <div class="rounded-xl overflow-hidden" data-media-gallery>
+  <div class="relative rounded-xl overflow-hidden" data-media-gallery>
     <div v-if="items.length === 0" class="flex aspect-4/3 items-center justify-center bg-muted">
       <TenantIcon :name="emptyIcon" class="size-16 text-dimmed" />
     </div>
@@ -59,10 +59,11 @@
           @click="openLightbox(0)"
         >
           <img
-            :src="items[0]?.url"
+            :src="items[0]?.kind === 'video' ? items[0]?.poster : items[0]?.url"
             :alt="items[0]?.alt ?? ''"
             class="h-full w-full object-cover"
           />
+          <span v-if="items[0]?.kind === 'video'" class="pointer-events-none absolute inset-0 grid place-items-center text-white"><TenantIcon name="play" class="size-8 drop-shadow" /></span>
         </button>
 
         <!-- Desktop view (md+): 5-photo mosaic -->
@@ -118,10 +119,10 @@
         <button
           type="button"
           class="absolute bottom-4 right-4 z-10 inline-flex items-center gap-2 rounded-lg border border-black/80 bg-white/95 px-3.5 py-1.5 text-xs font-semibold text-gray-900 shadow-sm backdrop-blur-sm transition hover:bg-white hover:scale-[1.02] active:scale-[0.98]"
-          @click="openLightbox(0)"
+          @click="openAllPhotos"
         >
           <TenantIcon name="squares-2x2" class="size-3.5" />
-          Show all {{ items.length }} photos
+          {{ t('saya.photos.show_all', { count: items.length }) }}
         </button>
       </div>
 
@@ -181,15 +182,18 @@
           v-if="items.length > 1"
           type="button"
           class="absolute bottom-4 right-4 z-10 inline-flex items-center gap-2 rounded-lg border border-black/80 bg-white/95 px-3.5 py-1.5 text-xs font-semibold text-gray-900 shadow-sm backdrop-blur-sm transition hover:bg-white hover:scale-[1.02] active:scale-[0.98]"
-          @click="openLightbox(0)"
+          @click="openAllPhotos"
         >
           <TenantIcon name="squares-2x2" class="size-3.5" />
-          Show all {{ items.length }} photos
+          {{ t('saya.photos.show_all', { count: items.length }) }}
         </button>
       </div>
     </div>
 
-    <MediaLightbox v-model:open="lightboxOpen" v-model:index="lightboxIndex" :items="items" :title="title">
+    <button v-if="items.length === 1 && photoGroups.length" type="button" class="absolute bottom-4 right-4 z-10 inline-flex items-center gap-2 rounded-lg border border-black/80 bg-white/95 px-3.5 py-1.5 text-xs font-semibold text-gray-900 shadow-sm" @click="openAllPhotos">
+      <TenantIcon name="squares-2x2" class="size-3.5" />{{ t('saya.photos.show_all', { count: items.length }) }}
+    </button>
+    <MediaLightbox v-model:open="lightboxOpen" v-model:index="lightboxIndex" v-model:overview="lightboxOverview" :items="items" :title="title" :photo-groups="photoGroups">
       <template v-if="$slots.caption" #caption="slotProps">
         <slot name="caption" v-bind="slotProps" />
       </template>
@@ -199,6 +203,7 @@
 
 <script setup lang="ts">
 import type { TenantIconName } from '~/components/tenant/TenantIcon.vue'
+import type { MediaGalleryGroup } from '~/components/MediaLightbox.vue'
 interface GalleryItem {
   url: string
   kind?: 'image' | 'video' | 'file'
@@ -212,25 +217,30 @@ const props = withDefaults(defineProps<{
   items: GalleryItem[]
   title: string
   emptyIcon?: TenantIconName
+  photoGroups?: MediaGalleryGroup[]
 }>(), {
   emptyIcon: 'sparkles',
+  photoGroups: () => [],
 })
 
 defineSlots<{
   caption(_slotProps: { item: GalleryItem; index: number }): unknown
 }>()
 
+const { t } = useI18n()
 const items = computed(() => {
   const seen = new Set<string>()
   return props.items.filter(item => {
-    if (!item.url || seen.has(item.url)) return false
-    seen.add(item.url)
+    const identity = typeof item.asset_id === 'string' ? item.asset_id : item.url
+    if (!item.url || seen.has(identity)) return false
+    seen.add(identity)
     return true
   })
 })
 const visibleItems = computed(() => items.value.slice(0, items.value.length >= 5 ? 5 : items.value.length))
 const lightboxOpen = ref(false)
 const lightboxIndex = ref(0)
+const lightboxOverview = ref(false)
 const videoRefs = ref<Record<number, HTMLVideoElement>>({})
 const videoVisibility = ref<Record<number, number>>({})
 const videoReady = ref<Record<number, boolean>>({})
@@ -385,7 +395,13 @@ function openLightbox(index: number) {
   if (!items.value[index]) return
   pauseVideos()
   lightboxIndex.value = index
+  lightboxOverview.value = false
   lightboxOpen.value = true
+}
+
+function openAllPhotos() {
+  openLightbox(0)
+  lightboxOverview.value = props.photoGroups.length > 0
 }
 
 watch(lightboxOpen, () => {

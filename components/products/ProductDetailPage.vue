@@ -52,7 +52,7 @@
         <!-- Airbnb's experience and service pages: the photographs on the left and
              the title beside them; a stay's photographs run the full width. -->
         <div :class="!isStay && galleryItems.length ? 'lg:grid lg:grid-cols-2 lg:items-center lg:gap-12' : undefined">
-        <MediaGallery v-if="!compact && galleryItems.length" :items="galleryItems" :title="displayTitle" />
+        <MediaGallery v-if="!compact && galleryItems.length" :items="galleryItems" :title="displayTitle" :photo-groups="photoGroups" />
 
         <header v-if="!isStay && !compact" class="mx-auto mt-10 max-w-3xl text-center" :class="galleryItems.length ? 'lg:mt-0' : undefined">
           <p class="saya-kicker mb-3">{{ collectionName }}</p>
@@ -494,6 +494,8 @@ import type { ProductPresentation, PublicProduct } from '~/server/types/products
 import type { Accommodation, PropertyValue } from 'nuxt-schema-org/schema'
 import { useSchemaOrg } from '#imports'
 import { STAY_AMENITIES, STAY_AMENITY_GROUPS, STAY_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_SIZE_UNITS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
+import { stayPhotoRoomName, stayPhotoTourReady } from '~/shared/stay-photos'
+import type { MediaGalleryGroup } from '~/components/MediaLightbox.vue'
 import type { CurrencyCode } from '~/shared/currencies'
 import { minorAmountToMajor, selectPrice, type Price } from '~/shared/prices'
 import { formatProductMoney } from '~/utils/product-money'
@@ -519,7 +521,7 @@ import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import { isRecord, publicApiRequest } from '~/utils/api-clients'
 import MediaGallery from '~/components/MediaGallery.vue'
 import ProductVariantPrices from '~/components/products/ProductVariantPrices.vue'
-import { uniqueMediaAssets } from '~/shared/media-placement-contract'
+import { mediaStillUrl, uniqueMediaAssets } from '~/shared/media-placement-contract'
 
 const props = defineProps<{
   organizationId: string
@@ -696,11 +698,29 @@ const galleryItems = computed(() => uniqueMediaAssets([
   ...props.product.gallery,
   ...(props.pageDocument?.media.filter(asset => asset.slot === 'cover' || asset.slot === 'gallery') ?? []),
 ]).filter(asset => asset.public_url).map(asset => ({
+  asset_id: asset.asset_id,
   url: asset.public_url!,
   kind: asset.kind,
   poster: asset.kind === 'video' ? asset.thumbnail_url : undefined,
   alt: asset.alt_text ?? undefined,
 })))
+
+/** A room tour is public only when every authored room has renderable Product media. */
+const photoGroups = computed<MediaGalleryGroup[]>(() => {
+  if (!isStay.value) return []
+  const productMedia = uniqueMediaAssets([
+    ...(props.product.image ? [props.product.image] : []),
+    ...props.product.gallery,
+  ]).filter(asset => asset.public_url && mediaStillUrl(asset))
+  const productIds = new Set(productMedia.map(asset => asset.asset_id))
+  const rooms = (props.product.stay?.photo_rooms ?? []).map(room => ({ ...room, photo_ids: room.photo_ids.filter(id => productIds.has(id)) }))
+  if (!stayPhotoTourReady(rooms)) return []
+  const assigned = new Set(rooms.flatMap(room => room.photo_ids))
+  const groups = rooms.map(room => ({ id: room.id, title: stayPhotoRoomName(room, rooms, t(`stay.photo_room_types.${room.type}`)), asset_ids: room.photo_ids }))
+  const additional = galleryItems.value.filter(item => !assigned.has(item.asset_id)).map(item => item.asset_id)
+  if (additional.length) groups.push({ id: 'additional', title: t('stay.additional_photos'), asset_ids: additional })
+  return groups
+})
 
 /**
  * The two facts a guest decides on before opening the form: how long it runs

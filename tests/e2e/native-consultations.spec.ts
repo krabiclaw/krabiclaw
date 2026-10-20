@@ -312,7 +312,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     for (let index = 0; index < 4; index++) {
       await visibleTiles.nth(index).click()
       await expect(lightbox.locator('section').nth(index).locator('img').last()).toBeInViewport()
-      await lightbox.getByRole('button', { name: 'Close', exact: true }).click()
+      await lightbox.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
     }
     await visibleTiles.first().click()
     for (let index = 0; index < gallery.length; index++) {
@@ -323,7 +323,7 @@ test('native online review uses canonical Products, holds capacity, and releases
       await expect.poll(() => image.evaluate(element => (element as HTMLImageElement).complete && (element as HTMLImageElement).naturalWidth > 0), { timeout: 30_000 }).toBe(true)
       if (index < gallery.length - 1) await lightbox.getByRole('button', { name: 'Next media', exact: true }).click()
     }
-    await lightbox.getByRole('button', { name: 'Close', exact: true }).click()
+    await lightbox.getByRole('button', { name: 'Close photos and videos', exact: true }).click()
     const placement = await page.locator('#consultations, [data-tenant-page]').evaluateAll(elements => elements.map(element => element.getBoundingClientRect().top))
     expect(placement[0]).toBeLessThan(placement[1]!)
     const externalUrl = 'https://example.com/?booking=ncls'

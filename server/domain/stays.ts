@@ -25,11 +25,13 @@ import { isValidTimezone } from '~/utils/timezone'
 import { stayThreadQueries } from '~/server/domain/requests'
 import { publishGuestInboxThreadEvent, publishStayInvalidation, type GuestInboxPublicationEnv } from '~/server/cloudflare/guest-inbox-events'
 import { planHomeMessages, planStayMessages } from '~/server/domain/scheduled-guest-messages'
-import { arrangeProductPhotos, readProductPhotos, type MediaPlacementItem } from '~/server/utils/media-placement'
+import { arrangeProductPhotos, readProductPhotos, readStayPhotoRooms, type MediaPlacementItem } from '~/server/utils/media-placement'
 import { deleteMediaAsset, getMediaAsset, updateMediaAssetMetadata } from '~/server/utils/media-asset-manager'
 import { sanitizeFilename, uploadResolvedMediaToAssetStore } from '~/server/utils/media-upload'
 import { MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, sniffMediaMimeType } from '~/server/utils/media-mime'
 import { mediaStillUrl, MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
+import { isStayPhotoRoomType, type StayPhotoRoom, type StayPhotoRoomType } from '~/shared/stay-photos'
+import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 
 /**
  * Places to stay: the one implementation of stays, nights and offline
@@ -194,6 +196,7 @@ export interface StayHome {
    * (the product image, then its gallery), the same pictures its pages show.
    */
   photos: StayPhoto[]
+  photo_rooms: StayPhotoRoom[]
 }
 
 /** A home's address as a home is added with it: street, city, state, ISO country and postal code. */
@@ -360,7 +363,11 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       JOIN product_stay_configs c ON c.organization_id = v.organization_id AND c.product_id = v.product_id
      WHERE pr.organization_id = ? ${productId ? 'AND v.product_id = ?' : ''} AND v.active = 1
      ORDER BY v.sort_order, v.id`, [organizationId, ...(productId ? [productId] : [])])
-  const photos = await readProductPhotos(db, { organizationId, productIds: rows.map(row => String(row.product_id)) })
+  const productIds = rows.map(row => String(row.product_id))
+  const [photos, photoRooms] = await Promise.all([
+    readProductPhotos(db, { organizationId, productIds }),
+    readStayPhotoRooms(db, organizationId, productIds),
+  ])
   return rows.map((row) => {
     if (!isCurrencyCode(row.default_currency)) throw new Error(`Organization ${organizationId} has an unsupported default currency`)
     const own = prices.filter(price => price.product_id === row.product_id).map(price => ({ ...price, active: Number(price.active) === 1 }))
@@ -392,6 +399,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
         status: Number(row.channel_enabled) === 1 ? 'connected' : row.channel_stage === 'reservations' || row.channel_stage === 'messages' || row.channel_stage === 'complete' ? 'disconnected' : 'importing',
       },
       photos: (photos.get(String(row.product_id)) ?? []).map(stayPhoto),
+      photo_rooms: photoRooms.get(String(row.product_id)) ?? [],
     }
   })
 }
@@ -803,6 +811,7 @@ export async function createStayHome(env: Parameters<typeof createLocation>[0], 
  */
 async function arrangeHomePhotos(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, principal: MemberAccessPrincipal, home: StayHome, to: string[]): Promise<StayHome> {
   await arrangeProductPhotos(db, { organizationId: access.organizationId, env, principal, productId: home.product_id, from: home.photos.map(photo => photo.id), to })
+  await purgePublicResourceCacheNow(env, access.organizationId)
   const updated = await readStayHome(db, access, home.product_id)
   await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId: home.product_id, locationId: home.location_id, stayId: null }, { updated_at: new Date().toISOString() })
   return updated
@@ -900,6 +909,7 @@ export async function updateStayHomePhoto(db: DbClient, env: GuestInboxPublicati
   if (!await updateMediaAssetMetadata(db, photoId, access.organizationId, { alt_text: alt === null ? null : (alt as string).trim() }, placedOn)) {
     fail(409, 'PHOTOS_CHANGED', 'The photo was taken off the home before its description was saved; reload the photos', 'photo_id')
   }
+  await purgePublicResourceCacheNow(env, access.organizationId)
   const updated = await readStayHome(db, access, productId)
   await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId, locationId: home.location_id, stayId: null }, { updated_at: new Date().toISOString() })
   return updated
@@ -910,6 +920,120 @@ export async function removeStayHomePhoto(db: DbClient, env: CloudflareEnv & Gue
   const home = await managedHome(db, access, productId)
   homePhoto(home, photoId)
   return await arrangeHomePhotos(db, env, access, principal, home, home.photos.map(photo => photo.id).filter(id => id !== photoId))
+}
+
+function stayPhotoRoomInsert(access: StayAccess, productId: string, roomId: string, type: StayPhotoRoomType): BatchQuery {
+  return {
+    query: `INSERT INTO product_stay_photo_rooms (id, organization_id, product_id, type, sort_order, created_at, created_by)
+      VALUES (?, ?, ?, ?, (SELECT COALESCE(MAX(sort_order) + 1, 0) FROM product_stay_photo_rooms WHERE organization_id = ? AND product_id = ?), ?, ?)`,
+    params: [roomId, access.organizationId, productId, type, access.organizationId, productId, new Date().toISOString(), access.actorId],
+  }
+}
+
+async function changedStayPhotoRooms(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, home: StayHome): Promise<StayHome> {
+  await purgePublicResourceCacheNow(env, access.organizationId)
+  const updated = await readStayHome(db, access, home.product_id)
+  await publishStayInvalidation(env, { type: 'stay.changed', organizationId: access.organizationId, productId: home.product_id, locationId: home.location_id, stayId: null }, { updated_at: new Date().toISOString() })
+  return updated
+}
+
+/** Add exactly the room the host named; aggregate bedroom and bathroom counts are unchanged. */
+export async function createStayPhotoRoom(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, productId: string, body: unknown): Promise<{ home: StayHome; room: StayPhotoRoom }> {
+  const home = await managedHome(db, access, productId)
+  if (!isRecord(body)) fail(422, 'INVALID_PHOTO_ROOM', 'Choose a room or space type', 'type')
+  const unknown = Object.keys(body).find(key => key !== 'type')
+  if (unknown) fail(422, 'INVALID_PHOTO_ROOM', `${unknown} cannot be changed here`, unknown)
+  if (!isStayPhotoRoomType(body.type)) fail(422, 'INVALID_PHOTO_ROOM', 'Choose a room or space type from the catalog', 'type')
+  const id = crypto.randomUUID()
+  await executeBatch(db, [
+    stayPhotoRoomInsert(access, productId, id, body.type),
+    publicResourceCacheInvalidationQuery(access.organizationId, 'stay-photo-room-create'),
+  ], { operation: 'Create stay photo room' })
+  const updated = await changedStayPhotoRooms(db, env, access, home)
+  const room = updated.photo_rooms.find(entry => entry.id === id)
+  if (!room) throw new Error('The created photo room could not be read')
+  return { home: updated, room }
+}
+
+/** Deleting a room returns its photos to Additional photos and keeps their Product placements. */
+export async function removeStayPhotoRoom(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, productId: string, roomId: string): Promise<StayHome> {
+  const home = await managedHome(db, access, productId)
+  if (!home.photo_rooms.some(room => room.id === roomId)) fail(404, 'PHOTO_ROOM_NOT_FOUND', 'That room is not on this home', 'room_id')
+  const [removed] = await executeBatch(db, [
+    { query: 'DELETE FROM product_stay_photo_rooms WHERE organization_id = ? AND product_id = ? AND id = ? RETURNING id', params: [access.organizationId, productId, roomId] },
+    publicResourceCacheInvalidationQuery(access.organizationId, 'stay-photo-room-delete'),
+  ], { operation: 'Delete stay photo room' })
+  const deleted = removed?.results[0]
+  if (removed?.results.length !== 1 || !isRecord(deleted) || deleted.id !== roomId) fail(409, 'PHOTOS_CHANGED', 'The room changed while deleting; reload the photo tour', 'room_id')
+  return await changedStayPhotoRooms(db, env, access, home)
+}
+
+/** Move explicit photos together, refusing a changed source or a photo removed in the meantime. */
+export async function moveStayPhotos(db: DbClient, env: CloudflareEnv & GuestInboxPublicationEnv, access: StayAccess, productId: string, body: unknown): Promise<StayHome> {
+  const home = await managedHome(db, access, productId)
+  if (!isRecord(body)) fail(422, 'INVALID_PHOTO_MOVE', 'Choose photos and their destination', 'photos')
+  const unknown = Object.keys(body).find(key => !['room_id', 'new_room_type', 'photos'].includes(key))
+  if (unknown) fail(422, 'INVALID_PHOTO_MOVE', `${unknown} cannot be changed here`, unknown)
+  const creating = Object.hasOwn(body, 'new_room_type')
+  if (creating === Object.hasOwn(body, 'room_id')) fail(422, 'INVALID_PHOTO_MOVE', 'Choose either room_id or new_room_type', 'room_id')
+  if (creating && !isStayPhotoRoomType(body.new_room_type)) fail(422, 'INVALID_PHOTO_MOVE', 'Choose a room or space type from the catalog', 'new_room_type')
+  if (!creating && body.room_id !== null && (typeof body.room_id !== 'string' || !body.room_id.trim())) fail(422, 'INVALID_PHOTO_MOVE', 'room_id must name a room, or be null for Additional photos', 'room_id')
+  const roomId = creating ? crypto.randomUUID() : body.room_id as string | null
+  if (!creating && roomId !== null && !home.photo_rooms.some(room => room.id === roomId)) fail(404, 'PHOTO_ROOM_NOT_FOUND', 'That room is not on this home', 'room_id')
+  if (!Array.isArray(body.photos) || !body.photos.length || body.photos.length > MAX_ORDERED_MEDIA_ASSETS) fail(422, 'INVALID_PHOTO_MOVE', `Choose between 1 and ${MAX_ORDERED_MEDIA_ASSETS} photos`, 'photos')
+  const photos = body.photos.map((photo: unknown) => {
+    if (!isRecord(photo) || Object.keys(photo).some(key => key !== 'photo_id' && key !== 'expected_room_id')
+      || typeof photo.photo_id !== 'string' || !photo.photo_id.trim()
+      || (photo.expected_room_id !== null && (typeof photo.expected_room_id !== 'string' || !photo.expected_room_id.trim()))) {
+      fail(422, 'INVALID_PHOTO_MOVE', 'Each photo needs photo_id and its expected_room_id, or null when unassigned', 'photos')
+    }
+    return { photo_id: photo.photo_id, expected_room_id: photo.expected_room_id as string | null }
+  })
+  if (new Set(photos.map(photo => photo.photo_id)).size !== photos.length) fail(422, 'INVALID_PHOTO_MOVE', 'Choose each photo once', 'photos')
+  for (const photo of photos) {
+    homePhoto(home, photo.photo_id)
+    const currentRoom = home.photo_rooms.find(room => room.photo_ids.includes(photo.photo_id))?.id ?? null
+    if (currentRoom !== photo.expected_room_id) fail(409, 'PHOTOS_CHANGED', 'A selected photo moved to another room; reload the photo tour', 'photos')
+  }
+  const selected = JSON.stringify(photos)
+  // A failed predicate violates the existing home's required timestamp and
+  // rolls back the entire batch, including a new destination room. This
+  // repeats presence and per-photo source checks at the actual commit.
+  const guard: BatchQuery = {
+    query: `UPDATE product_stay_configs SET updated_at = NULL WHERE organization_id = ? AND product_id = ? AND (
+      (? IS NOT NULL AND ? = 0 AND NOT EXISTS (SELECT 1 FROM product_stay_photo_rooms WHERE organization_id = ? AND product_id = ? AND id = ?))
+      OR EXISTS (SELECT 1 FROM json_each(?) selected WHERE NOT EXISTS (
+        SELECT 1 FROM media_placements mp JOIN media_assets ma ON ma.organization_id = mp.organization_id AND ma.id = mp.asset_id AND ma.status = 'active'
+        WHERE mp.organization_id = ? AND mp.owner_type = 'product' AND mp.owner_id = ? AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'
+          AND mp.asset_id = json_extract(selected.value, '$.photo_id'))
+        OR (SELECT m.room_id FROM product_stay_photo_room_memberships m WHERE m.organization_id = ? AND m.product_id = ?
+          AND m.asset_id = json_extract(selected.value, '$.photo_id')) IS NOT json_extract(selected.value, '$.expected_room_id'))
+      )`,
+    params: [access.organizationId, productId, roomId, creating ? 1 : 0, access.organizationId, productId, roomId, selected, access.organizationId, productId, access.organizationId, productId],
+  }
+  const assignments: BatchQuery = roomId === null ? {
+    query: `DELETE FROM product_stay_photo_room_memberships WHERE organization_id = ? AND product_id = ? AND asset_id IN (SELECT json_extract(value, '$.photo_id') FROM json_each(?))`,
+    params: [access.organizationId, productId, selected],
+  } : {
+    query: `INSERT INTO product_stay_photo_room_memberships (organization_id, product_id, asset_id, room_id)
+      SELECT ?, ?, json_extract(value, '$.photo_id'), ? FROM json_each(?) WHERE true
+      ON CONFLICT (organization_id, product_id, asset_id) DO UPDATE SET room_id = excluded.room_id`,
+    params: [access.organizationId, productId, roomId, selected],
+  }
+  try {
+    await executeBatch(db, [
+      guard,
+      ...(creating ? [stayPhotoRoomInsert(access, productId, roomId!, body.new_room_type as StayPhotoRoomType)] : []),
+      assignments,
+      publicResourceCacheInvalidationQuery(access.organizationId, 'stay-photo-move'),
+    ], { operation: 'Move stay photos' })
+  } catch (error) {
+    if (/NOT NULL constraint failed: product_stay_configs\.updated_at|FOREIGN KEY constraint failed/i.test(error instanceof Error ? error.message : String(error))) {
+      fail(409, 'PHOTOS_CHANGED', 'The photos or destination room changed while saving; reload the photo tour', 'photos')
+    }
+    throw error
+  }
+  return await changedStayPhotoRooms(db, env, access, home)
 }
 
 /** Stays overlapping [from, to), newest check-in last. Cancelled stays are included only when asked for. */

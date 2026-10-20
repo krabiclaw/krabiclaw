@@ -99,6 +99,13 @@
       "when": 1792489298020,
       "tag": "0013_location_stay_map_sharing",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "6",
+      "when": 1792493423909,
+      "tag": "0014_stay_photo_rooms",
+      "breakpoints": true
     }
   ]
 }

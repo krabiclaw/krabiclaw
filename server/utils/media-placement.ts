@@ -11,12 +11,15 @@ import {
   mediaPlacementOwnerQuery,
   isSingleMediaPlacement,
   readMediaPlacements,
+  pruneStayPhotoRoomMembershipsQuery,
   type MediaAssetRefInput,
   type StoredMediaPlacementItem,
 } from '~/server/utils/media-asset-manager'
 import { isEditableMediaPlacement, isEditableMediaPlacementOwnerType, uniqueMediaAssets, type EditableMediaPlacementOwnerType, type LogoPresentation, type MediaPlacementOwnerType } from '~/shared/media-placement-contract'
 import { refreshSocialCard, socialCardRefreshOwnersForPlacement } from '~/server/utils/social-card'
 import { postMediaMutationQueries } from '~/server/utils/post-management'
+import { isStayPhotoRoomType, type StayPhotoRoom } from '~/shared/stay-photos'
+import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 
 export { EDITABLE_MEDIA_PLACEMENT_OWNERS, MEDIA_CATEGORIES, WRITABLE_MEDIA_CATEGORIES, isMediaCategory } from '~/shared/media-placement-contract'
 export type { MediaCategory } from '~/shared/media-placement-contract'
@@ -171,7 +174,11 @@ export async function setSingleMediaPlacement(db: DbClient, input: {
     allowedKinds: allowedKindsFor(input.placement),
     fieldName: 'asset_id',
   })
-  await executeBatch(db, [...postQueries, ...buildSingleMediaPlacementQueries({ ...input, media: media.map(item => ({ ...item, presentation: input.presentation })) })])
+  await executeBatch(db, [
+    ...postQueries,
+    ...buildSingleMediaPlacementQueries({ ...input, media: media.map(item => ({ ...item, presentation: input.presentation })) }),
+    ...(input.placement.owner_type === 'product' && input.placement.slot === 'image' ? [pruneStayPhotoRoomMembershipsQuery(input.organizationId, input.placement.owner_id)] : []),
+  ])
   await refreshSocialCardForPlacement(db, input)
   return canonicalPlacementState(db, input)
 }
@@ -283,7 +290,9 @@ export async function removeMediaPlacement(db: DbClient, input: {
   await executeBatch(db, [...await postMediaQueries(db, input), { query: `
     DELETE FROM media_placements
      WHERE organization_id = ?  AND owner_type = ? AND owner_id = ? AND slot = ? AND asset_id = ?
-  `, params: [input.organizationId, input.placement.owner_type, input.placement.owner_id, input.placement.slot, input.assetId] }])
+  `, params: [input.organizationId, input.placement.owner_type, input.placement.owner_id, input.placement.slot, input.assetId] },
+  ...(input.placement.owner_type === 'product' && ['image', 'gallery'].includes(input.placement.slot) ? [pruneStayPhotoRoomMembershipsQuery(input.organizationId, input.placement.owner_id)] : []),
+  ])
   await refreshSocialCardForPlacement(db, input)
   return canonicalPlacementState(db, input)
 }
@@ -408,6 +417,36 @@ export async function readProductPhotos(db: DbClient, input: { organizationId: s
   ])]))
 }
 
+/** The authored tour; each room follows the Product's deduplicated photo order. */
+export async function readStayPhotoRooms(db: DbClient, organizationId: string, productIds: string[]): Promise<Map<string, StayPhotoRoom[]>> {
+  const rooms = new Map<string, StayPhotoRoom[]>(productIds.map(id => [id, []]))
+  if (!productIds.length) return rooms
+  const ids = d1JsonStringSet(productIds)
+  const [savedRooms, memberships] = await executeBatch(db, [
+    { query: `SELECT id, product_id, type FROM product_stay_photo_rooms
+        WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY type, sort_order, id`, params: [organizationId, ids] },
+    { query: `SELECT m.product_id, m.room_id, m.asset_id FROM product_stay_photo_room_memberships m
+        JOIN media_placements mp ON mp.organization_id = m.organization_id AND mp.owner_type = 'product'
+          AND mp.owner_id = m.product_id AND mp.asset_id = m.asset_id AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'
+        JOIN media_assets ma ON ma.organization_id = mp.organization_id AND ma.id = mp.asset_id AND ma.status = 'active'
+        WHERE m.organization_id = ? AND m.product_id IN (SELECT value FROM json_each(?))
+        ORDER BY CASE mp.slot WHEN 'image' THEN 0 ELSE 1 END, mp.sort_order, mp.asset_id`, params: [organizationId, ids] },
+  ], { operation: 'Read stay photo rooms' })
+  const byId = new Map<string, StayPhotoRoom>()
+  for (const row of savedRooms!.results as Array<{ id: string; product_id: string; type: unknown }>) {
+    if (!isStayPhotoRoomType(row.type)) throw new TypeError(`Photo room ${row.id} has an invalid room type`)
+    const room: StayPhotoRoom = { id: row.id, type: row.type, photo_ids: [] }
+    rooms.get(row.product_id)!.push(room)
+    byId.set(row.id, room)
+  }
+  for (const row of memberships!.results as Array<{ room_id: string; asset_id: string }>) {
+    const room = byId.get(row.room_id)
+    if (!room) throw new TypeError(`Photo membership has no room ${row.room_id}`)
+    if (!room.photo_ids.includes(row.asset_id)) room.photo_ids.push(row.asset_id)
+  }
+  return rooms
+}
+
 /**
  * Write a product's photos as one ordered list: the first becomes its `image`
  * and the rest its `gallery`, in one batch. `from` is the list the caller read
@@ -466,6 +505,8 @@ export async function arrangeProductPhotos(db: DbClient, input: {
       },
       ...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId, placement: cover, media: media.slice(0, 1), now }),
       ...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId, placement: gallery, media: media.slice(1), now }),
+      pruneStayPhotoRoomMembershipsQuery(input.organizationId, input.productId),
+      publicResourceCacheInvalidationQuery(input.organizationId, 'product-photos-arrange'),
     ], { operation: 'Arrange product photos' })
   } catch (error) {
     if (/CHECK constraint failed|FOREIGN KEY constraint failed/i.test(error instanceof Error ? error.message : String(error))) throw changed()
