@@ -1,33 +1,33 @@
 <template>
   <!--
-    Managed ads: what Chris does, its price, then what agreeing needs as ✓/✗
-    rows — each unmet one opens where it is met — and the consent that starts
-    the fee, enabled only when every row holds. The same leaf turns it off.
+    Managed ads: what Chris does and what it costs, then what agreeing needs as
+    rows that each say where they stand and open where they are met. The
+    consent appears once every row holds; until then the footer says what is
+    left. The same leaf turns it off.
   -->
   <DashboardLeafPanel
     id="organization-managed-ads"
     :title="SERVICES.managed_ads.name"
-    :lead="SERVICES.managed_ads.description"
     :footer="dashboard.canUpdateBilling.value"
     :saving="busy"
-    :disabled="!services || (!on && !met)"
+    :disabled="!services"
+    :note="on || !requirements || met ? undefined : outstanding"
     :error="error || (requirementsError ? getErrorMessage(requirementsError, 'What managed ads needs could not be checked') : '')"
     :save-label="on ? 'Turn off' : 'Agree and turn on'"
     @save="toggle"
   >
     <UAlert v-if="success" class="mb-6" color="success" variant="soft" icon="i-lucide-circle-check" :description="success" />
-    <p v-if="!dashboard.canUpdateBilling.value" class="mb-6 text-base text-muted">Owners turn services on and off.</p>
-    <div class="space-y-3 text-base text-muted">
-      <p class="font-medium text-highlighted">{{ priceLine }}</p>
-      <template v-if="on">
-        <p>On since {{ formatExactDateTime(services!.managed_ads!.agreed_at) }}.</p>
-        <p>Turning it off stops Chris managing your campaigns. Today's spend is excluded if you turn it off before the day closes in your Google Ads account's time zone; earlier managed days are still billed.</p>
-        <p>Keep Google Ads connected until your earlier managed spend has been counted. We count each day after two days.</p>
-      </template>
+    <p v-if="!dashboard.canUpdateBilling.value" class="mb-6 text-sm text-muted">Owners turn services on and off.</p>
+    <p class="text-base text-highlighted">{{ SERVICES.managed_ads.description }} Results stay in Insights.</p>
+    <p class="mt-4 text-base font-semibold text-highlighted">{{ priceLine }}</p>
+    <div v-if="on" class="mt-6 space-y-3 text-sm text-muted">
+      <p>On since {{ formatExactDateTime(services!.managed_ads!.agreed_at) }}.</p>
+      <p>Turning it off stops Chris managing your campaigns. Today's spend is excluded if you turn it off before the day closes in your Google Ads account's time zone; earlier managed days are still billed.</p>
+      <p>Keep Google Ads connected until your earlier managed spend has been counted. We count each day after two days.</p>
     </div>
-    <template v-if="!on && requirements">
+    <template v-else-if="requirements">
       <EditorNavigationList class="mt-6" :groups="[{ id: 'requirements', items: requirementRows }]" @act="act" />
-      <p v-if="met" class="mt-6 text-base text-muted">By turning it on you agree to {{ SERVICES.managed_ads.price }}, read from Google each day and billed on your plan's invoice. Google bills the ad spend itself to your Google Ads account.</p>
+      <p v-if="met" class="mt-6 text-sm text-muted">By turning it on you agree to {{ SERVICES.managed_ads.price }}, read from Google each day and billed on your plan's invoice. Google bills the ad spend itself to your Google Ads account.</p>
     </template>
   </DashboardLeafPanel>
 </template>
@@ -35,7 +35,7 @@
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
 import { SERVICES } from '~/shared/billing-model'
-import { isServices, useOrganizationServices } from '~/composables/usePaymentsSettings'
+import { isServices, useOrganizationBilling, useOrganizationServices } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard' })
 useSeoMeta({ title: 'Managed ads | KrabiClaw', robots: 'noindex, nofollow' })
@@ -54,8 +54,10 @@ const dashboardApi = useDashboardApi()
 const { openBillingPortal } = useOrganizationSubscription()
 const { formatExactDateTime } = useHumanTime()
 const orgSlug = String(route.params.orgSlug)
-const [{ servicesResource, services, refreshServices, servicesError }, { data: checked, error: requirementsError, refresh: refreshRequirements }] = await Promise.all([
+const { plans } = await usePlans()
+const [{ servicesResource, services, refreshServices, servicesError }, { billing }, { data: checked, error: requirementsError, refresh: refreshRequirements }] = await Promise.all([
   useOrganizationServices(),
+  useOrganizationBilling(),
   useAsyncData(`dashboard-services-requirements:${orgSlug}`, () => dashboardApi('/api/dashboard/services', { query: { requirements: 'managed_ads' }, validate: isRequirements })),
 ])
 const on = computed(() => !!services.value?.managed_ads)
@@ -63,18 +65,33 @@ const requirements = computed(() => checked.value?.requirements.managed_ads ?? n
 const met = computed(() => !!requirements.value && Object.values(requirements.value).every(Boolean))
 const priceLine = `${SERVICES.managed_ads.price[0]!.toUpperCase()}${SERVICES.managed_ads.price.slice(1)}, added to your plan's invoice.`
 
-// Each row says whether it holds; one that does not opens where it is met.
-const row = (id: string, label: string, holds: boolean, open: Pick<EditorNavigationItem, 'to' | 'action'>): EditorNavigationItem =>
-  ({ id, label, icon: holds ? 'i-lucide-check' : 'i-lucide-x', summary: holds ? 'Done' : 'Not yet', ...(holds || !dashboard.canUpdateBilling.value ? {} : open) })
+// Each row names where it stands and, while it does not hold, what meets it:
+// a check once it holds, an open circle until then, and a link only where there is somewhere to go.
+const row = (id: string, label: string, holds: boolean, state: string, open: Pick<EditorNavigationItem, 'to' | 'action'>): EditorNavigationItem =>
+  ({ id, label, summary: state, icon: holds ? 'i-lucide-circle-check' : 'i-lucide-circle', iconTone: holds ? 'success' : 'muted', ...(holds || !dashboard.canUpdateBilling.value ? {} : open) })
+const currentPlan = computed(() => billing.value?.subscriptionPrice?.name ?? plans.value.find(plan => plan.id === billing.value?.plan)?.name ?? 'your plan')
 const requirementRows = computed<EditorNavigationItem[]>(() => {
   const state = requirements.value
   if (!state) return []
+  const manage = dashboard.canUpdateBilling.value
   return [
-    row('google-ads', 'Google Ads account connected (USD)', state.google_ads_usd, { to: `/dashboard/${encodeURIComponent(orgSlug)}/integrations/google-ads` }),
-    row('business-plan', 'Business plan', state.business_plan, { to: level.to.value ? `${level.to.value}/upgrade` : undefined }),
+    row('google-ads', 'Google Ads', state.google_ads_usd, state.google_ads_usd ? 'Connected, billed in USD' : `Not connected in USD${manage ? ' · Connect' : ''}`, { to: `/dashboard/${encodeURIComponent(orgSlug)}/integrations/google-ads` }),
+    row('business-plan', 'Business plan', state.business_plan, state.business_plan ? 'On Business' : `On ${currentPlan.value}${manage ? ' · Upgrade' : ''}`, { to: level.to.value ? `${level.to.value}/upgrade` : undefined }),
     // Stripe's portal needs the plan's customer, which only a paid plan has.
-    row('payment-method', 'Default payment method', state.default_payment_method, state.business_plan ? { action: { label: 'Add' } } : {}),
+    row('payment-method', 'Default payment method', state.default_payment_method, state.default_payment_method ? 'Saved' : 'None saved', state.business_plan ? { action: { label: 'Add' } } : {}),
   ]
+})
+// What is left, in the footer where the consent will be.
+const outstanding = computed(() => {
+  const state = requirements.value
+  if (!state) return ''
+  const left = [
+    ...(state.google_ads_usd ? [] : ['connect Google Ads in USD']),
+    ...(state.business_plan ? [] : ['upgrade to Business']),
+    ...(state.default_payment_method ? [] : ['add a payment method']),
+  ]
+  const list = left.length > 1 ? `${left.slice(0, -1).join(', ')} and ${left.at(-1)}` : left[0] ?? ''
+  return `${list.charAt(0).toUpperCase()}${list.slice(1)} to turn this on.`
 })
 
 const busy = ref(false)

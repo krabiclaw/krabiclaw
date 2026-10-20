@@ -15,7 +15,12 @@
       <UAlert v-if="ownerError" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="getErrorMessage(ownerError, 'The owner could not be loaded')" />
       <UAlert v-if="errorMessage" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="errorMessage" />
       <UAlert v-if="successMessage" class="mb-6" color="success" variant="soft" icon="i-lucide-circle-check" :description="successMessage" />
-      <EditorNavigationList :groups="groups" :active-item="level.child.value" @act="onRowAction" />
+      <EditorNavigationList :groups="groups" :active-item="level.child.value" @act="onRowAction">
+        <!-- A service states whether it is on before what it costs. -->
+        <template #summary="{ item }">
+          <UBadge v-if="serviceState[item.id]" :label="serviceState[item.id]!.on ? 'On' : 'Off'" :color="serviceState[item.id]!.on ? 'success' : 'neutral'" :variant="serviceState[item.id]!.on ? 'solid' : 'soft'" size="lg" class="me-2 align-middle" />{{ item.summary }}
+        </template>
+      </EditorNavigationList>
     </div>
   </DashboardIndexPanel>
 </template>
@@ -24,7 +29,6 @@
 import EditorNavigationList, { type EditorNavigationGroup, type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
 import { authClient } from '~/lib/auth-client'
 import { BUSINESS_PLAN_ID, GROWTH_PLAN_ID, PAID_PLAN_PRICES, SERVICE_PRICES, SERVICES, STARTER_PLAN_ID, isNewSalePlan } from '~/shared/billing-model'
-import { paymentMoney } from '~/shared/payment-display'
 import { cardBrandLabel, useOrganizationBilling, useOrganizationServices, usePaymentMethods } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
@@ -37,7 +41,7 @@ const dashboard = useDashboardOrganization()
 const { trackSubscriptionCheckoutSuccess } = useAnalytics()
 const { startOrganizationCheckout, openBillingPortal } = useOrganizationSubscription()
 const { formatExactDateTime } = useHumanTime()
-const { plans } = await usePlans()
+const { plans, formatRecurring } = await usePlans()
 
 const [{ billing, billingError }, { services, servicesError }, { methods, methodsError }] = await Promise.all([
   useOrganizationBilling(), useOrganizationServices(), usePaymentMethods(),
@@ -59,7 +63,7 @@ const errorMessage = ref('')
 const successMessage = ref('')
 const busy = ref(false)
 const to = (leaf: string) => `${level.path.value}/${leaf}`
-const monthly = (cents: number) => `${paymentMoney(cents, 'USD')}/mo`
+const monthly = (cents: number) => formatRecurring(cents, 'USD')
 
 const onStarter = computed(() => billing.value?.plan === STARTER_PLAN_ID && !billing.value.stripeSubscriptionId)
 const planName = (id: string) => plans.value.find(plan => plan.id === id)?.name ?? id
@@ -72,7 +76,7 @@ const planSummary = computed(() => {
   if (onStarter.value) return `${planName(status.plan)} · Free`
   const price = status.subscriptionPrice
   const parts = [price?.name ?? planName(status.plan)]
-  if (price) parts.push(`${paymentMoney(price.amount, price.currency)}/${price.interval === 'year' ? 'yr' : 'mo'}`)
+  if (price) parts.push(formatRecurring(price.amount, price.currency, price.interval))
   if (status.subscriptionStatus === 'past_due') parts.push('Payment past due')
   else if (scheduledPlan.value) parts.push(`Changes to ${planName(scheduledPlan.value.plan)} on ${formatExactDateTime(scheduledPlan.value.at)}`)
   else if (status.currentPeriodEnd) parts.push(`${status.cancelAtPeriodEnd ? 'Ends' : 'Renews'} ${formatExactDateTime(status.currentPeriodEnd)}`)
@@ -90,14 +94,17 @@ const serviceRows = computed<EditorNavigationItem[]>(() => {
   const current = services.value
   if (!current) return []
   return [
-    { id: 'managed-ads', label: SERVICES.managed_ads.name, to: to('managed-ads'), status: current.managed_ads ? 'success' : undefined,
-      summary: `${current.managed_ads ? `On since ${formatExactDateTime(current.managed_ads.agreed_at)}` : 'Off'} · ${SERVICES.managed_ads.price}` },
-    { id: 'strategy', label: SERVICES.strategy.name, to: to('strategy'), status: current.strategy ? 'success' : undefined,
+    { id: 'managed-ads', label: SERVICES.managed_ads.name, to: to('managed-ads'),
+      summary: `${current.managed_ads ? `since ${formatExactDateTime(current.managed_ads.agreed_at)} · ` : ''}${SERVICES.managed_ads.price}` },
+    { id: 'strategy', label: SERVICES.strategy.name, to: to('strategy'),
       summary: current.strategy
-        ? `On since ${formatExactDateTime(current.strategy.since)} · ${paymentMoney(current.strategy.amount, current.strategy.currency)}/${current.strategy.interval === 'year' ? 'yr' : 'mo'}`
-        : `Off · ${monthly(SERVICE_PRICES.strategy.monthly)}` },
+        ? `since ${formatExactDateTime(current.strategy.since)} · ${formatRecurring(current.strategy.amount, current.strategy.currency, current.strategy.interval)}`
+        : monthly(SERVICE_PRICES.strategy.monthly) },
   ]
 })
+const serviceState = computed<Record<string, { on: boolean } | undefined>>(() => services.value
+  ? { 'managed-ads': { on: !!services.value.managed_ads }, 'strategy': { on: !!services.value.strategy } }
+  : {})
 
 // Stripe's portal owns cards, invoices and receipts; the row names the default card and opens it.
 const portalRow = computed<EditorNavigationItem | null>(() => {

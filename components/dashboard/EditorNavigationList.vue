@@ -53,7 +53,8 @@
           <UIcon
             v-else-if="item.icon && variant !== 'cards'"
             :name="item.icon"
-            class="size-6 shrink-0 text-highlighted"
+            class="size-6 shrink-0"
+            :class="item.iconTone === 'success' ? 'text-success' : item.iconTone === 'muted' ? 'text-dimmed' : 'text-highlighted'"
             aria-hidden="true"
           />
           <span class="min-w-0 flex-1">
@@ -146,6 +147,8 @@ export interface EditorNavigationItem {
   summary?: string
   /** A recognizable destination or choice; plain fields need no decoration. */
   icon?: string
+  /** A state mark rather than a destination's glyph: met in the success colour, outstanding muted. The summary still says it in words. */
+  iconTone?: 'success' | 'muted'
   /**
    * Where the row goes. A row with no `to` and no `action` states a value and
    * does nothing — the Google connection is read-only here — so it renders
