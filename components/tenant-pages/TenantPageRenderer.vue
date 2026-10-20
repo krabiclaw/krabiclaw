@@ -15,7 +15,7 @@
       a picture hero the shield cuts the picture. Any other run of blocks is not
       wrapped, and a divider outside a hero section is a plain break.
     -->
-    <div v-for="group in blockGroups" :key="group.key" :class="group.heroSection ? 'tenant-shield-edge relative bg-[var(--tenant-band)]' : 'contents'" :data-hero-section="group.heroSection ? '' : undefined">
+    <HeroSection v-for="group in blockGroups" :key="group.key" :section="group.heroSection">
     <section v-for="block in group.blocks" :key="block.id" :data-block-type="block.type" :data-parity-section="presentationOf(block) ? undefined : sectionKey(block)"
       class="tenant-page-block"
       :class="!presentationOf(block) ? 'mx-auto max-w-7xl px-4 sm:px-6 lg:px-8' : undefined"
@@ -211,14 +211,14 @@
         </section>
       </template>
     </section>
-    </div>
+    </HeroSection>
   </article>
 </template>
 
 <script setup lang="ts">
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock, TenantPageHowToStep } from '~/utils/tenant-page-blocks'
-import type { Component } from 'vue'
+import { h, type Component, type FunctionalComponent } from 'vue'
 import type { PublicTemplateSlug } from '~/utils/template-registry'
 import { tenantPageBlockPresentation } from '~/utils/tenant-page-presentation'
 import { overviewProseBlockId } from '~/utils/tenant-page-block-data'
@@ -253,6 +253,12 @@ const renderedBlocks = computed(() => {
  * The page's blocks in runs: a hero section — the first hero through the next
  * divider, with no other hero between — and the single blocks around it.
  */
+// Only a hero section is an element of its own; any other block stays a direct
+// child of the article, so the page's own sibling selectors still reach it.
+const HeroSection: FunctionalComponent<{ section: boolean }> = (sectionProps, { slots }) => sectionProps.section
+  ? h('div', { class: 'tenant-shield-edge relative bg-[var(--tenant-band)]', 'data-hero-section': '' }, slots.default?.())
+  : slots.default?.()
+HeroSection.props = ['section']
 const blockGroups = computed(() => {
   const blocks = renderedBlocks.value
   const hero = template.value === 'platform' ? -1 : blocks.findIndex(block => block.type === 'hero')
