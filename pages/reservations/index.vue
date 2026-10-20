@@ -62,8 +62,8 @@
 
             <div class="mt-6 flex flex-wrap items-center gap-3">
               <TenantButton control-id="reservation-booking-toggle" @click="openBookingModal(loc)">{{ resCopy.reservationRequestButton }}</TenantButton>
-              <TenantButton v-if="loc.phone" :href="`tel:${loc.phone.replace(/\s/g, '')}`" variant="outline">
-                {{ loc.phone }}
+              <TenantButton v-if="loc.phone" :href="`tel:${loc.phone}`" variant="outline">
+                {{ formatPhone(loc.phone) }}
               </TenantButton>
             </div>
           </div>
@@ -138,7 +138,7 @@
         />
         <BookingContactForm
           v-model="contactForm"
-          v-model:country="phoneCountry"
+         
           :default-country="defaultPhoneCountry"
           :loading="submitting"
           :submit-text="resCopy.reservationRequestButton"
@@ -166,7 +166,7 @@ import { formatTime, localDateAt, isValidInstant, isValidTimezone } from '~/util
 import { setBookingConfirmation } from '~/composables/useBookingHandoff'
 import { addressPlaceName, formatPostalAddress, schemaPostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { mediaStillUrl, type MediaPresentation } from '~/shared/media-placement-contract'
-import { getPhoneCountry, type CountryCode } from '~/utils/phone'
+import { getPhoneCountry, formatPhone } from '~/utils/phone'
 
 function formatTitleItalics(text: string | null | undefined): string {
   if (!text) return ''
@@ -206,7 +206,6 @@ const activeReservationPolicySummary = computed(() => {
 // ── Form state ────────────────────────────────────────────────────────────
 const reservationForm = ref({ location_id: '', date: '', time: '', guests: '' })
 const contactForm = ref<ContactFormState>({ name: '', email: '', phone: '', notes: '' })
-const phoneCountry = ref<CountryCode | ''>()
 
 // ── Contact & Locations ───────────────────────────────────────────────────
 const hasMultipleLocations = computed(() => locations.value.length > 1)

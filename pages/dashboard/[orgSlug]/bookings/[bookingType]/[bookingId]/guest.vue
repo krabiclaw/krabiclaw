@@ -9,7 +9,7 @@
         </div>
         <div v-if="b.booking.value.guestPhone">
           <dt class="text-sm text-muted">Phone</dt>
-          <dd class="mt-1 text-highlighted">{{ b.booking.value.guestPhone }}</dd>
+          <dd class="mt-1 text-highlighted">{{ formatPhone(b.booking.value.guestPhone) }}</dd>
         </div>
       </dl>
       <div class="flex gap-3">
@@ -21,6 +21,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatPhone } from '~/utils/phone'
 import { bookingEditorKey } from '~/components/dashboard/BookingDetails.vue'
 
 definePageMeta({ layout: 'dashboard' })

@@ -6,7 +6,7 @@ import { selectPrice } from '~/shared/prices'
 import { formatProductMoney } from '~/utils/product-money'
 import { isValidInstant, isValidTimezone, localDateAt, localPartsAt, TIMEZONE_OPTIONS } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
-import { getPhoneCountry, type CountryCode } from '~/utils/phone'
+import { getPhoneCountry } from '~/utils/phone'
 import { isRecord, normalizeApiError, publicApiRequest, publicApiMutation } from '~/utils/api-clients'
 import { setBookingConfirmation } from '~/composables/useBookingHandoff'
 import type { SubmissionMeasurement } from '~/composables/useOrganizationConversionTracking'
@@ -33,7 +33,6 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
   const bookingOpen = ref(false)
   const bookingStep = ref(1)
   const contactForm = ref<ContactFormState>({ name: '', email: '', phone: '', notes: '' })
-  const phoneCountry = ref<CountryCode | ''>()
   const defaultPhoneCountry = computed(() => getPhoneCountry(context.value.location?.address?.regionCode)?.code)
   const showPartySize = computed(() => context.value.showPartySize !== false)
   const selectedPartySize = ref(1)
@@ -323,7 +322,7 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
     }
   }
 
-    return { bookingOpen, bookingStep, contactForm, phoneCountry, defaultPhoneCountry, partySize, showPartySize, allowTimezoneSelection, guestTimezone, bookingTimezone, timezoneOptions, selectedVariantId, selectedPrice, sellableVariants, variantPriceLabel,
+    return { bookingOpen, bookingStep, contactForm, defaultPhoneCountry, partySize, showPartySize, allowTimezoneSelection, guestTimezone, bookingTimezone, timezoneOptions, selectedVariantId, selectedPrice, sellableVariants, variantPriceLabel,
       timeSelection, submitting, bookingError, sessions, sessionsPending, availabilityDates, referenceDate, guestsMax,
       selectedSession, loadSessions, openBooking, openBookingAt, upcomingSessions, nextSession,
       sessionDayLabel, sessionTimeLabel, submitBooking }

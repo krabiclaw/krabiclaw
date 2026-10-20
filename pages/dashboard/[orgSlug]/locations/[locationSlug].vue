@@ -50,6 +50,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatPhone } from '~/utils/phone'
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import { resolveCmsCapabilities, type ProductFeature } from '~/config/cms-registry'
 import { resolvePublicTemplate } from '~/utils/template-registry'
@@ -203,7 +204,7 @@ const cards = computed<HubCard[]>(() => {
   if (!resource) return []
   const loc = resource.location.location
   const counts = resource.counts
-  const contact = [loc.phone, loc.email].filter((value): value is string => Boolean(value?.trim())).join(' · ')
+  const contact = [loc.phone && formatPhone(loc.phone), loc.email].filter((value): value is string => Boolean(value?.trim())).join(' · ')
   const policy = resource.reservationConfig
   return [
     { id: 'photos', title: 'Photos', description: countSummary(counts.photos, 'photo', 'Add photos'), to: `${locationPath.value}/photos`, image: locationImage.value || undefined, visible: hasFeature('photos') },

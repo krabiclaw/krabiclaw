@@ -25,10 +25,8 @@
     <div>
       <label for="booking-phone" class="block text-sm font-medium text-default mb-1">{{ t('saya.experience_detail.phone_number') }} <span v-if="!phoneRequired" class="text-muted font-normal">({{ t('saya.experience_detail.optional') }})</span></label>
       <PhoneInput
-        ref="phoneInput"
         id="booking-phone"
         v-model="form.phone"
-        v-model:country="countryCode"
         :default-country="defaultCountry"
         :required="phoneRequired"
         :disabled="loading"
@@ -55,17 +53,17 @@
 
 <script setup lang="ts">
 import PhoneInput from '~/components/PhoneInput.vue'
-import { parsePhone, type CountryCode } from '~/utils/phone'
+import type { CountryCode } from '~/utils/phone'
 
 export interface ContactFormState {
   name: string
   email: string
+  /** E.164, or empty when no number was given. */
   phone: string
   notes: string
 }
 
 const form = defineModel<ContactFormState>({ required: true })
-const countryCode = defineModel<CountryCode | ''>('country')
 const props = withDefaults(defineProps<{
   defaultCountry?: CountryCode
   loading?: boolean
@@ -76,15 +74,15 @@ const props = withDefaults(defineProps<{
   phoneRequired: false
 })
 const { t } = useI18n()
-const phoneInput = ref<InstanceType<typeof PhoneInput> | null>(null)
 
 const emit = defineEmits<{
   submit: [form: ContactFormState]
 }>()
 
+// The browser refuses to submit while the phone field is invalid, so a form
+// that reaches here carries E.164 or no number.
 function submit() {
-  if (props.loading || !phoneInput.value?.validate()) return
-  const parsed = parsePhone(form.value.phone, countryCode.value ? { defaultCountry: countryCode.value } : undefined)
-  emit('submit', { ...form.value, phone: parsed.e164 ?? '' })
+  if (props.loading) return
+  emit('submit', { ...form.value })
 }
 </script>

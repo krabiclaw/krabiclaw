@@ -107,12 +107,11 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     await phone.press('Backspace')
     expect((await phone.inputValue()).replace(/\D/g, '')).toBe('082945678')
 
-    await country.click()
-    await countrySearch.fill('GB')
-    await page.getByRole('option', { name: /United Kingdom.*\+44/ }).click()
-    await phone.fill('+447700900123')
-    await expect(country).toContainText('+44')
-    await expect(phone).toHaveValue('07700 900123')
+    // A number typed with its calling code brings its own country and reads
+    // nationally there. ACMA's fictitious mobile range is never assigned.
+    await phone.fill('+61491570150')
+    await expect(country).toContainText('+61')
+    await expect(phone).toHaveValue('0491 570 150')
     await notes.fill('Please keep the two seats together.')
 
     await page.getByRole('button', { name: 'Change', exact: true }).click()
@@ -120,8 +119,8 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     await expect(page.getByLabel('Full name')).toHaveValue('Pottery Journey Test')
     await expect(page.getByLabel('Email address')).toHaveValue(email)
     await expect(notes).toHaveValue('Please keep the two seats together.')
-    await expect(country).toContainText('+44')
-    await expect(phone).toHaveValue('07700 900123')
+    await expect(country).toContainText('+61')
+    await expect(phone).toHaveValue('0491 570 150')
 
     await phone.fill('123')
     await notes.focus()
@@ -269,23 +268,21 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     const phone = page.getByLabel(/Phone number/i)
     const country = page.getByLabel(/^Phone country(?:$|:)/)
     await country.click()
-    await page.getByLabel('Search countries', { exact: true }).fill('International')
-    await page.getByRole('option', { name: /International number/ }).click()
-    await expect(country).toContainText('Country code')
-    await expect(page.getByText('Include + and the country calling code.', { exact: true })).toBeVisible()
+    await page.getByLabel('Search countries', { exact: true }).fill('Australia')
+    await page.getByRole('option', { name: /Australia.*\+61/ }).click()
+    await expect(country).toContainText('+61')
     await expect(phone).toHaveValue('')
-    await phone.pressSequentially('+447700900123')
-    await expect(country).toContainText('Country code')
-    await expect(phone).toHaveValue('+44 7700 900123')
-    // An explicit international choice and entered number survive remounting.
+    await phone.pressSequentially('0491570150')
+    await expect(phone).toHaveValue('0491 570 150')
+    // The chosen country and the entered number survive remounting.
     await page.getByRole('button', { name: 'Change', exact: true }).click()
     await chooseFirstAvailableTime(page)
-    await expect(country).toContainText('Country code')
-    await expect(phone).toHaveValue('+44 7700 900123')
-    // Clearing the optional phone does not manufacture a calling-code-only value.
+    await expect(country).toContainText('+61')
+    await expect(phone).toHaveValue('0491 570 150')
+    // Clearing the optional phone leaves no number, not a calling code alone.
     await phone.fill('')
     await expect(phone).toHaveValue('')
-    await expect(country).toContainText('Country code')
+    await expect(country).toContainText('+61')
     await page.getByLabel('Full name').fill('Cancel Once')
     await page.getByLabel('Email address').fill('cancel-once@playwright.example')
     await phone.focus()

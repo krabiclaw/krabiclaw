@@ -494,7 +494,18 @@ test.describe('stateless MCP server', () => {
 
     // Unique per run. A constant would pass on a value a previous run had left
     // on the row, which is the exact failure this read-back exists to catch.
-    const updatedPhone = `+1 555 555 ${String(Date.now() % 10000).padStart(4, '0')}`
+    // Entered with spaces, stored as E.164: the one form every phone is kept in.
+    const lineNumber = String(Date.now() % 10000).padStart(4, '0')
+    const updatedPhone = `+1 202 555 ${lineNumber}`
+    const nationalOnly = await mcpRequest(request, baseURL!, {
+      method: 'tools/call',
+      toolName: 'update_location',
+      args: { organization_id: organizationId, location_id: locationId, phone: '081 234 5678' },
+    })
+    expect(nationalOnly.status()).toBe(200)
+    const refused = (await nationalOnly.json()).result
+    expect(refused.isError).toBe(true)
+    expect(refused.content[0].text).toMatch(/phone must be an international number with its country calling code/)
     const locationUpdate = await mcpRequest(request, baseURL!, {
       method: 'tools/call',
       toolName: 'update_location',
@@ -512,7 +523,7 @@ test.describe('stateless MCP server', () => {
     })
     expect(locationAfter.status()).toBe(200)
     expect(mcpData<{ location: { phone: string } }>(await locationAfter.json()).location)
-      .toMatchObject({ phone: updatedPhone })
+      .toMatchObject({ phone: `+1202555${lineNumber}` })
 
     const reviewsList = await mcpRequest(request, baseURL!, {
       method: 'tools/call',

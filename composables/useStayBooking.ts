@@ -6,7 +6,7 @@ import { formatMinorAmount } from '~/shared/prices'
 import { isCurrencyCode } from '~/shared/currencies'
 import { stayNightlyGroups } from '~/shared/stay-listing'
 import { addLocalDays, formatCalendarDate, isValidInstant } from '~/utils/timezone'
-import { getPhoneCountry, type CountryCode } from '~/utils/phone'
+import { getPhoneCountry } from '~/utils/phone'
 import { isRecord, normalizeApiError, publicApiMutation, publicApiRequest } from '~/utils/api-clients'
 import type { ContactFormState } from '~/components/booking/BookingContactForm.vue'
 
@@ -33,7 +33,6 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
   const bookingOpen = ref(false)
   const bookingStep = ref(1)
   const contactForm = ref<ContactFormState>({ name: '', email: '', phone: '', notes: '' })
-  const phoneCountry = ref<CountryCode | ''>()
   const defaultPhoneCountry = computed(() => getPhoneCountry(context.value.location?.address?.regionCode)?.code)
   const calendar = ref<PublicStayCalendar | null>(null)
   const calendarPending = ref(false)
@@ -247,7 +246,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
 
   return {
     checkout, enquiryPath,
-    bookingOpen, bookingStep, contactForm, phoneCountry, defaultPhoneCountry, calendar, calendarPending, calendarError, checkIn, checkOut, adults, children, infants, maxGuests,
+    bookingOpen, bookingStep, contactForm, defaultPhoneCountry, calendar, calendarPending, calendarError, checkIn, checkOut, adults, children, infants, maxGuests,
     quote, quotePending, bookingError, submitting, breakdown, rangeLabel, guestsLabel, nightCount,
     loadCalendar, night, canCheckIn, canCheckOut, selectDay, clearDates, openBooking, submitBooking, money, nightsLabel, dateLabel,
   }
