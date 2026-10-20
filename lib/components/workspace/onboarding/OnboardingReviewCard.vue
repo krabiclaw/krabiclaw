@@ -25,6 +25,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatPhone } from '~/utils/phone'
 import { useOnboardingState } from '~/composables/useOnboardingFlow'
 import { useOnboardingDraft } from '~/composables/useOnboardingDraft'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
@@ -63,7 +64,7 @@ const ledger = computed(() => {
   const place = [
     { label: 'Name', value: state.value.details.name || 'Not set', done: Boolean(state.value.details.name) },
     { label: 'Address', value: address || 'Not set', done: Boolean(address) },
-    { label: 'Phone', value: state.value.details.phone || 'Not set', done: Boolean(state.value.details.phone) },
+    { label: 'Phone', value: state.value.details.phone ? formatPhone(state.value.details.phone) : 'Not set', done: Boolean(state.value.details.phone) },
     {
       label: 'Hours',
       value: hasHours ? `${state.value.hours.timezone}` : 'Not set',

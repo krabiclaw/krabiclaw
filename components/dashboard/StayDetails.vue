@@ -99,6 +99,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatPhone } from '~/utils/phone'
 import DashboardIndexPanel from '~/lib/components/workspace/dashboard/DashboardIndexPanel.vue'
 import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import type { GuestStay, StayDetail, StayPaymentMethod } from '~/server/domain/stays'
@@ -184,7 +185,7 @@ const rows = computed(() => {
     { label: 'Total', value: money(value.total_minor) },
     ...(value.owner === 'app' ? [{ label: 'Paid', value: money(value.paid_minor) }] : []),
     ...(value.arrival_time ? [{ label: 'Arriving', value: value.arrival_time }] : []),
-    ...(value.guest_phone ? [{ label: 'Phone', value: value.guest_phone }] : []),
+    ...(value.guest_phone ? [{ label: 'Phone', value: formatPhone(value.guest_phone) }] : []),
     ...(value.guest_email ? [{ label: 'Email', value: value.guest_email }] : []),
     ...(value.channel_booking_id ? [{ label: `${channelName.value} confirmation`, value: value.channel_booking_id }] : []),
     ...(value.notes ? [{ label: 'Notes', value: value.notes }] : []),

@@ -51,7 +51,7 @@ test('members talk in team conversations, see unread state and receive recorded 
       stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: null, assigned_team_id: null },
     } })
     const manager: StayAccess = { organizationId: ORG, actorId: 'owner', manage: true }
-    const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(3), check_out_date: day(5), adults: 1, guest_name: 'Dee', guest_phone: '+15557770000', total_minor: 30_000 })
+    const stay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(3), check_out_date: day(5), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 30_000 })
 
     const principal = (userId: string, role: string) => memberAccessPrincipal({ userId, role, organizationId: ORG } as never, { env })
     const team = (userId: string, role: string, memberId: string, action: 'read' | 'send' = 'send') => teamAccessFor(principal(userId, role), memberId, action)

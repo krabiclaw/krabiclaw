@@ -1,15 +1,18 @@
 import type { MaybeRefOrGetter } from 'vue'
 import type { PublicProduct } from '~/server/types/products'
+import type { PublicProductLocation } from '~/server/utils/public-products'
 import type { PublicStayCalendar, PublicStayNight, StayQuote } from '~/server/domain/stays'
 import { formatMinorAmount } from '~/shared/prices'
 import { isCurrencyCode } from '~/shared/currencies'
 import { stayNightlyGroups } from '~/shared/stay-listing'
 import { addLocalDays, formatCalendarDate, isValidInstant } from '~/utils/timezone'
+import { getPhoneCountry } from '~/utils/phone'
 import { isRecord, normalizeApiError, publicApiMutation, publicApiRequest } from '~/utils/api-clients'
 import type { ContactFormState } from '~/components/booking/BookingContactForm.vue'
 
 export interface StayBookingContext {
   product: PublicProduct
+  location: PublicProductLocation | null
   /** Whether the stay is paid for on the site; without it the chosen dates go to the host as an enquiry. */
   checkout: boolean
 }
@@ -29,6 +32,8 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
   const { locale, t, localePath } = useI18n()
   const bookingOpen = ref(false)
   const bookingStep = ref(1)
+  const contactForm = ref<ContactFormState>({ name: '', email: '', phone: '', notes: '' })
+  const defaultPhoneCountry = computed(() => getPhoneCountry(context.value.location?.address?.regionCode)?.code)
   const calendar = ref<PublicStayCalendar | null>(null)
   const calendarPending = ref(false)
   const calendarError = ref('')
@@ -241,7 +246,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
 
   return {
     checkout, enquiryPath,
-    bookingOpen, bookingStep, calendar, calendarPending, calendarError, checkIn, checkOut, adults, children, infants, maxGuests,
+    bookingOpen, bookingStep, contactForm, defaultPhoneCountry, calendar, calendarPending, calendarError, checkIn, checkOut, adults, children, infants, maxGuests,
     quote, quotePending, bookingError, submitting, breakdown, rangeLabel, guestsLabel, nightCount,
     loadCalendar, night, canCheckIn, canCheckOut, selectDay, clearDates, openBooking, submitBooking, money, nightsLabel, dateLabel,
   }

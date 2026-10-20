@@ -286,6 +286,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatPhone } from '~/utils/phone'
 import { useIntervalFn, useDocumentVisibility } from '@vueuse/core'
 import type { AvatarProps } from '@nuxt/ui'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
@@ -514,7 +515,7 @@ const announcement = computed(() => {
     { label: recordNoun.value.charAt(0).toUpperCase() + recordNoun.value.slice(1), value: fields.productTitle },
     { label: 'Location', value: fields.locationTitle ?? current.locationLabel },
     { label: 'Email', value: current.guestEmail },
-    { label: 'Phone', value: current.guestPhone },
+    { label: 'Phone', value: current.guestPhone && formatPhone(current.guestPhone) },
   ].filter((row): row is { label: string; value: string } => typeof row.value === 'string' && row.value.trim().length > 0)
   return { title: `New ${recordNoun.value}`, rows }
 })
