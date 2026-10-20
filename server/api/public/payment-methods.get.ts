@@ -8,7 +8,8 @@ const PAYMENT_METHODS_TTL_SECONDS = 3600
 /**
  * The ways this site's business takes payment, for its footer. Kept in the
  * site's public resource cache for an hour, under the site's own key, so
- * Stripe is asked at most hourly per site and a site purge clears it.
+ * Stripe is asked about once an hour per site (more after a purge, or when
+ * requests miss together) and a site purge clears it.
  */
 export default defineHandler(async (event) => {
   const organizationId = event.context.organizationId as string | undefined
