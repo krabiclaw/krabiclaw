@@ -37,8 +37,8 @@ const d1 = <T>(sql: string): T[] => {
 }
 const sqlString = (value: string) => `'${value.replaceAll("'", "''")}'`
 
-type Row = { id: string; referenceId: string; plan: string; seats: number | null; stripeSubscriptionId: string | null; stripeCustomerId: string | null; name: string | null }
-const rows = d1<Row>(`SELECT s.id, s.referenceId, s.plan, s.seats, s.stripeSubscriptionId, s.stripeCustomerId, o.name
+type Row = { id: string; referenceId: string; plan: string; seats: number | null; stripeSubscriptionId: string | null; stripeCustomerId: string | null; name: string | null; organizationCustomerId: string | null }
+const rows = d1<Row>(`SELECT s.id, s.referenceId, s.plan, s.seats, s.stripeSubscriptionId, s.stripeCustomerId, o.name, o.stripeCustomerId AS organizationCustomerId
   FROM subscription s LEFT JOIN organization o ON o.id = s.referenceId
  WHERE s.status NOT IN ('canceled', 'incomplete_expired') AND s.stripeSubscriptionId IS NOT NULL`)
 
@@ -58,7 +58,13 @@ const readable = async (id: string) => {
 
 let provisioned = 0
 for (const row of rows) {
-  if (await readable(row.stripeSubscriptionId!)) continue
+  // D1 does not make the two updates below one transaction: a run that stopped
+  // between them left the subscription moved and its organization not, which
+  // this finishes rather than leaving billing to refuse the mismatch.
+  if (await readable(row.stripeSubscriptionId!)) {
+    if (row.stripeCustomerId && row.organizationCustomerId !== row.stripeCustomerId) d1(`UPDATE organization SET stripeCustomerId = ${sqlString(row.stripeCustomerId)} WHERE id = ${sqlString(row.referenceId)}`)
+    continue
+  }
   const plan = plans.get(row.plan)
   if (!plan) throw new Error(`The test-mode catalog has no ${row.plan} plan for ${row.referenceId}`)
   if (!row.stripeCustomerId) throw new Error(`Subscription ${row.id} has no Stripe customer`)
