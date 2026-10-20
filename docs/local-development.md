@@ -88,7 +88,8 @@ reconciliation reports `zaraz_absent` without calling Cloudflare. Declaring it
 absent while `CF_ZONE_ID` is set fails as a configuration error.
 
 `local:setup` is safe to repeat: it applies the migration chain, refreshes
-the demo, Kikuzuki, Pottery House, and NCLS fixtures, copies the shared review credential, and
+the demo, Kikuzuki, Pottery House, and NCLS fixtures, copies the shared review credential,
+gives every copied subscription a test-mode equivalent (`billing:test-mode`), and
 verifies the resulting D1 database. Do not replace its steps with direct
 Wrangler writes or a hand-edited local database.
 
@@ -147,7 +148,10 @@ repair or add it to recurring schedules or every deployment. Staging deploys
 apply migrations; they do not refresh production data. A same-environment
 replacement names its previous database with `--source`, carries that source's
 keys, and follows the release contract. Replacement deltas require an explicit
-source; production loads always require one.
+source; production loads always require one. Follow a staging refresh with
+`corepack yarn billing:test-mode --staging`: the copy carries production's live-mode
+Stripe subscriptions, which staging's test-mode key cannot read, and that step points
+each one at a test-mode equivalent on the current catalog price.
 
 Local setup copies production through `db:pull:local`.
 One SQL read captures the tables and rows from the same database revision.
