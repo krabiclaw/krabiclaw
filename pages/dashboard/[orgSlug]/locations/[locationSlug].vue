@@ -28,7 +28,7 @@
           Basic includes {{ INCLUDED_LOCATIONS }} locations. Growth and Business include {{ INCLUDED_LOCATIONS }},
           then {{ additionalLocationPrice() }}.
         </p>
-        <UButton label="Choose a plan" :to="`/dashboard/${route.params.orgSlug}/payments?tab=plan`" />
+        <UButton label="Choose a plan" :to="`/dashboard/${route.params.orgSlug}/billing/upgrade`" />
       </div>
       <template v-else>
         <UAlert v-if="newLocation.createError.value" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="newLocation.createError.value" />
