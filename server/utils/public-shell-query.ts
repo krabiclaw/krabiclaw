@@ -1,7 +1,9 @@
 import { parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours'
 import type { BatchQuery, DbClient } from '~/server/db'
 import type { PublicBase } from '~/server/utils/public-base'
-import { calculateMapEmbedUrl } from '~/server/utils/google-places'
+import { projectPublicLocation } from '~/shared/location-sharing'
+import { publicLocationPrivacySql } from '~/server/utils/public-location-privacy'
+import { projectExactLocalizedCollection, type ExactPublicLocalization } from '~/server/utils/public-localization'
 import { PUBLIC_LOCATION_SECTIONS, PUBLIC_SITE_SECTIONS, type PublicLocationSection, type PublicShellPayload, type PublicSiteSection } from '~/utils/public-resource-contracts'
 import { listOrganizationProducts, PUBLIC_PRODUCT_SQL } from '~/server/utils/product-management'
 import type { Product } from '~/server/types/products'
@@ -10,7 +12,7 @@ import { publicLocationHomeSlugSql, publicLocationSql } from '~/server/utils/pub
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { isCurrencyCode } from '~/shared/currencies'
 import { parsePostalAddress } from '~/utils/postal-address'
-import type { PublicMediaPlacement } from '~/server/utils/public-social-image'
+import { publicLocationSocialMediaFromPlacements, type PublicMediaPlacement } from '~/server/utils/public-social-image'
 import { publicSocialMediaFromPlacements } from '~/utils/social-metadata'
 import type { PublicConsultationSettings, PublicCompliance, PublicBlawbyPageLink } from '~/types/blawby'
 
@@ -117,7 +119,7 @@ export function appendPublicShellQueries(
 
   return {
     locations: push(`SELECT bl.id, bl.slug, bl.title, bl.address, bl.phone, bl.email,
-                     bl.website_url, bl.maps_url, bl.latitude, bl.longitude,
+                     bl.website_url, bl.maps_url, bl.latitude, bl.longitude, ${publicLocationPrivacySql('bl')},
                      bl.opening_hours, bl.special_hours, bl.timezone, bl.rating,
                      bl.review_count, bl.status,
                      bl.description, bl.short_description,
@@ -163,6 +165,7 @@ export async function buildPublicShellPayload(
     compliance?: PublicCompliance | null
     pageLinks?: PublicBlawbyPageLink[]
     searchConsoleVerification?: string | null
+    localizations?: readonly ExactPublicLocalization[]
   },
 ): Promise<PublicShellPayload> {
   const rawLocations = (results[indexes.locations]?.results ?? []) as Record<string, unknown>[]
@@ -177,8 +180,8 @@ export async function buildPublicShellPayload(
     [...(results[indexes.catalog]?.results ?? []) as PublicCatalogRow[], ...productCatalogRows(experiences)],
     publicContentSectionRows(section => (results[indexes.content[section]]?.results ?? []) as PublicContentSectionRow[]),
     rawLocations.some(location => Number(location.has_reservations) === 1))
-  const locations = rawLocations.map(location => {
-    const locationMedia = publicSocialMediaFromPlacements('business_location',
+  const sourceLocations = rawLocations.map(location => {
+    const locationMedia = publicLocationSocialMediaFromPlacements({ is_stay_location: location.is_stay_location },
       placements.filter(item => item.owner_type === 'business_location' && item.owner_id === location.id)
         .map(({ owner_type: _ownerType, owner_id: _ownerId, ...item }) => item),
       organizationMedia)
@@ -191,16 +194,9 @@ export async function buildPublicShellPayload(
       phone: location.phone,
       email: location.email ?? null,
       website_url: location.website_url,
-      maps_url: location.maps_url,
-      map_embed_url: calculateMapEmbedUrl({
-        title: String(location.title),
-        maps_url: location.maps_url as string | null,
-        latitude: location.latitude as number | null,
-        longitude: location.longitude as number | null,
-        address,
-      }),
-      latitude: location.latitude,
-      longitude: location.longitude,
+      maps_url: location.maps_url as string | null,
+      latitude: location.latitude as number | null,
+      longitude: location.longitude as number | null,
       opening_hours: parseOpeningHours(location.opening_hours ? JSON.parse(String(location.opening_hours)) : null),
       special_hours: parseSpecialHours(location.special_hours ? JSON.parse(String(location.special_hours)) : null),
       timezone: requireLocationString(location.timezone, 'timezone'),
@@ -217,6 +213,15 @@ export async function buildPublicShellPayload(
       home_slug: typeof location.home_slug === 'string' ? location.home_slug : null,
       sections: sections.location(String(location.id)),
     }
+  })
+  const localizedLocations = extra?.localizations
+    ? projectExactLocalizedCollection('business_location', sourceLocations, extra.localizations)
+    : sourceLocations
+  const sourceById = new Map(rawLocations.map(location => [location.id, location]))
+  const locations = localizedLocations.map(location => {
+    const source = sourceById.get(location.id)
+    if (!source) throw new Error('Public location privacy source is unavailable')
+    return projectPublicLocation(location, { stay_map_sharing: source.stay_map_sharing, is_stay_location: source.is_stay_location })
   })
   const configRows = (results[indexes.config]?.results ?? []) as Array<{ key: string, value: string }>
   const config: Record<string, string> = Object.fromEntries(

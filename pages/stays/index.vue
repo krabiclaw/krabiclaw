@@ -31,6 +31,7 @@ const productLocations = computed(() => locations.value.map(location => ({
   slug: String(location.slug),
   title: String(location.title),
   address: (location.address ?? null) as PostalAddress | null,
+  public_area: location.public_area,
 })))
 useSocialMetadata(() => ({ socialImage, path: presentation.collectionPath, title: collectionTitle.value, description: t('saya.stays.meta_description', { organization: brandName }) }))
 </script>

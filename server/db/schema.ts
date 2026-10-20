@@ -6,6 +6,7 @@ import { sqliteTable, integer, text, real, unique, uniqueIndex, index, check, fo
 import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
 import type { CONTENT_DOCUMENT_KINDS } from "../../shared/content-registries"
 import { NOTIFICATION_CATEGORIES, PUSH_ONLY_CATEGORIES, type NotificationCategory } from "../../shared/notification-categories"
+import { STAY_MAP_SHARING_MODES } from "../../shared/stay-listing"
 
 export const account = sqliteTable("account", {
 	id: text().primaryKey(),
@@ -31,6 +32,7 @@ export const business_locations = sqliteTable("business_locations", {
 	slug: text().notNull(),
 	title: text().notNull(),
 	address: text(),
+	stay_map_sharing: text({ enum: STAY_MAP_SHARING_MODES }).default("general").notNull(),
 	phone: text(),
 	website_url: text(),
 	maps_url: text(),
@@ -73,6 +75,7 @@ export const business_locations = sqliteTable("business_locations", {
 	check("business_locations_opening_hours_check", sql`opening_hours IS NULL OR (json_valid(opening_hours) AND json_type(opening_hours) IS 'object' AND json_type(opening_hours, '$.periods') IS 'array')`),
 	check("business_locations_special_hours_check", sql`special_hours IS NULL OR (json_valid(special_hours) AND json_type(special_hours) IS 'array')`),
 	check("business_locations_timezone_check", sql`timezone <> '' AND timezone NOT GLOB '*[^A-Za-z0-9/_+-]*'`),
+	check("business_locations_stay_map_sharing_check", sql`stay_map_sharing IN (${sql.raw(STAY_MAP_SHARING_MODES.map(mode => `'${mode}'`).join(', '))})`),
 ]);
 
 

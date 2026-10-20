@@ -3,15 +3,16 @@ import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedHomeSql, isOrganizationWideRole, organizationAdapter, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { organizationEventQuery } from '~/server/utils/organization-events'
-import { coordinatesFailure, createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
+import { createLocation, updateLocation, type UpdateLocationInput } from '~/server/utils/location-management'
 import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
+import { calculateMapUrl, coordinatesFailure } from '~/utils/location-map'
 import { visitRefundQueries } from '~/server/domain/payments/visit-refund'
 import { bookedPolicyFor, LONG_TERM_STAY_NIGHTS, stayCancellationRefund, type StayBookedPolicy, type StayCancellationInput } from '~/shared/stay-cancellation'
 import { executeRefund, requirePayment, type Payment } from '~/server/domain/payments'
 import { paymentsStripe } from '~/server/utils/stripe-connect'
 import { isRecord } from '~/server/utils/type-guards'
 import { isStayCheckInMethod, STAY_ARRIVAL_TEXT_LIMITS, STAY_CHECKOUT_DETAILS_LIMIT } from '~/shared/stay-arrival'
-import { STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
+import { parseStayMapSharing, type StayMapSharing, STAY_CHECK_IN_METHODS, STAY_CHECKOUT_TASKS, type StayAmenity, type StayCancellationPolicy, type StayCheckInMethod, type StayCheckoutTask, type StayListingType, type StayLongTermCancellationPolicy, type StayPropertySizeUnit, type StayPropertyType, type StayPropertyTypeGroup } from '~/shared/stay-listing'
 import { createProduct, getProduct, setProductPublication, updateProduct } from '~/server/utils/product-management'
 import type { Product, UpdateProductInput } from '~/server/types/products'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -153,6 +154,7 @@ export interface StayHome {
   address: StayAddress | null
   latitude: number | null
   longitude: number | null
+  stay_map_sharing: StayMapSharing
   property_type_group: StayPropertyTypeGroup | null
   property_type: StayPropertyType | null
   listing_type: StayListingType | null
@@ -337,7 +339,7 @@ async function stayHomes(db: DbClient, access: StayAccess, productId: string | n
 
 async function stayHomesWhere(db: DbClient, organizationId: string, productId: string | null, scope: { sql: string; params: string[] }): Promise<StayHome[]> {
   const rows = await queryAll<Record<string, unknown>>(db, `
-    SELECT p.id AS product_id, p.name, p.description, c.location_id, l.timezone, l.address, l.latitude, l.longitude, o.default_currency,
+    SELECT p.id AS product_id, p.name, p.description, c.location_id, l.timezone, l.address, l.latitude, l.longitude, l.stay_map_sharing, o.default_currency,
            c.check_in_time, c.check_out_time, c.max_guests, c.min_nights, c.property_type_group, c.property_type,
            c.listing_type, c.total_floors, c.listing_floor, c.year_built, c.property_size, c.property_size_unit, c.bedrooms, c.beds, c.bathrooms, c.amenities,
            c.cancellation_policy, c.long_term_cancellation_policy, c.check_in_method, c.check_in_instructions, c.wifi_network, c.wifi_password,
@@ -368,7 +370,7 @@ async function stayHomesWhere(db: DbClient, organizationId: string, productId: s
       currency: row.default_currency, base_price_minor: base ? base.unit_amount : null, base_price_tax_behavior: base ? base.tax_behavior : null,
       check_in_time: String(row.check_in_time), check_out_time: String(row.check_out_time), max_guests: Number(row.max_guests), min_nights: Number(row.min_nights),
       description: String(row.description), published: Number(row.published) === 1,
-      address: stayAddress(row.address), latitude: nullableNumber(row.latitude), longitude: nullableNumber(row.longitude),
+      address: stayAddress(row.address), latitude: nullableNumber(row.latitude), longitude: nullableNumber(row.longitude), stay_map_sharing: parseStayMapSharing(row.stay_map_sharing),
       property_type_group: nullableText(row.property_type_group) as StayPropertyTypeGroup | null,
       property_type: nullableText(row.property_type) as StayPropertyType | null,
       listing_type: nullableText(row.listing_type) as StayListingType | null,
@@ -516,7 +518,7 @@ function homeAddress(body: Record<string, unknown>, prefix: string): Pick<NewSta
 const LISTING_FIELDS = ['property_type_group', 'property_type', 'listing_type', 'total_floors', 'listing_floor', 'year_built', 'property_size', 'property_size_unit', 'bedrooms', 'beds', 'bathrooms', 'amenities', 'cancellation_policy', 'long_term_cancellation_policy'] as const
 /** The arrival guide: private columns only this module reads and writes. */
 const ARRIVAL_FIELDS = [...Object.keys(STAY_ARRIVAL_TEXT_LIMITS) as Array<keyof typeof STAY_ARRIVAL_TEXT_LIMITS>, 'check_in_method', 'checkout_instructions'] as const
-const LOCATION_FIELDS = ['address', 'latitude', 'longitude'] as const
+const LOCATION_FIELDS = ['address', 'latitude', 'longitude', 'stay_map_sharing'] as const
 const EDITABLE_HOME_FIELDS = ['name', 'description', 'published', 'timezone', 'check_in_time', 'check_out_time', 'max_guests', 'min_nights', 'base_price_minor',
   'assigned_member_id', 'assigned_team_id', ...LISTING_FIELDS, ...ARRIVAL_FIELDS, ...LOCATION_FIELDS] as const
 
@@ -570,6 +572,9 @@ function locationPatch(body: Record<string, unknown>): UpdateLocationInput {
   }
   if ('latitude' in body) patch.latitude = body.latitude as number | null
   if ('longitude' in body) patch.longitude = body.longitude as number | null
+  if ('stay_map_sharing' in body) {
+    try { patch.stay_map_sharing = parseStayMapSharing(body.stay_map_sharing) } catch (error) { fail(422, 'INVALID_DETAIL', error instanceof Error ? error.message : 'Invalid location sharing', 'stay_map_sharing') }
+  }
   const pin = coordinatesFailure(patch)
   if (pin) fail(422, 'INVALID_DETAIL', pin.error, pin.field)
   return patch
@@ -1292,28 +1297,37 @@ export interface GuestStay {
   /** The business the stay is with: a business's site shows only its own. */
   organization_id: string
   stay: StayDetail
-  home: { name: string; organization_name: string; check_in_time: string; check_out_time: string; image_url: string | null }
+  home: { name: string; organization_name: string; check_in_time: string; check_out_time: string; image_url: string | null; location: { address: PostalAddress | null; latitude: number | null; longitude: number | null; maps_url: string | null } | null }
   /** Null once the stay is cancelled, or for a stay not paid on the site. */
   cancellation: StayCancellationQuote | null
 }
 
 /** The account's stay by its activity ID: its conversation's ID, or the stay's own when it has none. */
 export async function readGuestStay(db: DbClient, buyerUserId: string, activityId: string): Promise<GuestStay> {
-  const owned = await queryFirst<{ id: string; organization_id: string; product_id: string; status: string; name: string; organization_name: string; check_in_time: string; check_out_time: string; paid_online: number }>(db, `
-    SELECT s.id, s.organization_id, s.product_id, s.status, p.name, o.name AS organization_name, c.check_in_time, c.check_out_time,
+  const owned = await queryFirst<{ id: string; organization_id: string; product_id: string; status: string; name: string; organization_name: string; check_in_time: string; check_out_time: string; address: string | null; latitude: number | null; longitude: number | null; maps_url: string | null; paid_online: number }>(db, `
+    SELECT s.id, s.organization_id, s.product_id, s.status, p.name, o.name AS organization_name, c.check_in_time, c.check_out_time, l.address, l.latitude, l.longitude, l.maps_url,
            EXISTS (SELECT 1 FROM payments WHERE organization_id = s.organization_id AND subject_type = 'stay' AND subject_id = s.id AND captured_amount > 0) AS paid_online
       FROM stays s JOIN products p ON p.organization_id = s.organization_id AND p.id = s.product_id
       JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
       JOIN organization o ON o.id = s.organization_id
+      JOIN business_locations l ON l.organization_id = c.organization_id AND l.id = c.location_id
      WHERE COALESCE(s.request_id, s.id) = ? AND s.user_id = ? AND s.owner = 'app'`, [activityId, buyerUserId])
   if (!owned) fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'stay_id')
   const [stay, pictures] = await Promise.all([
     getStay(db, { organizationId: owned.organization_id, actorId: buyerUserId, manage: true }, owned.id),
     loadOwnerPictures(db, owned.organization_id, 'product', [owned.product_id]),
   ])
-  const cancellation = owned.status !== 'cancelled' && owned.paid_online === 1
+  if (stay.user_id !== buyerUserId || stay.owner !== 'app') fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'stay_id')
+  const cancellation = stay.status !== 'cancelled' && owned.paid_online === 1
     ? (await guestStayCancellation(db, owned.organization_id, owned.id, buyerUserId, new Date().toISOString())).quote : null
-  return { organization_id: owned.organization_id, stay, home: { name: owned.name, organization_name: owned.organization_name, check_in_time: owned.check_in_time, check_out_time: owned.check_out_time, image_url: pictures.get(owned.product_id)?.imageUrl ?? null }, cancellation }
+  const pinFailure = stay.status === 'confirmed' ? coordinatesFailure(owned) : null
+  if (pinFailure) fail(500, 'INVALID_STORED_LOCATION', pinFailure.error, pinFailure.field)
+  const address = stay.status === 'confirmed' ? parsePostalAddress(owned.address) : null
+  const location = stay.status === 'confirmed' ? {
+    address, latitude: owned.latitude, longitude: owned.longitude,
+    maps_url: calculateMapUrl({ title: '', address, latitude: owned.latitude, longitude: owned.longitude, maps_url: owned.maps_url }),
+  } : null
+  return { organization_id: owned.organization_id, stay, home: { name: owned.name, organization_name: owned.organization_name, check_in_time: owned.check_in_time, check_out_time: owned.check_out_time, image_url: pictures.get(owned.product_id)?.imageUrl ?? null, location }, cancellation }
 }
 
 /**

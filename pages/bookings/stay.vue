@@ -23,6 +23,11 @@
       <template #subtitle>
         {{ receiptDescription }}
       </template>
+      <template v-if="guestStay.home.location?.maps_url" #actions>
+        <TenantButton :href="guestStay.home.location.maps_url" variant="outline" target="_blank" rel="noopener noreferrer">
+          {{ t('saya.experience_detail.open_in_maps') }}
+        </TenantButton>
+      </template>
     </BookingConfirmation>
 
     <div v-else class="mx-auto max-w-xl px-4 pt-24 pb-24 text-center sm:px-6 lg:px-8">
@@ -36,11 +41,12 @@
 </template>
 
 <script setup lang="ts">
-// A stay paid on this site, confirmed here as a visit is: by the link that names and signs it.
+// The guest's own stay, opened by the confirmation link that names and signs it.
 import BookingConfirmation from '~/components/booking/BookingConfirmation.vue'
 import { bookedPolicyTerms } from '~/shared/stay-cancellation'
 import { paymentMoney } from '~/shared/payment-display'
 import { formatCalendarDate, formatTime } from '~/utils/timezone'
+import { formatPostalAddress } from '~/utils/postal-address'
 import { isRecord, publicApiRequest } from '~/utils/api-clients'
 import type { GuestStay } from '~/server/domain/stays'
 
@@ -55,6 +61,7 @@ const copy = computed(() => getVerticalCopy(organization.vertical, locale.value)
 
 const isGuestStay = (value: unknown): value is GuestStay => isRecord(value) && typeof value.organization_id === 'string' && isRecord(value.stay) && isRecord(value.home)
   && typeof value.stay.check_in_date === 'string' && typeof value.stay.check_out_date === 'string' && typeof value.home.name === 'string'
+  && (value.home.location === null || isRecord(value.home.location))
 const guestStay = ref<GuestStay | null>(null)
 const pending = ref(true)
 const loadError = ref<string | null>(null)
@@ -92,6 +99,7 @@ const receiptRows = computed(() => {
     { label: t('stay.nights'), value: String(nights) },
     { label: t('stay.guests'), value: String(stay.adults + stay.children) },
     { label: t('payment.paid'), value: paymentMoney(stay.paid_minor, stay.currency) },
+    ...(home.location?.address ? [{ label: t('saya.location.address'), value: formatPostalAddress(home.location.address), wide: true }] : []),
   ]
 })
 

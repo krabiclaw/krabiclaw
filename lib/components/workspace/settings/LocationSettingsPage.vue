@@ -28,8 +28,10 @@ import { parseOpeningHours, parseSpecialHours, type OpeningHours, type SpecialHo
 import type { Ref } from 'vue'
 import type { LocationReservationConfig, LocationReservationConfigPatch } from '~/server/utils/reservations'
 import { getErrorMessage } from '~/utils/errors'
+import { coordinatesFailure } from '~/utils/location-map'
 import { parsePostalAddress, postalAddressFromAnswers, type PostalAddress } from '~/utils/postal-address'
 import { getPhoneCountry } from '~/utils/phone'
+import { parseStayMapSharing, STAY_MAP_SHARING_MODES, type StayMapSharing } from '~/shared/stay-listing'
 
 
 export interface BusinessLocation {
@@ -38,6 +40,9 @@ export interface BusinessLocation {
   updated_at: string
   title: string
   address: PostalAddress | null
+  stay_map_sharing: StayMapSharing
+  latitude: number | null
+  longitude: number | null
   phone: string | null
   email: string | null
   maps_url: string | null
@@ -64,7 +69,7 @@ export interface BusinessLocation {
  */
 export const HUB_KEYS = ['name', 'description', 'hours', 'address', 'contact', 'reservations'] as const
 export const SETTINGS_KEYS = ['assignment', 'status'] as const
-export type LocationEditorKey = typeof HUB_KEYS[number] | typeof SETTINGS_KEYS[number]
+export type LocationEditorKey = typeof HUB_KEYS[number] | typeof SETTINGS_KEYS[number] | 'stay-map-sharing'
 
 /** `/locations/new`: the location record before it exists. */
 export const NEW_LOCATION_SLUG = 'new'
@@ -171,6 +176,10 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       && typeof value.updated_at === 'string'
       && typeof value.title === 'string'
       && typeof value.status === 'string'
+      && STAY_MAP_SHARING_MODES.includes(value.stay_map_sharing as StayMapSharing)
+      && (value.latitude === null || typeof value.latitude === 'number')
+      && (value.longitude === null || typeof value.longitude === 'number')
+      && !coordinatesFailure({ latitude: value.latitude, longitude: value.longitude })
       && (value.address === null || isRecord(value.address))
       && isNullableString(value.phone)
       && isNullableString(value.google_place_id)
@@ -235,6 +244,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     sublocality: '',
     administrativeArea: '',
     postalCode: '',
+    stay_map_sharing: null as StayMapSharing | null,
     short_description: '',
     description: '',
     status: 'active',
@@ -275,6 +285,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     detailsForm.sublocality = loc.address?.sublocality ?? ''
     detailsForm.administrativeArea = loc.address?.administrativeArea ?? ''
     detailsForm.postalCode = loc.address?.postalCode ?? ''
+    detailsForm.stay_map_sharing = loc.stay_map_sharing
     detailsForm.short_description = loc.short_description ?? ''
     detailsForm.description = loc.description ?? ''
     hoursForm.value = { timezone: loc.timezone, hours: parseOpeningHours(loc.opening_hours), specialHours: parseSpecialHours(loc.special_hours) }
@@ -283,7 +294,8 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     detailsForm.assigned_team_id = loc.assigned_team_id
   }
 
-  const { data: schedulingMembers, error: schedulingMembersError } = await useMemberSchedulingList(() => organizationId)
+  const schedulingMembersResource = useMemberSchedulingList(() => organizationId)
+  const { data: schedulingMembers, error: schedulingMembersError } = schedulingMembersResource
   const assignmentSummary = computed(() => {
     if (!detailsForm.assigned_team_id && !detailsForm.assigned_member_id) return 'Administrators'
     if (schedulingMembersError.value) return 'Team members could not be loaded'
@@ -310,6 +322,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   function editorSignature(key: string | null): string {
     switch (key) {
       case 'name': return JSON.stringify(detailsForm.title)
+      case 'stay-map-sharing': return JSON.stringify(detailsForm.stay_map_sharing)
       case 'address': return JSON.stringify([detailsForm.addressLines, detailsForm.regionCode, detailsForm.locality, detailsForm.sublocality, detailsForm.administrativeArea, detailsForm.postalCode])
       case 'contact': return JSON.stringify([detailsForm.phone, detailsForm.email])
       case 'assignment': return JSON.stringify([detailsForm.assigned_member_id, detailsForm.assigned_team_id])
@@ -325,6 +338,9 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     if (key === 'contact') {
       if (detailsForm.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(detailsForm.email)) return 'Enter a valid email address.'
     }
+    if (key === 'stay-map-sharing') {
+      try { parseStayMapSharing(detailsForm.stay_map_sharing) } catch (error) { return getErrorMessage(error, 'Choose how to show this location.') }
+    }
     if (key === 'address') {
       try { addressFromForm() } catch (error) { return getErrorMessage(error, 'Enter a valid address.') }
     }
@@ -338,9 +354,10 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     return null
   })
   const dirty = computed(() => editorSignature(key) !== originalSignature.value)
+  const locationConcern = key === 'address' || key === 'stay-map-sharing'
   const saveDisabled = computed(() => isNew.value
     ? newLocation.saveDisabled.value || validationMessage.value !== null
-    : (!dirty.value && !(key === 'address' && editorError.value)) || validationMessage.value !== null || (key === 'address' && !location.value))
+    : (!dirty.value && !(locationConcern && editorError.value)) || validationMessage.value !== null || (locationConcern && !location.value))
 
 
   function resetDraft() {
@@ -354,6 +371,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   async function patchLocation(body: Record<string, unknown>) {
     const requestedLocationId = locationId.value
     const addressDraft = key === 'address' ? addressDraftKeys.map(field => detailsForm[field]) : null
+    const sharingDraft = key === 'stay-map-sharing' ? detailsForm.stay_map_sharing : undefined
     detailsSaving.value = true
     editorError.value = null
     try {
@@ -365,7 +383,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       const previousSlug = typeof route.params.locationSlug === 'string' ? route.params.locationSlug : null
       // Every editor of this location reads one shared resource; refreshing it
       // refills them all, so the index beside this leaf shows what was saved.
-      if (key === 'address') await refreshAddressReads(requestedLocationId)
+      if (locationConcern) await refreshLocationReads(requestedLocationId)
       else {
         await refreshLocationWorkspace()
         // The location's own index draws the same location from its own read.
@@ -379,10 +397,13 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       return true
     } catch (error) {
       const failures = [getErrorMessage(error, 'Failed to save location')]
-      if (addressDraft && locationId.value === requestedLocationId) {
-        try { await refreshAddressReads(requestedLocationId) } catch (readError) { failures.push(getErrorMessage(readError, 'Failed to reload location')) }
+      if ((addressDraft || sharingDraft !== undefined) && locationId.value === requestedLocationId) {
+        try { await refreshLocationReads(requestedLocationId) } catch (readError) { failures.push(getErrorMessage(readError, 'Failed to reload location')) }
         await nextTick()
-        if (locationId.value === requestedLocationId) addressDraftKeys.forEach((field, index) => { detailsForm[field] = addressDraft[index]! })
+        if (locationId.value === requestedLocationId) {
+          if (addressDraft) addressDraftKeys.forEach((field, index) => { detailsForm[field] = addressDraft[index]! })
+          if (sharingDraft !== undefined) detailsForm.stay_map_sharing = sharingDraft
+        }
       }
       editorError.value = [...new Set(failures)].join(' ')
       return false
@@ -391,7 +412,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     }
   }
 
-  async function refreshAddressReads(requestedLocationId: string | null) {
+  async function refreshLocationReads(requestedLocationId: string | null) {
     const orgSlug = String(route.params.orgSlug)
     const keys = [`dashboard-location-overview:${organizationId}:${requestedLocationId}`, `dashboard-org-locations:${orgSlug}`, `dashboard-org-locations:${orgSlug}:all`]
     const reads = await Promise.allSettled([refreshLocationWorkspace(), refreshNuxtData(keys)])
@@ -452,6 +473,9 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       await patchLocation({ title: detailsForm.title.trim() })
       return
     }
+    if (key === 'stay-map-sharing') {
+      return patchLocation({ stay_map_sharing: parseStayMapSharing(detailsForm.stay_map_sharing), expected_updated_at: location.value!.updated_at })
+    }
     if (key === 'address') {
       return patchLocation({ address: addressFromForm(), expected_updated_at: location.value!.updated_at })
     }
@@ -494,11 +518,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   }
 
   const locationSettingsKey = computed(() => `dashboard-location-settings-${organizationId}-${isNew.value ? NEW_LOCATION_SLUG : locationId.value}`)
-  const {
-    data: locationSettingsResource,
-    error: locationSettingsError,
-    refresh: refreshLocationWorkspace,
-  } = await useAsyncData<LocationSettingsResource | null>(locationSettingsKey, async () => {
+  const locationSettings = useAsyncData<LocationSettingsResource | null>(locationSettingsKey, async () => {
     if (isNew.value) return null
     const requestedLocationId = locationId.value
     if (!requestedLocationId) throw createError({ statusCode: 400, statusMessage: 'Location is required' })
@@ -516,6 +536,21 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   }, {
     watch: [locationId],
   })
+  const {
+    data: locationSettingsResource,
+    error: locationSettingsError,
+    refresh: refreshLocationWorkspace,
+  } = locationSettings
+  // A newly opened concern reads the current owner, even when its shared Nuxt
+  // resource succeeded in a previous leaf. Defer joins an initial read already
+  // in flight; both composables were created before awaiting so Nuxt disposes
+  // their subscriptions with this editor.
+  await Promise.all([
+    schedulingMembersResource,
+    import.meta.client && !nuxtApp.isHydrating && key !== null && !isNew.value
+      ? locationSettings.refresh({ dedupe: 'defer' })
+      : locationSettings,
+  ])
 
   // The location and its policy are what the request answered; only the drafts
   // are this editor's own, seeded from each answer.

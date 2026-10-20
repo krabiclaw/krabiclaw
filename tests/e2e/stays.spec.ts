@@ -2,10 +2,14 @@ import { expect, test, type APIRequestContext, type Page, type Request, type Web
 import sharp from 'sharp'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpRequest, publishOwnHostProfile } from './helpers/mcp'
+import { openTenantPage } from './helpers'
 import { isDashboardInvalidation, type DashboardInvalidation } from '../../shared/dashboard-invalidations'
 import type { Product } from '../../server/types/products'
+import type { GuestStay } from '../../server/domain/stays'
+import { createReplayableReservationCancelToken } from '../../server/utils/reservation-cancel-token'
 import type { PostalAddress } from '../../utils/postal-address'
 import { STAY_SAFETY_DETAIL_KEYS } from '../../shared/stay-safety'
+import type { PublicLocationDisclosure } from '../../types/public-location'
 
 // A host's place to stay, end to end through the surfaces that own it: the
 // one Product editor creates the home, MCP adds a stay, Today and the stay's
@@ -77,17 +81,24 @@ function previewLocators(page: Page) {
   return { previewLink, previewModal, previewIframe, preview: previewIframe.contentFrame() }
 }
 
-test('a host creates a place to stay, sees its stay on Today, and records payment and cancellation', async ({ page, baseURL }) => {
+test('a host creates a place to stay, sees its stay on Today, and records payment and cancellation', async ({ page, browser, baseURL }, testInfo) => {
   test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
-  const { request, headers, slug, call, api, productId } = await createStayHome(page, baseURL!)
+  const { request, headers, slug, organizationId, location, call, api, productId } = await createStayHome(page, baseURL!)
   await page.setViewportSize({ width: 390, height: 844 })
+
+  const exactAddress: PostalAddress = { regionCode: 'TH', addressLines: ['24 Guest Road'], sublocality: 'Ao Nang', locality: 'Krabi Town', administrativeArea: 'Krabi', postalCode: '81180' }
+  const addressSaved = await call('update_location', { location_id: location.id, address: exactAddress })
+  expect(addressSaved.error).toBeNull()
+  const mapPin = { latitude: 8.0326, longitude: 98.822 }
+  const pinSaved = await request.patch(api(`stay-homes/${productId}`), { headers, data: mapPin })
+  expect(pinSaved.status(), await pinSaved.text()).toBe(200)
 
   // A stay arriving today holds its nights; another on them is refused.
   const checkIn = localDay(0)
   const checkOut = localDay(2)
   const stay = await call<{ stay: { id: string; version: number; status: string } }>('create_stay', {
-    product_id: productId, check_in_date: checkIn, check_out_date: checkOut, adults: 2, guest_name: 'Ana', guest_surname: 'Silva', total_minor: 300_00, idempotency_key: `${slug}-a`,
+    product_id: productId, check_in_date: checkIn, check_out_date: checkOut, adults: 2, guest_name: 'Ana', guest_surname: 'Silva', guest_email: `ana-${slug}@playwright.example`, total_minor: 300_00, idempotency_key: `${slug}-a`,
   })
   expect(stay.error).toBeNull()
   const overlap = await call('create_stay', { product_id: productId, check_in_date: localDay(1), check_out_date: localDay(3), adults: 1, guest_name: 'Bo', total_minor: 100_00, idempotency_key: `${slug}-b` })
@@ -105,17 +116,92 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
   await page.getByRole('button', { name: 'Record payment' }).click()
   // The recorded row, not the method picker: it names the amount with its method.
   await expect(page.getByRole('listitem').filter({ hasText: /100\.00 · Cash/ })).toBeVisible()
-  const paid = await call<{ stay: { paid_minor: number; payment_status: string; payments: Array<{ method: string; amount_minor: number }> } }>('get_stay', { stay_id: stay.data!.stay.id })
+  const paid = await call<{ stay: { request_id: string | null; user_id: string | null; paid_minor: number; payment_status: string; payments: Array<{ method: string; amount_minor: number }> } }>('get_stay', { stay_id: stay.data!.stay.id })
+  expect(paid.error).toBeNull()
   expect(paid.data!.stay).toMatchObject({ paid_minor: 100_00, payment_status: 'partial', payments: [{ method: 'cash', amount_minor: 100_00 }] })
 
-  await page.getByRole('button', { name: 'Cancel stay' }).click()
-  await page.getByRole('dialog').getByRole('button', { name: 'Cancel stay' }).click()
-  await expect(page.getByText('Cancelled', { exact: true })).toBeVisible()
-  const calendar = await call<{ nights: Array<{ date: string; available: boolean }> }>('get_stay_calendar', { product_id: productId, from: checkIn, to: checkOut })
-  expect(calendar.data!.nights.map(night => night.available)).toEqual([true, true])
-  const cancelled = await call<{ stay: { status: string; cancelled_at: string | null } }>('get_stay', { stay_id: stay.data!.stay.id })
-  expect(cancelled.data!.stay.status).toBe('cancelled')
-  expect(cancelled.data!.stay.cancelled_at).toBeTruthy()
+  // The host hands the real conversation to the guest's own signed-in account.
+  // Its confirmation link signs the same activity ID the account opens.
+  const activityId = paid.data!.stay.request_id
+  expect(activityId).toBeTruthy()
+  expect(paid.data!.stay.user_id).toBeNull()
+  const invited = await request.post(api(`organizations/${organizationId}/guest-threads/${activityId}/invite`), { headers, data: {} })
+  expect(invited.status(), await invited.text()).toBe(201)
+  const invitation = await invited.json() as { url: string }
+  const inviteToken = new URL(invitation.url).pathname.split('/').at(-1)!
+  expect(inviteToken).toMatch(/^[A-Za-z0-9_-]{43}$/)
+  const signingSecret = process.env.EMAIL_REPLY_SECRET
+  if (!signingSecret) throw new Error('The local receipt signing secret is not configured')
+  const signed = await createReplayableReservationCancelToken(signingSecret, activityId!)
+  const guest = await browser.newContext()
+  try {
+    await loginAs(guest.request, baseURL!, 'user-e2e-buyer')
+    const claimed = await guest.request.post(`${baseURL}/api/guest-invites/${inviteToken}/claim`, { headers, data: {} })
+    expect(claimed.status(), await claimed.text()).toBe(200)
+    expect(await claimed.json()).toEqual({ thread_id: activityId, path: `/dashboard/account/messages/${activityId}` })
+    const accountApi = `${baseURL}/api/account/stays/${activityId}`
+    const receiptApi = `${baseURL}/api/public/guest-stays/${activityId}`
+    const receiptHeaders = { 'x-preview-tenant': slug, authorization: `Bearer ${signed.token}` }
+    const accountRead = await guest.request.get(accountApi)
+    expect(accountRead.status(), await accountRead.text()).toBe(200)
+    const mapUrl = 'https://maps.google.com/maps?q=8.0326%2C98.822'
+    const exactLocation = { address: exactAddress, ...mapPin, maps_url: mapUrl }
+    expect(await accountRead.json()).toMatchObject({ organization_id: organizationId, stay: { id: stay.data!.stay.id, status: 'confirmed', user_id: 'user-e2e-buyer' }, home: { location: exactLocation } })
+    const receiptRead = await guest.request.get(receiptApi, { headers: receiptHeaders })
+    expect(receiptRead.status(), await receiptRead.text()).toBe(200)
+    expect(await receiptRead.json()).toMatchObject({ stay: { id: stay.data!.stay.id, status: 'confirmed' }, home: { location: exactLocation } })
+
+    const receiptPage = await guest.newPage()
+    const receiptUrl = new URL('/bookings/stay', baseURL!)
+    receiptUrl.searchParams.set('id', activityId!)
+    receiptUrl.hash = signed.token
+    expect((await openTenantPage(receiptPage, receiptUrl.href, { 'x-preview-tenant': slug }))?.status()).toBe(200)
+    await expect(receiptPage.getByText('Your stay at Cliff Cabin is confirmed.', { exact: true })).toBeVisible()
+    const receiptHome = receiptPage.getByRole('region', { name: 'Cliff Cabin', exact: true })
+    const addressText = '24 Guest Road, Ao Nang, Krabi Town, Krabi, 81180'
+    const addressTerm = receiptHome.getByRole('term').filter({ hasText: /^Address$/ })
+    await expect(addressTerm).toBeVisible()
+    await expect(addressTerm.locator('..').getByRole('definition')).toHaveText(addressText)
+    await expect(receiptHome.getByRole('link', { name: 'Open in Maps', exact: true })).toHaveAttribute('href', mapUrl)
+    const accountPage = await guest.newPage()
+    expect((await accountPage.goto(`${baseURL}/dashboard/account/bookings/stay/${activityId}`))?.status()).toBe(200)
+    const accountHome = accountPage.locator('#dashboard-panel-stay-details')
+    await expect(accountHome.getByRole('heading', { name: "Where you'll be", exact: true })).toBeVisible()
+    await expect(accountHome.getByText(addressText, { exact: true })).toBeVisible()
+    await expect(accountHome.getByRole('link', { name: 'Open in Maps', exact: true })).toHaveAttribute('href', mapUrl)
+    await receiptPage.setViewportSize({ width: 390, height: 844 })
+    await receiptPage.screenshot({ path: testInfo.outputPath('confirmed-guest-location-receipt-mobile.png'), fullPage: true, animations: 'disabled' })
+    await accountPage.screenshot({ path: testInfo.outputPath('confirmed-guest-location-account-desktop.png'), fullPage: true, animations: 'disabled' })
+
+    await page.getByRole('button', { name: 'Cancel stay' }).click()
+    await page.getByRole('dialog').getByRole('button', { name: 'Cancel stay' }).click()
+    await expect(page.getByText('Cancelled', { exact: true })).toBeVisible()
+    const calendar = await call<{ nights: Array<{ date: string; available: boolean }> }>('get_stay_calendar', { product_id: productId, from: checkIn, to: checkOut })
+    expect(calendar.data!.nights.map(night => night.available)).toEqual([true, true])
+    const cancelled = await call<{ stay: { status: string; cancelled_at: string | null } }>('get_stay', { stay_id: stay.data!.stay.id })
+    expect(cancelled.data!.stay.status).toBe('cancelled')
+    expect(cancelled.data!.stay.cancelled_at).toBeTruthy()
+
+    // Cancellation withdraws the exact location from both independent reads
+    // and from the receipt and account screens that previously displayed it.
+    for (const response of await Promise.all([guest.request.get(accountApi), guest.request.get(receiptApi, { headers: receiptHeaders })])) {
+      expect(response.status(), await response.text()).toBe(200)
+      const cancelledGuest = await response.json() as GuestStay
+      expect(cancelledGuest.stay.status).toBe('cancelled')
+      expect(cancelledGuest.home.location).toBeNull()
+    }
+    await Promise.all([receiptPage.reload(), accountPage.reload()])
+    await expect(receiptPage.getByRole('heading', { name: 'Booking Cancelled', exact: true })).toBeVisible()
+    await expect(accountHome.getByText('Cancelled', { exact: true })).toBeVisible()
+    await expect(addressTerm).toHaveCount(0)
+    await expect(accountHome.getByRole('heading', { name: "Where you'll be", exact: true })).toHaveCount(0)
+    for (const guestPage of [receiptPage, accountPage]) {
+      await expect(guestPage.getByText(addressText, { exact: true })).toHaveCount(0)
+      await expect(guestPage.getByRole('link', { name: 'Open in Maps', exact: true })).toHaveCount(0)
+    }
+  } finally {
+    await guest.close()
+  }
 
   const later = [localDay(10), localDay(13)] as const
   const made = await request.post(api('stays'), { headers, data: { product_id: productId, check_in_date: later[0], check_out_date: later[1], adults: 2, guest_name: 'Kai', total_minor: 450_00, idempotency_key: `${slug}-native` } })
@@ -145,7 +231,7 @@ test('a host creates a place to stay, sees its stay on Today, and records paymen
 test('a host describes a place to stay through its focused editors and previews the saved guest page', async ({ page, browser, baseURL }, testInfo) => {
   test.setTimeout(60_000)
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Creates an organization; requires isolated local D1')
-  const { request, slug, organizationId, location, homeAddress, call, api, productId, unknownPropertyFacts, home } = await createStayHome(page, baseURL!)
+  const { request, headers, slug, organizationId, location, homeAddress, call, api, productId, unknownPropertyFacts, home } = await createStayHome(page, baseURL!)
 
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto(`/dashboard/${slug}/products`)
@@ -542,7 +628,7 @@ test('a host describes a place to stay through its focused editors and previews 
     check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1, assigned_member_id: null, assigned_team_id: null, channel: null,
     check_in_instructions: null, photos: [],
     // The editor's listing choices persist through the native home projection too.
-    description: listingDescription, published: false, address: homeAddress, latitude: null, longitude: null,
+    description: listingDescription, published: false, address: homeAddress, latitude: null, longitude: null, stay_map_sharing: 'general',
     ...propertyFacts, bedrooms: null, beds: null, bathrooms: null, amenities: ['dryer', 'wireless_internet'], cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
     check_in_method: null, wifi_network: null, wifi_password: null, directions: null, house_manual: null, checkout_instructions: [],
   }])
@@ -894,6 +980,106 @@ test('a host describes a place to stay through its focused editors and previews 
   await addressPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
   await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/location`)
   await page.setViewportSize({ width: 1440, height: 900 })
+
+  // The same saved Location owns its map choice. Draft previews change the
+  // point guests would see; Cancel never commits either switch position.
+  const mapPin = { latitude: 8.0326, longitude: 98.822 }
+  const pinSaved = await request.patch(api(`stay-homes/${productId}`), { headers, data: mapPin })
+  expect(pinSaved.status(), await pinSaved.text()).toBe(200)
+  const sharingLink = productLocation.getByRole('link', { name: /^Location sharing/ })
+  await expect(sharingLink).toContainText('Show general location')
+  await sharingLink.click()
+  const sharingPanel = page.locator('#dashboard-panel-location-sharing')
+  const specificLocation = sharingPanel.getByRole('switch', { name: "Show your home's specific location", exact: true })
+  await expect(specificLocation).not.toBeChecked()
+  const sharingDraftRequests: string[] = []
+  const trackSharingDraft = (outgoing: Request) => {
+    if (new URL(outgoing.url()).pathname === locationWritePath && outgoing.method() === 'PATCH') sharingDraftRequests.push(outgoing.url())
+  }
+  page.on('request', trackSharingDraft)
+  await specificLocation.click()
+  const specificPreview = sharingPanel.locator('iframe[title="Specific location preview"]')
+  await expect(specificPreview).toBeVisible()
+  expect(new URL((await specificPreview.getAttribute('src'))!).searchParams.get('q')).toBe('8.0326,98.822')
+  await expect(sharingPanel.locator('figcaption')).toHaveText('Your listing shows a precise pin. Your street address stays private.')
+  // Capture the provider's rendered map, rather than the iframe's empty initial document.
+  await expect(specificPreview.contentFrame().getByRole('region', { name: 'Map', exact: true })).toBeVisible()
+  await expect(specificPreview.contentFrame().getByRole('link', { name: 'Terms (opens in new tab)', exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('location-sharing-desktop.png'), animations: 'disabled' })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(specificLocation).toBeChecked()
+  await expect(specificPreview.contentFrame().getByRole('link', { name: 'Terms (opens in new tab)', exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('location-sharing-mobile.png'), animations: 'disabled' })
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await specificLocation.click()
+  const generalPreview = sharingPanel.locator('iframe[title="General location preview"]')
+  await expect(generalPreview).toBeVisible()
+  expect(new URL((await generalPreview.getAttribute('src'))!).searchParams.get('q')).not.toBe('8.0326,98.822')
+  await expect(sharingPanel.locator('figcaption')).toHaveText('Your listing shows the approximate area. Your exact pin and street address stay private.')
+  await specificLocation.click()
+  await expect(specificLocation).toBeChecked()
+  await sharingPanel.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/location`)
+  page.off('request', trackSharingDraft)
+  expect(sharingDraftRequests).toEqual([])
+  const cancelledSharing = await call<{ location: { stay_map_sharing: string; updated_at: string } }>('get_location', { location_id: location.id })
+  expect(cancelledSharing.error).toBeNull()
+  expect(cancelledSharing.data!.location.stay_map_sharing).toBe('general')
+  await sharingLink.click()
+  await expect(specificLocation).not.toBeChecked()
+  await specificLocation.click()
+  const specificSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === locationWritePath)
+  await sharingPanel.getByRole('button', { name: 'Save', exact: true }).click()
+  const specificResponse = await specificSaved
+  expect(specificResponse.status(), await specificResponse.text()).toBe(200)
+  expect(specificResponse.request().postDataJSON()).toEqual({ stay_map_sharing: 'specific', expected_updated_at: cancelledSharing.data!.location.updated_at })
+  await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/location`)
+  await expect(sharingLink).toContainText('Show specific location')
+  const savedSpecific = await call<{ location: { stay_map_sharing: string; updated_at: string; address: PostalAddress | null } }>('get_location', { location_id: location.id })
+  expect(savedSpecific.error).toBeNull()
+  expect(savedSpecific.data!.location).toMatchObject({ stay_map_sharing: 'specific', address: changedAddress })
+  const { previewLink: sharingView, previewModal: sharingModal, previewIframe: sharingFrame, preview: sharingGuest } = previewLocators(page)
+  await sharingView.click()
+  await expect(sharingGuest.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
+  await expect(sharingGuest.getByText('This map shows the specific location. You’ll receive the street address after your reservation is confirmed.', { exact: true })).toBeVisible()
+  await expect(sharingGuest.locator('article')).not.toContainText('12 Test Road')
+  const sharingPublicURL = new URL((await sharingFrame.getAttribute('src'))!, baseURL!)
+  sharingPublicURL.pathname = sharingPublicURL.pathname.replace(/^\/stays\//, '/api/public/stays/')
+  const specificPublic = await request.get(sharingPublicURL.href)
+  expect(specificPublic.status(), await specificPublic.text()).toBe(200)
+  const specificPublicData = await specificPublic.json() as { location: PublicLocationDisclosure }
+  expect(specificPublicData.location).toMatchObject({ address: null, maps_url: null, ...mapPin, stay_map_sharing: 'specific', public_area: { approximate: false, center: mapPin } })
+  expect(JSON.stringify(specificPublicData)).not.toContain('12 Test Road')
+  await sharingModal.getByRole('button', { name: 'Close', exact: true }).click()
+  await sharingLink.click()
+  await expect(specificLocation).toBeChecked()
+  await specificLocation.click()
+  const generalSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === locationWritePath)
+  await sharingPanel.getByRole('button', { name: 'Save', exact: true }).click()
+  const generalResponse = await generalSaved
+  expect(generalResponse.status(), await generalResponse.text()).toBe(200)
+  expect(generalResponse.request().postDataJSON()).toEqual({ stay_map_sharing: 'general', expected_updated_at: savedSpecific.data!.location.updated_at })
+  await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/location`)
+  await expect(sharingLink).toContainText('Show general location')
+  const savedGeneral = await call<{ location: { stay_map_sharing: string; address: PostalAddress | null } }>('get_location', { location_id: location.id })
+  expect(savedGeneral.error).toBeNull()
+  expect(savedGeneral.data!.location).toMatchObject({ stay_map_sharing: 'general', address: changedAddress })
+  const generalPublic = await request.get(sharingPublicURL.href)
+  expect(generalPublic.status(), await generalPublic.text()).toBe(200)
+  const generalPublicData = await generalPublic.json() as { location: PublicLocationDisclosure }
+  expect(generalPublicData.location).toMatchObject({ address: null, maps_url: null, latitude: null, longitude: null, stay_map_sharing: 'general', public_area: { approximate: true } })
+  expect(generalPublicData.location.public_area!.center).toEqual({ latitude: expect.any(Number), longitude: expect.any(Number) })
+  expect(generalPublicData.location.public_area!.center).not.toEqual(mapPin)
+  expect(JSON.stringify(generalPublicData)).not.toContain('12 Test Road')
+  expect(JSON.stringify(generalPublicData)).not.toContain('8.0326')
+  expect(JSON.stringify(generalPublicData)).not.toContain('98.822')
+  const generalGuestURL = new URL(sharingPublicURL)
+  generalGuestURL.pathname = generalGuestURL.pathname.replace(/^\/api\/public\/stays\//, '/stays/')
+  const generalHTML = await request.get(generalGuestURL.href)
+  expect(generalHTML.status(), await generalHTML.text()).toBe(200)
+  const generalMarkup = await generalHTML.text()
+  for (const privateFact of ['12 Test Road', '8.0326', '98.822']) expect(generalMarkup).not.toContain(privateFact)
+  expect(generalMarkup).not.toMatch(/"@type"\s*:\s*"GeoCoordinates"/)
   await productLocation.getByRole('link', { name: /^Location features/ }).click()
   const locationAmenities = page.locator('#dashboard-panel-product-amenities-add')
   await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/amenities/add`) && url.searchParams.get('amenity_group') === 'location')
@@ -979,6 +1165,8 @@ test('a host describes a place to stay through its focused editors and previews 
   await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/name`) && url.searchParams.get('location_id') === location.id && url.searchParams.get('editMode') === 'preview' && url.searchParams.get('previewViewport') === 'desktop')
   await expect(previewModal).toBeVisible()
   await expect(preview.getByRole('heading', { name: 'Cliff Cabin', level: 1, exact: true })).toBeVisible()
+  await expect(preview.getByText('This map shows the approximate area. You’ll receive the exact location and street address after your reservation is confirmed.', { exact: true })).toBeVisible()
+  await expect(preview.locator('article')).not.toContainText('12 Test Road')
   const previewURL = new URL((await previewIframe.getAttribute('src'))!, baseURL!)
   expect(previewURL.pathname).toMatch(/^\/stays\//)
   expect(previewURL.searchParams.get('preview_token')).toBeTruthy()

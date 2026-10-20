@@ -66,7 +66,7 @@ export default {
   },
   "stay": {
     "confirmed_title": "Your stay is confirmed",
-    "confirmed_message": "Your stay at {home} is booked and paid.",
+    "confirmed_message": "Your stay at {home} is confirmed.",
     "cancellation_policy": "Cancellation policy",
     "receipt_missing_description": "Your stay is in your confirmation email, and in your KrabiClaw account once you create one with the email you booked with.",
     "your_stay": "Your stay",
@@ -118,6 +118,8 @@ export default {
     "guests_maximum": "1 guest maximum | {count} guests maximum",
     "not_reported": "{item} not reported",
     "where_youll_be": "Where you'll be",
+    "general_location_notice": "This map shows the approximate area. You’ll receive the exact location and street address after your reservation is confirmed.",
+    "specific_location_notice": "This map shows the specific location. You’ll receive the street address after your reservation is confirmed.",
     "error_unavailable": "Some of those nights are no longer available. Choose other dates.",
     "error_min_nights": "Stays on these dates are at least {count} nights.",
     "error_max_nights": "Stays on these dates are at most {count} nights.",

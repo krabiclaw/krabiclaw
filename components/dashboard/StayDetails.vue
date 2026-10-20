@@ -32,6 +32,12 @@
         </div>
       </dl>
 
+      <section v-if="personalScope && home?.location && (guestAddress || home.location.maps_url)" class="mt-8">
+        <h2 class="text-xl font-semibold text-highlighted">{{ t('stay.where_youll_be') }}</h2>
+        <p v-if="guestAddress" class="mt-3 whitespace-pre-line break-words text-base text-muted">{{ guestAddress }}</p>
+        <UButton v-if="home.location.maps_url" :to="home.location.maps_url" target="_blank" rel="noopener noreferrer" class="mt-4" color="neutral" variant="outline" :label="t('saya.experience_detail.open_in_maps')" />
+      </section>
+
       <!-- The policy the guest booked under, in Airbnb's words: what their own cancellation returns. -->
       <template v-if="policy">
         <h2 class="mt-8 text-xl font-semibold text-highlighted">Cancellation policy</h2>
@@ -106,6 +112,7 @@ import { bookedPolicyTerms } from '~/shared/stay-cancellation'
 import { isCurrencyCode } from '~/shared/currencies'
 import { formatMinorAmount, majorAmountToMinor } from '~/shared/prices'
 import { formatCalendarDate, localDateAt } from '~/utils/timezone'
+import { formatPostalAddress } from '~/utils/postal-address'
 import { getErrorMessage } from '~/utils/errors'
 import { ApiClientError } from '~/utils/api-clients'
 
@@ -117,18 +124,21 @@ const props = defineProps<{
   personalScope?: boolean
 }>()
 const dashboardApi = useDashboardApi()
+const { t } = useI18n()
 const route = useRoute()
 const realtime = useDashboardInvalidations()
 const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 
 const isStay = (value: unknown): value is { stay: StayDetail; manage?: boolean } => isRecord(value) && isRecord(value.stay) && typeof value.stay.id === 'string'
 const isGuestStay = (value: unknown): value is GuestStay => isStay(value) && isRecord((value as Record<string, unknown>).home) && 'cancellation' in value
+  && ((value as GuestStay).home.location === null || isRecord((value as GuestStay).home.location))
 const { data, error, refresh } = await useAsyncData(`${props.personalScope ? 'account' : 'dashboard'}-stay:${props.stayId}`, (): Promise<{ stay: StayDetail; manage?: boolean } | GuestStay> => props.personalScope
   ? applicationFetch(`/api/account/stays/${encodeURIComponent(props.stayId)}`, { validate: isGuestStay })
   : dashboardApi(`/api/dashboard/stays/${encodeURIComponent(props.stayId)}`, { validate: isStay }))
 const stay = computed(() => data.value?.stay ?? null)
 const manage = computed(() => !props.personalScope && data.value !== null && 'manage' in data.value! && data.value.manage === true)
 const home = computed(() => data.value && 'home' in data.value ? data.value.home : null)
+const guestAddress = computed(() => home.value?.location?.address ? formatPostalAddress(home.value.location.address) : '')
 const cancellation = computed(() => data.value && 'cancellation' in data.value ? data.value.cancellation : null)
 const policy = computed(() => stay.value?.cancellation_policy ? bookedPolicyTerms(stay.value.cancellation_policy) : null)
 const paymentPath = computed(() => stay.value?.online_payment ? `/dashboard/${route.params.orgSlug}/bookings/payment/${encodeURIComponent(stay.value.online_payment.payment_id)}` : '')

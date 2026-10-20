@@ -1,6 +1,6 @@
-import { parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours'
 import { oncePerRequest } from '~/server/utils/request-scope'
-import { parseGoogleReviewMetadata } from '~/shared/google-review'
+import { publicLocationIsProtected } from '~/shared/location-sharing'
+import { projectPublicLocationReview, publicReviewLocationProtectedSql } from '~/server/utils/public-location-privacy'
 // Canonical route-capability-driven public page service.
 //   ?page=home|about|contact|location|reviews|photos|qa|...
 //   ?location=slug          scope content to a location
@@ -10,7 +10,6 @@ import { executeBatch, queryFirst, type BatchQuery } from "~/server/db";
 import { HTTPError, type H3Event } from 'nitro';
 import {  setHeader } from 'nitro/h3';
 import { cloudflareEnv } from "~/server/utils/api-response";
-import { calculateMapEmbedUrl } from "~/server/utils/google-places";
 import {
   buildPublicReviewAggregate,
   normalizePublicReviewAggregateRows,
@@ -44,7 +43,6 @@ import { normalizeVertical } from '~/utils/vertical-copy'
 import { resolvePublicTemplate } from '~/utils/template-registry'
 import { isPublicSourceRouteRoot } from '~/shared/public-locale-routes'
 import { templateRendersPageDocumentAt } from '~/shared/tenant-page-paths'
-import { parsePostalAddress } from '~/utils/postal-address'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { assertPublicOrganizationLanguageEntitlement } from '~/server/utils/localization'
 import {
@@ -110,6 +108,7 @@ interface ReviewRow {
   original_reference: string | null;
   google_review_metadata: string | null;
   created_at: string | null;
+  is_stay_location: number;
 }
 
 
@@ -391,7 +390,8 @@ async function loadPublicPageSource(
     idxReviews = push(
       `SELECT r.id, r.author_name, r.rating, r.content, r.created_at, r.source,
               r.original_review_date, r.original_reference, r.google_review_metadata,
-              r.owner_reply, r.owner_reply_at, r.location_id, bl.title AS location_title
+              r.owner_reply, r.owner_reply_at, r.location_id, bl.title AS location_title,
+              ${publicReviewLocationProtectedSql('r')} AS is_stay_location
        FROM reviews r
        LEFT JOIN business_locations bl ON bl.id = r.location_id
        WHERE r.organization_id = ? AND r.status = 'approved'
@@ -402,7 +402,8 @@ async function loadPublicPageSource(
 
   if (locationId && requestedDatasets.has("reviews"))
     idxLocReviews = push(
-      `SELECT r.id, r.author_name, r.rating, r.content, r.created_at, r.source, r.original_review_date, r.original_reference, r.google_review_metadata, r.owner_reply, r.owner_reply_at
+      `SELECT r.id, r.author_name, r.rating, r.content, r.created_at, r.source, r.original_review_date, r.original_reference, r.google_review_metadata, r.owner_reply, r.owner_reply_at,
+              ${publicReviewLocationProtectedSql('r')} AS is_stay_location
        FROM reviews r WHERE r.location_id = ? AND r.organization_id = ? AND r.status = 'approved'
        ORDER BY CASE WHEN r.source = 'google_places' THEN r.original_review_date ELSE r.created_at END DESC, r.id ASC LIMIT 3`,
       [locationId, organizationId],
@@ -411,7 +412,8 @@ async function loadPublicPageSource(
   if (locationId && requestedDatasets.has("reviews"))
     idxFullReviews = push(
       `SELECT r.id, r.author_name, r.rating, r.title, r.content, r.owner_reply, r.owner_reply_at,
-              r.source, r.created_at, r.original_review_date, r.original_reference, r.google_review_metadata
+              r.source, r.created_at, r.original_review_date, r.original_reference, r.google_review_metadata,
+              ${publicReviewLocationProtectedSql('r')} AS is_stay_location
        FROM reviews r WHERE r.location_id = ? AND r.organization_id = ? AND r.status = 'approved'
        ORDER BY CASE WHEN r.source = 'google_places' THEN r.original_review_date ELSE r.created_at END DESC, r.id ASC LIMIT 50`,
       [locationId, organizationId],
@@ -558,7 +560,7 @@ async function loadPublicPageSource(
   })
   const [tenantPage, sourceShell, canonical, sourceCollections, ownRepresentations] = await Promise.all([
     tenantPagePromise,
-    buildPublicShellPayload(db, organization, batchResults, shellIndexes, env),
+    buildPublicShellPayload(db, organization, batchResults, shellIndexes, env, undefined, { localizations: localizedLocale ? publicLocalizations : undefined }),
     includeProducts
       ? listOrganizationProducts(db, { organizationId: orgId, kind: page === 'experiences' ? 'experience' : page === 'menu' ? 'dish' : page === 'stays' ? 'stay' : undefined, publishedOnly: true, env }).then(products => products.map(publicProduct))
       : [],
@@ -592,7 +594,6 @@ async function loadPublicPageSource(
     const localizedOrganization = organizationLocalization
       ? projectExactLocalizedResource('organization', organization, organizationLocalization)
       : { ...organization, name: null, brand_description: null, seo_title: null, seo_description: null }
-    const locations = projectExactLocalizedCollection('business_location', sourceShell.locations, publicLocalizations)
     const {
       name: _sourceBrandName,
       brand_description: _sourceBrandDescription,
@@ -615,7 +616,6 @@ async function loadPublicPageSource(
         name: localizedOrganization.name,
         brand_description: localizedOrganization.brand_description,
       },
-      locations,
       config,
       googleMaps: {
         ...sourceShell.googleMaps,
@@ -668,52 +668,7 @@ async function loadPublicPageSource(
 
 
 
-  // Shape locations
-  const locations = (locRows.results ?? []).map((loc) => {
-    const publicUrl = loc.media_public_url as string | null;
-
-    const address = parsePostalAddress(loc.address)
-    const openingHours = loc.opening_hours as string | null
-    const specialHours = loc.special_hours as string | null
-    return {
-      id: loc.id,
-      slug: loc.slug,
-      title: loc.title,
-      address,
-      phone: loc.phone,
-      email: (loc.email as string | null) ?? null,
-      website_url: loc.website_url,
-      maps_url: loc.maps_url,
-      map_embed_url: calculateMapEmbedUrl({
-        title: loc.title as string,
-        maps_url: loc.maps_url as string | null,
-        latitude: loc.latitude as number | null,
-        longitude: loc.longitude as number | null,
-        address,
-      }),
-      latitude: loc.latitude,
-      longitude: loc.longitude,
-      opening_hours: parseOpeningHours(openingHours ? JSON.parse(openingHours) : null),
-      special_hours: parseSpecialHours(specialHours ? JSON.parse(specialHours) : null),
-      timezone: loc.timezone,
-      rating: loc.rating,
-      review_count: loc.review_count,
-      status: loc.status,
-      media: publicUrl ? [{
-        asset_id: loc.asset_id,
-        slot: 'hero',
-        public_url: publicUrl,
-        thumbnail_url: loc.media_thumbnail_url,
-        kind: loc.media_kind,
-      }] : [],
-      short_description: loc.short_description || null,
-      description: loc.description || null,
-      seo_title: (loc.seo_title as string | null) ?? null,
-      seo_description: (loc.seo_description as string | null) ?? null,
-      canonical_url: (loc.canonical_url as string | null) ?? null,
-      robots: (loc.robots as string | null) ?? null,
-    };
-  });
+  const locations = shell.locations
 
   const needsReservationPolicies = requestedDatasets.has('reservationPolicies');
   if (needsReservationPolicies && !locale && !sourceLocale) {
@@ -756,7 +711,7 @@ async function loadPublicPageSource(
     : null;
   const fullReviewList = fullReviewRows?.results ?? []
   const reviewMedia = await getMediaPlacements(db, { organizationId, ownerType: 'review', ownerIds: fullReviewList.map(review => String(review.id)) })
-  const fullReviews = fullReviewList.map(r => ({ ...r, google_review_metadata: parseGoogleReviewMetadata(r.google_review_metadata), media: reviewMedia.get(String(r.id)) ?? [] }));
+  const fullReviews = fullReviewList.map(({ is_stay_location, ...review }) => ({ ...projectPublicLocationReview(review, publicLocationIsProtected(is_stay_location)), media: reviewMedia.get(String(review.id)) ?? [] }));
   const aggregateLocation = locationForAggregate ? {
     rating: typeof locationForAggregate.rating === 'number' ? locationForAggregate.rating : null,
     review_count: typeof locationForAggregate.review_count === 'number' ? locationForAggregate.review_count : null,
@@ -820,8 +775,8 @@ async function loadPublicPageSource(
     tenant_page: tenantPage,
     products,
     collections,
-    locationReviews: (locationReviewRows?.results ?? []).map(review => ({ ...review, google_review_metadata: parseGoogleReviewMetadata(review.google_review_metadata) })),
-    globalReviews: needsGlobalReviews ? (reviewRows.results ?? []).map(review => ({ ...review, google_review_metadata: parseGoogleReviewMetadata(review.google_review_metadata) })) : [],
+    locationReviews: (locationReviewRows?.results ?? []).map(({ is_stay_location, ...review }) => projectPublicLocationReview(review, publicLocationIsProtected(is_stay_location))),
+    globalReviews: needsGlobalReviews ? (reviewRows.results ?? []).map(({ is_stay_location, ...review }) => projectPublicLocationReview(review, publicLocationIsProtected(is_stay_location))) : [],
     reviewsAggregate: requestedDatasets.has("reviews") ? reviewsAggregate : null,
     reviewsList: requestedDatasets.has("reviews") ? fullReviews : [],
     media: requestedDatasets.has("photos") ? media : [],

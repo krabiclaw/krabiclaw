@@ -4,6 +4,7 @@ import { openingHoursSchema, specialHoursSchema } from '~/shared/reservation-hou
 import type { McpToolRole } from '~/server/utils/mcp-auth'
 import { SUPPORTED_CURRENCIES } from '~/shared/currencies'
 import { RESERVATION_STATUSES } from '~/shared/bookings'
+import { STAY_MAP_SHARING_MODES } from '~/shared/stay-listing'
 import { INDEXED_MEDIA_PLACEMENT_SLOTS, MEDIA_PLACEMENT_SLOTS, isEditableMediaPlacement, isSingleMediaPlacement, type EditableMediaPlacementOwnerType } from '~/shared/media-placement-contract'
 
 export interface McpToolDefinition {
@@ -98,10 +99,13 @@ export const locationObject = {
     id: { type: 'string', minLength: 1 },
     slug: { type: 'string', minLength: 1 },
     title: { type: 'string' },
+    stay_map_sharing: { type: 'string', enum: [...STAY_MAP_SHARING_MODES], description: 'Public map precision for places to stay at this location; both choices keep their street address private.' },
     phone: { type: ['string', 'null'] },
     email: { type: ['string', 'null'] },
     website_url: { type: ['string', 'null'] },
     maps_url: { type: ['string', 'null'] },
+    latitude: { type: ['number', 'null'], minimum: -90, maximum: 90 },
+    longitude: { type: ['number', 'null'], minimum: -180, maximum: 180 },
     address: postalAddressSchema,
     opening_hours: openingHoursSchema,
     special_hours: specialHoursSchema,
@@ -133,7 +137,7 @@ export const locationObject = {
     created_at: { type: 'string' },
     updated_at: { type: 'string' },
   },
-  required: ['id', 'slug', 'title', 'status', 'timezone', 'created_at', 'updated_at', 'media'],
+  required: ['id', 'slug', 'title', 'stay_map_sharing', 'latitude', 'longitude', 'status', 'timezone', 'created_at', 'updated_at', 'media'],
 }
 
 export const locationMutationResultObject = {

@@ -92,6 +92,13 @@
       "when": 1792467300989,
       "tag": "0012_metronome_removed",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1792489298020,
+      "tag": "0013_location_stay_map_sharing",
+      "breakpoints": true
     }
   ]
 }

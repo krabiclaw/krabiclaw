@@ -43,6 +43,7 @@ export default defineHandler(async (event) => {
 
   const result = await updateLocation(
     db, organizationId, locationId, {
+      stay_map_sharing: body.stay_map_sharing as UpdateLocationInput['stay_map_sharing'],
       title: typeof body.title === 'string' ? body.title : undefined, slug: typeof body.slug === 'string' ? body.slug : undefined, address: body.address, phone: typeof body.phone === 'string' ? body.phone : body.phone === null ? null : undefined, email: typeof body.email === 'string' ? body.email : body.email === null ? null : undefined, website_url: typeof body.website_url === 'string' ? body.website_url : body.website_url === null ? null : undefined, maps_url: typeof body.maps_url === 'string' ? body.maps_url : body.maps_url === null ? null : undefined, google_review_url: typeof body.google_review_url === 'string' ? body.google_review_url : body.google_review_url === null ? null : undefined, opening_hours: body.opening_hours === undefined
         ? undefined
         : body.opening_hours === null

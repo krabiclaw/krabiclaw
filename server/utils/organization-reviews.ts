@@ -1,14 +1,14 @@
 import { HTTPError } from 'nitro'
-import { parseGoogleReviewMetadata } from '~/shared/google-review'
 import { executeBatch, queryAll, queryFirst, type DbClient } from '../db/index.ts'
 import { publicResourceCacheInvalidationQuery } from './public-resource-cache.ts'
 import { loadPublicSocialMedia } from './public-social-image.ts'
+import { publicLocationIsProtected } from '~/shared/location-sharing'
+import { projectPublicLocationReview, publicReviewLocationProtectedSql } from './public-location-privacy.ts'
 
 
-function publicReviewRow(row: Record<string, unknown>): Record<string, unknown> & { publication_authorized: boolean; verified: boolean } {
+function publicReviewRow(row: Record<string, unknown>, protectedLocation: boolean): Record<string, unknown> & { publication_authorized: boolean; verified: boolean } {
   return {
-    ...row,
-    google_review_metadata: parseGoogleReviewMetadata(row.google_review_metadata),
+    ...projectPublicLocationReview(row, protectedLocation),
     publication_authorized: Boolean(row.publication_authorized),
     verified: row.source === 'direct' && typeof row.review_request_id === 'string' && Boolean(row.review_request_id),
   }
@@ -19,12 +19,14 @@ export async function listOrganizationReviews(db: DbClient, organizationId: stri
     SELECT r.id, r.organization_id, r.location_id, r.author_name,
            r.rating, r.title, r.content, r.owner_reply, r.owner_reply_at, r.helpful_count, r.status, r.source,
            review_request_id, entered_by_user_id, collection_method, original_review_date,
-           original_reference, google_review_metadata, publication_authorized, created_at, updated_at
+           original_reference, google_review_metadata, publication_authorized, created_at, updated_at,
+           ${publicReviewLocationProtectedSql('r')} AS is_stay_location
     FROM reviews r
     WHERE r.organization_id = ? AND ${options.locationId ? 'r.location_id = ?' : 'r.location_id IS NULL'}${options.publishedOnly ? " AND r.status = 'approved'" : ''}
     ORDER BY CASE WHEN r.source = 'google_places' THEN r.original_review_date ELSE r.created_at END DESC, r.id ASC
   `, options.locationId ? [organizationId, options.locationId] : [organizationId])
-  return await attachReviewMedia(db, organizationId, rows.map(publicReviewRow))
+  return await attachReviewMedia(db, organizationId, rows.map(({ is_stay_location, ...row }) =>
+    publicReviewRow(row, options.publishedOnly === true && publicLocationIsProtected(is_stay_location))))
 }
 
 export async function attachReviewMedia<T extends Record<string, unknown>>(db: DbClient, organizationId: string, reviews: T[]) {

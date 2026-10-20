@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:e5289890b9187868b5861c9e302eb5d6f554498f32467336bbbff27d9a9148ae",
-  "documentationFingerprint": "sha256:c694e20f35cd4203326224d2933e82fbd555b823b0cac35d0bc9643046c5fb97",
+  "fingerprint": "sha256:c9b26b9b50963bac84a43aa4ffcea97796ffe81fd3287116951dce0f77f04d36",
+  "documentationFingerprint": "sha256:3101309bc9a5983e694ca088c0c7d476d6abe4566748c601fe501c7d4ef59922",
   "tools": [
     {
       "name": "add_organization_language",
@@ -16106,6 +16106,22 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "latitude": {
+                "maximum": 90,
+                "minimum": -90,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "longitude": {
+                "maximum": 180,
+                "minimum": -180,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
               "maps_url": {
                 "type": [
                   "string",
@@ -16431,6 +16447,14 @@
               "status": {
                 "type": "string"
               },
+              "stay_map_sharing": {
+                "description": "Public map precision for places to stay at this location; both choices keep their street address private.",
+                "enum": [
+                  "general",
+                  "specific"
+                ],
+                "type": "string"
+              },
               "timezone": {
                 "description": "Explicit IANA timezone identifier, such as Asia/Bangkok. Missing timezone is an error, never the browser timezone.",
                 "minLength": 1,
@@ -16453,6 +16477,9 @@
               "id",
               "slug",
               "title",
+              "stay_map_sharing",
+              "latitude",
+              "longitude",
               "status",
               "timezone",
               "created_at",
@@ -42498,6 +42525,14 @@
                 "description": "Whether the home is listed on the site.",
                 "type": "boolean"
               },
+              "stay_map_sharing": {
+                "description": "The shared Location map setting. The street address stays private in either mode; confirmed guests receive the exact Location.",
+                "enum": [
+                  "general",
+                  "specific"
+                ],
+                "type": "string"
+              },
               "timezone": {
                 "minLength": 1,
                 "type": "string"
@@ -42554,6 +42589,7 @@
               "address",
               "latitude",
               "longitude",
+              "stay_map_sharing",
               "property_type_group",
               "property_type",
               "listing_type",
@@ -43107,6 +43143,22 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "latitude": {
+                "maximum": 90,
+                "minimum": -90,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
+              "longitude": {
+                "maximum": 180,
+                "minimum": -180,
+                "type": [
+                  "number",
+                  "null"
+                ]
+              },
               "maps_url": {
                 "type": [
                   "string",
@@ -43432,6 +43484,14 @@
               "status": {
                 "type": "string"
               },
+              "stay_map_sharing": {
+                "description": "Public map precision for places to stay at this location; both choices keep their street address private.",
+                "enum": [
+                  "general",
+                  "specific"
+                ],
+                "type": "string"
+              },
               "timezone": {
                 "description": "Explicit IANA timezone identifier, such as Asia/Bangkok. Missing timezone is an error, never the browser timezone.",
                 "minLength": 1,
@@ -43454,6 +43514,9 @@
               "id",
               "slug",
               "title",
+              "stay_map_sharing",
+              "latitude",
+              "longitude",
               "status",
               "timezone",
               "created_at",
@@ -58883,6 +58946,14 @@
                 "description": "Whether the home is listed on the site.",
                 "type": "boolean"
               },
+              "stay_map_sharing": {
+                "description": "The shared Location map setting. The street address stays private in either mode; confirmed guests receive the exact Location.",
+                "enum": [
+                  "general",
+                  "specific"
+                ],
+                "type": "string"
+              },
               "timezone": {
                 "minLength": 1,
                 "type": "string"
@@ -58939,6 +59010,7 @@
               "address",
               "latitude",
               "longitude",
+              "stay_map_sharing",
               "property_type_group",
               "property_type",
               "listing_type",
@@ -98631,6 +98703,14 @@
                 "description": "Whether the home is listed on the site.",
                 "type": "boolean"
               },
+              "stay_map_sharing": {
+                "description": "The shared Location map setting. The street address stays private in either mode; confirmed guests receive the exact Location.",
+                "enum": [
+                  "general",
+                  "specific"
+                ],
+                "type": "string"
+              },
               "timezone": {
                 "minLength": 1,
                 "type": "string"
@@ -98687,6 +98767,7 @@
               "address",
               "latitude",
               "longitude",
+              "stay_map_sharing",
               "property_type_group",
               "property_type",
               "listing_type",
@@ -104877,7 +104958,7 @@
     {
       "name": "update_location",
       "title": "Update location",
-      "description": "Update a location's own details: its name, URL slug and descriptions, regular opening hours, temporary closures/special hours, and contact info. Renaming changes the location's slug, and so its public URL, unless slug is given in the same call. To change its hero media, call set_media with { owner_type: \"business_location\", owner_id: <location.id>, slot: \"hero\" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.",
+      "description": "Update a location's own details: its name, URL slug and descriptions, regular opening hours, temporary closures/special hours, contact info, and map sharing for its places to stay. Renaming changes the location's slug, and so its public URL, unless slug is given in the same call. To change its hero media, call set_media with { owner_type: \"business_location\", owner_id: <location.id>, slot: \"hero\" }. Only provided fields are changed. Returns the updated location; website details can change immediately. This does not change reservation capacity or a product’s session schedule.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -105211,6 +105292,14 @@
               "draft",
               "active",
               "inactive"
+            ],
+            "type": "string"
+          },
+          "stay_map_sharing": {
+            "description": "Public map precision for every place to stay at this location. General shows the area; specific shows its precise pin. Both keep the street address private until a confirmed booking. Omit to keep the saved choice.",
+            "enum": [
+              "general",
+              "specific"
             ],
             "type": "string"
           },
@@ -121223,6 +121312,14 @@
                 "description": "Whether the home is listed on the site.",
                 "type": "boolean"
               },
+              "stay_map_sharing": {
+                "description": "The shared Location map setting. The street address stays private in either mode; confirmed guests receive the exact Location.",
+                "enum": [
+                  "general",
+                  "specific"
+                ],
+                "type": "string"
+              },
               "timezone": {
                 "minLength": 1,
                 "type": "string"
@@ -121279,6 +121376,7 @@
               "address",
               "latitude",
               "longitude",
+              "stay_map_sharing",
               "property_type_group",
               "property_type",
               "listing_type",
@@ -121578,7 +121676,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
-        "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
+        "get_location": "sha256:935bc48ba06c95ca2404aaba6b2f625477b07c06e4bb783f4b48f60adee60bcc",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_product": "sha256:0576e4c4688ede0ada51ec95fb6ab19e554ada44ecdc2a2d4115bfa20aea20a3",
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
@@ -121621,7 +121719,7 @@
         "text": "Use get_workspace_context, list_products, get_product and list_product_booking_sessions to read the public offering, booking readiness and actual availability. Use list_locations, get_location and get_reservation_policy for location hours and table reservation setup. Identify what prevents guests from booking and ask for missing business facts. Use update_product with booking setup, set_product_booking_config, replace_product_weekly_schedule or update_reservation_policy for the changes the user requests. Read back readiness, available times and the public result."
       },
       "toolContracts": {
-        "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
+        "get_location": "sha256:935bc48ba06c95ca2404aaba6b2f625477b07c06e4bb783f4b48f60adee60bcc",
         "get_product": "sha256:0576e4c4688ede0ada51ec95fb6ab19e554ada44ecdc2a2d4115bfa20aea20a3",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
@@ -121682,7 +121780,7 @@
       "slug": "what-you-can-edit-through-chatgpt",
       "contentHash": "sha256:1aa095e046466e5231a1c6e06a28af5b90c19ad5afe3d229cc14e2560cf15d6c",
       "toolContracts": {
-        "create_location": "sha256:f819486a992ddd46918bea50c223e740523093e3f0a08e646bd777255d7513ce",
+        "create_location": "sha256:4429629ed87d336328d275ab17d4cb36caae241d3cc1ede22985d0a11979f23f",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_stay": "sha256:9a13594b951339411e59e4425f62d60e3056430eab9698c77c93572cfaf19d48",
