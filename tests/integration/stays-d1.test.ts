@@ -369,16 +369,16 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     assert.deepEqual(safetyProduct.stay?.amenities, ['smoke_detector'])
     assert.deepEqual(JSON.parse((await db.prepare('SELECT details_json FROM products WHERE id = ?').bind(cabin.id).first<string>('details_json'))!), { featured: true, ...safetyDetails })
     const beforeSafetyRefusals = await db.prepare('SELECT details_json FROM products WHERE id = ?').bind(cabin.id).first<string>('details_json')
-    for (const details of [
-      { exterior_security_cameras_details: 'C'.repeat(301) },
-      { special_safety_considerations: 'C'.repeat(301) },
-      { stairs_required: false },
-      { exterior_security_cameras: null },
-      { nearby_water_details: 'A canal crosses the garden.' },
-      { noise_decibel_monitors: 'yes' },
+    for (const { details, message } of [
+      { details: { exterior_security_cameras_details: 'C'.repeat(301) }, message: /^exterior_security_cameras_details must be at most 300 characters$/ },
+      { details: { special_safety_considerations: 'C'.repeat(301) }, message: /^special_safety_considerations must be at most 300 characters$/ },
+      { details: { stairs_required: false }, message: /^details\.stairs_required_details requires details\.stairs_required to be true$/ },
+      { details: { exterior_security_cameras: null }, message: /^details\.exterior_security_cameras_details requires details\.exterior_security_cameras to be true$/ },
+      { details: { nearby_water_details: 'A canal crosses the garden.' }, message: /^details\.nearby_water_details requires details\.nearby_water to be true$/ },
+      { details: { noise_decibel_monitors: 'yes' }, message: /^noise_decibel_monitors must be a boolean$/ },
     ]) {
       await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { details_mode: 'merge', details } }),
-        (error: unknown) => (error as { status: number }).status === 400)
+        (error: unknown) => (error as { status: number }).status === 400 && message.test((error as Error).message))
       assert.equal(await db.prepare('SELECT details_json FROM products WHERE id = ?').bind(cabin.id).first<string>('details_json'), beforeSafetyRefusals)
       assert.equal(await db.prepare('SELECT amenities FROM product_stay_configs WHERE product_id = ?').bind(cabin.id).first<string>('amenities'), '["smoke_detector"]')
     }
@@ -411,7 +411,7 @@ test('a place to stay is a Product at exactly one location, priced per night', {
       { details_mode: 'merge', details: { no_property_parking: true }, stay: { amenities: ['smoke_detector', 'paid_parking_on_premises'] } },
     ] satisfies UpdateProductInput[]) {
       await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch }),
-        (error: unknown) => (error as { status: number }).status === 400 && (error as Error).message.includes('No parking on the property'))
+        (error: unknown) => (error as { status: number }).status === 400 && /^Remove on-property parking amenities or change “No parking on the property” before saving\.$/.test((error as Error).message))
       assert.deepEqual(await db.prepare('SELECT p.details_json, c.amenities FROM products p JOIN product_stay_configs c ON c.product_id = p.id WHERE p.id = ?').bind(cabin.id).first(), beforeParking)
     }
     await updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: {
@@ -423,7 +423,7 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     const beforeParkingAmenities = await db.prepare('SELECT p.details_json, c.amenities FROM products p JOIN product_stay_configs c ON c.product_id = p.id WHERE p.id = ?').bind(cabin.id).first()
     for (const parking of ['free_parking', 'paid_parking_on_premises'] as const) {
       await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { amenities: ['smoke_detector', parking] } } }),
-        (error: unknown) => (error as { status: number }).status === 400)
+        (error: unknown) => (error as { status: number }).status === 400 && /^Remove on-property parking amenities or change “No parking on the property” before saving\.$/.test((error as Error).message))
       assert.deepEqual(await db.prepare('SELECT p.details_json, c.amenities FROM products p JOIN product_stay_configs c ON c.product_id = p.id WHERE p.id = ?').bind(cabin.id).first(), beforeParkingAmenities)
     }
   } finally {
