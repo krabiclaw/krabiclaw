@@ -61,11 +61,7 @@ async function markProvisioningFailed(db: D1Database, organizationId: string, ca
   return asError(cause)
 }
 
-// Registry-driven: the template (and therefore theme_id) a tenant gets is
-// derived from the same publicTemplateRegistry that already drives tenant
-// routing/rendering (utils/template-registry.ts) — this is the only place
-// provisioning decides a theme_id, so a future third template only needs a new
-// registry entry, not a second hardcoded vertical-to-theme switch here.
+// Every customer site gets the tenant theme id; its vertical decides its routes.
 function resolveThemeId(vertical: OrganizationVertical): string {
   return resolvePublicTemplate({ vertical }).themeId
 }
