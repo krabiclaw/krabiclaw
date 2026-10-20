@@ -292,8 +292,10 @@ async function main() {
     if (!productId) {
       const createRes = await mcp(headers, 'create_product', {
         name: area.name,
+        kind: 'service',
         description: area.description,
         slug: area.slug,
+        idempotency_key: `cedar-legal-practice-area-${area.slug}`,
       })
       const created = expectSuccess(`create_product ${area.name} succeeds`, createRes)?.product
       productId = created?.id
