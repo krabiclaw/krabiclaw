@@ -759,6 +759,27 @@ test('a host describes a place to stay through its focused editors and previews 
   await page.getByRole('tab', { name: 'Your space', exact: true }).click()
   await expect(page).toHaveURL(url => url.pathname.endsWith(`/products/${productId}/photo`) && !url.searchParams.has('guide'))
 
+  // One generic attribute owns only its own detail key. A newer safety answer
+  // must survive when this leaf saves the older Product it originally read.
+  await page.goto(`/dashboard/${slug}/products/${productId}/attributes/featured`)
+  const featuredEditor = page.locator('#dashboard-panel-product-attribute')
+  const featuredSwitch = featuredEditor.getByRole('switch', { name: 'Featured', exact: true })
+  await expect(featuredSwitch).toBeChecked()
+  await featuredSwitch.click()
+  await expect(featuredSwitch).not.toBeChecked()
+  const concurrentSafety = await call('update_product', { product_id: productId, details_mode: 'merge', details: { dangerous_animals: false } })
+  expect(concurrentSafety.error).toBeNull()
+  const featuredSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === productWritePath)
+  await featuredEditor.getByRole('button', { name: 'Save', exact: true }).click()
+  const featuredResponse = await featuredSaved
+  expect(featuredResponse.status(), await featuredResponse.text()).toBe(200)
+  expect(featuredResponse.request().postDataJSON().details_mode).toBe('merge')
+  expect(featuredResponse.request().postDataJSON().details).toEqual({ featured: false })
+  await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/attributes`)
+  const savedAttributeSafety = await call<{ product: Product }>('get_product', { product_id: productId })
+  expect(savedAttributeSafety.error).toBeNull()
+  expect(savedAttributeSafety.data!.product.details).toEqual({ ...safetyBefore.data!.product.details, ...safetyFacts, dangerous_animals: false, featured: false })
+
   // Preview is a URL-owned editor mode around the real guest page. It
   // preserves the open concern and authored draft while showing saved content.
   const titlePath = `/dashboard/${slug}/products/${productId}/name?location_id=${encodeURIComponent(location.id)}`
@@ -815,7 +836,7 @@ test('a host describes a place to stay through its focused editors and previews 
     check_in_time: '16:00', check_out_time: '10:00', max_guests: 6, min_nights: 1,
     cancellation_policy: 'flexible', long_term_cancellation_policy: 'firm',
   } })
-  expect(publicProduct.details).toEqual(savedSafety.data!.product.details)
+  expect(publicProduct.details).toEqual(savedAttributeSafety.data!.product.details)
   const guestSafety = preview.getByRole('heading', { name: 'Safety & property', exact: true }).locator('..').getByRole('listitem')
   await expect(guestSafety).toHaveText(['Carbon monoxide alarm not reported', 'Smoke alarm', ...authoredSafetyLines])
   for (const line of authoredSafetyLines) await expect(preview.getByText(line, { exact: true })).toHaveCount(1)

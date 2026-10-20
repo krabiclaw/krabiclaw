@@ -1290,6 +1290,13 @@ function payload(concern?: ProductConcern) {
   // claim that it has none, which is not a product.
   const describesCatalog = catalog.variants.length > 0
   const changed = JSON.stringify(catalog) !== loadedCatalogShape.value
+  const attribute = editorKey.value === 'attributes' ? definitions.value.find(field => field.id === route.params.definitionId
+    && !(STAY_DESCRIPTION_DETAIL_KEYS as readonly string[]).includes(field.key)
+    && !(STAY_HOUSE_RULE_DETAIL_KEYS as readonly string[]).includes(field.key)
+    && !(STAY_SAFETY_DETAIL_KEYS as readonly string[]).includes(field.key)) : undefined
+  const detailKey = attribute ? productDetailKey(attribute)
+    : editorKey.value === 'description' && form.kind === 'stay' ? STAY_DESCRIPTION_DETAIL_KEYS.find(key => key === route.params.section)
+      : editorKey.value === 'price' && form.kind !== 'stay' && form.variants.length === 1 ? PRICING_NOTE_HANDLE : undefined
   return {
     kind: assertProductKind(form.kind),
     name: form.name.trim(),
@@ -1302,7 +1309,7 @@ function payload(concern?: ProductConcern) {
         variants: catalog.variants.map(variant => ({ ...variant, prices_mode: 'replace' })),
       } : {}),
     } : {}),
-    details: form.details,
+    ...(isNew.value ? { details: form.details } : detailKey ? { details_mode: 'merge', details: { [detailKey]: form.details[detailKey] ?? null } } : {}),
     active: form.active,
     // Stay settings are restated only when they are what is being saved, so a
     // description save never writes back settings someone else changed, and
