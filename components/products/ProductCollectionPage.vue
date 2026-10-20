@@ -42,7 +42,7 @@
         :location-slug="currentLocation.slug"
         :active="subNavTab"
       />
-      <header class="mx-auto max-w-7xl px-4 pb-10 pt-16 sm:px-6 lg:px-8">
+      <header v-if="title" class="mx-auto max-w-7xl px-4 pb-10 pt-16 sm:px-6 lg:px-8">
         <div class="max-w-2xl">
           <p v-if="collectionLabel" class="saya-kicker mb-4">{{ collectionLabel }}</p>
           <h1 class="saya-display-md text-default">{{ title }}</h1>
@@ -276,7 +276,8 @@ const props = defineProps<{
   currency: CurrencyCode
   presentation: ProductPresentation
   vertical: string
-  title: string
+  /** The page's heading. A page whose own hero names it passes none. */
+  title?: string
   brandName: string
 }>()
 

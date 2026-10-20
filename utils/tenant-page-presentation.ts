@@ -1,8 +1,9 @@
-// Which component a template draws a block with.
+// Which component draws a block.
 //
 // A page is an ordered list of typed blocks. The block says what the content
-// *is* — a hero, a feature grid, a question set — and the template says how it
-// looks.
+// *is* — a hero, a feature grid, a question set. KrabiClaw's own marketing site
+// draws them one way; every customer site draws them the same other way, and
+// its look comes from its site settings, not from its vertical.
 //
 // Absence of an entry means the renderer's generic markup.
 
@@ -64,7 +65,7 @@ const PRESENTATIONS: Readonly<Record<string, BlockPresentation>> = {
   'platform:language_reach': PlatformLanguageReach,
   'platform:steps': PlatformSteps,
 
-  // Canonical tenant presentations available across all tenant templates and presets.
+  // Every customer site draws its blocks the same way, whatever its vertical.
   'tenant:hero': TenantHeroBlock,
   'tenant:product_grid': TenantProductGridBlock,
   'tenant:location_grid': TenantLocationsGridBlock,
@@ -84,11 +85,6 @@ const PRESENTATIONS: Readonly<Record<string, BlockPresentation>> = {
   'tenant:button_group': TenantButtonGroupBlock,
   'tenant:contact_form': TenantContactFormBlock,
   'tenant:social_posts': feedOrBlock(SocialPosts),
-
-  // Blawby / professional services specialization: location and product grids
-  // render as practice-area / service style cards using TenantServicesBlock.
-  'blawby:location_grid': TenantServicesBlock,
-  'blawby:product_grid': TenantServicesBlock,
 }
 
 /** The component this template draws this block with, or null for the default. */
@@ -96,8 +92,5 @@ export function tenantPageBlockPresentation(
   template: PublicTemplateSlug,
   type: TenantPageBlockType,
 ): BlockPresentation | null {
-  if (template === 'platform') {
-    return PRESENTATIONS[`platform:${type}`] ?? null
-  }
-  return PRESENTATIONS[`${template}:${type}`] ?? PRESENTATIONS[`tenant:${type}`] ?? null
+  return PRESENTATIONS[`${template === 'platform' ? 'platform' : 'tenant'}:${type}`] ?? null
 }
