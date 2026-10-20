@@ -5,6 +5,7 @@
  * Validates the real-world flow an attorney/law firm or AI agent executes using
  * KrabiClaw's canonical MCP tools.
  */
+import { createHash } from 'node:crypto'
 import { authHeaders, BASE_URL, expectValue, fail, mcp, pass, run, toolData } from './utils/mcp-check.mjs'
 
 const CEDAR_ORG_ID = '5WebMejsoVLyZLHC29wHH5GbQx1jlvCd'
@@ -309,12 +310,16 @@ async function main() {
       const variant = product?.variants?.[0]
       expectValue(`${area.name} has a variant`, Boolean(variant?.id), product)
       const price = variant.prices.find(entry => entry.currency === 'USD' && entry.location_id === null)
-      const bookingRes = await mcp(headers, 'update_product', {
+      const consultation = {
         product_id: productId,
         unit_label: 'consultation',
         variants: [{ id: variant.id, prices: [{ ...(price ? { id: price.id } : {}), currency: 'USD', unit_amount: area.unit_amount, type: 'one_time', location_id: null }] }],
         booking: { location_id: null, duration_minutes: 30, default_capacity: 1, scheduling_mode: 'provider', assigned_member_id: area.host, assigned_team_id: null, confirmation_mode: 'instant', online_payment_required: true },
-        idempotency_key: `cedar-legal-consultation-${area.slug}`,
+      }
+      // The key names this exact request, so a changed consultation is a new write rather than a refused replay.
+      const bookingRes = await mcp(headers, 'update_product', {
+        ...consultation,
+        idempotency_key: `cedar-legal-consultation-${createHash('sha256').update(JSON.stringify(consultation)).digest('hex').slice(0, 32)}`,
       })
       const booked = expectSuccess(`update_product booking ${area.name} succeeds`, bookingRes)?.product
       expectValue(`${area.name} is bookable online`, booked?.booking?.held_online === true && booked?.booking_readiness?.ready === true, booked)
@@ -329,8 +334,16 @@ async function main() {
     }
   }
 
+  // A practice books the area it needs; there is no separate free intake. An
+  // earlier run of this demo created one, and it stays withheld.
+  const legacyIntake = existingProducts.find(p => p.name === 'Initial Legal Consultation')
+  if (legacyIntake) {
+    const withheld = await mcp(headers, 'set_product_publication', { product_id: legacyIntake.id, published: false })
+    expectSuccess('set_product_publication withholds the legacy free intake', withheld)
+  }
+
   // 6. Canonical Pages & Blocks
-  console.log('\n── Step 6: Update Canonical Legal Pages, Shield Dividers & Block Layouts ──')
+  console.log('\n── Step 6: Update Canonical Legal Pages, Shield Heroes & Block Layouts ──')
 
   const pagesListRes = await mcp(headers, 'list_site_pages')
   const pages = expectSuccess('list_site_pages succeeds', pagesListRes)?.pages || []

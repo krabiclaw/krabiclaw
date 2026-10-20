@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:0ddeebd50cd56fb41f5919f6ff237859e8047d2c4b64de8899ee9d4172da61af",
-  "documentationFingerprint": "sha256:907b5e14c2614a6b3b7c9ac5a72c392cb75c7d227268c0730cf73b63ab9428fa",
+  "fingerprint": "sha256:6e83c7133ea90af3a91d4fae0a8bcd1287ea13fa38923b04cec4c6a9e1d4051c",
+  "documentationFingerprint": "sha256:0ede6a08109776ad6674ec922ed5fda6e42ed69191f309547d8675722ebbce53",
   "tools": [
     {
       "name": "add_organization_language",
@@ -209,7 +209,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -2071,7 +2070,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -6020,7 +6018,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -10077,7 +10074,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -11386,7 +11382,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -17002,7 +16997,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -23485,7 +23479,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -27154,7 +27147,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -31900,7 +31892,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -36691,7 +36682,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -48963,7 +48953,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -53144,7 +53133,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -64683,7 +64671,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -68902,7 +68889,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -72900,7 +72886,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -80585,7 +80570,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -83224,7 +83208,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -83568,7 +83551,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -85381,7 +85363,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -90318,7 +90299,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -90651,7 +90631,6 @@
                             "enum": [
                               "media",
                               "gallery",
-                              "background",
                               "featured",
                               "decoration",
                               "parallax_sky",
@@ -91951,7 +91930,6 @@
                       {
                         "enum": [
                           "media",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -92356,7 +92334,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -97656,7 +97633,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -98978,7 +98954,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -110019,7 +109994,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -113695,7 +113669,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -118758,7 +118731,7 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:034dd10d3eb285cb0d967ed4797c2e04b10c2eb9da9bad7b47b5aa42b352f99e",
+        "create_product": "sha256:532068c75b1fc8e29832f1fb37e98543b39c97667d69d0ebd557ec4648d91c21",
         "get_product": "sha256:b9e0be9c62e11923243eb43b719fe76e3b8b022e719a56ea9654915300dee8cd",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
@@ -118813,14 +118786,14 @@
         "text": "Create a bookable offering from: <description> Use get_workspace_context, list_locations and list_products to resolve the business, existing offerings and explicit location or online scope. Ask for missing price, duration, capacity, actual start times, confirmation and payment choices. Use create_product with booking setup and one idempotency key. Preserve the supplied facts and attach supplied media to the returned product ID. Use get_product to read booking_readiness and list_product_booking_sessions with a concrete date range to verify actual availability. Use save_media_attachment for supplied files or attach_media for existing assets. Open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
-        "create_product": "sha256:034dd10d3eb285cb0d967ed4797c2e04b10c2eb9da9bad7b47b5aa42b352f99e",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
+        "create_product": "sha256:532068c75b1fc8e29832f1fb37e98543b39c97667d69d0ebd557ec4648d91c21",
         "get_product": "sha256:b9e0be9c62e11923243eb43b719fe76e3b8b022e719a56ea9654915300dee8cd",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
-        "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871"
+        "save_media_attachment": "sha256:fd9306458e6552d6a787cd03ff48b1887c648a210fbbd5acc03c7896deaf6a8b"
       }
     },
     {
@@ -118856,15 +118829,15 @@
         "text": "Use get_workspace_context, list_site_pages and get_site_page to read the selected business's homepage, and get_organization_media_assets for its media. Open its public preview and recommend the most useful improvements in plain language. Apply requested copy changes with update_site_page; use set_media for one image or attach_media, remove_media and reorder_media for a gallery. Read back the page and public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "get_site_page": "sha256:768684cb01606f5caa64729e1b549e70423d4a046c64e64673ea18570effafa8",
+        "get_site_page": "sha256:8569f8e685ad9d6671d2b9908ed29c0b34d5ac0c8f5331435c460d21f41a8ed7",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
-        "remove_media": "sha256:a59343b7aaf1b361ba9e70d9bcfff4a454baa3d618af3fc93f92188f9cb3893c",
-        "reorder_media": "sha256:0b9419a7d891bcf9f75032994fcf329651d3c888a0409356ad4ae7b94a199e25",
-        "set_media": "sha256:c5eab766610db3a84aaf33f9affe011d098083de2b94debf8d15d15da6d3a930",
-        "update_site_page": "sha256:06077f4676ffb10596fe094b8a849955484ac3a2175eae3529cad037eb39645a"
+        "remove_media": "sha256:227bb1165062216319751f5570613385e782b0a209e74ed1a47f9022eee1cc0b",
+        "reorder_media": "sha256:0e8083651c6b2bcb7484e01be67d001c8b829ce6f4f3b5e4b2f652c9f83dc829",
+        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
+        "update_site_page": "sha256:f7c8737677adc7423ceca224e011d8f2542b7b0f793fa5933e4a86be6f947d0b"
       }
     },
     {
@@ -118876,14 +118849,14 @@
         "text": "Inspect the supplied photos and use get_workspace_context plus the relevant get_site_page, get_location, get_product or get_post read to resolve the intended owner and placement. Ask only about an ambiguous destination. Use save_media_attachment with a stable idempotency_key and the intended placement for each attachment; retries reuse that key. For an existing asset use set_media or attach_media. Read back the owner and open the public result before reporting placement."
       },
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_product": "sha256:b9e0be9c62e11923243eb43b719fe76e3b8b022e719a56ea9654915300dee8cd",
-        "get_site_page": "sha256:768684cb01606f5caa64729e1b549e70423d4a046c64e64673ea18570effafa8",
+        "get_site_page": "sha256:8569f8e685ad9d6671d2b9908ed29c0b34d5ac0c8f5331435c460d21f41a8ed7",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
-        "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871",
-        "set_media": "sha256:c5eab766610db3a84aaf33f9affe011d098083de2b94debf8d15d15da6d3a930"
+        "save_media_attachment": "sha256:fd9306458e6552d6a787cd03ff48b1887c648a210fbbd5acc03c7896deaf6a8b",
+        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f"
       }
     },
     {
@@ -118895,9 +118868,9 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:034dd10d3eb285cb0d967ed4797c2e04b10c2eb9da9bad7b47b5aa42b352f99e",
+        "create_product": "sha256:532068c75b1fc8e29832f1fb37e98543b39c97667d69d0ebd557ec4648d91c21",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
-        "get_site_page": "sha256:768684cb01606f5caa64729e1b549e70423d4a046c64e64673ea18570effafa8",
+        "get_site_page": "sha256:8569f8e685ad9d6671d2b9908ed29c0b34d5ac0c8f5331435c460d21f41a8ed7",
         "get_website_draft": "sha256:fccf7d7281ba30d1e79163929e61abec1893c2e910460c4068364a65784a7bac",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -118908,7 +118881,7 @@
         "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
         "update_menu": "sha256:4ab27009a3a126aed4b328f7f1db8b4cc7e321f720da7e5a16d82f8badb202d8",
         "update_organization_settings": "sha256:24a6bf50d775f6612d779e0c377ba24aaf36b882fa18458c5a25e7c38e908e86",
-        "update_site_page": "sha256:06077f4676ffb10596fe094b8a849955484ac3a2175eae3529cad037eb39645a"
+        "update_site_page": "sha256:f7c8737677adc7423ceca224e011d8f2542b7b0f793fa5933e4a86be6f947d0b"
       }
     },
     {
@@ -118942,15 +118915,15 @@
         "text": "Use get_workspace_context, list_site_pages, get_site_page, get_organization_media_assets and list_products to read the actual public pages, media and catalog. Recommend specific improvements in plain language. Apply the requested copy with update_site_page or update_product, and media with set_media or attach_media. Read back the changed record and verify the public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "get_site_page": "sha256:768684cb01606f5caa64729e1b549e70423d4a046c64e64673ea18570effafa8",
+        "get_site_page": "sha256:8569f8e685ad9d6671d2b9908ed29c0b34d5ac0c8f5331435c460d21f41a8ed7",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
-        "set_media": "sha256:c5eab766610db3a84aaf33f9affe011d098083de2b94debf8d15d15da6d3a930",
+        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
         "update_product": "sha256:a5a3db8edacc990e450e880b738479b7e4ef197e4ff9fcdb7e110d2db1f44851",
-        "update_site_page": "sha256:06077f4676ffb10596fe094b8a849955484ac3a2175eae3529cad037eb39645a"
+        "update_site_page": "sha256:f7c8737677adc7423ceca224e011d8f2542b7b0f793fa5933e4a86be6f947d0b"
       }
     },
     {
@@ -118979,7 +118952,7 @@
   "publicDocumentation": [
     {
       "slug": "what-you-can-edit-through-chatgpt",
-      "contentHash": "sha256:905c93516a47893cb0aaae5b0410e2e5d5b984efc0ee3115be584bfd09d69aca",
+      "contentHash": "sha256:1aa095e046466e5231a1c6e06a28af5b90c19ad5afe3d229cc14e2560cf15d6c",
       "toolContracts": {
         "create_location": "sha256:037aa077585a9224a7c3be37ea22682aa14188996133d401984f0946511cc502",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
@@ -119036,13 +119009,13 @@
       "slug": "add-photos-and-video",
       "contentHash": "sha256:12d4c163d18a26ef149addaaf3ee345df1a5db52168d3c611513a27dfcbded2c",
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "delete_media_asset": "sha256:7cd7618939616504dc9e0ec08771cc009b09671c40b69c23485dfb172b18ec2e",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "remove_media": "sha256:a59343b7aaf1b361ba9e70d9bcfff4a454baa3d618af3fc93f92188f9cb3893c",
-        "reorder_media": "sha256:0b9419a7d891bcf9f75032994fcf329651d3c888a0409356ad4ae7b94a199e25",
-        "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871",
-        "set_media": "sha256:c5eab766610db3a84aaf33f9affe011d098083de2b94debf8d15d15da6d3a930",
+        "remove_media": "sha256:227bb1165062216319751f5570613385e782b0a209e74ed1a47f9022eee1cc0b",
+        "reorder_media": "sha256:0e8083651c6b2bcb7484e01be67d001c8b829ce6f4f3b5e4b2f652c9f83dc829",
+        "save_media_attachment": "sha256:fd9306458e6552d6a787cd03ff48b1887c648a210fbbd5acc03c7896deaf6a8b",
+        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
         "update_media_asset": "sha256:25902033f7e73a819b6c9660c6a2e70b4ab3dfb972a49b594f1c3a34d8a1a8f7"
       }
     },
@@ -119050,12 +119023,12 @@
       "slug": "publish-a-post",
       "contentHash": "sha256:20b71a412abc2f5b707463326e643c5f540dba815c168559b15c3aa3274e44f2",
       "toolContracts": {
-        "create_blog_post": "sha256:5b37b1fe8eba2227dc0d470508510e38d20e8bbdb37a94b1c2e79a0444209d15",
+        "create_blog_post": "sha256:1ad1dac27e0b3b1baa834e7dc3df6002c01766db96e48f59232542f715397583",
         "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
         "get_channel_post": "sha256:698bf8872c9dd2a8620b91933ded4589e572e082603730a787b21b53f895d9e8",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_social_connections": "sha256:96a2be10163ed07a418b1ff7a6b240307f6129a8ccd172e521fa2cc3af2e14f4",
-        "publish_blog_post": "sha256:3f8204deef1b67db4f95c0955f290ef75a529f413fad41f86b2e9e6cd8654097",
+        "publish_blog_post": "sha256:880ee97b1327df8456247334ecc0734b8380a4e7f55cc5da9a1d291e9750846f",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reconcile_post_publication": "sha256:f97049daa773708807be8f9f0a58a5ebbf76c5b38acb2592610a2d997b319843",
         "update_post": "sha256:b186430401e60fb65257100332ce0c4bd01b8e1c531ea8277dcc2910cfe356b0"

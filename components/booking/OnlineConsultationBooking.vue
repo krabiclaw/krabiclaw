@@ -12,6 +12,7 @@ import { requireProductPresentation } from '~/utils/product-presentation'
 const { data, organizationName } = await useConsultationProducts()
 if (!data.value) throw createError({ statusCode: 500, statusMessage: 'Consultation services were not returned' })
 const { t } = useI18n()
-const consultations = computed(() => data.value!.products.filter(product => product.kind === 'service' && product.active && product.page && (product.booking || product.order_url)))
+// Booked online in its attorney's hours, or through the practice's own scheduler.
+const consultations = computed(() => data.value!.products.filter(product => product.kind === 'service' && product.active && product.page && (product.booking?.held_online || product.order_url)))
 const presentation = requireProductPresentation('service')
 </script>

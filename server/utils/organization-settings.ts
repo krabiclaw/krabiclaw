@@ -125,7 +125,7 @@ export async function loadSettingsPayload(
   }
 
   const siteConfig = await getConfig(db, organizationId)
-  const template = resolvePublicTemplate({ themeId: updatedOrganization.theme_id }).slug
+  const template = resolvePublicTemplate({ themeId: updatedOrganization.theme_id, vertical: updatedOrganization.vertical }).slug
   const [compliance, consultation] = isLegalPracticeSite({ vertical: updatedOrganization.vertical, themeId: updatedOrganization.theme_id })
     ? await Promise.all([getPublicCompliance(db, organizationId), getPublicConsultationSettings(db, organizationId)])
     : [null, null]

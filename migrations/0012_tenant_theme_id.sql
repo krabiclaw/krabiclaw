@@ -3,3 +3,14 @@
 -- 'saya-theme-v1' default changes with the next replacement database, since
 -- SQLite rebuilds a table to change a default.
 UPDATE `organization` SET `theme_id` = 'tenant-theme-v1' WHERE `theme_id` IN ('saya-theme-v1', 'blawby-theme-v1');
+--> statement-breakpoint
+-- A block's picture is its `media` slot, the one the editor and MCP write.
+-- Customer CTAs were drawn from a `background` slot instead; the picture a
+-- visitor saw there becomes the block's media, replacing any media the
+-- customer site never showed.
+DELETE FROM `media_placements`
+ WHERE `owner_type` = 'content_block' AND `slot` = 'media'
+   AND `owner_id` IN (SELECT `owner_id` FROM `media_placements` WHERE `owner_type` = 'content_block' AND `slot` = 'background');
+--> statement-breakpoint
+UPDATE `media_placements` SET `slot` = 'media'
+ WHERE `owner_type` = 'content_block' AND `slot` = 'background';

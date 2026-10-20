@@ -165,8 +165,9 @@ export const PLATFORM_TEMPLATE: PublicTemplateDefinition = {
 /** Every route table a site can have: KrabiClaw's, a legal practice's and a venue's. */
 export const PUBLIC_TEMPLATES: readonly PublicTemplateDefinition[] = [PLATFORM_TEMPLATE, tenantTemplate('service'), tenantTemplate('restaurant')]
 
-export function isPlatformTemplate(input: { themeId?: string | null; vertical?: string | null }): boolean {
-  return resolvePublicTemplate(input).slug === 'platform'
+/** Is this KrabiClaw's own site? Its theme id alone says. */
+export function isPlatformTemplate(input: { themeId?: string | null }): boolean {
+  return String(input.themeId ?? '').trim().toLowerCase() === PLATFORM_THEME_ID
 }
 
 export const TENANT_NON_INDEXABLE_EXACT_PATHS = new Set(
