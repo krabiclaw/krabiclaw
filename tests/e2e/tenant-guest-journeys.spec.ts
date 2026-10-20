@@ -134,6 +134,9 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     await expect(page.getByRole('option', { name: /Thailand.*\+66/ })).toBeVisible()
     await countrySearch.fill('Thailand')
     await page.getByRole('option', { name: /Thailand.*\+66/ }).click()
+    // The list closes and hands focus back to the country button, as a combobox does.
+    await expect(page.getByRole('listbox')).toBeHidden()
+    await expect(country).toBeFocused()
     await phone.fill('+66812345678')
     await expect(country).toContainText('+66')
     await expect(phone).toHaveValue('081 234 5678')
@@ -270,6 +273,9 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     await country.click()
     await page.getByLabel('Search countries', { exact: true }).fill('Australia')
     await page.getByRole('option', { name: /Australia.*\+61/ }).click()
+    // The list closes and hands focus back to the country button, as a combobox does.
+    await expect(page.getByRole('listbox')).toBeHidden()
+    await expect(country).toBeFocused()
     await expect(country).toContainText('+61')
     await expect(phone).toHaveValue('')
     await phone.pressSequentially('0491570150')

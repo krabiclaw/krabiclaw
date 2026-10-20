@@ -145,7 +145,6 @@ function selectCountry(value: CountryCode | undefined) {
   const digits = parsed.value.valid ? parsed.value.nationalFormat ?? display.value : display.value
   chosen.value = value
   show(formatPhoneAsTyped(digits, value))
-  nextTick(() => input.value?.focus())
 }
 
 function update(target: HTMLInputElement, value: string, caret: number) {
