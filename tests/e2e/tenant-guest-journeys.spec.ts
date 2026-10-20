@@ -87,12 +87,71 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     await chooseFirstAvailableTime(page)
     await page.getByLabel('Full name').fill('Pottery Journey Test')
     await page.getByLabel('Email address').fill(email)
-    await page.getByLabel(/Phone number/i).fill('+66812345678')
+    const phone = page.getByLabel(/Phone number/i)
+    const country = page.getByLabel(/^Phone country(?:$|:)/)
+    const countrySearch = page.getByLabel('Search countries', { exact: true })
+    const notes = page.getByLabel(/Special requests/i)
+    await expect(country).toContainText('+66')
+    await expect(phone).toHaveValue('')
+    await expect(phone).toHaveAttribute('placeholder', '081 234 5678')
+    await phone.pressSequentially('0812345678')
+    await expect(phone).toHaveValue('081 234 5678')
+
+    // Editing a digit in the middle keeps the caret there. Backspace across
+    // a formatting space removes a digit instead of restoring the same space.
+    await phone.evaluate(input => (input as HTMLInputElement).setSelectionRange(5, 6))
+    await phone.press('9')
+    await expect(phone).toHaveValue('081 294 5678')
+    expect(await phone.evaluate(input => (input as HTMLInputElement).selectionStart)).toBe(6)
+    await phone.evaluate(input => (input as HTMLInputElement).setSelectionRange(4, 4))
+    await phone.press('Backspace')
+    expect((await phone.inputValue()).replace(/\D/g, '')).toBe('082945678')
+
+    await country.click()
+    await countrySearch.fill('GB')
+    await page.getByRole('option', { name: /United Kingdom.*\+44/ }).click()
+    await phone.fill('+447700900123')
+    await expect(country).toContainText('+44')
+    await expect(phone).toHaveValue('07700 900123')
+    await notes.fill('Please keep the two seats together.')
+
+    await page.getByRole('button', { name: 'Change', exact: true }).click()
+    await chooseFirstAvailableTime(page)
+    await expect(page.getByLabel('Full name')).toHaveValue('Pottery Journey Test')
+    await expect(page.getByLabel('Email address')).toHaveValue(email)
+    await expect(notes).toHaveValue('Please keep the two seats together.')
+    await expect(country).toContainText('+44')
+    await expect(phone).toHaveValue('07700 900123')
+
+    await phone.fill('123')
+    await notes.focus()
+    await expect(phone).toHaveAttribute('aria-invalid', 'true')
+    await expect(page.getByText('Enter a valid number and choose its country, or include the international calling code.', { exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Confirm booking' }).click()
+    await expect(phone).toBeFocused()
+
+    await country.click()
+    await countrySearch.fill('66')
+    await expect(page.getByRole('option', { name: /Thailand.*\+66/ })).toBeVisible()
+    await countrySearch.fill('Thailand')
+    await page.getByRole('option', { name: /Thailand.*\+66/ }).click()
+    await phone.fill('+66812345678')
+    await expect(country).toContainText('+66')
+    await expect(phone).toHaveValue('081 234 5678')
     const submission = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/products/pottery-wheel-class/book'))
     await page.getByRole('button', { name: 'Confirm booking' }).click()
     const response = await submission
     expect(response.status()).toBe(201)
-    expect((await response.json() as { booking_id?: string }).booking_id).toEqual(expect.any(String))
+    expect(response.request().postDataJSON()).toMatchObject({ guest_phone: '+66812345678' })
+    const booked = await response.json() as { booking_id: string }
+    expect(booked.booking_id).toEqual(expect.any(String))
+    const persisted = await request.get(`${testBaseUrl()}/api/dashboard/bookings/booking/${booked.booking_id}`, {
+      params: { org: E2E_POTTERY_ORGANIZATION_ID },
+    })
+    expect(persisted.status(), await persisted.text()).toBe(200)
+    expect((await persisted.json()).booking).toMatchObject({
+      guestName: 'Pottery Journey Test', guestEmail: email, guestPhone: '+66812345678', requests: 'Please keep the two seats together.',
+    })
     await expect(page).toHaveURL(/\/bookings\/confirmed/)
     await expect(page.locator('main')).toContainText(/booking|received|confirmed/i)
     const state = await waitForNotifications(request, potteryHouseBaseURL, E2E_POTTERY_ORGANIZATION_ID, since, state =>
@@ -191,7 +250,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expectOwnerDispatch(state)
   })
 
-  test('guest validation rejects invalid input and cancellation retries preserve the existing outcome', async ({ request }) => {
+  test('guest validation rejects invalid input and cancellation retries preserve the existing outcome', async ({ page, request }) => {
     const baseURL = testBaseUrl()
     const headers = { ...devLoginHeaders(), 'x-preview-tenant': 'pottery-house' }
     // A guest names a SESSION, not a date and a time: the occurrence is a real
@@ -203,15 +262,47 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expect((await book('Unknown Session', 'slot@playwright.example', 'session-that-does-not-exist')).status()).toBe(404)
     expect((await request.post(`${baseURL}/api/public/contact`, { headers, data: {} })).status()).toBe(400)
     expect((await request.post(`${baseURL}/api/public/reservations`, { headers, data: {} })).status()).toBe(400)
-    const sessions = await request.get(`${baseURL}/api/public/products/pottery-wheel-class/sessions`, { headers })
-    expect(sessions.status()).toBe(200)
-    const { sessions: rows } = await sessions.json() as { sessions: Array<{ id: string; is_full: boolean }> }
-    const openSession = rows.find(session => !session.is_full)
-    expect(openSession, 'pottery-wheel-class has no open session materialized').toBeTruthy()
-    const created = await book('Cancel Once', 'cancel-once@playwright.example', openSession!.id)
+    await openTenantPage(page, `${potteryHouseBaseURL}/locations/krabi/products/pottery-wheel-class`, potteryHouseExtraHeaders)
+    await waitForNuxtHydration(page)
+    await page.getByRole('button', { name: 'Book now' }).first().click()
+    await chooseFirstAvailableTime(page)
+    const phone = page.getByLabel(/Phone number/i)
+    const country = page.getByLabel(/^Phone country(?:$|:)/)
+    await country.click()
+    await page.getByLabel('Search countries', { exact: true }).fill('International')
+    await page.getByRole('option', { name: /International number/ }).click()
+    await expect(country).toContainText('Country code')
+    await expect(page.getByText('Include + and the country calling code.', { exact: true })).toBeVisible()
+    await expect(phone).toHaveValue('')
+    await phone.pressSequentially('+447700900123')
+    await expect(country).toContainText('Country code')
+    await expect(phone).toHaveValue('+44 7700 900123')
+    // An explicit international choice and entered number survive remounting.
+    await page.getByRole('button', { name: 'Change', exact: true }).click()
+    await chooseFirstAvailableTime(page)
+    await expect(country).toContainText('Country code')
+    await expect(phone).toHaveValue('+44 7700 900123')
+    // Clearing the optional phone does not manufacture a calling-code-only value.
+    await phone.fill('')
+    await expect(phone).toHaveValue('')
+    await expect(country).toContainText('Country code')
+    await page.getByLabel('Full name').fill('Cancel Once')
+    await page.getByLabel('Email address').fill('cancel-once@playwright.example')
+    await phone.focus()
+    await page.getByLabel(/Special requests/i).focus()
+    const submission = page.waitForResponse(response => response.request().method() === 'POST' && response.url().includes('/products/pottery-wheel-class/book'))
+    await page.getByRole('button', { name: 'Confirm booking' }).click()
+    const created = await submission
     expect(created.status()).toBe(201)
+    expect(created.request().postDataJSON()).toMatchObject({ guest_phone: null })
     const body = await created.json() as { booking_id: string; cancellation_token: string }
     expect(JSON.stringify(body)).not.toContain('cancel-once@playwright.example')
+    await loginAs(request, baseURL, 'user-e2e-pottery-owner')
+    const persisted = await request.get(`${baseURL}/api/dashboard/bookings/booking/${body.booking_id}`, {
+      params: { org: E2E_POTTERY_ORGANIZATION_ID },
+    })
+    expect(persisted.status(), await persisted.text()).toBe(200)
+    expect((await persisted.json()).booking).toMatchObject({ guestName: 'Cancel Once', guestPhone: null })
     const cancelURL = `${baseURL}/api/public/booking-requests/${body.booking_id}/cancel`
     const authHeaders = { ...headers, Authorization: `Bearer ${body.cancellation_token}` }
     const receiptURL = cancelURL.replace(/\/cancel$/, '')

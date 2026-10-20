@@ -62,7 +62,7 @@ export function getPhoneCountry(code: string | null | undefined): PhoneCountry |
  * leading "+" (international input) are both understood, so the result always
  * round-trips through `parsePhone(result, { defaultCountry })`.
  */
-export function formatPhoneAsTyped(input: string, country: CountryCode): string {
+export function formatPhoneAsTyped(input: string, country?: CountryCode): string {
   return new AsYouType(country).input(input)
 }
 
