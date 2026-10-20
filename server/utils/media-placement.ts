@@ -12,6 +12,8 @@ import {
   isSingleMediaPlacement,
   readMediaPlacements,
   pruneStayPhotoRoomMembershipsQuery,
+  stayAccessibilityEvidenceGuardQuery,
+  stayAccessibilityEvidenceWriteError,
   type MediaAssetRefInput,
   type StoredMediaPlacementItem,
 } from '~/server/utils/media-asset-manager'
@@ -20,6 +22,7 @@ import { refreshSocialCard, socialCardRefreshOwnersForPlacement } from '~/server
 import { postMediaMutationQueries } from '~/server/utils/post-management'
 import { isStayPhotoRoom, parseStaySleepingArrangements, type StayPhotoRoom } from '~/shared/stay-photos'
 import { isStayAmenity, STAY_AMENITIES, stayCodes } from '~/shared/stay-listing'
+import { isStayRoomAccessibilityFeature, stayRoomAccessibilityFeatures } from '~/shared/stay-accessibility'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 
 export { EDITABLE_MEDIA_PLACEMENT_OWNERS, MEDIA_CATEGORIES, WRITABLE_MEDIA_CATEGORIES, isMediaCategory } from '~/shared/media-placement-contract'
@@ -178,8 +181,8 @@ export async function setSingleMediaPlacement(db: DbClient, input: {
   await executeBatch(db, [
     ...postQueries,
     ...buildSingleMediaPlacementQueries({ ...input, media: media.map(item => ({ ...item, presentation: input.presentation })) }),
-    ...(input.placement.owner_type === 'product' && input.placement.slot === 'image' ? [pruneStayPhotoRoomMembershipsQuery(input.organizationId, input.placement.owner_id)] : []),
-  ])
+    ...(input.placement.owner_type === 'product' && input.placement.slot === 'image' ? [pruneStayPhotoRoomMembershipsQuery(input.organizationId, input.placement.owner_id), stayAccessibilityEvidenceGuardQuery(input.organizationId, { productId: input.placement.owner_id })] : []),
+  ]).catch((error: unknown) => { throw stayAccessibilityEvidenceWriteError(error) })
   await refreshSocialCardForPlacement(db, input)
   return canonicalPlacementState(db, input)
 }
@@ -292,8 +295,8 @@ export async function removeMediaPlacement(db: DbClient, input: {
     DELETE FROM media_placements
      WHERE organization_id = ?  AND owner_type = ? AND owner_id = ? AND slot = ? AND asset_id = ?
   `, params: [input.organizationId, input.placement.owner_type, input.placement.owner_id, input.placement.slot, input.assetId] },
-  ...(input.placement.owner_type === 'product' && ['image', 'gallery'].includes(input.placement.slot) ? [pruneStayPhotoRoomMembershipsQuery(input.organizationId, input.placement.owner_id)] : []),
-  ])
+  ...(input.placement.owner_type === 'product' && ['image', 'gallery'].includes(input.placement.slot) ? [pruneStayPhotoRoomMembershipsQuery(input.organizationId, input.placement.owner_id), stayAccessibilityEvidenceGuardQuery(input.organizationId, { productId: input.placement.owner_id })] : []),
+  ]).catch((error: unknown) => { throw stayAccessibilityEvidenceWriteError(error) })
   await refreshSocialCardForPlacement(db, input)
   return canonicalPlacementState(db, input)
 }
@@ -423,7 +426,7 @@ export async function readStayPhotoRooms(db: DbClient, organizationId: string, p
   const rooms = new Map<string, StayPhotoRoom[]>(productIds.map(id => [id, []]))
   if (!productIds.length) return rooms
   const ids = d1JsonStringSet(productIds)
-  const [savedRooms, memberships, amenities] = await executeBatch(db, [
+  const [savedRooms, memberships, amenities, accessibility, evidence] = await executeBatch(db, [
     { query: `SELECT id, product_id, type, details_version, sleeping_arrangements, private_attached_bathroom FROM product_stay_photo_rooms
         WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?)) ORDER BY type, sort_order, id`, params: [organizationId, ids] },
     { query: `SELECT m.product_id, m.room_id, m.asset_id FROM product_stay_photo_room_memberships m
@@ -436,11 +439,22 @@ export async function readStayPhotoRooms(db: DbClient, organizationId: string, p
         EXISTS (SELECT 1 FROM json_each(c.amenities) WHERE value = a.amenity_code) AS on_listing
         FROM product_stay_photo_room_amenities a JOIN product_stay_configs c ON c.organization_id = a.organization_id AND c.product_id = a.product_id
         WHERE a.organization_id = ? AND a.product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
+    { query: `SELECT room_id, feature_code, available FROM product_stay_room_accessibility
+        WHERE organization_id = ? AND product_id IN (SELECT value FROM json_each(?))`, params: [organizationId, ids] },
+    { query: `SELECT e.room_id, e.feature_code, e.asset_id,
+        EXISTS (SELECT 1 FROM media_assets ma WHERE ma.organization_id = e.organization_id AND ma.id = e.asset_id
+          AND ma.status = 'active' AND ma.kind = 'image' AND ma.generation_key IS NULL AND length(trim(ma.public_url)) > 0 AND mp.id IS NOT NULL) AS valid
+        FROM product_stay_room_accessibility_photos e LEFT JOIN media_placements mp
+          ON mp.organization_id = e.organization_id AND mp.owner_type = 'product' AND mp.owner_id = e.product_id
+          AND mp.asset_id = e.asset_id AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'
+        WHERE e.organization_id = ? AND e.product_id IN (SELECT value FROM json_each(?))
+        ORDER BY CASE mp.slot WHEN 'image' THEN 0 ELSE 1 END, mp.sort_order, e.asset_id`, params: [organizationId, ids] },
   ], { operation: 'Read stay photo rooms' })
   const byId = new Map<string, StayPhotoRoom>()
   for (const row of savedRooms!.results as Array<{ id: string; product_id: string; type: unknown; details_version: number; sleeping_arrangements: string | null; private_attached_bathroom: number | null }>) {
     const room = {
       id: row.id, type: row.type, photo_ids: [], amenities: [], details_version: row.details_version,
+      accessibility: stayRoomAccessibilityFeatures(row.type).map(feature => ({ feature, available: null, photo_ids: [] })),
       sleeping_arrangements: parseStaySleepingArrangements(row.sleeping_arrangements === null ? null : JSON.parse(row.sleeping_arrangements)),
       private_attached_bathroom: row.private_attached_bathroom === 1 ? true : row.private_attached_bathroom === 0 ? false : row.private_attached_bathroom,
     }
@@ -460,6 +474,20 @@ export async function readStayPhotoRooms(db: DbClient, organizationId: string, p
   }
   const amenityOrder = stayCodes(STAY_AMENITIES)
   for (const room of byId.values()) room.amenities = amenityOrder.filter(code => room.amenities.includes(code))
+  for (const row of accessibility!.results as Array<{ room_id: string; feature_code: unknown; available: number }>) {
+    const answer = byId.get(row.room_id)?.accessibility.find(entry => entry.feature === row.feature_code)
+    if (!answer || !isStayRoomAccessibilityFeature(row.feature_code) || (row.available !== 0 && row.available !== 1)) throw new TypeError(`Room ${row.room_id} has invalid accessibility information`)
+    answer.available = row.available === 1
+  }
+  for (const row of evidence!.results as Array<{ room_id: string; feature_code: unknown; asset_id: string; valid: number }>) {
+    const answer = byId.get(row.room_id)?.accessibility.find(entry => entry.feature === row.feature_code)
+    if (!answer || row.valid !== 1) throw new TypeError(`Room ${row.room_id} has invalid accessibility photo evidence`)
+    if (!answer.photo_ids.includes(row.asset_id)) answer.photo_ids.push(row.asset_id)
+  }
+  for (const room of byId.values()) {
+    const roomId = room.id
+    if (!isStayPhotoRoom(room)) throw new TypeError(`Room ${roomId} has incomplete accessibility photo evidence`)
+  }
   return rooms
 }
 
@@ -486,14 +514,14 @@ export function isStayBedAllocationConflict(error: unknown): boolean {
  * and changed; when the product's photos are no longer that list, or change
  * before the batch commits, the write is refused with PHOTOS_CHANGED.
  */
-export async function arrangeProductPhotos(db: DbClient, input: {
+export async function prepareArrangeProductPhotos(db: DbClient, input: {
   organizationId: string
   env: CloudflareEnv
   principal: MemberAccessPrincipal
   productId: string
   from: readonly string[]
   to: readonly string[]
-}): Promise<void> {
+}) {
   const cover: MediaPlacementKey = { owner_type: 'product', owner_id: input.productId, slot: 'image' }
   const gallery: MediaPlacementKey = { ...cover, slot: 'gallery' }
   await authorizePlacementWrite(db, { ...input, placement: cover })
@@ -523,8 +551,7 @@ export async function arrangeProductPhotos(db: DbClient, input: {
     JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id AND ma.status = 'active'
     WHERE mp.organization_id = ? AND mp.owner_type = 'product' AND mp.owner_id = ? AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'`
   const now = new Date().toISOString()
-  try {
-    await executeBatch(db, [
+  const queries: BatchQuery[] = [
       {
         query: `INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id, sort_order, status, created_at, updated_at)
           SELECT ?, ?, 'product', ?, 'gallery', ?, -1, 'active', ?, ?
@@ -539,13 +566,24 @@ export async function arrangeProductPhotos(db: DbClient, input: {
       ...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId, placement: cover, media: media.slice(0, 1), now }),
       ...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId, placement: gallery, media: media.slice(1), now }),
       pruneStayPhotoRoomMembershipsQuery(input.organizationId, input.productId),
+      stayAccessibilityEvidenceGuardQuery(input.organizationId, { productId: input.productId }),
       publicResourceCacheInvalidationQuery(input.organizationId, 'product-photos-arrange'),
-    ], { operation: 'Arrange product photos' })
-  } catch (error) {
-    if (/CHECK constraint failed|FOREIGN KEY constraint failed/i.test(error instanceof Error ? error.message : String(error))) throw changed()
-    throw error
+  ]
+  return {
+    queries,
+    async complete() { await refreshSocialCardForPlacement(db, { env: input.env, placement: cover }) },
+    writeError(error: unknown): unknown {
+      const evidenceError = stayAccessibilityEvidenceWriteError(error)
+      if (evidenceError !== error) return evidenceError
+      return /CHECK constraint failed|FOREIGN KEY constraint failed|NOT NULL constraint failed: media_placements\.asset_id/i.test(error instanceof Error ? error.message : String(error)) ? changed() : error
+    },
   }
-  await refreshSocialCardForPlacement(db, { env: input.env, placement: cover })
+}
+
+export async function arrangeProductPhotos(db: DbClient, input: Parameters<typeof prepareArrangeProductPhotos>[1]): Promise<void> {
+  const plan = await prepareArrangeProductPhotos(db, input)
+  await executeBatch(db, plan.queries, { operation: 'Arrange product photos' }).catch((error: unknown) => { throw plan.writeError(error) })
+  await plan.complete()
 }
 
 function buildMembershipGuardQuery(input: {

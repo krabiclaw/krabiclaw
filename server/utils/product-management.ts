@@ -1,6 +1,6 @@
 import { isStayAmenity, stayCodes, STAY_AMENITIES, STAY_CANCELLATION_POLICIES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_PROPERTY_SIZE_UNITS, isStayPropertyType, type StayAmenity, type StayCancellationPolicy, type StayLongTermCancellationPolicy, type StayPropertyType, type StayPropertyTypeGroup, type StayListingType, type StayPropertySizeUnit } from '~/shared/stay-listing'
 import { getSourceLocale } from '~/server/utils/organization-locales'
-import { ASSIGNED_SERVICE_SQL } from '~/server/utils/member-access'
+import { ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveMembership } from '~/server/utils/member-access'
 import { assertPublishedHost } from '~/server/utils/public-provider'
 import type { ProductBookingSetupInput, SessionAvailability } from '~/server/utils/availability'
 import { HTTPError } from 'nitro'
@@ -8,9 +8,10 @@ import { d1JsonArray, executeBatch, queryAll, queryFirst, type BatchQuery, type 
 import { MAX_D1_BATCH_STATEMENTS } from '~/server/db/d1-limits'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { loadPublicSocialMedia } from '~/server/utils/public-social-image'
-import { buildDeleteOwnerPlacementsQuery, readMediaPlacements } from '~/server/utils/media-asset-manager'
-import { isStayBedAllocationConflict, readStayPhotoRooms, stayBedAllocationGuardQuery } from '~/server/utils/media-placement'
+import { buildDeleteOwnerPlacementsQuery, hydrateMediaAssetRefs, readMediaPlacements, stayAccessibilityEvidenceGuardQuery, stayAccessibilityEvidenceWriteError } from '~/server/utils/media-asset-manager'
+import { isStayBedAllocationConflict, prepareArrangeProductPhotos, readProductPhotos, readStayPhotoRooms, stayBedAllocationGuardQuery } from '~/server/utils/media-placement'
 import { parseStaySleepingArrangements, type StayPhotoRoom } from '~/shared/stay-photos'
+import type { StayRoomAccessibility } from '~/shared/stay-accessibility'
 import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
 import { assertTenantPagePathAvailable, isProductPageConflict, prepareTenantPageCreate, prepareTenantPageDelete, refreshTenantPageCard, type TenantPageEditorInput } from '~/server/utils/content/pages'
@@ -1730,10 +1731,11 @@ export async function updateProduct(db: DbClient, input: {
   /** updateStayHome completes once after its optional location timezone write. */
   deferStayNightPush?: true
   /** A room's authored details share this Product transaction when assigning listing amenities. */
-  stayRoomUpdate?: { roomId: string; expectedDetailsVersion: number } & Partial<Pick<StayPhotoRoom, 'sleeping_arrangements' | 'private_attached_bathroom' | 'amenities'>>
+  stayRoomUpdate?: { roomId: string; expectedDetailsVersion: number; accessibility?: StayRoomAccessibility } & Partial<Pick<StayPhotoRoom, 'sleeping_arrangements' | 'private_attached_bathroom' | 'amenities'>>
 }): Promise<ProductMutation> {
   const env = input.env
   const roomUpdate = input.stayRoomUpdate
+  let photoPlan: Awaited<ReturnType<typeof prepareArrangeProductPhotos>> | undefined
   if (roomUpdate && (Object.keys(input.patch).length || input.booking)) invalid('Room details cannot be combined with unrelated product edits')
   const reprice = input.patch.variants !== undefined || input.patch.stay?.min_nights !== undefined
   const complete = async (product: Product): Promise<ProductMutation> => {
@@ -1744,6 +1746,7 @@ export async function updateProduct(db: DbClient, input: {
       channelPush = await pushStayHomeNights(db, env, { organizationId: input.organizationId, actorId: input.actor.actorId, manage: true }, product)
     }
     return completeChannelPush(channelPush, { product_id: product.id, updated_at: product.updated_at }, async () => {
+      if (photoPlan) await photoPlan.complete()
       if (product.kind === 'stay') await purgePublicResourceCacheNow(env, input.organizationId)
       await publishStayProducts(env, [product])
       return product
@@ -1766,6 +1769,17 @@ export async function updateProduct(db: DbClient, input: {
     throw new HTTPError({ statusCode: 409, statusMessage: 'The room or listing changed while you were editing. Nothing was changed; reload the room and try again.', data: { code: 'ROOM_DETAILS_CHANGED', field: 'expected_details_version', product_id: input.productId } })
   }
   if (roomUpdate && !current.stay?.photo_rooms.some(room => room.id === roomUpdate.roomId && room.details_version === roomUpdate.expectedDetailsVersion)) roomChanged()
+  if (roomUpdate?.accessibility?.available === true) {
+    const images = await hydrateMediaAssetRefs(db, { organizationId: input.organizationId, refs: roomUpdate.accessibility.photo_ids.map(asset_id => ({ asset_id })), allowedKinds: ['image'], fieldName: 'accessibility.photo_ids' })
+    if (images.some(image => !image.public_url.trim())) throw new HTTPError({ statusCode: 400, statusMessage: 'accessibility.photo_ids must reference images with a public URL', data: { field: 'accessibility.photo_ids' } })
+    const photos = ((await readProductPhotos(db, { organizationId: input.organizationId, productIds: [input.productId] })).get(input.productId) ?? []).map(photo => photo.asset_id)
+    const additions = roomUpdate.accessibility.photo_ids.filter(id => !photos.includes(id))
+    if (additions.length) {
+      const membership = await resolveMembership(env, { organizationId: input.organizationId, userId: input.actor.actorId })
+      if (!membership) throw new HTTPError({ statusCode: 403, statusMessage: 'Organization membership is required to attach accessibility photos' })
+      photoPlan = await prepareArrangeProductPhotos(db, { organizationId: input.organizationId, productId: input.productId, env, principal: memberAccessPrincipal(membership, { env }), from: photos, to: [...photos, ...additions] })
+    }
+  }
   // Only the current Product read supplies global facts. A room contributes
   // additions, never a stale replacement of the listing's amenity set.
   const patch = roomUpdate?.amenities === undefined ? input.patch : {
@@ -1785,6 +1799,7 @@ export async function updateProduct(db: DbClient, input: {
     writes.unshift({ query: `UPDATE products SET updated_at = NULL WHERE organization_id = ? AND id = ? AND NOT EXISTS (
       SELECT 1 FROM product_stay_photo_rooms WHERE organization_id = ? AND product_id = ? AND id = ? AND details_version = ?)`,
     params: [input.organizationId, input.productId, input.organizationId, input.productId, roomUpdate.roomId, roomUpdate.expectedDetailsVersion] })
+    if (photoPlan) writes.push(...photoPlan.queries)
     const assignments = ['details_version = details_version + 1']
     const params: unknown[] = []
     if (Object.hasOwn(roomUpdate, 'sleeping_arrangements')) {
@@ -1803,6 +1818,17 @@ export async function updateProduct(db: DbClient, input: {
       query: `INSERT INTO product_stay_photo_room_amenities (organization_id, product_id, room_id, amenity_code)
         SELECT ?, ?, ?, value FROM json_each(?)`, params: [input.organizationId, input.productId, roomUpdate.roomId, d1JsonArray(roomUpdate.amenities)],
     })
+    if (roomUpdate.accessibility) {
+      const answer = roomUpdate.accessibility
+      writes.push({ query: 'DELETE FROM product_stay_room_accessibility WHERE organization_id = ? AND product_id = ? AND room_id = ? AND feature_code = ?', params: [input.organizationId, input.productId, roomUpdate.roomId, answer.feature] })
+      if (answer.available !== null) writes.push({
+        query: 'INSERT INTO product_stay_room_accessibility (organization_id, product_id, room_id, feature_code, available) VALUES (?, ?, ?, ?, ?)', params: [input.organizationId, input.productId, roomUpdate.roomId, answer.feature, answer.available ? 1 : 0],
+      }, {
+        query: `INSERT INTO product_stay_room_accessibility_photos (organization_id, product_id, room_id, feature_code, asset_id)
+          SELECT ?, ?, ?, ?, value FROM json_each(?)`, params: [input.organizationId, input.productId, roomUpdate.roomId, answer.feature, d1JsonArray(answer.photo_ids)],
+      })
+    }
+    writes.push(stayAccessibilityEvidenceGuardQuery(input.organizationId, { productId: input.productId }))
     writes.push(stayBedAllocationGuardQuery(input.organizationId, input.productId), {
       // All room references must still have their canonical listing fact.
       query: `UPDATE products SET updated_at = NULL WHERE organization_id = ? AND id = ? AND EXISTS (
@@ -1838,6 +1864,10 @@ export async function updateProduct(db: DbClient, input: {
   // it was, and the merchant is told why rather than reading a constraint name.
   await executeBatch(db, writes, { operation: 'Update product' }).catch(async (error: unknown) => {
     if (isUniqueDedupeConflict(error) && await replay()) return
+    const evidenceError = stayAccessibilityEvidenceWriteError(error)
+    if (evidenceError !== error) throw evidenceError
+    const photoError = photoPlan?.writeError(error)
+    if (photoPlan && photoError !== error) throw photoError
     if (isStayBedAllocationConflict(error)) throw new HTTPError({ statusCode: 409, statusMessage: 'The listing bed total must cover its assigned room beds. Reduce room quantities or update the listing total.', data: { code: 'STAY_BED_ALLOCATION_EXCEEDED', field: roomUpdate ? 'sleeping_arrangements' : 'stay.beds', product_id: input.productId }, cause: error })
     if (/NOT NULL constraint failed: products\.updated_at/.test(error instanceof Error ? error.message : String(error))) {
       if (await replay()) return

@@ -528,3 +528,25 @@ saved amenity rows include definition text for choices such as Air conditioning,
 Cooking basics, Dedicated workspace and Wifi; other rows such as Hangers have
 only a label. Room picker rows have plain labels. The live reference supports
 keeping the listing's saved definitions while keeping the room chooser compact.
+
+### Bedroom accessibility evidence — 2026-10-20
+
+The existing Bedroom's two accessibility leaves were opened again. Each has a
+feature definition, example photos, a Photo guidelines dialog, an explicit
+Have / Don't have choice and Cancel / Save. A positive draft requires photos
+before Save becomes available. Both drafts were cancelled; no Airbnb data was
+saved or uploaded.
+
+Step-free access describes a ground-floor bedroom or a route reached by lift
+or ramp, with no step or threshold higher than 5 cm (2 in) between the guest
+entrance and bedroom. Its guidance asks for an open-door view from outside the
+room that clearly includes the threshold. The wide-doorway definition requires
+at least 32 inches. Its photo guidance asks for a fully open door and a readable
+tape measure inside the frame with both ends visible.
+
+Only the existing Bedroom is available in this listing's authored tour. These
+two bedroom features are the verified scope; bathroom-specific or other feature
+catalogs were not inferred. Airbnb's positive-draft copy names its own photo
+review service. KrabiClaw uses host-authored facts and evidence, with no invented
+approval process. Evidence can reference an existing Product photo without
+moving it between authored rooms.

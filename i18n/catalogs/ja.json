@@ -619,5 +619,10 @@
   "stay.bed_types.crib": "ベビーベッド{count}台",
   "stay.bed_types.toddler_bed": "幼児用ベッド{count}台",
   "stay.bed_types.hammock": "ハンモック{count}台",
-  "stay.bed_types.water_bed": "ウォーターベッド{count}台"
+  "stay.bed_types.water_bed": "ウォーターベッド{count}台",
+  "stay.open_accessibility_photo": "{feature}の写真{number}を見る",
+  "stay.accessibility_features.step_free_access.label": "段差のないアクセス",
+  "stay.accessibility_features.step_free_access.description": "寝室は地上階にあるか、エレベーターまたはスロープでアクセスできます。ゲスト用玄関から寝室までの経路に、5cm（2インチ）を超える段差や敷居はありません。",
+  "stay.accessibility_features.wide_doorway.label": "幅32インチ超の入口",
+  "stay.accessibility_features.wide_doorway.description": "寝室の入口は、ドアを開けた状態で幅が32インチ以上あります。"
 }

@@ -619,5 +619,10 @@
   "stay.bed_types.crib": "เตียงเด็กอ่อน {count} เตียง",
   "stay.bed_types.toddler_bed": "เตียงเด็กเล็ก {count} เตียง",
   "stay.bed_types.hammock": "เปลญวน {count} หลัง",
-  "stay.bed_types.water_bed": "เตียงน้ำ {count} เตียง"
+  "stay.bed_types.water_bed": "เตียงน้ำ {count} เตียง",
+  "stay.open_accessibility_photo": "ดู{feature} รูปที่ {number}",
+  "stay.accessibility_features.step_free_access.label": "ทางเข้าที่ไม่มีขั้นบันได",
+  "stay.accessibility_features.step_free_access.description": "ห้องนอนอยู่ชั้นล่าง หรือเข้าถึงได้ด้วยลิฟต์หรือทางลาด เส้นทางจากทางเข้าสำหรับผู้เข้าพักไปยังห้องนอนไม่มีขั้นบันไดหรือธรณีประตูที่สูงเกิน 5 ซม. (2 นิ้ว)",
+  "stay.accessibility_features.wide_doorway.label": "ทางเข้ากว้างกว่า 32 นิ้ว",
+  "stay.accessibility_features.wide_doorway.description": "ทางเข้าห้องนอนกว้างอย่างน้อย 32 นิ้วเมื่อเปิดประตู"
 }

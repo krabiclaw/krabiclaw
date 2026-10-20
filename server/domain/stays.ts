@@ -31,6 +31,7 @@ import { sanitizeFilename, uploadResolvedMediaToAssetStore } from '~/server/util
 import { MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES, sniffMediaMimeType } from '~/server/utils/media-mime'
 import { mediaStillUrl, MAX_ORDERED_MEDIA_ASSETS } from '~/shared/media-placement-contract'
 import { isStayPhotoRoomType, isStaySleepingArrangements, MAX_STAY_BEDS_PER_TYPE, type StayPhotoRoom, type StayPhotoRoomType } from '~/shared/stay-photos'
+import { isStayRoomAccessibility, type StayRoomAccessibility } from '~/shared/stay-accessibility'
 import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 
 /**
@@ -961,16 +962,18 @@ export async function updateStayPhotoRoom(db: DbClient, env: CloudflareEnv & Gue
   const current = home.photo_rooms.find(room => room.id === roomId)
   if (!current) fail(404, 'PHOTO_ROOM_NOT_FOUND', 'That room is not on this home', 'room_id')
   if (!isRecord(body)) fail(422, 'INVALID_ROOM_DETAILS', 'Provide the room details to change', 'room')
-  const unknown = Object.keys(body).find(key => !['expected_details_version', 'sleeping_arrangements', 'private_attached_bathroom', 'amenities'].includes(key))
+  const unknown = Object.keys(body).find(key => !['expected_details_version', 'sleeping_arrangements', 'private_attached_bathroom', 'amenities', 'accessibility'].includes(key))
   if (unknown) fail(422, 'INVALID_ROOM_DETAILS', `${unknown} cannot be changed here`, unknown)
   if (!Number.isInteger(body.expected_details_version) || (body.expected_details_version as number) < 1) fail(422, 'INVALID_ROOM_DETAILS', 'Provide the room details_version from the latest read', 'expected_details_version')
   const sleeping = Object.hasOwn(body, 'sleeping_arrangements')
   const privacy = Object.hasOwn(body, 'private_attached_bathroom')
   const amenities = Object.hasOwn(body, 'amenities')
-  if (!sleeping && !privacy && !amenities) fail(422, 'INVALID_ROOM_DETAILS', 'Provide sleeping arrangements, private bathroom information or room amenities', 'room')
+  const accessibility = Object.hasOwn(body, 'accessibility')
+  if (!sleeping && !privacy && !amenities && !accessibility) fail(422, 'INVALID_ROOM_DETAILS', 'Provide room details to change', 'room')
   if (sleeping && !isStaySleepingArrangements(body.sleeping_arrangements)) fail(422, 'INVALID_ROOM_DETAILS', `Sleeping arrangements must be null or a list of unique bed types with whole counts from 1 to ${MAX_STAY_BEDS_PER_TYPE}`, 'sleeping_arrangements')
   if (privacy && (current.type !== 'bedroom' || (body.private_attached_bathroom !== null && typeof body.private_attached_bathroom !== 'boolean'))) fail(422, 'INVALID_ROOM_DETAILS', 'Only a bedroom can state whether it has a private attached bathroom, as true, false or null', 'private_attached_bathroom')
   if (amenities && (!Array.isArray(body.amenities) || !body.amenities.every(isStayAmenity) || new Set(body.amenities).size !== body.amenities.length)) fail(422, 'INVALID_ROOM_DETAILS', 'Room amenities must list amenity codes from the catalog, each once', 'amenities')
+  if (accessibility && (current.type !== 'bedroom' || !isStayRoomAccessibility(body.accessibility))) fail(422, 'INVALID_ROOM_DETAILS', 'Choose a bedroom accessibility feature and true, false or null. A true answer needs unique photo IDs; false or null needs an empty photo list.', 'accessibility')
   if (current.details_version !== body.expected_details_version) fail(409, 'ROOM_DETAILS_CHANGED', 'The room details changed while you were editing. Reload the room and try again.', 'expected_details_version')
   await updateProduct(db, {
     organizationId: access.organizationId, productId, patch: {}, actor: { actorId: access.actorId }, env,
@@ -979,6 +982,7 @@ export async function updateStayPhotoRoom(db: DbClient, env: CloudflareEnv & Gue
       ...(sleeping ? { sleeping_arrangements: body.sleeping_arrangements as StayPhotoRoom['sleeping_arrangements'] } : {}),
       ...(privacy ? { private_attached_bathroom: body.private_attached_bathroom as boolean | null } : {}),
       ...(amenities ? { amenities: body.amenities as StayAmenity[] } : {}),
+      ...(accessibility ? { accessibility: body.accessibility as StayRoomAccessibility } : {}),
     },
   })
   const updated = await readStayHome(db, access, productId)

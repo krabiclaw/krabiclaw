@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:19a2f45b859f33754c0d04efeaef97e90bc69c0cf9fb8b064c5b29c37dca687b",
-  "documentationFingerprint": "sha256:df6f6494e2aad0513ac393ea4d11a4da3919169c6a48a5b9af4b4c8375efb451",
+  "fingerprint": "sha256:f48c7f4578fdfb1b2ce6e560ad3deb5c577cf6ac70a22730c21026b0e50c10e6",
+  "documentationFingerprint": "sha256:11bf9456a504242518f40d42e0f0c8e737534a5e634e239075166ed5d9492646",
   "tools": [
     {
       "name": "add_organization_language",
@@ -629,6 +629,71 @@
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "accessibility": {
+                      "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                      "items": {
+                        "additionalProperties": false,
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "available": {
+                                "const": true
+                              },
+                              "photo_ids": {
+                                "minItems": 1
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "available": {
+                                "enum": [
+                                  false,
+                                  null
+                                ]
+                              },
+                              "photo_ids": {
+                                "maxItems": 0
+                              }
+                            }
+                          }
+                        ],
+                        "properties": {
+                          "available": {
+                            "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "feature": {
+                            "enum": [
+                              "step_free_access",
+                              "wide_doorway"
+                            ],
+                            "type": "string"
+                          },
+                          "photo_ids": {
+                            "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "maxItems": 50,
+                            "type": "array",
+                            "uniqueItems": true
+                          }
+                        },
+                        "required": [
+                          "feature",
+                          "available",
+                          "photo_ids"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 2,
+                      "type": "array"
+                    },
                     "amenities": {
                       "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
                       "items": {
@@ -897,7 +962,8 @@
                     "details_version",
                     "sleeping_arrangements",
                     "private_attached_bathroom",
-                    "amenities"
+                    "amenities",
+                    "accessibility"
                   ],
                   "type": "object"
                 },
@@ -1160,6 +1226,71 @@
           "room": {
             "additionalProperties": false,
             "properties": {
+              "accessibility": {
+                "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                "items": {
+                  "additionalProperties": false,
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "available": {
+                          "const": true
+                        },
+                        "photo_ids": {
+                          "minItems": 1
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "available": {
+                          "enum": [
+                            false,
+                            null
+                          ]
+                        },
+                        "photo_ids": {
+                          "maxItems": 0
+                        }
+                      }
+                    }
+                  ],
+                  "properties": {
+                    "available": {
+                      "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "feature": {
+                      "enum": [
+                        "step_free_access",
+                        "wide_doorway"
+                      ],
+                      "type": "string"
+                    },
+                    "photo_ids": {
+                      "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "maxItems": 50,
+                      "type": "array",
+                      "uniqueItems": true
+                    }
+                  },
+                  "required": [
+                    "feature",
+                    "available",
+                    "photo_ids"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 2,
+                "type": "array"
+              },
               "amenities": {
                 "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
                 "items": {
@@ -1428,7 +1559,8 @@
               "details_version",
               "sleeping_arrangements",
               "private_attached_bathroom",
-              "amenities"
+              "amenities",
+              "accessibility"
             ],
             "type": "object"
           }
@@ -9436,6 +9568,71 @@
                       "items": {
                         "additionalProperties": false,
                         "properties": {
+                          "accessibility": {
+                            "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                            "items": {
+                              "additionalProperties": false,
+                              "oneOf": [
+                                {
+                                  "properties": {
+                                    "available": {
+                                      "const": true
+                                    },
+                                    "photo_ids": {
+                                      "minItems": 1
+                                    }
+                                  }
+                                },
+                                {
+                                  "properties": {
+                                    "available": {
+                                      "enum": [
+                                        false,
+                                        null
+                                      ]
+                                    },
+                                    "photo_ids": {
+                                      "maxItems": 0
+                                    }
+                                  }
+                                }
+                              ],
+                              "properties": {
+                                "available": {
+                                  "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                                  "type": [
+                                    "boolean",
+                                    "null"
+                                  ]
+                                },
+                                "feature": {
+                                  "enum": [
+                                    "step_free_access",
+                                    "wide_doorway"
+                                  ],
+                                  "type": "string"
+                                },
+                                "photo_ids": {
+                                  "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                                  "items": {
+                                    "minLength": 1,
+                                    "type": "string"
+                                  },
+                                  "maxItems": 50,
+                                  "type": "array",
+                                  "uniqueItems": true
+                                }
+                              },
+                              "required": [
+                                "feature",
+                                "available",
+                                "photo_ids"
+                              ],
+                              "type": "object"
+                            },
+                            "maxItems": 2,
+                            "type": "array"
+                          },
                           "amenities": {
                             "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
                             "items": {
@@ -9704,7 +9901,8 @@
                           "details_version",
                           "sleeping_arrangements",
                           "private_attached_bathroom",
-                          "amenities"
+                          "amenities",
+                          "accessibility"
                         ],
                         "type": "object"
                       },
@@ -24907,6 +25105,71 @@
                     "items": {
                       "additionalProperties": false,
                       "properties": {
+                        "accessibility": {
+                          "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                          "items": {
+                            "additionalProperties": false,
+                            "oneOf": [
+                              {
+                                "properties": {
+                                  "available": {
+                                    "const": true
+                                  },
+                                  "photo_ids": {
+                                    "minItems": 1
+                                  }
+                                }
+                              },
+                              {
+                                "properties": {
+                                  "available": {
+                                    "enum": [
+                                      false,
+                                      null
+                                    ]
+                                  },
+                                  "photo_ids": {
+                                    "maxItems": 0
+                                  }
+                                }
+                              }
+                            ],
+                            "properties": {
+                              "available": {
+                                "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                                "type": [
+                                  "boolean",
+                                  "null"
+                                ]
+                              },
+                              "feature": {
+                                "enum": [
+                                  "step_free_access",
+                                  "wide_doorway"
+                                ],
+                                "type": "string"
+                              },
+                              "photo_ids": {
+                                "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                                "items": {
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 50,
+                                "type": "array",
+                                "uniqueItems": true
+                              }
+                            },
+                            "required": [
+                              "feature",
+                              "available",
+                              "photo_ids"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 2,
+                          "type": "array"
+                        },
                         "amenities": {
                           "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
                           "items": {
@@ -25175,7 +25438,8 @@
                         "details_version",
                         "sleeping_arrangements",
                         "private_attached_bathroom",
-                        "amenities"
+                        "amenities",
+                        "accessibility"
                       ],
                       "type": "object"
                     },
@@ -44277,6 +44541,71 @@
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "accessibility": {
+                      "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                      "items": {
+                        "additionalProperties": false,
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "available": {
+                                "const": true
+                              },
+                              "photo_ids": {
+                                "minItems": 1
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "available": {
+                                "enum": [
+                                  false,
+                                  null
+                                ]
+                              },
+                              "photo_ids": {
+                                "maxItems": 0
+                              }
+                            }
+                          }
+                        ],
+                        "properties": {
+                          "available": {
+                            "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "feature": {
+                            "enum": [
+                              "step_free_access",
+                              "wide_doorway"
+                            ],
+                            "type": "string"
+                          },
+                          "photo_ids": {
+                            "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "maxItems": 50,
+                            "type": "array",
+                            "uniqueItems": true
+                          }
+                        },
+                        "required": [
+                          "feature",
+                          "available",
+                          "photo_ids"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 2,
+                      "type": "array"
+                    },
                     "amenities": {
                       "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
                       "items": {
@@ -44545,7 +44874,8 @@
                     "details_version",
                     "sleeping_arrangements",
                     "private_attached_bathroom",
-                    "amenities"
+                    "amenities",
+                    "accessibility"
                   ],
                   "type": "object"
                 },
@@ -50108,6 +50438,71 @@
                     "items": {
                       "additionalProperties": false,
                       "properties": {
+                        "accessibility": {
+                          "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                          "items": {
+                            "additionalProperties": false,
+                            "oneOf": [
+                              {
+                                "properties": {
+                                  "available": {
+                                    "const": true
+                                  },
+                                  "photo_ids": {
+                                    "minItems": 1
+                                  }
+                                }
+                              },
+                              {
+                                "properties": {
+                                  "available": {
+                                    "enum": [
+                                      false,
+                                      null
+                                    ]
+                                  },
+                                  "photo_ids": {
+                                    "maxItems": 0
+                                  }
+                                }
+                              }
+                            ],
+                            "properties": {
+                              "available": {
+                                "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                                "type": [
+                                  "boolean",
+                                  "null"
+                                ]
+                              },
+                              "feature": {
+                                "enum": [
+                                  "step_free_access",
+                                  "wide_doorway"
+                                ],
+                                "type": "string"
+                              },
+                              "photo_ids": {
+                                "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                                "items": {
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 50,
+                                "type": "array",
+                                "uniqueItems": true
+                              }
+                            },
+                            "required": [
+                              "feature",
+                              "available",
+                              "photo_ids"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 2,
+                          "type": "array"
+                        },
                         "amenities": {
                           "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
                           "items": {
@@ -50376,7 +50771,8 @@
                         "details_version",
                         "sleeping_arrangements",
                         "private_attached_bathroom",
-                        "amenities"
+                        "amenities",
+                        "accessibility"
                       ],
                       "type": "object"
                     },
@@ -61257,6 +61653,71 @@
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "accessibility": {
+                      "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                      "items": {
+                        "additionalProperties": false,
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "available": {
+                                "const": true
+                              },
+                              "photo_ids": {
+                                "minItems": 1
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "available": {
+                                "enum": [
+                                  false,
+                                  null
+                                ]
+                              },
+                              "photo_ids": {
+                                "maxItems": 0
+                              }
+                            }
+                          }
+                        ],
+                        "properties": {
+                          "available": {
+                            "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "feature": {
+                            "enum": [
+                              "step_free_access",
+                              "wide_doorway"
+                            ],
+                            "type": "string"
+                          },
+                          "photo_ids": {
+                            "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "maxItems": 50,
+                            "type": "array",
+                            "uniqueItems": true
+                          }
+                        },
+                        "required": [
+                          "feature",
+                          "available",
+                          "photo_ids"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 2,
+                      "type": "array"
+                    },
                     "amenities": {
                       "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
                       "items": {
@@ -61525,7 +61986,8 @@
                     "details_version",
                     "sleeping_arrangements",
                     "private_attached_bathroom",
-                    "amenities"
+                    "amenities",
+                    "accessibility"
                   ],
                   "type": "object"
                 },
@@ -68489,6 +68951,71 @@
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "accessibility": {
+                      "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                      "items": {
+                        "additionalProperties": false,
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "available": {
+                                "const": true
+                              },
+                              "photo_ids": {
+                                "minItems": 1
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "available": {
+                                "enum": [
+                                  false,
+                                  null
+                                ]
+                              },
+                              "photo_ids": {
+                                "maxItems": 0
+                              }
+                            }
+                          }
+                        ],
+                        "properties": {
+                          "available": {
+                            "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "feature": {
+                            "enum": [
+                              "step_free_access",
+                              "wide_doorway"
+                            ],
+                            "type": "string"
+                          },
+                          "photo_ids": {
+                            "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "maxItems": 50,
+                            "type": "array",
+                            "uniqueItems": true
+                          }
+                        },
+                        "required": [
+                          "feature",
+                          "available",
+                          "photo_ids"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 2,
+                      "type": "array"
+                    },
                     "amenities": {
                       "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
                       "items": {
@@ -68757,7 +69284,8 @@
                     "details_version",
                     "sleeping_arrangements",
                     "private_attached_bathroom",
-                    "amenities"
+                    "amenities",
+                    "accessibility"
                   ],
                   "type": "object"
                 },
@@ -84454,6 +84982,71 @@
                       "items": {
                         "additionalProperties": false,
                         "properties": {
+                          "accessibility": {
+                            "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                            "items": {
+                              "additionalProperties": false,
+                              "oneOf": [
+                                {
+                                  "properties": {
+                                    "available": {
+                                      "const": true
+                                    },
+                                    "photo_ids": {
+                                      "minItems": 1
+                                    }
+                                  }
+                                },
+                                {
+                                  "properties": {
+                                    "available": {
+                                      "enum": [
+                                        false,
+                                        null
+                                      ]
+                                    },
+                                    "photo_ids": {
+                                      "maxItems": 0
+                                    }
+                                  }
+                                }
+                              ],
+                              "properties": {
+                                "available": {
+                                  "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                                  "type": [
+                                    "boolean",
+                                    "null"
+                                  ]
+                                },
+                                "feature": {
+                                  "enum": [
+                                    "step_free_access",
+                                    "wide_doorway"
+                                  ],
+                                  "type": "string"
+                                },
+                                "photo_ids": {
+                                  "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                                  "items": {
+                                    "minLength": 1,
+                                    "type": "string"
+                                  },
+                                  "maxItems": 50,
+                                  "type": "array",
+                                  "uniqueItems": true
+                                }
+                              },
+                              "required": [
+                                "feature",
+                                "available",
+                                "photo_ids"
+                              ],
+                              "type": "object"
+                            },
+                            "maxItems": 2,
+                            "type": "array"
+                          },
                           "amenities": {
                             "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
                             "items": {
@@ -84722,7 +85315,8 @@
                           "details_version",
                           "sleeping_arrangements",
                           "private_attached_bathroom",
-                          "amenities"
+                          "amenities",
+                          "accessibility"
                         ],
                         "type": "object"
                       },
@@ -87595,6 +88189,71 @@
                     "items": {
                       "additionalProperties": false,
                       "properties": {
+                        "accessibility": {
+                          "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                          "items": {
+                            "additionalProperties": false,
+                            "oneOf": [
+                              {
+                                "properties": {
+                                  "available": {
+                                    "const": true
+                                  },
+                                  "photo_ids": {
+                                    "minItems": 1
+                                  }
+                                }
+                              },
+                              {
+                                "properties": {
+                                  "available": {
+                                    "enum": [
+                                      false,
+                                      null
+                                    ]
+                                  },
+                                  "photo_ids": {
+                                    "maxItems": 0
+                                  }
+                                }
+                              }
+                            ],
+                            "properties": {
+                              "available": {
+                                "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                                "type": [
+                                  "boolean",
+                                  "null"
+                                ]
+                              },
+                              "feature": {
+                                "enum": [
+                                  "step_free_access",
+                                  "wide_doorway"
+                                ],
+                                "type": "string"
+                              },
+                              "photo_ids": {
+                                "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                                "items": {
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 50,
+                                "type": "array",
+                                "uniqueItems": true
+                              }
+                            },
+                            "required": [
+                              "feature",
+                              "available",
+                              "photo_ids"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 2,
+                          "type": "array"
+                        },
                         "amenities": {
                           "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
                           "items": {
@@ -87863,7 +88522,8 @@
                         "details_version",
                         "sleeping_arrangements",
                         "private_attached_bathroom",
-                        "amenities"
+                        "amenities",
+                        "accessibility"
                       ],
                       "type": "object"
                     },
@@ -88686,6 +89346,71 @@
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "accessibility": {
+                      "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                      "items": {
+                        "additionalProperties": false,
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "available": {
+                                "const": true
+                              },
+                              "photo_ids": {
+                                "minItems": 1
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "available": {
+                                "enum": [
+                                  false,
+                                  null
+                                ]
+                              },
+                              "photo_ids": {
+                                "maxItems": 0
+                              }
+                            }
+                          }
+                        ],
+                        "properties": {
+                          "available": {
+                            "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "feature": {
+                            "enum": [
+                              "step_free_access",
+                              "wide_doorway"
+                            ],
+                            "type": "string"
+                          },
+                          "photo_ids": {
+                            "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "maxItems": 50,
+                            "type": "array",
+                            "uniqueItems": true
+                          }
+                        },
+                        "required": [
+                          "feature",
+                          "available",
+                          "photo_ids"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 2,
+                      "type": "array"
+                    },
                     "amenities": {
                       "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
                       "items": {
@@ -88954,7 +89679,8 @@
                     "details_version",
                     "sleeping_arrangements",
                     "private_attached_bathroom",
-                    "amenities"
+                    "amenities",
+                    "accessibility"
                   ],
                   "type": "object"
                 },
@@ -101573,6 +102299,71 @@
                     "items": {
                       "additionalProperties": false,
                       "properties": {
+                        "accessibility": {
+                          "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                          "items": {
+                            "additionalProperties": false,
+                            "oneOf": [
+                              {
+                                "properties": {
+                                  "available": {
+                                    "const": true
+                                  },
+                                  "photo_ids": {
+                                    "minItems": 1
+                                  }
+                                }
+                              },
+                              {
+                                "properties": {
+                                  "available": {
+                                    "enum": [
+                                      false,
+                                      null
+                                    ]
+                                  },
+                                  "photo_ids": {
+                                    "maxItems": 0
+                                  }
+                                }
+                              }
+                            ],
+                            "properties": {
+                              "available": {
+                                "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                                "type": [
+                                  "boolean",
+                                  "null"
+                                ]
+                              },
+                              "feature": {
+                                "enum": [
+                                  "step_free_access",
+                                  "wide_doorway"
+                                ],
+                                "type": "string"
+                              },
+                              "photo_ids": {
+                                "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                                "items": {
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 50,
+                                "type": "array",
+                                "uniqueItems": true
+                              }
+                            },
+                            "required": [
+                              "feature",
+                              "available",
+                              "photo_ids"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 2,
+                          "type": "array"
+                        },
                         "amenities": {
                           "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
                           "items": {
@@ -101841,7 +102632,8 @@
                         "details_version",
                         "sleeping_arrangements",
                         "private_attached_bathroom",
-                        "amenities"
+                        "amenities",
+                        "accessibility"
                       ],
                       "type": "object"
                     },
@@ -103383,6 +104175,71 @@
                     "items": {
                       "additionalProperties": false,
                       "properties": {
+                        "accessibility": {
+                          "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                          "items": {
+                            "additionalProperties": false,
+                            "oneOf": [
+                              {
+                                "properties": {
+                                  "available": {
+                                    "const": true
+                                  },
+                                  "photo_ids": {
+                                    "minItems": 1
+                                  }
+                                }
+                              },
+                              {
+                                "properties": {
+                                  "available": {
+                                    "enum": [
+                                      false,
+                                      null
+                                    ]
+                                  },
+                                  "photo_ids": {
+                                    "maxItems": 0
+                                  }
+                                }
+                              }
+                            ],
+                            "properties": {
+                              "available": {
+                                "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                                "type": [
+                                  "boolean",
+                                  "null"
+                                ]
+                              },
+                              "feature": {
+                                "enum": [
+                                  "step_free_access",
+                                  "wide_doorway"
+                                ],
+                                "type": "string"
+                              },
+                              "photo_ids": {
+                                "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                                "items": {
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 50,
+                                "type": "array",
+                                "uniqueItems": true
+                              }
+                            },
+                            "required": [
+                              "feature",
+                              "available",
+                              "photo_ids"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 2,
+                          "type": "array"
+                        },
                         "amenities": {
                           "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
                           "items": {
@@ -103651,7 +104508,8 @@
                         "details_version",
                         "sleeping_arrangements",
                         "private_attached_bathroom",
-                        "amenities"
+                        "amenities",
+                        "accessibility"
                       ],
                       "type": "object"
                     },
@@ -104547,6 +105405,71 @@
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "accessibility": {
+                      "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                      "items": {
+                        "additionalProperties": false,
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "available": {
+                                "const": true
+                              },
+                              "photo_ids": {
+                                "minItems": 1
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "available": {
+                                "enum": [
+                                  false,
+                                  null
+                                ]
+                              },
+                              "photo_ids": {
+                                "maxItems": 0
+                              }
+                            }
+                          }
+                        ],
+                        "properties": {
+                          "available": {
+                            "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "feature": {
+                            "enum": [
+                              "step_free_access",
+                              "wide_doorway"
+                            ],
+                            "type": "string"
+                          },
+                          "photo_ids": {
+                            "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "maxItems": 50,
+                            "type": "array",
+                            "uniqueItems": true
+                          }
+                        },
+                        "required": [
+                          "feature",
+                          "available",
+                          "photo_ids"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 2,
+                      "type": "array"
+                    },
                     "amenities": {
                       "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
                       "items": {
@@ -104815,7 +105738,8 @@
                     "details_version",
                     "sleeping_arrangements",
                     "private_attached_bathroom",
-                    "amenities"
+                    "amenities",
+                    "accessibility"
                   ],
                   "type": "object"
                 },
@@ -113861,6 +114785,71 @@
                             "items": {
                               "additionalProperties": false,
                               "properties": {
+                                "accessibility": {
+                                  "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                                  "items": {
+                                    "additionalProperties": false,
+                                    "oneOf": [
+                                      {
+                                        "properties": {
+                                          "available": {
+                                            "const": true
+                                          },
+                                          "photo_ids": {
+                                            "minItems": 1
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "properties": {
+                                          "available": {
+                                            "enum": [
+                                              false,
+                                              null
+                                            ]
+                                          },
+                                          "photo_ids": {
+                                            "maxItems": 0
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "properties": {
+                                      "available": {
+                                        "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                                        "type": [
+                                          "boolean",
+                                          "null"
+                                        ]
+                                      },
+                                      "feature": {
+                                        "enum": [
+                                          "step_free_access",
+                                          "wide_doorway"
+                                        ],
+                                        "type": "string"
+                                      },
+                                      "photo_ids": {
+                                        "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                                        "items": {
+                                          "minLength": 1,
+                                          "type": "string"
+                                        },
+                                        "maxItems": 50,
+                                        "type": "array",
+                                        "uniqueItems": true
+                                      }
+                                    },
+                                    "required": [
+                                      "feature",
+                                      "available",
+                                      "photo_ids"
+                                    ],
+                                    "type": "object"
+                                  },
+                                  "maxItems": 2,
+                                  "type": "array"
+                                },
                                 "amenities": {
                                   "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
                                   "items": {
@@ -114129,7 +115118,8 @@
                                 "details_version",
                                 "sleeping_arrangements",
                                 "private_attached_bathroom",
-                                "amenities"
+                                "amenities",
+                                "accessibility"
                               ],
                               "type": "object"
                             },
@@ -118449,6 +119439,71 @@
                     "items": {
                       "additionalProperties": false,
                       "properties": {
+                        "accessibility": {
+                          "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                          "items": {
+                            "additionalProperties": false,
+                            "oneOf": [
+                              {
+                                "properties": {
+                                  "available": {
+                                    "const": true
+                                  },
+                                  "photo_ids": {
+                                    "minItems": 1
+                                  }
+                                }
+                              },
+                              {
+                                "properties": {
+                                  "available": {
+                                    "enum": [
+                                      false,
+                                      null
+                                    ]
+                                  },
+                                  "photo_ids": {
+                                    "maxItems": 0
+                                  }
+                                }
+                              }
+                            ],
+                            "properties": {
+                              "available": {
+                                "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                                "type": [
+                                  "boolean",
+                                  "null"
+                                ]
+                              },
+                              "feature": {
+                                "enum": [
+                                  "step_free_access",
+                                  "wide_doorway"
+                                ],
+                                "type": "string"
+                              },
+                              "photo_ids": {
+                                "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                                "items": {
+                                  "minLength": 1,
+                                  "type": "string"
+                                },
+                                "maxItems": 50,
+                                "type": "array",
+                                "uniqueItems": true
+                              }
+                            },
+                            "required": [
+                              "feature",
+                              "available",
+                              "photo_ids"
+                            ],
+                            "type": "object"
+                          },
+                          "maxItems": 2,
+                          "type": "array"
+                        },
                         "amenities": {
                           "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
                           "items": {
@@ -118717,7 +119772,8 @@
                         "details_version",
                         "sleeping_arrangements",
                         "private_attached_bathroom",
-                        "amenities"
+                        "amenities",
+                        "accessibility"
                       ],
                       "type": "object"
                     },
@@ -127994,6 +129050,71 @@
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "accessibility": {
+                      "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                      "items": {
+                        "additionalProperties": false,
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "available": {
+                                "const": true
+                              },
+                              "photo_ids": {
+                                "minItems": 1
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "available": {
+                                "enum": [
+                                  false,
+                                  null
+                                ]
+                              },
+                              "photo_ids": {
+                                "maxItems": 0
+                              }
+                            }
+                          }
+                        ],
+                        "properties": {
+                          "available": {
+                            "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "feature": {
+                            "enum": [
+                              "step_free_access",
+                              "wide_doorway"
+                            ],
+                            "type": "string"
+                          },
+                          "photo_ids": {
+                            "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "maxItems": 50,
+                            "type": "array",
+                            "uniqueItems": true
+                          }
+                        },
+                        "required": [
+                          "feature",
+                          "available",
+                          "photo_ids"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 2,
+                      "type": "array"
+                    },
                     "amenities": {
                       "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
                       "items": {
@@ -128262,7 +129383,8 @@
                     "details_version",
                     "sleeping_arrangements",
                     "private_attached_bathroom",
-                    "amenities"
+                    "amenities",
+                    "accessibility"
                   ],
                   "type": "object"
                 },
@@ -128550,7 +129672,7 @@
     {
       "name": "update_stay_photo_room",
       "title": "Update stay photo room",
-      "description": "Update sleeping arrangements, bedroom private-bathroom information or amenity memberships on one authored room under its details_version. Fields omitted are retained. Null clears sleeping/privacy answers; [] explicitly states no sleeping arrangements or no amenity memberships. Beds allocate the known listing total. Selected room amenities are atomically added to the listing; deselection only unassigns them from this room. A stale version or invalid combination refuses every change. Listing totals and photos are unchanged.",
+      "description": "Update one authored room under its details_version: sleeping arrangements, bedroom privacy, amenity memberships or one bedroom accessibility answer. Omitted concerns and other feature answers are retained. Beds allocate the declared listing total; selected amenities join the global listing set while deselection only unassigns. Accessibility true requires image evidence and atomically appends selected library images to Product photos without changing existing cover/order or tour groups. False/null requires no evidence; null clears to unknown. Referenced photos cannot be removed until evidence is replaced or the answer cleared. No review or approval is implied. A stale version or invalid combination refuses every change.",
       "inputSchema": {
         "additionalProperties": false,
         "anyOf": [
@@ -128568,9 +129690,74 @@
             "required": [
               "amenities"
             ]
+          },
+          {
+            "required": [
+              "accessibility"
+            ]
           }
         ],
         "properties": {
+          "accessibility": {
+            "additionalProperties": false,
+            "oneOf": [
+              {
+                "properties": {
+                  "available": {
+                    "const": true
+                  },
+                  "photo_ids": {
+                    "minItems": 1
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "available": {
+                    "enum": [
+                      false,
+                      null
+                    ]
+                  },
+                  "photo_ids": {
+                    "maxItems": 0
+                  }
+                }
+              }
+            ],
+            "properties": {
+              "available": {
+                "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                "type": [
+                  "boolean",
+                  "null"
+                ]
+              },
+              "feature": {
+                "enum": [
+                  "step_free_access",
+                  "wide_doorway"
+                ],
+                "type": "string"
+              },
+              "photo_ids": {
+                "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                "items": {
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "maxItems": 50,
+                "type": "array",
+                "uniqueItems": true
+              }
+            },
+            "required": [
+              "feature",
+              "available",
+              "photo_ids"
+            ],
+            "type": "object"
+          },
           "amenities": {
             "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
             "items": {
@@ -129247,6 +130434,71 @@
                 "items": {
                   "additionalProperties": false,
                   "properties": {
+                    "accessibility": {
+                      "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                      "items": {
+                        "additionalProperties": false,
+                        "oneOf": [
+                          {
+                            "properties": {
+                              "available": {
+                                "const": true
+                              },
+                              "photo_ids": {
+                                "minItems": 1
+                              }
+                            }
+                          },
+                          {
+                            "properties": {
+                              "available": {
+                                "enum": [
+                                  false,
+                                  null
+                                ]
+                              },
+                              "photo_ids": {
+                                "maxItems": 0
+                              }
+                            }
+                          }
+                        ],
+                        "properties": {
+                          "available": {
+                            "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                            "type": [
+                              "boolean",
+                              "null"
+                            ]
+                          },
+                          "feature": {
+                            "enum": [
+                              "step_free_access",
+                              "wide_doorway"
+                            ],
+                            "type": "string"
+                          },
+                          "photo_ids": {
+                            "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                            "items": {
+                              "minLength": 1,
+                              "type": "string"
+                            },
+                            "maxItems": 50,
+                            "type": "array",
+                            "uniqueItems": true
+                          }
+                        },
+                        "required": [
+                          "feature",
+                          "available",
+                          "photo_ids"
+                        ],
+                        "type": "object"
+                      },
+                      "maxItems": 2,
+                      "type": "array"
+                    },
                     "amenities": {
                       "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
                       "items": {
@@ -129515,7 +130767,8 @@
                     "details_version",
                     "sleeping_arrangements",
                     "private_attached_bathroom",
-                    "amenities"
+                    "amenities",
+                    "accessibility"
                   ],
                   "type": "object"
                 },
@@ -129778,6 +131031,71 @@
           "room": {
             "additionalProperties": false,
             "properties": {
+              "accessibility": {
+                "description": "Both bedroom features in catalog order, including unanswered null rows; [] for other room types.",
+                "items": {
+                  "additionalProperties": false,
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "available": {
+                          "const": true
+                        },
+                        "photo_ids": {
+                          "minItems": 1
+                        }
+                      }
+                    },
+                    {
+                      "properties": {
+                        "available": {
+                          "enum": [
+                            false,
+                            null
+                          ]
+                        },
+                        "photo_ids": {
+                          "maxItems": 0
+                        }
+                      }
+                    }
+                  ],
+                  "properties": {
+                    "available": {
+                      "description": "The host’s answer, without a review or approval status. Null clears the answer to unknown.",
+                      "type": [
+                        "boolean",
+                        "null"
+                      ]
+                    },
+                    "feature": {
+                      "enum": [
+                        "step_free_access",
+                        "wide_doorway"
+                      ],
+                      "type": "string"
+                    },
+                    "photo_ids": {
+                      "description": "Same-organization active image asset IDs in canonical Product photo order. A true answer needs evidence; false/null requires []. Save appends selected library images to Product photos atomically, preserving existing cover/order without assigning a tour room.",
+                      "items": {
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "maxItems": 50,
+                      "type": "array",
+                      "uniqueItems": true
+                    }
+                  },
+                  "required": [
+                    "feature",
+                    "available",
+                    "photo_ids"
+                  ],
+                  "type": "object"
+                },
+                "maxItems": 2,
+                "type": "array"
+              },
               "amenities": {
                 "description": "Amenities assigned to this room, each once. Replaces only this room’s memberships; [] unassigns all. Selected codes are added to the canonical listing amenity set atomically, while unassigning never removes a listing amenity.",
                 "items": {
@@ -130046,7 +131364,8 @@
               "details_version",
               "sleeping_arrangements",
               "private_attached_bathroom",
-              "amenities"
+              "amenities",
+              "accessibility"
             ],
             "type": "object"
           }
@@ -130203,18 +131522,18 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:0d98b231c703b7b6e23b1bb6c7cac9e1299f9cd8684fe966919d23c519765a69",
-        "get_product": "sha256:b7162400886c6e4688647a92738a826c4a2383ce6b528867422f21f8d9fc58ac",
+        "create_product": "sha256:267a19228604764a3953a9603c7e139c2b3da64cc653a2cd2b9f2d9f8f2c0dca",
+        "get_product": "sha256:8e9b29bf58bedd798421dd53242bca5aeee0c41eeba20001763d75f494855f16",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
-        "reconcile_products": "sha256:07ecd4a30e1bf79afb8e5c31933ae0ca3be065e6c34cbc583f7c4c9d3ad9b60f",
+        "reconcile_products": "sha256:f4c6d141ddc9f0b03652a5a8d3ce0d795244f158d2bdce4073e0658f73c3e3f2",
         "reorder_collections": "sha256:1ca15d17627f9313cf613371e44816f2ae36a2f215b343ad8f4f1d1c6fe7c171",
         "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
-        "update_menu": "sha256:bbaeef0e17c77cb41581352953977015cb1f44323d4847fdf03d07ea9005e4fe",
-        "update_product": "sha256:42cb12550e3c6c434fb94521a042b21613e8bd0b0d190a81a329350fe0057536"
+        "update_menu": "sha256:203ae23ae03f77e7a587e368d315d0a47f4368ec868e05be2b683abe23e1093c",
+        "update_product": "sha256:6d0b1f7680483b83398268a18771f04a049b8a117d320c8d818f68e16c6492a0"
       }
     },
     {
@@ -130259,8 +131578,8 @@
       },
       "toolContracts": {
         "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
-        "create_product": "sha256:0d98b231c703b7b6e23b1bb6c7cac9e1299f9cd8684fe966919d23c519765a69",
-        "get_product": "sha256:b7162400886c6e4688647a92738a826c4a2383ce6b528867422f21f8d9fc58ac",
+        "create_product": "sha256:267a19228604764a3953a9603c7e139c2b3da64cc653a2cd2b9f2d9f8f2c0dca",
+        "get_product": "sha256:8e9b29bf58bedd798421dd53242bca5aeee0c41eeba20001763d75f494855f16",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
@@ -130324,7 +131643,7 @@
         "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
         "get_location": "sha256:935bc48ba06c95ca2404aaba6b2f625477b07c06e4bb783f4b48f60adee60bcc",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
-        "get_product": "sha256:b7162400886c6e4688647a92738a826c4a2383ce6b528867422f21f8d9fc58ac",
+        "get_product": "sha256:8e9b29bf58bedd798421dd53242bca5aeee0c41eeba20001763d75f494855f16",
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871",
@@ -130340,7 +131659,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:0d98b231c703b7b6e23b1bb6c7cac9e1299f9cd8684fe966919d23c519765a69",
+        "create_product": "sha256:267a19228604764a3953a9603c7e139c2b3da64cc653a2cd2b9f2d9f8f2c0dca",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_website_draft": "sha256:fccf7d7281ba30d1e79163929e61abec1893c2e910460c4068364a65784a7bac",
@@ -130351,7 +131670,7 @@
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
-        "update_menu": "sha256:bbaeef0e17c77cb41581352953977015cb1f44323d4847fdf03d07ea9005e4fe",
+        "update_menu": "sha256:203ae23ae03f77e7a587e368d315d0a47f4368ec868e05be2b683abe23e1093c",
         "update_organization_settings": "sha256:b5488027b9a151e5759c0cf78e9010b60ff1d07ba783525d50e30cc233f2ef94",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
@@ -130366,7 +131685,7 @@
       },
       "toolContracts": {
         "get_location": "sha256:935bc48ba06c95ca2404aaba6b2f625477b07c06e4bb783f4b48f60adee60bcc",
-        "get_product": "sha256:b7162400886c6e4688647a92738a826c4a2383ce6b528867422f21f8d9fc58ac",
+        "get_product": "sha256:8e9b29bf58bedd798421dd53242bca5aeee0c41eeba20001763d75f494855f16",
         "get_reservation_policy": "sha256:02b88a415fda9ae0cc84221d08f66c80f387917adf60625913996c574e3f86c1",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -130374,7 +131693,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "replace_product_weekly_schedule": "sha256:d4f5ba8f99874961aa0d9cb91f22c8ef2b640aeeeff6a52fc8e7ed758fbf4ae2",
         "set_product_booking_config": "sha256:c007ea9559df74ac50714b2adf181eb57053b53523366adb89d0df9fff291b3b",
-        "update_product": "sha256:42cb12550e3c6c434fb94521a042b21613e8bd0b0d190a81a329350fe0057536",
+        "update_product": "sha256:6d0b1f7680483b83398268a18771f04a049b8a117d320c8d818f68e16c6492a0",
         "update_reservation_policy": "sha256:f1e5e7eda32993dc7be3ffc459ceb97517ed309bb144d2a5f29a0f0b082f784f"
       }
     },
@@ -130394,7 +131713,7 @@
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0",
-        "update_product": "sha256:42cb12550e3c6c434fb94521a042b21613e8bd0b0d190a81a329350fe0057536",
+        "update_product": "sha256:6d0b1f7680483b83398268a18771f04a049b8a117d320c8d818f68e16c6492a0",
         "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
       }
     },
@@ -130410,14 +131729,14 @@
         "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_organization_analytics": "sha256:aad678e4cef26c11f2a5304b650d582662912ff4a1395bffb04b7d791778db43",
-        "get_product": "sha256:b7162400886c6e4688647a92738a826c4a2383ce6b528867422f21f8d9fc58ac",
+        "get_product": "sha256:8e9b29bf58bedd798421dd53242bca5aeee0c41eeba20001763d75f494855f16",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_guest_conversations": "sha256:08666b91702a4368eb91ef9cc7e33fa493d53ef328a4a3e958eee1a0c20660cb",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reply_to_guest": "sha256:3283d7bae3907cc170396513e5e00551ee0e5bd18b068164a9bd4b405f4ae7f9",
-        "update_product": "sha256:42cb12550e3c6c434fb94521a042b21613e8bd0b0d190a81a329350fe0057536"
+        "update_product": "sha256:6d0b1f7680483b83398268a18771f04a049b8a117d320c8d818f68e16c6492a0"
       }
     }
   ],
@@ -130445,7 +131764,7 @@
       "slug": "update-your-menu-with-an-ai-assistant",
       "contentHash": "sha256:aa8642030ebe66e3d27ab8abecff519d51ee2eaf11f7ee1e02875ee4e1ea987e",
       "toolContracts": {
-        "get_product": "sha256:b7162400886c6e4688647a92738a826c4a2383ce6b528867422f21f8d9fc58ac",
+        "get_product": "sha256:8e9b29bf58bedd798421dd53242bca5aeee0c41eeba20001763d75f494855f16",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
         "list_location_products": "sha256:6d4c29acd5c3cf926df1d4c758ca7fcc2eb314d9087b1daeb04b907cb0ee392e",
@@ -130453,7 +131772,7 @@
         "list_organizations": "sha256:e1f645a8c5aed169c4874d9655a1b413ba1b54dffe2ddaf3f394db0b8017c5a4",
         "reorder_collections": "sha256:1ca15d17627f9313cf613371e44816f2ae36a2f215b343ad8f4f1d1c6fe7c171",
         "set_collection_products": "sha256:58b1aa681e38ce9ead9e945439f606467932c7755dac3f02a454e33fd3ca763a",
-        "update_menu": "sha256:bbaeef0e17c77cb41581352953977015cb1f44323d4847fdf03d07ea9005e4fe"
+        "update_menu": "sha256:203ae23ae03f77e7a587e368d315d0a47f4368ec868e05be2b683abe23e1093c"
       }
     },
     {

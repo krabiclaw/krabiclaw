@@ -619,5 +619,10 @@
   "stay.bed_types.crib": "{count} cũi em bé",
   "stay.bed_types.toddler_bed": "{count} giường trẻ nhỏ",
   "stay.bed_types.hammock": "{count} võng",
-  "stay.bed_types.water_bed": "{count} giường nước"
+  "stay.bed_types.water_bed": "{count} giường nước",
+  "stay.open_accessibility_photo": "Xem {feature}, ảnh {number}",
+  "stay.accessibility_features.step_free_access.label": "Lối vào không có bậc",
+  "stay.accessibility_features.step_free_access.description": "Phòng ngủ ở tầng trệt hoặc có thể đến bằng thang máy hay đường dốc. Lối đi từ cửa vào dành cho khách đến phòng ngủ không có bậc hoặc ngưỡng cửa cao quá 5 cm (2 inch).",
+  "stay.accessibility_features.wide_doorway.label": "Lối vào rộng hơn 32 inch",
+  "stay.accessibility_features.wide_doorway.description": "Lối vào phòng ngủ rộng ít nhất 32 inch khi cửa mở."
 }

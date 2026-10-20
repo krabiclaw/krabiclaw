@@ -140,7 +140,7 @@ test('a home authors room details and manages its product photos through authent
     assert.equal(createdRoom.status, 201, JSON.stringify(createdRoom.body))
     const roomId = (createdRoom.body.room as StayPhotoRoom).id
     assert.equal(typeof roomId, 'string')
-    const unansweredRoom: StayPhotoRoom = { id: roomId, type: 'bedroom', photo_ids: [], amenities: [], details_version: 1, sleeping_arrangements: null, private_attached_bathroom: null }
+    const unansweredRoom: StayPhotoRoom = { id: roomId, type: 'bedroom', photo_ids: [], amenities: [], accessibility: [{ feature: 'step_free_access', available: null, photo_ids: [] }, { feature: 'wide_doorway', available: null, photo_ids: [] }], details_version: 1, sleeping_arrangements: null, private_attached_bathroom: null }
     assert.deepEqual(createdRoom.body.room, unansweredRoom)
     assert.deepEqual((await getProduct(db, ORG, productId)).stay?.photo_rooms, [unansweredRoom])
 
@@ -217,6 +217,52 @@ test('a home authors room details and manages its product photos through authent
     assert.deepEqual((await getProduct(db, ORG, productId)).stay!.amenities, ['tv', 'wireless_internet'])
     assert.equal(await db.prepare('SELECT count(*) AS n FROM product_stay_photo_room_amenities WHERE organization_id = ? AND product_id = ?').bind(ORG, productId).first('n'), 0)
 
+    const notStepFree = await call(owner, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 7, accessibility: { feature: 'step_free_access', available: false, photo_ids: [] } })
+    assert.equal(notStepFree.status, 200, JSON.stringify(notStepFree.body))
+    assert.deepEqual(notStepFree.body.room, { ...clearedRoom, details_version: 8, accessibility: [{ feature: 'step_free_access', available: false, photo_ids: [] }, unansweredRoom.accessibility[1]] })
+    // Saving existing library evidence reattaches the actual photo atomically,
+    // completes cache invalidation, and preserves the current cover and order.
+    assert.equal((await call(owner, 'DELETE', `/${productId}/photos/bedroom`)).status, 200)
+    assert.deepEqual((await homes())[0]!.photos, [photo('deck', 0), photo('kitchen', 1)])
+    const beforeEvidenceShell = await shell()
+    assert.equal(beforeEvidenceShell.status, 200, await beforeEvidenceShell.clone().text())
+    assert.equal(beforeEvidenceShell.headers.get('x-bootstrap-cache'), 'MISS')
+    const cachedBeforeEvidenceShell = await shell()
+    assert.equal(cachedBeforeEvidenceShell.status, 200, await cachedBeforeEvidenceShell.clone().text())
+    assert.equal(cachedBeforeEvidenceShell.headers.get('x-bootstrap-cache'), 'HIT')
+    const stepFree = await call(owner, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 8, accessibility: { feature: 'step_free_access', available: true, photo_ids: ['bedroom'] } })
+    assert.equal(stepFree.status, 200, JSON.stringify(stepFree.body))
+    const accessibleRoom: StayPhotoRoom = { ...clearedRoom, details_version: 9, accessibility: [{ feature: 'step_free_access', available: true, photo_ids: ['bedroom'] }, unansweredRoom.accessibility[1]!] }
+    assert.deepEqual(stepFree.body.room, accessibleRoom)
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.photo_rooms, [accessibleRoom])
+    assert.deepEqual((await db.prepare('SELECT feature_code, available FROM product_stay_room_accessibility WHERE organization_id = ? AND product_id = ? AND room_id = ?').bind(ORG, productId, roomId).all()).results, [{ feature_code: 'step_free_access', available: 1 }])
+    assert.deepEqual((await db.prepare('SELECT feature_code, asset_id FROM product_stay_room_accessibility_photos WHERE organization_id = ? AND product_id = ? AND room_id = ?').bind(ORG, productId, roomId).all()).results, [{ feature_code: 'step_free_access', asset_id: 'bedroom' }])
+    assert.deepEqual([((await rendered()).image)?.asset_id, (await rendered()).gallery.map(asset => asset.asset_id)], ['deck', ['kitchen', 'bedroom']])
+    assert.deepEqual((await homes())[0]!.photos, [photo('deck', 0), photo('kitchen', 1), photo('bedroom', 2)])
+    assert.deepEqual(accessibleRoom.photo_ids, [])
+    const afterEvidenceShell = await shell()
+    assert.equal(afterEvidenceShell.status, 200, await afterEvidenceShell.clone().text())
+    assert.equal(afterEvidenceShell.headers.get('x-bootstrap-cache'), 'MISS')
+    assert.deepEqual(refusal(await call(owner, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 8, accessibility: { feature: 'step_free_access', available: true, photo_ids: ['deck'] }, amenities: ['hot_water'] })), { status: 409, code: 'ROOM_DETAILS_CHANGED', field: 'expected_details_version' })
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.photo_rooms, [accessibleRoom])
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.amenities, ['tv', 'wireless_internet'])
+    const noWideDoor = await call(owner, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 9, accessibility: { feature: 'wide_doorway', available: false, photo_ids: [] } })
+    assert.equal(noWideDoor.status, 200, JSON.stringify(noWideDoor.body))
+    assert.deepEqual((noWideDoor.body.room as StayPhotoRoom).accessibility, [accessibleRoom.accessibility[0], { feature: 'wide_doorway', available: false, photo_ids: [] }])
+    assert.deepEqual(refusal(await call(owner, 'DELETE', `/${productId}/photos/bedroom`)), { status: 409, code: 'ACCESSIBILITY_EVIDENCE_REQUIRED', field: 'photo_ids' })
+    assert.deepEqual((await homes())[0]!.photos, [photo('deck', 0), photo('kitchen', 1), photo('bedroom', 2)])
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.photo_rooms[0]!.accessibility, [accessibleRoom.accessibility[0], { feature: 'wide_doorway', available: false, photo_ids: [] }])
+    const clearStep = await call(owner, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 10, accessibility: { feature: 'step_free_access', available: null, photo_ids: [] } })
+    assert.equal(clearStep.status, 200, JSON.stringify(clearStep.body))
+    assert.deepEqual((clearStep.body.room as StayPhotoRoom).accessibility, [unansweredRoom.accessibility[0], { feature: 'wide_doorway', available: false, photo_ids: [] }])
+    assert.equal((await call(owner, 'DELETE', `/${productId}/photos/bedroom`)).status, 200)
+    assert.equal((await call(owner, 'POST', `/${productId}/photos`, { asset_id: 'bedroom' })).status, 201)
+    const clearWideDoor = await call(owner, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 11, accessibility: { feature: 'wide_doorway', available: null, photo_ids: [] } })
+    assert.equal(clearWideDoor.status, 200, JSON.stringify(clearWideDoor.body))
+    clearedRoom.details_version = 12
+    assert.deepEqual(clearWideDoor.body.room, clearedRoom)
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay!.photo_rooms, [clearedRoom])
+
     // Ordering makes the first photo the cover; the product the pages render agrees.
     const ordered = await call(owner, 'PUT', `/${productId}/photos`, { photo_ids: ['bedroom', 'deck', 'kitchen'] })
     assert.equal(ordered.status, 200)
@@ -269,7 +315,7 @@ test('a home authors room details and manages its product photos through authent
 
     // Only managers change a home's photos.
     const helper = await cookieFor('helper')
-    assert.deepEqual(refusal(await call(helper, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 7, amenities: ['hot_water'], private_attached_bathroom: true })), { status: 403, code: 'STAY_ROLE_REQUIRED' })
+    assert.deepEqual(refusal(await call(helper, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 12, accessibility: { feature: 'step_free_access', available: true, photo_ids: ['deck'] }, amenities: ['hot_water'], private_attached_bathroom: true })), { status: 403, code: 'STAY_ROLE_REQUIRED' })
     assert.deepEqual((await getProduct(db, ORG, productId)).stay?.photo_rooms, [clearedRoom])
     assert.deepEqual((await getProduct(db, ORG, productId)).stay!.amenities, ['tv', 'wireless_internet'])
     assert.deepEqual(refusal(await call(helper, 'PUT', `/${productId}/photos`, { photo_ids: ['kitchen', 'deck'] })), { status: 403, code: 'STAY_ROLE_REQUIRED' })

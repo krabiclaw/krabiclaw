@@ -140,6 +140,7 @@ import type { GalleryMediaItem } from '~/components/dashboard/DashboardMediaGall
 import type { StayArrivalGuide, StayArrivalField } from '~/shared/stay-arrival'
 import type { StaySafetySection } from '~/shared/stay-safety'
 import type { StayPhotoRoom, StayPhotoRoomType } from '~/shared/stay-photos'
+import type { StayRoomAccessibility } from '~/shared/stay-accessibility'
 
 export const SECTION_KEYS = [
   'photo', 'kind', 'name', 'price', 'description', 'page', 'options', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections',
@@ -277,7 +278,7 @@ export interface ProductEditor {
   photoAssets: ComputedRef<Product['gallery']>
   photoRooms: ComputedRef<StayPhotoRoom[]>
   createStayPhotoRoom: (type: StayPhotoRoomType) => Promise<StayPhotoRoom | null>
-  updateStayPhotoRoom: (roomId: string, patch: Pick<StayPhotoRoom, 'details_version'> & Partial<Pick<StayPhotoRoom, 'sleeping_arrangements' | 'private_attached_bathroom' | 'amenities'>>) => Promise<boolean>
+  updateStayPhotoRoom: (roomId: string, patch: Pick<StayPhotoRoom, 'details_version'> & Partial<Pick<StayPhotoRoom, 'sleeping_arrangements' | 'private_attached_bathroom' | 'amenities'>> & { accessibility?: StayRoomAccessibility }) => Promise<boolean>
   deleteStayPhotoRoom: (roomId: string) => Promise<boolean>
   moveStayPhotos: (photos: Array<{ photo_id: string; expected_room_id: string | null }>, target: { room_id: string | null } | { new_room_type: StayPhotoRoomType }) => Promise<boolean>
   addStayPhoto: (assetId: string) => Promise<boolean>
@@ -1836,7 +1837,7 @@ async function deleteStayPhotoRoom(roomId: string) {
   return await changeStayPhotos(async () => await dashboardApi(`${stayRoomsUrl()}/${encodeURIComponent(roomId)}`, { method: 'DELETE', validate: isStayPhotoMutation }))
 }
 
-async function updateStayPhotoRoom(roomId: string, patch: Pick<StayPhotoRoom, 'details_version'> & Partial<Pick<StayPhotoRoom, 'sleeping_arrangements' | 'private_attached_bathroom' | 'amenities'>>) {
+async function updateStayPhotoRoom(roomId: string, patch: Pick<StayPhotoRoom, 'details_version'> & Partial<Pick<StayPhotoRoom, 'sleeping_arrangements' | 'private_attached_bathroom' | 'amenities'>> & { accessibility?: StayRoomAccessibility }) {
   const { details_version, ...details } = patch
   return await changeStayPhotos(async () => await dashboardApi(`${stayRoomsUrl()}/${encodeURIComponent(roomId)}`, {
     method: 'PATCH', body: { expected_details_version: details_version, ...details }, validate: isStayPhotoMutation,

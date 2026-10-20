@@ -122,6 +122,17 @@ export default {
     "additional_photos": "Additional photos",
     "back_to_photo_tour": "Back to photo tour",
     "open_room_photo": "Open {room}, photo {number}",
+    "open_accessibility_photo": "View {feature}, photo {number}",
+    "accessibility_features": {
+      "step_free_access": {
+        "label": "Step-free access",
+        "description": "The bedroom is on the ground floor or reached by a lift or ramp. The route from the guest entrance to the bedroom has no steps or thresholds higher than 5 cm (2 in)."
+      },
+      "wide_doorway": {
+        "label": "Entrance wider than 32 inches",
+        "description": "The bedroom entrance is at least 32 inches wide when the door is open."
+      }
+    },
     "where_youll_sleep": "Where you'll sleep",
     "room_details": "Room details",
     "no_sleeping_arrangements": "No sleeping arrangements",

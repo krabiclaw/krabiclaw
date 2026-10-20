@@ -404,6 +404,8 @@ function openAllPhotos() {
   lightboxOverview.value = props.photoGroups.length > 0
 }
 
+defineExpose({ openLightbox })
+
 watch(lightboxOpen, () => {
   void syncVideoPreviews()
 })

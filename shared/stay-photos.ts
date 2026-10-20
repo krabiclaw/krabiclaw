@@ -1,4 +1,5 @@
 import { isStayAmenity, type StayAmenity } from './stay-listing'
+import { isStayRoomAccessibility, stayRoomAccessibilityFeatures, type StayRoomAccessibility } from './stay-accessibility'
 
 /** Authored rooms and spaces in a home's photo tour. Their existence implies no capacity or amenities. */
 export const STAY_PHOTO_ROOM_TYPES = {
@@ -101,6 +102,7 @@ export interface StayPhotoRoom {
   private_attached_bathroom: boolean | null
   /** Room references to amenities present in the canonical listing amenity set. */
   amenities: StayAmenity[]
+  accessibility: StayRoomAccessibility[]
 }
 
 export function isStayPhotoRoomType(value: unknown): value is StayPhotoRoomType {
@@ -111,7 +113,9 @@ export function isStayPhotoRoomType(value: unknown): value is StayPhotoRoomType 
 export function isStayPhotoRoom(value: unknown): value is StayPhotoRoom {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const room = value as Record<string, unknown>
-  return Object.keys(room).every(key => ['id', 'type', 'photo_ids', 'details_version', 'sleeping_arrangements', 'private_attached_bathroom', 'amenities'].includes(key))
+  if (!isStayPhotoRoomType(room.type)) return false
+  const features = stayRoomAccessibilityFeatures(room.type)
+  return Object.keys(room).every(key => ['id', 'type', 'photo_ids', 'details_version', 'sleeping_arrangements', 'private_attached_bathroom', 'amenities', 'accessibility'].includes(key))
     && typeof room.id === 'string' && room.id.length > 0
     && isStayPhotoRoomType(room.type)
     && Array.isArray(room.photo_ids) && room.photo_ids.every(id => typeof id === 'string' && id.length > 0)
@@ -120,6 +124,8 @@ export function isStayPhotoRoom(value: unknown): value is StayPhotoRoom {
     && isStaySleepingArrangements(room.sleeping_arrangements)
     && (room.private_attached_bathroom === null || (room.type === 'bedroom' && typeof room.private_attached_bathroom === 'boolean'))
     && Array.isArray(room.amenities) && room.amenities.every(isStayAmenity) && new Set(room.amenities).size === room.amenities.length
+    && Array.isArray(room.accessibility) && room.accessibility.length === features.length
+    && room.accessibility.every((answer, index) => isStayRoomAccessibility(answer) && answer.feature === features[index])
 }
 
 /** Multiple authored rooms of a type receive a number in their saved order. */

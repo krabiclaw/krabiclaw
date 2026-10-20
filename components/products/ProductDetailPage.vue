@@ -52,7 +52,7 @@
         <!-- Airbnb's experience and service pages: the photographs on the left and
              the title beside them; a stay's photographs run the full width. -->
         <div :class="!isStay && galleryItems.length ? 'lg:grid lg:grid-cols-2 lg:items-center lg:gap-12' : undefined">
-        <MediaGallery v-if="!compact && galleryItems.length" :items="galleryItems" :title="displayTitle" :photo-groups="photoGroups" />
+        <MediaGallery v-if="!compact && galleryItems.length" ref="mediaGallery" :items="galleryItems" :title="displayTitle" :photo-groups="photoGroups" />
 
         <header v-if="!isStay && !compact" class="mx-auto mt-10 max-w-3xl text-center" :class="galleryItems.length ? 'lg:mt-0' : undefined">
           <p class="saya-kicker mb-3">{{ collectionName }}</p>
@@ -155,7 +155,18 @@
                 <h3 class="font-semibold text-default">{{ room.title }}</h3>
                 <ul v-if="room.details?.length" class="mt-3 space-y-2 text-sm text-muted"><li v-for="detail in room.details" :key="detail">{{ detail }}</li></ul>
                 <ul v-if="room.features?.length" class="mt-3 space-y-3 text-sm text-muted">
-                  <li v-for="feature in room.features" :key="feature.id" class="flex items-center gap-3"><UIcon :name="feature.icon" class="size-5 shrink-0" aria-hidden="true" /><span>{{ feature.label }}</span></li>
+                  <li v-for="feature in room.features" :key="feature.id" class="flex items-start gap-3">
+                    <UIcon :name="feature.icon" class="size-5 shrink-0" aria-hidden="true" />
+                    <div class="min-w-0">
+                      <p>{{ feature.label }}</p>
+                      <p v-if="feature.description" class="mt-1 leading-relaxed">{{ feature.description }}</p>
+                      <div v-if="feature.asset_ids?.length" class="mt-3 flex flex-wrap gap-2">
+                        <button v-for="(assetId, position) in feature.asset_ids" :key="assetId" type="button" class="w-24 overflow-hidden rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4" :aria-label="t('stay.open_accessibility_photo', { feature: feature.label, number: position + 1 })" @click="openGalleryAsset(assetId)">
+                          <img :src="galleryItems.find(item => item.asset_id === assetId)!.url" alt="" class="aspect-4/3 w-full object-cover transition hover:brightness-95" loading="lazy">
+                        </button>
+                      </div>
+                    </div>
+                  </li>
                 </ul>
               </article>
             </div>
@@ -508,6 +519,7 @@ import type { Accommodation, PropertyValue } from 'nuxt-schema-org/schema'
 import { useSchemaOrg } from '#imports'
 import { STAY_AMENITIES, STAY_AMENITY_GROUPS, STAY_CANCELLATION_POLICIES, STAY_LISTING_TYPES, STAY_LONG_TERM_CANCELLATION_POLICIES, STAY_PROPERTY_SIZE_UNITS, STAY_PROPERTY_TYPES } from '~/shared/stay-listing'
 import { stayPhotoRoomName, stayPhotoTourReady } from '~/shared/stay-photos'
+import { STAY_ROOM_ACCESSIBILITY_FEATURES } from '~/shared/stay-accessibility'
 import type { MediaGalleryGroup } from '~/components/MediaLightbox.vue'
 import type { CurrencyCode } from '~/shared/currencies'
 import { minorAmountToMajor, selectPrice, type Price } from '~/shared/prices'
@@ -706,9 +718,12 @@ const canBook = computed(() => isStay.value
  * — two slots, read as the two things they are, not one list with a chosen
  * head.
  */
-const galleryItems = computed(() => uniqueMediaAssets([
+const productMedia = computed(() => uniqueMediaAssets([
   ...(props.product.image ? [props.product.image] : []),
   ...props.product.gallery,
+]))
+const galleryItems = computed(() => uniqueMediaAssets([
+  ...productMedia.value,
   ...(props.pageDocument?.media.filter(asset => asset.slot === 'cover' || asset.slot === 'gallery') ?? []),
 ]).filter(asset => asset.public_url).map(asset => ({
   asset_id: asset.asset_id,
@@ -717,11 +732,19 @@ const galleryItems = computed(() => uniqueMediaAssets([
   poster: asset.kind === 'video' ? asset.thumbnail_url : undefined,
   alt: asset.alt_text ?? undefined,
 })))
+const mediaGallery = ref<InstanceType<typeof MediaGallery> | null>(null)
+
+function openGalleryAsset(assetId: string) {
+  const index = galleryItems.value.findIndex(item => item.asset_id === assetId)
+  if (index < 0 || !mediaGallery.value) throw new TypeError('The accessibility photo is not in this listing gallery')
+  mediaGallery.value.openLightbox(index)
+}
 
 /** Room facts remain available even when the photo tour is not complete. */
 const stayRoomGroups = computed<MediaGalleryGroup[]>(() => {
   if (!isStay.value || !props.product.stay) return []
   const rooms = props.product.stay.photo_rooms
+  const imageIds = new Set(productMedia.value.filter(asset => asset.kind === 'image' && asset.public_url).map(asset => asset.asset_id))
   return rooms.map(room => ({
     id: room.id,
     title: stayPhotoRoomName(room, rooms, t(`stay.photo_room_types.${room.type}`)),
@@ -732,11 +755,24 @@ const stayRoomGroups = computed<MediaGalleryGroup[]>(() => {
         : [t('stay.no_sleeping_arrangements')]),
       ...(room.private_attached_bathroom === null ? [] : [t(room.private_attached_bathroom ? 'stay.private_attached_bathroom' : 'stay.no_private_attached_bathroom')]),
     ],
-    features: room.amenities.map(code => {
-      const amenity = stayAmenitiesList.value.find(item => item.code === code)
-      if (!amenity) throw new TypeError(`Room ${room.id} refers to an amenity the listing does not offer`)
-      return { id: code, label: amenity.label, icon: amenity.icon }
-    }),
+    features: [
+      ...room.amenities.map(code => {
+        const amenity = stayAmenitiesList.value.find(item => item.code === code)
+        if (!amenity) throw new TypeError(`Room ${room.id} refers to an amenity the listing does not offer`)
+        return { id: code, label: amenity.label, icon: amenity.icon }
+      }),
+      ...room.accessibility.filter(answer => answer.available === true).map(answer => {
+        if (!answer.photo_ids.length || answer.photo_ids.some(id => !imageIds.has(id))) throw new TypeError(`Room ${room.id} has an accessibility feature without its Product image evidence`)
+        const feature = STAY_ROOM_ACCESSIBILITY_FEATURES[answer.feature]
+        return {
+          id: `accessibility:${answer.feature}`,
+          label: t(`stay.accessibility_features.${answer.feature}.label`),
+          icon: feature.icon,
+          description: t(`stay.accessibility_features.${answer.feature}.description`),
+          asset_ids: answer.photo_ids,
+        }
+      }),
+    ],
   }))
 })
 const authoredRoomDetails = computed(() => stayRoomGroups.value.filter(room => room.details?.length || room.features?.length))
@@ -745,11 +781,7 @@ const roomDetailsTitle = computed(() => t(props.product.stay?.photo_rooms.some(r
 /** A room tour is public only when every authored room has renderable Product media. */
 const photoGroups = computed<MediaGalleryGroup[]>(() => {
   if (!isStay.value) return []
-  const productMedia = uniqueMediaAssets([
-    ...(props.product.image ? [props.product.image] : []),
-    ...props.product.gallery,
-  ]).filter(asset => asset.public_url && mediaStillUrl(asset))
-  const productIds = new Set(productMedia.map(asset => asset.asset_id))
+  const productIds = new Set(productMedia.value.filter(asset => asset.public_url && mediaStillUrl(asset)).map(asset => asset.asset_id))
   const rooms = (props.product.stay?.photo_rooms ?? []).map(room => ({ ...room, photo_ids: room.photo_ids.filter(id => productIds.has(id)) }))
   if (!stayPhotoTourReady(rooms)) return []
   const assigned = new Set(rooms.flatMap(room => room.photo_ids))
