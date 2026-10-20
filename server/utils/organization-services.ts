@@ -39,11 +39,11 @@ export async function listServices(db: DbClient, organizationId: string): Promis
 export async function managedAdsRequirements(db: DbClient, env: CloudflareEnv, organizationId: string): Promise<{ business_plan: boolean; default_payment_method: boolean; google_ads_usd: boolean }> {
   const [{ configured, pricing }, ads] = await Promise.all([paymentsUsage(db, env, organizationId), readIntegration(db, organizationId, 'google_ads')])
   const business_plan = configured && pricing?.ad_spend_rate === AD_SPEND_RATE
+  // The card is read on any paid plan, so the row says whether one is saved whatever the plan is.
   let default_payment_method = false
-  if (business_plan) {
-    const billing = await getOrganizationBillingStatus(env, db, organizationId)
-    const subscription = await getStripe(env).subscriptions.retrieve(billing.stripeSubscriptionId!)
-    const customer = await getStripe(env).customers.retrieve(billing.stripeCustomerId!)
+  const billing = await getOrganizationBillingStatus(env, db, organizationId)
+  if (billing.stripeSubscriptionId && billing.stripeCustomerId) {
+    const [subscription, customer] = await Promise.all([getStripe(env).subscriptions.retrieve(billing.stripeSubscriptionId), getStripe(env).customers.retrieve(billing.stripeCustomerId)])
     default_payment_method = !customer.deleted && Boolean(subscription.default_payment_method || customer.invoice_settings.default_payment_method)
   }
   let google_ads_usd = false
