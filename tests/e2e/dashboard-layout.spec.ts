@@ -1046,10 +1046,10 @@ test.describe('dashboard pane hierarchy', () => {
     await expectPanes(page, ['organization-payments', 'organization-payout-method'])
     await expect(page.getByRole('heading', { name: 'How you get paid', exact: true })).toBeVisible()
     await expect(page.getByRole('tab')).toHaveCount(0)
-    // Plan and billing is a destination of its own; beside a pane it opens the plan.
+    // Plan and billing is a destination of its own. Business has no step up, so beside a pane it opens its first service.
     await open(page, `${ORG}/billing`)
-    await expect(page).toHaveURL(`${ORG}/billing/plan`)
-    await expectPanes(page, ['organization-billing', 'organization-plan'])
+    await expect(page).toHaveURL(`${ORG}/billing/managed-ads`)
+    await expectPanes(page, ['organization-billing', 'organization-managed-ads'])
   })
 
   test('five organization destinations keep tenant management in Menu', async ({ page }) => {
@@ -1143,22 +1143,25 @@ test.describe('dashboard pane hierarchy', () => {
       await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'])
       const billingIndex = page.locator('#dashboard-panel-organization-billing')
       await expect(billingIndex.getByTestId('dashboard-navbar-back')).toHaveAttribute('href', `${basic}/menu`)
-      // Basic has no Stripe customer: no portal row and nothing to cancel.
-      await expect(billingIndex.locator('[data-testid^="editor-row-"]')).toHaveCount(4)
-      await expect(billingIndex.getByTestId('editor-row-plan')).toContainText('Basic · Free')
+      // The plan is the page's one card. Basic has no Stripe customer, so there is no Manage billing row.
+      const planCard = billingIndex.getByTestId('billing-plan-card')
+      await expect(planCard).toContainText('Basic')
+      await expect(planCard).toContainText('Free')
+      await expect(billingIndex.locator('[data-testid^="editor-row-"]')).toHaveCount(3)
+      await expect(billingIndex.getByTestId('editor-row-locations')).toContainText('in use · 2 included')
+      await expect(billingIndex.getByTestId('editor-row-portal')).toHaveCount(0)
       await expect(billingIndex.locator('[data-slot="description"]')).toHaveCount(0)
 
-      // The plan leaf states the locations in use, then its one way up.
-      await billingIndex.getByTestId('editor-row-plan').click()
-      const planLeaf = page.getByRole('dialog', { name: 'Plan', exact: true })
-      await expect(planLeaf.getByTestId('editor-row-locations')).toContainText('2 included')
-      await planLeaf.getByRole('link', { name: /^Choose a plan/ }).click()
+      // The card's one change opens Choose a plan, with the recommended plan chosen and the other a click away.
+      await planCard.getByRole('link', { name: 'Choose a plan', exact: true }).click()
       await expect(page).toHaveURL(`${basic}/billing/upgrade`)
       const choose = page.getByRole('dialog', { name: 'Choose a plan', exact: true })
       await expect(choose.getByRole('radio')).toHaveCount(2)
-      await expect(choose.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled()
-      await choose.getByRole('radio', { name: /^Growth/ }).click()
-      await expect(choose.getByRole('radio', { name: /^Growth/ })).toBeChecked()
+      await expect(choose.getByRole('radio', { checked: true })).toHaveCount(1)
+      // The radio itself is hidden inside its card; the card is what a person presses.
+      await choose.getByText('Business', { exact: true }).click()
+      // Nuxt UI's card variant names each radio by its value.
+      await expect(choose.getByRole('radio', { name: 'business', exact: true })).toBeChecked()
       await expect(choose.getByRole('button', { name: 'Continue', exact: true })).toBeEnabled()
       await choose.getByTestId('dashboard-navbar-close').click()
       await expect(page).toHaveURL(`${basic}/billing`)
@@ -1169,8 +1172,10 @@ test.describe('dashboard pane hierarchy', () => {
       expect(await servicesBefore.json()).toEqual({ success: true, services: { managed_ads: null, strategy: null } })
       await billingIndex.getByTestId('editor-row-managed-ads').click()
       const managedAds = page.getByRole('dialog', { name: 'Managed ads', exact: true })
-      for (const id of ['google-ads', 'business-plan', 'payment-method']) await expect(managedAds.getByTestId(`editor-row-${id}`)).toContainText('Not yet')
-      await expect(managedAds.getByRole('button', { name: 'Agree and turn on', exact: true })).toBeDisabled()
+      await expect(managedAds.getByTestId('editor-row-google-ads')).toContainText('Not connected in USD · Connect')
+      await expect(managedAds.getByTestId('editor-row-business-plan')).toContainText('On Basic · Upgrade')
+      await expect(managedAds.getByTestId('editor-row-payment-method')).toContainText('None saved')
+      await expect(managedAds.getByRole('button', { name: 'Agree and turn on', exact: true })).toHaveCount(0)
       await managedAds.getByTestId('editor-row-business-plan').click()
       await expect(page).toHaveURL(`${basic}/billing/upgrade`)
       await page.getByRole('dialog', { name: 'Choose a plan', exact: true }).getByTestId('dashboard-navbar-close').click()
