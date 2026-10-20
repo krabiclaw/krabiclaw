@@ -89,9 +89,9 @@ const brandName = computed(() => (props.organization?.name as string)?.trim() ||
 const description = computed(() => props.compliance?.footer_disclaimer || (props.organization?.brand_description as string) || (props.organization?.tagline as string) || '')
 const documents = computed(() => props.compliance?.media.filter(item => item.slot === 'document' && item.public_url) ?? [])
 
-// A legal practice states its office address only when it chooses to.
-const showAddresses = computed(() => !props.compliance || props.compliance.address_visibility === 'visible')
 const legalPractice = computed(() => isLegalPractice(props.organization?.vertical as string | undefined))
+// A legal practice shows its office addresses only when it chose to; a venue always shows them.
+const showAddresses = computed(() => !legalPractice.value || props.compliance?.address_visibility === 'visible')
 
 const catalogLinks = computed(() => (props.organization?.vertical
   ? catalogNavigation(props.organization.vertical as string, props.sections)
