@@ -1,9 +1,6 @@
 <template>
   <DashboardIndexPanel id="product-all-photos" :title="title">
     <template #leading><DashboardNavbarLeading :disabled="p.saving.value" /></template>
-    <template v-if="room" #right>
-      <UButton icon="i-lucide-trash-2" aria-label="Delete room or space" color="neutral" variant="soft" square :disabled="p.saving.value" @click="confirmDelete = true" />
-    </template>
     <UAlert v-if="props.roomId && !room && p.photoError.value" color="error" variant="soft" :description="p.photoError.value" />
     <DashboardGridEditor
       v-if="!props.roomId || room"
@@ -18,7 +15,7 @@
       manage-label="Manage photos"
       remove-label="Remove selected photos"
       selection-title="Select photos"
-      grid-class="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5"
+      :grid-class="room && level.mode.value === 'pair' ? 'grid grid-cols-2 gap-4' : 'grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5'"
       :removing="p.saving.value"
       @remove-many="removePhotos"
     >
@@ -42,6 +39,10 @@
         <UButton icon="i-lucide-folder-input" aria-label="Move selected photos" color="neutral" variant="ghost" square :disabled="p.saving.value || changed" @click="openMove(ids)" />
       </template>
     </DashboardGridEditor>
+    <template v-if="room">
+      <EditorNavigationList :groups="roomDetails" :active-item="level.child.value" class="mt-8" />
+      <UButton label="Delete room or space" color="neutral" variant="link" :disabled="p.saving.value" class="mt-8 px-0 underline" @click="confirmDelete = true" />
+    </template>
     <template v-if="changed" #footer>
       <DashboardPanelFooter :loading="p.saving.value" :disabled="p.saving.value || Boolean(p.loadError.value)" @cancel="cancelOrder" @save="saveOrder" />
     </template>
@@ -71,6 +72,7 @@
 
 <script setup lang="ts">
 import DashboardGridEditor from '~/components/dashboard/DashboardGridEditor.vue'
+import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import StayPhotoRoomDialog from '~/components/dashboard/StayPhotoRoomDialog.vue'
 import MediaPicker from '~/lib/components/workspace/media/MediaPicker.vue'
@@ -82,6 +84,7 @@ import { getErrorMessage } from '~/utils/errors'
 
 const props = defineProps<{ roomId?: string | null }>()
 const p = inject(productEditorKey)!
+const { t } = useI18n()
 const level = useRouteLevel()
 const allPhotos = computed(() => props.roomId === undefined)
 const room = computed(() => p.photoRooms.value.find(entry => entry.id === props.roomId) ?? null)
@@ -98,6 +101,24 @@ const confirmDelete = ref(false)
 const deleting = ref(false)
 const savedOrder = computed(() => p.photoAssets.value.map(photo => photo.asset_id))
 const changed = computed(() => orderDraft.value !== null && JSON.stringify(orderDraft.value) !== JSON.stringify(savedOrder.value))
+const roomDetails = computed<EditorNavigationGroup[]>(() => {
+  const current = room.value
+  if (!current) return []
+  return [{ id: 'room-details', items: [
+    {
+      id: 'beds', label: 'Sleeping arrangements',
+      summary: current.sleeping_arrangements === null ? 'Add details' : current.sleeping_arrangements.length ? current.sleeping_arrangements.map(bed => t(`stay.bed_types.${bed.type}`, { count: bed.count }, bed.count)).join(', ') : 'No beds in this room',
+      placeholder: current.sleeping_arrangements === null,
+      to: `${level.path.value}/beds`,
+    },
+    ...(current.type === 'bedroom' ? [{
+      id: 'privacy', label: 'Privacy info',
+      summary: current.private_attached_bathroom === null ? 'Add details' : current.private_attached_bathroom ? 'Private attached bathroom' : 'No private attached bathroom',
+      placeholder: current.private_attached_bathroom === null,
+      to: `${level.path.value}/privacy`,
+    }] : []),
+  ] }]
+})
 const items = computed(() => {
   if (props.roomId && !room.value) return []
   const order = orderDraft.value ?? savedOrder.value

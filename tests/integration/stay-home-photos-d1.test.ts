@@ -14,8 +14,11 @@ import addPhotoRoute from '../../server/api/dashboard/stay-homes/[productId]/pho
 import orderPhotosRoute from '../../server/api/dashboard/stay-homes/[productId]/photos/index.put.ts'
 import describePhotoRoute from '../../server/api/dashboard/stay-homes/[productId]/photos/[photoId].patch.ts'
 import removePhotoRoute from '../../server/api/dashboard/stay-homes/[productId]/photos/[photoId].delete.ts'
+import createRoomRoute from '../../server/api/dashboard/stay-homes/[productId]/rooms/index.post.ts'
+import updateRoomRoute from '../../server/api/dashboard/stay-homes/[productId]/rooms/[roomId].patch.ts'
 import { getProduct, hydrateProductMedia } from '../../server/utils/product-management.ts'
 import publicShellRoute from '../../server/api/public/shell.get.ts'
+import type { StayPhotoRoom } from '../../shared/stay-photos.ts'
 
 // A home's photos are its product's media: the product image is the cover and
 // the gallery follows. The native app's routes order, describe and remove them
@@ -27,7 +30,7 @@ const ORG = 'org'
 const BASE = 'https://proof.example'
 const PASSWORD = 'StayHomePhotos123!'
 
-test('a home orders, describes and removes its product photos, and refuses what is not a photo', async () => {
+test('a home authors room details and manages its product photos through authenticated native routes', async () => {
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'stay-home-photos-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
@@ -66,6 +69,8 @@ test('a home orders, describes and removes its product photos, and refuses what 
     app.put('/api/dashboard/stay-homes/:productId/photos', orderPhotosRoute)
     app.patch('/api/dashboard/stay-homes/:productId/photos/:photoId', describePhotoRoute)
     app.delete('/api/dashboard/stay-homes/:productId/photos/:photoId', removePhotoRoute)
+    app.post('/api/dashboard/stay-homes/:productId/rooms', createRoomRoute)
+    app.patch('/api/dashboard/stay-homes/:productId/rooms/:roomId', updateRoomRoute)
     const call = async (cookie: string, method: string, path: string, body?: Record<string, unknown> | FormData) => {
       const json = body !== undefined && !(body instanceof FormData)
       const response = await app.request(Object.assign(new Request(`${BASE}/api/dashboard/stay-homes${path}?org=org`, {
@@ -126,6 +131,48 @@ test('a home orders, describes and removes its product photos, and refuses what 
     const homes = async () => (await call(owner, 'GET', '')).body.homes as Array<{ photos: unknown[] }>
     assert.deepEqual((await homes())[0]!.photos, [photo('deck', 0), photo('kitchen', 1), photo('bedroom', 2)])
 
+    // The room allocates the explicitly declared listing inventory; neither
+    // its photos nor its sleeping arrangements create a listing bed total.
+    const declaredBeds = await call(owner, 'PATCH', `/${productId}`, { beds: 2 })
+    assert.equal(declaredBeds.status, 200, JSON.stringify(declaredBeds.body))
+    assert.equal((await getProduct(db, ORG, productId)).stay?.beds, 2)
+    const createdRoom = await call(owner, 'POST', `/${productId}/rooms`, { type: 'bedroom' })
+    assert.equal(createdRoom.status, 201, JSON.stringify(createdRoom.body))
+    const roomId = (createdRoom.body.room as StayPhotoRoom).id
+    assert.equal(typeof roomId, 'string')
+    const unansweredRoom: StayPhotoRoom = { id: roomId, type: 'bedroom', photo_ids: [], details_version: 1, sleeping_arrangements: null, private_attached_bathroom: null }
+    assert.deepEqual(createdRoom.body.room, unansweredRoom)
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay?.photo_rooms, [unansweredRoom])
+
+    const roomDetails = await call(owner, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 1, sleeping_arrangements: [{ type: 'queen', count: 2 }], private_attached_bathroom: false })
+    assert.equal(roomDetails.status, 200, JSON.stringify(roomDetails.body))
+    const authoredRoom: StayPhotoRoom = { ...unansweredRoom, details_version: 2, sleeping_arrangements: [{ type: 'queen', count: 2 }], private_attached_bathroom: false }
+    assert.deepEqual(roomDetails.body.room, authoredRoom)
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay?.photo_rooms, [authoredRoom])
+    const storedDetails = await db.prepare('SELECT details_version, sleeping_arrangements, private_attached_bathroom FROM product_stay_photo_rooms WHERE organization_id = ? AND product_id = ? AND id = ?').bind(ORG, productId, roomId).first()
+    assert.deepEqual(storedDetails, { details_version: 2, sleeping_arrangements: '[{"type":"queen","count":2}]', private_attached_bathroom: 0 })
+
+    // A stale editor cannot replace either field, including an explicit false.
+    assert.deepEqual(refusal(await call(owner, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 1, sleeping_arrangements: [{ type: 'single', count: 1 }], private_attached_bathroom: true })), { status: 409, code: 'ROOM_DETAILS_CHANGED', field: 'expected_details_version' })
+    assert.deepEqual(await db.prepare('SELECT details_version, sleeping_arrangements, private_attached_bathroom FROM product_stay_photo_rooms WHERE organization_id = ? AND product_id = ? AND id = ?').bind(ORG, productId, roomId).first(), storedDetails)
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay?.photo_rooms, [authoredRoom])
+    assert.deepEqual(refusal(await call(owner, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 2, private_attached_bathroom: 'false' })), { status: 422, code: 'INVALID_ROOM_DETAILS', field: 'private_attached_bathroom' })
+
+    const noBeds = await call(owner, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 2, sleeping_arrangements: [] })
+    assert.equal(noBeds.status, 200, JSON.stringify(noBeds.body))
+    const emptyRoom: StayPhotoRoom = { ...authoredRoom, details_version: 3, sleeping_arrangements: [] }
+    assert.deepEqual(noBeds.body.room, emptyRoom)
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay?.photo_rooms, [emptyRoom])
+    assert.deepEqual(await db.prepare('SELECT sleeping_arrangements, private_attached_bathroom FROM product_stay_photo_rooms WHERE organization_id = ? AND product_id = ? AND id = ?').bind(ORG, productId, roomId).first(), { sleeping_arrangements: '[]', private_attached_bathroom: 0 })
+
+    const clearedDetails = await call(owner, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 3, sleeping_arrangements: null, private_attached_bathroom: null })
+    assert.equal(clearedDetails.status, 200, JSON.stringify(clearedDetails.body))
+    const clearedRoom: StayPhotoRoom = { ...unansweredRoom, details_version: 4 }
+    assert.deepEqual(clearedDetails.body.room, clearedRoom)
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay?.photo_rooms, [clearedRoom])
+    assert.deepEqual(await db.prepare('SELECT sleeping_arrangements, private_attached_bathroom FROM product_stay_photo_rooms WHERE organization_id = ? AND product_id = ? AND id = ?').bind(ORG, productId, roomId).first(), { sleeping_arrangements: null, private_attached_bathroom: null })
+    assert.equal(await db.prepare('SELECT beds FROM product_stay_configs WHERE organization_id = ? AND product_id = ?').bind(ORG, productId).first('beds'), 2)
+
     // Ordering makes the first photo the cover; the product the pages render agrees.
     const ordered = await call(owner, 'PUT', `/${productId}/photos`, { photo_ids: ['bedroom', 'deck', 'kitchen'] })
     assert.equal(ordered.status, 200)
@@ -178,6 +225,8 @@ test('a home orders, describes and removes its product photos, and refuses what 
 
     // Only managers change a home's photos.
     const helper = await cookieFor('helper')
+    assert.deepEqual(refusal(await call(helper, 'PATCH', `/${productId}/rooms/${roomId}`, { expected_details_version: 4, private_attached_bathroom: true })), { status: 403, code: 'STAY_ROLE_REQUIRED' })
+    assert.deepEqual((await getProduct(db, ORG, productId)).stay?.photo_rooms, [clearedRoom])
     assert.deepEqual(refusal(await call(helper, 'PUT', `/${productId}/photos`, { photo_ids: ['kitchen', 'deck'] })), { status: 403, code: 'STAY_ROLE_REQUIRED' })
     assert.deepEqual(refusal(await call(helper, 'DELETE', `/${productId}/photos/deck`)), { status: 403, code: 'STAY_ROLE_REQUIRED' })
     assert.deepEqual(refusal(await call(helper, 'POST', `/${productId}/photos`, { asset_id: 'bedroom' })), { status: 403, code: 'STAY_ROLE_REQUIRED' })

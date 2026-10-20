@@ -24,7 +24,12 @@
               </a>
             </nav>
             <section v-for="group in groups" :id="`photo-room-${group.id}`" :key="group.id" class="scroll-mt-24 border-t border-gray-200 py-8 sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(0,2fr)] sm:gap-10 sm:py-10">
-              <h3 class="mb-5 text-2xl font-semibold tracking-tight">{{ group.title }}</h3>
+              <div class="mb-5">
+                <h3 class="text-2xl font-semibold tracking-tight">{{ group.title }}</h3>
+                <ul v-if="group.details?.length" class="mt-3 space-y-2 text-sm leading-relaxed text-gray-600">
+                  <li v-for="detail in group.details" :key="detail">{{ detail }}</li>
+                </ul>
+              </div>
               <div class="grid grid-cols-2 gap-2 sm:gap-3">
                 <button v-for="(entry, position) in group.entries" :key="entry.index" type="button" class="relative overflow-hidden rounded-xl focus-visible:outline-2 focus-visible:outline-offset-4" :class="position === 0 && group.entries.length % 2 === 1 ? 'col-span-2' : ''" :aria-label="t('stay.open_room_photo', { room: group.title, number: position + 1 })" @click="openPhoto(entry.index)">
                   <img :src="backgroundUrl(entry.item)!" :alt="entry.item.alt || ''" class="aspect-4/3 w-full object-cover transition hover:brightness-95">
@@ -59,6 +64,7 @@ export interface MediaGalleryGroup {
   id: string
   title: string
   asset_ids: string[]
+  details?: string[]
 }
 </script>
 

@@ -148,6 +148,16 @@
             </button>
           </section>
 
+          <section v-if="isStay && !compact && authoredRoomDetails.length" class="mt-10 border-t border-default pt-8" data-testid="stay-room-details">
+            <h2 class="saya-display text-2xl text-default sm:text-3xl">{{ roomDetailsTitle }}</h2>
+            <div class="mt-5 grid gap-4 sm:grid-cols-2">
+              <article v-for="room in authoredRoomDetails" :key="room.id" class="rounded-xl border border-default p-5" :data-testid="`stay-room-details-${room.id}`">
+                <h3 class="font-semibold text-default">{{ room.title }}</h3>
+                <ul class="mt-3 space-y-2 text-sm text-muted"><li v-for="detail in room.details" :key="detail">{{ detail }}</li></ul>
+              </article>
+            </div>
+          </section>
+
           <!-- What this place offers (Amenities) -->
           <section v-if="isStay && !compact && stayAmenitiesList.length" class="mt-10 border-t border-default pt-8">
             <h2 class="saya-display text-2xl text-default sm:text-3xl">{{ t('stay.what_this_place_offers') }}</h2>
@@ -705,6 +715,25 @@ const galleryItems = computed(() => uniqueMediaAssets([
   alt: asset.alt_text ?? undefined,
 })))
 
+/** Room facts remain available even when the photo tour is not complete. */
+const stayRoomGroups = computed<MediaGalleryGroup[]>(() => {
+  if (!isStay.value || !props.product.stay) return []
+  const rooms = props.product.stay.photo_rooms
+  return rooms.map(room => ({
+    id: room.id,
+    title: stayPhotoRoomName(room, rooms, t(`stay.photo_room_types.${room.type}`)),
+    asset_ids: room.photo_ids,
+    details: [
+      ...(room.sleeping_arrangements === null ? [] : room.sleeping_arrangements.length
+        ? room.sleeping_arrangements.map(bed => t(`stay.bed_types.${bed.type}`, { count: bed.count }, bed.count))
+        : [t('stay.no_sleeping_arrangements')]),
+      ...(room.private_attached_bathroom === null ? [] : [t(room.private_attached_bathroom ? 'stay.private_attached_bathroom' : 'stay.no_private_attached_bathroom')]),
+    ],
+  }))
+})
+const authoredRoomDetails = computed(() => stayRoomGroups.value.filter(room => room.details?.length))
+const roomDetailsTitle = computed(() => t(props.product.stay?.photo_rooms.some(room => room.sleeping_arrangements?.length) ? 'stay.where_youll_sleep' : 'stay.room_details'))
+
 /** A room tour is public only when every authored room has renderable Product media. */
 const photoGroups = computed<MediaGalleryGroup[]>(() => {
   if (!isStay.value) return []
@@ -716,7 +745,7 @@ const photoGroups = computed<MediaGalleryGroup[]>(() => {
   const rooms = (props.product.stay?.photo_rooms ?? []).map(room => ({ ...room, photo_ids: room.photo_ids.filter(id => productIds.has(id)) }))
   if (!stayPhotoTourReady(rooms)) return []
   const assigned = new Set(rooms.flatMap(room => room.photo_ids))
-  const groups = rooms.map(room => ({ id: room.id, title: stayPhotoRoomName(room, rooms, t(`stay.photo_room_types.${room.type}`)), asset_ids: room.photo_ids }))
+  const groups = stayRoomGroups.value.map(group => ({ ...group, asset_ids: rooms.find(room => room.id === group.id)!.photo_ids }))
   const additional = galleryItems.value.filter(item => !assigned.has(item.asset_id)).map(item => item.asset_id)
   if (additional.length) groups.push({ id: 'additional', title: t('stay.additional_photos'), asset_ids: additional })
   return groups

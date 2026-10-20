@@ -39,6 +39,45 @@ test('the migration chain applies from zero and builds every table the schema de
   }
 })
 
+test('room-details migration preserves authored rooms and photo memberships without deriving room facts from listing totals', () => {
+  const database = new Database(':memory:')
+  database.pragma('foreign_keys = ON')
+  try {
+    const journal = JSON.parse(readFileSync('migrations/meta/_journal.json', 'utf8')) as { entries: Array<{ idx: number; tag: string }> }
+    for (const entry of journal.entries.filter(entry => entry.idx <= 14)) database.exec(readFileSync(`migrations/${entry.tag}.sql`, 'utf8'))
+    database.prepare("INSERT INTO organization (id, name, slug, default_currency, timezone) VALUES ('org', 'Host', 'host', 'USD', 'America/Denver')").run()
+    database.prepare("INSERT INTO business_locations (id, organization_id, slug, title, timezone) VALUES ('site', 'org', 'site', 'Cabin', 'America/Denver')").run()
+    for (const productId of ['authored-home', 'counts-only-home']) {
+      database.prepare("INSERT INTO products (id, organization_id, kind, name, slug, created_by, updated_by) VALUES (?, 'org', 'stay', ?, ?, 'host', 'host')").run(productId, productId, productId)
+      database.prepare("INSERT INTO product_locations (organization_id, product_id, location_id, created_by, updated_by) VALUES ('org', ?, 'site', 'host', 'host')").run(productId)
+      database.prepare("INSERT INTO product_stay_configs (organization_id, product_id, location_id, check_in_time, check_out_time, max_guests, bedrooms, beds, bathrooms, created_by, updated_by) VALUES ('org', ?, 'site', '16:00', '10:00', 6, 3, 5, 1.5, 'host', 'host')").run(productId)
+    }
+    database.prepare("INSERT INTO media_assets (id, organization_id, kind, provider, source, public_url, status) VALUES ('photo', 'org', 'image', 'cloudflare_images', 'uploaded', 'https://imagedelivery.net/h/room/public', 'active')").run()
+    database.prepare("INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id) VALUES ('cover', 'org', 'product', 'authored-home', 'image', 'photo')").run()
+    database.prepare("INSERT INTO product_stay_photo_rooms (id, organization_id, product_id, type, sort_order, created_by) VALUES ('bedroom', 'org', 'authored-home', 'bedroom', 3, 'host'), ('living-room', 'org', 'authored-home', 'living_room', 8, 'host')").run()
+    database.prepare("INSERT INTO product_stay_photo_room_memberships (organization_id, product_id, asset_id, room_id) VALUES ('org', 'authored-home', 'photo', 'bedroom')").run()
+    const rooms = database.prepare('SELECT * FROM product_stay_photo_rooms ORDER BY sort_order').all()
+    const memberships = database.prepare('SELECT * FROM product_stay_photo_room_memberships').all()
+    const placements = database.prepare('SELECT * FROM media_placements').all()
+    const listings = database.prepare('SELECT * FROM product_stay_configs ORDER BY product_id').all()
+
+    database.exec(readFileSync('migrations/0015_stay_room_details.sql', 'utf8'))
+
+    assert.deepEqual(database.prepare('SELECT id, organization_id, product_id, type, sort_order, created_at, created_by FROM product_stay_photo_rooms ORDER BY sort_order').all(), rooms)
+    assert.deepEqual(database.prepare('SELECT id, details_version, sleeping_arrangements, private_attached_bathroom FROM product_stay_photo_rooms ORDER BY sort_order').all(), [
+      { id: 'bedroom', details_version: 1, sleeping_arrangements: null, private_attached_bathroom: null },
+      { id: 'living-room', details_version: 1, sleeping_arrangements: null, private_attached_bathroom: null },
+    ])
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_photo_room_memberships').all(), memberships)
+    assert.deepEqual(database.prepare('SELECT * FROM media_placements').all(), placements)
+    assert.deepEqual(database.prepare('SELECT * FROM product_stay_configs ORDER BY product_id').all(), listings)
+    assert.equal(database.prepare("SELECT count(*) AS count FROM product_stay_photo_rooms WHERE product_id = 'counts-only-home'").get()!.count, 0)
+    assert.deepEqual(database.pragma('foreign_key_check'), [])
+  } finally {
+    database.close()
+  }
+})
+
 test('a v7 export transfers into the current baseline, its connections into organization_integrations', async () => {
   const { transferDatabaseExport } = await import('../../scripts/transfer-database-export.mjs')
   const directory = mkdtempSync(join(tmpdir(), 'krabiclaw-v7-transfer-'))
