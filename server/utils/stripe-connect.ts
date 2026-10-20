@@ -372,12 +372,13 @@ const STRIPE_CONNECT_ACCOUNT_INCLUDE: Stripe.V2.Core.AccountRetrieveParams.Inclu
 ]
 
 /** The business's one active Stripe payment method configuration, inheriting the platform's Payments parent. */
-async function connectedMethodConfiguration(stripe: Stripe, stripeAccountId: string, parent: string) {
+// Stripe's own failures propagate; only a configuration the business must fix is returned as a problem.
+async function connectedMethodConfiguration(stripe: Stripe, stripeAccountId: string, parent: string): Promise<{ configuration: Stripe.PaymentMethodConfiguration } | { problem: string }> {
   const configurations = await stripe.paymentMethodConfigurations.list({ limit: 100 }, { stripeAccount: stripeAccountId })
-  if (configurations.has_more) throw new Error('Connected checkout configuration needs bounded operator review')
+  if (configurations.has_more) return { problem: 'Connected checkout configuration needs bounded operator review' }
   const matching = configurations.data.filter(configuration => configuration.parent === parent || configuration.id === parent)
-  if (matching.length !== 1 || !matching[0]!.active) throw new Error('One active connected payment configuration inheriting the Payments parent is required')
-  return matching[0]!
+  if (matching.length !== 1 || !matching[0]!.active) return { problem: 'One active connected payment configuration inheriting the Payments parent is required' }
+  return { configuration: matching[0]! }
 }
 
 /**
@@ -412,8 +413,10 @@ async function checkoutReadiness(db: DbClient, env: CloudflareEnv, organizationI
 export async function acceptedPaymentMethods(db: DbClient, env: CloudflareEnv, organizationId: string): Promise<{ types: string[]; country: string | null }> {
   const readiness = await checkoutReadiness(db, env, organizationId)
   if (!readiness.ready) return { types: [], country: null }
-  const configuration = await connectedMethodConfiguration(readiness.stripe, readiness.account.id, readiness.parent) as unknown as Record<string, unknown>
-  const types = Object.entries(configuration)
+  const methods = await connectedMethodConfiguration(readiness.stripe, readiness.account.id, readiness.parent)
+  // A configuration the business must still fix takes no payment, as checkout refuses it.
+  if ('problem' in methods) return { types: [], country: null }
+  const types = Object.entries(methods.configuration as unknown as Record<string, unknown>)
     .filter(([, value]) => typeof value === 'object' && value !== null && (value as { available?: unknown }).available === true
       && (value as { display_preference?: { value?: unknown } }).display_preference?.value === 'on')
     .map(([type]) => type)
@@ -426,14 +429,13 @@ export async function requireStripeCheckoutAcceptance(db: DbClient, env: Cloudfl
   if (!readiness.ready) throw new HTTPError({ statusCode: readiness.statusCode, statusMessage: readiness.statusMessage, data: readiness.handoff })
   const { stripe, account, connected, handoff } = readiness
   // Which methods the business offers is its Stripe payment method configuration's to decide.
-  const methods = await connectedMethodConfiguration(stripe, account.id, readiness.parent).catch((cause: Error) => {
-    throw new HTTPError({ statusCode: 409, statusMessage: cause.message, data: handoff })
-  })
+  const methods = await connectedMethodConfiguration(stripe, account.id, readiness.parent)
+  if ('problem' in methods) throw new HTTPError({ statusCode: 409, statusMessage: methods.problem, data: handoff })
   const [taxSettings, registrations] = await Promise.all([
     stripe.tax.settings.retrieve({}, { stripeAccount: account.id }),
     stripe.tax.registrations.list({ status: 'active', limit: 1 }, { stripeAccount: account.id }),
   ])
-  return { connected: { ...connected, stripeAccountId: account.id }, methodConfigurationId: methods.id, automaticTax: taxSettings.status === 'active' && registrations.data.length > 0 }
+  return { connected: { ...connected, stripeAccountId: account.id }, methodConfigurationId: methods.configuration.id, automaticTax: taxSettings.status === 'active' && registrations.data.length > 0 }
 }
 
 export async function refreshStripeConnectedAccount(
