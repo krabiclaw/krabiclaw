@@ -21,14 +21,25 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
 }) {
   const organization = await queryFirst<{ name: string; slug: string }>(db, 'SELECT name,slug FROM organization WHERE id=?', [payment.organization_id])
   if (!organization && !await queryFirst(db, 'SELECT organization_id FROM payment_servicing_tenants WHERE organization_id=? AND stripe_account_id=? AND livemode=?', [payment.organization_id, payment.stripe_account_id, payment.livemode])) throw new Error('Payments notification has no tenant or retained servicing identity')
-  const guestKind = input.kind.startsWith('payment_') || input.kind.startsWith('refund_') ? input.kind as GuestPaymentNotificationKind : null
+  // A booking, reservation or stay paid on the site is confirmed to its guest by
+  // the confirmation email, which states what they paid. A failure is told here:
+  // a bank or pay-later method can fail after the guest has left the pay page.
+  const checkout = payment.subject_type === 'booking' || payment.subject_type === 'reservation' || payment.subject_type === 'stay'
+  const guestKind = (input.kind.startsWith('refund_') || input.kind === 'payment_failed' || (!checkout && input.kind.startsWith('payment_'))) ? input.kind as GuestPaymentNotificationKind : null
   // A deleted merchant and an unclaimed contact have no application audience.
   // The verified return can still claim the purchase and then notify its buyer.
   if (!organization && (!payment.buyer_user_id || !guestKind)) return
-  const snapshot = JSON.parse(payment.price_snapshot_json) as { title?: unknown }
+  const snapshot = JSON.parse(payment.price_snapshot_json) as { title?: unknown; stay?: { guest?: { email?: unknown } } }
   if (typeof snapshot.title !== 'string' || !snapshot.title.trim() || !isCurrencyCode(payment.currency)) throw new Error('Payments notification requires its immutable item and currency')
   let email: string | null = null
-  if (guestKind) {
+  if (guestKind && checkout) {
+    // The address the guest booked with, which their confirmation went to.
+    const booked = payment.subject_type === 'stay'
+      ? snapshot.stay?.guest?.email
+      : (await queryFirst<{ email: string | null }>(db, `SELECT json_extract(r.payload_json, '$.guest.email') AS email FROM payment_checkout_holds h JOIN requests r ON r.id = h.request_id AND r.organization_id = h.organization_id WHERE h.payment_id = ? AND h.organization_id = ?`, [payment.id, payment.organization_id]))?.email
+    if (typeof booked !== 'string' || !booked) throw new Error('Paid checkout has no guest email to notify')
+    email = booked
+  } else if (guestKind) {
     // The address the buyer gave Stripe with the card, from the charge the intent made.
     if (input.email !== undefined) email = input.email
     else if (payment.stripe_charge_id) {
@@ -46,8 +57,14 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
   const threadId = hold?.request_id ?? stayThread?.request_id ?? null
   const booking=visitKind&&payment.subject_id&&organization?await queryFirst<{request_id:string|null}>(db,`SELECT request_id FROM ${visitKind==='booking'?'bookings':'reservations'} WHERE organization_id=? AND id=?`,[payment.organization_id,payment.subject_id]):null
   if(booking&&booking.request_id!==threadId)throw new Error('Booking payment notification request does not match its operational booking')
-  const deepLink = organization ? `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}${booking?.request_id?`/bookings/${visitKind}/${encodeURIComponent(booking.request_id)}`:`/earnings/transactions/${encodeURIComponent(payment.id)}`}` : null
-  const details = { organizationName: organization?.name ?? null, amount: input.amount, currency: payment.currency, productTitle: snapshot.title, action: deepLink ? { url: deepLink, label: 'View details' } : null }
+  const deepLink = organization ? `${dashboardOrigin(env, { orgSlug: organization.slug, locationSlug: null })}${booking?.request_id?`/bookings/${visitKind}/${encodeURIComponent(booking.request_id)}`:stayThread?`/bookings/stay/${encodeURIComponent(payment.subject_id!)}`:`/earnings/transactions/${encodeURIComponent(payment.id)}`}` : null
+  const details = {
+    organizationName: organization?.name ?? null, amount: input.amount, currency: payment.currency, productTitle: snapshot.title, action: deepLink ? { url: deepLink, label: 'View details' } : null,
+    // A checkout whose booking was taken before the payment completed is refunded without being asked.
+    refundReason: payment.state !== 'recovery' ? null
+      : input.kind === 'refund_pending' ? 'What you paid for was taken before your payment completed, so your booking could not be made and your payment will be refunded in full.'
+        : input.kind === 'refund_succeeded' ? 'What you paid for was taken before your payment completed, so your booking could not be made and your payment has been refunded in full.' : null,
+  }
   const event: PaymentNotificationEvent = input.kind === 'dispute_needs_response' ? { ...details, kind: input.kind, responseDueBy: input.responseDueBy } : { ...details, kind: input.kind }
   const ownerMessage = organization ? ownerPaymentMessage(event) : undefined
   let sourceEntryId: string | null = null
@@ -62,8 +79,11 @@ export async function notifyPaymentFinancialEvent(db: DbClient, stripe: Stripe, 
     sourceEntryId = entry.id
     await publishGuestInboxThreadEvent(env, db, { threadId, type: 'thread.changed' })
   }
-  const guestAction = guestKind&&payment.buyer_user_id
-    ? {url:new URL(await buyerPaymentActivityPath(db,payment.buyer_user_id,payment.id),env.NUXT_PUBLIC_PLATFORM_DOMAIN).toString(),label:'View details'}
+  // An account opens its own activity; a guest who never made one reads Stripe's receipt.
+  const buyer = guestKind ? payment.buyer_user_id : null
+  const account = buyer ? await queryFirst<{ isAnonymous: number }>(db, 'SELECT isAnonymous FROM user WHERE id=?', [buyer]) : null
+  const guestAction = buyer && account && !account.isAnonymous
+    ? {url:new URL(await buyerPaymentActivityPath(db,buyer,payment.id),env.NUXT_PUBLIC_PLATFORM_DOMAIN).toString(),label:'View details'}
     : payment.receipt_url?{url:payment.receipt_url,label:'View receipt'}:null
   await notifyFinancialNotification(env, db, {
     organizationId: organization ? payment.organization_id : null,

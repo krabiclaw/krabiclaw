@@ -55,11 +55,13 @@ import { appendEntry, findEntryByDedupeKey, parseEntryPayload } from '~/server/d
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import type { GuestThreadDeliveryPurpose, GuestThreadDeliveryRow } from '~/server/domain/guest-threads/types'
 import { getPersistedSourceLocale } from '~/server/utils/localization'
+import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
+import { createReplayableReservationCancelToken } from '~/server/utils/reservation-cancel-token'
 import { indexStoredPublicLocalizations, type StoredPublicLocalizationRow } from '~/server/utils/public-localization'
 import { platformLocale } from '~/shared/platform-locales'
 import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import { formatMinorAmount } from '~/shared/prices'
-import { isCurrencyCode } from '~/shared/currencies'
+import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 
 const SUBJECT_LABELS: Record<string, string> = {
   general: 'General',
@@ -101,7 +103,9 @@ interface ReservationNotificationInput extends OrganizationContext {
   guests: string
   requests?: string | null
   wasConfirmed?: boolean
-  cancelUrl?: string | null
+  receiptUrl?: string | null
+  /** What the guest paid on the site for it; null when nothing was paid online. */
+  paid?: { amount: number; currency: CurrencyCode } | null
   contactPhone?: string | null
   contactEmail?: string | null
   ownerInboxUrl?: string | null
@@ -142,7 +146,9 @@ interface BookingNotificationInput extends OrganizationContext {
   partySize: number
   notes?: string | null
   wasConfirmed?: boolean
-  cancelUrl?: string | null
+  receiptUrl?: string | null
+  /** What the guest paid on the site for it; null when nothing was paid online. */
+  paid?: { amount: number; currency: CurrencyCode } | null
   contactPhone?: string | null
   contactEmail?: string | null
   ownerInboxUrl?: string | null
@@ -934,7 +940,8 @@ export async function notifyReservationCreated(
     guestName: opts.guestName, organizationLogoUrl: logoUrl,
     date: formatCalendarDate(opts.date, guest.locale), time: formatTime(opts.time, guest.locale), partySize: opts.guests, notes: opts.requests,
     contactPhone: opts.contactPhone, contactEmail: opts.contactEmail,
-    cancelUrl: opts.cancelUrl, heroImageUrl: hero?.imageUrl ?? null,
+    receiptUrl: opts.receiptUrl, heroImageUrl: hero?.imageUrl ?? null,
+    paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, guest.locale) : null,
   })
   const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain })
 
@@ -1265,7 +1272,8 @@ export async function notifyBookingCreated(
     date: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { dateStyle: 'medium' }),
     time: formatTimestamp(opts.startsAt, guest.locale, opts.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }), partySize: String(opts.partySize),
     notes: opts.notes, contactPhone: opts.contactPhone ?? null, contactEmail: opts.contactEmail ?? null,
-    cancelUrl: opts.cancelUrl ?? null, heroImageUrl: hero?.imageUrl ?? null,
+    receiptUrl: opts.receiptUrl ?? null, heroImageUrl: hero?.imageUrl ?? null,
+    paid: opts.paid ? formatMinorAmount(opts.paid.amount, opts.paid.currency, guest.locale) : null,
   })
   const guestEmail = await renderNotificationEmail(guestMessage, { platformDomain })
   const guestTitle = `${guestMessage.title} — ${guest.productTitle}`
@@ -1309,8 +1317,14 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
   // Loaded when used: the stays domain reaches notifications through the guest inbox.
   const { readCheckoutStay } = await import('~/server/domain/stays')
   const stay = await readCheckoutStay(db, organizationId, stayId)
-  const organization = await queryFirst<{ name: string | null }>(db, 'SELECT name FROM organization WHERE id = ?', [organizationId])
+  const { paidOnline } = await import('~/server/domain/payments')
+  const [organization, paid, sourceLocale] = await Promise.all([
+    queryFirst<{ name: string | null; public_url: string | null }>(db, `SELECT name, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url FROM organization WHERE id = ?`, [organizationId]),
+    paidOnline(db, organizationId, 'stay', stayId),
+    getPersistedSourceLocale(db, organizationId),
+  ])
   if (!organization || !stay.request_id || !stay.guest_email || !stay.guest_name) throw new Error('A stay booked on the site needs its organization, guest conversation, guest name and email')
+  if (!paid) throw new Error('A stay booked on the site is confirmed only once it is paid')
   if (!isCurrencyCode(stay.currency)) throw new Error('The stay has an unsupported currency')
   const home = stay.home
   const studio = organizationName({ organizationId, organizationName: organization.name })
@@ -1335,9 +1349,10 @@ export async function notifyStayBooked(env: NotificationEnv, db: DbClient, organ
   const guestMessage = guestStayConfirmedMessage({
     locale: guest.locale, guestName: stay.guest_name, organizationName: guest.organizationName, organizationLogoUrl: logoUrl, homeName: guest.productTitle ?? home.name,
     checkIn: when(stay.check_in_date, home.check_in_time, guest.locale), checkOut: when(stay.check_out_date, home.check_out_time, guest.locale),
-    nights: String(nights), guests: String(stay.adults + stay.children), total: formatMinorAmount(stay.total_minor, stay.currency, guest.locale),
+    nights: String(nights), guests: String(stay.adults + stay.children), total: formatMinorAmount(paid.amount, paid.currency, guest.locale),
     checkInInstructions: home.check_in_instructions, contactPhone: contact.contactPhone ?? null, contactEmail: contact.contactEmail ?? null,
     heroImageUrl: hero?.imageUrl ?? null, accountUrl: guestAccountUrl(env.NUXT_PUBLIC_PLATFORM_DOMAIN!, '/signup', stay.guest_email),
+    receiptUrl: organization.public_url ? `${organization.public_url.replace(/\/$/, '')}${formatTenantLocalePath('/bookings/stay', guest.locale, sourceLocale.locale)}?id=${encodeURIComponent(stay.request_id)}#${(await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', stay.request_id)).token}` : null,
   })
   const payload = {
     stay_id: stay.id, guest_name: stay.guest_name, email: stay.guest_email, home: home.name, check_in_date: stay.check_in_date, check_out_date: stay.check_out_date,

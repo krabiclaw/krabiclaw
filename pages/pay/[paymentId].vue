@@ -29,20 +29,33 @@
             <img v-if="handoff.image_url" :src="handoff.image_url" alt="" class="size-24 shrink-0 rounded-xl object-cover">
             <h2 class="min-w-0 text-lg font-semibold leading-snug text-highlighted">{{ handoff.title }}</h2>
           </div>
-          <p v-if="policySummary" class="text-sm text-default">{{ policySummary }}</p>
+          <p v-if="policySummary" class="text-sm text-default">
+            <span class="line-clamp-3">{{ policySummary }}</span>
+            <NuxtLink v-if="termsPath" :to="termsPath" class="font-semibold underline">{{ t('payment.full_policy') }}</NuxtLink>
+          </p>
 
-          <div v-if="handoff.stay" class="border-t border-default pt-5" data-payment-stay>
-            <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.dates') }}</h3>
-            <p class="mt-1 text-sm text-default">{{ stayRange }}</p>
+          <!-- Airbnb's Change goes back to what was picked; here that is the offering's own page. -->
+          <div v-if="handoff.stay" class="flex items-start justify-between gap-4 border-t border-default pt-5" data-payment-stay>
+            <div>
+              <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.dates') }}</h3>
+              <p class="mt-1 text-sm text-default">{{ stayRange }}</p>
+            </div>
+            <UButton v-if="offeringPath" :to="offeringPath" color="neutral" variant="soft" size="sm" :label="t('payment.change')" />
           </div>
-          <div v-else-if="handoff.starts_at && handoff.ends_at && handoff.timezone" class="border-t border-default pt-5" data-payment-time>
-            <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.date') }}</h3>
-            <p class="mt-1 text-sm text-default">{{ formatTimestamp(handoff.starts_at, locale, handoff.timezone, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' }) }}</p>
-            <p class="text-sm text-default">{{ formatTimestamp(handoff.starts_at, locale, handoff.timezone, { hour: 'numeric', minute: '2-digit' }) }} – {{ formatTimestamp(handoff.ends_at, locale, handoff.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) }}</p>
+          <div v-else-if="handoff.starts_at && handoff.ends_at && handoff.timezone" class="flex items-start justify-between gap-4 border-t border-default pt-5" data-payment-time>
+            <div>
+              <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.date') }}</h3>
+              <p class="mt-1 text-sm text-default">{{ formatTimestamp(handoff.starts_at, locale, handoff.timezone, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' }) }}</p>
+              <p class="text-sm text-default">{{ formatTimestamp(handoff.starts_at, locale, handoff.timezone, { hour: 'numeric', minute: '2-digit' }) }} – {{ formatTimestamp(handoff.ends_at, locale, handoff.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) }}</p>
+            </div>
+            <UButton v-if="offeringPath" :to="offeringPath" color="neutral" variant="soft" size="sm" :label="t('payment.change')" />
           </div>
-          <div v-if="guests" class="border-t border-default pt-5">
-            <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.guests') }}</h3>
-            <p class="mt-1 text-sm text-default">{{ guests }}</p>
+          <div v-if="guests" class="flex items-start justify-between gap-4 border-t border-default pt-5">
+            <div>
+              <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.guests') }}</h3>
+              <p class="mt-1 text-sm text-default">{{ guests }}</p>
+            </div>
+            <UButton v-if="offeringPath" :to="offeringPath" color="neutral" variant="soft" size="sm" :label="t('payment.change')" />
           </div>
 
           <div class="border-t border-default pt-5 space-y-2">
@@ -74,6 +87,19 @@
           <UAlert v-else-if="paid || handoff.state === 'paid'" color="success" :title="t('payment.already_paid')" />
           <UAlert v-else-if="handoff.state !== 'open'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
           <template v-else>
+            <!-- Airbnb's own choice of when to pay, above the methods: paying later is Klarna's (or Affirm's, Afterpay's) method, and its terms are theirs. -->
+            <section v-if="laterTypes.length && nowTypes.length" class="space-y-4" data-payment-when>
+              <h2 class="text-lg font-semibold text-highlighted">{{ t('payment.when') }}</h2>
+              <div class="divide-y divide-default rounded-xl border border-default" role="radiogroup" :aria-label="t('payment.when')">
+                <label v-for="option in (['now', 'later'] as const)" :key="option" class="flex cursor-pointer items-start justify-between gap-4 p-4">
+                  <span class="min-w-0">
+                    <span class="block text-sm font-semibold text-highlighted">{{ option === 'now' ? t('payment.pay_now', { amount: paymentMoney(handoff.subtotal, handoff.currency) }) : t('payment.pay_later') }}</span>
+                    <span v-if="option === 'later'" :ref="element => { laterMessage = element as HTMLElement | null }" class="mt-1 block" />
+                  </span>
+                  <input v-model="when" type="radio" name="payment-when" :value="option" class="mt-1 size-5 shrink-0 accent-(--ui-text-highlighted)" :disabled="working">
+                </label>
+              </div>
+            </section>
             <!-- No frame around Stripe's form: its fields are the only boxes, as on Airbnb's page. -->
             <section class="space-y-4">
               <h2 class="text-lg font-semibold text-highlighted">{{ t('payment.pay_with') }}</h2>
@@ -84,11 +110,16 @@
                   <p class="font-medium text-sm text-highlighted">{{ methodLabel }}</p>
                   <p v-if="review.surcharge > 0" class="text-xs text-muted">{{ t('payment.surcharge_applies') }}</p>
                 </div>
-                <UButton color="neutral" variant="soft" size="sm" :label="t('payment.change_method')" :disabled="working" @click="changeMethod" />
+                <UButton color="neutral" variant="soft" size="sm" :label="t('payment.change')" :disabled="working" @click="changeMethod" />
               </div>
             </section>
 
-            <p class="text-xs text-muted leading-relaxed">{{ t('payment.agreement') }}</p>
+            <i18n-t keypath="payment.agreement" tag="p" scope="global" class="text-xs text-muted leading-relaxed">
+              <template #terms>
+                <NuxtLink v-if="termsPath" :to="termsPath" class="font-semibold text-default underline">{{ t('payment.booking_terms') }}</NuxtLink>
+                <template v-else>{{ t('payment.booking_terms') }}</template>
+              </template>
+            </i18n-t>
             <UButton
               size="xl"
               block
@@ -107,7 +138,9 @@
 </template>
 
 <script setup lang="ts">
-import { loadStripe, type Stripe, type StripeElements, type StripePaymentElement } from '@stripe/stripe-js'
+import { loadStripe, type Stripe, type StripeElements, type StripePaymentElement, type StripePaymentMethodMessagingElementOptions } from '@stripe/stripe-js'
+import { presentationForProduct } from '~/utils/product-presentation'
+import type { ProductKind } from '~/shared/product-details'
 import { paymentMoney } from '~/shared/payment-display'
 import { cardBrandLabel } from '~/composables/usePaymentsSettings'
 import { formatCalendarDate, formatTimestamp } from '~/utils/timezone'
@@ -134,7 +167,7 @@ const isHandoff = (value: unknown): value is Handoff => isRecord(value) && value
 const isReview = (value: unknown): value is Review => isRecord(value) && typeof value.payment_method_id === 'string' && Number.isSafeInteger(value.subtotal) && Number.isSafeInteger(value.surcharge) && value.total === (value.subtotal as number) + (value.surcharge as number) && isRecord(value.method)
 const isConfirmation = (value: unknown): value is Confirmation => isRecord(value) && typeof value.status === 'string' && typeof value.requires_action === 'boolean'
 const isReturn = (value: unknown): value is PaymentReturn => isRecord(value) && (value.state === 'processing' || value.state === 'refunded' || (value.state === 'paid' && (
-  (value.kind === 'stay' && typeof value.activity_id === 'string')
+  (value.kind === 'stay' && typeof value.activity_id === 'string' && typeof value.receipt_token === 'string')
   || ((value.kind === 'booking' || value.kind === 'reservation') && typeof value.request_id === 'string' && typeof value.cancellation_token === 'string'))))
 
 const { data: handoff, status, error } = await useAsyncData(`payment-handoff:${paymentId}`, () => publicApiRequest<Handoff>(`/api/public/payments/${encodeURIComponent(paymentId)}`, { query: { claim: claim.value }, validate: isHandoff }), { server: false, immediate: Boolean(claim.value) })
@@ -178,8 +211,27 @@ const guests = computed(() => {
 })
 const policySummary = computed(() => {
   const policy = handoff.value?.stay?.cancellation_policy
-  return policy ? bookedPolicyTerms(policy).summary : ''
+  return policy ? bookedPolicyTerms(policy).summary : handoff.value?.cancellation_policy ?? ''
 })
+const { organization } = useTenantOrganization()
+// The offering's own page: where its full terms are stated and what was picked can be changed.
+const offeringPath = computed(() => {
+  const value = handoff.value
+  if (!value?.product_slug || !value.kind || value.kind === 'reservation') return ''
+  // Only an experience's and a stay's page is the site's; any other offering's is its location's.
+  if (value.kind !== 'experience' && value.kind !== 'stay' && !value.location_slug) return ''
+  return localePath(presentationForProduct(organization.vertical, { kind: value.kind as ProductKind }).productPath(value.location_slug ?? '', value.product_slug))
+})
+// A stay's booked policy is always among its things to know; any other offering states its terms on its page.
+const termsPath = computed(() => !offeringPath.value ? '' : handoff.value?.stay ? `${offeringPath.value}#things-to-know` : offeringPath.value)
+
+// Airbnb's "Choose when to pay": now with any method, or later with the method that pays in installments.
+const LATER_TYPES = ['klarna', 'affirm', 'afterpay_clearpay']
+const laterTypes = computed(() => handoff.value?.payment_method_types.filter(type => LATER_TYPES.includes(type)) ?? [])
+const nowTypes = computed(() => handoff.value?.payment_method_types.filter(type => !LATER_TYPES.includes(type)) ?? [])
+const when = ref<'now' | 'later'>('now')
+const shownTypes = () => !laterTypes.value.length || !nowTypes.value.length ? handoff.value!.payment_method_types : when.value === 'now' ? nowTypes.value : laterTypes.value
+const laterMessage = ref<HTMLElement | null>(null)
 /** How the total adds up, the way Airbnb's receipt reads: "$120.00 × 2 nights", "$95.00 × 1 guest". */
 const priceLines = computed(() => {
   const value = handoff.value
@@ -207,7 +259,7 @@ watch([handoff, mount], async ([value, container]) => {
     if (!stripe) throw new Error('Stripe could not be loaded')
     elements = stripe.elements({
       mode: 'payment', amount: value.subtotal, currency: value.currency.toLowerCase(),
-      paymentMethodTypes: value.payment_method_types,
+      paymentMethodTypes: shownTypes(),
       // The method is created here and attached by the server, which prices it before anything is confirmed.
       paymentMethodCreation: 'manual',
       ...(value.customer_session_client_secret ? { customerSessionClientSecret: value.customer_session_client_secret } : {}),
@@ -221,6 +273,10 @@ watch([handoff, mount], async ([value, container]) => {
     paymentElement.on('ready', () => { ready.value = true })
     paymentElement.on('change', () => { if (review.value) review.value = null })
     paymentElement.mount(container)
+    // Klarna's own words for what paying later costs, priced on this total.
+    if (laterMessage.value && laterTypes.value.length) {
+      elements.create('paymentMethodMessaging', { amount: value.subtotal, currency: value.currency as StripePaymentMethodMessagingElementOptions['currency'], paymentMethodTypes: laterTypes.value as StripePaymentMethodMessagingElementOptions['paymentMethodTypes'] }).mount(laterMessage.value)
+    }
   } catch (cause) {
     actionError.value = getErrorMessage(cause, t('payment.unavailable'))
   }
@@ -253,6 +309,23 @@ async function reviewMethod() {
     working.value = false
   }
 }
+
+// The button waits for Stripe to show the chosen list, so nothing is submitted from the one before.
+watch(when, async () => {
+  review.value = null
+  if (!elements) return
+  // The radios are disabled while working, so one switch finishes before the next.
+  working.value = true
+  ready.value = false
+  try {
+    await elements.update({ paymentMethodTypes: shownTypes(), amount: handoff.value!.subtotal })
+    ready.value = true
+  } catch (cause) {
+    actionError.value = getErrorMessage(cause, t('payment.unavailable'))
+  } finally {
+    working.value = false
+  }
+})
 
 function changeMethod() {
   review.value = null
@@ -297,7 +370,7 @@ async function complete() {
   try {
     const done = await publicApiMutation<PaymentReturn>(`/api/public/payments/${encodeURIComponent(paymentId)}/return`, { method: 'POST', body: { claim: claim.value }, validate: isReturn })
     if (done.state !== 'paid') outcome.value = done.state
-    else if (done.kind === 'stay') await navigateTo({ path: localePath('/bookings/stay'), query: { id: done.activity_id } }, { replace: true })
+    else if (done.kind === 'stay') await navigateTo({ path: localePath('/bookings/stay'), query: { id: done.activity_id }, hash: `#${done.receipt_token}` }, { replace: true })
     else await navigateTo({ path: localePath(done.kind === 'booking' ? '/bookings/confirmed' : '/reservations/confirmed'), query: { id: done.request_id }, hash: `#${done.cancellation_token}` }, { replace: true })
   } catch (cause) {
     actionError.value = getErrorMessage(cause, t('payment.unavailable'))
@@ -307,6 +380,6 @@ async function complete() {
 }
 
 async function leave() {
-  await navigateTo('/')
+  await navigateTo(offeringPath.value || localePath('/'))
 }
 </script>

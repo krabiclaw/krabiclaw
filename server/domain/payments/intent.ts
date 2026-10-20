@@ -62,10 +62,19 @@ async function handoffSubject(db: DbClient, organizationId: string, payment: Pay
   if ((payment.subject_type === 'booking' || payment.subject_type === 'reservation') && !hold) throw new Error('Payment has no checkout hold for its time')
   const productId = snapshot.stay?.product_id ?? snapshot.product_id
   // A payment outlives its product: a deleted product leaves its kind unknown, and the summary omits what depends on it.
-  const product = productId ? await queryFirst<{ kind: string }>(db, 'SELECT kind FROM products WHERE id=? AND organization_id=?', [productId, organizationId]) : null
+  const product = productId ? await queryFirst<{ kind: string; slug: string; details_json: string }>(db, 'SELECT kind,slug,details_json FROM products WHERE id=? AND organization_id=?', [productId, organizationId]) : null
+  const locationId = hold?.location_id ?? payment.location_id
+  const location = locationId ? await queryFirst<{ slug: string }>(db, 'SELECT slug FROM business_locations WHERE id=? AND organization_id=?', [locationId, organizationId]) : null
+  // A booked offering's terms are the ones its page states; a stay's are its booked policy.
+  const cancellation = product ? (JSON.parse(product.details_json) as { cancellation_policy?: unknown }).cancellation_policy : null
   const [ownerType, ownerId] = productId ? ['product', productId] as const : ['business_location', hold?.location_id ?? payment.location_id] as const
   const picture = ownerId ? (await loadOwnerPictures(db, organizationId, ownerType, [ownerId])).get(ownerId) ?? null : null
-  return { kind: product?.kind ?? (productId ? null : payment.subject_type), image_url: picture?.imageUrl ?? null, starts_at: hold?.starts_at ?? null, ends_at: hold?.ends_at ?? null, timezone: hold?.timezone ?? null }
+  return {
+    kind: product?.kind ?? (productId ? null : payment.subject_type), image_url: picture?.imageUrl ?? null, starts_at: hold?.starts_at ?? null, ends_at: hold?.ends_at ?? null, timezone: hold?.timezone ?? null,
+    // Where the offering's page is, so the buyer can read its full terms or change what they picked.
+    product_slug: product?.slug ?? null, location_slug: location?.slug ?? null,
+    cancellation_policy: typeof cancellation === 'string' && cancellation.trim() ? cancellation.trim() : null,
+  }
 }
 
 /** What the pay page needs to mount Stripe's Payment Element on the connected account. */
@@ -165,7 +174,7 @@ export async function confirmPayment(db: DbClient, stripe: Stripe, env: Cloudfla
  */
 export type PaymentReturn =
   | { state: 'paid'; kind: 'booking' | 'reservation'; request_id: string; cancellation_token: string }
-  | { state: 'paid'; kind: 'stay'; activity_id: string }
+  | { state: 'paid'; kind: 'stay'; activity_id: string; receipt_token: string }
   /** Stripe is still clearing the payment; nothing is booked until it captures. */
   | { state: 'processing' }
   /** Captured, but what it paid for was taken first; the payment is refunded in full. */
@@ -182,7 +191,7 @@ async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment
     // The stay is read by its activity ID, as the guest's account reads it.
     const stay = await queryFirst<{ id: string }>(db, 'SELECT COALESCE(request_id,id) AS id FROM stays WHERE id=? AND organization_id=?', [hold.converted_stay_id, payment.organization_id])
     if (!stay) throw new Error('Converted stay hold has no stay')
-    return { state: 'paid', kind: 'stay', activity_id: stay.id }
+    return { state: 'paid', kind: 'stay', activity_id: stay.id, receipt_token: (await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', stay.id)).token }
   }
   if (payment.subject_type !== 'booking' && payment.subject_type !== 'reservation') throw new Error(`Payment subject ${payment.subject_type} has no guest confirmation`)
   if (!hold.request_id) throw new Error('Captured visit payment has no guest request')

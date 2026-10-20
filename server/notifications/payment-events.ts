@@ -11,6 +11,8 @@ export interface PaymentNotificationInput {
   productTitle?: string | null
   /** The caller supplies the actual receipt, purchase or provider action. */
   action?: NotificationAction | null
+  /** Why a refund happened when the guest did not ask for it. */
+  refundReason?: string | null
 }
 
 export type GuestPaymentNotificationKind =
@@ -57,10 +59,12 @@ function paymentMessage(event: PaymentNotificationEvent, audience: 'owner' | 'gu
     case 'refund_pending':
       title = guest ? 'Your refund is pending' : 'Refund pending'
       amountLabel = 'Refund amount'
+      intro = guest ? event.refundReason ?? undefined : undefined
       break
     case 'refund_succeeded':
       title = guest ? 'Your refund was processed' : 'Refund processed'
       amountLabel = 'Refund amount'
+      intro = guest ? event.refundReason ?? undefined : undefined
       break
     case 'refund_failed':
       title = guest ? 'Your refund failed' : 'Refund failed'
