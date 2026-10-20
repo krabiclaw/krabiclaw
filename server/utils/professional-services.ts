@@ -1,9 +1,12 @@
+import { getSourceLocale } from '~/server/utils/organization-locales'
+import { platformLocale } from '~/shared/platform-locales'
+import { loadPublicProductCollection } from '~/server/utils/public-products'
+import { listOrganizationProducts, publicProduct } from '~/server/utils/product-management'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
-import { parseGoogleReviewMetadata } from '~/shared/google-review'
-import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
+import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { HTTPError } from 'nitro';
+import { z } from 'zod'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { listOrganizationReviews } from '~/server/utils/organization-reviews'
 import {
   loadExactPublicLocalizations,
   type ExactPublicLocalization,
@@ -13,10 +16,7 @@ import { listPublicLocaleRepresentations } from '~/server/utils/public-locale-re
 import { publicTemplateRegistry, organizationSupportsBlawbyTemplate } from '~/utils/template-registry'
 
 const BLAWBY_TEMPLATE = publicTemplateRegistry.blawby
-import {
-  getPublicTenantPageForPath,
-  listCanonicalTenantPages,
-} from '~/server/utils/public-tenant-pages'
+import { getPublicTenantPageForPath } from '~/server/utils/public-tenant-pages'
 import { listPublishedTenantPagePaths } from '~/server/utils/content/pages'
 import { isBlawbyShellOnlyRouteRecipe } from '~/types/blawby'
 import { publicTenantVisibilitySql } from '~/server/utils/public-base'
@@ -27,14 +27,24 @@ import type {
   PublicCompliance,
   PublicComplianceContactPoint,
   PublicConsultationSettings,
-  PublicOrganizationQa,
-  PublicOrganizationReview,
-  PublicTenantPage,
 } from '~/types/blawby'
 
-function asBoolean(value: unknown) {
-  return value === true || value === 1 || value === '1'
-}
+const consultationSettingsSchema = z.object({
+  mode: z.enum(['native', 'external_url', 'native_disabled']),
+  cta_label: z.string().trim().min(1),
+  external_url: z.url({ protocol: /^https?$/, normalize: true, abort: true }).refine(value => {
+    const destination = new URL(value)
+    return !destination.username && !destination.password
+  }, 'external_url must be an absolute HTTP or HTTPS URL without credentials').nullable(),
+  schedule_path: z.string().trim().startsWith('/'),
+  confirmation_path: z.string().trim().startsWith('/'),
+  tracking_enabled: z.boolean(),
+  metadata_json: z.looseObject({}).nullable().optional(),
+}).superRefine((settings, context) => {
+  if (settings.mode === 'external_url' && settings.external_url === null) {
+    context.addIssue({ code: 'custom', path: ['external_url'], message: 'An external scheduler URL is required' })
+  }
+})
 
 function requiredText(value: unknown, field: string): string {
   if (typeof value === 'string' && value.trim()) return value.trim()
@@ -68,78 +78,54 @@ export async function getActiveBlawbyOrganization(
     : null
 }
 
-export async function listPublicTenantPages(env: CloudflareEnv, db: DbClient, organizationId: string): Promise<PublicTenantPage[]> {
-  const pages = await listCanonicalTenantPages(env, db, organizationId)
-  return pages.map(page => ({
-    id: page.id,
-    page_id: page.page_id,
-    path: page.path,
-    title: page.title,
-    page_type: page.page_type,
-    recipe: page.recipe,
-    sort_order: page.sort_order,
-    locale: page.locale,
-    summary: page.summary,
-    blocks: page.blocks,
-    media: page.media,
-    social_image: page.social_image,
-    updated_at: page.updated_at,
-  }))
-}
-
 /** Initialize the canonical consultation settings through the shared adapter. */
-export async function initializePublicConsultationSettings(db: DbClient, organizationId: string, settings: Omit<NonNullable<import('~/shared/organization-settings').OrganizationSettings['consultation']>, 'created_at' | 'updated_at' | 'updated_by'>) {
-  await executeBatch(db, [{
+export async function initializePublicConsultationSettings(db: DbClient, organizationId: string, settings: Omit<NonNullable<import('~/shared/organization-settings').OrganizationSettings['consultation']>, 'created_at' | 'updated_at' | 'updated_by'>, writeGuard?: BatchQuery) {
+  const validated = consultationSettingsSchema.parse(settings)
+  await executeBatch(db, [...(writeGuard ? [writeGuard] : []), {
     query: `UPDATE organization SET consultation_settings_json = json(?), updated_at = ? WHERE id = ? AND consultation_settings_json IS NULL`,
-    params: [JSON.stringify({ ...settings, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), updated_by: null }), new Date().toISOString(), organizationId],
+    params: [JSON.stringify({ ...validated, created_at: new Date().toISOString(), updated_at: new Date().toISOString(), updated_by: null }), new Date().toISOString(), organizationId],
   }, publicResourceCacheInvalidationQuery(organizationId, 'consultation_settings_initialized')], { operation: 'Initialize consultation settings' })
 }
 
 /** Only this adapter writes consultation settings. */
-export async function setPublicConsultationMode(db: DbClient, organizationId: string, mode: PublicConsultationSettings['mode']): Promise<PublicConsultationSettings> {
-  if (mode !== 'native' && mode !== 'external_url' && mode !== 'native_disabled') throw new HTTPError({ statusCode: 400, statusMessage: 'Invalid consultation mode' })
+export async function setPublicConsultationMode(db: DbClient, organizationId: string, mode: PublicConsultationSettings['mode'], externalUrl?: unknown): Promise<PublicConsultationSettings> {
   const settings = await getPublicConsultationSettings(db, organizationId)
-  if (mode === 'external_url' && !settings.external_url) throw new HTTPError({ statusCode: 400, statusMessage: 'Configure an external destination before enabling it' })
+  const validated = consultationSettingsSchema.safeParse({ ...settings, mode, external_url: externalUrl === undefined ? settings.external_url : externalUrl })
+  if (!validated.success) {
+    throw new HTTPError({ statusCode: 400, statusMessage: validated.error.issues[0]!.message, data: { code: 'INVALID_CONSULTATION_SETTINGS', issues: validated.error.issues }, cause: validated.error })
+  }
+  const external = validated.data.external_url
+  const now = new Date().toISOString()
   await executeBatch(db, [{
-    query: `UPDATE organization SET consultation_settings_json = json_set(consultation_settings_json, '$.mode', ?), updated_at = ? WHERE id = ?`,
-    params: [mode, new Date().toISOString(), organizationId],
+    query: `UPDATE organization SET consultation_settings_json = json_set(consultation_settings_json, '$.mode', ?, '$.external_url', ?, '$.updated_at', ?), updated_at = ? WHERE id = ?`,
+    params: [mode, external, now, now, organizationId],
   }, publicResourceCacheInvalidationQuery(organizationId, 'consultation_mode_changed')], { operation: 'Set consultation mode' })
-  return { ...settings, mode }
+  return { ...settings, mode, external_url: external }
 }
 
-export async function getPublicConsultationSettings(db: DbClient, organizationId: string): Promise<PublicConsultationSettings> {
-  const row = await queryFirst<ApiRecord>(db, `
-    SELECT json_extract(consultation_settings_json, '$.mode') AS mode,
-           json_extract(consultation_settings_json, '$.cta_label') AS cta_label,
-           json_extract(consultation_settings_json, '$.external_url') AS external_url,
-           json_extract(consultation_settings_json, '$.schedule_path') AS schedule_path,
-           json_extract(consultation_settings_json, '$.confirmation_path') AS confirmation_path,
-           json_extract(consultation_settings_json, '$.tracking_enabled') AS tracking_enabled,
-           json_extract(consultation_settings_json, '$.metadata_json') AS metadata_json
+export async function getOptionalPublicConsultationSettings(db: DbClient, organizationId: string): Promise<PublicConsultationSettings | null> {
+  const row = await queryFirst<{ consultation_settings_json: string }>(db, `
+    SELECT consultation_settings_json
       FROM organization
      WHERE id = ? AND json_type(consultation_settings_json) = 'object'
      LIMIT 1
   `, [organizationId])
 
-  if (!row) throw new HTTPError({ statusCode: 500, statusMessage: 'Professional-service consultation settings are missing', data: { code: 'CONSULTATION_SETTINGS_MISSING' } })
-  const metadata = row.metadata_json ? JSON.parse(row.metadata_json) as ApiRecord : {}
-  const ctaLabel = requiredText(row.cta_label, 'consultation.cta_label')
-  const schedulePath = requiredText(row.schedule_path, 'consultation.schedule_path')
-  const confirmationPath = requiredText(row.confirmation_path, 'consultation.confirmation_path')
-  if (row.mode !== 'native_disabled' && row.mode !== 'external_url' && row.mode !== 'native') {
-    throw new HTTPError({ statusCode: 500, statusMessage: 'Professional-service consultation mode is invalid', data: { code: 'INVALID_STORED_CONTENT' } })
+  if (!row) return null
+  let settings: z.output<typeof consultationSettingsSchema>
+  try {
+    settings = consultationSettingsSchema.parse(JSON.parse(row.consultation_settings_json) as unknown)
+  } catch (error) {
+    throw new HTTPError({ statusCode: 500, statusMessage: 'Stored professional-service consultation settings are invalid', data: { code: 'INVALID_STORED_CONTENT' }, cause: error })
   }
+  const { metadata_json: _metadata, ...consultation } = settings
+  return consultation
+}
 
-  return {
-    mode: row.mode,
-    cta_label: ctaLabel,
-    external_url: typeof row.external_url === 'string' ? row.external_url : null,
-    schedule_path: schedulePath,
-    confirmation_path: confirmationPath,
-    tracking_enabled: row.tracking_enabled == null ? true : asBoolean(row.tracking_enabled),
-    contact_form_enabled: metadata.contact_form_enabled == null ? true : asBoolean(metadata.contact_form_enabled),
-    metadata,
-  }
+export async function getPublicConsultationSettings(db: DbClient, organizationId: string): Promise<PublicConsultationSettings> {
+  const consultation = await getOptionalPublicConsultationSettings(db, organizationId)
+  if (!consultation) throw new HTTPError({ statusCode: 500, statusMessage: 'Professional-service consultation settings are missing', data: { code: 'CONSULTATION_SETTINGS_MISSING' } })
+  return consultation
 }
 
 export async function getPublicCompliance(db: DbClient, organizationId: string): Promise<PublicCompliance | null> {
@@ -157,8 +143,7 @@ export async function getPublicCompliance(db: DbClient, organizationId: string):
            json_extract(settings_json, '$.compliance.founding_date') AS founding_date,
            json_extract(settings_json, '$.compliance.same_as') AS same_as,
            json_extract(settings_json, '$.compliance.contact_points') AS contact_points,
-           json_extract(settings_json, '$.compliance.address_visibility') AS address_visibility,
-           json_extract(settings_json, '$.compliance.metadata_json') AS metadata_json
+           json_extract(settings_json, '$.compliance.address_visibility') AS address_visibility
       FROM organization
      WHERE id = ? AND json_type(settings_json, '$.compliance') = 'object'
      LIMIT 1
@@ -196,19 +181,21 @@ export async function getPublicCompliance(db: DbClient, organizationId: string):
     same_as: row.same_as ? JSON.parse(row.same_as) as string[] : [],
     contact_points: row.contact_points ? JSON.parse(row.contact_points) as PublicComplianceContactPoint[] : [],
     address_visibility: row.address_visibility === 'visible' ? 'visible' : 'hidden',
-    metadata: row.metadata_json ? JSON.parse(row.metadata_json) as ApiRecord : {},
   }
 }
 
 
 export async function getPublicBlawbyIdentity(db: DbClient, organizationId: string): Promise<PublicBlawbyIdentity> {
-  const row = await queryFirst<ApiRecord>(db, `
+  const [row, placements] = await Promise.all([
+    queryFirst<ApiRecord>(db, `
     SELECT s.name, s.brand_description, s.contact_phone
       FROM organization s
      WHERE s.id = ?
      LIMIT 1
-  `, [organizationId])
-  const socialMedia = (await loadPublicSocialMedia(db, organizationId, 'organization', [organizationId])).get(organizationId)
+    `, [organizationId]),
+    loadPublicSocialMedia(db, organizationId, 'organization', [organizationId]),
+  ])
+  const socialMedia = placements.get(organizationId)
 
   return {
     name: requiredText(row?.name, `organization ${organizationId}.name`),
@@ -222,29 +209,42 @@ export async function getPublicBlawbyIdentity(db: DbClient, organizationId: stri
 export async function getPublicBlawbyShellData(
   db: DbClient,
   organizationId: string,
-  options: { locale?: string | null; localizations?: readonly ExactPublicLocalization[] } = {},
+  sourceLocale: string,
+  options: { previewAuthorized?: boolean; locale?: string | null; localizations?: readonly ExactPublicLocalization[]; env?: CloudflareEnv } = {},
 ): Promise<PublicBlawbyShellData> {
-  const locale = options.locale?.trim() || 'en'
+  const locale = options.locale ?? sourceLocale
   const localizations = options.localizations ?? []
   const organizationLocalization = localizations.find(item => item.resourceType === 'organization' && item.resourceId === organizationId) ?? null
-  // Navigation is the site's published pages. A practice area is one of them,
-  // so there is no separate link list to keep in step with the page list.
-  const [sourceIdentity, sourceConsultation, sourceCompliance, pageLinks, verification] = await Promise.all([
+  const consultationSettings = getPublicConsultationSettings(db, organizationId)
+  const [sourceIdentity, sourceConsultation, sourceCompliance, publishedPages, verification, experienceCollection, bookableServices] = await Promise.all([
     getPublicBlawbyIdentity(db, organizationId),
-    getPublicConsultationSettings(db, organizationId),
+    consultationSettings,
     getPublicCompliance(db, organizationId),
     listPublishedTenantPagePaths(db, organizationId, locale),
     queryFirst<{ token: string | null }>(db, `
       SELECT (SELECT i.verification_token FROM organization_integrations i WHERE i.organization_id = organization.id AND i.provider = 'google_search_console') AS token
         FROM organization WHERE id = ? LIMIT 1
     `, [organizationId]),
+    loadPublicProductCollection(db, organizationId, 'experiences', options.previewAuthorized === true, undefined, options.env),
+    consultationSettings.then(settings => settings.mode === 'native'
+      ? listOrganizationProducts(db, { organizationId, kind: 'service', publishedOnly: true, bookableOnly: true, env: options.env }).then(products => products.map(publicProduct))
+      : []),
   ])
   if (!verification) throw new Error(`Organization ${organizationId} was not found for its Blawby shell`)
-  const localizedRepresentation = locale !== 'en'
+  const canSchedule = sourceConsultation.mode === 'native' ? bookableServices.length > 0
+    : sourceConsultation.mode === 'external_url' && Boolean(sourceConsultation.external_url)
+  const pageLinks = publishedPages.filter(page => page.path !== '/schedule' || canSchedule)
+    .map(page => ({ id: page.id, path: page.path, title: page.title }))
+  if (experienceCollection?.products.length && !pageLinks.some(page => page.path === '/experiences')) {
+    const title = platformLocale(locale)?.messages['saya.footer.experiences']
+    if (!title) throw new Error(`Experience navigation label is unavailable for ${locale}`)
+    pageLinks.push({ id: 'experiences', path: '/experiences', title })
+  }
+  const localizedRepresentation = locale !== sourceLocale
   const identity = localizedRepresentation
     ? {
         ...sourceIdentity,
-        name: typeof organizationLocalization?.values.name === 'string' ? organizationLocalization.values.name : '',
+        name: requiredText(organizationLocalization?.values.name, `organization ${organizationId}.${locale}.name`),
         brand_description: typeof organizationLocalization?.values.brand_description === 'string' ? organizationLocalization.values.brand_description : null,
       }
     : sourceIdentity
@@ -254,8 +254,7 @@ export async function getPublicBlawbyShellData(
     const consultationValues = organizationLocalization?.values.consultation as { cta_label?: unknown } | undefined
     consultation = {
       ...sourceConsultation,
-      cta_label: typeof consultationValues?.cta_label === 'string' ? consultationValues.cta_label : '',
-      metadata: { ...sourceConsultation.metadata, header_cta_label: null },
+      cta_label: requiredText(consultationValues?.cta_label, `organization ${organizationId}.${locale}.consultation.cta_label`),
     }
     const complianceValues = organizationLocalization?.values.compliance as { service_area?: unknown; disclaimer?: unknown; footer_disclaimer?: unknown } | undefined
     compliance = sourceCompliance
@@ -264,7 +263,6 @@ export async function getPublicBlawbyShellData(
           service_area: typeof complianceValues?.service_area === 'string' ? complianceValues.service_area : null,
           disclaimer: typeof complianceValues?.disclaimer === 'string' ? complianceValues.disclaimer : null,
           footer_disclaimer: typeof complianceValues?.footer_disclaimer === 'string' ? complianceValues.footer_disclaimer : null,
-          metadata: { ...sourceCompliance.metadata, header: null },
           media: sourceCompliance.media.map(item => ({ ...item, alt_text: null, file_name: null })),
         }
       : null
@@ -272,8 +270,9 @@ export async function getPublicBlawbyShellData(
   return {
     identity,
     consultation,
+    canSchedule,
     compliance,
-    pageLinks: pageLinks.map(page => ({ id: page.id, path: page.path, title: page.title })),
+    pageLinks,
     searchConsoleVerification: verification.token,
   }
 }
@@ -287,28 +286,32 @@ export async function getPublicBlawbyDocumentData(
 ): Promise<{ shell: PublicBlawbyShellData; route: PublicBlawbyRouteData } | null> {
   const organization = await getActiveBlawbyOrganization(db, organizationId, { previewAuthorized: options.previewAuthorized })
   if (!organization) return null
-  const locale = options.locale?.trim() || 'en'
-  const localizations = locale === 'en'
+  const sourceLocale = await getSourceLocale(db, organizationId)
+  const locale = options.locale ?? sourceLocale
+  const localizations = locale === sourceLocale
     ? []
     : await loadExactPublicLocalizations(env, db, organizationId, locale)
 
   const [shell, route] = await Promise.all([
-    getPublicBlawbyShellData(db, organizationId, { locale, localizations }),
-    getPublicBlawbyRouteData(db, organizationId, recipe, { ...options, locale, localizations }, env),
+    getPublicBlawbyShellData(db, organizationId, sourceLocale, { previewAuthorized: options.previewAuthorized, locale, localizations, env }),
+    getPublicBlawbyRouteData(db, organizationId, recipe, sourceLocale, { ...options, locale, localizations }, env),
   ])
   // Which path each recipe's document lives at is declared once, per template,
   // in utils/template-registry.ts; 'page' names its own path.
   const pagePath = recipe === 'page' ? options.slug ?? null : BLAWBY_TEMPLATE.pageDocuments.recipes[recipe] ?? null
   // An article and a post carry their own locale representations.
-  if (recipe === 'article' || recipe === 'posts') return { shell, route }
+  if (recipe === 'article' || recipe === 'posts' || recipe === 'experiences') return { shell, route }
   // Every route on this template is a page now, so locale representations
   // come from the document — there is no second resource kind to branch on.
-  route.localeRepresentations = await listPublicLocaleRepresentations(env, db, {
-    organizationId: organizationId,
-    
-    sourcePath: pagePath ?? '/',
-    documentId: route.page?.page_id,
-  })
+  if (route.page) {
+    if (!route.page.localeRepresentations) throw new HTTPError({ statusCode: 500, statusMessage: 'Public page locale representations are unavailable' })
+    route.localeRepresentations = route.page.localeRepresentations
+  } else {
+    route.localeRepresentations = await listPublicLocaleRepresentations(env, db, {
+      organizationId,
+      sourcePath: pagePath ?? '/',
+    })
+  }
   return { shell, route }
 }
 
@@ -337,65 +340,28 @@ export async function resolvePublicBlawbyDocumentOrThrow(
   return { success: true, ...document }
 }
 
-function faqBlockQa(page: { blocks: Array<{ type: string; data: Record<string, unknown> }> } | null): PublicOrganizationQa[] {
-  const block = page?.blocks.find(candidate => candidate.type === 'faq')
-  if (!block || !Array.isArray(block.data.items)) return []
-  return block.data.items.flatMap((item, index) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return []
-    const record = item as Record<string, unknown>
-    if (typeof record.id !== 'string' || typeof record.title !== 'string') return []
-    return [{ id: record.id, question: record.title, answer: typeof record.description === 'string' ? record.description : null, sort_order: index }]
-  })
-}
-
-type OrganizationReviewRow = Awaited<ReturnType<typeof listOrganizationReviews>>[number]
-
-function mapPublicReviews(rows: OrganizationReviewRow[]): PublicOrganizationReview[] {
-  return rows.map(row => ({
-    id: String(row.id),
-    author_name: requiredText(row.author_name, `review ${row.id}.author_name`),
-    media: row.media,
-    rating: Number(row.rating),
-    title: typeof row.title === 'string' ? row.title : null,
-    content: requiredText(row.content, `review ${row.id}.content`),
-    original_review_date: typeof row.original_review_date === 'string' ? row.original_review_date : null,
-    verified: row.verified === true,
-    source: typeof row.source === 'string' ? row.source : null,
-    original_reference: typeof row.original_reference === 'string' ? row.original_reference : null,
-    google_review_metadata: parseGoogleReviewMetadata(row.google_review_metadata),
-  }))
-}
-
 export async function getPublicBlawbyRouteData(
   db: DbClient,
   organizationId: string,
   recipe: PublicBlawbyRouteData['recipe'],
+  sourceLocale: string,
   options: { previewAuthorized?: boolean; slug?: string | null; locale?: string | null; localizations?: readonly ExactPublicLocalization[] } = {},
   env: CloudflareEnv,
 ): Promise<PublicBlawbyRouteData> {
-  const needsReviews = ['home', 'about', 'contact', 'schedule'].includes(recipe)
   // Declared once, per template, in utils/template-registry.ts.
   const pagePath = recipe === 'page' ? options.slug ?? null : BLAWBY_TEMPLATE.pageDocuments.recipes[recipe] ?? null
-  const localized = options.locale !== undefined && options.locale !== 'en'
+  const localized = options.locale != null && options.locale !== sourceLocale
 
-  const [page, reviewRows] = await Promise.all([
-    pagePath
-      ? getPublicTenantPageForPath(env, db, organizationId, pagePath, {
-          locale: options.locale,
-          localizations: localized ? options.localizations ?? [] : null,
-        })
-      : Promise.resolve(null),
-    needsReviews ? listOrganizationReviews(db, organizationId, { publishedOnly: true }) : Promise.resolve([]),
-  ])
-  // The Blawby layouts render one FAQ section, from the page's FAQ block; the
-  // route data carries that block's items, as its declared source resolved them.
-  const qa = faqBlockQa(page)
+  const page = pagePath
+    ? await getPublicTenantPageForPath(env, db, organizationId, pagePath, {
+        locale: options.locale,
+        localizations: localized ? options.localizations ?? [] : null,
+      })
+    : null
   return {
     recipe,
     localeRepresentations: [],
     page,
-    qa,
-    reviews: mapPublicReviews(reviewRows),
   }
 }
 

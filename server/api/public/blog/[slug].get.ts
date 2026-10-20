@@ -1,3 +1,4 @@
+import { getSourceLocale } from '~/server/utils/organization-locales'
 // GET /api/public/blog/[slug]?collection=blog|docs&locale=xx — one published article
 //
 // This was two routes with two fetchers. `getPublishedBlogPost` looked the
@@ -31,11 +32,11 @@ export default defineHandler(async (event) => {
   // Absent means the blog, as on the list route: an article is served only by
   // its own collection's route.
   const collection = requested === undefined ? 'blog' : requested
-  const locale = assertExactCanonicalLocale(query.locale ?? 'en')
 
   const env = cloudflareEnv(event)
   const db = env.db
   if (!db) return jsonResponse({ error: 'Database not available' }, { status: 500 })
+  const locale = assertExactCanonicalLocale(query.locale ?? await getSourceLocale(db, organizationId))
 
   const post = await getPublishedBlogPost(
     db,

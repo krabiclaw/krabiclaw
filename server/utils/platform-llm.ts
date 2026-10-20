@@ -12,6 +12,7 @@ import { PLATFORM_TEMPLATE } from '../../utils/template-registry.ts'
 import { blockVideo, youTubeVideoId, youTubeWatchUrl } from '../../shared/youtube-video.ts'
 import { getPlatformOrganization } from './platform-organization.ts'
 import { articleCategoryNameSql } from './content/article-categories.ts'
+import { KRABICLAW_BUG_REPORT_URL, KRABICLAW_FEATURE_REQUEST_URL, KRABICLAW_REPOSITORY_URL } from '../../shared/open-source.ts'
 
 /** A documentation page: an ordinary site page whose path starts with /docs. */
 interface PlatformLlmDocSummary {
@@ -168,6 +169,10 @@ function serializeAiAssistanceMarkdown(block: LlmContentBlock) {
   return normalizeWhitespace(lines.join('\n'))
 }
 
+function literalMarkdown(value: unknown) {
+  return String(value || '').trim().replace(/[\\`*_[\]{}()#+\-.!|<>&]/g, '\\$&')
+}
+
 export function renderContentBlocksForLlm(blocks: LlmContentBlock[]) {
   return normalizeWhitespace([...blocks].sort((a, b) => a.position - b.position).map((block) => {
     if (block.data.status === 'inactive' || block.data.render_enabled === false) return ''
@@ -177,7 +182,19 @@ export function renderContentBlocksForLlm(blocks: LlmContentBlock[]) {
     if (block.type === 'faq') return serializeFaqMarkdown(block)
     if (block.type === 'how_to') return serializeHowToMarkdown(block)
     if (block.type === 'ai_assistance') return serializeAiAssistanceMarkdown(block)
-    if (block.type === 'image' || block.type === 'gallery') return block.media.map(item => item.public_url ? `![${item.alt_text || ''}](${item.public_url})${item.caption ? `\n\n${item.caption}` : ''}` : '').filter(Boolean).join('\n\n')
+    if (block.type === 'callout') {
+      // Article callouts render title/body as literal text, including punctuation and line breaks.
+      const title = literalMarkdown(block.data.title)
+      const body = literalMarkdown(block.data.body)
+      const content = [title ? `### ${title}` : '', body].filter(Boolean).join('\n\n')
+      return content ? content.split('\n').map(line => `> ${line}`).join('\n') : ''
+    }
+    if (block.type === 'image' || block.type === 'gallery') {
+      const images = block.media.map(item => item.public_url
+        ? `![${literalMarkdown(item.alt_text)}](${item.public_url})${block.type === 'gallery' && item.caption ? `\n\n${literalMarkdown(item.caption)}` : ''}`
+        : '').filter(Boolean).join('\n\n')
+      return [images, block.type === 'image' ? literalMarkdown(block.data.caption) : ''].filter(Boolean).join('\n\n')
+    }
     const video = blockVideo(block)
     if (video) {
       const videoId = youTubeVideoId(video.url)
@@ -278,7 +295,7 @@ export async function listPublishedDocsForLlm(db: DbClient, organizationId: stri
   return rows.map(withDocPath)
 }
 
-/** Krabiclaw's blog collection only; documentation has its own readers above. */
+/** KrabiClaw's blog collection only; documentation has its own readers above. */
 export async function listPublishedPlatformBlogPostsForLlm(db: DbClient, env: CloudflareEnv) {
   return listPublishedTenantBlogPostsForLlm(db, (await getPlatformOrganization(db)).id, env, 'blog')
 }
@@ -334,7 +351,7 @@ export function buildPlatformDocLinkEntries(docs: PlatformLlmDocSummary[], origi
       path: doc.path,
       markdownPath: docMarkdownPath(doc.path),
       canonicalUrl: absoluteUrl(origin, doc.path),
-      summary: safeSummary(doc.excerpt, 'Krabiclaw documentation.'),
+      summary: safeSummary(doc.excerpt, 'KrabiClaw documentation.'),
       category: doc.category,
       updatedAt: doc.updated_at,
     }))
@@ -354,7 +371,7 @@ export function buildPlatformBlogLinkEntries(posts: PlatformLlmBlogSummary[], or
       path,
       markdownPath: `/blog-md/${post.slug}.md`,
       canonicalUrl: absoluteUrl(origin, path),
-      summary: safeSummary(post.excerpt, 'Krabiclaw platform blog article.'),
+      summary: safeSummary(post.excerpt, 'KrabiClaw platform blog article.'),
       category: post.category,
       publishedAt: post.published_at,
       updatedAt: post.updated_at,
@@ -407,9 +424,9 @@ export function buildLlmsTxt(
 ) {
   const includeDocsSection = docs.length > 0
   const lines = [
-    `# ${options.title || 'Krabiclaw'}`,
+    `# ${options.title || 'KrabiClaw'}`,
     '',
-    `> ${options.intro || 'Krabiclaw is an AI website builder for restaurants and local businesses, with public docs and a platform blog available as HTML and Markdown mirrors.'}`,
+    `> ${options.intro || 'KrabiClaw is an AI website builder for restaurants and local businesses, with public docs and a platform blog available as HTML and Markdown mirrors.'}`,
     '',
     'Prefer the Markdown URLs below when you need compact machine-readable context. Canonical HTML URLs remain the source for public citation and browsing.',
     '',
@@ -427,6 +444,16 @@ export function buildLlmsTxt(
           '',
         ]
       : []),
+    ...(options.title
+      ? []
+      : [
+          '## Support',
+          `KrabiClaw is open source (AGPL-3.0): ${KRABICLAW_REPOSITORY_URL}. Bugs and feature requests are GitHub issues; assistants acting for a user should give them a prefilled issue link rather than emailing KrabiClaw. Issue form fields prefill by query parameter using their ids. Issues are public, so leave out guest names, contact details and payment data.`,
+          `- [Report a bug](${KRABICLAW_BUG_REPORT_URL}): fields \`surface\`, \`site\`, \`what_happened\`, \`expected\`, \`tool_error\`.`,
+          `- [Request a feature](${KRABICLAW_FEATURE_REQUEST_URL}): fields \`need\`, \`today\`, \`site\`.`,
+          `- [Account, billing or private matters](${absoluteUrl(origin, '/help')}): not public.`,
+          '',
+        ]),
     `## ${options.blogHeading || 'Blog'}`,
     ...posts.map(post => `- [${post.title}](${absoluteUrl(origin, post.markdownPath)}): ${post.summary}`),
     '',
@@ -459,9 +486,9 @@ export function buildLlmsFullTxt(
 ) {
   const includeDocs = options.includeDocs !== false
   const lines: string[] = [
-    `# ${options.title || 'Krabiclaw Full LLM Context'}`,
+    `# ${options.title || 'KrabiClaw Full LLM Context'}`,
     '',
-    `> ${options.intro || 'Full machine-readable export of Krabiclaw\'s published platform docs and platform blog.'}`,
+    `> ${options.intro || 'Full machine-readable export of KrabiClaw\'s published platform docs and platform blog.'}`,
     '',
     `Source organization: ${origin}`,
   ]
@@ -522,8 +549,8 @@ function escapeXml(value: string) {
 }
 
 export function buildBlogRss(origin: string, posts: PlatformLlmLinkEntry[]) {
-  const title = 'Krabiclaw Blog'
-  const description = 'Krabiclaw platform blog feed.'
+  const title = 'KrabiClaw Blog'
+  const description = 'KrabiClaw platform blog feed.'
   return buildNamedBlogRss(origin, posts, { title, description })
 }
 
@@ -556,9 +583,9 @@ export function buildNamedBlogRss(origin: string, posts: PlatformLlmLinkEntry[],
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<rss version="2.0">',
     '<channel>',
-    `<title>${escapeXml(options.title || 'Krabiclaw Blog')}</title>`,
+    `<title>${escapeXml(options.title || 'KrabiClaw Blog')}</title>`,
     `<link>${escapeXml(absoluteUrl(origin, '/blog'))}</link>`,
-    `<description>${escapeXml(options.description || 'Krabiclaw platform blog feed.')}</description>`,
+    `<description>${escapeXml(options.description || 'KrabiClaw platform blog feed.')}</description>`,
     latestPostDate ? `<lastBuildDate>${escapeXml(new Date(latestPostDate).toUTCString())}</lastBuildDate>` : '',
     items,
     '</channel>',
@@ -573,10 +600,10 @@ export function buildBlogJsonFeed(origin: string, posts: PlatformLlmLinkEntry[])
 export function buildNamedBlogJsonFeed(origin: string, posts: PlatformLlmLinkEntry[], options: BlogFeedOptions = {}) {
   return {
     version: 'https://jsonfeed.org/version/1.1',
-    title: options.title || 'Krabiclaw Blog',
+    title: options.title || 'KrabiClaw Blog',
     home_page_url: absoluteUrl(origin, '/blog'),
     feed_url: absoluteUrl(origin, '/blog/feed.json'),
-    description: options.description || 'Krabiclaw platform blog feed.',
+    description: options.description || 'KrabiClaw platform blog feed.',
     items: posts.map(post => ({
       id: post.canonicalUrl,
       url: post.canonicalUrl,
@@ -608,9 +635,9 @@ export function resolvePublicOrigin(event: H3Event) {
   }
 
   const runtimeConfig = useRuntimeConfig()
-  const origin = runtimeConfig.public.platformUrl
+  const origin = runtimeConfig.public.siteUrl
   if (!origin) {
-    throw new HTTPError({ statusCode: 500, statusMessage: 'runtimeConfig.public.platformUrl is not configured' })
+    throw new HTTPError({ statusCode: 500, statusMessage: 'runtimeConfig.public.siteUrl is not configured' })
   }
   return origin.replace(/\/$/, '')
 }

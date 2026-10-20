@@ -8,7 +8,7 @@
     <template #right>
       <UButton
         color="neutral"
-        variant="ghost"
+        variant="soft"
         :icon="copiedUrl ? 'i-lucide-check' : 'i-lucide-copy'"
         :disabled="!publicLinksUrl"
         @click="copyPublicUrl"
@@ -314,7 +314,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => [
     id: 'page',
     items: [
       { id: 'title', label: 'Title', summary: form.title || 'Not named yet', placeholder: !form.title, to: `${linksPath.value}/title` },
-      { id: 'items', label: 'Links', summary: linksSummary(), placeholder: !items.value.length, to: `${linksPath.value}/items` },
+      { id: 'items', label: 'Links', icon: 'i-lucide-link', summary: linksSummary(), placeholder: !items.value.length, to: `${linksPath.value}/items` },
     ],
   },
 ])
@@ -334,5 +334,5 @@ provide(linksEditorKey, {
   organizationLocalizationSettingsPath,
 })
 
-useSeoMeta({ title: 'Links page | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Links page | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>

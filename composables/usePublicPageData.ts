@@ -6,10 +6,10 @@
 //
 // Usage (in a page):
 //   const { getField, getHero, media, qaList, ... } = await usePublicPageData()
-import { onMounted, onBeforeUnmount, watch } from "vue";
+import { onMounted, watch } from "vue";
 import {
   usePublicPageRequest,
-  usePublicPageKey,
+  usePublicResourceKey,
   buildPublicPageUrl,
   type PublicPageDataset,
 } from "~/composables/usePublicPageRequest";
@@ -54,15 +54,14 @@ export const usePublicPageData = async (options: {
   lazy?: boolean
   routeOwned?: boolean
 } = {}) => {
-  const { isPlatform, organizationId } = useTenantOrganization();
-  const route = useRoute();
+  const { id: organizationId } = useTenantOrganization().organization
   const params = usePublicPageRequest();
   const requestedParams = computed(() => options.datasets
     ? { ...params.value, datasets: [...options.datasets] }
     : { ...params.value, datasets: [...params.value.datasets] })
-  const key = computed(() => usePublicPageKey(organizationId, requestedParams.value));
+  const key = computed(() => usePublicResourceKey('page', organizationId, requestedParams.value));
 
-  const url = computed(() => buildPublicPageUrl(organizationId, requestedParams.value));
+  const url = computed(() => buildPublicPageUrl(requestedParams.value));
 
   const shell = useOrganizationShellState();
   const requestEvent = import.meta.server ? useRequestEvent() : undefined
@@ -70,10 +69,7 @@ export const usePublicPageData = async (options: {
     && options.server === false
     && options.lazy === true;
 
-  const asyncData =
-    isPlatform || !organizationId
-      ? { data: ref<PublicPagePayload>(), error: ref<Error | null>(null), pending: ref(false), refresh: async () => {} }
-      : useAsyncData<PublicPagePayload>(
+  const asyncData = useAsyncData<PublicPagePayload>(
           key,
           (_nuxtApp, { signal }) => {
             const currentParams = requestedParams.value
@@ -119,7 +115,7 @@ export const usePublicPageData = async (options: {
 
   // Persistent chrome comes from the stable shell. Route-owned collections
   // come from the keyed page response and change with navigation.
-  const { locations, config, organization } = shell;
+  const { locations, config, organization, sections } = shell;
   const googleMaps = computed(() => ({
     ...(shell.googleMaps.value ?? {}),
     reviews: data.value?.globalReviews ?? [],
@@ -179,47 +175,10 @@ export const usePublicPageData = async (options: {
     }, {});
   });
 
-  const previewOverrides = ref<Record<string, string>>({});
-  if (import.meta.client) {
-    const isPreview = computed(() => route.query.preview === "true");
-    const expectedOrigin = computed(() => {
-      try {
-        return new URL(window.location.href).origin;
-      } catch {
-        return null;
-      }
-    });
-
-    const handler = (e: MessageEvent) => {
-      if (!isPreview.value) return;
-      if (!expectedOrigin.value) return;
-      if (e.origin !== expectedOrigin.value) return;
-      const msg = e.data;
-      if (msg?.type !== "admin:content-update") return;
-      if (typeof msg.field !== "string" || typeof msg.value !== "string")
-        return;
-      previewOverrides.value = {
-        ...previewOverrides.value,
-        [msg.field]: msg.value,
-      };
-    };
-
-    onMounted(() => {
-      window.addEventListener("message", handler);
-    });
-
-    onBeforeUnmount(() => {
-      window.removeEventListener("message", handler);
-    });
-  }
-
   const getField = (
     field: string,
     defaultValue: string | null = null,
   ): string | null => {
-    if (Object.prototype.hasOwnProperty.call(previewOverrides.value, field)) {
-      return previewOverrides.value[field] ?? null;
-    }
     if (
       ["hero.title", "hero.subtitle", "hero.media"].includes(
         field,
@@ -240,9 +199,6 @@ export const usePublicPageData = async (options: {
     const val = row.type === "media" ? mediaValue : row.content;
     return val && val.trim() !== "" ? val : defaultValue;
   };
-
-  const getFieldStr = (field: string, defaultValue = ""): string =>
-    getField(field, defaultValue) ?? defaultValue;
 
   const getHero = (
     defaults = { title: "", subtitle: "", image: "", video: "" },
@@ -290,6 +246,7 @@ export const usePublicPageData = async (options: {
     locations,
     organization,
     location,
+    sections,
     config,
     googleMaps,
     locationReviews,
@@ -301,7 +258,6 @@ export const usePublicPageData = async (options: {
     tenantPage,
     reservationPolicyByLocation,
     getField,
-    getFieldStr,
     getHero,
     contentMap,
     products,

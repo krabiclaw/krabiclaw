@@ -41,7 +41,6 @@
         </UBadge>
         <UBadge
           v-else-if="organizationStatus === 'ready'"
-          color="primary"
           variant="soft"
           size="sm"
           class="gap-1.5"
@@ -51,7 +50,6 @@
         </UBadge>
         <UBadge
           v-else-if="iframeSrc"
-          color="primary"
           variant="soft"
           size="sm"
           class="gap-1.5"

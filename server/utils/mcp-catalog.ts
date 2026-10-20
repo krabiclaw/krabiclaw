@@ -2,9 +2,12 @@ import { createHash } from 'node:crypto'
 
 export interface McpCatalogToolSnapshot {
   name: string
+  title?: string
   description: string
   inputSchema: Record<string, unknown>
   outputSchema?: Record<string, unknown>
+  annotations?: object
+  securitySchemes?: object[]
 }
 
 function compareCodePoint(a: string, b: string) {
@@ -32,9 +35,12 @@ export function canonicalCatalogSnapshot(tools: McpCatalogToolSnapshot[]) {
   return tools
     .map(tool => ({
       name: tool.name,
+      ...(tool.title ? { title: tool.title } : {}),
       description: tool.description,
       inputSchema: sortValue(tool.inputSchema) as Record<string, unknown>,
       outputSchema: sortValue(tool.outputSchema ?? {}) as Record<string, unknown>,
+      ...(tool.annotations ? { annotations: sortValue(tool.annotations) } : {}),
+      ...(tool.securitySchemes ? { securitySchemes: sortValue(tool.securitySchemes) } : {}),
     }))
     .sort((a, b) => compareCodePoint(a.name, b.name))
 }

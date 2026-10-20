@@ -8,7 +8,7 @@
     </template>
 
     <template v-else-if="location">
-      <SayaSubNav :location-slug="slug" active="contact" />
+      <TenantSubNav :location-slug="slug" active="contact" />
 
       <!-- Page header -->
       <header class="mx-auto max-w-7xl px-4 pt-14 pb-10 sm:px-6 lg:px-8">
@@ -74,10 +74,10 @@
               style="border:0;filter:grayscale(0.12)"
               allowfullscreen
               loading="lazy"
-              referrerpolicy="no-referrer-when-downgrade"
+              referrerpolicy="strict-origin-when-cross-origin"
             />
             <div v-else class="flex h-full w-full flex-col items-center justify-center gap-3">
-              <SayaIcon name="map-pin" class="size-8 text-muted" />
+              <TenantIcon name="map-pin" class="size-8 text-muted" />
               <span class="text-sm text-muted">{{ t('saya.location.map_synced') }}</span>
             </div>
           </div>
@@ -94,7 +94,7 @@
               rel="noopener noreferrer"
               class="inline-flex items-center gap-2 rounded-full bg-inverted px-4 py-2 text-[11px] font-medium uppercase tracking-widest text-inverted no-underline transition hover:opacity-80"
             >
-              <SayaIcon name="map-pin" class="size-3.5" />
+              <TenantIcon name="map-pin" class="size-3.5" />
               {{ t('saya.location.get_directions') }}
             </a>
             <a
@@ -148,7 +148,7 @@
       <section class="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-8 px-4 py-24 sm:px-6 lg:px-8">
         <h3 class="saya-display-md saya-italic text-default">{{ t('saya.location.see_you_soon') }}</h3>
         <div class="flex flex-wrap gap-3">
-          <SayaButton :to="localePath(locationCopy.ctaRoute)" size="lg">{{ locationCopy.reserveCta }}</SayaButton>
+          <TenantButton v-if="locationCopy.ctaRoute" :to="localePath(locationCopy.ctaRoute)" size="lg">{{ locationCopy.reserveCta }}</TenantButton>
           <a
             v-if="location.phone"
             :href="`tel:${location.phone}`"
@@ -161,9 +161,9 @@
     </template>
 
     <div v-else class="mx-auto max-w-xl px-4 py-24 text-center">
-      <SayaIcon name="map-pin" class="mx-auto mb-4 size-12 text-muted" />
+      <TenantIcon name="map-pin" class="mx-auto mb-4 size-12 text-muted" />
       <h1 class="saya-display-sm text-default">{{ t('saya.location.not_found') }}</h1>
-      <SayaButton to="/locations" class="mt-8">{{ t('saya.location.view_all_locations') }}</SayaButton>
+      <TenantButton to="/locations" class="mt-8">{{ t('saya.location.view_all_locations') }}</TenantButton>
     </div>
   </div>
 </template>
@@ -172,17 +172,18 @@
 import { formatOpeningHours, getIsOpenNow } from '~/utils/formatters'
 import { getTodayHoursLabel, schemaOpeningHours } from '~/shared/reservation-hours'
 import { addressPlaceName, formatPostalAddress, schemaPostalAddress, type PostalAddress } from '~/utils/postal-address'
-const DOMPurify = useHtmlSanitizer()
+import { loadDomPurify } from '~/utils/dom-purify-loader'
+import { sanitizeHtmlForSsr } from '~/utils/markdown'
 
-definePageMeta({ layout: 'saya' })
+const DOMPurify = import.meta.client ? await loadDomPurify() : { sanitize: sanitizeHtmlForSsr }
+
+definePageMeta({ layout: 'tenant' })
 
 const { locale, localePath, t } = useI18n()
 
 const route = useRoute()
-const { organizationId, organization } = useTenantOrganization()
+const { organization } = useTenantOrganization()
 const locationCopy = computed(() => getVerticalCopy((organization as ApiValue)?.vertical, locale.value))
-if (!organizationId) throw createError({ statusCode: 404 })
-
 const slug = computed(() => String(route.params.slug))
 
 // Bootstrap: location data + page content (parking/notes) — 1 SSR call
@@ -213,9 +214,6 @@ useSocialMetadata(() => ({
   title: `Plan a visit · ${location.value?.title || slug.value}`,
   description: `Hours, address and directions for ${location.value?.title || slug.value}.`,
   socialImage: location.value?.social_image ?? null,
-  brand: {
-    organizationName: organizationName.value,
-  },
   breadcrumbs: [
     { name: 'Locations', url: '/locations' },
     { name: location.value?.title ?? slug.value, url: `/locations/${slug.value}` },

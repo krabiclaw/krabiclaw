@@ -25,7 +25,7 @@ import {
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { refreshSocialCard } from '~/server/utils/social-card'
-import { assertExactCanonicalLocale } from '~/server/utils/localization'
+import { assertExactCanonicalLocale, getPersistedSourceLocale } from '~/server/utils/localization'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { buildSingleMediaPlacementQueries, insertInitialMediaPlacements, hydrateMediaAssetRefs } from '~/server/utils/media-asset-manager'
 import { isSingleMediaPlacement } from '~/shared/media-placement-contract'
@@ -126,10 +126,10 @@ function metadataForInput(input: TenantPageEditorInput, locale: string, path: st
 /**
  * May this site hold a custom page?
  *
- * A custom page is a subscription feature a customer buys. Krabiclaw's own site
+ * A custom page is a subscription feature a customer buys. KrabiClaw's own site
  * is the seller, not a subscriber: the platform organization holds no
  * subscription and never will, so asking `custom_pages` of it refused every
- * page Krabiclaw publishes about itself (#903).
+ * page KrabiClaw publishes about itself (#903).
  */
 async function organizationMayHoldCustomPages(env: CloudflareEnv, db: DbClient, organizationId: string): Promise<boolean> {
   const { template } = await loadOrganizationTemplate(db, organizationId)
@@ -304,19 +304,14 @@ async function resolveLocale(db: DbClient, organizationId: string, locale?: stri
     if (!row) notFound('Locale is not configured for this organization')
     return row.locale
   }
-  const row = await queryFirst<{ locale: string | null }>(
-    db,
-    'SELECT locale FROM organization_locales WHERE organization_id = ? AND locale = \'en\' AND is_source = 1 AND status = \'published\' LIMIT 1',
-    [organizationId],
-  )
-  if (!row?.locale) throw new HTTPError({ statusCode: 500, statusMessage: 'Source locale is not configured for this organization' })
-  return row.locale
+  return (await getPersistedSourceLocale(db, organizationId)).locale
 }
 
 export async function assertTenantPagePathAvailable(
   db: DbClient,
   input: { organizationId: string; locale: string; path: string; template: PublicTemplateDefinition; excludeVariantId?: string | null; allowOwnedRedirectVariantId?: string | null },
 ) {
+  const sourceLocale = await resolveLocale(db, input.organizationId)
   const path = normalizeTenantPagePath(input.path)
   // One rule, from one declaration: the template renders a document here, or
   // nothing claims the path and the template's catch-all renders it. The hand
@@ -324,6 +319,10 @@ export async function assertTenantPagePathAvailable(
   // that do read a document.
   if (!templateAllowsPageDocumentAt(input.template, CLAIMED_PUBLIC_ROUTES, path)) {
     conflict('This path is reserved by a platform or product route')
+  }
+  const locationPath = input.template.slug === 'saya' ? /^\/locations\/([^/]+)$/.exec(path) : null
+  if (locationPath && !await queryFirst(db, 'SELECT id FROM business_locations WHERE organization_id = ? AND slug = ? LIMIT 1', [input.organizationId, locationPath[1]!])) {
+    notFound('The location for this page was not found')
   }
   const row = await queryFirst<{ id: string } | null>(db, [
     'SELECT id FROM content_documents',
@@ -336,7 +335,7 @@ export async function assertTenantPagePathAvailable(
      WHERE organization_id = ? AND locale = ? AND from_path = ?
        AND (? IS NULL OR owner_id IS NULL OR owner_id <> ?)
      LIMIT 1
-  `, [input.organizationId, input.locale, formatTenantLocalePath(path, input.locale), input.allowOwnedRedirectVariantId ?? null, input.allowOwnedRedirectVariantId ?? null])
+  `, [input.organizationId, input.locale, formatTenantLocalePath(path, input.locale, sourceLocale), input.allowOwnedRedirectVariantId ?? null, input.allowOwnedRedirectVariantId ?? null])
   if (redirect) conflict('A tenant redirect already owns this path')
   return path
 }
@@ -345,12 +344,13 @@ async function assertTenantPageRedirectWritable(
   db: DbClient,
   input: { organizationId: string; locale: string; fromPath: string; variantId: string },
 ) {
+  const sourceLocale = await resolveLocale(db, input.organizationId)
   const existing = await queryFirst<{ owner_id: string | null; source: string } | null>(db, `
     SELECT owner_id, source
       FROM organization_redirects
       WHERE organization_id = ? AND locale = ? AND from_path = ?
      LIMIT 1
-  `, [ input.organizationId, input.locale, formatTenantLocalePath(input.fromPath, input.locale)])
+  `, [ input.organizationId, input.locale, formatTenantLocalePath(input.fromPath, input.locale, sourceLocale)])
   if (existing && (existing.owner_id !== input.variantId || existing.source !== 'tenant-pages')) {
     conflict('A manual tenant redirect already owns this path')
   }
@@ -380,17 +380,18 @@ async function prepareTenantPageRedirectFlatten(
   },
   now: string,
 ): Promise<BatchQuery[]> {
+  const sourceLocale = await resolveLocale(db, input.organizationId)
   const incoming = await queryAll<{ from_path: string; source: string; behavior: string }>(db, `
     SELECT from_path, source, behavior
       FROM organization_redirects
       WHERE organization_id = ? AND locale = ? AND to_path = ?
        AND behavior = 'redirect'
-  `, [ input.organizationId, input.locale, formatTenantLocalePath(input.fromPath, input.locale)])
+  `, [ input.organizationId, input.locale, formatTenantLocalePath(input.fromPath, input.locale, sourceLocale)])
   if (!input.toPath) {
     if (incoming.length) conflict('Cannot archive a page while another redirect points to it')
     return []
   }
-  if (incoming.some(redirect => redirect.from_path === formatTenantLocalePath(input.toPath!, input.locale))) {
+  if (incoming.some(redirect => redirect.from_path === formatTenantLocalePath(input.toPath!, input.locale, sourceLocale))) {
     conflict('Changing this page path would create a redirect cycle')
   }
   if (incoming.some(redirect => redirect.source !== 'tenant-pages')) {
@@ -401,7 +402,7 @@ async function prepareTenantPageRedirectFlatten(
     query: `UPDATE organization_redirects
        SET to_path = ?, updated_at = ?
      WHERE organization_id = ? AND locale = ? AND to_path = ? AND behavior = 'redirect'`,
-    params: [formatTenantLocalePath(input.toPath, input.locale), now, input.organizationId, input.locale, formatTenantLocalePath(input.fromPath, input.locale)],
+    params: [formatTenantLocalePath(input.toPath, input.locale, sourceLocale), now, input.organizationId, input.locale, formatTenantLocalePath(input.fromPath, input.locale, sourceLocale)],
   }]
 }
 
@@ -497,16 +498,7 @@ export async function getTenantPageForEditor(db: DbClient, variantId: string, sc
 }
 
 export async function getPublishedTenantPage(db: DbClient, organizationId: string, path: string, locale?: string | null): Promise<TenantPageDto | null> {
-  const resolvedLocale = await resolveLocale(db, organizationId, locale)
-  const normalizedPath = normalizeTenantPagePath(path)
-  const selectPublished = async (candidateLocale: string) => await queryFirst<PageRepresentationRow | null>(db, [
-    'SELECT v.id, COALESCE(v.root_id, v.id) AS page_id, v.organization_id, v.locale, v.path,',
-    '       v.title, v.summary, p.product_id,',
-    `       json_extract(p.metadata_json, '$.page_type') AS page_type, json_extract(p.metadata_json, '$.recipe') AS recipe, p.sort_order, v.updated_at`,
-    `  FROM content_documents v JOIN content_documents p ON p.id = COALESCE(v.root_id, v.id) AND p.row_role = 'root' AND p.kind = 'page'`,
-    ` WHERE v.row_role IN ('root','representation') AND v.kind = 'page' AND v.organization_id = ? AND v.locale = ? AND v.path = ? AND ${publicTenantPageSql('p')} LIMIT 1`,
-  ].join('\n'), [organizationId, candidateLocale, normalizedPath])
-  const row = await selectPublished(resolvedLocale)
+  const row = await resolvePublishedTenantPageIdentity(db, organizationId, path, locale)
   if (!row) return null
   return pageDto(row, documentOf(row), await tenantPageBlocks(db, organizationId, row.id))
 }
@@ -519,21 +511,16 @@ export async function resolvePublishedTenantPageIdentity(
 ) {
   const resolvedLocale = await resolveLocale(db, organizationId, locale)
   const normalizedPath = normalizeTenantPagePath(path)
-  const selectPublished = async (candidateLocale: string) => await queryFirst<{
-    page_id: string
-    page_type: TenantPageType
-    recipe: string | null
-    locale: string
-  } | null>(db, `
-    SELECT p.id AS page_id, json_extract(p.metadata_json, '$.page_type') AS page_type, json_extract(p.metadata_json, '$.recipe') AS recipe, v.locale
+  return await queryFirst<PageRepresentationRow | null>(db, `
+    SELECT v.id, p.id AS page_id, v.organization_id, v.locale, v.path,
+           v.title, v.summary, p.product_id,
+           json_extract(p.metadata_json, '$.page_type') AS page_type, json_extract(p.metadata_json, '$.recipe') AS recipe, p.sort_order, v.updated_at
       FROM content_documents v
       JOIN content_documents p ON p.id = COALESCE(v.root_id, v.id) AND p.row_role = 'root' AND p.kind = 'page'
      WHERE v.row_role IN ('root','representation') AND v.kind = 'page' AND v.organization_id = ? AND v.locale = ? AND v.path = ?
        AND ${publicTenantPageSql('p')}
       LIMIT 1
-  `, [organizationId, candidateLocale, normalizedPath])
-  const page = await selectPublished(resolvedLocale)
-  return page
+  `, [organizationId, resolvedLocale, normalizedPath])
 }
 
 export async function createTenantPagesBatch(
@@ -542,13 +529,14 @@ export async function createTenantPagesBatch(
     env: CloudflareEnv
     organizationId: string
     userId?: string | null
+    writeGuard?: BatchQuery
     pages: Array<{
       data: TenantPageEditorInput
       trustedSystemPage?: boolean
     }>
   },
 ) {
-  const locale = await resolveLocale(db, input.organizationId, 'en')
+  const locale = await resolveLocale(db, input.organizationId)
   const { template } = await loadOrganizationTemplate(db, input.organizationId)
   const localeRow = await queryFirst<{ is_source: number } | null>(db, `
     SELECT is_source FROM organization_locales WHERE organization_id = ? AND locale = ? LIMIT 1
@@ -577,6 +565,7 @@ export async function createTenantPagesBatch(
   for (const pageInput of input.pages) {
     const data = pageInput.data
     if (data.pageId) badRequest('Batch tenant-page creation cannot include an existing page parent')
+    if (data.locale !== undefined && data.locale !== locale) badRequest('Batch page creation uses the organization primary language')
     const path = normalizeTenantPagePath(data.path)
     if (existingPaths.has(path)) continue
     if (requestedPaths.has(path)) conflict('A batch contains duplicate tenant-page paths')
@@ -600,7 +589,7 @@ export async function createTenantPagesBatch(
     const now = new Date().toISOString()
     const placementQueries = await tenantPagePlacementQueries(db, input.organizationId, blocks, now)
     const prepared = prepareContentDocumentWithBlocks({
-      id: variantId, rowRole: 'root', locale: 'en', organizationId: input.organizationId, kind: 'page',
+      id: variantId, rowRole: 'root', locale, organizationId: input.organizationId, kind: 'page',
       metadata: { page_type: metadata.pageType, recipe: metadata.recipe }, source: 'pages',
       path, title: metadata.title, summary: metadata.summary, createdBy: input.userId, updatedBy: input.userId,
     }, blocksAsInputs(blocks), {
@@ -613,7 +602,7 @@ export async function createTenantPagesBatch(
 
   if (created > 0) {
     queries.push(publicResourceCacheInvalidationQuery(input.organizationId, 'tenant-page-seed'))
-    await executeBatch(db, queries)
+    await executeBatch(db, [...(input.writeGuard ? [input.writeGuard] : []), ...queries])
   }
   return { created }
 }
@@ -642,6 +631,7 @@ export async function applyOnboardingTenantPages(
     organizationId: string
     userId: string | null
     pages: OnboardingTenantPageInput[]
+    writeGuard?: BatchQuery
   },
 ) {
   if (!input.pages.length) return { updated: 0, created: 0 }
@@ -652,7 +642,7 @@ export async function applyOnboardingTenantPages(
   }))
   const paths = pages.map(page => page.path)
   if (new Set(paths).size !== paths.length) badRequest('Onboarding page paths must be unique')
-  const locale = await resolveLocale(db, input.organizationId, 'en')
+  const locale = await resolveLocale(db, input.organizationId)
   const existingRows = await queryAll<OnboardingPageRepresentationRow>(db, `
     SELECT v.id, COALESCE(v.root_id, v.id) AS page_id, v.organization_id, v.locale,
            v.path, v.title, v.summary, json_extract(p.metadata_json, '$.page_type') AS page_type, json_extract(p.metadata_json, '$.recipe') AS recipe,
@@ -693,8 +683,8 @@ export async function applyOnboardingTenantPages(
       id: row.id,
       organization_id: input.organizationId,
       kind: 'page' as const,
-      row_role: row.locale === 'en' ? 'root' as const : 'representation' as const,
-      root_id: row.locale === 'en' ? null : row.page_id,
+      row_role: row.id === row.page_id ? 'root' as const : 'representation' as const,
+      root_id: row.id === row.page_id ? null : row.page_id,
       locale: row.locale,
       created_at: row.created_at,
       updated_at: row.updated_at,
@@ -714,13 +704,14 @@ export async function applyOnboardingTenantPages(
 
   if (replacementQueries.length) {
     replacementQueries.push(publicResourceCacheInvalidationQuery(input.organizationId, 'tenant-page-onboarding-import'))
-    await executeBatch(db, replacementQueries)
+    await executeBatch(db, [...(input.writeGuard ? [input.writeGuard] : []), ...replacementQueries])
   }
 
   let created = 0
   if (missingPages.length) {
     const result = await createTenantPagesBatch(db, {
       env: input.env,
+      writeGuard: input.writeGuard,
       organizationId: input.organizationId,
       userId: input.userId,
       pages: missingPages.map(page => ({
@@ -753,6 +744,7 @@ type TenantPageCreateInput = {
    * the binding's foreign key, not a read here.
    */
   productInSameBatch?: boolean
+  pathOwnerDeletedInSameBatch?: string
 }
 
 /**
@@ -813,6 +805,7 @@ export async function prepareTenantPageCreate(db: DbClient, input: TenantPageCre
     locale,
     path: input.data.path,
     template,
+    excludeVariantId: input.pathOwnerDeletedInSameBatch,
   })
   const metadata = metadataForInput(effectiveData, locale, path)
   const blocks = normalizeTenantPageBlocks(effectiveData.blocks)
@@ -827,7 +820,7 @@ export async function prepareTenantPageCreate(db: DbClient, input: TenantPageCre
     // It used to be accepted and dropped: a caller that asked for a position got
     // 0 and no error.
     ...(existingPage ? { rowRole: 'representation', rootId: pageId, locale } : {
-      rowRole: 'root', locale: 'en', metadata: { page_type: metadata.pageType, recipe: metadata.recipe }, source: 'pages', productId,
+      rowRole: 'root', locale, metadata: { page_type: metadata.pageType, recipe: metadata.recipe }, source: 'pages', productId,
       ...(typeof effectiveData.sortOrder === 'number' ? { sortOrder: effectiveData.sortOrder } : {}),
     }),
     path, title: metadata.title, summary: metadata.summary, createdBy: input.userId, updatedBy: input.userId,
@@ -883,7 +876,7 @@ export async function createTenantPage(db: DbClient, input: TenantPageCreateInpu
  * dead row the template no longer maps, like the /locations/main every site used
  * to be seeded with, is deletable precisely because nothing renders it.
  */
-export async function deleteTenantPage(db: DbClient, variantId: string, input: { scope: TenantPageScope; expectedUpdatedAt: string; env: CloudflareEnv }) {
+export async function prepareTenantPageDelete(db: DbClient, variantId: string, input: { scope: TenantPageScope; expectedUpdatedAt: string }) {
   const row = await getPageRepresentation(db, variantId, input.scope)
   if (!row) notFound('Tenant page variant not found')
   const document = await getContentDocumentById(db, row.id)
@@ -916,7 +909,8 @@ export async function deleteTenantPage(db: DbClient, variantId: string, input: {
     conflict(`${referrers.map(item => item.path).join(', ')} link${referrers.length === 1 ? 's' : ''} to this page; remove the link before deleting it`)
   }
 
-  const translations = row.locale === 'en'
+  const sourceLocale = await resolveLocale(db, row.organization_id)
+  const translations = row.id === row.page_id
     ? await queryAll<{ id: string; locale: string; path: string; updated_at: string }>(db, `
         SELECT id, locale, path, updated_at FROM content_documents
          WHERE root_id = ? AND row_role = 'representation'  AND organization_id = ?
@@ -937,7 +931,7 @@ export async function deleteTenantPage(db: DbClient, variantId: string, input: {
            AND (${removed.map(() => '(locale = ? AND to_path = ?)').join(' OR ')})`,
     params: [
       row.organization_id, row.id, row.id, row.organization_id,
-      ...removed.flatMap(variant => [variant.locale, formatTenantLocalePath(variant.path, variant.locale)]),
+      ...removed.flatMap(variant => [variant.locale, formatTenantLocalePath(variant.path, variant.locale, sourceLocale)]),
     ],
   }
   const pointedAt = await queryFirst<{ count: number }>(db, `SELECT count(*) AS count ${incoming.sql}`, incoming.params)
@@ -948,7 +942,7 @@ export async function deleteTenantPage(db: DbClient, variantId: string, input: {
   // but queries run between them and this write, and a page changed in that
   // window must not be deleted on the strength of a snapshot taken before it.
   const now = new Date().toISOString()
-  await executeBatch(db, [
+  const queries: BatchQuery[] = [
     {
       query: `INSERT INTO content_blocks (id, document_id, parent_block_id, type, position, level, data_json, created_at, updated_at)
         SELECT NULL, ?, NULL, 'markdown', 0, NULL, '{}', ?, ? WHERE EXISTS (SELECT 1 ${incoming.sql})`,
@@ -958,14 +952,20 @@ export async function deleteTenantPage(db: DbClient, variantId: string, input: {
       documentId: row.id,
       organizationId: row.organization_id,
       expectedUpdatedAt: input.expectedUpdatedAt,
-      expectedRepresentations: row.locale === 'en'
+      expectedRepresentations: row.id === row.page_id
         ? translations.map(translation => ({ id: translation.id, updatedAt: translation.updated_at }))
         : undefined,
     }),
     publicResourceCacheInvalidationQuery(row.organization_id, 'tenant-page-delete'),
-  ])
+  ]
 
-  return { deleted: { id: row.id, path: row.path, locale: row.locale, removed_locales: removedLocales } }
+  return { queries, deleted: { id: row.id, path: row.path, locale: row.locale, removed_locales: removedLocales } }
+}
+
+export async function deleteTenantPage(db: DbClient, variantId: string, input: { scope: TenantPageScope; expectedUpdatedAt: string; env: CloudflareEnv }) {
+  const prepared = await prepareTenantPageDelete(db, variantId, input)
+  await executeBatch(db, prepared.queries)
+  return { deleted: prepared.deleted }
 }
 
 export async function updateTenantPage(db: DbClient, variantId: string, input: { userId: string | null; data: TenantPageEditorInput; scope: TenantPageScope; env: CloudflareEnv }) {
@@ -1039,6 +1039,7 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
       variantId,
     })
   }
+  const sourceLocale = await resolveLocale(db, row.organization_id)
   const redirectQueries = pathChanged
     ? [
         ...await prepareTenantPageRedirectFlatten(db, {
@@ -1049,7 +1050,7 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
         }, now),
         {
           query: "INSERT INTO organization_redirects (id, organization_id, locale, owner_type, owner_id, from_path, to_path, status_code, behavior, reason, source, created_at, updated_at) VALUES (?, ?, ?, 'content_document', ?, ?, ?, 301, 'redirect', 'tenant_page_path_change', 'tenant-pages', ?, ?) ON CONFLICT(organization_id, locale, from_path) DO UPDATE SET owner_type = excluded.owner_type, owner_id = excluded.owner_id, to_path = excluded.to_path, status_code = excluded.status_code, behavior = excluded.behavior, reason = excluded.reason, source = excluded.source, updated_at = excluded.updated_at",
-          params: [crypto.randomUUID(), row.organization_id, row.locale, variantId, formatTenantLocalePath(row.path, row.locale), formatTenantLocalePath(path, row.locale), now, now],
+          params: [crypto.randomUUID(), row.organization_id, row.locale, variantId, formatTenantLocalePath(row.path, row.locale, sourceLocale), formatTenantLocalePath(path, row.locale, sourceLocale), now, now],
         },
       ]
     : []
@@ -1060,9 +1061,9 @@ export async function updateTenantPage(db: DbClient, variantId: string, input: {
   const updatePage: BatchQuery = {
     query: `UPDATE content_documents SET metadata_json = json_set(metadata_json, '$.page_type', ?, '$.recipe', ?),
       sort_order = ?, updated_by = ?
-      WHERE row_role = 'root' AND kind = 'page' AND id = ? AND organization_id = ? AND ? = 'en'`,
+      WHERE row_role = 'root' AND kind = 'page' AND id = ? AND organization_id = ? AND id = ?`,
     params: [metadata.pageType, metadata.recipe, sortOrder, input.userId,
-      row.page_id, input.scope.organizationId, row.locale],
+      row.page_id, input.scope.organizationId, variantId],
   }
   await updateContentDocument(db, variantId, {
     blocks: blocksAsInputs(blocks), expected_updated_at: input.data.expectedUpdatedAt,

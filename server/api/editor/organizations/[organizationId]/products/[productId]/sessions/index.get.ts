@@ -1,5 +1,5 @@
 import { jsonResponse, rethrowHttpError } from '~/server/utils/api-response'
-import { requireOrganizationAccess } from '~/server/utils/location-access'
+import { requireProductAccess } from '~/server/utils/location-access'
 import { requireOrganizationProduct } from '~/server/utils/product-management'
 import { listSessions } from '~/server/utils/availability'
 import { PRODUCT_SESSION_STATUSES, type ProductSessionStatus } from '~/shared/bookings'
@@ -11,7 +11,7 @@ export default defineHandler(async (event) => {
   const productId = getRouterParam(event, 'productId')
   if (!organizationId || !productId) return jsonResponse({ error: 'Organization ID and product ID are required' }, { status: 400 })
   try {
-    const { db, organization } = await requireOrganizationAccess(event, organizationId)
+    const { db, organization } = await requireProductAccess(event, organizationId, productId)
     // A product id in the path is not authorized by the site in the path.
     await requireOrganizationProduct(db, { organizationId: organization.id, productId })
     const query = getQuery(event)

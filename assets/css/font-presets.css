@@ -1,13 +1,93 @@
 /*
   Site font presets. shared/organization-fonts.ts owns the IDs; each rule maps one
-  to the theme's heading and body roles. @nuxt/fonts reads the families named
-  here and adds their @font-face rules to the sheet that imports this file. A
-  browser downloads a face only when rendered text uses it, so only the
+  to the theme's heading and body roles. The faces are the @fontsource packages'
+  own @font-face rules, imported below and bundled from node_modules, so a build
+  fetches nothing: each weight file splits its family into unicode-range slices,
+  and a browser downloads a slice only when rendered text uses it, so only the
   selected preset's files are fetched. Without a preset rule, the theme's own
   --font-heading and --font-sans apply. Every stack ends with the script
-  fallbacks from base.css, so a family without Thai or Japanese glyphs leaves
+  fallbacks from base.css, so a family without Thai, Vietnamese or Japanese glyphs leaves
   those characters to a font that has them.
 */
+@import "@fontsource/cormorant-garamond/400.css";
+@import "@fontsource/cormorant-garamond/500.css";
+@import "@fontsource/cormorant-garamond/600.css";
+@import "@fontsource/cormorant-garamond/700.css";
+@import "@fontsource/dm-sans/400.css";
+@import "@fontsource/dm-sans/500.css";
+@import "@fontsource/dm-sans/600.css";
+@import "@fontsource/dm-sans/700.css";
+@import "@fontsource/ibm-plex-sans-thai/400.css";
+@import "@fontsource/ibm-plex-sans-thai/500.css";
+@import "@fontsource/ibm-plex-sans-thai/600.css";
+@import "@fontsource/ibm-plex-sans-thai/700.css";
+@import "@fontsource/instrument-serif/400-italic.css";
+@import "@fontsource/instrument-serif/400.css";
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
+@import "@fontsource/kanit/400.css";
+@import "@fontsource/kanit/500.css";
+@import "@fontsource/kanit/600.css";
+@import "@fontsource/kanit/700.css";
+@import "@fontsource/lora/400.css";
+@import "@fontsource/lora/500.css";
+@import "@fontsource/lora/600.css";
+@import "@fontsource/lora/700.css";
+@import "@fontsource/mali/400.css";
+@import "@fontsource/mali/500.css";
+@import "@fontsource/mali/600.css";
+@import "@fontsource/mali/700.css";
+@import "@fontsource/marcellus/400.css";
+@import "@fontsource/montserrat/400.css";
+@import "@fontsource/montserrat/500.css";
+@import "@fontsource/montserrat/600.css";
+@import "@fontsource/montserrat/700.css";
+@import "@fontsource/noto-sans-display/400.css";
+@import "@fontsource/noto-sans-display/500.css";
+@import "@fontsource/noto-sans-display/600.css";
+@import "@fontsource/noto-sans-display/700.css";
+@import "@fontsource/noto-sans-thai/400.css";
+@import "@fontsource/noto-sans-thai/500.css";
+@import "@fontsource/noto-sans-thai/600.css";
+@import "@fontsource/noto-sans-thai/700.css";
+@import "@fontsource/noto-serif-display/400.css";
+@import "@fontsource/noto-serif-display/500.css";
+@import "@fontsource/noto-serif-display/600.css";
+@import "@fontsource/noto-serif-display/700.css";
+@import "@fontsource/noto-serif-thai/400.css";
+@import "@fontsource/noto-serif-thai/500.css";
+@import "@fontsource/noto-serif-thai/600.css";
+@import "@fontsource/noto-serif-thai/700.css";
+@import "@fontsource/playfair-display/400.css";
+@import "@fontsource/playfair-display/500.css";
+@import "@fontsource/playfair-display/600.css";
+@import "@fontsource/playfair-display/700.css";
+@import "@fontsource/poppins/400.css";
+@import "@fontsource/poppins/500.css";
+@import "@fontsource/poppins/600.css";
+@import "@fontsource/poppins/700.css";
+@import "@fontsource/prompt/400.css";
+@import "@fontsource/prompt/500.css";
+@import "@fontsource/prompt/600.css";
+@import "@fontsource/prompt/700.css";
+@import "@fontsource/sarabun/400.css";
+@import "@fontsource/sarabun/500.css";
+@import "@fontsource/sarabun/600.css";
+@import "@fontsource/sarabun/700.css";
+
+/* Jost's variable package names its family "Jost Variable"; the theme names it
+   "Jost". Its Latin slice is the face every surface uses. */
+@font-face {
+  font-family: "Jost";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 900;
+  src: url("@fontsource-variable/jost/files/jost-latin-wght-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 /* Each template's own heading face: what Default renders. The CMS preview names
    the template with data-font-template. Platform pages and the dashboard take
    theirs from .platform-theme in base.css. */

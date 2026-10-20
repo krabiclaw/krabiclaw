@@ -9,6 +9,8 @@ import {
   bookingReassignedMessage,
   bookingCreatedMessage,
   contactReceivedMessage,
+  stayBookedMessage,
+  stayCancelledMessage,
   domainUpdateMessage,
   onboardingCompletedMessage,
   guestReplyMessage,
@@ -24,6 +26,7 @@ import {
   guestContactReceivedMessage,
   guestReservationCancelledMessage,
   guestReservationReceivedMessage,
+  guestStayConfirmedMessage,
   guestThreadReplyMessage,
   guestThreadStatusMessage,
   organizationInviteMessage,
@@ -106,7 +109,7 @@ const guestVisit = {
   notes: 'Window seat.',
   contactPhone: '+1 555 000 0000',
   contactEmail: 'hello@emberslice.example',
-  cancelUrl: 'https://demo.krabiclaw.com/reservations/cancel?id=preview',
+  receiptUrl: 'https://demo.krabiclaw.com/reservations/confirmed?id=preview',
   heroImageUrl: sampleCover,
 }
 
@@ -133,9 +136,6 @@ const ownerPayments: PaymentNotificationEvent[] = [
   { ...payment, kind: 'dispute_closed' },
   { ...payment, kind: 'payout_paid', amount: 25000, productTitle: null, arrivalDate: 'Oct 7, 2026', action: { ...payment.action, label: 'View payout' } },
   { ...payment, kind: 'payout_failed', amount: 25000, productTitle: null, action: { ...payment.action, label: 'View payout' } },
-  { ...payment, kind: 'usage_invoice_paid', amount: 140, productTitle: null, action: { ...payment.action, label: 'View invoice' } },
-  { ...payment, kind: 'usage_invoice_payment_failed', amount: 140, productTitle: null, action: { ...payment.action, label: 'View invoice' } },
-  { ...payment, kind: 'usage_invoice_action_required', amount: 140, productTitle: null, action: { ...payment.action, label: 'Pay invoice' } },
 ]
 
 const guestPayments: GuestPaymentNotificationEvent[] = [
@@ -152,6 +152,28 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
   { id: 'reservation-cancelled', audience: 'owner', title: 'Owner — reservation cancelled', whatsappTemplate: 'reservation_cancelled', message: ownerAlert(reservationCancelledMessage({ ...reservation, wasConfirmed: true })) },
   { id: 'booking-created', audience: 'owner', title: 'Owner — new experience booking', whatsappTemplate: 'new_reservation', message: ownerAlert(bookingCreatedMessage(booking)) },
   { id: 'booking-cancelled', audience: 'owner', title: 'Owner — booking cancelled', whatsappTemplate: 'reservation_cancelled', message: ownerAlert(bookingCancelledMessage({ ...booking, wasConfirmed: false })) },
+  {
+    id: 'stay-booked',
+    audience: 'owner',
+    title: 'Owner — new stay booked on the site',
+    message: ownerAlert(stayBookedMessage({
+      guestName: 'Mina Park', guestEmail: 'mina@example.com', guestPhone: '+1 415 555 0134', homeName: 'Cedar Loft',
+      checkIn: 'Fri, Nov 6, 2026 · from 15:00', checkOut: 'Mon, Nov 9, 2026 · by 11:00', nights: '3', guests: '2 adults',
+      total: '$645.00', notes: 'We will arrive around 6 pm.', organizationName: 'Pinecone Stays', heroImageUrl: null,
+      replyUrl: 'https://demo.krabiclaw.com/dashboard/pinecone-stays/messages/preview-1',
+    })),
+  },
+  {
+    id: 'stay-cancelled',
+    audience: 'owner',
+    title: 'Owner — stay cancelled by its guest',
+    message: ownerAlert(stayCancelledMessage({
+      guestName: 'Mina Park', guestEmail: 'mina@example.com', guestPhone: '+1 415 555 0134', homeName: 'Cedar Loft',
+      checkIn: 'Fri, Nov 6, 2026 · from 15:00', checkOut: 'Mon, Nov 9, 2026 · by 11:00', nights: '3', guests: '2 adults',
+      refund: '$322.50', organizationName: 'Pinecone Stays', heroImageUrl: null,
+      replyUrl: 'https://demo.krabiclaw.com/dashboard/pinecone-stays/messages/preview-1',
+    })),
+  },
   {
     id: 'contact-received',
     audience: 'owner',
@@ -247,13 +269,14 @@ export const NOTIFICATION_CATALOG: CatalogEntry[] = [
   { id: 'guest-reservation-received', audience: 'guest', title: 'Guest — reservation confirmed', message: guestReservationReceivedMessage(guestVisit) },
   { id: 'guest-reservation-cancelled', audience: 'guest', title: 'Guest — reservation cancelled', message: guestReservationCancelledMessage({ ...guestVisit, wasConfirmed: true }) },
   { id: 'guest-booking-received', audience: 'guest', title: 'Guest — booking request sent', message: guestBookingReceivedMessage({ ...guestVisit, guestName: 'Mina Park', organizationName: studio, productTitle: 'Pottery Wheel Class', date: 'Mon, Jul 20, 2026', time: '10:00 AM' }) },
+  { id: 'guest-stay-confirmed', audience: 'guest', title: 'Guest — stay confirmed', message: guestStayConfirmedMessage({ guestName: 'Mina Park', organizationName: 'Pinecone Stays', organizationLogoUrl: sampleLogo, homeName: 'Cedar Loft', checkIn: 'Fri, Nov 6, 2026 · from 15:00', checkOut: 'Mon, Nov 9, 2026 · by 11:00', nights: '3', guests: '2 adults', total: '$645.00', receiptUrl: 'https://demo.krabiclaw.com/bookings/stay?id=preview', checkInInstructions: 'The lockbox is to the left of the front door. Your code arrives the morning of check-in.', contactPhone: '+1 415 555 0100', contactEmail: 'hello@example.com', heroImageUrl: null, accountUrl: 'https://krabiclaw.com/signup?email=mina%40example.com&redirect=%2Fdashboard%2Faccount' }) },
   { id: 'guest-booking-cancelled', audience: 'guest', title: 'Guest — booking cancelled', message: guestBookingCancelledMessage({ ...guestVisit, guestName: 'Mina Park', organizationName: studio, productTitle: 'Pottery Wheel Class', date: 'Mon, Jul 20, 2026', time: '10:00 AM', wasConfirmed: false }) },
   { id: 'guest-contact-received', audience: 'guest', title: 'Guest — message sent', message: guestContactReceivedMessage({ guestName: 'Jordan Lee', organizationName: restaurant, organizationLogoUrl: sampleLogo, subject: 'General', productTitle: 'Pottery Wheel Class', message: 'Hi, do you have vegan options and parking nearby?', consentAcknowledged: true, accountUrl: 'https://krabiclaw.com/signup?email=jordan%40example.com&redirect=%2Fdashboard%2Faccount' }) },
   { id: 'guest-thread-reply', audience: 'guest', title: 'Guest — a reply from the business', message: guestThreadReplyMessage({ organizationName: restaurant, organizationLogoUrl: sampleLogo, body: 'Hi Jordan,\n\nYes — we have a full vegan menu, and there is street parking on Soi 3 right outside. See you Tuesday!' }) },
-  { id: 'guest-thread-status', audience: 'guest', title: 'Guest — reservation status changed', message: guestThreadStatusMessage({ organizationName: restaurant, organizationLogoUrl: sampleLogo, heading: `Your reservation at ${restaurant} is confirmed`, body: 'Your reservation is confirmed: Tue, Jul 14, 2026 at 7:00 PM for 2 guests.', actionUrl: guestVisit.cancelUrl, actionLabel: 'Manage your reservation' }) },
+  { id: 'guest-thread-status', audience: 'guest', title: 'Guest — reservation status changed', message: guestThreadStatusMessage({ organizationName: restaurant, organizationLogoUrl: sampleLogo, heading: `Your reservation at ${restaurant} is confirmed`, body: 'Your reservation is confirmed: Tue, Jul 14, 2026 at 7:00 PM for 2 guests.', actionUrl: guestVisit.receiptUrl, actionLabel: 'Manage your reservation' }) },
   { id: 'guest-booking-change-proposal', audience: 'guest', title: 'Guest — booking change proposed', message: bookingChangeProposalMessage({ guestName: 'Mina Park', organizationName: studio, organizationLogoUrl: sampleLogo, heading: 'Please review changes to your booking', intro: 'Your host has requested changes. Your booking stays exactly as it is until you accept, and the link below expires in 7 days.', rows: [['Location', 'Main Studio'], ['When', 'Tue, Jul 21, 2026 at 2:00 PM'], ['Guests', '2']], actionUrl: 'https://demo.krabiclaw.com/booking-changes/preview', actionLabel: 'Review the changes' }) },
   { id: 'guest-review-request', audience: 'guest', title: 'Guest — review request', message: reviewRequestMessage({ guestName: 'Alex Carter', organizationName: restaurant, locationName: 'Main Dining Room', visitAt: 'Tue, Jul 14, 2026 at 7:00 PM', partySize: '2 guests', reviewUrl: 'https://demo.krabiclaw.com/locations/main/review-submit?request=preview', organizationLogoUrl: sampleLogo }) },
-  { id: 'article-announcement', audience: 'owner', title: 'Krabiclaw news — new article', message: articleAnnouncementMessage({ title: 'Turning walk-ins into repeat guests', summary: 'Three things the best-performing Krabiclaw sites do after a guest leaves.', bodyMarkdown: '## Say thank you the same day\n\nA short note while the meal is still fresh brings guests back more often than any discount.\n\n## Ask for the review\n\n- Send the link once\n- Make it one tap\n\n## Invite them back\n\nTell them what is new next month, and [show them the menu](https://krabiclaw.com).', coverImageUrl: null, articleUrl: 'https://krabiclaw.com/blog/operations/preview' }) },
+  { id: 'article-announcement', audience: 'owner', title: 'KrabiClaw news — new article', message: articleAnnouncementMessage({ title: 'Turning walk-ins into repeat guests', summary: 'Three things the best-performing KrabiClaw sites do after a guest leaves.', bodyMarkdown: '## Say thank you the same day\n\nA short note while the meal is still fresh brings guests back more often than any discount.\n\n## Ask for the review\n\n- Send the link once\n- Make it one tap\n\n## Invite them back\n\nTell them what is new next month, and [show them the menu](https://krabiclaw.com).', coverImageUrl: null, articleUrl: 'https://krabiclaw.com/blog/operations/preview' }) },
   ...ownerPayments.map(event => ({ id: `owner-${event.kind}`, audience: 'owner' as const, title: `Owner — ${ownerPaymentMessage(event).title}`, message: ownerPaymentMessage(event) })),
   ...guestPayments.map(event => ({ id: `guest-${event.kind}`, audience: 'guest' as const, title: `Guest — ${guestPaymentMessage(event).title}`, message: guestPaymentMessage(event) })),
 ]

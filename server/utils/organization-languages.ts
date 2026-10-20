@@ -1,10 +1,13 @@
 import { PLATFORM_LOCALES, platformLocale } from '~/shared/platform-locales'
 import { prepareContentDocumentDeletion } from '~/server/utils/content/documents'
+import { getPublishedTenantPage } from '~/server/utils/content/pages'
 import { execute, executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { getOrganizationBillingStatus } from '~/server/utils/billing'
 import type { CloudflareEnv } from '~/server/utils/auth'
-import { canonicalizeLocale } from '~/server/utils/localization'
+import { assertOrganizationLanguageEntitlement, canonicalizeLocale, getPersistedSourceLocale } from '~/server/utils/localization'
 import { localizationError } from '~/server/utils/localization-errors'
+import { validateLocalizedValues } from '~/server/utils/localization-registry'
+import { organizationSupportsBlawbyTemplate } from '~/utils/template-registry'
 
 interface OrganizationLanguageRow {
   id: string
@@ -12,39 +15,26 @@ interface OrganizationLanguageRow {
   status: 'published' | 'disabled'
   activated_at: string | null
   disabled_at: string | null
+  is_source: number
 }
 
 async function loadLanguage(db: DbClient, organizationId: string, locale: string) {
   return await queryFirst<OrganizationLanguageRow>(db, `
-    SELECT id, locale, status, activated_at, disabled_at FROM organization_locales
+    SELECT id, locale, status, activated_at, disabled_at, is_source FROM organization_locales
      WHERE organization_id = ?  AND locale = ?
   `, [organizationId, locale])
 }
 
-/**
- * Adding a language starts it disabled, which is the authoring state.
- *
- * It used to be created `published`, so the moment an owner picked Japanese the
- * site served `/ja` with nothing in it — footer, sitemap, hreflang and routes
- * all live against zero content, and a locale shows exactly what has been
- * translated into it, so those routes 404. Translating first was impossible
- * because writes required `published`. Add, translate, then publish.
- */
+/** A new language remains private while its content is authored. */
 export async function addOrganizationLanguage(
   db: DbClient, env: CloudflareEnv,
   input: { organizationId: string; locale: unknown },
 ) {
-  const locale = canonicalizeLocale(input.locale)
-  if (locale === 'en') localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'English is the immutable source language')
-  const catalog = platformLocale(locale)
-  if (!catalog) localizationError(403, 'PLATFORM_LOCALE_UNAVAILABLE', 'The platform locale is unavailable', { locale })
-  const projection = await getOrganizationBillingStatus(env, db, input.organizationId)
-  if (typeof projection.entitlements.additional_languages !== 'number' || projection.entitlements.additional_languages <= 0 || !projection.stripeSubscriptionId) {
-    localizationError(402, 'LANGUAGE_ENTITLEMENT_REQUIRED', 'An active subscription with additional website languages is required to add a language')
-  }
+  const language = await assertOrganizationLanguageEntitlement(env, db, input.organizationId, canonicalizeLocale(input.locale), 'plan')
+  const { locale } = language
+  if (language.source) return loadLanguage(db, input.organizationId, locale)
+  const catalog = platformLocale(locale)!
   const now = new Date().toISOString()
-  // No public-slot count here: adding costs the site nothing until it is
-  // published, and the limit belongs where the slot is actually taken.
   await execute(db, `
     INSERT INTO organization_locales (id, organization_id, locale, label, is_source, status, created_at, updated_at)
     VALUES (?, ?, ?, ?, 0, 'disabled', ?, ?)
@@ -53,37 +43,37 @@ export async function addOrganizationLanguage(
   return await loadLanguage(db, input.organizationId, locale)
 }
 
-/**
- * Publishing is what makes a language public. Untranslated fields fall back to
- * the English source, so how much is translated is the owner's call to read off
- * the progress report, not a condition of going public.
- */
+/** Publishing exposes authored translations; absent representations stay absent. */
 export async function publishOrganizationLanguage(
   db: DbClient, env: CloudflareEnv,
   input: { organizationId: string; locale: unknown },
 ) {
-  const locale = canonicalizeLocale(input.locale)
-  if (locale === 'en') localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'English is the immutable source language')
-  const catalog = platformLocale(locale)
-  if (!catalog) localizationError(403, 'PLATFORM_LOCALE_UNAVAILABLE', 'The platform locale is unavailable', { locale })
-  const projection = await getOrganizationBillingStatus(env, db, input.organizationId)
-  const languageLimit = projection.entitlements.additional_languages
-  if (typeof languageLimit !== 'number' || languageLimit <= 0 || !projection.stripeSubscriptionId) {
-    localizationError(402, 'LANGUAGE_ENTITLEMENT_REQUIRED', 'An active subscription with additional website languages is required to publish a language')
+  const language = await assertOrganizationLanguageEntitlement(env, db, input.organizationId, canonicalizeLocale(input.locale))
+  const { locale } = language
+  if (language.source) return loadLanguage(db, input.organizationId, locale)
+
+  if (!await getPublishedTenantPage(db, input.organizationId, '/', locale)) {
+    localizationError(409, 'LOCALIZATION_VALIDATION_FAILED', 'Translate the homepage before publishing this language', { missing: ['homepage'] })
   }
-  const existing = await loadLanguage(db, input.organizationId, locale)
-  if (!existing) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Add the language before publishing it', { locale })
+
+  const organization = await queryFirst<{ vertical: string; theme_id: string; values_json: string | null }>(db, `
+    SELECT o.vertical, o.theme_id, rl.values_json
+      FROM organization o
+      LEFT JOIN resource_localizations rl ON rl.organization_id = o.id AND rl.resource_type = 'organization'
+        AND rl.resource_id = o.id AND rl.locale = ?
+     WHERE o.id = ?
+  `, [locale, input.organizationId])
+  if (!organization) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Organization was not found', { organization_id: input.organizationId })
+  if (organizationSupportsBlawbyTemplate({ vertical: organization.vertical, themeId: organization.theme_id })) {
+    validateLocalizedValues('organization', organization.values_json === null ? null : JSON.parse(organization.values_json), undefined, { publishedTemplate: 'blawby' })
+  }
 
   const now = new Date().toISOString()
-  const result = await execute(db, `
+  await execute(db, `
     UPDATE organization_locales SET status = 'published',
       activated_at = COALESCE(activated_at, ?), disabled_at = NULL, updated_at = ?
      WHERE organization_id = ?  AND locale = ? AND is_source = 0
-       AND (SELECT COUNT(*) FROM organization_locales other
-              WHERE other.organization_id = ? AND other.is_source = 0
-                AND other.status = 'published' AND other.locale <> ?) < ?
-  `, [now, now, input.organizationId, locale, input.organizationId, locale, languageLimit])
-  if (result.meta?.changes !== 1) localizationError(409, 'LANGUAGE_ENTITLEMENT_REQUIRED', `Language could not be published because ${languageLimit} secondary languages are already published.`)
+  `, [now, now, input.organizationId, locale])
   return await loadLanguage(db, input.organizationId, locale)
 }
 
@@ -92,7 +82,9 @@ export async function disableOrganizationLanguage(
   input: { organizationId: string; locale: unknown },
 ) {
   const locale = canonicalizeLocale(input.locale)
-  if (locale === 'en') localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'English cannot be disabled')
+  if (locale === (await getPersistedSourceLocale(db, input.organizationId)).locale) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'The source language cannot be disabled')
+  const language = await loadLanguage(db, input.organizationId, locale)
+  if (!language) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Language not found', { locale })
   const now = new Date().toISOString()
   await execute(db, `UPDATE organization_locales SET status = 'disabled', disabled_at = COALESCE(disabled_at, ?), updated_at = ?
     WHERE organization_id = ?  AND locale = ? AND is_source = 0`, [now, now, input.organizationId, locale])
@@ -104,7 +96,7 @@ export async function deleteDisabledOrganizationLanguageContent(
   input: { organizationId: string; locale: unknown },
 ): Promise<{ deleted: true; locale: string }> {
   const locale = canonicalizeLocale(input.locale)
-  if (locale === 'en') localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'English source content cannot be deleted')
+  if (locale === (await getPersistedSourceLocale(db, input.organizationId)).locale) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'Source content cannot be deleted')
   const language = await loadLanguage(db, input.organizationId, locale)
   if (language && language.status !== 'disabled') localizationError(409, 'LOCALIZATION_VALIDATION_FAILED', 'Disable the language before permanently deleting its content', { locale })
   const documents = await queryAll<{ id: string }>(db, `SELECT id FROM content_documents
@@ -127,14 +119,15 @@ export async function getOrganizationLanguageSettings(
 ) {
   // The plan and the site's languages are independent reads; running them in
   // series made the slowest endpoint in production wait for both in turn.
-  const [projection, languages] = await Promise.all([
+  const [projection, languages, source] = await Promise.all([
     getOrganizationBillingStatus(env, db, input.organizationId),
     queryAll(db, `
       SELECT locale, label, is_source, status FROM organization_locales
        WHERE organization_id = ? 
     `, [input.organizationId]),
+    getPersistedSourceLocale(db, input.organizationId),
   ])
-  const availableCatalogs = PLATFORM_LOCALES.filter(catalog => catalog.locale !== 'en')
+  const availableCatalogs = PLATFORM_LOCALES.filter(catalog => catalog.locale !== source.locale)
     .map(({ locale, label, direction }) => ({ locale, label, direction }))
   return { effective_plan: projection.plan, languages, available_catalogs: availableCatalogs }
 }

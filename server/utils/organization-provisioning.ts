@@ -1,3 +1,4 @@
+import { platformLocale } from '~/shared/platform-locales'
 // Turning a bare Better Auth organization into a serving tenant: its address,
 // its template, its source locale and its seeded structure. The target
 // organization is always an explicit input from the caller — this module never
@@ -5,11 +6,11 @@
 // subdomain uniqueness, and seeding.
 import { seedNewOrganization } from '~/server/utils/organization-seed'
 import { createSystemSubdomain, isSystemSubdomainSpent, organizationPublicUrl } from '~/server/utils/domains'
-import { execute, executeBatch, queryFirst } from '~/server/db'
+import { executeBatch, queryFirst, type BatchQuery } from '~/server/db'
 import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
 import type { CurrencyCode } from '~/shared/currencies'
 import { resolvePublicTemplate } from '~/utils/template-registry'
-import { isOrganizationWideRole, organizationAdapter, type OrganizationAdapter } from '~/server/utils/member-access'
+import { isOrganizationWideRole, organizationAdapter } from '~/server/utils/member-access'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
 import { measurementOutcome, originatingOwnerId, recordAndDeliverConversion } from '~/server/utils/organization-conversions'
 import { getPlatformOrganization } from '~/server/utils/platform-organization'
@@ -18,26 +19,16 @@ import { getPlatformDomain } from '~/server/utils/dashboard-notification-links'
 import { hashEmail, sendEmail } from '~/server/utils/email-delivery'
 import { renderNotificationEmail } from '~/server/emails/render'
 import { onboardingCompletedMessage } from '~/server/notifications/events'
+import { HTTPError } from 'nitro'
+import { isAPIError } from 'better-auth/api'
+import { isRecord } from '~/utils/api-clients'
+import { ONBOARDING_ORGANIZATION_MARKER, onboardingDraftWriteGuard, type SavedOnboardingDraft } from '~/server/utils/onboarding-drafts'
 
 type SetupEnv = CloudflareEnv & { PLATFORM_OWNER_EMAILS?: string }
 
 interface ExistingSubdomainRow {
   id: string
   onboarding_status: string | null
-}
-
-const ORGANIZATION_CREATION_MARKER_KEY = '__krabiclaw_organization_creation_marker'
-
-interface CreateOrganizationApi {
-  createOrganization(_input: {
-    body: {
-      name: string
-      slug: string
-      userId: string
-      keepCurrentActiveOrganization: true
-      metadata: Record<string, string>
-    }
-  }): Promise<{ id: string }>
 }
 
 // Re-exported for existing callers (endpoint validation, tests) — the
@@ -55,10 +46,12 @@ function asError(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error))
 }
 
-async function markProvisioningFailed(db: D1Database, organizationId: string, cause: unknown): Promise<Error> {
+async function markProvisioningFailed(db: D1Database, organizationId: string, cause: unknown, writeGuard?: BatchQuery): Promise<Error> {
   try {
-    await execute(db, `UPDATE organization SET onboarding_status = 'failed', updated_at = ? WHERE id = ?`,
-      [new Date().toISOString(), organizationId])
+    await executeBatch(db, [...(writeGuard ? [writeGuard] : []), {
+      query: "UPDATE organization SET onboarding_status = 'failed', updated_at = ? WHERE id = ? AND onboarding_status <> 'active'",
+      params: [new Date().toISOString(), organizationId],
+    }])
   } catch (cleanupError) {
     return new AggregateError(
       [asError(cause), asError(cleanupError)],
@@ -81,21 +74,31 @@ export async function provisionOrganization(
   env: SetupEnv,
   db: D1Database,
   userId: string,
-  // `defaultCurrency` is the owner's answer or null. A tenant that goes live on
-  // creation has to carry one; onboarding's first save has not asked yet, and
-  // stores null until the currency step answers it.
-  params: { organizationId: string; name: string; subdomain: string; vertical: OrganizationVertical; defaultCurrency: CurrencyCode | null; activate?: boolean; origin: { headers: Headers } | null },
+  // The currency and the clock arrive with the organization itself (Better
+  // Auth requires both at creation), so provisioning never writes them.
+  params: { organizationId: string; name: string; subdomain: string; vertical: OrganizationVertical; sourceLocale: string; activate?: boolean; origin: { headers: Headers } | null; writeGuard?: BatchQuery },
 ): Promise<OrganizationProvisioningResult> {
-  const { organizationId, name, vertical, defaultCurrency } = params
+  const { organizationId, name, vertical } = params
   const normalizedSubdomain = params.subdomain.toLowerCase()
+  const source = platformLocale(params.sourceLocale)
+  if (!source) return { status: 400, data: { error: 'Choose a supported website language' } }
+  const linkedDraft = params.writeGuard ? null : await queryFirst<SavedOnboardingDraft>(db, "SELECT * FROM onboarding_drafts WHERE organization_id = ? AND status IN ('active', 'committing') LIMIT 1", [organizationId])
+  if (linkedDraft && linkedDraft.user_id !== userId) return { status: 403, data: { error: 'Only the draft owner can finish this website setup' } }
+  const writeGuard: BatchQuery = params.writeGuard ?? (linkedDraft ? onboardingDraftWriteGuard(linkedDraft, organizationId) : {
+    query: "SELECT CASE WHEN EXISTS (SELECT 1 FROM organization o WHERE o.id = ? AND o.onboarding_status IN ('pending', 'failed') AND NOT EXISTS (SELECT 1 FROM onboarding_drafts WHERE organization_id = o.id AND status = 'abandoned')) THEN NULL ELSE json('Organization provisioning is no longer available') END",
+    params: [organizationId],
+  })
 
   try {
+    await executeBatch(db, [writeGuard])
     const adapter = await organizationAdapter(env)
     const member = await adapter.findMemberByOrgId({ userId, organizationId })
-    if (!member || !isOrganizationWideRole(String(member.role))) {
+    if (!member || !isOrganizationWideRole(member.role)) {
       return { status: 403, data: { error: 'Organization-level access required to provision this organization' } }
     }
 
+    const existingSource = await queryFirst<{ locale: string }>(db, 'SELECT locale FROM organization_locales WHERE organization_id = ? AND is_source = 1', [organizationId])
+    if (existingSource && existingSource.locale !== source.locale) return { status: 409, data: { error: 'This organization already has a primary language; existing content cannot be relabelled' } }
     const themeId = resolveThemeId(vertical)
     const now = new Date().toISOString()
 
@@ -106,15 +109,17 @@ export async function provisionOrganization(
       const isRetryable = existingSubdomain.id === organizationId
         && (existingSubdomain.onboarding_status === 'pending' || existingSubdomain.onboarding_status === 'failed')
       if (!isRetryable) {
-        return { status: 409, data: { error: 'This subdomain is already taken' } }
+        return { status: 409, data: { error: 'This subdomain is already taken', code: 'SUBDOMAIN_TAKEN', missing_fields: ['subdomain'] } }
       }
       // Retry: the same subdomain in the same explicit organization is still
       // pending/failed from a previous attempt. It may have been left under a
       // stale default (theme_id='saya-theme-v1', vertical='restaurant') —
       // correct both here so a professional-service retry can never be left on Saya.
-      await execute(db, `UPDATE organization SET theme_id = ?, vertical = ?, updated_at = ? WHERE id = ?`,
-        [themeId, vertical, now, organizationId])
-      return await performSeeding(env, db, organizationId, name, vertical, normalizedSubdomain, params.activate !== false, params.origin)
+      await executeBatch(db, [writeGuard, {
+        query: "UPDATE organization SET theme_id = ?, vertical = ?, onboarding_status = 'pending', updated_at = ? WHERE id = ? AND onboarding_status IN ('pending', 'failed')",
+        params: [themeId, vertical, now, organizationId],
+      }])
+      return await performSeeding(env, db, organizationId, name, vertical, normalizedSubdomain, params.activate !== false, params.origin, writeGuard, linkedDraft)
     }
     // The guard above answers "is this subdomain taken", which was the only
     // question while provisioning inserted a `organizations` row: a second run made a
@@ -131,50 +136,62 @@ export async function provisionOrganization(
     }
 
     if (await isSystemSubdomainSpent(env, db, normalizedSubdomain)) {
-      return { status: 409, data: { error: 'This subdomain is permanently unavailable' } }
+      return { status: 409, data: { error: 'This subdomain is permanently unavailable', code: 'SUBDOMAIN_TAKEN', missing_fields: ['subdomain'] } }
     }
-
     try {
       await executeBatch(db, [
+        writeGuard,
         {
           query: `
             UPDATE organization
-               SET theme_id = ?, vertical = ?, subdomain = ?, default_currency = ?,
+               SET theme_id = ?, vertical = ?, subdomain = ?,
                    status = 'active', onboarding_status = 'pending',
                    analytics_data_start_at = COALESCE(analytics_data_start_at, ?), updated_at = ?
-             WHERE id = ?
+             WHERE id = ? AND onboarding_status IN ('pending', 'failed')
           `,
-          params: [themeId, vertical, normalizedSubdomain, defaultCurrency, now, now, organizationId],
+          params: [themeId, vertical, normalizedSubdomain, now, now, organizationId],
         },
         {
           query: `
-            INSERT OR IGNORE INTO organization_locales
+            INSERT INTO organization_locales
               (id, organization_id, locale, label, is_source, status, created_at, updated_at)
-            VALUES (?, ?, 'en', 'English', 1, 'published', ?, ?)
+            VALUES (?, ?, ?, ?, 1, 'published', ?, ?)
+            ON CONFLICT(organization_id, locale) DO NOTHING
           `,
-          params: [`locale::${organizationId}::en`, organizationId, now, now],
+          params: [`locale::${organizationId}::${source.locale}`, organizationId, source.locale, source.label, now, now],
         },
       ], { operation: 'provision organization and source locale' })
     } catch (provisioningError) {
       const msg = provisioningError instanceof Error ? provisioningError.message : ''
-      if (msg.includes('UNIQUE constraint failed')) {
-        return { status: 409, data: { error: 'This subdomain is already taken' } }
+      if (/UNIQUE constraint failed: organization\.subdomain/.test(msg)) {
+        return { status: 409, data: { error: 'This subdomain is already taken', code: 'SUBDOMAIN_TAKEN', missing_fields: ['subdomain'] } }
       }
       throw provisioningError
     }
 
-    return await performSeeding(env, db, organizationId, name, vertical, normalizedSubdomain, params.activate !== false, params.origin)
+    return await performSeeding(env, db, organizationId, name, vertical, normalizedSubdomain, params.activate !== false, params.origin, writeGuard, linkedDraft)
 
   } catch (error) {
+    const state = await queryFirst<{ onboarding_status: string; abandoned: number }>(db, "SELECT onboarding_status, EXISTS (SELECT 1 FROM onboarding_drafts WHERE organization_id = organization.id AND status = 'abandoned') AS abandoned FROM organization WHERE id = ?", [organizationId])
+    if (state?.onboarding_status === 'active' || state?.abandoned) return { status: 409, data: { error: 'Website setup is no longer available for this draft', code: 'ONBOARDING_DRAFT_CHANGED' } }
     console.error('Organization provisioning failed:', asError(error))
-    const failure = await markProvisioningFailed(db, organizationId, error)
+    const failure = await markProvisioningFailed(db, organizationId, error, writeGuard)
     return { status: 500, data: { error: failure.message } }
   }
 }
 
 /** Makes a pending tenant public. */
-export async function activateOrganization(db: D1Database, organizationId: string): Promise<void> {
-  await execute(db, `UPDATE organization SET onboarding_status = 'active', updated_at = ? WHERE id = ?`, [new Date().toISOString(), organizationId])
+export async function activateOrganization(db: D1Database, organizationId: string, writeGuard: BatchQuery, draft?: Pick<SavedOnboardingDraft, 'id' | 'user_id' | 'updated_at'> | null): Promise<void> {
+  const now = new Date(Math.max(Date.now(), draft ? Date.parse(draft.updated_at) + 1 : 0)).toISOString()
+  const queries: BatchQuery[] = [writeGuard, {
+    query: "UPDATE organization SET onboarding_status = 'active', updated_at = ? WHERE id = ? AND onboarding_status = 'pending' AND NOT EXISTS (SELECT 1 FROM onboarding_drafts WHERE organization_id = organization.id AND status = 'abandoned')",
+    params: [now, organizationId],
+  }, { query: "SELECT CASE WHEN changes() = 1 THEN NULL ELSE json('Website activation is no longer available') END" }]
+  if (draft) queries.push({
+    query: "UPDATE onboarding_drafts SET status = 'committed', committed_at = COALESCE(committed_at, ?), updated_at = ? WHERE id = ? AND user_id = ? AND organization_id = ? AND status = 'active' AND updated_at = ?",
+    params: [now, now, draft.id, draft.user_id, organizationId, draft.updated_at],
+  }, { query: "SELECT CASE WHEN changes() = 1 THEN NULL ELSE json('Onboarding draft revision changed') END" })
+  await executeBatch(db, queries)
 }
 
 /**
@@ -226,7 +243,7 @@ async function emailOperatorOnboardingComplete(env: SetupEnv, db: D1Database, or
     queryFirst<{ name: string }>(db, 'SELECT name FROM organization WHERE id = ?', [organizationId]),
     queryFirst<{ name: string; email: string }>(db, 'SELECT name, email FROM user WHERE id = ?', [ownerId]),
     queryFirst<{ slug: string }>(db, 'SELECT slug FROM organization WHERE id = ?', [platformOrganizationId]),
-    organizationPublicUrl(db, organizationId),
+    organizationPublicUrl(env, db, organizationId),
   ])
   if (!business || !owner || !platform) throw new Error(`Onboarding email for ${organizationId} is missing its business, owner or platform organization`)
   if (!siteUrl) throw new Error(`Organization ${organizationId} has no active site address`)
@@ -249,105 +266,48 @@ async function emailOperatorOnboardingComplete(env: SetupEnv, db: D1Database, or
   if (failures.length) throw new Error(`Operator onboarding email failed: ${failures.join('; ')}`)
 }
 
-// Creates a brand-new organization owned by `userId`. Callers decide when a new
-// organization is wanted (the "New Organization" onboarding entry point); this
-// never reuses or renames an existing one.
-export async function createOrganization(env: CloudflareEnv, userId: string, name: string) {
+// The draft identifies one native organization across interrupted requests.
+export async function findOnboardingOrganization(env: CloudflareEnv, userId: string, identity: { draftId: string; slug: string }) {
   const adapter = await organizationAdapter(env)
-  const slug = await uniqueOrganizationSlug(adapter, name)
+  const existing = await adapter.findOrganizationBySlug(identity.slug)
+  if (!existing) return null
+  // The native adapter returns metadata as stored JSON; its parser is private.
+  const metadata = typeof existing.metadata === 'string' ? JSON.parse(existing.metadata) : existing.metadata
+  if (metadata != null && !isRecord(metadata)) throw new HTTPError({ statusCode: 500, statusMessage: `Stored metadata for organization ${existing.id} is invalid`, data: { code: 'INVALID_STORED_CONTENT', organization_id: existing.id } })
+  if (metadata?.[ONBOARDING_ORGANIZATION_MARKER] !== identity.draftId) return null
+  const owner = await adapter.findMemberByOrgId({ userId, organizationId: existing.id })
+  if (owner?.role !== 'owner') throw new HTTPError({ statusCode: 409, statusMessage: 'Website organization creation has no verified owner', data: { code: 'ONBOARDING_ORGANIZATION_OWNER_MISSING', draft_id: identity.draftId, organization_id: existing.id } })
+  return { organizationId: existing.id }
+}
+
+export async function createOrganization(env: CloudflareEnv, userId: string, name: string, identity: { draftId: string; slug: string }, facts: { defaultCurrency: CurrencyCode; timezone: string }) {
   const auth = createAuth(env)
-  const organizationApi = auth.api as unknown as CreateOrganizationApi
-  const creationMarker = crypto.randomUUID()
+  const existing = await findOnboardingOrganization(env, userId, identity)
+  if (existing) return existing
   try {
-    const organization = await organizationApi.createOrganization({
+    const organization = await auth.api.createOrganization({
       body: {
         name,
-        slug,
+        slug: identity.slug,
         userId,
         keepCurrentActiveOrganization: true,
-        metadata: { [ORGANIZATION_CREATION_MARKER_KEY]: creationMarker },
+        metadata: { [ONBOARDING_ORGANIZATION_MARKER]: identity.draftId },
+        default_currency: facts.defaultCurrency,
+        timezone: facts.timezone,
       },
     })
-    const created = await adapter.findOrganizationBySlug(slug)
-    if (created?.id === organization.id) {
-      const metadata = organizationMetadata(created.metadata)
-      if (metadata[ORGANIZATION_CREATION_MARKER_KEY] === creationMarker) {
-        Reflect.deleteProperty(metadata, ORGANIZATION_CREATION_MARKER_KEY)
-        await adapter.updateOrganization(organization.id, {
-          metadata,
-        })
-      }
-    }
+    const created = await findOnboardingOrganization(env, userId, identity)
+    if (!created || created.organizationId !== organization.id) throw new Error('Created organization identity could not be read back')
     return { organizationId: organization.id }
   } catch (error) {
-    // Better Auth creates the organization before adding its owner member.
-    // If that second step fails, locate the just-created unique slug and
-    // remove it only when the expected owner member is absent. Never delete an
-    // organization that already has this user as its owner.
-    let partial
-    try {
-      partial = await adapter.findOrganizationBySlug(slug)
-    } catch (lookupError) {
-      throw new AggregateError(
-        [asError(error), asError(lookupError)],
-        `Organization creation failed and partial organization ${slug} could not be inspected`, { cause: lookupError },
-      )
-    }
-    if (partial) {
-      let expectedOwner
-      try {
-        expectedOwner = await adapter.findMemberByOrgId({
-          userId,
-          organizationId: partial.id,
-        })
-      } catch (lookupError) {
-        throw new AggregateError(
-          [asError(error), asError(lookupError)],
-          `Organization creation failed and owner state for ${partial.id} could not be inspected`, { cause: lookupError },
-        )
-      }
-      const metadata = organizationMetadata(partial.metadata)
-      if (metadata[ORGANIZATION_CREATION_MARKER_KEY] === creationMarker
-        && (!expectedOwner || String(expectedOwner.role) !== 'owner')) {
-        try {
-          await adapter.deleteOrganization(partial.id)
-        } catch (cleanupError) {
-          throw new AggregateError(
-            [asError(error), asError(cleanupError)],
-            `Organization creation failed and partial organization ${partial.id} could not be deleted`, { cause: cleanupError },
-          )
-        }
-      }
-    }
-    throw error
+    const nativeCollision = isAPIError(error) && error.body?.code === 'ORGANIZATION_ALREADY_EXISTS'
+    const collision = nativeCollision
+      || error instanceof Error && /UNIQUE constraint failed: organization\.slug/.test(error.message)
+    if (!collision) throw error
+    const raced = await findOnboardingOrganization(env, userId, identity)
+    if (raced) return raced
+    throw new HTTPError({ statusCode: 409, statusMessage: 'This website address is already taken. Choose another address.', data: { code: 'SUBDOMAIN_TAKEN', missing_fields: ['subdomain'], draft_id: identity.draftId }, cause: error })
   }
-}
-
-function organizationMetadata(value: unknown): Record<string, unknown> {
-  if (isMetadataRecord(value)) return { ...value }
-  if (typeof value !== 'string') return {}
-  const parsed: unknown = JSON.parse(value)
-  if (!isMetadataRecord(parsed)) throw new Error('Stored organization metadata is invalid')
-  return { ...parsed }
-}
-
-function isMetadataRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
-
-async function uniqueOrganizationSlug(adapter: OrganizationAdapter, name: string) {
-  const base = slugifyName(name)
-  for (let i = 0; i < 20; i++) {
-    const slug = i === 0 ? base : `${base}-${i + 1}`
-    const existing = await adapter.findOrganizationBySlug(slug)
-    if (!existing) return slug
-  }
-  return `${base}-${crypto.randomUUID().slice(0, 8)}`
-}
-
-
-function slugifyName(name: string) {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'organization'
 }
 
 async function performSeeding(
@@ -365,12 +325,14 @@ async function performSeeding(
   // The request of the person finishing setup, when there is one: the only
   // source of the consent GA4 delivery of the onboarding outcome must honor.
   origin: { headers: Headers } | null,
+  writeGuard: BatchQuery,
+  draft: Pick<SavedOnboardingDraft, 'id' | 'user_id' | 'updated_at'> | null,
 ): Promise<OrganizationProvisioningResult> {
-  const locationId = await seedNewOrganization(db, { env: env as CloudflareEnv, organizationId, name, vertical })
+  const locationId = await seedNewOrganization(db, { env: env as CloudflareEnv, organizationId, name, vertical, writeGuard })
 
-  await createSystemSubdomain(env, db, organizationId, subdomain)
+  await createSystemSubdomain(env, db, organizationId, subdomain, { writeGuard })
 
-  if (activate) await activateOrganization(db, organizationId)
+  if (activate) await activateOrganization(db, organizationId, writeGuard, draft)
   const completion = activate ? await completeOnboarding(env, db, organizationId, origin) : undefined
 
   return {

@@ -3,6 +3,7 @@
     id="integration-google-search-console"
     icon="i-logos-google-search-console"
     title="Google Search Console"
+    :lead="integrationDefinition('google-search-console').purpose"
     :saving="saving"
     :disabled="!accountId || !selected"
     :error="error || data?.error || integrations.failure.value || loadFailure"
@@ -10,9 +11,9 @@
     save-label="Connect property"
     @save="select"
   >
-    <IntegrationConnection
-      logo="i-logos-google-search-console"
-      :connection="searchConsole && { name: searchConsole.target_name, connectedAt: searchConsole.connected_at }"
+    <IntegrationLeaf
+      integration="google-search-console"
+      :connection="searchConsole && { name: searchConsole.target_name, connectedAt: searchConsole.connected_at, through: searchConsole.connected_through, status: searchConsole.status, lastError: searchConsole.last_error }"
       :disconnecting="disconnecting"
       @disconnect="disconnect"
     >
@@ -21,13 +22,14 @@
       <UFormField v-if="data?.account_id" label="Property" :error="data.error ?? undefined">
         <USelectMenu v-model="selected" :items="options" value-key="value" placeholder="Choose a property" class="w-full" />
       </UFormField>
-    </IntegrationConnection>
+    </IntegrationLeaf>
   </DashboardLeafPanel>
 </template>
 
 <script setup lang="ts">
 import { INTEGRATION_SCOPES } from '~/shared/organization-settings'
-import IntegrationConnection from '~/components/dashboard/IntegrationConnection.vue'
+import IntegrationLeaf from '~/components/dashboard/IntegrationLeaf.vue'
+import { integrationDefinition } from '~/shared/integrations'
 import { integrationsKey, type ConnectedIntegration } from '../integrations.vue'
 
 definePageMeta({ layout: 'dashboard' })
@@ -59,7 +61,7 @@ const { data, refresh, error: loadError } = await useAsyncData(
 )
 const selected = ref<string | undefined>()
 
-// This website's own URL is offered even before the account owns it: Krabiclaw verifies it by serving the tag.
+// This website's own URL is offered even before the account owns it: KrabiClaw verifies it by serving the tag.
 const options = computed(() => {
   const owned = (data.value?.properties ?? []).map(property => ({ label: property.siteUrl, value: property.siteUrl }))
   const own = data.value?.siteUrl

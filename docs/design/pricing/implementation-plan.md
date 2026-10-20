@@ -71,8 +71,8 @@ MCP media/content integration; it does not rewrite the Stripe billing projection
 - Free initial Places snapshot import is different from paid location connection,
   explicit re-import and weekly Sunday review refresh. Sources:
   onboarding draft endpoint, `google-places/sync.post.ts`, `server/scheduled-tasks.ts`.
-- English is the source language. Growth can publish up to two secondary locales;
-  currently supported catalogs are Japanese and Thai. This is manually authored
+- English is the source language. Paid plans can publish every supported locale;
+  supported catalogs are the ones listed in `shared/platform-locales.ts`. This is manually authored
   content, not automatic translation or arbitrary language selection.
 - Saya (restaurant/experience) and Blawby (service) provisioning has no billing
   gate. Current Blawby promotional Growth wording needs reconciliation.

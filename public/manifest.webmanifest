@@ -1,8 +1,8 @@
 {
   "id": "/dashboard",
-  "name": "Krabiclaw",
-  "short_name": "Krabiclaw",
-  "description": "Krabiclaw dashboard",
+  "name": "KrabiClaw",
+  "short_name": "KrabiClaw",
+  "description": "KrabiClaw dashboard",
   "start_url": "/dashboard",
   "scope": "/dashboard",
   "display": "standalone",

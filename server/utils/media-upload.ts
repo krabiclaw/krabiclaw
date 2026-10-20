@@ -1,10 +1,13 @@
+import { HTTPError } from 'nitro'
+import { creationRequestHash, readCreationRecord } from '~/server/utils/organization-events'
 // Canonical media-asset creation from resolved bytes for MCP and dashboard uploads.
-import { errorChainForTelemetry } from "~/server/utils/error-telemetry";
+import { errorChainForTelemetry } from "~/shared/error-telemetry";
 import type { DbClient } from "~/server/db";
 import { uploadImageBuffer, deleteImage } from "~/server/utils/cloudflare-images";
 import { uploadToR2, buildR2Key, deleteFromR2 } from "~/server/utils/cloudflare-r2";
-import { createMediaAsset, type MediaAsset } from "~/server/utils/media-asset-manager";
+import { createMediaAsset, getMediaAsset, type MediaAsset } from "~/server/utils/media-asset-manager";
 import { readMp4Metadata } from "~/server/utils/video-metadata";
+import { R2_IMAGE_MIME_TYPES } from "~/server/utils/media-mime";
 
 interface UploadResolvedMediaInputBase {
   db: DbClient;
@@ -19,6 +22,9 @@ interface UploadResolvedMediaInputBase {
   width?: number | null;
   height?: number | null;
   generationKey?: string | null;
+  idempotencyKey?: string;
+  sourceFileId?: string;
+  posterSourceFileId?: string;
 }
 
 type UploadResolvedMediaActor =
@@ -45,6 +51,48 @@ export type UploadResolvedMediaResult = {
   | { kind: 'video'; thumbnailUrl: string }
 )
 
+interface MediaUploadIdentity {
+  organizationId: string; idempotencyKey: string; sourceFileId: string; posterSourceFileId?: string; category?: MediaAsset['category'] | null; altText?: string | null
+}
+
+async function uploadCreation(identity: MediaUploadIdentity) {
+  const key = identity.idempotencyKey.trim()
+  if (!key || key.length > 200 || !identity.sourceFileId) throw new HTTPError({ statusCode: 400, statusMessage: 'A media upload needs its source file ID and idempotency key' })
+  return { dedupeKey: `media-upload:${identity.organizationId}:${key}`, requestHash: await creationRequestHash({ file_id: identity.sourceFileId, poster_file_id: identity.posterSourceFileId ?? null, category: identity.category ?? null, alt_text: identity.altText ?? null }) }
+}
+
+/** A retry can read the saved asset even after the host’s temporary download URL expires. */
+export async function getMediaUploadReplay(db: DbClient, identity: MediaUploadIdentity): Promise<UploadResolvedMediaResult | null> {
+  const creation = await uploadCreation(identity)
+  const record = await readCreationRecord(db, creation.dedupeKey)
+  if (!record) return null
+  if (record.requestHash !== creation.requestHash) throw new HTTPError({ statusCode: 409, statusMessage: 'This idempotency key belongs to a different media upload' })
+  const asset = await getMediaAsset(db, record.entityId, identity.organizationId)
+  return savedUploadResult(asset)
+}
+
+function savedUploadResult(asset: MediaAsset | null): UploadResolvedMediaResult {
+  if (!asset || asset.status !== 'active' || !asset.public_url) throw new HTTPError({ statusCode: 410, statusMessage: 'The saved asset is no longer available' })
+  if (asset.kind === 'video') {
+    if (!asset.thumbnail_url) throw new Error('The saved video has no poster image')
+    return { assetId: asset.id, publicUrl: asset.public_url, thumbnailUrl: asset.thumbnail_url, kind: 'video' }
+  }
+  return { assetId: asset.id, publicUrl: asset.public_url, thumbnailUrl: asset.thumbnail_url, kind: asset.kind }
+}
+
+/** An uploaded file's name as stored: printable ASCII, no path, at most 120 characters. */
+export function sanitizeFilename(raw: string | undefined): string {
+  const sanitized = (raw ?? '')
+    .replace(/[\\/]+/g, '-')
+    .replace(/[^\x20-\x7E]+/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/[^A-Za-z0-9._-]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
+    .slice(0, 120)
+  return sanitized || 'upload'
+}
+
 function uploadFailure(error: unknown): Error {
   return error instanceof Error ? error : new Error(String(error));
 }
@@ -52,8 +100,12 @@ function uploadFailure(error: unknown): Error {
 export async function uploadResolvedMediaToAssetStore(
   input: UploadResolvedMediaInput,
 ): Promise<UploadResolvedMediaResult> {
-  const assetId = crypto.randomUUID();
-  const provider = input.provider ?? (input.kind === "image" ? "cloudflare_images" : "cloudflare_r2");
+  const identity = input.idempotencyKey ? { organizationId: input.organizationId, idempotencyKey: input.idempotencyKey, sourceFileId: input.sourceFileId ?? '', posterSourceFileId: input.posterSourceFileId, category: input.category, altText: input.altText } : null
+  const creation = identity ? await uploadCreation(identity) : undefined
+  const earlier = identity ? await getMediaUploadReplay(input.db, identity) : null
+  if (earlier) return earlier
+  const assetId = creation ? await creationRequestHash({ organization_id: input.organizationId, dedupe_key: creation.dedupeKey, request_hash: creation.requestHash }) : crypto.randomUUID();
+  const provider = input.provider ?? (input.kind === "image" && !R2_IMAGE_MIME_TYPES.has(input.contentType) ? "cloudflare_images" : "cloudflare_r2");
   // An MP4's length and size come from its own header, read before anything is
   // stored, so an unreadable file is refused rather than saved without them.
   const video = input.kind === "video" && input.contentType === "video/mp4" ? readMp4Metadata(input.buffer) : null;
@@ -69,14 +121,14 @@ export async function uploadResolvedMediaToAssetStore(
 
   try {
     if (input.kind === 'image' && provider === 'cloudflare_images') {
-      const uploaded = await uploadImageBuffer(input.env, input.buffer, input.filename, input.contentType);
+      const uploaded = await uploadImageBuffer(input.env, input.buffer, input.filename, input.contentType, `media-${assetId}`);
       imageId = uploaded.imageId;
       publicUrl = uploaded.publicUrl;
       thumbnailUrl = uploaded.thumbnailUrl;
       timings[stage] = Date.now() - stageStartedAt;
     } else {
       if (input.kind === 'video') {
-        const poster = await uploadImageBuffer(input.env, input.poster.buffer, input.poster.filename, input.poster.contentType);
+        const poster = await uploadImageBuffer(input.env, input.poster.buffer, input.poster.filename, input.poster.contentType, `media-${assetId}-poster`);
         imageId = poster.imageId;
         thumbnailUrl = poster.publicUrl;
         timings[stage] = Date.now() - stageStartedAt;
@@ -102,7 +154,7 @@ export async function uploadResolvedMediaToAssetStore(
       thumbnail_url: thumbnailUrl,
       mime_type: input.contentType,
       file_name: input.filename,
-      file_size: input.fileSize ?? null,
+      file_size: input.fileSize ?? input.buffer.byteLength,
       width: video?.width ?? input.width ?? null,
       height: video?.height ?? input.height ?? null,
       duration: video?.duration ?? null,
@@ -110,13 +162,50 @@ export async function uploadResolvedMediaToAssetStore(
       category: input.category ?? null,
       status: "active",
       created_by_user_id: input.userId ?? null,
-    });
+    }, creation);
     timings[stage] = Date.now() - stageStartedAt;
   } catch (persistError) {
     timings[stage] = Date.now() - stageStartedAt;
     console.error({ event: 'media_upload_failed', asset_id: assetId, organization_id: input.organizationId,
       provider, kind: input.kind, stage, bytes: input.buffer.byteLength,
       duration_ms: Date.now() - startedAt, timings_ms: timings, errors: errorChainForTelemetry(persistError) });
+    let concurrentAsset: MediaAsset | null = null;
+    let replayError: HTTPError | null = null;
+    let safeToCleanup = !creation;
+    if (stage === 'asset_persist') {
+      let saved: MediaAsset | null;
+      let record: Awaited<ReturnType<typeof readCreationRecord>> = null;
+      try {
+        saved = await getMediaAsset(input.db, assetId, input.organizationId);
+        if (!saved && creation) {
+          record = await readCreationRecord(input.db, creation.dedupeKey);
+          if (record && record.requestHash === creation.requestHash) {
+            concurrentAsset = await getMediaAsset(input.db, record.entityId, input.organizationId);
+          }
+        }
+      } catch (readError) {
+        // A lost database response does not prove rollback. Keep the provider
+        // objects until their ownership can be established from the saved row.
+        console.error({ event: 'media_upload_commit_unknown', asset_id: assetId,
+          organization_id: input.organizationId, errors: errorChainForTelemetry(readError) });
+        throw new AggregateError([uploadFailure(persistError), uploadFailure(readError)],
+          `The result of saving media asset ${assetId} could not be read`, { cause: readError });
+      }
+      if (saved) {
+        console.info({ event: 'media_upload_commit_confirmed', asset_id: assetId, organization_id: input.organizationId });
+        return savedUploadResult(saved);
+      }
+      safeToCleanup = !creation || Boolean(record);
+      if (record && record.requestHash !== creation!.requestHash) {
+        replayError = new HTTPError({ statusCode: 409, statusMessage: 'This idempotency key belongs to a different media upload' });
+      } else if (record && !concurrentAsset) {
+        replayError = new HTTPError({ statusCode: 410, statusMessage: 'The saved asset is no longer available' });
+      }
+    }
+    if (!safeToCleanup) {
+      console.warn({event:'media_upload_pending_retry',asset_id:assetId,organization_id:input.organizationId,stage});
+      throw uploadFailure(persistError);
+    }
     const cleanupStartedAt = Date.now();
     const cleanupErrors: Error[] = [];
     if (r2Key) {
@@ -143,6 +232,8 @@ export async function uploadResolvedMediaToAssetStore(
         `Media asset ${assetId} could not be stored or cleaned up`, { cause: persistError },
       );
     }
+    if (replayError) throw replayError;
+    if (concurrentAsset) return savedUploadResult(concurrentAsset);
     throw persistError;
   }
   console.info({ event: 'media_upload_completed', asset_id: assetId, organization_id: input.organizationId,

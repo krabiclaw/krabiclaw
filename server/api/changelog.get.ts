@@ -15,14 +15,12 @@ export default defineHandler(async (event) => {
 
     const env = cloudflareEnv(event)
     const githubToken = env.GITHUB_TOKEN
-    const repoOwner = env.GITHUB_REPO_OWNER || 'paulchrisluke'
-    const repoName = env.GITHUB_REPO_NAME || 'krabiclaw'
 
     if (!githubToken) {
       return jsonResponse({ error: 'GITHUB_TOKEN not configured' }, { status: 500 })
     }
 
-    return jsonResponse(await getRecentChanges({ githubToken, repoOwner, repoName, limit: prLimit }))
+    return jsonResponse(await getRecentChanges({ githubToken, limit: prLimit }))
   } catch (error) {
     console.error('Failed to generate changelog:', error)
     if (error instanceof ChangelogFetchError) {

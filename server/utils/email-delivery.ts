@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { HTTPError } from 'nitro'
 import { getResendClient } from '~/server/utils/resend'
 
 export type EmailDeliveryMode = 'provider' | 'log_only'
@@ -11,44 +12,43 @@ type EmailDeliveryEnv = {
 
 export type EmailSendResult =
   | { status: 'sent'; messageId: string | null }
-  | { status: 'failed'; error: string }
+  /** `code` is machine-readable; `error` leads with it, so a persisted delivery error carries it too. */
+  | { status: 'failed'; code: string; error: string }
 
-// Fails closed: an unset/blank/invalid EMAIL_DELIVERY_MODE must never fall through to
-// real sends. Production is the only environment that should send real email, and it does
-// so by setting EMAIL_DELIVERY_MODE="provider" explicitly in wrangler.toml's top-level
-// [vars] — every other environment (local dev, preview, staging) either sets
-// "log_only" explicitly or is protected by this default if the var is ever missing.
-// See the 2026-07 incident: this used to default to 'provider', so any environment that
-// forgot to set the var (or a local .env with a real RESEND_API_KEY) sent real Resend email
-// to seeded e2e fixture addresses like user-mcp-growth@example.test, bouncing and burning
-// sending-domain reputation.
-export function getEmailDeliveryMode(env: EmailDeliveryEnv | null | undefined | unknown): EmailDeliveryMode {
+function failed(code: string, message: string): EmailSendResult {
+  return { status: 'failed', code, error: `${code}: ${message}` }
+}
+
+/**
+ * The configured email delivery mode, which every environment states explicitly
+ * in wrangler.toml: production "provider", staging/E2E/local "log_only".
+ *
+ * A missing or unrecognised value is a configuration failure, never a mode.
+ * This used to answer log_only for both, so a deployment that lost the var
+ * reported every email as sent while nothing reached anyone. (Before that it
+ * answered provider, and seeded fixture addresses bounced from production.)
+ */
+export function getEmailDeliveryMode(env: EmailDeliveryEnv): EmailDeliveryMode {
   // `nuxt dev` reads wrangler.toml's top-level [vars] — the same block
   // `wrangler deploy` (no --env) uses for production — so a local dev session
-  // inherits EMAIL_DELIVERY_MODE=provider from the production config. Hard-stop
-  // local development at the code level instead of depending on local config.
+  // inherits EMAIL_DELIVERY_MODE=provider from the production config. Local
+  // development is log_only by construction, not by local config.
   if (import.meta.dev) return 'log_only'
-  const mode = typeof env === 'object' && env !== null && 'EMAIL_DELIVERY_MODE' in env
-    ? (env as { EMAIL_DELIVERY_MODE?: string }).EMAIL_DELIVERY_MODE
-    : undefined
-  const raw = String(mode || '').trim().toLowerCase()
-  if (!raw) return 'log_only'
-
-  const normalized = raw.replace(/[-_]/g, '')
-  if (normalized === 'logonly') return 'log_only'
-  if (normalized === 'provider') return 'provider'
-
-  console.warn('[email-delivery] Invalid EMAIL_DELIVERY_MODE value; defaulting to log_only', {
-    EMAIL_DELIVERY_MODE: raw,
-  })
-  return 'log_only'
+  const mode = env.EMAIL_DELIVERY_MODE
+  if (mode === undefined || mode === '') {
+    throw new HTTPError({ statusCode: 503, message: 'EMAIL_DELIVERY_MODE is not configured', data: { code: 'EMAIL_DELIVERY_MODE_REQUIRED', field: 'EMAIL_DELIVERY_MODE' } })
+  }
+  if (mode !== 'provider' && mode !== 'log_only') {
+    throw new HTTPError({ statusCode: 503, message: 'EMAIL_DELIVERY_MODE must be provider or log_only', data: { code: 'INVALID_EMAIL_DELIVERY_MODE', field: 'EMAIL_DELIVERY_MODE' } })
+  }
+  return mode
 }
 
 export function hashEmail(email: string): string {
   return createHash('sha256').update(email.toLowerCase().trim()).digest('hex')
 }
 
-export function shouldSendRealEmail(env: EmailDeliveryEnv | null | undefined | unknown): boolean {
+export function shouldSendRealEmail(env: EmailDeliveryEnv): boolean {
   return getEmailDeliveryMode(env) === 'provider'
 }
 
@@ -58,10 +58,10 @@ export function logOnlyEmailProviderId(prefix = 'email'): string {
 
 // RFC 2606 reserves .test/.example/.invalid (plus .localhost) as non-resolvable, always-fake
 // domains for documentation/testing — a real mailbox can never exist there, so any send here
-// is guaranteed to hard-bounce. Checked as defense-in-depth in addition to EMAIL_DELIVERY_MODE:
-// even if delivery mode is ever misconfigured back to "provider" in an environment seeded with
-// e2e/demo fixture addresses (e.g. user-mcp-growth@example.test), this stops the bounce before
-// it reaches Resend.
+// is guaranteed to hard-bounce. A provider-mode send to one is refused with a coded failure
+// rather than reported as sent: in an environment seeded with e2e/demo fixture addresses
+// (e.g. user-mcp-growth@example.test) the bounce is stopped before it reaches Resend, and the
+// delivery says it was refused.
 const RESERVED_TEST_TLDS = new Set(['test', 'example', 'invalid', 'localhost'])
 
 // RFC 2606 also reserves these exact second-level domains under otherwise-real TLDs
@@ -83,11 +83,15 @@ export function isReservedTestDomain(email: string): boolean {
 }
 
 /**
- * The From header for mail Krabiclaw sends: the configured sender, with its
+ * The From header for mail KrabiClaw sends: the configured sender, with its
  * display name replaced when the message is sent on a business's behalf.
+ * EMAIL_FROM is required; there is no default sender.
  */
 export function emailSender(env: Pick<EmailDeliveryEnv, 'EMAIL_FROM'>, fromName?: string): string {
-  const configuredFrom = env.EMAIL_FROM || 'Krabiclaw <hello@krabiclaw.com>'
+  const configuredFrom = env.EMAIL_FROM?.trim()
+  if (!configuredFrom) {
+    throw new HTTPError({ statusCode: 503, message: 'EMAIL_FROM is not configured', data: { code: 'EMAIL_FROM_REQUIRED', field: 'EMAIL_FROM' } })
+  }
   if (!fromName) return configuredFrom
   return configuredFrom.includes('<')
     ? configuredFrom.replace(/^[^<]*(?=<)/, `${fromName} `)
@@ -119,10 +123,14 @@ export async function sendEmail(
     unsubscribeOneClickUrl?: string | null
   },
 ): Promise<EmailSendResult> {
-  if (!shouldSendRealEmail(env) || isReservedTestDomain(input.to)) {
+  if (!shouldSendRealEmail(env)) {
     return { status: 'sent', messageId: logOnlyEmailProviderId('email') }
   }
-  if (!env.RESEND_API_KEY) return { status: 'failed', error: 'RESEND_API_KEY not configured' }
+  if (isReservedTestDomain(input.to)) return failed('RESERVED_TEST_EMAIL_DOMAIN', 'the recipient is on a reserved test domain that cannot receive mail')
+  if (!env.RESEND_API_KEY) return failed('RESEND_API_KEY_REQUIRED', 'RESEND_API_KEY is not configured')
+  // Checked here rather than thrown from emailSender, because a caller may
+  // already hold a delivery receipt that this outcome has to be written onto.
+  if (!env.EMAIL_FROM?.trim()) return failed('EMAIL_FROM_REQUIRED', 'EMAIL_FROM is not configured')
 
   const from = emailSender(env, input.fromName)
   const resend = getResendClient(env)
@@ -143,5 +151,5 @@ export async function sendEmail(
       : {}),
   }, input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined)
   if (!response.error) return { status: 'sent', messageId: response.data.id }
-  return { status: 'failed', error: `${response.error.statusCode ?? 'no response'} ${response.error.name}: ${response.error.message}` }
+  return failed('RESEND_REJECTED', `${response.error.statusCode ?? 'no response'} ${response.error.name}: ${response.error.message}`)
 }

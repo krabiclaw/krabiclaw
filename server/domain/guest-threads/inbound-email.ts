@@ -123,12 +123,13 @@ async function receiveGuestReply(env:CloudflareEnv,input:{threadId:string;organi
   }
   await attachGuestPhotos(db,env,input.organizationId,entry.id,photos,input.userId?{source:'uploaded',userId:input.userId}:{source:'external',userId:null})
   await updateThreadProjectionIfLatestEntry(db,thread.id,entry.id,{conversationState:'needs_attention'})
+  // The guest's message is in the thread before the owner is alerted, so an alert that fails cannot hide it.
+  await publishGuestInboxThreadEvent(env,db,{threadId:thread.id,type:'entry.appended'})
   const summary=await requestSummary(db,thread)
   await notifyGuestThreadReply(env,db,{
     organizationId:input.organizationId,locationId:summary.locationId,threadId:thread.id,sourceEntryId:entry.id,
     submissionType:input.submissionType,submissionId:input.threadId,
-    guestName:summary.guestName,guestEmail:summary.guestEmail,guestPhone:summary.guestPhone,
+    participantLabel:summary.participantLabel,guestEmail:summary.guestEmail,guestPhone:summary.guestPhone,
     inboundChannel:input.channel,messagePreview:messagePreview(input.body,photos.length),
   })
-  await publishGuestInboxThreadEvent(env,db,{threadId:thread.id,type:'entry.appended'})
 }

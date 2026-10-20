@@ -12,7 +12,7 @@ export default defineHandler(async (event) => {
   try {
     // Location access, not site access: a location editor may say whether this
     // branch offers the product without gaining rights over the product itself.
-    const { db, session, organization } = await requireLocationAccess(event, organizationId, locationId)
+    const { db, session, organization, env } = await requireLocationAccess(event, organizationId, locationId)
     // A product id in the path is not authorized by the site in the path.
     await requireOrganizationProduct(db, { organizationId: organization.id, productId })
     const body = await readStrictBody<{ active?: unknown; published?: unknown }>(event, { active: 'unknown', published: 'unknown' })
@@ -24,7 +24,7 @@ export default defineHandler(async (event) => {
     await setProductLocation(db, {
       organizationId: organization.id, productId, locationId,
       active: body.active as boolean | undefined, published: body.published as boolean | undefined,
-      actor: { actorId: session.user.id },
+      actor: { actorId: session.user.id }, env,
     })
     return jsonResponse({ success: true, product: await getProduct(db, organization.id, productId) })
   } catch (error) {

@@ -1,9 +1,10 @@
 import { expect, request as playwrightRequest, test } from '@playwright/test'
-import { loginAs } from './helpers/auth'
+import { authRequestHeaders, loginAs } from './helpers/auth'
 import { openTenantPage, waitForNuxtHydration } from './helpers'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { blawbyTestExtraHeaders } from './test-env'
 import type { Product } from '../../server/types/products'
+import type { BlawbyDocumentPayload } from '../../utils/blawby-document-contract'
 
 test.use({ timezoneId: 'America/New_York' })
 
@@ -16,6 +17,9 @@ test('native online review uses canonical Products, holds capacity, and releases
   })
   await loginAs(page.request, baseURL!)
   const cleanupRequest = await playwrightRequest.newContext({ baseURL, storageState: await page.context().storageState() })
+  await loginAs(cleanupRequest, baseURL!, 'user-e2e-ncls-owner')
+  await page.context().clearCookies()
+  await loginAs(page.request, baseURL!, 'user-e2e-ncls-consultation-owner')
   const org = 'org-ncls-blawby'
   const editor = `/api/editor/organizations/${org}`
   const previous = await (await page.request.get(`${editor}/consultation`)).json()
@@ -35,16 +39,48 @@ test('native online review uses canonical Products, holds capacity, and releases
   const tomorrow = new Date(Date.now() + 86400000)
   const day = tomorrow.toISOString().slice(0, 10)
   const headers = blawbyTestExtraHeaders()
+  // Online consultations are held by a provider and booked in their hours. The
+  // dedicated test member has none yet; removing its membership restores that
+  // state through Better Auth without changing the review owner's hours.
+  const membersResponse = await page.request.get(`/api/organizations/${org}/members/scheduling`)
+  expect(membersResponse.status(), await membersResponse.text()).toBe(200)
+  const self = (await membersResponse.json()).members.find((member: { self: boolean }) => member.self)
+  expect(self).toBeTruthy()
+  expect(self.scheduling).toBeNull()
   try {
+  const mcpScheduling = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_scheduling', args: { organization_id: org, member_id: self.id } })
+  expect(mcpScheduling.status(), await mcpScheduling.text()).toBe(200)
+  const missingScheduling = (await mcpScheduling.json()).result
+  expect(missingScheduling.isError).toBe(true)
+  expect(missingScheduling.structuredContent).toBeUndefined()
+  expect(JSON.parse(missingScheduling.content[0].text)).toEqual({ status: 404, message: 'Member scheduling not found', code: 'MEMBER_SCHEDULING_NOT_FOUND' })
+  const mcpMembers = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_scheduling', args: { organization_id: org } })
+  expect(mcpMembers.status(), await mcpMembers.text()).toBe(200)
+  expect(mcpData<{ members: Array<Record<string, unknown>> }>(await mcpMembers.json()).members).toContainEqual({ id: self.id, name: self.name, image: self.image, self: true, scheduling: self.scheduling })
+  for (const data of [{}, { action: 'unknown' }, { action: 'select', calendar_ids: [] }]) {
+    const invalidCalendar = await page.request.post(`/api/organizations/${org}/members/${self.id}/calendar`, { data })
+    expect(invalidCalendar.status(), await invalidCalendar.text()).toBe(400)
+  }
+  // The attorney hosts the consultations, and guests meet them through their published profile.
+  const host = { name: 'Consultation attorney', photo_url: null, bio: 'Reviews family law questions before your appointment.' }
+  const hours = await page.request.put(`/api/organizations/${org}/members/${self.id}/scheduling`, { data: { timezone: 'UTC', weekly: [{ weekday: tomorrow.getUTCDay(), start: '14:00', end: '14:45' }], time_off: [], expected_updated_at: null, public_name: host.name, public_bio: host.bio, public_approved: true } })
+  expect(hours.status(), await hours.text()).toBe(200)
+  expect((await hours.json()).scheduling).toMatchObject({ public_name: host.name, public_bio: host.bio, public_approved: 1 })
   for (let index = 0; index < 2; index++) {
-    const create = await page.request.post(`${editor}/products`, { data: { kind: 'service', details: { preparation: 'Bring a list of questions for your consultation', cancellation_policy: 'Contact us at least one day before your appointment to cancel.' }, name: `Local consultation ${stamp}-${index}`, description: 'A local test service for reviewing the native consultation flow.', variants: [{ name: 'Online', prices: [{ unit_amount: 0, currency: 'USD' }] }] } })
+    const create = await page.request.post(`${editor}/products`, { data: { kind: 'service', active: true, details: { preparation: 'Bring a list of questions for your consultation', cancellation_policy: 'Contact us at least one day before your appointment to cancel.' }, name: `Local consultation ${stamp}-${index}`, description: 'A local test service for reviewing the native consultation flow.', variants: [{ name: 'Online', prices: [{ unit_amount: 0, currency: 'USD' }] }] } })
     expect(create.status(), await create.text()).toBe(201)
     const product = (await create.json()).product
     products.push(product)
-    const config = await page.request.put(`${editor}/products/${product.id}/booking`, { data: { duration_minutes: 45, default_capacity: 1, confirmation_mode: 'review', online_payment_required: true, online_timezone: 'UTC', calendar_group: `local-${stamp}` } })
+    // This journey adopts the existing authored service page. Remove the
+    // temporary service's automatic page explicitly before binding it there.
+    expect(product.page).toBeTruthy()
+    const automaticPage = await page.request.get(`${editor}/pages/${product.page.id}`)
+    expect(automaticPage.status(), await automaticPage.text()).toBe(200)
+    const removedPage = await page.request.delete(`${editor}/pages/${product.page.id}`, { data: { expectedUpdatedAt: (await automaticPage.json()).page.document.updated_at } })
+    expect(removedPage.status(), await removedPage.text()).toBe(200)
+    // Both offerings are the owner's, so the one 14:00 hour can be booked once between them.
+    const config = await page.request.put(`${editor}/products/${product.id}/booking`, { data: { duration_minutes: 45, default_capacity: 1, confirmation_mode: 'review', online_payment_required: false, scheduling_mode: 'provider', assigned_member_id: self.id, held_online: true } })
     expect(config.status(), await config.text()).toBe(200)
-    const schedule = await page.request.put(`${editor}/products/${product.id}/availability`, { data: { location_id: null, slots: [{ weekday: tomorrow.getUTCDay(), start_time: '14:00' }] } })
-    expect(schedule.status(), await schedule.text()).toBe(200)
     const publish = await page.request.put(`${editor}/products/${product.id}/publication`, { data: { published: true } })
     expect(publish.status(), await publish.text()).toBe(200)
   }
@@ -55,36 +91,14 @@ test('native online review uses canonical Products, holds capacity, and releases
     await page.goto(`/dashboard/north-carolina-legal-services/products/${products[0]!.id}/booking`)
     const bookingPath = `/dashboard/north-carolina-legal-services/products/${products[0]!.id}/booking`
     await expect(page.getByRole('link', { name: 'Guest limit One guest per session' })).toBeVisible()
-    // The Calendar-only build saves assignment in the focused CMS editor and
-    // reads it through MCP without requiring Payments tables or Checkout.
-    const membersResponse = await page.request.get(`/api/organizations/${org}/members/scheduling`)
-    expect(membersResponse.status(), await membersResponse.text()).toBe(200)
-    const self = (await membersResponse.json()).members.find((member: { self: boolean }) => member.self)
-    expect(self).toBeTruthy()
-    const mcpScheduling = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_scheduling', args: { organization_id: org, member_id: self.id } })
-    expect(mcpScheduling.status(), await mcpScheduling.text()).toBe(200)
-    expect(mcpData<{ scheduling: Record<string, unknown> }>(await mcpScheduling.json()).scheduling).toEqual(self.scheduling)
-    const mcpMembers = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_member_scheduling', args: { organization_id: org } })
-    expect(mcpMembers.status(), await mcpMembers.text()).toBe(200)
-    expect(mcpData<{ members: Array<Record<string, unknown>> }>(await mcpMembers.json()).members).toContainEqual({ id: self.id, name: self.name, self: true, scheduling: self.scheduling })
-    for (const data of [{}, { action: 'unknown' }, { action: 'select', calendar_ids: [] }]) {
-      const invalidCalendar = await page.request.post(`/api/organizations/${org}/members/${self.id}/calendar`, { data })
-      expect(invalidCalendar.status(), await invalidCalendar.text()).toBe(400)
-    }
-    const unchangedSchedule = await page.request.get(`/api/organizations/${org}/members/${self.id}/scheduling`)
-    expect(unchangedSchedule.status(), await unchangedSchedule.text()).toBe(200)
-    expect((await unchangedSchedule.json()).scheduling).toEqual(self.scheduling)
-    await page.getByRole('link', { name: 'Who guests meet Tenant organization', exact: true }).click()
-    await page.getByRole('radio', { name: self.name, exact: true }).check()
-    await page.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(page.getByRole('link', { name: 'Who guests meet Assigned team member', exact: true })).toBeVisible()
+    await expect(page.getByRole('link', { name: `Host ${self.name}`, exact: true })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Meeting location Online', exact: true })).toBeVisible()
+    // Online, the times are the provider's own hours; the offering has no weekly list of its own.
+    await expect(page.getByRole('link', { name: "Bookable times Your provider's working hours", exact: true })).toHaveAttribute('href', `/dashboard/north-carolina-legal-services/team/${self.id}/hours`)
+    await expect(page.getByRole('link', { name: /^Weekly schedule/ })).toHaveCount(0)
     const assigned = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: org, product_id: products[0]!.id } })
     expect(assigned.status(), await assigned.text()).toBe(200)
-    expect(mcpData<{ product: { booking: Record<string, unknown> } }>(await assigned.json()).product.booking).toMatchObject({ scheduling_mode: 'provider', assigned_member_id: self.id })
-    await page.getByRole('link', { name: 'Who guests meet Assigned team member', exact: true }).click()
-    await page.getByRole('radio', { name: 'Use the business schedule', exact: true }).check()
-    await page.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(page.getByRole('link', { name: 'Who guests meet Tenant organization', exact: true })).toBeVisible()
+    expect(mcpData<{ product: { booking: Record<string, unknown> } }>(await assigned.json()).product.booking).toMatchObject({ scheduling_mode: 'provider', assigned_member_id: self.id, held_online: true })
 
     await page.getByRole('link', { name: 'Duration 45 minutes', exact: true }).click()
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
@@ -96,29 +110,13 @@ test('native online review uses canonical Products, holds capacity, and releases
       expect(result.status()).toBe(200)
       return mcpData<{ product: { booking: Record<string, unknown> } }>(await result.json()).product.booking
     }
-    expect(await readConfig()).toMatchObject({ duration_minutes: 50, default_capacity: 1, confirmation_mode: 'review', online_payment_required: true, online_timezone: 'UTC', calendar_group: `local-${stamp}` })
+    expect(await readConfig()).toMatchObject({ duration_minutes: 50, default_capacity: 1, confirmation_mode: 'review', online_payment_required: false, held_online: true })
     expect((await (await page.request.get(`${editor}/consultation`)).json()).mode).toBe('native')
-    const retainedSchedule = await page.request.get(`${editor}/products/${products[0]!.id}/availability?location_id=online`)
-    expect(retainedSchedule.status()).toBe(200)
-    expect((await retainedSchedule.json()).rules).toHaveLength(1)
     await page.getByRole('link', { name: 'Duration 50 minutes', exact: true }).click()
     await page.getByLabel('Duration in minutes', { exact: true }).fill('45')
     await page.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(page.getByRole('link', { name: 'Duration 45 minutes', exact: true })).toBeVisible()
-    await page.getByRole('link', { name: /^Meeting location Online · UTC · GMT(?:\+0)?$/ }).click()
-    const timeZone = page.getByRole('button', { name: 'Time zone', exact: true })
-    await expect(timeZone).toContainText('UTC · GMT')
-    await timeZone.click()
-    await page.getByPlaceholder('Search by city, e.g. Bangkok').fill('New York')
-    await page.getByRole('option', { name: /^New York · GMT/ }).click()
-    await expect(timeZone).toContainText('New York')
-    await page.getByRole('button', { name: 'Save', exact: true }).click()
-    await expect(page.getByRole('link', { name: /^Meeting location Online · New York · GMT/ })).toBeVisible()
-    expect(await readConfig()).toMatchObject({ online_timezone: 'America/New_York', duration_minutes: 45, calendar_group: `local-${stamp}` })
-    // Restore the explicit UTC schedule used by the public booking assertions below.
-    const restoredTimezone = await page.request.put(`${editor}/products/${products[0]!.id}/booking`, { data: { online_timezone: 'UTC' } })
-    expect(restoredTimezone.status(), await restoredTimezone.text()).toBe(200)
-    expect(await readConfig()).toMatchObject({ online_timezone: 'UTC' })
+    expect(await readConfig()).toMatchObject({ held_online: true, duration_minutes: 45 })
     await page.goto(`${bookingPath}/capacity`)
     await expect(page.getByRole('radio', { name: 'One guest', exact: true })).toBeChecked()
     await page.getByRole('radio', { name: 'A group of guests', exact: true }).click()
@@ -126,7 +124,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     await page.getByLabel('Maximum guests per session', { exact: true }).fill('2')
     await page.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(page.getByRole('link', { name: 'Guest limit Up to 2 guests per session', exact: true })).toBeVisible()
-    expect(await readConfig()).toMatchObject({ default_capacity: 2, duration_minutes: 45, online_timezone: 'UTC', online_payment_required: true })
+    expect(await readConfig()).toMatchObject({ default_capacity: 2, duration_minutes: 45, held_online: true, online_payment_required: false })
     await page.getByRole('link', { name: 'Guest limit Up to 2 guests per session', exact: true }).click()
     await page.getByRole('radio', { name: 'One guest', exact: true }).click()
     await page.getByRole('button', { name: 'Save', exact: true }).click()
@@ -195,17 +193,51 @@ test('native online review uses canonical Products, holds capacity, and releases
     }))).flat()
     expect(storedGallery).toHaveLength(8)
     expect(publishedService.media.filter((media: { slot: string }) => ['cover', 'gallery'].includes(media.slot)).map((media: { asset_id: string }) => media.asset_id)).toEqual(storedGallery.map(media => media.id))
+    const invalidService = await page.goto('/schedule?service_id=missing-consultation')
+    expect(invalidService?.status()).toBe(404)
+    await expect(page.getByRole('heading', { name: 'Page not found', exact: true })).toBeVisible()
+    await expect(page.getByRole('combobox', { name: 'Service', exact: true })).toHaveCount(0)
+    const scheduleSource = await request.get('/api/public/blawby/document?recipe=schedule', { headers })
+    expect(scheduleSource.status(), await scheduleSource.text()).toBe(200)
+    const scheduleDocument: BlawbyDocumentPayload = await scheduleSource.json()
+    expect(scheduleDocument.route.page).toBeTruthy()
+    const authoredSchedule = scheduleDocument.route.page!
+    expect(authoredSchedule.blocks.length).toBeGreaterThan(0)
     await openTenantPage(page, new URL('/schedule', baseURL).href, {})
+    const scheduleArticle = page.locator('[data-tenant-page]')
+    await expect(scheduleArticle).toHaveCount(1)
+    const scheduleBlocks = scheduleArticle.locator(':scope > [data-block-type]')
+    expect(await scheduleBlocks.evaluateAll(elements => elements.map(element => element.getAttribute('data-block-type')))).toEqual(authoredSchedule.blocks.map(block => block.type))
+    for (const [index, block] of authoredSchedule.blocks.entries()) {
+      if (block.type === 'hero' && typeof block.data.title === 'string') {
+        await expect(page.getByRole('heading', { name: block.data.title, exact: true, level: 1 })).toHaveCount(1)
+      }
+      if (block.type === 'booking_cta') {
+        for (const field of ['title', 'price_line', 'notice']) {
+          const text = block.data[field]
+          if (typeof text !== 'string' || !text) continue
+          await expect(scheduleBlocks.nth(index).getByText(text, { exact: true })).toHaveCount(1)
+          const authoredOccurrences = authoredSchedule.blocks.filter(item => item.data[field] === text).length
+          await expect(page.locator('main').getByText(text, { exact: true })).toHaveCount(authoredOccurrences)
+        }
+      }
+    }
+    await expect(page.locator('#consultations')).toHaveCount(1)
+    expect(await scheduleArticle.evaluate(article => {
+      const form = document.getElementById('consultations')!
+      return Boolean(article.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING)
+        && article.getBoundingClientRect().bottom <= form.getBoundingClientRect().top
+    })).toBe(true)
     const serviceSelector = page.getByRole('combobox', { name: 'Service', exact: true })
-    await expect(serviceSelector).toContainText(service.title)
+    await expect(serviceSelector).toContainText(products[0]!.name)
     const chevronInset = await serviceSelector.evaluate(element => element.getBoundingClientRect().right - element.querySelector('[data-slot="trailingIcon"]')!.getBoundingClientRect().right)
     expect(chevronInset).toBeGreaterThanOrEqual(10)
     await serviceSelector.focus()
     await page.keyboard.press('Enter')
-    await expect(page.getByRole('option', { name: service.title, exact: true })).toBeVisible()
+    await expect(page.getByRole('option', { name: products[0]!.name, exact: true })).toBeVisible()
     await page.keyboard.press('Escape')
     await expect(serviceSelector).toBeFocused()
-    await expect(page.getByRole('heading', { name: service.title, exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: products[0]!.name, exact: true })).toBeVisible()
     await expect(page.getByText('Free', { exact: true }).filter({ visible: true })).toBeVisible()
     await expect(page.getByText('Staff review', { exact: true }).first()).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Upcoming availability', exact: true })).toBeVisible()
@@ -236,33 +268,34 @@ test('native online review uses canonical Products, holds capacity, and releases
     await zoneSearch.press('Enter')
     await expect(pageTimezone).toContainText('(America/New_York)')
     await expect(page.locator('a[href*="/experiences/"]')).toHaveCount(0)
-    await expect(page.locator('section[aria-label="Choose your consultation"] img')).toHaveAttribute('alt', publishedService.media.find((media: { slot: string }) => media.slot === 'cover').alt_text ?? '')
-    await expect.poll(() => page.locator('section[aria-label="Choose your consultation"] img').evaluateAll(images => images.every(image => (image as HTMLImageElement).naturalWidth > 0))).toBe(true)
+    expect(products[0]!.image).toBeNull()
+    await expect(page.locator('section[aria-label="Choose your consultation"] img')).toHaveCount(0)
     await page.setViewportSize({ width: 390, height: 844 })
     await page.setViewportSize({ width: 1280, height: 720 })
     const providerRoute=`**/api/public/products/${products[0]!.slug}/provider*`
     await page.route(providerRoute,route=>route.fulfill({status:503,json:{statusCode:503,message:'Provider lookup unavailable'}}))
     await page.getByRole('link', { name: 'Full service details →', exact: true }).click()
     await expect(page).toHaveURL(new RegExp(`${service.path}$`))
-    await expect(page.getByRole('heading', { name: service.title, exact: true, level: 1 })).toBeVisible()
-    const providerSection=page.locator('section[aria-label="Who you’ll meet with"]')
+    await expect(page.getByRole('heading', { name: products[0]!.name, exact: true, level: 1 })).toBeVisible()
+    const providerSection=page.locator('section[aria-label="Meet your host"]')
     await waitForNuxtHydration(page)
     const failedProvider=page.waitForResponse(response=>new URL(response.url()).pathname===`/api/public/products/${products[0]!.slug}/provider`)
-    await page.getByRole('button',{name:'Select a time',exact:true}).first().click()
+    await page.getByRole('button',{name:/^Select a time /}).first().click()
     expect((await failedProvider).status()).toBe(503)
     await page.getByRole('button',{name:'Close booking form',exact:true}).click()
-    await expect(providerSection.getByText('Who you’ll meet could not be loaded',{exact:true})).toBeVisible()
+    await expect(providerSection.getByText('Profile could not be loaded',{exact:true})).toBeVisible()
     await expect(providerSection.getByText('North Carolina Legal Services',{exact:true})).toHaveCount(0)
     await providerSection.screenshot({path:'/tmp/pr1240-provider-error.png'})
     await page.unroute(providerRoute)
     const providerRetry=page.waitForResponse(response=>new URL(response.url()).pathname===`/api/public/products/${products[0]!.slug}/provider`)
-    await providerSection.getByRole('button',{name:'Retry loading provider',exact:true}).click()
+    await providerSection.getByRole('button',{name:'Try again',exact:true}).click()
     const providerResponse=await providerRetry
     expect(providerResponse.status(),await providerResponse.text()).toBe(200)
-    expect((await providerResponse.json()).provider).toBeNull()
-    await expect(providerSection.getByText('North Carolina Legal Services',{exact:true})).toBeVisible()
-    await expect(providerSection.getByRole('button',{name:'Retry loading provider',exact:true})).toHaveCount(0)
-    await providerSection.screenshot({path:'/tmp/pr1240-provider-recovered.png'})
+    expect((await providerResponse.json()).hosts).toEqual([host])
+    await expect(providerSection.getByText(host.name,{exact:true})).toBeVisible()
+    await expect(providerSection.getByText(host.bio,{exact:true})).toBeVisible()
+    await expect(page.getByRole('button',{name:'Try again',exact:true})).toHaveCount(0)
+    await page.locator('main').screenshot({path:'/tmp/pr1240-provider-recovered.png'})
     await expect(page.locator('[data-block-type="hero"]')).toHaveCount(0)
     await expect(page.getByRole('heading', { name: /where.*meet/i })).toHaveCount(0)
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', new URL(service.path, baseURL).href)
@@ -275,7 +308,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     await expect(visibleTiles).toHaveCount(4)
     const tileBounds = await visibleTiles.evaluateAll(tiles => tiles.map(tile => { const box = tile.getBoundingClientRect(); const frame = tile.closest('[data-media-gallery]')!.getBoundingClientRect(); return { top: box.top - frame.top, bottom: box.bottom - frame.top, height: frame.height } }))
     expect(tileBounds.every(tile => tile.top >= 0 && tile.bottom <= tile.height + 1)).toBe(true)
-    const lightbox = page.getByRole('dialog', { name: service.title, exact: true })
+    const lightbox = page.getByRole('dialog', { name: products[0]!.name, exact: true })
     for (let index = 0; index < 4; index++) {
       await visibleTiles.nth(index).click()
       await expect(lightbox.locator('section').nth(index).locator('img').last()).toBeInViewport()
@@ -299,19 +332,19 @@ test('native online review uses canonical Products, holds capacity, and releases
     await page.getByLabel('Website address', { exact: true }).fill(externalUrl)
     await page.getByRole('button', { name: 'Save', exact: true }).click()
     const nativeConfigBeforeHandoff = await readConfig()
-    const withoutNativeCalendar = await page.request.put(`${editor}/products/${products[0]!.id}/booking`, { data: { online_timezone: null, calendar_group: null } })
+    const withoutNativeCalendar = await page.request.put(`${editor}/products/${products[0]!.id}/booking`, { data: { held_online: false } })
     expect(withoutNativeCalendar.status(), await withoutNativeCalendar.text()).toBe(200)
     const externalProduct = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: org, product_id: products[0]!.id } })
-    const savedExternalProduct = mcpData<{ product: { order_url: string; booking: { online_timezone: string | null } } }>(await externalProduct.json()).product
+    const savedExternalProduct = mcpData<{ product: { order_url: string; booking: { held_online: boolean } } }>(await externalProduct.json()).product
     expect(savedExternalProduct.order_url).toBe(externalUrl)
-    expect(savedExternalProduct.booking.online_timezone).toBeNull()
+    expect(savedExternalProduct.booking.held_online).toBe(false)
     expect(savedExternalProduct).not.toHaveProperty('tags')
     const externalSessions = await request.get(`/api/public/products/${products[0]!.slug}/sessions?location_id=online`, { headers })
     expect(externalSessions.status()).toBe(200)
     expect((await externalSessions.json()).sessions).toEqual([])
     await page.setExtraHTTPHeaders(headers)
     await page.goto(service.path)
-    await expect(page.getByRole('heading', { name: service.title, exact: true, level: 1 })).toBeVisible()
+    await expect(page.getByRole('heading', { name: products[0]!.name, exact: true, level: 1 })).toBeVisible()
     for (const width of [1280, 390]) {
       await page.setViewportSize({ width, height: 844 })
       const handoff = page.locator(`a[href="${externalUrl}"]:visible`)
@@ -331,7 +364,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     const recordedEvents = mcpData<{ rows: Array<Record<string, unknown>> }>(await events.json()).rows
     expect(recordedEvents).toHaveLength(1)
     expect(recordedEvents[0]).toMatchObject({ location_id: null, subject: { type: 'product', id: products[0]!.id }, metadata: { destination_hostname: 'example.com' } })
-    const restoreCalendar = await page.request.put(`${editor}/products/${products[0]!.id}/booking`, { data: { online_timezone: nativeConfigBeforeHandoff.online_timezone, calendar_group: nativeConfigBeforeHandoff.calendar_group } })
+    const restoreCalendar = await page.request.put(`${editor}/products/${products[0]!.id}/booking`, { data: { held_online: nativeConfigBeforeHandoff.held_online } })
     expect(restoreCalendar.status(), await restoreCalendar.text()).toBe(200)
     const restoreNative = await page.request.patch(`${editor}/products/${products[0]!.id}`, { data: { order_url: null } })
     expect(restoreNative.status()).toBe(200)
@@ -342,7 +375,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     await page.setViewportSize({ width: 1280, height: 720 })
     await page.getByRole('button', { name: 'Request appointment', exact: true }).focus()
     await page.keyboard.press('Enter')
-    const bookingDialog = page.getByRole('dialog', { name: service.title, exact: true })
+    const bookingDialog = page.getByRole('dialog', { name: products[0]!.name, exact: true })
     await expect(bookingDialog).toBeVisible()
     const modalTimezone = bookingDialog.getByRole('button', { name: 'Time zone', exact: true })
     await expect(modalTimezone).toContainText('(America/New_York)')
@@ -381,11 +414,11 @@ test('native online review uses canonical Products, holds capacity, and releases
     for(const [sessionId,status]of [[sessions[1].id,404],['missing-session',404],['',400]]) {
       const invalidProvider=await request.get(`/api/public/products/${products[0]!.slug}/provider`,{headers,params:{session_id:String(sessionId)}})
       expect(invalidProvider.status(),await invalidProvider.text()).toBe(status)
-      expect((await invalidProvider.json()).provider).toBeUndefined()
+      expect((await invalidProvider.json()).hosts).toBeUndefined()
     }
     const ambiguousProvider=await request.get(`/api/public/products/${products[0]!.slug}/provider?session_id=${sessions[0].id}&session_id=${sessions[1].id}`,{headers})
     expect(ambiguousProvider.status(),await ambiguousProvider.text()).toBe(400)
-    const book = (index: number) => request.post(`/api/public/products/${products[index]!.slug}/book`, { headers, data: { session_id: sessions[index].id, variant_id: products[index]!.variants[0]!.id, party_size: 1, guest_name: `Local review ${index}`, guest_email: `consultation-${stamp}-${index}@playwright.example` } })
+    const book = (index: number) => request.post(`/api/public/products/${products[index]!.slug}/book`, { headers, data: { session_id: sessions[index].id, variant_id: products[index]!.variants[0]!.id, party_size: 1, guest_name: `Local review ${index}`, guest_email: `consultation-${stamp}-${index}@playwright.example`, idempotency_key: crypto.randomUUID() } })
     const results = await Promise.all([book(0), book(1)])
     expect(results.map(result => result.status()).sort()).toEqual([201, 409])
     const pending = await results.find(result => result.status() === 201)!.json()
@@ -394,12 +427,12 @@ test('native online review uses canonical Products, holds capacity, and releases
     expect(pending.policy_summary.additional_notes_html).toBe('Contact us at least one day before your appointment to cancel.')
     const details = await page.request.get(`/api/dashboard/bookings/booking/${pending.request_id}?org=north-carolina-legal-services`)
     expect(details.status(), await details.text()).toBe(200)
-    expect((await details.json()).booking).toMatchObject({ locationId: null, locationTitle: 'Online', status: 'pending', operationalBookingId: pending.operational_booking_id })
+    expect((await details.json()).booking).toMatchObject({ locationId: null, locationTitle: 'Online', status: 'pending', operationalBookingId: pending.operational_booking_id, assignedMemberId: self.id, assignedMemberName: self.name, policy: pending.policy_summary })
     const invalidReassignment = await page.request.post(`/api/dashboard/bookings/booking/${pending.operational_booking_id}/provider?org=north-carolina-legal-services`, { data: { member_id: 42, expected_updated_at: new Date().toISOString(), idempotency_key: `invalid-${stamp}` } })
     expect(invalidReassignment.status(), await invalidReassignment.text()).toBe(400)
     const unchangedBooking = await page.request.get(`/api/dashboard/bookings/booking/${pending.request_id}?org=north-carolina-legal-services`)
     expect(unchangedBooking.status(), await unchangedBooking.text()).toBe(200)
-    expect((await unchangedBooking.json()).booking).toMatchObject({ status: 'pending', operationalBookingId: pending.operational_booking_id, assignedMemberId: null })
+    expect((await unchangedBooking.json()).booking).toMatchObject({ status: 'pending', operationalBookingId: pending.operational_booking_id, assignedMemberId: self.id, assignedMemberName: self.name })
     const key = `reject-${stamp}`
     for (let replay = 0; replay < 2; replay++) {
       const reject = await page.request.post(`/api/dashboard/organizations/${org}/guest-threads/${pending.request_id}/operations/reject`, { data: { idempotencyKey: key } })
@@ -420,7 +453,9 @@ test('native online review uses canonical Products, holds capacity, and releases
     const browserBooking = await browserBookingResponse.json()
     expect(browserBooking.status).toBe('pending')
     await expect(page).toHaveURL(/\/bookings\/confirmed/)
-    await expect(page.getByRole('heading', { name: /Request received, Browser review guest/ })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Thank you, Browser review guest!', exact: true, level: 1 })).toBeVisible()
+    await expect(page.getByText('Request received', { exact: true })).toBeVisible()
+    await expect(page.getByText('Your request is waiting for confirmation from the business.', { exact: true })).toBeVisible()
     expect(analyticsFailures).toEqual([])
     for (let replay = 0; replay < 2; replay++) {
       const confirm = await page.request.post(`/api/dashboard/organizations/${org}/guest-threads/${browserBooking.request_id}/operations/confirm`, { data: { idempotencyKey: `confirm-${stamp}` } })
@@ -429,28 +464,54 @@ test('native online review uses canonical Products, holds capacity, and releases
     const confirmedDetails = await page.request.get(`/api/dashboard/bookings/booking/${browserBooking.request_id}?org=north-carolina-legal-services`)
     expect((await confirmedDetails.json()).booking).toMatchObject({ status: 'confirmed', operationalBookingId: browserBooking.operational_booking_id })
     await page.goto(`/dashboard/north-carolina-legal-services/bookings/booking/${browserBooking.request_id}`)
-    await page.getByRole('link', { name: 'Team member North Carolina Legal Services', exact: true }).click()
+    await page.getByRole('button', { name: `Cancellation policy ${browserBooking.policy_summary.additional_notes_html}`, exact: true }).click()
+    const policyDialog = page.getByRole('dialog', { name: browserBooking.policy_summary.heading, exact: true })
+    await expect(policyDialog.getByText(browserBooking.policy_summary.additional_notes_html, { exact: true })).toBeVisible()
+    await expect(policyDialog.getByText('No cancellation terms have been configured for this booking.', { exact: true })).toHaveCount(0)
+    await policyDialog.getByRole('button', { name: `Close ${browserBooking.policy_summary.heading}`, exact: true }).click()
+    await page.getByRole('link', { name: `Team member ${self.name}`, exact: true }).click()
     await expect(page.getByRole('heading', { name: 'Team member', exact: true })).toBeVisible()
-    await expect(page.getByText('Assign a team member to this service before changing this booking.', { exact: true })).toBeVisible()
+    await expect(page.getByRole('radio', { name: self.name, exact: true })).toBeChecked()
+    await expect(page.getByText('Current', { exact: true })).toBeVisible()
+    await expect(page.getByText('Add working hours for a team member before moving this booking.', { exact: true })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
     for (const mode of ['external_url', 'native_disabled', 'native'] as const) {
       const switchMode = await page.request.put(`${editor}/consultation`, { data: { mode } })
       expect(switchMode.status(), await switchMode.text()).toBe(200)
       const publicDocument = await request.get('/api/public/blawby/document?recipe=schedule', { headers })
       expect(publicDocument.status(), await publicDocument.text()).toBe(200)
-      expect((await publicDocument.json()).shell.consultation.mode).toBe(mode)
+      const modeDocument: BlawbyDocumentPayload = await publicDocument.json()
+      expect(modeDocument.shell.consultation.mode).toBe(mode)
+      expect(modeDocument.route.page!.blocks).toEqual(authoredSchedule.blocks)
       await page.goto(service.path)
-      await expect(page.locator('[data-media-gallery]')).toHaveCount(mode === 'native' ? 1 : 0)
-      await expect(page.locator('[data-block-type="hero"]')).toHaveCount(mode === 'native' ? 0 : 1)
+      await expect(page.locator('[data-media-gallery]')).toHaveCount(1)
+      await expect(page.locator('[data-block-type="hero"]')).toHaveCount(0)
       await page.goto('/schedule')
       await expect(page.getByRole('combobox', { name: 'Service', exact: true })).toHaveCount(mode === 'native' ? 1 : 0)
-      if (mode === 'external_url') await expect(page.locator('[data-parity-section="schedule-hero"] a')).toHaveAttribute('href', previous.external_url)
+      await expect(page.locator('#consultations')).toHaveCount(mode === 'native' ? 1 : 0)
+      expect(await scheduleBlocks.evaluateAll(elements => elements.map(element => element.getAttribute('data-block-type')))).toEqual(authoredSchedule.blocks.map(block => block.type))
+      if (mode === 'external_url') {
+        const externalAction = page.locator('main > div').getByRole('link', { name: modeDocument.shell.consultation.cta_label, exact: true })
+        await expect(externalAction).toHaveCount(1)
+        await expect(externalAction).toHaveAttribute('href', modeDocument.shell.consultation.external_url!)
+      } else if (mode === 'native_disabled') {
+        const contactAction = page.locator('main > div').getByRole('link', { name: 'Contact', exact: true })
+        await expect(contactAction).toHaveCount(1)
+        await expect(contactAction).toHaveAttribute('href', '/contact')
+      }
       const binding = (await (await page.request.get(`${editor}/pages/${service.id}`)).json()).page
       expect(binding.product_id).toBe(products[0]!.id)
       expect(content(binding.blocks)).toEqual(content(service.blocks))
       const retained = await page.request.get(`/api/dashboard/bookings/booking/${browserBooking.request_id}?org=north-carolina-legal-services`)
       expect((await retained.json()).booking).toMatchObject({ status: 'confirmed', operationalBookingId: browserBooking.operational_booking_id })
     }
+    const pause = await page.request.patch(`${editor}/products/${products[0]!.id}`, { data: { active: false } })
+    expect(pause.status(), await pause.text()).toBe(200)
+    await page.goto(service.path)
+    await expect(page.locator('[data-media-gallery]')).toHaveCount(1)
+    await expect(page.getByRole('button', { name: 'Request appointment', exact: true })).toHaveCount(0)
+    const resume = await page.request.patch(`${editor}/products/${products[0]!.id}`, { data: { active: true } })
+    expect(resume.status(), await resume.text()).toBe(200)
     await bindViaMcp(null)
     await page.goto(service.path)
     await expect(page.locator('[data-media-gallery]')).toHaveCount(0)
@@ -463,7 +524,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     const cancelledBrowserDetails = await page.request.get(`/api/dashboard/bookings/booking/${browserBooking.request_id}?org=north-carolina-legal-services`)
     expect((await cancelledBrowserDetails.json()).booking.status).toBe('cancelled')
     await page.goto(`/dashboard/north-carolina-legal-services/bookings/booking/${browserBooking.request_id}`)
-    await expect(page.getByRole('link', { name: 'Team member North Carolina Legal Services', exact: true })).toHaveCount(0)
+    await expect(page.getByRole('link', { name: `Team member ${self.name}`, exact: true })).toHaveCount(0)
     await expect(page.getByRole('link', { name: 'Change consultation', exact: true })).toHaveCount(0)
     await page.getByRole('link', { name: 'Message guest', exact: true }).click()
     await expect(page).toHaveURL(`/dashboard/north-carolina-legal-services/messages/${browserBooking.request_id}`)
@@ -478,9 +539,10 @@ test('native online review uses canonical Products, holds capacity, and releases
     expect(onlinePrice).toMatchObject({ currency: 'USD', unit_amount: 0 })
     const paid = await page.request.patch(`${editor}/products/${products[0]!.id}`, { data: { variants: [{ id: onlineVariant.id, prices: [{ id: onlinePrice.id, unit_amount: 7500 }] }] } })
     expect(paid.status(), await paid.text()).toBe(200)
-    const blocked = await book(0)
-    expect(blocked.status(), await blocked.text()).toBe(409)
-    expect(await blocked.json()).toMatchObject({ code: 'payment_required' })
+    const blocked = await page.request.put(`${editor}/products/${products[0]!.id}/booking`, { data: { online_payment_required: true } })
+    expect(blocked.status(), await blocked.text()).toBe(503)
+    expect(await blocked.json()).toMatchObject({ data: { code: 'financial_action_required', dashboard_url: '/dashboard/north-carolina-legal-services/payments', missing: ['payments.entitlement', 'payments.configuration', 'payments.account'] } })
+    expect(await readConfig()).toMatchObject({ online_payment_required: false })
     const instantPolicy = await page.request.put(`${editor}/products/${products[0]!.id}/booking`, { data: { duration_minutes: 45, default_capacity: 1, confirmation_mode: 'instant', online_payment_required: false } })
     expect(instantPolicy.status(), await instantPolicy.text()).toBe(200)
     const instantResponse = await book(0)
@@ -515,19 +577,22 @@ test('native online review uses canonical Products, holds capacity, and releases
       if (deleted.status() === 200) continue
       // Canonical Product deletion preserves booked history, even when cancelled.
       expect(deleted.status(), await deleted.text()).toBe(409)
-      const archivedBooking = await cleanupRequest.put(`${editor}/products/${product.id}/booking`, { data: { duration_minutes: 45, default_capacity: 1, calendar_group: null } })
+      // No longer held online, it stops taking new times from the provider's hours.
+      const archivedBooking = await cleanupRequest.put(`${editor}/products/${product.id}/booking`, { data: { duration_minutes: 45, default_capacity: 1, held_online: false } })
       expect(archivedBooking.status(), await archivedBooking.text()).toBe(200)
-      const removedSchedule = await cleanupRequest.put(`${editor}/products/${product.id}/availability`, { data: { location_id: null, slots: [] } })
-      expect(removedSchedule.status(), await removedSchedule.text()).toBe(200)
       const deactivated = await cleanupRequest.patch(`${editor}/products/${product.id}`, { data: { active: false } })
       expect(deactivated.status(), await deactivated.text()).toBe(200)
       const archived = await cleanupRequest.get(`${editor}/products/${product.id}`)
       expect(archived.status()).toBe(200)
-      expect((await archived.json()).product).toMatchObject({ active: false, booking: { calendar_group: null } })
-      const availability = await cleanupRequest.get(`${editor}/products/${product.id}/availability?location_id=online`)
-      expect(availability.status()).toBe(200)
-      expect((await availability.json()).rules).toEqual([])
+      expect((await archived.json()).product).toMatchObject({ active: false, booking: { held_online: false } })
     }
+    const removedMember = await cleanupRequest.post('/api/auth/organization/remove-member', { headers: authRequestHeaders(baseURL!), data: { organizationId: org, memberIdOrEmail: self.id } })
+    expect(removedMember.status(), await removedMember.text()).toBe(200)
+    const remainingMembers = await cleanupRequest.get(`/api/organizations/${org}/members/scheduling`)
+    expect(remainingMembers.status(), await remainingMembers.text()).toBe(200)
+    expect((await remainingMembers.json()).members.some((member: { id: string }) => member.id === self.id)).toBe(false)
+    const removedScheduling = await cleanupRequest.get(`/api/organizations/${org}/members/${self.id}/scheduling`)
+    expect(removedScheduling.status(), await removedScheduling.text()).toBe(404)
     await cleanupRequest.dispose()
   }
 })

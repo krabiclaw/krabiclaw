@@ -1,5 +1,5 @@
 import { jsonResponse, readStrictBody } from '~/server/utils/api-response'
-import { requireLocationAccess, requireOrganizationAccess } from '~/server/utils/location-access'
+import { requireProductAccess } from '~/server/utils/location-access'
 import { replaceWeeklySchedule } from '~/server/utils/availability'
 import { defineHandler } from 'nitro'
 import { getRouterParam } from 'nitro/h3'
@@ -18,8 +18,8 @@ export default defineHandler(async (event) => {
   const productId = getRouterParam(event, 'productId')
   if (!organizationId || !productId) return jsonResponse({ error: 'Organization ID and product ID are required' }, { status: 400 })
   const body = await readStrictBody<{ location_id: unknown; slots: unknown }>(event, { location_id: 'unknown', slots: 'unknown' })
-  if (body.location_id !== null && (typeof body.location_id !== 'string' || !body.location_id)) return jsonResponse({ error: 'location_id must be a location ID or explicit null for online sessions' }, { status: 400 })
-  const { db, session, organization } = await (body.location_id === null ? requireOrganizationAccess(event, organizationId) : requireLocationAccess(event, organizationId, body.location_id))
+  if (typeof body.location_id !== 'string' || !body.location_id) return jsonResponse({ error: 'location_id must be a location ID; an online offering is booked in its provider\'s working hours' }, { status: 400 })
+  const { db, session, organization } = await requireProductAccess(event, organizationId, productId)
   const result = await replaceWeeklySchedule(db, {
     organizationId: organization.id, productId, locationId: body.location_id,
     slots: body.slots, actorId: session.user.id,

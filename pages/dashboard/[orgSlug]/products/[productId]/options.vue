@@ -32,7 +32,7 @@ const groups = computed<EditorNavigationGroup[]>(() => [
         summary: option.values.map(value => value.value).join(', ') || undefined,
         to: p.sectionPath(`options/${encodeURIComponent(option.id)}`),
       })),
-      ...(p.form.options.length < PRODUCT_LIMITS.options ? [{ id: 'add', label: 'Add a choice', action: {} }] : []),
+      ...(p.form.options.length < PRODUCT_LIMITS.options ? [{ id: 'add', icon: 'i-lucide-plus', label: 'Add a choice', action: {} }] : []),
     ],
   },
   ...(p.form.variants.length > 1

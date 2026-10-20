@@ -168,7 +168,8 @@ export function defaultLinksPage(input: { organizationId: string; name?: string 
   }
 }
 
-export async function getLinksPage(db: DbClient, organizationId: string, locale = 'en'): Promise<{ page: OrganizationLinksPage | null; items: OrganizationLinkItem[] }> {
+export async function getLinksPage(db: DbClient, organizationId: string, locale?: string): Promise<{ page: OrganizationLinksPage | null; items: OrganizationLinkItem[] }> {
+  locale ??= (await getPersistedSourceLocale(db, organizationId)).locale
   const pageRow = await queryFirst<ApiRecord>(db, `
     SELECT d.id, d.organization_id, d.path, d.title,
            d.created_at, d.updated_at, d.updated_by
@@ -192,7 +193,8 @@ export async function getLinksPage(db: DbClient, organizationId: string, locale 
   return { page: mapPage(pageRow), items: items.map(mapItem) }
 }
 
-export async function getPublicLinksPage(env: CloudflareEnv, db: DbClient, organizationId: string, locale = 'en'): Promise<PublicOrganizationLinksPayload | null> {
+export async function getPublicLinksPage(env: CloudflareEnv, db: DbClient, organizationId: string, locale?: string): Promise<PublicOrganizationLinksPayload | null> {
+  locale ??= (await getPersistedSourceLocale(db, organizationId)).locale
   const organization = await queryFirst<ApiRecord>(db, `
     SELECT o.id, o.name, o.brand_description,
            o.theme_id, o.vertical
@@ -294,7 +296,7 @@ export async function upsertLinksPage(db: DbClient, input: {
       changes: copy, blocks })
   } else {
     await createContentDocumentWithBlocks(db, { id: pageId, organizationId: input.organizationId,
-      kind: 'page', rowRole: 'root', locale: 'en', path: '/links', title,
+      kind: 'page', rowRole: 'root', locale: (await getPersistedSourceLocale(db, input.organizationId)).locale, path: '/links', title,
       updatedBy: input.updatedBy,
       metadata: { recipe: 'links', page_type: 'custom' } }, blocks)
   }

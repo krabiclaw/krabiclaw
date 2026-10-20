@@ -23,7 +23,7 @@ export default defineHandler(async (event) => {
   try {
     await deleteCustomDomain(env, db, domainId, organization.member_role as 'owner' | 'admin', session.user.id)
     await notifyDomainLifecycle(env, db, {
-      organizationId: organization.id, domain: domain.domain, status: 'deleted', title: `Domain deleted: ${domain.domain}`, message: `${domain.domain} has been removed from Krabiclaw.`, dashboardUrl: buildDashboardUrl({
+      organizationId: organization.id, domain: domain.domain, status: 'deleted', title: `Domain deleted: ${domain.domain}`, message: `${domain.domain} has been removed from KrabiClaw.`, dashboardUrl: buildDashboardUrl({
         env, organizationId: organization.id, organizationSlug: organization.slug }, 'organization.domains')
     })
     return jsonResponse({ success: true })

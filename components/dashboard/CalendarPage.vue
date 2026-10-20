@@ -8,45 +8,31 @@
   <DashboardIndexPanel
     :id="personalScope ? 'account-calendar' : 'org-calendar'"
     title="Calendar"
-    :navbar-ui="personalScope ? undefined : { title: 'sr-only', root: 'h-(--ui-header-height) shrink-0 flex items-center justify-between px-4 sm:px-6 gap-1.5', center: 'flex min-w-0 flex-1 items-center' }"
   >
-    <!-- Which location the calendar is: Airbnb names the listing in its header, and tapping it switches. An account has no branch to choose. -->
-    <template v-if="!personalScope" #center>
-      <UDropdownMenu :items="locationItems" :content="{ align: 'start' }" :ui="{ content: 'w-64' }">
-        <UButton
-          :label="chosenLocationTitle"
-          trailing-icon="i-lucide-chevron-down"
-          color="neutral"
-          variant="ghost"
-          class="max-w-[16rem] font-semibold"
-          :ui="{ label: 'truncate' }"
-          aria-label="Choose a location"
-        />
-      </UDropdownMenu>
-    </template>
     <template #right>
       <div class="flex items-center gap-1">
+        <UDropdownMenu v-if="nightlyHomes?.length" :items="nightlyHomes.map(home => ({ label: home.name, to: { path: level.path.value, query: { product_id: home.product_id } } }))" :content="{ align: 'end' }">
+          <UButton label="Nightly calendar" icon="i-lucide-calendar-days" color="neutral" variant="outline" />
+        </UDropdownMenu>
         <UButton
           v-if="!personalScope && chosenLocation && !selecting && view === 'month'"
           label="Select dates"
           color="neutral"
           variant="outline"
-          size="sm"
           class="mr-1"
           @click="startSelecting"
         />
         <AgendaFilters v-if="!personalScope" :kinds="availableKinds" :organization-id="organizationId" />
         <!-- List, Month, Year behind one icon, as Airbnb's view menu. -->
         <UDropdownMenu :items="viewItems" :content="{ align: 'end' }" :ui="{ content: 'w-44' }">
-          <UButton :icon="VIEWS[view].icon" color="neutral" variant="ghost" size="sm" square :aria-label="`View: ${VIEWS[view].label}`" />
+          <UButton :icon="VIEWS[view].icon" color="neutral" variant="soft" square :aria-label="`View: ${VIEWS[view].label}`" />
         </UDropdownMenu>
         <!-- The gear opens this location's reservation settings, as Airbnb's opens the listing's. -->
         <UButton
           v-if="!personalScope && chosenLocation"
           icon="i-lucide-settings"
           color="neutral"
-          variant="ghost"
-          size="sm"
+          variant="soft"
           square
           aria-label="Settings"
           :to="{ path: `${level.path.value}/settings`, query: route.query }"
@@ -54,7 +40,12 @@
       </div>
     </template>
 
-    <div class="mx-auto w-full max-w-5xl pb-28">
+    <div>
+      <UAlert v-if="nightlyError" class="mb-6" color="error" variant="soft" title="Nightly calendars could not be loaded" :description="nightlyError" />
+      <!-- Which location the calendar is, the same pill Catalog narrows by. An account has no branch to choose. -->
+      <div v-if="!personalScope" class="mb-8 flex">
+        <DashboardLocationFilter v-model="filters.locationId" :items="locationItems" />
+      </div>
       <UAlert
         v-if="locationError"
         class="mb-6"
@@ -109,7 +100,7 @@
                   :type="selecting ? 'button' : undefined"
                   :to="selecting ? undefined : dayTo(day.key)"
                   class="flex size-7 items-center justify-center rounded-full text-sm font-medium hover:bg-elevated"
-                  :class="[day.key === todayKey ? 'bg-primary text-inverted hover:bg-primary' : '', isUnavailableKey(day.key) ? 'text-muted line-through' : '']"
+                  :class="[day.key === todayKey ? 'bg-primary font-semibold text-inverted hover:bg-primary' : '', isUnavailableKey(day.key) ? 'text-muted line-through' : '']"
                   :aria-label="formatCalendarDate(day.key, 'en', { weekday: 'long', month: 'long', day: 'numeric' })"
                   @click="selecting ? extendSelection(day.key) : undefined"
                 >{{ day.number }}</component>
@@ -158,12 +149,12 @@
             <NuxtLink :to="dayTo(dayKey)" class="pt-1 text-center">
               <span
                 class="mx-auto flex size-7 items-center justify-center rounded-full text-sm font-medium"
-                :class="dayKey === todayKey ? 'bg-primary text-inverted' : isUnavailableKey(dayKey) ? 'text-muted line-through' : 'text-highlighted'"
+                :class="dayKey === todayKey ? 'bg-primary font-semibold text-inverted' : isUnavailableKey(dayKey) ? 'text-muted line-through' : 'text-highlighted'"
               >{{ Number(dayKey.slice(-2)) }}</span>
-              <span class="block text-[11px] text-muted">{{ formatCalendarDate(dayKey, 'en', { weekday: 'short' }) }}</span>
+              <span class="block text-xs text-muted">{{ formatCalendarDate(dayKey, 'en', { weekday: 'short' }) }}</span>
             </NuxtLink>
             <div class="min-w-0">
-              <AgendaRow v-for="item in itemsOn(dayKey)" :key="item.id" :item="item" :to="personalScope ? undefined : `${level.path.value}/${dayKey}/${item.kind}/${encodeURIComponent(item.id.slice(item.kind.length + 1))}`" />
+              <AgendaRow v-for="item in itemsOn(dayKey)" :key="item.id" :item="item" :to="personalScope ? undefined : `${level.path.value}/${dayKey}/${item.kind}/${encodeURIComponent(item.stayId ?? item.id.slice(item.kind.length + 1))}`" />
             </div>
           </div>
         </div>
@@ -211,7 +202,7 @@
     </div>
 
     <template v-if="selecting" #footer>
-      <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
+      <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="min-w-0">
           <p class="text-sm font-medium text-highlighted">{{ selectionLabel }}</p>
           <p class="text-xs text-muted">{{ selectionHint }}</p>
@@ -253,14 +244,14 @@ import { formatCalendarDate, formatTimestamp } from '~/utils/timezone'
 import { getErrorMessage } from '~/utils/errors'
 import type { AgendaItem, AgendaKind, AgendaLocation, AgendaPayload } from '~/server/utils/dashboard-agenda'
 
-useSeoMeta({ title: 'Calendar | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Calendar | KrabiClaw', robots: 'noindex, nofollow' })
 
 // One calendar for both readers. Personal scope reads the account agenda,
 // has no branch to filter, block or configure, and opens a day the same way.
-const props = defineProps<{ personalScope?: boolean }>()
+const props = defineProps<{ personalScope?: boolean; nightlyHomes?: Array<{ product_id: string; name: string }>; nightlyError?: string }>()
 
 // Named here rather than imported: the agenda module is the server's, and a value import would bundle it.
-const AGENDA_KINDS = ['reservation', 'booking', 'post'] as const satisfies readonly AgendaKind[]
+const AGENDA_KINDS = ['reservation', 'booking', 'post', 'stay'] as const satisfies readonly AgendaKind[]
 // Weeks start on Sunday, as Airbnb's do.
 const WEEKDAYS = [
   { short: 'S', rest: 'un', long: 'Sunday' }, { short: 'M', rest: 'on', long: 'Monday' }, { short: 'T', rest: 'ue', long: 'Tuesday' },
@@ -270,6 +261,7 @@ const route = useRoute()
 const router = useRouter()
 const dashboardApi = props.personalScope ? applicationFetch : useDashboardApi()
 const apiBase = props.personalScope ? '/api/account' : '/api/dashboard'
+const realtime = props.personalScope ? null : useDashboardInvalidations()
 const { filters, signature: filterSignature, query: filterQuery } = useAgendaFilters()
 
 const timeZone = getLocalTimeZone()
@@ -298,14 +290,7 @@ const viewItems = computed(() => [
     onSelect: () => { view.value = key },
   })),
 ])
-const locationItems = computed(() => [locationOptions.value.map(option => ({
-  label: option.label,
-  ...(option.imageUrl ? { avatar: { src: option.imageUrl } } : option.value !== AGENDA_FILTER_ALL ? { icon: 'i-lucide-map-pin' } : {}),
-  type: 'checkbox' as const,
-  checked: filters.locationId === option.value,
-  onSelect: () => { filters.locationId = option.value },
-}))])
-const chosenLocationTitle = computed(() => locations.value.find(location => location.id === filters.locationId)?.title ?? 'All locations')
+const locationItems = computed(() => locationOptions.value.map(option => ({ label: option.label, value: option.value, ...(option.imageUrl ? { avatar: { src: option.imageUrl } } : {}) })))
 
 type MonthBlock = { key: string; items: AgendaItem[] } & (
   | { status: 'loading' | 'ready' }
@@ -571,4 +556,10 @@ watch([view, monthKey, shownYear], () => {
 watch(filterSignature, () => {
   void resetMonths()
 })
+if (realtime) {
+  watch(realtime.event, event => {
+    if (event?.type === 'stay.changed' || event?.type === 'nights.changed') void resetMonths()
+  })
+  watch(realtime.connectionEpoch, epoch => { if (epoch > 0) void resetMonths() })
+}
 </script>

@@ -1,5 +1,6 @@
 <template>
   <div :class="{ 'platform-docs': section === 'docs' }" class="platform-layout platform-theme min-h-screen flex flex-col font-sans selection:bg-stone-900 selection:text-white" :data-font-preset="fontPreset">
+    <AnnouncementBanner />
     <PlatformHeader :section="section" />
     <main class="grow">
       <slot />
@@ -23,16 +24,16 @@ useHead({
   link: import.meta.dev ? [] : [{ rel: 'stylesheet', href: '/_nuxt/surfaces/platform.css' }],
 })
 
-// Krabiclaw's blog and docs pages name their collection; the header says which.
+// KrabiClaw's blog and docs pages name their collection; the header says which.
 const route = useRoute()
 const section = computed(() => route.meta.articleCollection === 'docs' ? 'docs' as const
   : route.meta.articleCollection === 'blog' ? 'blog' as const : 'platform' as const)
 
-// Krabiclaw's public pages have one theme: dark. It is rendered on the server
+// KrabiClaw's public pages have one theme: dark. It is rendered on the server
 // so a visitor never sees a light frame first.
 useHead(() => ({
   htmlAttrs: { class: section.value === 'docs' ? 'dark platform-documentation' : 'dark', 'data-theme': 'dark', style: 'color-scheme: dark' },
-  titleTemplate: (title) => title ? `${title} | Krabiclaw` : 'Krabiclaw | AI Website Platform'
+  titleTemplate: (title) => title ? `${title} | KrabiClaw` : 'KrabiClaw | AI Website Platform'
 }))
 </script>
 

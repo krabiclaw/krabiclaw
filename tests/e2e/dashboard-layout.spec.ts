@@ -1,18 +1,31 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type BrowserContext, type Page } from '@playwright/test'
 import { dismissPreviewToolbar, waitForNuxtHydration } from './helpers'
 import { authRequestHeaders, loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { isAccountActivityResponse } from '../../shared/account-activity'
 import { isBookingDetailsResponse } from '../../composables/useBookingDetails'
+import type { DashboardArticleCategory } from '../../composables/useArticleCategories'
+import type { NotificationPreferenceMap } from '../../composables/useNotificationPreferences'
+import type { SessionAvailability } from '../../server/utils/availability'
+import type { OrganizationMembersData } from '../../utils/organization-members'
+import { localNow, timezoneLabel } from '../../utils/timezone'
+import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
+import type { Collection, Product } from '../../server/types/products'
+import type { DashboardLocation } from '../../composables/useDashboardOrganization'
+import type { TodayFeedPayload } from '../../shared/dashboard-today'
 
 // The dashboard's pane topology is the nested route tree (DESIGN.md, Route
 // hierarchy). On a wide screen a level renders beside the parent its Back goes
 // to, an index of deterministic settings opens its first one, and a list of
-// records opens nothing. Below `lg` every level is one screen.
+// records opens nothing. Below `lg` an index is one screen and a leaf is a
+// modal drawer over its own index.
 
 const ORG = '/dashboard/ember-slice-demo'
 const WIDE = { width: 1440, height: 900 }
 const NARROW = { width: 900, height: 900 }
+const PHONE = { width: 390, height: 844 }
+// A short phone, so the demo owner's real Today cards overflow and the scroll end is measurable.
+const SHORT_PHONE = { width: 390, height: 600 }
 
 /** The panes on screen, left to right, by the id each DashboardIndexPanel/LeafPanel is given. */
 async function visiblePanes(page: Page): Promise<string[]> {
@@ -38,10 +51,11 @@ test.describe('dashboard pane hierarchy', () => {
     await loginAs(page.request, baseURL!)
   })
 
-  test('each Menu destination is a root at its own URL, and Website content nests under Website', async ({ page }) => {
+  test('each Menu destination is a root at its own URL, and Website content nests under Website', async ({ page }, testInfo) => {
     await page.setViewportSize(WIDE)
     await open(page, `${ORG}/menu`)
-    const segments = ['website/pages', 'website/blog', 'website/qa', 'website/brand', 'website/pages/links', 'website/posts', 'locations', 'team', 'products', 'products/menu', 'products/services']
+    await page.screenshot({ path: testInfo.outputPath('cms-menu-desktop.png') })
+    const segments = ['website/pages', 'website/blog', 'website/qa', 'website/brand', 'website/pages/links', 'website/posts', 'locations', 'team', 'products', 'products/menu']
     const resolved = await page.evaluate(({ org, segments }) => {
       const router = (document.querySelector('#__nuxt') as Element & {
         __vue_app__: { config: { globalProperties: { $router: { resolve: (path: string) => { path: string; matched: Array<{ path: string; meta: { tab?: unknown; back?: unknown } }> } } } } }
@@ -69,7 +83,6 @@ test.describe('dashboard pane hierarchy', () => {
       'team': { path: `${ORG}/team`, levels: [`${o}/team`], ...website },
       'products': { path: `${ORG}/products`, levels: [`${o}/products`], tab: 'catalog', back: null },
       'products/menu': { path: `${ORG}/products/menu`, levels: [`${o}/products`, `${o}/products/menu`], tab: 'catalog', back: null },
-      'products/services': { path: `${ORG}/products/services`, levels: [`${o}/products`, `${o}/products/services`], tab: 'catalog', back: null },
     })
   })
 
@@ -95,6 +108,582 @@ test.describe('dashboard pane hierarchy', () => {
     }
   })
 
+  test.describe('team and location assignment', () => {
+    test.describe.configure({ mode: 'default' })
+
+  test('Team changes member roles through Better Auth, and self-demotion refreshes context before leaving Team', async ({ page, baseURL, browser }, testInfo) => {
+    test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'Role writes use local D1 only.')
+    const organizationId = 'org-demo'
+    const release = await acquireTenantMutationLock(testInfo, organizationId)
+    try {
+    const before = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
+    expect(before.status(), await before.text()).toBe(200)
+    const members = (await before.json() as { members: Array<{ id: string; userId: string; role: string; user: { name: string } }> }).members
+    const member = members.find(item => item.userId === 'user-e2e-demo-role-owner')
+    expect(member).toBeDefined()
+    expect(member!.role).toBe('owner')
+    expect(members.some(item => item.id !== member!.id && item.role === 'owner'), 'self-demotion requires another existing owner').toBe(true)
+    const ownerContext = await browser.newContext({ baseURL, viewport: NARROW })
+    try {
+      await open(page, `${ORG}/team`)
+      const role = page.getByRole('combobox', { name: `Role for ${member!.user.name}`, exact: true })
+      await role.click()
+      await page.getByRole('option', { name: 'Admin', exact: true }).click()
+      await expect(role).toContainText('Admin')
+      const persisted = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
+      expect(persisted.status(), await persisted.text()).toBe(200)
+      expect((await persisted.json() as { members: Array<{ id: string; role: string }> }).members.find(item => item.id === member!.id)?.role).toBe('admin')
+      await page.reload()
+      await waitForNuxtHydration(page)
+      await expect(page.getByRole('combobox', { name: `Role for ${member!.user.name}`, exact: true })).toContainText('Admin')
+
+      const restoredOwner = await page.request.post('/api/auth/organization/update-member-role', { headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: member!.id, role: member!.role } })
+      expect(restoredOwner.status(), await restoredOwner.text()).toBe(200)
+      await loginAs(ownerContext.request, baseURL!, member!.userId)
+      const ownerPage = await ownerContext.newPage()
+      const pageErrors: string[] = []
+      ownerPage.on('pageerror', error => pageErrors.push(error.message))
+      await open(ownerPage, `${ORG}/team`)
+      const selfRole = ownerPage.getByRole('combobox', { name: `Role for ${member!.user.name}`, exact: true })
+      await expect(selfRole).toContainText('Owner')
+      const contextRefresh = ownerPage.waitForResponse(response => {
+        const url = new URL(response.url())
+        return url.pathname === '/api/dashboard/context' && url.searchParams.get('org') === 'ember-slice-demo'
+      })
+      await selfRole.click()
+      await ownerPage.getByRole('option', { name: 'Member', exact: true }).click()
+      const refreshed = await contextRefresh
+      expect(refreshed.status(), await refreshed.text()).toBe(200)
+      expect(await refreshed.json()).toMatchObject({ organization: { id: organizationId, role: 'member' } })
+      await expect(ownerPage).toHaveURL('/dashboard/account/profile/calendar/org-demo')
+      await expect(ownerPage.locator('#dashboard-panel-member-availability').getByRole('heading', { name: 'Your availability', exact: true })).toBeVisible()
+      await expect(ownerPage.locator('#dashboard-panel-member-availability').getByRole('link', { name: /^Hours/ })).toHaveAttribute('href', '/dashboard/account/profile/calendar/org-demo/hours')
+      await expect(ownerPage.locator('#dashboard-panel-organization-members')).toHaveCount(0)
+      const independentRead = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
+      expect(independentRead.status(), await independentRead.text()).toBe(200)
+      expect((await independentRead.json() as { members: Array<{ id: string; role: string }> }).members.find(item => item.id === member!.id)?.role).toBe('member')
+      expect(pageErrors).toEqual([])
+    } finally {
+      try {
+        const restored = await page.request.post('/api/auth/organization/update-member-role', { headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: member!.id, role: member!.role } })
+        expect(restored.status(), await restored.text()).toBe(200)
+        const read = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
+        expect(read.status()).toBe(200)
+        expect((await read.json() as { members: Array<{ id: string; role: string }> }).members.find(item => item.id === member!.id)?.role).toBe('owner')
+      } finally {
+        await ownerContext.close()
+      }
+    }
+    } finally {
+      await release()
+    }
+  })
+
+  test('Booking team forms create, rename and change native Better Auth membership', async ({ page, baseURL, playwright }, testInfo) => {
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Team writes require isolated local D1.')
+    const organizationId = 'org-demo'
+    const release = await acquireTenantMutationLock(testInfo, organizationId)
+    try {
+    const membersResponse = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
+    expect(membersResponse.status(), await membersResponse.text()).toBe(200)
+    const member = (await membersResponse.json() as { members: Array<{ userId: string; user: { name: string } }> }).members.find(row => row.userId === 'user-e2e-demo-role-owner')
+    expect(member).toBeDefined()
+    const readTeams = async () => {
+      const response = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
+      expect(response.status(), await response.text()).toBe(200)
+      return (await response.json() as OrganizationMembersData).teams
+    }
+    const name = `E2E Booking Team ${Date.now().toString(36)}`
+    let teamId: string | null = null
+    try {
+      await page.setViewportSize(PHONE)
+      await open(page, `${ORG}/team/groups/new/name`)
+      const leaf = page.locator('#dashboard-panel-booking-team-setting')
+      await expect(page.getByRole('dialog', { name: 'Team name', exact: true })).toBeVisible()
+      await expect(page.locator('#dashboard-panel-booking-team')).toBeVisible()
+      await expect(leaf.getByRole('button', { name: 'Create booking team', exact: true })).toBeDisabled()
+      await leaf.getByRole('textbox', { name: 'Team name', exact: true }).fill(name)
+      const created = page.waitForResponse(response => new URL(response.url()).pathname === '/api/auth/organization/create-team' && response.request().method() === 'POST')
+      await leaf.getByRole('button', { name: 'Create booking team', exact: true }).click()
+      const createdResponse = await created
+      expect(createdResponse.status(), await createdResponse.text()).toBe(200)
+      teamId = (await createdResponse.json() as { id: string }).id
+      await expect(page).toHaveURL(`${ORG}/team/groups/${teamId}`)
+      await expect(page.getByRole('dialog')).toHaveCount(0)
+      await expect(page.locator('#dashboard-panel-booking-team')).toContainText(name)
+      const original = (await readTeams()).find(row => row.id === teamId)
+      expect(original).toMatchObject({ id: teamId, name, organizationId })
+      expect(original!.members.map(row => row.userId)).not.toContain(member!.userId)
+
+      await open(page, `${ORG}/team/groups/${teamId}/name`)
+      await expect(page.getByRole('dialog', { name: 'Team name', exact: true })).toBeVisible()
+      await expect(page.locator('#dashboard-panel-booking-team')).toContainText(name)
+      const save = leaf.getByRole('button', { name: 'Save', exact: true })
+      await expect(save).toBeDisabled()
+      const renamed = `${name} renamed`
+      await leaf.getByRole('textbox', { name: 'Team name', exact: true }).fill(renamed)
+      await expect(save).toBeEnabled()
+      for (const viewport of [WIDE, PHONE]) {
+        await page.setViewportSize(viewport)
+        await expect(leaf.getByRole('textbox', { name: 'Team name', exact: true })).toHaveValue(renamed)
+        await expect(save).toBeEnabled()
+      }
+      await save.click()
+      await expect(page).toHaveURL(`${ORG}/team/groups/${teamId}`)
+      await expect(page.getByRole('dialog')).toHaveCount(0)
+      await expect(page.locator('#dashboard-panel-booking-team')).toContainText(renamed)
+      expect((await readTeams()).find(row => row.id === teamId)?.name).toBe(renamed)
+
+      await open(page, `${ORG}/team/groups/${teamId}/members`)
+      const included = leaf.getByRole('switch', { name: member!.user.name, exact: true })
+      await expect(included).not.toBeChecked()
+      await expect(save).toBeDisabled()
+      await included.click()
+      await expect(save).toBeEnabled()
+      await save.click()
+      await expect(page).toHaveURL(`${ORG}/team/groups/${teamId}`)
+      expect((await readTeams()).find(row => row.id === teamId)?.members.map(row => row.userId).sort()).toEqual([...original!.members.map(row => row.userId), member!.userId].sort())
+      const memberReader = await playwright.request.newContext({ baseURL })
+      try {
+        await loginAs(memberReader, baseURL!, member!.userId)
+        const nativeMembers = await memberReader.get('/api/auth/organization/list-team-members', { params: { teamId } })
+        expect(nativeMembers.status(), await nativeMembers.text()).toBe(200)
+        expect((await nativeMembers.json() as OrganizationMembersData['teams'][number]['members']).map(row => row.userId).sort()).toEqual([...original!.members.map(row => row.userId), member!.userId].sort())
+      } finally {
+        await memberReader.dispose()
+      }
+
+      await open(page, `${ORG}/team/groups/${teamId}/members`)
+      await expect(included).toBeChecked()
+      await expect(save).toBeDisabled()
+      await included.click()
+      await save.click()
+      await expect(page).toHaveURL(`${ORG}/team/groups/${teamId}`)
+      expect((await readTeams()).find(row => row.id === teamId)?.members.map(row => row.userId).sort()).toEqual(original!.members.map(row => row.userId).sort())
+    } finally {
+      if (teamId) {
+        const removed = await page.request.post('/api/auth/organization/remove-team', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId } })
+        expect(removed.status(), await removed.text()).toBe(200)
+        expect((await readTeams()).map(row => row.id)).not.toContain(teamId)
+      }
+    }
+    } finally {
+      await release()
+    }
+  })
+
+  test('location assignments survive reload and let assigned staff discover and edit their branch', async ({ page, baseURL, browser }, testInfo) => {
+    test.setTimeout(120_000)
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Location assignments and role changes use disposable local data only.')
+    const organizationId = 'org-demo'
+    const org = 'ember-slice-demo'
+    const locationId = 'loc-demo'
+    const endpoint = `/api/dashboard/locations/${locationId}`
+    const independentEndpoint = `/api/organizations/${organizationId}/locations/${locationId}`
+    const release = await acquireTenantMutationLock(testInfo, organizationId)
+    let memberContext: BrowserContext | null = null
+    type Location = { id: string; slug: string; title: string; email: string | null; assigned_member_id: string | null; assigned_team_id: string | null }
+    type Member = { id: string; userId: string; role: string; user: { name: string } }
+    let original: Location | null = null
+    let actor: Member | undefined
+    let teamId: string | null = null
+    let roleChanged = false
+    const failures: unknown[] = []
+    const readLocation = async () => {
+      const response = await page.request.get(independentEndpoint)
+      expect(response.status(), await response.text()).toBe(200)
+      return (await response.json() as { location: Location }).location
+    }
+    try {
+      memberContext = await browser.newContext({ baseURL, viewport: PHONE })
+      original = await readLocation()
+      expect(original).toMatchObject({ id: locationId, assigned_member_id: null, assigned_team_id: null })
+      const otherTenant = await page.request.get('/api/dashboard/locations/loc-pottery-house', { params: { org: 'pottery-house' } })
+      expect(otherTenant.status(), await otherTenant.text()).toBe(200)
+      expect(await otherTenant.json()).toMatchObject({ location: { id: 'loc-pottery-house', organization_id: 'org-user-pottery-house' } })
+      const memberRead = await page.request.get('/api/auth/organization/list-members', { params: { organizationId } })
+      expect(memberRead.status(), await memberRead.text()).toBe(200)
+      actor = (await memberRead.json() as { members: Member[] }).members.find(member => member.userId === 'user-e2e-demo-role-owner')
+      expect(actor, 'The canonical role actor already belongs to the demo tenant').toBeDefined()
+      if (!actor) throw new Error('The canonical demo role actor is missing')
+      expect(actor.role).toBe('owner')
+      const changed = await page.request.post('/api/auth/organization/update-member-role', {
+        headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor.id, role: 'member' },
+      })
+      expect(changed.status(), await changed.text()).toBe(200)
+      roleChanged = true
+      await loginAs(memberContext.request, baseURL!, actor.userId)
+      const beforeList = await memberContext.request.get('/api/dashboard/locations', { params: { org, organization: 'true' } })
+      expect(beforeList.status(), await beforeList.text()).toBe(200)
+      expect((await beforeList.json() as { locations: DashboardLocation[] }).locations.map(location => location.id)).not.toContain(locationId)
+      const unassigned = await memberContext.request.get(endpoint, { params: { org } })
+      expect(unassigned.status(), await unassigned.text()).toBe(404)
+
+      const assignmentPath = `${ORG}/locations/${original.slug}/settings/assignment`
+      await page.setViewportSize(WIDE)
+      await open(page, assignmentPath)
+      const leaf = page.locator('#dashboard-panel-location-assignment')
+      await expect(leaf.getByRole('radio', { name: 'Administrators', exact: true })).toBeChecked()
+      await expect(leaf).toContainText('No staff are assigned. Owners and administrators manage this location.')
+      const memberChoice = leaf.getByRole('radio', { name: actor.user.name, exact: true })
+      await memberChoice.click()
+      const saved = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
+      await leaf.getByRole('button', { name: 'Save', exact: true }).click()
+      expect((await saved).status()).toBe(200)
+      await expect(leaf.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+      await page.reload()
+      await waitForNuxtHydration(page)
+      await expect(memberChoice).toBeChecked()
+      await expect(page.locator('#dashboard-panel-location-settings').getByRole('link', { name: /Team assignment/ })).toContainText(actor.user.name)
+      expect(await readLocation()).toMatchObject({ assigned_member_id: actor.id, assigned_team_id: null })
+
+      const memberPage = await memberContext.newPage()
+      await dismissPreviewToolbar(memberPage)
+      await open(memberPage, `${ORG}/locations`)
+      const branch = memberPage.getByTestId(`selector-item-${locationId}`)
+      await expect(branch).toBeVisible()
+      await expect(branch).toHaveAttribute('href', `${ORG}/locations/${original.slug}`)
+      await branch.click()
+      await expect(memberPage.locator('#dashboard-panel-location-index').getByRole('heading', { name: original.title, exact: true })).toBeVisible()
+      await open(memberPage, `${ORG}/locations/${original.slug}/contact`)
+      const contact = memberPage.locator('#dashboard-panel-location-contact')
+      const email = `location-assignment-${Date.now()}@playwright.example`
+      await contact.getByRole('textbox', { name: 'Email', exact: true }).fill(email)
+      const edited = memberPage.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
+      await contact.getByRole('button', { name: 'Save', exact: true }).click()
+      expect((await edited).status()).toBe(200)
+      await expect(contact.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+      await memberPage.reload()
+      await waitForNuxtHydration(memberPage)
+      await expect(contact.getByRole('textbox', { name: 'Email', exact: true })).toHaveValue(email)
+      expect(await readLocation()).toMatchObject({ email, assigned_member_id: actor.id, assigned_team_id: null })
+      const forbidden = await memberContext.request.patch(endpoint, { params: { org }, data: { assigned_member_id: null, assigned_team_id: null } })
+      expect(forbidden.status(), await forbidden.text()).toBe(403)
+      expect(await readLocation()).toMatchObject({ email, assigned_member_id: actor.id, assigned_team_id: null })
+      const wrongTenant = await memberContext.request.get(`/api/organizations/${organizationId}/locations/loc-pottery-house`)
+      expect(wrongTenant.status(), await wrongTenant.text()).toBe(404)
+
+      const name = `E2E Location Team ${Date.now().toString(36)}`
+      const created = await page.request.post('/api/auth/organization/create-team', { headers: authRequestHeaders(baseURL!), data: { organizationId, name } })
+      expect(created.status(), await created.text()).toBe(200)
+      teamId = (await created.json() as { id: string }).id
+      const included = await page.request.post('/api/auth/organization/add-team-member', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId, userId: actor.userId } })
+      expect(included.status(), await included.text()).toBe(200)
+      const nativeMembers = await memberContext.request.get('/api/auth/organization/list-team-members', { params: { teamId } })
+      expect(nativeMembers.status(), await nativeMembers.text()).toBe(200)
+      expect((await nativeMembers.json() as Array<{ userId: string }>).map(member => member.userId)).toContain(actor.userId)
+      await page.reload()
+      await waitForNuxtHydration(page)
+      const teamChoice = leaf.getByRole('radio', { name: `Team: ${name}`, exact: true })
+      await teamChoice.click()
+      const teamSaved = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
+      await leaf.getByRole('button', { name: 'Save', exact: true }).click()
+      expect((await teamSaved).status()).toBe(200)
+      await expect(leaf.getByRole('button', { name: 'Save', exact: true })).toBeDisabled()
+      await page.reload()
+      await waitForNuxtHydration(page)
+      await expect(teamChoice).toBeChecked()
+      expect(await readLocation()).toMatchObject({ assigned_member_id: null, assigned_team_id: teamId })
+      await open(memberPage, `${ORG}/locations`)
+      await expect(branch).toBeVisible()
+      await branch.click()
+      await expect(memberPage.locator('#dashboard-panel-location-index').getByRole('heading', { name: original.title, exact: true })).toBeVisible()
+      const teamForbidden = await memberContext.request.patch(endpoint, { params: { org }, data: { assigned_member_id: actor.id, assigned_team_id: null } })
+      expect(teamForbidden.status(), await teamForbidden.text()).toBe(403)
+      expect(await readLocation()).toMatchObject({ assigned_member_id: null, assigned_team_id: teamId })
+      await memberPage.screenshot({ path: testInfo.outputPath('assigned-location-mobile.png'), fullPage: true })
+    } catch (error) {
+      failures.push(error)
+    } finally {
+      try {
+        if (original) {
+          const restored = await page.request.patch(endpoint, { params: { org }, data: {
+            email: original.email, assigned_member_id: original.assigned_member_id, assigned_team_id: original.assigned_team_id,
+          } })
+          expect(restored.status(), await restored.text()).toBe(200)
+          expect(await readLocation()).toMatchObject({ email: original.email, assigned_member_id: original.assigned_member_id, assigned_team_id: original.assigned_team_id })
+          if (roleChanged && memberContext) {
+            const restoredAccess = await memberContext.request.get(endpoint, { params: { org } })
+            expect(restoredAccess.status(), await restoredAccess.text()).toBe(404)
+          }
+        }
+      } catch (error) { failures.push(error) }
+      try {
+        if (teamId) {
+          const removed = await page.request.post('/api/auth/organization/remove-team', { headers: authRequestHeaders(baseURL!), data: { organizationId, teamId } })
+          expect(removed.status(), await removed.text()).toBe(200)
+          const teams = await page.request.get('/api/auth/organization/list-teams', { params: { organizationId } })
+          expect(teams.status(), await teams.text()).toBe(200)
+          expect((await teams.json() as Array<{ id: string }>).map(team => team.id)).not.toContain(teamId)
+        }
+      } catch (error) { failures.push(error) }
+      try {
+        if (roleChanged && actor) {
+          const restored = await page.request.post('/api/auth/organization/update-member-role', { headers: authRequestHeaders(baseURL!), data: { organizationId, memberId: actor.id, role: actor.role } })
+          expect(restored.status(), await restored.text()).toBe(200)
+          const members = await page.request.get('/api/dashboard/members', { params: { org } })
+          expect(members.status(), await members.text()).toBe(200)
+          expect((await members.json() as OrganizationMembersData).members.find(member => member.id === actor!.id)?.role).toBe(actor.role)
+        }
+      } catch (error) { failures.push(error) }
+      try {
+        await memberContext?.close()
+      } catch (error) { failures.push(error) }
+      try {
+        await release()
+      } catch (error) { failures.push(error) }
+    }
+    if (failures.length) throw new AggregateError(failures, 'Location assignment workflow or restoration failed')
+  })
+  })
+
+  test('Notification form saves each channel and reloads the account preference', async ({ page, baseURL }) => {
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Preference writes require isolated local D1.')
+    await page.context().clearCookies()
+    await loginAs(page.request, baseURL!, 'user-e2e-kikuzuki-owner')
+    const session = await page.request.get('/api/auth/get-session')
+    expect(session.status(), await session.text()).toBe(200)
+    expect((await session.json()).user.phoneNumberVerified).toBe(true)
+    const read = async () => {
+      const response = await page.request.get('/api/user/notification-preferences')
+      expect(response.status(), await response.text()).toBe(200)
+      return (await response.json() as { preferences: NotificationPreferenceMap }).preferences
+    }
+    const before = await read()
+    const category = 'reviews'
+    const wanted = { email: !before[category].email, whatsapp: !before[category].whatsapp, push: !before[category].push }
+    const path = `/dashboard/account/profile/notifications/${category}`
+    const leaf = page.locator('#dashboard-panel-account-notification-category')
+    const save = leaf.getByRole('button', { name: 'Save', exact: true })
+    try {
+      await page.setViewportSize(NARROW)
+      await open(page, path)
+      await expect(save).toBeDisabled()
+      await leaf.getByRole('switch', { name: 'Email', exact: true }).click()
+      await expect(save).toBeEnabled()
+      const emailSaved = page.waitForResponse(response => new URL(response.url()).pathname === '/api/user/notification-preferences' && response.request().method() === 'PATCH')
+      await save.click()
+      const emailResponse = await emailSaved
+      expect(emailResponse.status(), await emailResponse.text()).toBe(200)
+      expect(await read()).toEqual({ ...before, [category]: { ...before[category], email: wanted.email } })
+      await expect(save).toBeDisabled()
+
+      await page.reload()
+      await waitForNuxtHydration(page)
+      await expect(leaf.getByRole('switch', { name: 'Email', exact: true })).toHaveAttribute('aria-checked', String(wanted.email))
+      await expect(save).toBeDisabled()
+      await leaf.getByRole('switch', { name: 'WhatsApp', exact: true }).click()
+      await expect(save).toBeEnabled()
+      const whatsappSaved = page.waitForResponse(response => new URL(response.url()).pathname === '/api/user/notification-preferences' && response.request().method() === 'PATCH')
+      await save.click()
+      const whatsappResponse = await whatsappSaved
+      expect(whatsappResponse.status(), await whatsappResponse.text()).toBe(200)
+      expect(await read()).toEqual({ ...before, [category]: { ...before[category], email: wanted.email, whatsapp: wanted.whatsapp } })
+      await expect(save).toBeDisabled()
+
+      await page.reload()
+      await waitForNuxtHydration(page)
+      await expect(leaf.getByRole('switch', { name: 'WhatsApp', exact: true })).toHaveAttribute('aria-checked', String(wanted.whatsapp))
+      await leaf.getByRole('switch', { name: 'Push notifications', exact: true }).click()
+      await expect(save).toBeEnabled()
+      const pushSaved = page.waitForResponse(response => new URL(response.url()).pathname === '/api/user/notification-preferences' && response.request().method() === 'PATCH')
+      await save.click()
+      const pushResponse = await pushSaved
+      expect(pushResponse.status(), await pushResponse.text()).toBe(200)
+      expect(await read()).toEqual({ ...before, [category]: wanted })
+      await expect(save).toBeDisabled()
+    } finally {
+      const restored = await page.request.patch('/api/user/notification-preferences', { data: { category, ...before[category] } })
+      expect(restored.status(), await restored.text()).toBe(200)
+      expect(await read()).toEqual(before)
+      await open(page, path)
+      await expect(leaf.getByRole('switch', { name: 'Email', exact: true })).toHaveAttribute('aria-checked', String(before[category].email))
+      await expect(leaf.getByRole('switch', { name: 'WhatsApp', exact: true })).toHaveAttribute('aria-checked', String(before[category].whatsapp))
+      await expect(leaf.getByRole('switch', { name: 'Push notifications', exact: true })).toHaveAttribute('aria-checked', String(before[category].push))
+      await expect(save).toBeDisabled()
+    }
+  })
+
+  test('Category form retries a failed write and persists each named field through MCP', async ({ page, baseURL }) => {
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Category writes require isolated local D1.')
+    const read = async () => {
+      const response = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'list_article_categories', args: { organization_id: 'org-demo', collection: 'blog' } })
+      expect(response.status(), await response.text()).toBe(200)
+      return mcpData<{ categories: DashboardArticleCategory[] }>(await response.json()).categories
+    }
+    const before = await read()
+    const category = before.find(row => row.id === 'ad2dd862-18ec-46f5-a601-d653fe223542')
+    const parent = before.find(row => row.id === 'acat_9b2495848c41ed0acff635bb')
+    expect(category).toBeDefined()
+    expect(parent).toBeDefined()
+    expect(category!.parent_id).toBeNull()
+    expect(parent!.parent_id).toBeNull()
+    expect(category!.child_count).toBe(0)
+    expect(category!.sort_order).toBe(Math.max(...before.filter(row => row.parent_id === null).map(row => row.sort_order)))
+    const endpoint = `/api/editor/organizations/org-demo/blog/categories/${category!.id}`
+    const path = `${ORG}/website/blog/categories/${category!.id}`
+    const leaf = page.locator('#dashboard-panel-organization-blog-category')
+    const save = leaf.getByRole('button', { name: 'Save', exact: true })
+    const name = `E2E Category ${Date.now().toString(36)}`
+    const description = 'A category description saved through its native form.'
+    const interceptCategory = (url: URL) => url.pathname === endpoint
+    let failedWrites = 0
+    try {
+      await page.setViewportSize(NARROW)
+      await open(page, path)
+      await expect(save).toBeDisabled()
+      await leaf.getByLabel('Name', { exact: true }).fill(name)
+      await expect(save).toBeEnabled()
+      await page.route(interceptCategory, async route => {
+        if (route.request().method() !== 'PATCH') return await route.continue()
+        failedWrites += 1
+        await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'Category write failed for retry verification' }) })
+      })
+      const failed = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
+      await save.click()
+      expect((await failed).status()).toBe(503)
+      await expect(leaf.getByText('Category write failed for retry verification', { exact: true })).toBeVisible()
+      expect((await read()).find(row => row.id === category!.id)?.name).toBe(category!.name)
+      await expect(save).toBeEnabled()
+      expect(failedWrites).toBe(1)
+      await page.unroute(interceptCategory)
+      const retry = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
+      await save.click()
+      const retryResponse = await retry
+      expect(retryResponse.status(), await retryResponse.text()).toBe(200)
+      expect((await read()).find(row => row.id === category!.id)).toMatchObject({ name, slug: category!.slug, description: category!.description, parent_id: category!.parent_id })
+      await expect(save).toBeDisabled()
+
+      await leaf.getByRole('textbox', { name: 'Description', exact: true }).fill(description)
+      await expect(save).toBeEnabled()
+      const descriptionSaved = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
+      await save.click()
+      const descriptionResponse = await descriptionSaved
+      expect(descriptionResponse.status(), await descriptionResponse.text()).toBe(200)
+      expect((await read()).find(row => row.id === category!.id)).toMatchObject({ name, description, parent_id: null })
+      await expect(save).toBeDisabled()
+
+      await leaf.getByRole('combobox', { name: 'Parent', exact: true }).click()
+      await page.getByRole('option', { name: parent!.name, exact: true }).click()
+      await expect(save).toBeEnabled()
+      const parentSaved = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
+      await save.click()
+      const parentResponse = await parentSaved
+      expect(parentResponse.status(), await parentResponse.text()).toBe(200)
+      expect((await read()).find(row => row.id === category!.id)).toMatchObject({ name, description, parent_id: parent!.id, slug: category!.slug })
+      await page.reload()
+      await waitForNuxtHydration(page)
+      await expect(leaf.getByLabel('Name', { exact: true })).toHaveValue(name)
+      await expect(leaf.getByRole('textbox', { name: 'Description', exact: true })).toHaveValue(description)
+      await expect(leaf.getByRole('combobox', { name: 'Parent', exact: true })).toContainText(parent!.name)
+      await expect(save).toBeDisabled()
+
+      await leaf.getByRole('combobox', { name: 'Parent', exact: true }).click()
+      await page.getByRole('option', { name: 'Top level', exact: true }).click()
+      await expect(save).toBeEnabled()
+      const topLevelSaved = page.waitForResponse(response => new URL(response.url()).pathname === endpoint && response.request().method() === 'PATCH')
+      await save.click()
+      const topLevelResponse = await topLevelSaved
+      expect(topLevelResponse.status(), await topLevelResponse.text()).toBe(200)
+      expect(topLevelResponse.request().postDataJSON().parent_id).toBeNull()
+      expect((await read()).find(row => row.id === category!.id)).toMatchObject({ name, description, parent_id: null, sort_order: category!.sort_order })
+      await expect(leaf.getByRole('combobox', { name: 'Parent', exact: true })).toContainText('Top level')
+      await expect(save).toBeDisabled()
+    } finally {
+      await page.unroute(interceptCategory)
+      const restored = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'update_article_category', args: { organization_id: 'org-demo', category_id: category!.id, name: category!.name, description: category!.description, parent_id: category!.parent_id } })
+      expect(restored.status(), await restored.text()).toBe(200)
+      expect(mcpData<{ category: DashboardArticleCategory }>(await restored.json()).category).toMatchObject(category!)
+      expect((await read()).find(row => row.id === category!.id)).toEqual(category)
+      await open(page, path)
+      await expect(leaf.getByLabel('Name', { exact: true })).toHaveValue(category!.name)
+      await expect(save).toBeDisabled()
+    }
+  })
+
+  test('Dated session form saves times, capacity and status and restores the occurrence', async ({ page, baseURL }, testInfo) => {
+    test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Session writes require isolated local D1.')
+    const organizationId = 'org-user-pottery-house'
+    const release = await acquireTenantMutationLock(testInfo, organizationId)
+    try {
+      await page.context().clearCookies()
+      await loginAs(page.request, baseURL!, 'user-e2e-pottery-owner')
+      const productId = 'exp-ph-wheel'
+      const endpoint = `/api/editor/organizations/${organizationId}/products/${productId}/sessions`
+      const from = new Date(Date.now() + 25 * 86_400_000).toISOString()
+      const to = new Date(Date.now() + 40 * 86_400_000).toISOString()
+      const list = async () => {
+        const response = await page.request.get(endpoint, { params: { from, to } })
+        expect(response.status(), await response.text()).toBe(200)
+        return (await response.json() as { sessions: SessionAvailability[] }).sessions
+      }
+      const original = (await list()).find(row => row.location_id === 'loc-pottery-house' && row.status === 'scheduled' && row.claimed === 0 && localNow(row.timezone, new Date(row.starts_at)).time === '11:00')
+      expect(original, 'the seeded product has an unclaimed daytime occurrence in its own location').toBeDefined()
+      expect(original!.capacity).toBe(8)
+      const localInput = (instant: string) => {
+        const value = localNow(original!.timezone, new Date(instant))
+        return `${value.date}T${value.time}`
+      }
+      const startsAt = new Date(Date.parse(original!.starts_at) + 15 * 60_000).toISOString()
+      const endsAt = new Date(Date.parse(original!.ends_at) + 15 * 60_000).toISOString()
+      const sessionListPath = `/dashboard/org-user-pottery-house/products/${productId}/booking/sessions?location_id=${original!.location_id}`
+      const path = `/dashboard/org-user-pottery-house/products/${productId}/booking/sessions/${original!.id}?location_id=${original!.location_id}`
+      const leaf = page.locator('#dashboard-panel-product-session')
+      const save = leaf.getByRole('button', { name: 'Save', exact: true })
+      const commit = async () => {
+        await expect(save).toBeEnabled()
+        const saved = page.waitForResponse(response => new URL(response.url()).pathname === `${endpoint}/${original!.id}` && response.request().method() === 'PATCH')
+        await save.click()
+        const response = await saved
+        expect(response.status(), await response.text()).toBe(200)
+        await expect(page).toHaveURL(sessionListPath)
+      }
+      try {
+        await page.setViewportSize(NARROW)
+        await open(page, path)
+        await expect(save).toBeDisabled()
+        await leaf.getByLabel('Starts', { exact: true }).fill(localInput(startsAt))
+        await commit()
+        expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: original!.ends_at, capacity: 8, status: 'scheduled' })
+
+        await open(page, path)
+        await expect(save).toBeDisabled()
+        await leaf.getByLabel('Ends', { exact: true }).fill(localInput(endsAt))
+        await commit()
+        expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: endsAt, capacity: 8, status: 'scheduled' })
+
+        await open(page, path)
+        await expect(save).toBeDisabled()
+        await leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true }).fill('9')
+        await leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true }).press('Tab')
+        await commit()
+        expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: endsAt, capacity: 9, status: 'scheduled' })
+
+        await open(page, path)
+        await expect(save).toBeDisabled()
+        await leaf.getByText('Cancelled', { exact: true }).click()
+        await expect(leaf.getByRole('radio', { name: 'cancelled', exact: true })).toBeChecked()
+        await commit()
+        expect((await list()).find(row => row.id === original!.id)).toMatchObject({ starts_at: startsAt, ends_at: endsAt, capacity: 9, status: 'cancelled' })
+      } finally {
+        const current = (await list()).find(row => row.id === original!.id)
+        expect(current).toBeDefined()
+        const restored = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'update_product_session', args: { organization_id: organizationId, product_id: productId, session_id: original!.id, expected_updated_at: current!.updated_at, starts_at: original!.starts_at, ends_at: original!.ends_at, capacity: original!.capacity, status: original!.status } })
+        expect(restored.status(), await restored.text()).toBe(200)
+        expect(mcpData<{ session: SessionAvailability }>(await restored.json()).session).toMatchObject({ id: original!.id, starts_at: original!.starts_at, ends_at: original!.ends_at, capacity: original!.capacity, status: original!.status })
+        expect((await list()).find(row => row.id === original!.id)).toMatchObject({ id: original!.id, starts_at: original!.starts_at, ends_at: original!.ends_at, capacity: original!.capacity, status: original!.status })
+        await open(page, path)
+        await expect(leaf.getByLabel('Starts', { exact: true })).toHaveValue(localInput(original!.starts_at))
+        await expect(leaf.getByLabel('Ends', { exact: true })).toHaveValue(localInput(original!.ends_at))
+        await expect(leaf.getByRole('spinbutton', { name: 'Guest limit', exact: true })).toHaveValue('8')
+        await expect(leaf.getByRole('radio', { name: 'scheduled', exact: true })).toBeChecked()
+        await expect(save).toBeDisabled()
+      }
+    } finally {
+      await release()
+    }
+  })
+
   test('Website opens Pages, and Catalog is a root that selects nothing', async ({ page }) => {
     await page.setViewportSize(WIDE)
     await open(page, `${ORG}/website`)
@@ -103,6 +692,314 @@ test.describe('dashboard pane hierarchy', () => {
     await open(page, `${ORG}/products`)
     await expectPanes(page, ['catalog'])
     await expect(page.locator('#dashboard-panel-catalog [data-testid="dashboard-navbar-back"]')).toHaveCount(0)
+  })
+
+  test('Catalog opens one menu per location and every other offering as cards, filtered by kind pills', async ({ page }, testInfo) => {
+    const [productResponse, collectionResponse, locationResponse] = await Promise.all([
+      page.request.get('/api/editor/organizations/org-demo/products'),
+      page.request.get('/api/editor/organizations/org-demo/collections'),
+      page.request.get('/api/dashboard/locations', { params: { org: 'ember-slice-demo', organization: 'true', status: 'all' } }),
+    ])
+    for (const response of [productResponse, collectionResponse, locationResponse]) expect(response.status(), await response.text()).toBe(200)
+    const { products } = await productResponse.json() as { products: Product[] }
+    const { collections } = await collectionResponse.json() as { collections: Collection[] }
+    const { locations } = await locationResponse.json() as { locations: DashboardLocation[] }
+    expect(locations.length, 'The demo has more than one location, so it has more than one menu').toBeGreaterThan(1)
+    const section = collections.find(collection => collection.location_id && products.some(product => product.kind === 'dish' && product.collections.some(membership => membership.collection_id === collection.id)))
+    expect(section, 'The demo has a location-owned menu section containing dishes').toBeDefined()
+    const menuSections = collections.filter(collection => {
+      const members = products.filter(product => product.collections.some(membership => membership.collection_id === collection.id))
+      return !members.length || members.some(product => product.kind === 'dish')
+    })
+
+    await page.setViewportSize(WIDE)
+    await open(page, `${ORG}/products`)
+    const catalog = page.locator('#dashboard-panel-catalog')
+    await expect(catalog.getByTestId('catalog-kind-all')).toHaveAttribute('aria-pressed', 'true')
+    await expect(catalog.getByRole('combobox', { name: 'Location', exact: true })).toHaveCount(0)
+    const grid = catalog.getByTestId('catalog-grid')
+
+    for (const location of locations) {
+      const card = grid.getByTestId(`selector-item-menu-${location.id}`)
+      const count = menuSections.filter(collection => collection.location_id === null || collection.location_id === location.id).length
+      await expect(card).toHaveAttribute('href', `${ORG}/products/menu?location_id=${encodeURIComponent(location.id)}`)
+      await expect(card.getByRole('heading', { level: 2 })).toHaveText(location.title)
+      await expect(card).toContainText(`${count} ${count === 1 ? 'section' : 'sections'}`)
+    }
+    const offerings = products.filter(product => product.kind !== 'dish')
+    await expect(grid.locator('a[data-testid^="selector-item-"]')).toHaveCount(locations.length + offerings.length)
+    for (const product of offerings) {
+      const card = grid.getByTestId(`selector-item-${product.id}`)
+      await expect(card).toHaveAttribute('href', `${ORG}/products/${product.id}`)
+      await expect(card.getByRole('heading', { level: 2 })).toHaveText(product.name)
+      for (const binding of product.locations) {
+        const location = locations.find(row => row.id === binding.location_id)
+        expect(location, 'An offering’s location must exist in its tenant').toBeDefined()
+        await expect(card).toContainText(location!.title)
+      }
+      if (product.booking?.held_online) await expect(card).toContainText('Online')
+      else if (!product.locations.length) await expect(card).toContainText('No locations set')
+      if (product.variants.every(variant => !variant.prices.length)) await expect(card).toContainText('No price set')
+    }
+    const firstCard = grid.locator('a[data-testid^="selector-item-"]').first()
+    const desktopImage = await firstCard.locator('[data-selector-image]').boundingBox()
+    expect(desktopImage).not.toBeNull()
+    expect(desktopImage!.width / desktopImage!.height).toBeCloseTo(20 / 19, 2)
+    await page.screenshot({ path: testInfo.outputPath('catalog-desktop.png'), fullPage: true })
+
+    // A kind pill narrows the grid in place and is held in the URL.
+    const kind = (['experience', 'item', 'service'] as const).find(value => offerings.some(product => product.kind === value))
+    expect(kind, 'The demo offers something besides its menu').toBeDefined()
+    await catalog.getByTestId(`catalog-kind-${kind}`).click()
+    await expect(page).toHaveURL(`${ORG}/products?kind=${kind}`)
+    await expect(catalog.getByTestId(`catalog-kind-${kind}`)).toHaveAttribute('aria-pressed', 'true')
+    await expect(grid.locator('a[data-testid^="selector-item-"]')).toHaveCount(offerings.filter(product => product.kind === kind).length)
+    await expect(grid.locator('a[data-testid^="selector-item-menu-"]')).toHaveCount(0)
+    await catalog.getByTestId('catalog-kind-menu').click()
+    await expect(page).toHaveURL(`${ORG}/products?kind=menu`)
+    await expect(grid.locator('a[data-testid^="selector-item-"]')).toHaveCount(locations.length)
+
+    // A phone shows the same cards, each the full width of the grid.
+    await page.setViewportSize({ width: 390, height: 844 })
+    const mobileCard = grid.locator('a[data-testid^="selector-item-"]').first()
+    const mobileImage = await mobileCard.locator('[data-selector-image]').boundingBox()
+    const mobileGrid = await grid.boundingBox()
+    expect(mobileImage).not.toBeNull()
+    expect(mobileGrid).not.toBeNull()
+    expect(mobileImage!.width).toBeCloseTo(mobileGrid!.width, 0)
+    await page.screenshot({ path: testInfo.outputPath('catalog-mobile.png'), fullPage: true })
+
+    // A location's card opens its menu, named under the title, with nothing to switch.
+    const owner = locations.find(row => row.id === section!.location_id)!
+    await page.setViewportSize(WIDE)
+    await grid.getByTestId(`selector-item-menu-${owner.id}`).click()
+    await expect(page).toHaveURL(`${ORG}/products/menu?location_id=${encodeURIComponent(owner.id)}`)
+    const menu = page.locator('#dashboard-panel-catalog-menu')
+    await expect(menu).toContainText(owner.title)
+    await expect(menu.getByRole('combobox', { name: 'Location', exact: true })).toHaveCount(0)
+    await open(page, `${ORG}/products/menu/${section!.id}?location_id=${encodeURIComponent(owner.id)}`)
+    const member = products.find(product => product.kind === 'dish' && product.collections.some(membership => membership.collection_id === section!.id))!
+    await expect(page.getByTestId(`product-${member.id}`)).toContainText(member.name)
+  })
+
+  test('mobile scroll keeps real Catalog and menu rows reachable inside their panel', async ({ page }) => {
+    const [productsRead, sectionsRead] = await Promise.all([
+      page.request.get('/api/editor/organizations/org-demo/products'),
+      page.request.get('/api/editor/organizations/org-demo/collections'),
+    ])
+    expect(productsRead.status(), await productsRead.text()).toBe(200)
+    expect(sectionsRead.status(), await sectionsRead.text()).toBe(200)
+    const { products } = await productsRead.json() as { products: Product[] }
+    const { collections } = await sectionsRead.json() as { collections: Collection[] }
+    const sections = collections.map(collection => ({
+      collection,
+      members: products.filter(product => product.collections.some(row => row.collection_id === collection.id))
+        .sort((a, b) => a.collections.find(row => row.collection_id === collection.id)!.sort_order - b.collections.find(row => row.collection_id === collection.id)!.sort_order),
+    })).sort((a, b) => b.members.length - a.members.length)
+    const section = sections[0]
+    expect(section, 'The demo has an existing menu section').toBeDefined()
+    expect(section!.members.length).toBeGreaterThan(0)
+    await page.setViewportSize(PHONE)
+
+    for (const entry of [
+      { path: `${ORG}/products`, id: 'catalog' },
+      { path: `${ORG}/products/menu/${section!.collection.id}${section!.collection.location_id ? `?location_id=${encodeURIComponent(section!.collection.location_id)}` : ''}`, id: 'menu-section' },
+    ]) {
+      await open(page, entry.path)
+      const panel = page.locator(`#dashboard-panel-${entry.id}`)
+      const body = panel.locator(':scope > [data-slot="body"]')
+      const header = panel.locator(':scope > :has(h1)')
+      const nav = page.getByTestId('dashboard-mobile-nav')
+      const rows = entry.id === 'catalog' ? panel.locator('a[data-testid^="selector-item-"]') : panel.locator('span[data-testid^="product-"]')
+      expect(await rows.count()).toBeGreaterThan(0)
+      if (entry.id === 'menu-section') {
+        await expect(rows).toHaveCount(section!.members.length)
+        await expect(rows.last()).toHaveAttribute('data-testid', `product-${section!.members.at(-1)!.id}`)
+      } else {
+        const href = await rows.last().getAttribute('href')
+        const id = new URL(href!, page.url()).pathname.split('/').at(-1)
+        const record = products.find(product => product.id === id) ?? collections.find(collection => collection.id === id)
+        expect(record, 'The final Catalog row names a real organization record').toBeDefined()
+        await expect(rows.last()).toContainText(record!.name)
+      }
+      await expect(nav).toBeVisible()
+      const headerBefore = await header.boundingBox()
+      const navBefore = await nav.boundingBox()
+      const bodyBox = await body.boundingBox()
+      expect(headerBefore).not.toBeNull()
+      expect(navBefore).not.toBeNull()
+      expect(bodyBox).not.toBeNull()
+      expect(bodyBox!.y + bodyBox!.height).toBeLessThanOrEqual(navBefore!.y + 1)
+      const documentBefore = await page.evaluate(() => ({ top: document.scrollingElement!.scrollTop, left: scrollX, width: document.documentElement.scrollWidth, height: document.scrollingElement!.scrollHeight }))
+      expect(documentBefore.top).toBe(0)
+      expect(documentBefore.left).toBe(0)
+      expect(documentBefore.width).toBeLessThanOrEqual(PHONE.width)
+      expect(documentBefore.height).toBeLessThanOrEqual(PHONE.height)
+      const maximum = await body.evaluate(element => element.scrollHeight - element.clientHeight)
+      await expect.poll(() => body.evaluate(element => element.scrollTop)).toBe(0)
+      if (entry.id === 'catalog') expect(maximum, 'The actual Catalog has more rows than fit on a phone').toBeGreaterThan(0)
+      await page.mouse.move(bodyBox!.x + 4, bodyBox!.y + bodyBox!.height / 2)
+      await page.mouse.wheel(0, maximum + bodyBox!.height)
+      await expect.poll(() => body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
+      if (maximum > 0) expect(await body.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+      else expect(await body.evaluate(element => element.scrollTop)).toBe(0)
+      await expect(rows.last()).toBeInViewport({ ratio: 1 })
+      await page.mouse.wheel(0, bodyBox!.height)
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+      expect(await header.boundingBox()).toEqual(headerBefore)
+      expect(await nav.boundingBox()).toEqual(navBefore)
+      expect(await page.evaluate(() => ({ top: document.scrollingElement!.scrollTop, left: scrollX, width: document.documentElement.scrollWidth, height: document.scrollingElement!.scrollHeight }))).toEqual(documentBefore)
+      expect(await body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
+    }
+  })
+
+  test('mobile scroll confines a short Description drawer to its body and pins its controls', async ({ page }) => {
+    const productsRead = await page.request.get('/api/editor/organizations/org-demo/products')
+    expect(productsRead.status(), await productsRead.text()).toBe(200)
+    const product = (await productsRead.json() as { products: Product[] }).products.find(row => row.kind === 'dish')
+    expect(product, 'The demo has an existing dish to describe').toBeDefined()
+    await page.setViewportSize({ width: 390, height: 480 })
+    await open(page, `${ORG}/products/${product!.id}/description`)
+    const dialog = page.getByRole('dialog', { name: 'Description', exact: true })
+    const panel = page.locator('#dashboard-panel-product-description')
+    const body = panel.locator(':scope > [data-slot="body"]')
+    const parentBody = page.locator('#dashboard-panel-product > [data-slot="body"]')
+    const header = panel.locator(':scope > :has(h1)')
+    const save = panel.getByRole('button', { name: 'Save', exact: true })
+    await expect(dialog).toBeVisible()
+    await expect(panel.getByRole('textbox', { name: 'Description', exact: true })).toHaveValue(product!.description ?? '')
+    await panel.getByTestId('dashboard-navbar-close').hover()
+    const bodyBox = await body.boundingBox()
+    expect(bodyBox).not.toBeNull()
+    const maximum = await body.evaluate(element => element.scrollHeight - element.clientHeight)
+    expect(maximum, 'The real ten-row Description control needs body scrolling in a short window').toBeGreaterThan(0)
+    // The body padding receives the wheel; a textarea can own its own scroll.
+    await page.mouse.move(bodyBox!.x + 4, bodyBox!.y + bodyBox!.height / 2)
+    await page.mouse.wheel(0, -maximum - bodyBox!.height)
+    await expect.poll(() => body.evaluate(element => element.scrollTop)).toBe(0)
+    const headerBefore = await header.boundingBox()
+    const saveBefore = await save.boundingBox()
+    expect(headerBefore).not.toBeNull()
+    expect(saveBefore).not.toBeNull()
+    expect(saveBefore!.y).toBeGreaterThanOrEqual(0)
+    expect(saveBefore!.y + saveBefore!.height).toBeLessThanOrEqual(568)
+    expect(bodyBox!.y + bodyBox!.height).toBeLessThanOrEqual(saveBefore!.y)
+    const parentBefore = await parentBody.evaluate(element => element.scrollTop)
+    const documentBefore = await page.evaluate(() => ({ top: document.scrollingElement!.scrollTop, left: scrollX, width: document.documentElement.scrollWidth, height: document.scrollingElement!.scrollHeight }))
+    expect(documentBefore.top).toBe(0)
+    expect(documentBefore.width).toBeLessThanOrEqual(390)
+    expect(documentBefore.height).toBeLessThanOrEqual(568)
+    await page.mouse.wheel(0, maximum + bodyBox!.height)
+    await expect.poll(() => body.evaluate(element => element.scrollTop)).toBeGreaterThan(0)
+    await expect.poll(() => body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
+    await page.mouse.wheel(0, bodyBox!.height)
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+    expect(await header.boundingBox()).toEqual(headerBefore)
+    expect(await save.boundingBox()).toEqual(saveBefore)
+    expect(await parentBody.evaluate(element => element.scrollTop)).toBe(parentBefore)
+    expect(await page.evaluate(() => ({ top: document.scrollingElement!.scrollTop, left: scrollX, width: document.documentElement.scrollWidth, height: document.scrollingElement!.scrollHeight }))).toEqual(documentBefore)
+    expect(await body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
+    await panel.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(page).toHaveURL(`${ORG}/products/${product!.id}`)
+  })
+
+  test('mobile scroll ends Today after its real final card and one panel padding', async ({ page }, testInfo) => {
+    const feedRead = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo', locationId: 'loc-demo' } })
+    expect(feedRead.status(), await feedRead.text()).toBe(200)
+    const feed = await feedRead.json() as TodayFeedPayload
+    expect(feed.cards.length, 'The demo owner has real Today cards').toBeGreaterThan(0)
+    await page.setViewportSize(SHORT_PHONE)
+    await open(page, `${ORG}?locationId=loc-demo`)
+    const panel = page.locator('#dashboard-panel-org-today')
+    const body = panel.locator(':scope > [data-slot="body"]')
+    const cards = panel.getByTestId('today-card')
+    await expect(cards.first()).toBeVisible()
+    expect(await body.evaluate(element => element.scrollHeight > element.clientHeight), 'Today overflows the phone, so it has a scroll end to measure').toBe(true)
+    await expect(page.getByTestId('dashboard-mobile-nav')).toBeVisible()
+    const bodyBox = await body.boundingBox()
+    expect(bodyBox).not.toBeNull()
+    await page.mouse.move(bodyBox!.x + 4, bodyBox!.y + bodyBox!.height / 2)
+    while (await cards.count() < feed.cards.length) {
+      const count = await cards.count()
+      await page.mouse.wheel(0, await body.evaluate(element => element.scrollHeight))
+      await expect.poll(() => cards.count()).toBeGreaterThan(count)
+    }
+    expect(await cards.evaluateAll(elements => elements.map(element => element.getAttribute('data-card-id')))).toEqual(feed.cards.map(card => card.id))
+    await page.mouse.wheel(0, await body.evaluate(element => element.scrollHeight))
+    await expect.poll(() => body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
+    const last = cards.last()
+    await expect(last).toContainText(feed.cards.at(-1)!.headline)
+    await expect(last).toBeInViewport({ ratio: 1 })
+    const finalBody = (await body.boundingBox())!
+    const finalCard = (await last.boundingBox())!
+    expect(finalBody.y + finalBody.height - finalCard.y - finalCard.height, 'Today has the canonical 16px panel padding after its last card').toBeCloseTo(16, 0)
+    const nav = (await page.getByTestId('dashboard-mobile-nav').boundingBox())!
+    expect(finalBody.y + finalBody.height).toBeCloseTo(nav.y, 0)
+    expect(await page.evaluate(() => document.scrollingElement!.scrollTop)).toBe(0)
+    await page.screenshot({ path: testInfo.outputPath('today-mobile-scroll-bottom.png'), fullPage: true })
+  })
+
+  test('mobile scroll ends Calendar and earnings content at their panel boundary', async ({ page }) => {
+    test.setTimeout(60_000)
+    for (const entry of [
+      { path: `${ORG}/calendar?view=year`, id: 'org-calendar', height: 568, gap: 32 },
+      { path: `${ORG}/earnings/payouts`, id: 'earnings-payouts', height: 568, gap: 16 },
+      { path: `${ORG}/earnings/transactions`, id: 'earnings-transactions', height: 300, gap: 16 },
+    ]) {
+      await page.setViewportSize({ width: 390, height: entry.height })
+      await open(page, entry.path)
+      const panel = page.locator(`#dashboard-panel-${entry.id}`)
+      const body = panel.locator(':scope > [data-slot="body"]')
+      const header = panel.locator(':scope > :has(h1)')
+      const nav = page.getByTestId('dashboard-mobile-nav')
+      const last = entry.id === 'org-calendar' ? panel.locator('[data-month]').last()
+        : entry.id === 'earnings-payouts' ? panel.getByRole('region', { name: 'Payments help', exact: true })
+          : panel.getByText('No transactions in this period.', { exact: true })
+      if (entry.id === 'org-calendar') {
+        await expect(panel.locator('[data-month]')).toHaveCount(12)
+        await expect(last).toHaveAttribute('data-month', /^\d{4}-12$/)
+        await expect(last.getByRole('button', { name: 'December', exact: true })).toBeVisible()
+        const month = await last.getAttribute('data-month')
+        await expect(last.locator(`time[datetime="${month}-31"]`)).toHaveText('31')
+      } else if (entry.id === 'earnings-payouts') {
+        await expect(panel.getByText('Payouts start once your business is connected to Stripe.', { exact: true })).toBeVisible()
+        await expect(last.getByRole('link', { name: 'Go to your transactions', exact: true })).toBeVisible()
+      } else {
+        await expect(last).toBeVisible()
+      }
+      await expect(nav).toBeVisible()
+      const headerBefore = await header.boundingBox()
+      const navBefore = await nav.boundingBox()
+      const bodyBox = await body.boundingBox()
+      expect(headerBefore).not.toBeNull()
+      expect(navBefore).not.toBeNull()
+      expect(bodyBox).not.toBeNull()
+      expect(bodyBox!.y + bodyBox!.height).toBeCloseTo(navBefore!.y, 0)
+      const documentBefore = await page.evaluate(() => ({ top: document.scrollingElement!.scrollTop, left: scrollX, width: document.documentElement.scrollWidth, height: document.scrollingElement!.scrollHeight }))
+      expect(documentBefore.top).toBe(0)
+      expect(documentBefore.left).toBe(0)
+      expect(documentBefore.width).toBeLessThanOrEqual(390)
+      expect(documentBefore.height).toBeLessThanOrEqual(entry.height)
+      const maximum = await body.evaluate(element => element.scrollHeight - element.clientHeight)
+      await page.mouse.move(bodyBox!.x + 4, bodyBox!.y + bodyBox!.height / 2)
+      await page.mouse.wheel(0, maximum + bodyBox!.height)
+      await expect.poll(() => body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
+      const finalAction = entry.id === 'earnings-payouts' ? last.getByRole('link', { name: 'Go to your transactions', exact: true }) : last
+      await expect(finalAction).toBeInViewport({ ratio: 1 })
+      if (maximum > 0) {
+        const end = (await last.boundingBox())!
+        // The calendar's month grid keeps its own 16px below December.
+        expect(bodyBox!.y + bodyBox!.height - end.y - end.height, `${entry.id} ends at its content padding and the 16px panel padding`).toBeCloseTo(entry.gap, 0)
+      } else {
+        expect(await body.evaluate(element => element.scrollTop)).toBe(0)
+      }
+      await page.mouse.wheel(0, bodyBox!.height)
+      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+      expect(await header.boundingBox()).toEqual(headerBefore)
+      expect(await nav.boundingBox()).toEqual(navBefore)
+      expect(await page.evaluate(() => ({ top: document.scrollingElement!.scrollTop, left: scrollX, width: document.documentElement.scrollWidth, height: document.scrollingElement!.scrollHeight }))).toEqual(documentBefore)
+      expect(await body.evaluate(element => Math.abs(element.scrollHeight - element.clientHeight - element.scrollTop))).toBeLessThanOrEqual(1)
+    }
   })
 
   test('the deepest two levels of the page editor own the frame', async ({ page }) => {
@@ -144,13 +1041,22 @@ test.describe('dashboard pane hierarchy', () => {
     await expectPanes(page, ['organization-integrations', 'integration-google-maps'])
 
     // Payments is one page with Airbnb's tabs, reached from the Earnings cog; Payments is the first tab.
+    // Beside a pane each tab opens its first row: the plan from its deep link, How you get paid, then the plan again from the tab.
+    await open(page, `${ORG}/payments?tab=plan`)
+    await expect(page).toHaveURL(`${ORG}/payments/plan`)
+    await expectPanes(page, ['organization-payments', 'organization-plan'])
     await open(page, `${ORG}/payments?tab=payouts`)
+    await expect(page).toHaveURL(`${ORG}/payments/payout-method`)
+    await expectPanes(page, ['organization-payments', 'organization-payout-method'])
     await expect(page.getByRole('heading', { name: 'How you get paid', exact: true })).toBeVisible()
     await page.getByRole('tab', { name: 'Plan', exact: true }).click()
-    await expect(page).toHaveURL(`${ORG}/payments?tab=plan`)
+    await expect(page).toHaveURL(`${ORG}/payments/plan`)
+    await expectPanes(page, ['organization-payments', 'organization-plan'])
+    // The open leaf lights its tab, whatever the query says.
+    await expect(page.getByRole('tab', { name: 'Plan', exact: true })).toHaveAttribute('aria-selected', 'true')
   })
 
-  test('five destinations keep tenant management in Menu and personal activity in its own context', async ({ page, baseURL }) => {
+  test('five organization destinations keep tenant management in Menu', async ({ page }) => {
     await page.setViewportSize(WIDE)
     await open(page, `${ORG}/menu`)
     await expect(page.getByTestId('dashboard-top-nav').getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages'])
@@ -161,12 +1067,19 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page.locator('#dashboard-panel-earnings [data-testid="dashboard-navbar-back"]')).toHaveAttribute('href', `${ORG}/menu`)
     await expect(page.getByRole('heading', { name: 'Earnings', exact: true })).toBeVisible()
     await open(page, `${ORG}/earnings/transactions`)
-    await expect(page.getByText('No transactions in this period.', { exact: true })).toBeVisible()
+    await expect(page).toHaveURL(`${ORG}/earnings/transactions`)
+    const transactions = page.locator('#dashboard-panel-earnings-transactions')
+    await expect(transactions.getByRole('heading', { name: 'Transactions', exact: true })).toBeVisible()
+    await page.setViewportSize(PHONE)
+    const transactionsBack = transactions.getByRole('link', { name: 'Back', exact: true })
+    await expect(transactionsBack).toBeVisible()
+    await expect(transactionsBack).toHaveAttribute('href', `${ORG}/earnings`)
+    await transactionsBack.click()
+    await expect(page).toHaveURL(`${ORG}/earnings`)
     await open(page, `${ORG}/earnings/refunds`)
     await expect(page.getByText('No refunds yet.', { exact: true })).toBeVisible()
     await expect(page.getByText('No disputes.', { exact: true })).toBeVisible()
 
-    await page.setViewportSize({ width: 390, height: 844 })
     await open(page, `${ORG}/earnings`)
     const mobileNav = page.getByTestId('dashboard-mobile-nav')
     await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'])
@@ -187,88 +1100,216 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page).toHaveURL(`${services}/products`)
     await expect(mobileNav.getByRole('link', { name: 'Catalog', exact: true })).toHaveAttribute('aria-current', 'page')
     await expect(page.locator('#dashboard-panel-catalog [data-testid="dashboard-navbar-back"]')).toHaveCount(0)
+  })
 
-    await open(page, `${ORG}/payments`)
-    await expect(page.getByRole('heading', { name: 'Payment methods', exact: true })).toBeVisible()
-    await open(page, `${ORG}/payments?tab=plan`)
-    await expect(page.getByText(/^(Manage|Choose a plan)$/)).toBeVisible()
-    // Personal is a switch in Better Auth, not a URL: with no active organization
-    // the account is its own context, with its own tabs.
-    const personal = await page.request.post('/api/auth/organization/set-active', { headers: authRequestHeaders(baseURL!), data: { organizationId: null } })
-    expect(personal.status(), await personal.text()).toBe(200)
-    await open(page, '/account')
-    await expect(page).toHaveURL('/dashboard/account')
-    await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages', 'Menu'])
-    // Past activity is a card in the account's Menu, as Past trips is on Airbnb's profile; Today owns what is ahead.
-    const account = page.waitForResponse(response => new URL(response.url()).pathname === '/api/account' && response.request().method() === 'GET')
-    await mobileNav.getByRole('link', { name: 'Menu', exact: true }).click()
-    await page.getByTestId('dashboard-menu-past-activity').click()
-    await expect(page).toHaveURL('/dashboard/account/activity')
-    const response = await account
-    expect(response.status(), await response.text()).toBe(200)
-    const activity = await response.json()
-    expect(isAccountActivityResponse(activity), 'the account API returns actual owned activity').toBe(true)
-    if (!isAccountActivityResponse(activity)) throw new Error('Invalid account activity response')
-    await expect(page.getByRole('heading', { name: 'Past activity', exact: true })).toBeVisible()
-    const past = activity.activities.filter(item => item.kind === 'order' || item.kind === 'payment' || (item.status !== 'cancelled' && item.endsAt !== null && Date.parse(item.endsAt) < Date.now()))
-    const cancelled = activity.activities.filter(item => (item.kind === 'booking' || item.kind === 'reservation') && item.status === 'cancelled')
-    await expect(page.getByTestId('account-activity-cancelled')).toHaveCount(cancelled.length ? 1 : 0)
-    await expect(page.locator('[data-testid^="account-activity-"]:not([data-testid="account-activity-cancelled"])')).toHaveCount(past.length)
-    for (const item of past) {
-      await expect(page.getByTestId(`account-activity-${item.kind}-${item.id}`)).toContainText(item.title)
-    }
-    // The copied actor's own history may be empty; never create a purchase to
-    // make the dashboard assert its fabricated premise.
-    if (past.length) {
-      const item = past[0]!
-      // A visit and a purchase open the same record screen, on the account's own read.
-      const read = await page.request.get(`/api/account/bookings/${item.kind}/${item.id}`)
-      expect(read.status(), await read.text()).toBe(200)
-      const detail = await read.json()
-      expect(isBookingDetailsResponse(detail), 'the account detail API returns the canonical record').toBe(true)
-      if (!isBookingDetailsResponse(detail)) throw new Error('Invalid account booking details response')
-      const paymentCount = (detail.booking.payments ?? []).length
-      await page.getByTestId(`account-activity-${item.kind}-${item.id}`).click()
-      await expect(page).toHaveURL(`/dashboard/account/activity/${item.kind}/${item.id}`)
-      await expect(page.getByRole('heading', { name: item.title, exact: true })).toBeVisible()
-      await expect(page.getByRole('heading', { name: 'Payment info', exact: true })).toHaveCount(paymentCount)
-      // The record opens beside Past activity; its own Back returns to that list.
-      await page.locator('#dashboard-panel-account-booking-details [data-testid="dashboard-navbar-back"]').click()
-      await expect(page).toHaveURL('/dashboard/account/activity')
-    } else {
-      await expect(page.getByText('No past activity yet', { exact: true })).toBeVisible()
-    }
-    await mobileNav.getByRole('link', { name: 'Today', exact: true }).click()
-    await expect(page).toHaveURL('/dashboard/account')
-    await expect(page.getByRole('heading', { name: 'Today', exact: true })).toBeVisible()
-    await mobileNav.getByRole('link', { name: 'Calendar', exact: true }).click()
-    await expect(page).toHaveURL('/dashboard/account/calendar')
-    await expect(page.getByRole('heading', { name: 'Calendar', exact: true })).toBeVisible()
-    await mobileNav.getByRole('link', { name: 'Messages', exact: true }).click()
-    await expect(page).toHaveURL('/dashboard/account/messages')
-    const personalUpdates = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/notifications'
-      && new URL(response.url()).searchParams.get('scope') === 'personal')
-    await page.getByRole('button', { name: 'All, filter by message type' }).click()
-    await page.getByRole('menuitemcheckbox', { name: 'Updates', exact: true }).click()
-    const updatesResponse = await personalUpdates
-    expect(updatesResponse.status(), await updatesResponse.text()).toBe(200)
-    const updates = await updatesResponse.json() as { notifications: Array<{ id: string; scope: string; title: string | null; target_user_id: string | null }> }
-    const viewer = await (await page.request.get('/api/auth/get-session')).json() as { user: { id: string } }
-    // Personal Updates are platform notifications addressed to this account, or to everyone; never a business's.
-    expect(updates.notifications.every(item => item.scope === 'global' && (item.target_user_id === viewer.user.id || item.target_user_id === null)), 'personal Updates carry only this account\'s notifications').toBe(true)
-    await expect(page).toHaveURL('/dashboard/account/messages?view=updates')
-    if (updates.notifications.length) {
-      for (const item of updates.notifications) {
-        const row = page.getByTestId(`notification-${item.id}`)
-        await expect(row).toBeVisible()
-        if (item.title) await expect(row).toContainText(item.title)
+  test('a Basic business\'s billing tabs show its actual payment methods and Basic plan', async ({ page, baseURL }) => {
+    await page.setViewportSize(PHONE)
+    const mobileNav = page.getByTestId('dashboard-mobile-nav')
+    // KrabiClaw Review Legal is our own fictional Basic business with no billing
+    // customer. (Cedar Legal Demo is now on Business to demo paid consultations.)
+    // The copied Ember subscription belongs to LIVE Stripe, not this TEST key.
+    expect(['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Owner impersonation is confined to isolated local D1').toBe(true)
+    const principalResponse = await page.request.get('/api/auth/get-session')
+    expect(principalResponse.status(), await principalResponse.text()).toBe(200)
+    const principal = await principalResponse.json() as { user: { id: string; role: string } }
+    expect(principal.user.role).toBe('admin')
+    const basicId = 'OcMePkke1szEqCjfyHDYS6l26JenCLcg'
+    const basicOwnerId = '3TW7uQfi4mzTcCqIWPltcwBxav3F67HZ'
+    const basic = '/dashboard/krabiclaw-review-legal'
+    let impersonated = false
+    try {
+      const impersonation = await page.request.post('/api/auth/admin/impersonate-user', { headers: authRequestHeaders(baseURL!), data: { userId: basicOwnerId } })
+      expect(impersonation.status(), await impersonation.text()).toBe(200)
+      impersonated = true
+      expect(await impersonation.json()).toMatchObject({ user: { id: basicOwnerId }, session: { impersonatedBy: principal.user.id } })
+      const activated = await page.request.post('/api/auth/organization/set-active', { headers: authRequestHeaders(baseURL!), data: { organizationId: basicId } })
+      expect(activated.status(), await activated.text()).toBe(200)
+      const billingResponse = await page.request.get(`/api/billing/status?organizationId=${basicId}`)
+      expect(billingResponse.status(), await billingResponse.text()).toBe(200)
+      const billing = await billingResponse.json()
+      expect(billing).toMatchObject({ billing: { plan: 'free', organizationId: basicId }, userRole: 'owner' })
+      expect(billing.billing.stripeCustomerId).toBeUndefined()
+      const methods = await page.request.get(`/api/billing/payment-methods?organizationId=${basicId}`)
+      expect(methods.status(), await methods.text()).toBe(200)
+      expect(await methods.json()).toEqual({ payment_methods: [] })
+      // The column reads the plan and its usage billing on arrival, whichever tab is open.
+      const planBilling = page.waitForResponse(response => {
+        const url = new URL(response.url())
+        return url.pathname === '/api/billing/status' && url.searchParams.get('includePrice') === 'true'
+      })
+      const usageBilling = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/payments/billing')
+      await open(page, `${basic}/payments`)
+      const payments = page.locator('#dashboard-panel-organization-payments')
+      // On a phone the tab is rows and nothing opens on its own; the row states the actual cards.
+      await expect(page).toHaveURL(`${basic}/payments`)
+      await expect(payments.getByRole('link', { name: /^Payment methods/ })).toBeVisible()
+      await expect(payments.getByText('No payment methods saved yet.', { exact: true })).toBeVisible()
+      // UAlert renders its message in this slot, including native provider errors.
+      await expect(payments.locator('[data-slot="description"]')).toHaveCount(0)
+      // The row opens the cards as a drawer, with the same actual state and the way to add one.
+      await payments.getByRole('link', { name: /^Payment methods/ }).click()
+      const methodsLeaf = page.getByRole('dialog', { name: 'Payment methods', exact: true })
+      await expect(methodsLeaf.getByText('No payment methods saved yet.', { exact: true })).toBeVisible()
+      await expect(methodsLeaf.getByRole('button', { name: 'Add payment method', exact: true })).toBeVisible()
+      await methodsLeaf.getByTestId('dashboard-navbar-close').click()
+      await expect(page).toHaveURL(`${basic}/payments`)
+      await expect(payments.getByTestId('dashboard-navbar-back')).toHaveAttribute('href', `${basic}/earnings`)
+      await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'])
+
+      await payments.getByRole('tab', { name: 'Plan', exact: true }).click()
+      await expect(page).toHaveURL(`${basic}/payments?tab=plan`)
+      const planResponse = await planBilling
+      expect(planResponse.status(), await planResponse.text()).toBe(200)
+      const plan = await planResponse.json()
+      expect(plan).toMatchObject({ success: true, billing: { plan: 'free', organizationId: basicId }, userRole: 'owner' })
+      expect(plan.billing.stripeSubscriptionId).toBeUndefined()
+      expect(plan.billing.subscriptionPrice).toBeUndefined()
+      const usageResponse = await usageBilling
+      expect(usageResponse.status(), await usageResponse.text()).toBe(200)
+      // Basic has no Stripe subscription price: its actual charge is Free, and its row opens the plans as "Choose a plan".
+      await expect(payments.getByText('Basic', { exact: true })).toBeVisible()
+      await expect(payments.getByText('Free', { exact: true })).toBeVisible()
+      await expect(payments.locator('[data-slot="description"]')).toHaveCount(0)
+      await payments.getByRole('link', { name: /^Basic/ }).click()
+      const plans = page.getByRole('dialog', { name: 'Choose a plan', exact: true })
+      await expect(plans).toBeVisible()
+      await expect(plans.getByRole('button', { name: 'Switch to Growth', exact: true })).toBeVisible()
+      await plans.getByTestId('dashboard-navbar-close').click()
+      await expect(page).toHaveURL(`${basic}/payments?tab=plan`)
+
+      // A Basic business gets the actual setup action, and cannot record a
+      // billable agreement by submitting it.
+      const servicesBefore = await page.request.get('/api/dashboard/services?org=krabiclaw-review-legal')
+      expect(servicesBefore.status(), await servicesBefore.text()).toBe(200)
+      expect(await servicesBefore.json()).toEqual({ success: true, services: { managed_ads: null, strategy: null } })
+      await payments.getByRole('link', { name: /^Managed ads/ }).click()
+      const managedAds = page.getByRole('dialog', { name: 'Managed ads', exact: true })
+      await expect(managedAds.getByText('Before turning it on, choose Business, set a default payment method and connect a Google Ads account billed in USD.', { exact: true })).toBeVisible()
+      await expect(managedAds.getByRole('link', { name: 'Payment methods', exact: true })).toHaveCount(0)
+      await managedAds.getByRole('link', { name: 'Choose Business', exact: true }).click()
+      await expect(page).toHaveURL(`${basic}/payments/plan`)
+      await expect(plans).toBeVisible()
+      await plans.getByTestId('dashboard-navbar-close').click()
+      await payments.getByRole('link', { name: /^Managed ads/ }).click()
+      const rejectedAgreement = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/services' && response.request().method() === 'POST')
+      await managedAds.getByRole('button', { name: 'Agree and turn on', exact: true }).click()
+      const rejected = await rejectedAgreement
+      expect(rejected.status(), await rejected.text()).toBe(409)
+      const setupMessage = 'Managed ads is billed on the Business plan. Choose Business in Plan before turning on managed ads.'
+      await expect(managedAds.getByText(setupMessage, { exact: true })).toBeVisible()
+      await expect(payments.getByText('Managed ads is off.', { exact: true })).toHaveCount(0)
+      const servicesAfter = await page.request.get('/api/dashboard/services?org=krabiclaw-review-legal')
+      expect(servicesAfter.status(), await servicesAfter.text()).toBe(200)
+      expect(await servicesAfter.json()).toEqual({ success: true, services: { managed_ads: null, strategy: null } })
+      await managedAds.getByTestId('dashboard-navbar-close').click()
+      await expect(page).toHaveURL(`${basic}/payments?tab=plan`)
+    } finally {
+      try {
+        if (impersonated) {
+          const stopped = await page.request.post('/api/auth/admin/stop-impersonating', { headers: authRequestHeaders(baseURL!), data: {} })
+          expect(stopped.status(), await stopped.text()).toBe(200)
+        }
+      } finally {
+        const restored = await page.request.post('/api/auth/organization/set-active', { headers: authRequestHeaders(baseURL!), data: { organizationId: 'org-demo' } })
+        expect(restored.status(), await restored.text()).toBe(200)
+        const sessionResponse = await page.request.get('/api/auth/get-session')
+        expect(sessionResponse.status(), await sessionResponse.text()).toBe(200)
+        const session = await sessionResponse.json()
+        expect(session.user.id).toBe(principal.user.id)
+        expect(session.session.activeOrganizationId).toBe('org-demo')
+        expect(session.session.impersonatedBy ?? null).toBeNull()
       }
-    } else {
-      await expect(page.getByText('No updates yet.', { exact: true })).toBeVisible()
     }
-    await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages', 'Menu'])
-    await page.setViewportSize(WIDE)
-    await expect(page.getByTestId('dashboard-top-nav').getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages'])
+  })
+
+  test('personal navigation keeps owned activity and Updates in its own context', async ({ page, baseURL }) => {
+    await page.setViewportSize(PHONE)
+    const mobileNav = page.getByTestId('dashboard-mobile-nav')
+    try {
+      // Personal is a switch in Better Auth, not a URL: with no active organization
+      // the account is its own context, with its own tabs.
+      const personal = await page.request.post('/api/auth/organization/set-active', { headers: authRequestHeaders(baseURL!), data: { organizationId: null } })
+      expect(personal.status(), await personal.text()).toBe(200)
+      await open(page, '/account')
+      await expect(page).toHaveURL('/dashboard/account')
+      await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages', 'Menu'])
+      // Past activity is a card in the account's Menu, as Past trips is on Airbnb's profile; Today owns what is ahead.
+      const account = page.waitForResponse(response => new URL(response.url()).pathname === '/api/account' && response.request().method() === 'GET')
+      await mobileNav.getByRole('link', { name: 'Menu', exact: true }).click()
+      await page.getByTestId('dashboard-menu-past-activity').click()
+      await expect(page).toHaveURL('/dashboard/account/activity')
+      const response = await account
+      expect(response.status(), await response.text()).toBe(200)
+      const activity = await response.json()
+      expect(isAccountActivityResponse(activity), 'the account API returns actual owned activity').toBe(true)
+      if (!isAccountActivityResponse(activity)) throw new Error('Invalid account activity response')
+      await expect(page.getByRole('heading', { name: 'Past activity', exact: true })).toBeVisible()
+      const past = activity.activities.filter(item => item.kind === 'order' || item.kind === 'payment' || (item.status !== 'cancelled' && item.endsAt !== null && Date.parse(item.endsAt) < Date.now()))
+      const cancelled = activity.activities.filter(item => (item.kind === 'booking' || item.kind === 'reservation') && item.status === 'cancelled')
+      await expect(page.getByTestId('account-activity-cancelled')).toHaveCount(cancelled.length ? 1 : 0)
+      await expect(page.locator('[data-testid^="account-activity-"]:not([data-testid="account-activity-cancelled"])')).toHaveCount(past.length)
+      for (const item of past) {
+        await expect(page.getByTestId(`account-activity-${item.kind}-${item.id}`)).toContainText(item.title)
+      }
+      // The copied actor's own history may be empty; never create a purchase to
+      // make the dashboard assert its fabricated premise.
+      if (past.length) {
+        const item = past[0]!
+        // A visit and a purchase open the same record screen, on the account's own read.
+        const read = await page.request.get(`/api/account/bookings/${item.kind}/${item.id}`)
+        expect(read.status(), await read.text()).toBe(200)
+        const detail = await read.json()
+        expect(isBookingDetailsResponse(detail), 'the account detail API returns the canonical record').toBe(true)
+        if (!isBookingDetailsResponse(detail)) throw new Error('Invalid account booking details response')
+        const paymentCount = (detail.booking.payments ?? []).length
+        await page.getByTestId(`account-activity-${item.kind}-${item.id}`).click()
+        await expect(page).toHaveURL(`/dashboard/account/activity/${item.kind}/${item.id}`)
+        await expect(page.getByRole('heading', { name: item.title, exact: true })).toBeVisible()
+        await expect(page.getByRole('heading', { name: 'Payment info', exact: true })).toHaveCount(paymentCount)
+        // The record opens beside Past activity; its own Back returns to that list.
+        await page.locator('#dashboard-panel-account-booking-details [data-testid="dashboard-navbar-back"]').click()
+        await expect(page).toHaveURL('/dashboard/account/activity')
+      } else if (!cancelled.length) {
+        await expect(page.getByText('No past activity yet', { exact: true })).toBeVisible()
+      }
+      await mobileNav.getByRole('link', { name: 'Today', exact: true }).click()
+      await expect(page).toHaveURL('/dashboard/account')
+      await expect(page.getByRole('heading', { name: 'Today', exact: true })).toBeVisible()
+      await mobileNav.getByRole('link', { name: 'Calendar', exact: true }).click()
+      await expect(page).toHaveURL('/dashboard/account/calendar')
+      await expect(page.getByRole('heading', { name: 'Calendar', exact: true })).toBeVisible()
+      await mobileNav.getByRole('link', { name: 'Messages', exact: true }).click()
+      await expect(page).toHaveURL('/dashboard/account/messages')
+      const personalUpdates = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/notifications'
+        && new URL(response.url()).searchParams.get('scope') === 'personal')
+      await page.getByRole('button', { name: 'All, filter by message type' }).click()
+      await page.getByRole('menuitemcheckbox', { name: 'Updates', exact: true }).click()
+      const updatesResponse = await personalUpdates
+      expect(updatesResponse.status(), await updatesResponse.text()).toBe(200)
+      const updates = await updatesResponse.json() as { notifications: Array<{ id: string; scope: string; title: string | null; target_user_id: string | null }> }
+      const viewer = await (await page.request.get('/api/auth/get-session')).json() as { user: { id: string } }
+      // Personal Updates are platform notifications addressed to this account, or to everyone; never a business's.
+      expect(updates.notifications.every(item => item.scope === 'global' && (item.target_user_id === viewer.user.id || item.target_user_id === null)), 'personal Updates carry only this account\'s notifications').toBe(true)
+      await expect(page).toHaveURL('/dashboard/account/messages?view=updates')
+      if (updates.notifications.length) {
+        for (const item of updates.notifications) {
+          const row = page.getByTestId(`notification-${item.id}`)
+          await expect(row).toBeVisible()
+          if (item.title) await expect(row).toContainText(item.title)
+        }
+      } else {
+        await expect(page.getByText('No updates yet.', { exact: true })).toBeVisible()
+      }
+      await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages', 'Menu'])
+      await page.setViewportSize(WIDE)
+      await expect(page.getByTestId('dashboard-top-nav').getByRole('navigation', { name: 'Dashboard' }).getByRole('link')).toHaveText(['Today', 'Calendar', 'Messages'])
+    } finally {
+      const restored = await page.request.post('/api/auth/organization/set-active', { headers: authRequestHeaders(baseURL!), data: { organizationId: 'org-demo' } })
+      expect(restored.status(), await restored.text()).toBe(200)
+      const restoredSession = await page.request.get('/api/auth/get-session')
+      expect(restoredSession.status(), await restoredSession.text()).toBe(200)
+      expect((await restoredSession.json()).session.activeOrganizationId).toBe('org-demo')
+    }
   })
 
   test('booking Change opens its first field on desktop and not below lg', async ({ page }) => {
@@ -343,25 +1384,300 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(filter).toContainText('All assigned people')
   })
 
-  test('below lg every level is one screen and nothing opens itself', async ({ page }) => {
+  test('below lg indexes show one screen and choose no child', async ({ page }) => {
     await page.setViewportSize(NARROW)
     for (const [path, pane] of [['website', 'organization-website'], ['website/pages', 'organization-pages'], ['website/brand', 'organization-brand'], ['products', 'catalog'], ['integrations', 'organization-integrations']] as const) {
       await open(page, `${ORG}/${path}`)
       await expectPanes(page, [pane])
       await expect(page).toHaveURL(`${ORG}/${path}`)
     }
-
-    // A leaf is a sheet whose Close goes to the level that contains it.
-    await open(page, `${ORG}/website/pages/links/title`)
-    await expectPanes(page, ['organization-links-title'])
-    await expect(page.getByTestId('dashboard-navbar-close')).toHaveAttribute('href', `${ORG}/website/pages/links`)
-    await page.getByTestId('dashboard-navbar-close').click()
-    await expect(page).toHaveURL(`${ORG}/website/pages/links`)
-    await expectPanes(page, ['organization-links'])
   })
 
-  // A service is a Product and the page that shows it: Catalog's labelled Add
-  // starts at Name, and Create writes both, bound, through one request.
+  test('mobile leaf drawers retain their parent and discard drafts on every dismissal', async ({ page }, testInfo) => {
+    test.setTimeout(90_000)
+    const links = `${ORG}/website/pages/links`
+    const endpoint = '/api/editor/organizations/org-demo/links-page'
+    const beforeResponse = await page.request.get(endpoint)
+    expect(beforeResponse.status(), await beforeResponse.text()).toBe(200)
+    const before = await beforeResponse.json() as { page: { title: string }; items: unknown[] }
+    expect(before.page.title).not.toBe('')
+    const writes: string[] = []
+    page.on('request', request => {
+      if (new URL(request.url()).pathname === endpoint && request.method() !== 'GET') writes.push(request.method())
+    })
+    const parent = page.locator('#dashboard-panel-organization-links')
+    const leaf = page.locator('#dashboard-panel-organization-links-title')
+    const dialog = page.getByRole('dialog', { name: 'Title', exact: true })
+    const input = leaf.getByRole('textbox', { name: 'Links page title', exact: true })
+
+    for (const viewport of [PHONE, NARROW]) {
+      await page.setViewportSize(viewport)
+      await open(page, links)
+      for (const dismissal of ['Close', 'Cancel', 'Escape', 'backdrop', 'swipe'] as const) {
+        const parentBefore = await parent.boundingBox()
+        expect(parentBefore).not.toBeNull()
+        await parent.getByRole('link', { name: /^Title/ }).click()
+        await expect(page).toHaveURL(`${links}/title`)
+        await expect(dialog).toBeVisible()
+        await expect(parent).toBeVisible()
+        expect((await parent.boundingBox())!.height).toBeCloseTo(parentBefore!.height, 1)
+        await expect(leaf).toHaveCount(1)
+        await expect(input).toHaveValue(before.page.title)
+        await expect.poll(async () => {
+          const parentBox = await parent.boundingBox()
+          const drawerBox = await dialog.boundingBox()
+          return parentBox !== null && drawerBox !== null
+            && drawerBox.y > parentBox.y
+            && drawerBox.y + drawerBox.height <= viewport.height + 1
+        }, { message: 'A strip of the real parent remains visible above the bottom drawer' }).toBe(true)
+        const save = leaf.getByRole('button', { name: 'Save', exact: true })
+        await expect(save).toBeInViewport()
+        await input.fill(`Discarded ${dismissal} draft`)
+        if (dismissal === 'Close') {
+          await input.focus()
+          for (let at = 0; at < 5; at += 1) {
+            await page.keyboard.press('Tab')
+            await expect.poll(() => dialog.evaluate(element => element.contains(document.activeElement)), {
+              message: 'Keyboard focus stays in the modal drawer',
+            }).toBe(true)
+          }
+        }
+        if (dismissal === 'Close') {
+          await page.screenshot({ path: testInfo.outputPath(`leaf-drawer-${viewport.width}.png`), fullPage: true })
+          await leaf.getByTestId('dashboard-navbar-close').click()
+        } else if (dismissal === 'Cancel') {
+          await leaf.getByRole('button', { name: 'Cancel', exact: true }).click()
+        } else if (dismissal === 'Escape') {
+          await page.keyboard.press('Escape')
+        } else if (dismissal === 'backdrop') {
+          const overlay = page.locator('[data-slot="overlay"][data-state="open"]')
+          await expect(overlay).toHaveCount(1)
+          const parentBox = (await parent.boundingBox())!
+          await overlay.click({ position: { x: 8, y: parentBox.y + 4 } })
+        } else {
+          const handleLocator = dialog.locator('[data-slot="handle"]')
+          await handleLocator.hover()
+          const handle = await handleLocator.boundingBox()
+          expect(handle, 'The native drawer has a drag handle').not.toBeNull()
+          const receivesPointer = await handleLocator.evaluate(element => {
+            const rect = element.getBoundingClientRect()
+            return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
+          })
+          expect(receivesPointer, 'The drag handle receives pointer input').toBe(true)
+          const beforeDrag = await dialog.boundingBox()
+          await page.mouse.move(handle!.x + handle!.width / 2, handle!.y + handle!.height / 2)
+          await page.mouse.down()
+          try {
+            await page.mouse.move(handle!.x + handle!.width / 2, Math.min(viewport.height - 4, handle!.y + handle!.height / 2 + 32), { steps: 3 })
+            await expect.poll(async () => (await dialog.boundingBox())?.y, { message: 'The drawer follows the drag' }).toBeGreaterThan(beforeDrag!.y + 1)
+            await page.mouse.move(viewport.width / 2, viewport.height - 4, { steps: 8 })
+          } finally {
+            await page.mouse.up()
+          }
+        }
+        await expect(page).toHaveURL(links)
+        await expect(leaf).toHaveCount(0)
+        await expect(page.getByRole('dialog')).toHaveCount(0)
+        await expectPanes(page, ['organization-links'])
+        await expect(parent.getByRole('link', { name: /^Title/ })).toContainText(before.page.title)
+        if (viewport.width < 768) await expect(page.getByTestId('dashboard-mobile-nav')).toBeVisible()
+      }
+    }
+    expect(writes).toEqual([])
+    const afterResponse = await page.request.get(endpoint)
+    expect(afterResponse.status(), await afterResponse.text()).toBe(200)
+    const after = await afterResponse.json() as typeof before
+    expect(after.page.title).toBe(before.page.title)
+    expect(after.items).toEqual(before.items)
+  })
+
+  test('a photo library dialog stays above its leaf drawer and Escape dismisses only the top level', async ({ page }, testInfo) => {
+    const endpoint = '/api/editor/organizations/org-demo/products'
+    const productsRead = await page.request.get(endpoint)
+    expect(productsRead.status(), await productsRead.text()).toBe(200)
+    const product = (await productsRead.json() as { products: Product[] }).products.find(row => row.kind === 'dish' && row.image)
+    expect(product, 'The demo contains a dish with an existing photo').toBeDefined()
+    const parentPath = `${ORG}/products/${product!.id}`
+    const leafPath = `${parentPath}/photo`
+    const writes: string[] = []
+    page.on('request', request => {
+      if (new URL(request.url()).pathname.startsWith('/api/editor/organizations/org-demo/') && request.method() !== 'GET') writes.push(`${request.method()} ${new URL(request.url()).pathname}`)
+    })
+    await page.setViewportSize(PHONE)
+    await open(page, leafPath)
+    const outer = page.getByRole('dialog', { name: 'Photos', exact: true })
+    const leaf = page.locator('#dashboard-panel-product-photo')
+    await expect(outer).toBeVisible()
+    await expect(leaf.getByTestId('product-photo').locator('img')).toHaveAttribute('src', product!.image!.public_url)
+    const libraryRead = page.waitForResponse(response => {
+      const url = new URL(response.url())
+      return url.pathname === '/api/editor/organizations/org-demo/media' && url.searchParams.get('limit') === '100'
+    })
+    await leaf.getByTestId('product-photo').click()
+    const library = await libraryRead
+    expect(library.status(), await library.text()).toBe(200)
+    expect((await library.json() as { media: unknown[] }).media.length).toBeGreaterThan(0)
+    const picker = page.getByRole('dialog', { name: 'Dish photo', exact: true })
+    await expect(picker).toBeVisible()
+    await expect(page.getByRole('dialog', { includeHidden: true })).toHaveCount(2)
+    await expect(page.getByRole('dialog')).toHaveCount(1)
+    await expect(picker.getByRole('button', { name: 'Done', exact: true })).toBeDisabled()
+    const cancel = picker.getByRole('button', { name: 'Cancel', exact: true })
+    await expect.poll(() => cancel.evaluate(element => {
+      const rect = element.getBoundingClientRect()
+      return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
+    }), { message: 'The inner media dialog is above the drawer and receives pointer input' }).toBe(true)
+    await cancel.focus()
+    for (let at = 0; at < 5; at += 1) {
+      await page.keyboard.press('Tab')
+      await expect.poll(() => picker.evaluate(element => element.contains(document.activeElement))).toBe(true)
+    }
+    await page.screenshot({ path: testInfo.outputPath('nested-photo-picker-mobile.png'), fullPage: true })
+    await page.keyboard.press('Escape')
+    await expect(picker).toHaveCount(0)
+    await expect(outer).toBeVisible()
+    await expect(page).toHaveURL(leafPath)
+    await page.keyboard.press('Escape')
+    await expect(page).toHaveURL(parentPath)
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    const parent = page.locator('#dashboard-panel-product')
+    await expect(parent.getByRole('heading', { level: 1, name: product!.name, exact: true })).toBeFocused()
+    expect(writes).toEqual([])
+    const afterRead = await page.request.get(`${endpoint}/${product!.id}`)
+    expect(afterRead.status(), await afterRead.text()).toBe(200)
+    expect((await afterRead.json() as { product: Product }).product.image?.asset_id).toBe(product!.image!.asset_id)
+  })
+
+  test('a timezone menu scrolls above its leaf and preserves its draft until the drawer is dismissed', async ({ page }, testInfo) => {
+    const locationsRead = await page.request.get('/api/dashboard/locations', { params: { org: 'ember-slice-demo', organization: 'true' } })
+    expect(locationsRead.status(), await locationsRead.text()).toBe(200)
+    const location = (await locationsRead.json() as { locations: DashboardLocation[] }).locations.find(row => row.id === 'loc-demo')
+    expect(location, 'The demo carries its existing location and timezone').toBeDefined()
+    const parentPath = `${ORG}/locations/${location!.slug}/hours`
+    const leafPath = `${parentPath}/timezone`
+    const endpoint = `/api/dashboard/locations/${location!.id}`
+    const writes: string[] = []
+    page.on('request', request => {
+      if (new URL(request.url()).pathname === endpoint && request.method() !== 'GET') writes.push(request.method())
+    })
+    await page.setViewportSize(PHONE)
+    await open(page, leafPath)
+    const outer = page.getByRole('dialog', { name: 'Timezone', exact: true })
+    const control = outer.getByRole('button', { name: 'Time zone', exact: true })
+    await expect(control).toContainText(timezoneLabel(location!.timezone))
+    await control.click()
+    const menu = page.getByRole('listbox')
+    await expect(menu).toBeVisible()
+    const viewport = menu.locator('[data-slot="viewport"]')
+    await expect.poll(() => viewport.evaluate(element => element.scrollHeight > element.clientHeight)).toBe(true)
+    const initialScroll = await viewport.evaluate(element => element.scrollTop)
+    const documentScroll = await page.evaluate(() => document.scrollingElement?.scrollTop)
+    await viewport.hover()
+    await page.mouse.wheel(0, initialScroll > 0 ? -240 : 240)
+    await expect.poll(() => viewport.evaluate(element => element.scrollTop)).not.toBe(initialScroll)
+    expect(await page.evaluate(() => document.scrollingElement?.scrollTop)).toBe(documentScroll)
+    const search = page.getByPlaceholder('Search by city, e.g. Bangkok')
+    await expect.poll(() => search.evaluate(element => {
+      const rect = element.getBoundingClientRect()
+      return element.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2))
+    }), { message: 'The nested timezone search receives pointer input above the drawer' }).toBe(true)
+    const target = location!.timezone === 'Asia/Bangkok' ? 'Europe/London' : 'Asia/Bangkok'
+    await search.fill(target === 'Asia/Bangkok' ? 'Bangkok' : 'London')
+    await page.getByRole('option', { name: timezoneLabel(target), exact: true }).click()
+    await expect(menu).toHaveCount(0)
+    await expect(control).toContainText(timezoneLabel(target))
+    await expect(outer.getByRole('button', { name: 'Save', exact: true })).toBeEnabled()
+    await control.click()
+    await expect(menu).toBeVisible()
+    await page.screenshot({ path: testInfo.outputPath('nested-timezone-picker-mobile.png'), fullPage: true })
+    await page.keyboard.press('Escape')
+    await expect(menu).toHaveCount(0)
+    await expect(outer).toBeVisible()
+    await expect(control).toContainText(timezoneLabel(target))
+    await expect(page).toHaveURL(leafPath)
+    await page.keyboard.press('Escape')
+    await expect(page).toHaveURL(parentPath)
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    expect(writes).toEqual([])
+    const persisted = await page.request.get(endpoint, { params: { org: 'ember-slice-demo' } })
+    expect(persisted.status(), await persisted.text()).toBe(200)
+    expect((await persisted.json() as { location: { timezone: string } }).location.timezone).toBe(location!.timezone)
+  })
+
+  test('a leaf URL reloads its drawer and resizing keeps one editor with its draft', async ({ page }) => {
+    const links = `${ORG}/website/pages/links`
+    const query = '?location_id=loc-demo'
+    const leafUrl = `${links}/title${query}`
+    const parent = page.locator('#dashboard-panel-organization-links')
+    const leaf = page.locator('#dashboard-panel-organization-links-title')
+    const dialog = page.getByRole('dialog', { name: 'Title', exact: true })
+    const input = page.getByRole('textbox', { name: 'Links page title', exact: true })
+    await page.setViewportSize(PHONE)
+    await open(page, leafUrl)
+    await expect(dialog).toBeVisible()
+    await expect(parent).toBeVisible()
+    await expect(input).toHaveCount(1)
+    const savedTitle = await input.inputValue()
+    await page.reload()
+    await waitForNuxtHydration(page)
+    await expect(page).toHaveURL(leafUrl)
+    await expect(dialog).toBeVisible()
+    await expect(parent).toBeVisible()
+    await expect(input).toHaveValue(savedTitle)
+    const draft = `${savedTitle} unsaved resize`
+    await input.fill(draft)
+
+    await page.setViewportSize(WIDE)
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expectPanes(page, ['organization-links', 'organization-links-title'])
+    await expect(input).toHaveCount(1)
+    await expect(input).toHaveValue(draft)
+    await expect(leaf).toHaveCount(1)
+    await expect(leaf.getByTestId('dashboard-navbar-close')).not.toBeVisible()
+    await expect(leaf.getByRole('button', { name: 'Cancel', exact: true })).not.toBeVisible()
+    await expect(leaf.getByRole('button', { name: 'Save', exact: true })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Save', exact: true })).toHaveCount(1)
+    const parentBox = await parent.boundingBox()
+    const leafBox = await leaf.boundingBox()
+    expect(parentBox).not.toBeNull()
+    expect(leafBox).not.toBeNull()
+    expect(leafBox!.x).toBeGreaterThanOrEqual(parentBox!.x + parentBox!.width - 1)
+
+    for (const viewport of [NARROW, PHONE]) {
+      await page.setViewportSize(viewport)
+      await expect(dialog).toBeVisible()
+      await expect(parent).toBeVisible()
+      await expect(leaf).toHaveCount(1)
+      await expect(input).toHaveCount(1)
+      await expect(input).toHaveValue(draft)
+      await expect(leaf.getByRole('button', { name: 'Save', exact: true })).toBeInViewport()
+      await expect(page.getByRole('button', { name: 'Save', exact: true })).toHaveCount(1)
+      await expect(page).toHaveURL(leafUrl)
+    }
+    await expect(leaf.getByTestId('dashboard-navbar-close')).toHaveAttribute('href', `${links}${query}`)
+    await leaf.getByRole('button', { name: 'Cancel', exact: true }).click()
+    await expect(page).toHaveURL(`${links}${query}`)
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    await expectPanes(page, ['organization-links'])
+    await expect(parent.getByRole('link', { name: /^Title/ })).toContainText(savedTitle)
+  })
+
+  // Making a record is its steps, at every width: a phone lands on the first
+  // one rather than on a list with a button, and dismissing it leaves the making.
+  test('a phone opens a new record on its first step and dismissing it returns to Catalog', async ({ page }) => {
+    await page.setViewportSize(PHONE)
+    await open(page, `${ORG}/products/new`)
+    await expect(page).toHaveURL(`${ORG}/products/new/kind`)
+    await expect(page.getByRole('dialog', { name: 'Type', exact: true })).toBeVisible()
+    // The level behind the sheet is hidden from assistive technology while the sheet is open.
+    await expect(page.locator('#dashboard-panel-product h1')).toHaveText('New product')
+    await page.locator('#dashboard-panel-product-kind').getByTestId('dashboard-navbar-close').click()
+    await expect(page).toHaveURL(`${ORG}/products`)
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+  })
+
+  // A service is a Product and the page that shows it: Catalog's Add opens the
+  // shared create walk, and Create writes both, bound, through one request.
   test('Catalog adds a service with its page through the one Product editor', async ({ page, baseURL }) => {
     const services = '/dashboard/north-carolina-legal-services'
     const editor = '/api/editor/organizations/org-ncls-blawby'
@@ -370,15 +1686,19 @@ test.describe('dashboard pane hierarchy', () => {
     await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
     await open(page, `${services}/products`)
     await expectPanes(page, ['catalog'])
-    await page.getByTestId('catalog-entry-services').click()
-    await expect(page).toHaveURL(`${services}/products/services`)
-    await expectPanes(page, ['catalog', 'catalog-services'])
-    await page.locator('#dashboard-panel-catalog-services').getByTestId('catalog-add').click()
-    await expect(page).toHaveURL(`${services}/products/new/name?kind=service`)
+    await page.locator('#dashboard-panel-catalog').getByTestId('catalog-add').click()
+    await expect(page).toHaveURL(`${services}/products/new/kind`)
+    const kind = page.locator('#dashboard-panel-product-kind')
+    await kind.getByText('Service or appointment', { exact: true }).click()
+    await expect(kind.getByRole('radio', { name: 'Service or appointment', exact: true })).toBeChecked()
+    await kind.getByRole('button', { name: 'Next: Name', exact: true }).click()
+    await expect(page).toHaveURL(`${services}/products/new/name`)
+    // The level is named for what is being made, and the step's own footer is the only commit.
+    await expect(page.locator('#dashboard-panel-product').getByRole('heading', { name: 'New service', level: 1, exact: true })).toBeVisible()
+    await expect(page.locator('#dashboard-panel-product').getByRole('button', { name: 'Create service', exact: true })).toHaveCount(0)
     const name = `E2E Service ${Date.now().toString(36)}`
     await page.getByRole('textbox', { name: 'Name' }).fill(name)
     const created = page.waitForResponse(response => new URL(response.url()).pathname === `${editor}/products` && response.request().method() === 'POST')
-    // The walk's index and its Name leaf both offer the commit; the leaf's is the one beside the field.
     await page.locator('#dashboard-panel-product-name').getByRole('button', { name: 'Create service', exact: true }).click()
     const response = await created
     expect(response.status(), await response.text()).toBe(201)
@@ -387,7 +1707,8 @@ test.describe('dashboard pane hierarchy', () => {
     const productId = (await response.json() as { product: { id: string } }).product.id
     let pageId: string | null = null
     try {
-      await expect(page).toHaveURL(new RegExp(`${services}/products/${productId}(/photo)?$`))
+      await expect(page).toHaveURL(`${services}/products/${productId}/price`)
+      await expectPanes(page, ['product', 'product-price'])
       // Read back through other paths than the one that wrote it.
       const product = (await (await page.request.get(`${editor}/products/${productId}`)).json() as { product: { kind: string; active: boolean; name: string; variants: unknown[]; publications: Array<{ published: boolean }>; booking: unknown; page: { id: string; path: string; title: string } | null } }).product
       expect(product).toMatchObject({ kind: 'service', active: false, name, publications: [{ published: false }], booking: null })
@@ -397,6 +1718,15 @@ test.describe('dashboard pane hierarchy', () => {
       pageId = product.page!.id
       const bound = (await (await page.request.get(`${editor}/pages/${pageId}`)).json() as { page: { product_id: string | null } }).page
       expect(bound.product_id).toBe(productId)
+      await page.locator('#dashboard-panel-product').getByTestId('dashboard-navbar-back').click()
+      await expect(page).toHaveURL(`${services}/products`)
+      await expectPanes(page, ['catalog'])
+      const catalogService = page.getByTestId('catalog-grid').getByTestId(`selector-item-${productId}`)
+      await expect(catalogService).toHaveAttribute('href', `${services}/products/${productId}`)
+      await expect(catalogService).toContainText(name)
+      await expect(catalogService).toContainText('No photo')
+      await expect(catalogService).toContainText('No price set')
+      await expect(catalogService).toContainText('No locations set')
       // MCP reads the same pair, and the editor URL it hands an agent opens this record.
       const viaMcp = mcpData<{ product: { page: { id: string; path: string } | null; admin_edit_url: string | null } }>(await (await mcpRequest(page.request, baseURL!, {
         method: 'tools/call', toolName: 'get_product', args: { organization_id: 'org-ncls-blawby', product_id: productId },
@@ -421,9 +1751,9 @@ test.describe('dashboard pane hierarchy', () => {
     }
   })
 
-  // Krabiclaw runs on Krabiclaw: the row and its page exist only inside
-  // Krabiclaw's own organization, and only for a Better Auth admin.
-  test('Platform accounts opens only inside Krabiclaw, and only for a Better Auth admin', async ({ page, baseURL, playwright }) => {
+  // KrabiClaw runs on KrabiClaw: the row and its page exist only inside
+  // KrabiClaw's own organization, and only for a Better Auth admin.
+  test('Platform accounts opens only inside KrabiClaw, and only for a Better Auth admin', async ({ page, baseURL, playwright }) => {
     const services = '/dashboard/north-carolina-legal-services'
     const krabiclaw = '/dashboard/platform'
     const menu = page.locator('#dashboard-panel-organization-settings')
@@ -456,7 +1786,7 @@ test.describe('dashboard pane hierarchy', () => {
       await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
       await expectNoPlatformAccounts()
 
-      // Krabiclaw's own organization, opened by its owner, who is a Better Auth admin.
+      // KrabiClaw's own organization, opened by its owner, who is a Better Auth admin.
       await page.context().clearCookies()
       await loginAs(page.request, baseURL!)
       const signedIn = await (await page.request.get('/api/auth/get-session')).json() as { user: { role?: string | null } }
@@ -513,7 +1843,7 @@ test.describe('dashboard pane hierarchy', () => {
     expect(discarded.status(), await discarded.text()).toBe(200)
     const name = `E2E Organization ${Date.now().toString(36)}`
     const draft = await page.request.post('/api/dashboard/onboarding/drafts/active', {
-      data: { sourceType: 'manual', vertical: 'restaurant', name, details: { country: 'TH', city: 'Ao Nang', streetAddress: '88 Moo 2' } },
+      data: { sourceType: 'manual', vertical: 'restaurant', name, details: { sourceLocale: 'en', country: 'TH', city: 'Ao Nang', streetAddress: '88 Moo 2', currency: 'THB', timezone: 'Asia/Bangkok' } },
     })
     expect(draft.status(), await draft.text()).toBe(200)
     const { organizationId } = await draft.json() as { organizationId: string }

@@ -21,6 +21,7 @@
           <UButton v-if="active" label="Clear" color="neutral" variant="ghost" size="xs" @click="clear" />
         </div>
         <UAlert v-if="failure" color="error" variant="soft" :description="getErrorMessage(failure, 'The filter could not be applied')" />
+        <UAlert v-if="membersError" color="error" variant="soft" :description="getErrorMessage(membersError, 'Team members could not be loaded')" />
         <UFormField v-if="locations" label="Location">
           <USelect v-model="filters.locationId" :items="locationOptions" class="w-full" />
         </UFormField>
@@ -49,9 +50,7 @@ const props = defineProps<{
 const { filters, active, clear, failure } = useAgendaFilters()
 const open = ref(false)
 
-const members = props.organizationId
-  ? (await useFetch<{ members: { id: string; name: string; image: string | null }[] }>(`/api/organizations/${props.organizationId}/members/scheduling`)).data
-  : ref(null)
+const { data: members, error: membersError } = await useMemberSchedulingList(() => props.organizationId)
 
 // A person is their face and a branch its picture, as the rows that list them draw it.
 const locationOptions = computed(() => [
@@ -60,7 +59,7 @@ const locationOptions = computed(() => [
 ])
 const kindOptions = computed(() => [
   { label: 'All booking types', value: AGENDA_FILTER_ALL },
-  ...props.kinds.map(kind => ({ label: kind === 'reservation' ? 'Reservations' : kind === 'booking' ? 'Bookings' : 'Posts', value: kind })),
+  ...props.kinds.map(kind => ({ label: kind === 'reservation' ? 'Reservations' : kind === 'booking' ? 'Bookings' : kind === 'stay' ? 'Stays' : 'Posts', value: kind })),
 ])
 const memberOptions = computed(() => [
   { label: 'All assigned people', value: AGENDA_FILTER_ALL },

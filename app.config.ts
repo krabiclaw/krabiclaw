@@ -42,7 +42,8 @@ export default defineAppConfig({
     // (docs/design/airbnb-parity-audit.md). A page passes
     // `size` only where a control genuinely differs; the commit bar's Save is
     // the one `xl`. Focus is a 2px ring in the text colour, as Airbnb's is
-    // black: coral is reserved for Save and the lit tab.
+    // black. Buttons are neutral — navy in light, white in dark — and coral
+    // is left for status and selection marks.
     checkbox: { defaultVariants: { size: 'lg' } },
     inputMenu: field,
     inputNumber: field,
@@ -59,14 +60,7 @@ export default defineAppConfig({
           xl: { base: 'h-12 px-6 text-base' }
         }
       },
-      defaultVariants: { size: 'lg' },
-      compoundVariants: [
-        {
-          color: 'primary',
-          variant: 'solid',
-          class: 'text-on-primary'
-        }
-      ]
+      defaultVariants: { size: 'lg', color: 'neutral' }
     },
     // A yes/no setting. Black when on, as Airbnb's toggle is; off is the 3:1
     // field edge, because Nuxt UI's off track vanishes on the cream page.
@@ -86,7 +80,10 @@ export default defineAppConfig({
           card: { item: 'w-full rounded-xl border-default has-data-[state=checked]:ring-2 has-data-[state=checked]:ring-inset has-data-[state=checked]:ring-(color:--ui-text-highlighted)' }
         }
       },
-      compoundVariants: [{ variant: 'card', class: { item: 'p-5 has-data-[state=checked]:border-transparent has-data-[state=checked]:bg-transparent' } }],
+      compoundVariants: [
+        { variant: 'card', class: { item: 'p-5 has-data-[state=checked]:border-transparent has-data-[state=checked]:bg-transparent' } },
+        { indicator: 'hidden', class: { icon: 'size-8 text-highlighted' } }
+      ],
       defaultVariants: { size: 'lg', color: 'neutral' }
     },
     // A label is the 16px line a row reads; anything under it is 14px muted.
@@ -97,18 +94,19 @@ export default defineAppConfig({
         help: 'text-sm text-muted'
       }
     },
+    // One card and one empty state across the dashboard: the padding and the
+    // corner are these, never a page's own.
     card: {
       slots: { root: 'rounded-2xl', body: 'p-6 sm:p-6' }
     },
-    // Every nav bar shares one horizontal gutter so the top nav's logo, the
-    // panel navbar's back control and the page body all start on the same line.
-    // The left slot used to be a centred 45rem column, which put the back arrow
-    // and the title at a different inset from everything above and below them.
+    empty: {
+      slots: { root: 'rounded-2xl' }
+    },
+    // The navbar keeps Nuxt UI's `px-4 sm:px-6`, the panel body's and footer's
+    // gutter, so the top nav (which uses the same) and every pane start on one line.
     dashboardNavbar: {
       slots: {
-        // Both variants: Nuxt UI's base is `px-4 sm:px-6`, and an unprefixed
-        // override does not outrank a `sm:` one in tailwind-merge.
-        root: 'px-(--kc-nav-gutter) sm:px-(--kc-nav-gutter) border-b-0',
+        root: 'border-b-0',
         toggle: 'hidden'
       }
     },

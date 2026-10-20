@@ -1,17 +1,6 @@
 import type { FetchOptions } from 'ofetch'
 import { $fetch } from 'ofetch'
 
-export const PUBLIC_READ_TIMEOUT_MS = 6_000
-export const DASHBOARD_READ_TIMEOUT_MS = 8_000
-// Shared deadline for non-upload public and dashboard mutations.
-export const MUTATION_TIMEOUT_MS = 30_000
-export const MEDIA_UPLOAD_TIMEOUT_MS = 300_000
-
-export function mediaUploadSignal(callerSignal?: AbortSignal): AbortSignal {
-  const deadline = AbortSignal.timeout(MEDIA_UPLOAD_TIMEOUT_MS)
-  return callerSignal ? AbortSignal.any([callerSignal, deadline]) : deadline
-}
-
 export class ApiClientError extends Error {
   readonly statusCode: number
   readonly code: string
@@ -75,14 +64,19 @@ export function normalizeApiError(error: unknown, fallbackMessage = 'API request
   const data = sanitizeApiData(candidate.data)
   const structuredError = isRecord(data.error) ? data.error : null
   const topLevelError = typeof data.error === 'string' ? data.error : null
+  const domainData = isRecord(data.data) ? data.data : data
   const statusCode = candidate.statusCode ?? candidate.status ?? candidate.response?.status ?? 500
   return new ApiClientError(
     (typeof structuredError?.message === 'string' ? structuredError.message : null)
       ?? topLevelError
+      ?? (typeof data.message === 'string' ? data.message : null)
+      ?? (typeof data.statusMessage === 'string' ? data.statusMessage : null)
       ?? candidate.message
       ?? fallbackMessage,
     statusCode,
-    (typeof structuredError?.code === 'string' ? structuredError.code : null) ?? 'API_REQUEST_FAILED',
+    (typeof structuredError?.code === 'string' ? structuredError.code : null)
+      ?? (typeof domainData.code === 'string' ? domainData.code : null)
+      ?? 'API_REQUEST_FAILED',
     (typeof structuredError?.requestId === 'string' ? structuredError.requestId : null)
       ?? candidate.response?.headers?.get('x-request-id')
       ?? null,
@@ -99,7 +93,6 @@ async function request<T>(
     body?: unknown
     query?: Record<string, unknown>
     signal?: AbortSignal
-    timeout: number
     validate: Validator<T>
     coalesceKey?: string
   },
@@ -114,7 +107,6 @@ async function request<T>(
         query: options.query,
         signal: options.signal,
         retry: 0,
-        timeout: options.timeout,
       }
       const value = await $fetch<unknown>(url, requestOptions)
       if (!options.validate(value)) {
@@ -148,9 +140,10 @@ export function publicApiRequest<T>(
     signal?: AbortSignal
     coalesceKey?: string
     query?: Record<string, unknown>
+    headers?: HeadersInit
   },
 ) {
-  return request(url, { ...options, timeout: PUBLIC_READ_TIMEOUT_MS })
+  return request(url, options)
 }
 
 export function publicApiMutation<T>(
@@ -164,7 +157,7 @@ export function publicApiMutation<T>(
     validate: Validator<T>
   },
 ) {
-  return request(url, { ...options, timeout: MUTATION_TIMEOUT_MS })
+  return request(url, options)
 }
 
 export const isRecord = (value: unknown): value is Record<string, unknown> =>

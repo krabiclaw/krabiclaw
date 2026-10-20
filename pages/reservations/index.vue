@@ -61,10 +61,10 @@
             <p v-if="loc.short_description" class="mt-3 max-w-md text-sm leading-relaxed text-muted">{{ loc.short_description }}</p>
 
             <div class="mt-6 flex flex-wrap items-center gap-3">
-              <SayaButton control-id="reservation-booking-toggle" @click="openBookingModal(loc)">{{ resCopy.reservationRequestButton }}</SayaButton>
-              <SayaButton v-if="loc.phone" :href="`tel:${loc.phone.replace(/\s/g, '')}`" variant="outline">
+              <TenantButton control-id="reservation-booking-toggle" @click="openBookingModal(loc)">{{ resCopy.reservationRequestButton }}</TenantButton>
+              <TenantButton v-if="loc.phone" :href="`tel:${loc.phone.replace(/\s/g, '')}`" variant="outline">
                 {{ loc.phone }}
-              </SayaButton>
+              </TenantButton>
             </div>
           </div>
         </article>
@@ -153,16 +153,15 @@
 
 <script setup lang="ts">
 import type { SubmissionMeasurement } from '~/composables/useOrganizationConversionTracking'
-import { $fetch } from 'ofetch'
+import { isRecord, publicApiMutation, publicApiRequest, normalizeApiError } from '~/utils/api-clients'
 import BookingContactForm from '@/components/booking/BookingContactForm.vue'
 import BookingLocationStep from '@/components/booking/BookingLocationStep.vue'
 import BookingModal from '@/components/booking/BookingModal.vue'
 import BookingRecap from '@/components/booking/BookingRecap.vue'
 import BookingTimeStep, { type RawDateAvailability, type TimeSlotSelection } from '@/components/booking/BookingTimeStep.vue'
 import { getTodayHoursLabel, isOpenNow, schemaOpeningHours } from '~/shared/reservation-hours'
-import { formatTime, localDateTimeToInstant } from '~/utils/timezone'
+import { formatTime, localDateAt, isValidInstant, isValidTimezone } from '~/utils/timezone'
 import { setBookingConfirmation } from '~/composables/useBookingHandoff'
-import { requireProductPresentation } from '~/utils/product-presentation'
 import { addressPlaceName, formatPostalAddress, schemaPostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { mediaStillUrl, type MediaPresentation } from '~/shared/media-placement-contract'
 
@@ -171,34 +170,26 @@ function formatTitleItalics(text: string | null | undefined): string {
   return text.replace(/\*(.*?)\*/g, '<em class="saya-italic">$1</em>')
 }
 
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 // The tenant is the organization; `site` is only the shape this composable
 // still returns it under.
-const { organization: organization, organizationId } = useTenantOrganization()
-const route = useRoute()
-const { locale, t } = useI18n()
+const { organization } = useTenantOrganization()
+const { id: organizationId } = organization
+const { locale, localePath, t } = useI18n()
 const resCopy = computed(() => getVerticalCopy((organization as ApiValue)?.vertical, locale.value))
 const { locations, config, getField, reservationPolicyByLocation } = await usePublicPageData()
+// A site whose locations take no reservations has no reservations page, the
+// same fact the header uses to offer one.
+if (!Object.values(reservationPolicyByLocation.value).some(policy => policy !== null)) {
+  throw createError({ statusCode: 404, statusMessage: 'This site does not take reservations' })
+}
 
 // The first location card's hero is this route's LCP element.
 useHeroLcpPreload(computed(() => {
   const first = locations.value[0]
   return first ? getLocationPoster(first) : null
 }))
-
-const isExperienceOrganization = computed(() => (organization as { vertical?: string | null } | null)?.vertical === 'experience')
-
-// Experience-vertical sites book each Product on its own page. The
-// /reservations page has no meaning for them. Redirect as soon as the site
-// vertical is known — do NOT gate on having products, because a freshly seeded
-// site with vertical='experience' and no products yet should still not show
-// this page.
-watch(isExperienceOrganization, (isExp) => {
-  if (isExp) {
-    navigateTo({ path: requireProductPresentation(String((organization as { vertical?: string | null } | null)?.vertical)).collectionPath, query: route.query }, { replace: true, redirectCode: 302 })
-  }
-}, { immediate: true })
 
 const activeReservationPolicySummary = computed(() => {
   const locationId = selectedLocation.value?.id ? String(selectedLocation.value.id) : null
@@ -339,10 +330,13 @@ async function loadAvailability() {
   const locationId = reservationForm.value.location_id
   availabilityLoading.value = true
   try {
-    const today = new Date()
-    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`
-    const res = await $fetch<{ dates: RawDateAvailability[] }>(`/api/public/reservations/availability`, {
+    const dateStr = localDateAt(new Date(), reservationTimezone.value)
+    const res = await publicApiRequest(`/api/public/reservations/availability`, {
       query: { location_id: locationId, date: dateStr, days: 14 },
+      validate: (value): value is { dates: RawDateAvailability[] } => isRecord(value) && Array.isArray(value.dates)
+        && value.dates.every(day => isRecord(day) && typeof day.date === 'string' && Array.isArray(day.slots)
+          && day.slots.every(slot => isRecord(slot) && typeof slot.time_slot === 'string' && (slot.capacity === null || Number.isSafeInteger(slot.capacity))
+            && (slot.remaining === null || Number.isSafeInteger(slot.remaining)) && typeof slot.is_closed === 'boolean' && typeof slot.is_full === 'boolean')),
     })
     // Ignore stale responses from a location that was changed away from before this resolved
     if (requestId !== availabilityRequestId || locationId !== reservationForm.value.location_id) return
@@ -357,7 +351,7 @@ async function loadAvailability() {
 }
 
 watch(() => reservationForm.value.location_id, (id) => {
-  if (id) {
+  if (id && import.meta.client) {
     timeSelection.value = null
     loadAvailability()
   }
@@ -365,6 +359,8 @@ watch(() => reservationForm.value.location_id, (id) => {
 
 // ── Submission ────────────────────────────────────────────────────────────
 const submitting = ref(false)
+let reservationRequestKey: string | null = null
+let reservationFingerprint: string | null = null
 const { mirrorSubmission, pageEventId, trackCheckoutStart } = useOrganizationConversionTracking()
 let checkoutStarted = false
 watch([isBookingModalOpen, () => reservationForm.value.location_id], ([open, locationId]) => {
@@ -393,49 +389,63 @@ async function handleReservation() {
   submitting.value = true
   submitError.value = null
   try {
-    // The instant is resolved BEFORE the request. Reading the location's zone
-    // and converting the wall-clock slot both throw on a misconfigured
-    // location, and doing it after the POST turned a reservation that exists
-    // into "Failed to submit" — which the guest answers by booking a second one.
-    const startsAt = localDateTimeToInstant(reservationForm.value.date, reservationForm.value.time, reservationTimezone.value).toISOString()
-    const timezone = reservationTimezone.value
-    const res = await $fetch<{ id: string; cancellationToken: string; policy_summary?: ApiRecord | null; measurement?: SubmissionMeasurement }>(`/api/public/reservations`, {
+    const details = { ...reservationForm.value, name: reservationForm.value.name.trim(), email: reservationForm.value.email.trim(), phone: reservationForm.value.phone.trim(), requests: reservationForm.value.requests.trim() }
+    const fingerprint = JSON.stringify(details)
+    if (fingerprint !== reservationFingerprint) {
+      reservationRequestKey = crypto.randomUUID()
+      reservationFingerprint = fingerprint
+    }
+    reservationRequestKey ??= crypto.randomUUID()
+    type ReservationReceipt = { success: true; status: 'confirmed'; id: string; request_id: string; operational_reservation_id: string; starts_at: string; ends_at: string; timezone: string; cancellationToken: string; policy_summary?: ApiRecord | null; measurement?: SubmissionMeasurement }
+      | { success: true; status: 'checkout'; payment_id: string; pay_path: string; purchase_claim: string; expires_at: string }
+    const res = await publicApiMutation(`/api/public/reservations`, {
       method: 'POST',
-      body: { ...reservationForm.value, page_event_id: await pageEventId() },
+      body: { ...details, idempotency_key: reservationRequestKey, locale: locale.value, page_event_id: await pageEventId() },
+      validate: (value): value is ReservationReceipt => isRecord(value) && value.success === true && (
+        value.status === 'checkout' ? typeof value.payment_id === 'string' && typeof value.pay_path === 'string' && value.pay_path.startsWith('/pay/') && typeof value.purchase_claim === 'string' && isValidInstant(value.expires_at)
+        : value.status === 'confirmed' && typeof value.id === 'string' && typeof value.request_id === 'string' && typeof value.operational_reservation_id === 'string' && typeof value.cancellationToken === 'string'
+          && isValidInstant(value.starts_at) && isValidInstant(value.ends_at) && typeof value.timezone === 'string' && isValidTimezone(value.timezone)),
     })
+    if (res.status === 'checkout') {
+      await navigateTo({ path: res.pay_path, hash: `#${res.purchase_claim}` })
+      return
+    }
     setBookingConfirmation({
       type: 'reservation',
+      locale: locale.value,
       organizationId,
       organizationName: brandName.value,
       guestName: reservationForm.value.name,
       guestEmail: reservationForm.value.email,
-      // The guest picked a wall-clock slot at this location; the instant it
-      // means was resolved once, above, in that location's zone.
-      startsAt,
-      timezone,
+      operationalBookingId: res.operational_reservation_id,
+      requestId: res.request_id,
+      startsAt: res.starts_at,
+      timezone: res.timezone,
       guests: reservationForm.value.guests,
       requests: reservationForm.value.requests || null,
-      cancelUrl: res?.id && res?.cancellationToken ? `/reservations/cancel?id=${res.id}#${res.cancellationToken}` : null,
+      cancelUrl: res?.id && res?.cancellationToken ? `${localePath('/reservations/cancel')}?id=${encodeURIComponent(res.id)}#${res.cancellationToken}` : null,
       contactPhone: contactPhone.value || null,
       contactEmail: contactEmail.value || null,
-      policySummary: res.policy_summary ?? null,
+      policySummary: res.policy_summary ? { ...res.policy_summary, additional_notes_html: activeReservationPolicySummary.value?.additional_notes_html ?? null } : null,
       locationId: selectedLocation.value?.id ? String(selectedLocation.value.id) : null,
       locationName: selectedLocation.value?.title ?? null,
       locationAddress: formatPostalAddress((selectedLocation.value?.address ?? null) as PostalAddress | null) || null,
       locationSlug: typeof selectedLocation.value?.slug === 'string' ? selectedLocation.value.slug : null,
     })
     mirrorSubmission('reservation_submit', res.measurement, selectedLocation.value?.id ? String(selectedLocation.value.id) : null)
-    await navigateTo('/reservations/confirmed')
+    await navigateTo({ path: localePath('/reservations/confirmed'), query: { id: res.request_id }, hash: `#${res.cancellationToken}` })
+    reservationRequestKey = null
+    reservationFingerprint = null
   } catch (err) {
-    const error = err as { data?: { error?: string }; status?: number }
-    if (error.status === 409) {
+    const error = normalizeApiError(err)
+    if (error.statusCode === 409 && error.code === 'capacity_unavailable') {
       // Conflict (slot filled or capacity exceeded) — revert to time selection and reload availability
       bookingStep.value = 2
       timeSelection.value = null
-      submitError.value = error.data?.error || 'This time is no longer available. Please select another.'
+      submitError.value = error.message
       await loadAvailability()
     } else {
-      submitError.value = error.data?.error ?? 'Failed to submit. Please try again.'
+      submitError.value = error.message
     }
   } finally {
     submitting.value = false
@@ -447,23 +457,16 @@ const requestUrl = useRequestURL()
 
 const brandName = computed(() => String((organization as ApiValue)?.name ?? '').trim())
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
 useSocialMetadata(() => ({
   path: '/reservations',
-  socialImage: organizationSocialImage,
+  socialImage: organization.social_image,
   title: `${brandName.value} | ${resCopy.value.reserveCta}`,
   description: resCopy.value.seoReservationDescription(brandName.value),
-  brand: {
-    organizationName: brandName.value,
-  },
   breadcrumbs: [
     { name: 'Home', url: '/' },
     { name: 'Reservations', url: '/reservations' },
   ],
-  // An experience site has no reservations page: the server redirects to
-  // /experiences, but a client-side navigation can render this briefly during
-  // hydration, so the intent says unlisted rather than relying on the redirect.
-  discoverability: isExperienceOrganization.value ? 'unlisted' : 'listed',
+  discoverability: 'listed',
 }))
 
 /**

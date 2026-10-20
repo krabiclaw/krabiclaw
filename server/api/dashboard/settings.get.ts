@@ -9,7 +9,7 @@ export default defineHandler(async (event) => {
   const { env, db, organization } = await getDashboardContext(event)
   await assertOrganizationWideAccess(db, memberAccessPrincipal(organization, { env, event }))
 
-  const settings = await loadSettingsPayload(db, organization.id)
+  const settings = await loadSettingsPayload(db, env, organization.id)
 
   return jsonResponse({
     success: true, settings

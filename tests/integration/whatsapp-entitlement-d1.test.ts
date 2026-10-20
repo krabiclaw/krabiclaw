@@ -34,7 +34,8 @@ test('organization messaging entitlement fences Meta calls while preserving noti
 
     const providerEnv = { ...env, WHATSAPP_DELIVERY_MODE: 'provider', WHATSAPP_PHONE_NUMBER_ID: 'local-proof-phone-id', WHATSAPP_ACCESS_TOKEN: 'local-proof-no-live-token' }
     for (const id of ['free', 'paid']) {
-      await db.prepare('INSERT INTO organization (id,name,slug,subdomain) VALUES (?,?,?,?)').bind(id, id, id, id).run()
+      await db.prepare(`INSERT INTO organization (id,name,slug,subdomain, default_currency, timezone) VALUES (?,?,?,?, 'USD', 'UTC')`).bind(id, id, id, id).run()
+      await db.prepare("INSERT INTO organization_locales (id,organization_id,locale,is_source,status) VALUES (?,?,'en',1,'published')").bind(`${id}-en`, id).run()
     }
     await db.prepare("INSERT INTO user (id,name,email,phoneNumber,phoneNumberVerified) VALUES ('owner','Owner','owner@proof.example','+66812345678',1)").run()
     for (const id of ['free', 'paid']) {
@@ -50,7 +51,7 @@ test('organization messaging entitlement fences Meta calls while preserving noti
       return Response.json({ messages: [{ id: `meta-proof-${metaCalls}` }] })
     }
     try {
-      const send = (organizationId: string) => sendWhatsAppNotification(providerEnv, { organizationId, toPhone: '+66812345678', template: 'domain_update', vars: { domain: 'proof.example', status: 'active', dashboard_path: 'paid/settings' } })
+      const send = (organizationId: string) => sendWhatsAppNotification(providerEnv, { organizationId, toPhone: '+66812345678', template: 'domain_update', vars: { domain: 'proof.example', status: 'active', dashboard_url: 'https://proof.example/dashboard/paid/settings' } })
       const skipped = { success: true, status: 'skipped', reason: 'messaging_not_enabled' }
       assert.deepEqual(await send('free'), skipped)
       assert.equal(metaCalls, 0)
@@ -72,7 +73,7 @@ test('organization messaging entitlement fences Meta calls while preserving noti
 
       // The same owner belongs to both organizations: eligibility is per org.
       for (const category of ['organization_and_billing', 'guest_messages', 'reservations_bookings']) {
-        await db.prepare('INSERT INTO user_notification_preferences (user_id,category,email_enabled,whatsapp_enabled) VALUES (?,?,1,1)').bind('owner', category).run()
+        await db.prepare('INSERT INTO user_notification_preferences (user_id,category,email_enabled,whatsapp_enabled,push_enabled) VALUES (?,?,1,1,0)').bind('owner', category).run()
       }
       const domain = (organizationId: string, status: string) => notifyDomainLifecycle(providerEnv, db, { organizationId, domain: 'proof.example', status, title: 'Domain update', message: 'Domain status changed', dashboardUrl: `https://proof.example/dashboard/${organizationId}/settings` })
       await domain('free', 'free')
@@ -92,7 +93,7 @@ test('organization messaging entitlement fences Meta calls while preserving noti
         assert.equal(metaCalls - before, organizationId === 'paid' ? 1 : 0)
         const entry = await appendEntry(db, { threadId: id, kind: 'message', actorKind: 'guest', channel: 'email', body: 'Reply', dedupeKey: `reply-${id}` })
         const replyBefore = metaCalls
-        await notifyGuestThreadReply(providerEnv, db, { organizationId, organizationName: organizationId, threadId: id, sourceEntryId: entry.id, submissionType: 'contact', submissionId: id, guestName: 'Guest', inboundChannel: 'email', messagePreview: 'Reply' })
+        await notifyGuestThreadReply(providerEnv, db, { organizationId, organizationName: organizationId, threadId: id, sourceEntryId: entry.id, submissionType: 'contact', submissionId: id, participantLabel: 'Guest', guestEmail: 'guest@proof.example', inboundChannel: 'email', messagePreview: 'Reply' })
         assert.equal(metaCalls - replyBefore, organizationId === 'paid' ? 1 : 0)
         const rows = (await db.prepare('SELECT d.channel,d.status FROM guest_thread_deliveries d JOIN activity_entries e ON e.id=d.entry_id WHERE e.request_id=?').bind(id).all<{ channel: string; status: string }>()).results
         assert(rows.some(row => row.channel === 'email' && row.status === 'sent'), 'email fallback persists')
@@ -102,7 +103,7 @@ test('organization messaging entitlement fences Meta calls while preserving noti
       await db.prepare("UPDATE user_notification_preferences SET whatsapp_enabled=0 WHERE category='guest_messages'").run()
       const entry = await appendEntry(db, { threadId: 'contact-paid', kind: 'message', actorKind: 'guest', channel: 'email', body: 'Opted out', dedupeKey: 'reply-optout' })
       const before = metaCalls
-      await notifyGuestThreadReply(providerEnv, db, { organizationId: 'paid', organizationName: 'paid', threadId: 'contact-paid', sourceEntryId: entry.id, submissionType: 'contact', submissionId: 'contact-paid', guestName: 'Guest', inboundChannel: 'email', messagePreview: 'Opted out' })
+      await notifyGuestThreadReply(providerEnv, db, { organizationId: 'paid', organizationName: 'paid', threadId: 'contact-paid', sourceEntryId: entry.id, submissionType: 'contact', submissionId: 'contact-paid', participantLabel: 'Guest', inboundChannel: 'email', messagePreview: 'Opted out' })
       assert.equal(metaCalls, before)
       // A notification whose organization downgrades is explicitly skipped,
       // not represented as a failed or sent delivery.

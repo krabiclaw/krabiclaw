@@ -1,6 +1,9 @@
 import { CONTENT_DOCUMENT_KINDS, LOCALIZED_RESOURCE_TYPES } from '~/shared/content-registries'
 import type { McpToolDefinition } from './shared'
-import { organizationTool } from './shared'
+import { contentBlockObject, organizationTool } from './shared'
+import { TENANT_PAGE_BLOCKS_SCHEMA } from './content'
+import { localizedResourceValuesSchema } from '~/server/utils/localization-registry'
+import { PRODUCT_KINDS, productDetailsSchema } from '~/shared/product-details'
 import type { McpExecutorContext } from './execution'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import {
@@ -11,41 +14,80 @@ import {
   replaceResourceLocalizations,
 } from '~/server/utils/localization'
 import { listOrganizationLocales } from '~/server/utils/organization-locales'
+import { addOrganizationLanguage, publishOrganizationLanguage, disableOrganizationLanguage, deleteDisabledOrganizationLanguageContent } from '~/server/utils/organization-languages'
+import { PLATFORM_LOCALES } from '~/shared/platform-locales'
 import { NOT_HANDLED, mutationContextPayload, requiredString } from './execution'
 
-const localizedValuesSchema = {
+const localizedDocumentValues = { type: 'object', properties: {
+  title: { type: ['string', 'null'] }, summary: { type: ['string', 'null'] }, slug: { type: ['string', 'null'] }, seo_keywords: { type: ['string', 'null'] },
+  metadata: { type: 'object', properties: { call_to_action: { type: 'object', properties: { label: { type: 'string', pattern: '\\S' } }, required: ['label'], additionalProperties: false } }, additionalProperties: false },
+}, additionalProperties: false } as const
+const resourceValueBranches = LOCALIZED_RESOURCE_TYPES.map(resourceType => ({
+  properties: { resource_type: { const: resourceType }, values: localizedResourceValuesSchema(resourceType) },
+}))
+const resourceValuesInput = {
   type: 'object',
-  description: 'Localized values follow the canonical owner fields. content_document uses title, summary, slug, SEO fields and typed metadata; content_blocks edits its representation. Other allowed fields depend on resource_type. For collection, use { name }. Product values never include a collection; collection names are localized on the collection record.',
-  additionalProperties: true,
+  properties: Object.assign({}, ...LOCALIZED_RESOURCE_TYPES.map(resourceType => localizedResourceValuesSchema(resourceType).properties)),
+  additionalProperties: false,
 } as const
+const organizationLocaleObject = { type: 'object', properties: {
+  id: { type: 'string' }, organization_id: { type: 'string' }, locale: { type: 'string' }, label: { type: ['string', 'null'] },
+  is_source: { type: 'boolean' }, status: { type: 'string', enum: ['published', 'disabled'] }, created_at: { type: 'string' }, updated_at: { type: 'string' },
+}, required: ['id', 'organization_id', 'locale', 'label', 'is_source', 'status', 'created_at', 'updated_at'], additionalProperties: false } as const
 
 const localizationIdentity = { id: { type: 'string' }, organization_id: { type: 'string' }, 
   locale: { type: 'string' }, created_at: { type: 'string' }, updated_at: { type: 'string' } } as const
 const localizationObject = { oneOf: [
   { type: 'object', properties: { ...localizationIdentity, resource_type: { type: 'string', enum: [...LOCALIZED_RESOURCE_TYPES] },
-      resource_id: { type: 'string' }, values: localizedValuesSchema, route_path: { type: ['string','null'] },
+      resource_id: { type: 'string' }, values: { type: 'object' }, route_path: { type: ['string','null'] },
       created_by_user_id: { type: 'string' }, updated_by_user_id: { type: 'string' } },
-    required: [...Object.keys(localizationIdentity), 'resource_type','resource_id','values','route_path','created_by_user_id','updated_by_user_id'], additionalProperties: false },
+    required: [...Object.keys(localizationIdentity), 'resource_type','resource_id','values','route_path','created_by_user_id','updated_by_user_id'], additionalProperties: false, anyOf: resourceValueBranches },
   { type: 'object', properties: { ...localizationIdentity, kind: { type: 'string', enum: CONTENT_DOCUMENT_KINDS },
       row_role: { const: 'representation' }, root_id: { type: 'string' }, title: { type: ['string','null'] }, summary: { type: ['string','null'] },
       slug: { type: ['string','null'] }, path: { type: ['string','null'] },
       seo_keywords: { type: ['string','null'] }, metadata: { type: 'object', additionalProperties: true },
-      content_blocks: { type: 'array', items: { type: 'object', additionalProperties: true } } },
+      content_blocks: { type: 'array', items: contentBlockObject } },
     required: [...Object.keys(localizationIdentity), 'kind','row_role','root_id','title','summary','slug','path','seo_keywords','metadata','content_blocks'], additionalProperties: false },
 ] } as const
 
 export const LOCALES_TOOLS: McpToolDefinition[] = [
   organizationTool({
+    name: 'add_organization_language',
+    description: 'Add a website language for private authoring. Requires the website’s language entitlement. A new language starts disabled; an existing language keeps its publication status and translations while its stored label is refreshed from the platform catalog.',
+    domain: 'locales', minimumRole: 'admin', inputSchema: { locale: { type: 'string', enum: PLATFORM_LOCALES.map(item => item.locale) } },
+    required: ['locale'],
+    outputSchema: { type: 'object', properties: { locales: { type: 'array', items: organizationLocaleObject } }, required: ['locales'], additionalProperties: false },
+  }),
+  organizationTool({
+    name: 'publish_organization_language',
+    description: 'Publish an added website language’s authored translations on public routes. Requires the website’s language entitlement and a translated homepage. Missing translations remain unavailable; the source language is unchanged.',
+    domain: 'locales', minimumRole: 'admin', inputSchema: { locale: { type: 'string', enum: PLATFORM_LOCALES.map(item => item.locale) } },
+    required: ['locale'],
+    outputSchema: { type: 'object', properties: { locales: { type: 'array', items: organizationLocaleObject } }, required: ['locales'], additionalProperties: false },
+  }),
+  organizationTool({
+    name: 'disable_organization_language',
+    description: 'Disable an existing website language’s public routes while preserving its translations for private authoring. The source language cannot be disabled.',
+    domain: 'locales', minimumRole: 'admin', inputSchema: { locale: { type: 'string', enum: PLATFORM_LOCALES.map(item => item.locale) } },
+    required: ['locale'],
+    outputSchema: { type: 'object', properties: { locales: { type: 'array', items: organizationLocaleObject } }, required: ['locales'], additionalProperties: false },
+  }),
+  organizationTool({
+    name: 'delete_organization_language',
+    description: 'Permanently delete a disabled website language and all of its translations. Disable it before deletion. Source content is preserved.',
+    domain: 'locales', minimumRole: 'admin', inputSchema: { locale: { type: 'string' } }, required: ['locale'],
+    outputSchema: { type: 'object', properties: { deleted: { const: true }, locale: { type: 'string' } }, required: ['deleted', 'locale'], additionalProperties: false },
+  }),
+  organizationTool({
     name: 'list_organization_locales',
-    description: "Read the site’s English source language and authored secondary languages. English is fixed as the source; this tool does not create or translate content.",
+    description: "Read the website’s source language and authored translations.",
     domain: 'locales',
     minimumRole: 'admin',
-    confirmRequired: false,
     inputSchema: {},
     outputSchema: {
       type: 'object',
       properties: {
-        locales: { type: 'array', items: { type: 'object', additionalProperties: true } },
+        locales: { type: 'array', items: organizationLocaleObject },
       },
       required: ['locales'],
       additionalProperties: false,
@@ -56,7 +98,6 @@ export const LOCALES_TOOLS: McpToolDefinition[] = [
     description: "Read the requested resource or document in exactly the named language. A missing translation returns not found rather than source-language content.",
     domain: 'locales',
     minimumRole: 'admin',
-    confirmRequired: false,
     inputSchema: {
       resource_type: { type: 'string', enum: [...LOCALIZED_RESOURCE_TYPES, 'content_document'] },
       resource_id: { type: 'string' },
@@ -67,17 +108,16 @@ export const LOCALES_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'put_resource_localization',
-    description: "Replace the requested resource’s translation in exactly the named language. Resource values replace that translation; document fields and blocks require expected_updated_at. This localization tool does not edit Q&A; authored Q&A uses its dedicated tools.",
+    description: "Replace an exact translation. Existing documents require expected_updated_at. Documents require route_path; authored Q&A uses title and summary without a route or blocks. Imported Q&A remains read-only.",
     domain: 'locales',
     minimumRole: 'admin',
-    confirmRequired: true,
     inputSchema: {
       resource_type: { type: 'string', enum: [...LOCALIZED_RESOURCE_TYPES, 'content_document'] },
       resource_id: { type: 'string' },
       locale: { type: 'string' },
-      values: localizedValuesSchema,
-      route_path: { type: ['string', 'null'] },
-      content_blocks: { type: ['array', 'null'], items: { type: 'object', additionalProperties: true } },
+      values: { ...resourceValuesInput, properties: { ...resourceValuesInput.properties, ...localizedDocumentValues.properties } },
+      route_path: { type: ['string', 'null'], description: 'Document path including the language prefix. Resource routes are automatic.' },
+      content_blocks: TENANT_PAGE_BLOCKS_SCHEMA,
       expected_updated_at: { type: ['string', 'null'] },
     },
     required: ['resource_type', 'resource_id', 'locale', 'values'],
@@ -85,10 +125,9 @@ export const LOCALES_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'delete_resource_localization',
-    description: "Permanently remove one resource translation when the user requests deletion of that language representation. Also deletes its owned document and redirects. Authored Q&A is managed with delete_qa.",
+    description: "Permanently remove one translation and its owned document and redirects. Source content is preserved; imported Q&A remains read-only.",
     domain: 'locales',
     minimumRole: 'admin',
-    confirmRequired: true,
     inputSchema: {
       resource_type: { type: 'string', enum: [...LOCALIZED_RESOURCE_TYPES, 'content_document'] },
       resource_id: { type: 'string' },
@@ -99,20 +138,23 @@ export const LOCALES_TOOLS: McpToolDefinition[] = [
   }),
   organizationTool({
     name: 'get_product_catalog_localization',
-    description: "Read source product fields and existing translations when the user wants to review or translate the catalog in a published secondary language. Collection names use the resource-localization tools separately.",
+    description: 'Read catalog text and existing translations for an authored secondary language, including its menu sections.',
     domain: 'locales',
     minimumRole: 'admin',
-    confirmRequired: false,
     inputSchema: { locale: { type: 'string' } },
     required: ['locale'],
-    outputSchema: { type: 'object', properties: { locale: { type: 'string' }, products: { type: 'array', items: { type: 'object', additionalProperties: true } } }, required: ['locale', 'products'], additionalProperties: false },
+    outputSchema: { type: 'object', properties: { locale: { type: 'string' },
+      products: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, kind: { type: 'string', enum: PRODUCT_KINDS }, source: { type: 'object', properties: { name: { type: 'string' }, description: { type: 'string' }, marketing_features: { type: 'array', items: { type: 'string' } }, unit_label: { type: ['string', 'null'] }, details: productDetailsSchema() }, required: ['name', 'description', 'marketing_features', 'unit_label', 'details'], additionalProperties: false },
+        localization: { type: ['object', 'null'], properties: { values: localizedResourceValuesSchema('product'), route_path: { type: ['string', 'null'] } }, required: ['values', 'route_path'], additionalProperties: false } }, required: ['id', 'kind', 'source', 'localization'], additionalProperties: false } },
+      collections: { type: 'array', items: { type: 'object', properties: { id: { type: 'string' }, location_id: { type: ['string', 'null'] }, source: { type: 'object', properties: { name: { type: 'string' }, description: { type: ['string', 'null'] } }, required: ['name', 'description'], additionalProperties: false },
+        localization: { type: ['object', 'null'], properties: { values: localizedResourceValuesSchema('collection') }, required: ['values'], additionalProperties: false } }, required: ['id', 'location_id', 'source', 'localization'], additionalProperties: false } },
+    }, required: ['locale', 'products', 'collections'], additionalProperties: false },
   }),
   organizationTool({
     name: 'replace_resource_localizations',
-    description: 'Atomically replace 1–250 exact localizations of one resource type for one locale. Omitted resources remain untouched; any invalid item rejects the whole submitted batch. Returns the saved representations; supplied document content replaces its complete representation and can remove blocks. This uses supplied translations, without generating them.',
+    description: 'Atomically replace 1–250 exact resource translations for one language. Omitted resources retain their translations; any invalid item rejects the batch. Uses supplied translations without generating them.',
     domain: 'locales',
     minimumRole: 'admin',
-    confirmRequired: true,
     inputSchema: {
       resource_type: { type: 'string', enum: [...LOCALIZED_RESOURCE_TYPES] },
       locale: { type: 'string' },
@@ -124,8 +166,8 @@ export const LOCALES_TOOLS: McpToolDefinition[] = [
           type: 'object',
           properties: {
             resource_id: { type: 'string' },
-            values: localizedValuesSchema,
-            route_path: { type: ['string', 'null'] },
+            values: resourceValuesInput,
+            route_path: { type: 'null' },
           },
           required: ['resource_id', 'values'],
           additionalProperties: false,
@@ -139,6 +181,21 @@ export const LOCALES_TOOLS: McpToolDefinition[] = [
 
 export async function handleLocalesTools(ctx: McpExecutorContext): Promise<unknown> {
   const { toolName, args, organization } = ctx
+  if (toolName === 'add_organization_language') {
+    await addOrganizationLanguage(organization.db, organization.env, { organizationId: organization.organizationId, locale: requiredString(args, 'locale') })
+    return await listOrganizationLocales(organization.db, organization.organizationId)
+  }
+  if (toolName === 'publish_organization_language') {
+    await publishOrganizationLanguage(organization.db, organization.env, { organizationId: organization.organizationId, locale: requiredString(args, 'locale') })
+    return await listOrganizationLocales(organization.db, organization.organizationId)
+  }
+  if (toolName === 'disable_organization_language') {
+    await disableOrganizationLanguage(organization.db, { organizationId: organization.organizationId, locale: requiredString(args, 'locale') })
+    return await listOrganizationLocales(organization.db, organization.organizationId)
+  }
+  if (toolName === 'delete_organization_language') {
+    return await deleteDisabledOrganizationLanguageContent(organization.db, { organizationId: organization.organizationId, locale: requiredString(args, 'locale') })
+  }
   if (toolName === 'list_organization_locales') {
     return await listOrganizationLocales(organization.db, organization.organizationId)
   }
@@ -171,7 +228,7 @@ export async function handleLocalesTools(ctx: McpExecutorContext): Promise<unkno
   }
   if (toolName === 'get_product_catalog_localization') {
     const catalog = await getProductCatalogLocalization(organization.env as CloudflareEnv, organization.db, organization.organizationId, requiredString(args, 'locale'))
-    return { locale: catalog.locale, products: catalog.products }
+    return catalog
   }
   if (toolName === 'replace_resource_localizations') {
     const result = await replaceResourceLocalizations(organization.env as CloudflareEnv, organization.db, {

@@ -11,10 +11,28 @@ export const DASHBOARD_DESTINATIONS = {
   'organization.settings': 'menu',
   'location.overview': 'locations/:locationSlug',
   'location.settings': 'locations/:locationSlug/settings',
+  products: 'products',
+  'products.menu': 'products/menu',
+  'website.brand': 'website/brand',
+  'website.pages': 'website/pages',
+  'website.blog': 'website/blog',
+  team: 'team',
+  payments: 'payments',
   support: 'support',
 } as const
 
 export type DashboardDestination = keyof typeof DASHBOARD_DESTINATIONS
+
+/**
+ * Canonical deep-link path under `/dashboard/app` for public documentation,
+ * marketing links, or notifications that should resolve to the reader's active
+ * organization.
+ */
+export function appDashboardPath(destination?: string): string {
+  if (!destination) return '/dashboard/app'
+  const clean = destination.replace(/^\/+/, '')
+  return clean ? `/dashboard/app/${clean}` : '/dashboard/app'
+}
 
 export interface DashboardLinkOrgContext {
   env: { NUXT_PUBLIC_PLATFORM_DOMAIN?: string }
@@ -87,6 +105,30 @@ export function pageEditorPath(orgSlug: string, page: { id: string }): string {
 
 export function blogEditorPath(orgSlug: string, articleId: string): string {
   return `${organizationBase(orgSlug)}/website/blog/${encodeURIComponent(articleId)}`
+}
+
+export function blogCreatePath(orgSlug: string): string {
+  return `${blogEditorPath(orgSlug, 'new')}/headline`
+}
+
+/** Prepare a draft from this article; opening it never publishes anything. */
+export function articleFacebookPostPath(orgSlug: string, articleId: string, locationId?: string | null): string {
+  const query = new URLSearchParams({ article_id: articleId, channel: 'facebook' })
+  if (locationId) query.set('location_id', locationId)
+  return `${organizationBase(orgSlug)}/website/posts/new/body?${query}`
+}
+
+export function insightsPath(orgSlug: string, query?: { startDate: string; endDate: string; tab?: 'ads' }): string {
+  const path = `${organizationBase(orgSlug)}/insights`
+  return query ? `${path}?${new URLSearchParams(query)}` : path
+}
+
+export function bookingEditorPath(orgSlug: string, kind: 'reservation' | 'booking', requestId: string): string {
+  return `${organizationBase(orgSlug)}/bookings/${kind}/${encodeURIComponent(requestId)}`
+}
+
+export function guestConversationPath(orgSlug: string, requestId: string): string {
+  return `${organizationBase(orgSlug)}/messages/${encodeURIComponent(requestId)}`
 }
 
 export function articleCategoryEditorPath(orgSlug: string, categoryId: string): string {

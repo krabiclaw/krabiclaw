@@ -20,7 +20,11 @@ export async function reassignBookingProvider(actor: SchedulingActor, input: {bo
  const prior=await queryFirst<{payload_json:string}>(db,'SELECT payload_json FROM activity_entries WHERE dedupe_key=?',[key])
  const booking=await queryFirst<{id:string;product_session_id:string;product_id:string;assigned_member_id:string|null;updated_at:string}>(db,"SELECT * FROM bookings WHERE id=? AND organization_id=? AND status IN ('pending','confirmed')",[input.booking_id,actor.organizationId])
  if(!booking)throw new HTTPError({statusCode:404,message:'Live booking not found'})
- if(prior) {const payload=JSON.parse(prior.payload_json);if(payload.booking_id!==input.booking_id||payload.new_member_id!==input.member_id||payload.actor_user_id!==actor.userId)throw new HTTPError({statusCode:409,message:'Idempotency key belongs to a different reassignment'})}
+ if(prior) {
+  const payload=JSON.parse(prior.payload_json)
+  if(payload.booking_id!==input.booking_id||payload.new_member_id!==input.member_id||payload.actor_user_id!==actor.userId)throw new HTTPError({statusCode:409,message:'Idempotency key belongs to a different reassignment'})
+  if(booking.assigned_member_id!==input.member_id||booking.product_session_id!==payload.session_id)throw new HTTPError({statusCode:409,message:'This reassignment was superseded. Read the current booking before continuing.'})
+ }
  else {
   if(booking.assigned_member_id===input.member_id)throw new HTTPError({statusCode:409,message:'This booking is already with that team member'})
   await refreshMemberBusy(db,actor.env,input.member_id,true)
@@ -50,5 +54,8 @@ export async function reassignBookingProvider(actor: SchedulingActor, input: {bo
  }
  const sources=await queryAll<{id:string;booking_id:string;previous:string|null;target:string}>(db,"SELECT a.id,json_extract(a.payload_json,'$.operational_booking_id') booking_id,json_extract(a.payload_json,'$.old_member_id') previous,json_extract(a.payload_json,'$.new_member_id') target FROM activity_entries a JOIN requests r ON r.id=a.request_id AND r.organization_id=? WHERE a.event_name='booking.reassign' AND a.scope_kind='request' AND a.dedupe_key=?||':'||json_extract(a.payload_json,'$.operational_booking_id')",[actor.organizationId,key])
  for(const source of sources)await notifyBookingReassigned(actor.env,db,{organizationId:actor.organizationId,bookingId:source.booking_id,previousMemberId:source.previous,memberId:source.target,sourceEntryId:source.id})
- return {session_id:booking.product_session_id,assigned_member_id:input.member_id}
+ const current=await queryFirst<{session_id:string;assigned_member_id:string|null}>(db,"SELECT product_session_id session_id,assigned_member_id FROM bookings WHERE id=? AND organization_id=? AND status IN ('pending','confirmed')",[input.booking_id,actor.organizationId])
+ if(!current)throw new HTTPError({statusCode:404,message:'Live booking not found'})
+ if(current.session_id!==booking.product_session_id||current.assigned_member_id!==input.member_id)throw new HTTPError({statusCode:409,message:'This reassignment was superseded. Read the current booking before continuing.'})
+ return current
 }

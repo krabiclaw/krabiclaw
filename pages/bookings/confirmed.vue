@@ -1,12 +1,18 @@
 <template>
-  <NuxtLayout :name="isBlawby ? 'blawby' : 'saya'">
+  <NuxtLayout :name="template.layout">
   <div class="min-h-screen bg-default text-default">
+    <div v-if="pending" class="flex min-h-screen items-center justify-center">
+      <TenantIcon name="arrow-path" class="size-12 animate-spin text-muted" />
+    </div>
     <BookingConfirmation
-      v-if="confirmation"
-      kicker="Request received"
-      receipt-kicker="Your booking"
+      v-else-if="confirmation"
+      :kicker="receiptTitle"
+      :cancelled="confirmation.status === 'cancelled'"
+      :item-title="confirmation.title || organizationName"
+      :item-subtitle="itemSubtitle"
+      :image-url="confirmation.imageUrl"
       :receipt-rows="receiptRows"
-      :next-steps-kicker="resolvedPolicySummary?.heading ?? 'Booking policies'"
+      :next-steps-kicker="resolvedPolicySummary?.heading ?? t(confirmation.productKind === 'service' ? 'booking_policy.consultation_heading' : 'booking_policy.experience_heading')"
       :next-steps="policyLines"
       :next-steps-notes-html="resolvedPolicySummary?.additional_notes_html ?? ''"
       :cta-label="browseLabel"
@@ -14,70 +20,86 @@
       :guest-email="confirmation.guestEmail"
     >
       <template #title>
-        {{ confirmation.status === 'pending' ? 'Request received' : "You’re booked" }}, {{ confirmation.guestName }}!
+        {{ confirmation.status === 'cancelled' ? t('saya.experience_cancel.cancelled_title') : copy.thankYouLabel(confirmation.guestName) }}
       </template>
       <template #subtitle>
-        {{ confirmation.message }}
+        {{ receiptDescription }}
       </template>
       <template #actions>
-        <SayaButton variant="soft" @click="share">
-          <SayaIcon name="share" class="mr-1.5 size-4" />
-          {{ justCopied ? 'Copied!' : 'Share' }}
-        </SayaButton>
-        <SayaButton v-if="confirmation.contactPhone" :href="`tel:${confirmation.contactPhone.replace(/\s/g, '')}`" variant="outline">
-          Call us: {{ confirmation.contactPhone }}
-        </SayaButton>
-        <SayaButton v-if="confirmation.cancelUrl" :to="confirmation.cancelUrl" color="error" variant="ghost">
-          Cancel booking
-        </SayaButton>
+        <TenantButton v-if="confirmation.status !== 'cancelled'" variant="soft" @click="share">
+          <TenantIcon name="share" class="mr-1.5 size-4" />
+          {{ t(justCopied ? 'social_posts.link_copied' : 'social_posts.share') }}
+        </TenantButton>
+        <TenantButton v-if="confirmation.contactPhone" :href="`tel:${confirmation.contactPhone.replace(/\s/g, '')}`" variant="outline">
+          {{ copy.callUsLabel(confirmation.contactPhone) }}
+        </TenantButton>
+        <TenantButton v-if="confirmation.cancelUrl" :to="confirmation.cancelUrl" color="error" variant="ghost">
+          {{ t('saya.experience_cancel.title') }}
+        </TenantButton>
       </template>
     </BookingConfirmation>
 
     <div v-else class="mx-auto max-w-xl px-4 pt-24 pb-24 text-center sm:px-6 lg:px-8">
-      <SayaIcon name="exclamation-triangle" class="mx-auto size-12 text-error" />
-      <h2 class="mt-6 text-xl font-bold">No booking found</h2>
-      <p class="mt-2 text-muted">We couldn't find a confirmation to show. Check your email for the details.</p>
-      <SayaButton :to="browseHref" variant="soft" class="mt-10">{{ browseLabel }}</SayaButton>
+      <TenantIcon name="exclamation-triangle" class="mx-auto size-12 text-error" />
+      <h2 class="mt-6 text-xl font-bold">{{ t(loadError ? 'booking.receipt_failed' : 'booking.receipt_missing') }}</h2>
+      <p class="mt-2 text-muted">{{ loadError ?? t('booking.receipt_missing_description') }}</p>
+      <TenantButton :to="browseHref" variant="soft" class="mt-10">{{ browseLabel }}</TenantButton>
     </div>
   </div>
   </NuxtLayout>
 </template>
 
 <script setup lang="ts">
-import { getBookingConfirmation, type BookingConfirmation as BookingConfirmationData } from '~/composables/useBookingHandoff'
+import { loadBookingConfirmation, type BookingConfirmation as BookingConfirmationData } from '~/composables/useBookingHandoff'
 import BookingConfirmation from '~/components/booking/BookingConfirmation.vue'
 import { formatTimestamp } from '~/utils/timezone'
-import { resolveProductPresentation } from '~/utils/product-presentation'
+import { paymentMoney } from '~/shared/payment-display'
+import { presentationForProduct } from '~/utils/product-presentation'
 import type { RenderedBookingPolicySummaryItem } from '~/server/utils/reservations'
 
 definePageMeta({ layout: false })
-const { isBlawby } = usePublicTemplate()
 
-const { locale } = useI18n()
+const { locale, localePath, t } = useI18n()
+const route = useRoute()
 const justCopied = ref(false)
-const { organizationId } = useTenantOrganization()
+const { organization } = useTenantOrganization()
+const { id: organizationId, template } = organization
 
 const confirmation = ref<BookingConfirmationData | null>(null)
-const { organization } = useTenantOrganization()
-const presentation = computed(() => resolveProductPresentation((organization as { vertical?: string | null } | null)?.vertical))
+const pending = ref(true)
+const loadError = ref<string | null>(null)
+const copy = computed(() => getVerticalCopy((organization as { vertical?: string | null } | null)?.vertical, locale.value))
+const presentation = computed(() => confirmation.value?.productKind ? presentationForProduct(organization.vertical, { kind: confirmation.value.productKind }) : null)
 // Back to where the guest booked from: this location's own catalogue when the
 // booking names one, otherwise the site's.
 const browseHref = computed(() => {
-  if (!presentation.value) return '/'
-  if (isBlawby.value && !confirmation.value?.locationId) return '/schedule'
+  if (!presentation.value) return localePath('/')
+  if (!confirmation.value?.locationId && (template.slug === 'blawby' || confirmation.value?.productKind === 'service')) return localePath('/schedule')
   const locationSlug = confirmation.value?.locationSlug
-  return locationSlug
+  return localePath(locationSlug
     ? `/locations/${locationSlug}/${presentation.value.locationCollectionSegment}`
-    : presentation.value.collectionPath
+    : presentation.value.collectionPath)
 })
-const browseLabel = computed(() => isBlawby.value && !confirmation.value?.locationId ? 'View consultations' : presentation.value?.locationCollectionSegment === 'menu'
-  ? 'Browse the menu'
-  : 'Browse everything on offer')
+const browseLabel = computed(() => confirmation.value?.productKind === 'experience'
+  ? t('saya.header.experiences')
+  : !confirmation.value?.locationId && (template.slug === 'blawby' || confirmation.value?.productKind === 'service')
+    ? t('site_pages.schedule')
+    : copy.value.reservationExploreLabel)
+const receiptTitle = computed(() => t(confirmation.value?.status === 'cancelled' ? 'saya.experience_cancel.cancelled_title' : confirmation.value?.status === 'pending' ? 'booking.request_received' : 'booking.confirmed'))
+const receiptDescription = computed(() => confirmation.value?.status === 'cancelled'
+  ? t('saya.experience_cancel.cancelled_desc', { date: readableDate.value })
+  : t(confirmation.value?.status === 'pending' ? 'booking.pending_message' : 'booking.confirmed_message'))
 
-onMounted(() => {
-  if (!organizationId) return
-  const handoff = getBookingConfirmation(organizationId)
-  confirmation.value = handoff && handoff.type === 'booking' ? handoff : null
+onMounted(async () => {
+  try {
+    if (organizationId) confirmation.value = await loadBookingConfirmation(organizationId, 'booking', String((organization as ApiValue)?.name ?? ''), {
+      id: typeof route.query.id === 'string' ? route.query.id : '', token: route.hash.slice(1),
+    }, { locale: locale.value, localePath, t })
+  } catch (cause) {
+    loadError.value = getErrorMessage(cause, t('booking.receipt_failed'))
+  } finally {
+    pending.value = false
+  }
 })
 
 // One instant plus one zone, formatted where the booking happens — the guest
@@ -89,19 +111,20 @@ const readableTime = computed(() => confirmation.value
   ? formatTimestamp(confirmation.value.startsAt, locale.value, confirmation.value.timezone, { timeStyle: 'short' })
   : '')
 
+const organizationName = String((organization as ApiValue)?.name ?? '')
+// Where it happens, under what was booked: the place, or online.
+const itemSubtitle = computed(() => !confirmation.value ? '' : !confirmation.value.locationId ? t('booking.online') : confirmation.value.locationName ?? '')
 const receiptRows = computed(() => {
   if (!confirmation.value) return []
-  const rows: Array<{ label: string; value: string }> = []
-  if (confirmation.value.title) rows.push({ label: confirmation.value.status === 'pending' ? 'Requested service' : 'Booked', value: confirmation.value.title })
-  if (!confirmation.value.locationId) rows.push({ label: 'Format', value: 'Online' })
-  else if (confirmation.value.locationName) rows.push({ label: 'Location', value: confirmation.value.locationName })
-  rows.push({ label: 'Date', value: readableDate.value })
-  rows.push({ label: 'Time', value: readableTime.value })
-  if (!confirmation.value.locationId) rows.push({ label: 'Timezone', value: confirmation.value.timezone })
+  const rows: Array<{ label: string; value: string; wide?: boolean }> = []
+  rows.push({ label: copy.value.dateLabel, value: readableDate.value })
+  rows.push({ label: copy.value.timeLabel, value: readableTime.value })
+  if (!confirmation.value.locationId) rows.push({ label: t('booking.timezone'), value: confirmation.value.timezone })
   if ((organization as { vertical?: string | null } | null)?.vertical !== 'service') {
-    rows.push({ label: 'Guests', value: String(confirmation.value.guests) })
+    rows.push({ label: copy.value.guestsLabel, value: String(confirmation.value.guests) })
   }
-  if (confirmation.value.requests) rows.push({ label: 'Requests', value: confirmation.value.requests })
+  if (confirmation.value.requests) rows.push({ label: copy.value.specialRequestsLabel, value: confirmation.value.requests, wide: true })
+  if (confirmation.value.paid) rows.push({ label: t('payment.paid'), value: paymentMoney(confirmation.value.paid.amount, confirmation.value.paid.currency) })
   return rows
 })
 
@@ -119,11 +142,11 @@ const resolvedPolicySummary = computed(() =>
 const policyLines = computed(() => (resolvedPolicySummary.value?.items ?? []).map((item: RenderedBookingPolicySummaryItem) => String(item.text ?? '')))
 
 async function share() {
-  if (!confirmation.value) return
-  const text = `${confirmation.value.status === 'pending' ? 'I requested' : "I'm booked for"} ${confirmation.value.title ?? confirmation.value.organizationName} on ${readableDate.value} at ${readableTime.value}.`
+  if (!confirmation.value || confirmation.value.status === 'cancelled') return
+  const text = [receiptTitle.value, confirmation.value.title ?? confirmation.value.organizationName, readableDate.value, readableTime.value].join(' · ')
   if (import.meta.client && navigator.share) {
     try {
-      await navigator.share({ title: 'Booking confirmed', text, url: window.location.origin })
+      await navigator.share({ title: receiptTitle.value, text, url: window.location.origin + localePath('/') })
       return
     } catch (error) {
       // Cancelling the native share sheet falls through to the clipboard.
@@ -137,11 +160,11 @@ async function share() {
   }
 }
 
-useSocialMetadata({
-  path: '/bookings/confirmed',
-  title: 'Booking confirmed',
-  description: 'Your booking has been confirmed.',
+useSocialMetadata(() => ({
+  path: localePath('/bookings/confirmed'),
+  title: receiptTitle.value,
+  description: receiptDescription.value,
   socialImage: null,
   discoverability: 'private',
-})
+}))
 </script>

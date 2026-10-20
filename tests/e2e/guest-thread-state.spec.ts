@@ -9,6 +9,7 @@ import type {
 import { loginAs } from './helpers/auth'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { E2E_DEMO_ORGANIZATION_ID, E2E_POTTERY_ORGANIZATION_ID, devLoginHeaders, potteryHouseTestExtraHeaders, tenantTestExtraHeaders, testBaseUrl } from './test-env'
+import type { TodayFeedPayload } from '../../shared/dashboard-today'
 
 interface NotificationView {
   id: string
@@ -115,6 +116,7 @@ function setLocationSlot(request: APIRequestContext, slot: LocationSlot) {
 // The location's own special hours, read before the Today journey replaces them, so
 // cleanup puts back what the tenant had rather than clearing the field. Null is a
 // value here: it means the location had none, which is not the same as "leave it".
+let priorReservationDuration: { value: number | null } | null = null
 let priorSpecialHours: { value: unknown } | null = null
 // loc-demo's hours and reservation capacity are shared with the calendar and MCP specs.
 let releaseDemoLock: (() => Promise<void>) | null = null
@@ -123,6 +125,13 @@ test.afterEach(async ({ page }) => {
   const release = releaseDemoLock
   releaseDemoLock = null
   try {
+    if (priorReservationDuration) {
+      const duration = priorReservationDuration.value
+      priorReservationDuration = null
+      const policy = await page.request.get('/api/editor/organizations/org-demo/locations/loc-demo/reservation-config')
+      await expectStatus(policy,200)
+      await expectStatus(await page.request.put('/api/editor/organizations/org-demo/locations/loc-demo/reservation-config', { data: { duration_minutes: duration, expected_updated_at: (await policy.json()).config.updated_at } }),200)
+    }
     if (!priorSpecialHours) return
     const previous = priorSpecialHours.value
     priorSpecialHours = null
@@ -513,6 +522,13 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   releaseDemoLock = await acquireTenantMutationLock(testInfo, E2E_DEMO_ORGANIZATION_ID)
   await loginAs(page.request, baseURL)
 
+  const reservationConfig = '/api/editor/organizations/org-demo/locations/loc-demo/reservation-config'
+  const priorPolicy = await page.request.get(reservationConfig)
+  await expectStatus(priorPolicy,200)
+  const policy = (await priorPolicy.json()).config
+  priorReservationDuration = { value: policy.duration_minutes }
+  await expectStatus(await page.request.put(reservationConfig,{data:{duration_minutes:60,expected_updated_at:policy.updated_at}}),200)
+
   const now = Date.now()
   const firstName = `Maya${now}`
   const guestName = `${firstName} Chen`
@@ -573,7 +589,7 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
     }
     const response = await page.request.post('/api/public/reservations', {
       headers: tenantTestExtraHeaders(),
-      data: { name, email, phone: '+12025550123', date, time, guests: '2', location_id: 'loc-demo' },
+      data: { name, email, phone: '+12025550123', date, time, guests: '2', location_id: 'loc-demo', idempotency_key: crypto.randomUUID() },
     })
     await expectStatus(response, 201)
     const { id } = await response.json() as { id: string }
@@ -585,13 +601,31 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
   await dismissPreviewToolbar(page)
 
   await page.goto(`${baseURL}/dashboard/ember-slice-demo`)
-  const heading = page.getByRole('heading', { name: /^You have \d+ (?:bookings?|reservations?)$/ })
-  await expect(heading).toBeVisible()
+  // Today counts outstanding work now; this new reservation is a review card
+  // whose whole-card link must still open the exact booking's actions.
+  const todayResponse = await page.request.get('/api/dashboard/today', { params: { org: 'ember-slice-demo' } })
+  await expectStatus(todayResponse, 200)
+  const todayFeed = await todayResponse.json() as TodayFeedPayload
+  const reviewCard = todayFeed.cards.find(card => card.id === `attention:${bookingIds[0]}`)
+  expect(reviewCard?.headline).toBe(`Review ${guestName}’s reservation`)
+  expect(reviewCard?.to).toBe(`/dashboard/ember-slice-demo/bookings/reservation/${bookingIds[0]}`)
+  await expect(page.getByRole('heading', { name: /^You have \d+ things? to do$/ })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Today', exact: true })).toBeVisible()
   await expect(page.getByRole('tab', { name: 'Upcoming', exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Filter bookings', exact: true })).toBeVisible()
 
-  await page.getByRole('link', { name: new RegExp(`${firstName} arrives today`) }).click()
+  const upcomingResponse = await page.request.get('/api/dashboard/today', { params: {
+    org: 'ember-slice-demo', range: 'upcoming', from: localToday.date,
+    to: localDateAt(new Date(now + 5 * 86_400_000), timezone),
+  } })
+  await expectStatus(upcomingResponse, 200)
+  const upcomingFeed = await upcomingResponse.json() as TodayFeedPayload
+  const upcomingCard = upcomingFeed.cards.find(card => card.id === `reservation:${upcomingBookingId}`)
+  expect(upcomingCard?.to).toBe(`/dashboard/ember-slice-demo/bookings/reservation/${upcomingBookingId}`)
+  expect(localDateAt(new Date(upcomingCard!.occurrenceAt!), timezone) > localToday.date).toBe(true)
+  expect(upcomingFeed.cards.some(card => card.id === `reservation:${bookingIds[0]}`)).toBe(false)
+
+  await page.getByTestId('today-card').filter({ hasText: reviewCard!.headline }).click()
   await expect(page.getByRole('heading', { name: 'Currently hosting', exact: true })).toBeVisible()
   await expect(page.getByText(guestName, { exact: true }).first()).toBeVisible()
   await expect(page.getByText(guestEmail, { exact: true })).toHaveCount(0)
@@ -670,12 +704,10 @@ test('Today uses the CMS patterns and sends one reservation change request', asy
     const token = createHmac('sha256', 'local-playwright-email-reply-secret')
       .update(`booking-change:v1:${before.booking.threadId}:${request.id}`)
       .digest('hex')
-    const accepted = await page.request.post(
-      `/api/public/booking-changes/${before.booking.threadId}/${request.id}`,
-      { headers: { authorization: `Bearer ${token}` }, data: { decision: 'accept' } },
-    )
-    await expectStatus(accepted, 200)
-    expect(await accepted.json()).toMatchObject({ status: 'accepted' })
+    await page.goto(`${baseURL}/booking-changes/${before.booking.threadId}/${request.id}#${token}`)
+    await expect(page.getByRole('button', { name: 'Accept changes', exact: true })).toBeVisible()
+    await page.getByRole('button', { name: 'Accept changes', exact: true }).click()
+    await expect(page.getByText('Your booking has been updated.', { exact: true })).toBeVisible()
 
     const afterResponse = await page.request.get(
       `/api/dashboard/bookings/reservation/${upcomingBookingId}`,

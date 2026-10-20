@@ -5,29 +5,92 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1791264056717,
+      "when": 1792113458950,
       "tag": "0000_baseline",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "6",
-      "when": 1791298059212,
-      "tag": "0001_ncls_service_products",
+      "when": 1792127605440,
+      "tag": "0001_guest_thread_invites",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "6",
-      "when": 1791338557373,
-      "tag": "0002_stripe_connect_country_from_stripe",
+      "when": 1792137077903,
+      "tag": "0002_team_messages",
       "breakpoints": true
     },
     {
       "idx": 3,
       "version": "6",
-      "when": 1791355007743,
-      "tag": "0003_discord_webhook_publishing",
+      "when": 1792138999594,
+      "tag": "0003_direct_stay_holds",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1792142418082,
+      "tag": "0004_stay_listing_fields",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1792146573786,
+      "tag": "0005_collection_media",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1792159372925,
+      "tag": "0006_stay_airbnb_catalog",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1792161403052,
+      "tag": "0007_stay_booked_cancellation_policy",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1792293392872,
+      "tag": "0008_location_assignment",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1792296878544,
+      "tag": "0009_organization_services",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1792309754838,
+      "tag": "0010_stay_property_details",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1792381443999,
+      "tag": "0011_team_thread_location",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1792467300989,
+      "tag": "0012_metronome_removed",
       "breakpoints": true
     }
   ]

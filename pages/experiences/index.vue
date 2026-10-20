@@ -1,18 +1,13 @@
 <template>
-  <NuxtLayout :name="isPlatform ? 'platform' : 'saya'">
-    <TenantPublicPage v-if="isPlatform" :path="documentPath" />
-    <LazySayaExperienceCatalog v-else />
+  <NuxtLayout :name="template.layout">
+    <TenantPublicPage v-if="isPlatform" path="/experiences" />
+    <TenantExperienceCatalog v-else />
   </NuxtLayout>
 </template>
 
 <script setup lang="ts">
 definePageMeta({ layout: false })
 
-// On Krabiclaw's own host /experiences sells the product and is a published
-// platform page document (#903). On a customer host it is that site's bookable
-// catalog, unchanged, in the Saya markup it has always used.
-const { isPlatform } = useTenantOrganization()
-const { isBlawby } = usePublicTemplate()
-if (isBlawby.value) throw createError({ statusCode: 404 })
-const documentPath = useTenantPageDocumentPath('/experiences', 'path')
+const { template } = useTenantOrganization().organization
+const isPlatform = template.slug === 'platform'
 </script>

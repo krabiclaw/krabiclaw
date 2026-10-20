@@ -1,5 +1,6 @@
 import { markdownRequiresSourceMode } from '~/shared/markdown-editor-mode'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
+import { resolveMcpDocumentationBlocks } from '~/server/utils/mcp-documentation'
 import { HTTPError } from 'nitro';
 
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '../../db/index.ts'
@@ -12,6 +13,16 @@ import {
   type ContentDocumentKind,
 } from '~/shared/content-registries'
 
+
+/**
+ * The join condition for a root's own row or one of its representations, as
+ * `document`. Each side of the OR uses its own index: the primary key, and
+ * content_documents_root_locale_unique. COALESCE(root_id, id) could use
+ * neither, so every such join scanned the organization's documents.
+ */
+export function documentOfRootSql(document: string, root: string): string {
+  return `(${document}.id = ${root}.id OR (${document}.row_role = 'representation' AND ${document}.root_id = ${root}.id))`
+}
 
 export {
   CONTENT_BLOCK_TYPES,
@@ -41,7 +52,7 @@ interface ContentDocumentInputFields {
 
 export type ContentDocumentInput = ContentDocumentInputFields & (
   | { rowRole: 'representation'; rootId: string; locale: string }
-  | { rowRole: 'root'; locale: 'en'; locationId?: string | null; productId?: string | null; scopePath?: string | null;
+  | { rowRole: 'root'; locale: string; locationId?: string | null; productId?: string | null; scopePath?: string | null;
       status?: string | null; visibility?: string | null; sortOrder?: number; source?: string | null;
       authorId?: string | null; publishedAt?: string | null; firstPublishedAt?: string | null }
 )
@@ -134,16 +145,6 @@ function mediaFreeBlockData(type: ContentBlockType, value: unknown, field: strin
   } catch (error) {
     badRequest(error instanceof Error ? error.message : `${field} contains invalid block data`)
   }
-  // A heading's text is `text`, and its level is the `level` column. Importers
-  // also wrote a `markdown` key holding `'#'.repeat(level) + ' ' + text` — a
-  // second copy of both, which no reader consumes and which the CMS leaves
-  // behind when it edits `text`, so the row ends up asserting two different
-  // headlines. Drop it on write: the block is exactly what the registry says
-  // it is.
-  if (type === 'heading') {
-    delete data.markdown
-    delete data.level
-  }
   // The markdown contract lives here, on the one batch builder every content
   // document write passes through, because `content_blocks` is one table and a
   // block cannot mean different things depending on which caller wrote it.
@@ -166,11 +167,13 @@ function mediaFreeBlockData(type: ContentBlockType, value: unknown, field: strin
 
 function parseBlockData(row: Pick<ContentBlockRow, 'data_json' | 'id' | 'type'>) {
   try {
-    return asObject(JSON.parse(row.data_json) as unknown, `content block ${row.id} data`)
+    const data = asObject(JSON.parse(row.data_json) as unknown, `content block ${row.id} data`)
+    if (row.type === 'how_to' || row.type === 'faq' || row.type === 'page_grid') validateContentBlockData(row.type, data)
+    return data
   } catch (error) {
     throw new HTTPError({
       statusCode: 500,
-      statusMessage: `Content block ${row.id} has malformed data_json`,
+      statusMessage: `Content block ${row.id} has invalid stored data`,
       cause: error,
     })
   }
@@ -712,17 +715,8 @@ export async function getContentBlocksForDocument(db: DbClient, documentId: stri
   const document = await getContentDocumentById(db, documentId)
   if (!document) return null
   const blocks = await listBlocksForDocument(db, document.id)
-  return await attachContentBlockMedia(db, document.id, blocks.map(b => ({
-    id: b.id,
-    source_block_id: b.source_block_id,
-    parent_block_id: b.parent_block_id,
-    type: b.type,
-    position: b.position,
-    level: b.level,
-    data: b.data_json ? JSON.parse(b.data_json) : {},
-    created_at: b.created_at,
-    updated_at: b.updated_at
-  })))
+  const outlined = await attachContentBlockMedia(db, document.id, blocks.map(block => ({ ...formatBlockOutline(block), created_at: block.created_at })))
+  return await resolveMcpDocumentationBlocks(db, document.id, outlined)
 }
 
 

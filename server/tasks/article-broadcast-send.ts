@@ -2,7 +2,7 @@ import { runArticleBroadcast, type BroadcastEnv, type BroadcastRunResult } from 
 import { defineScheduledTask } from '~/server/utils/scheduled-task'
 
 export default defineScheduledTask({
-  meta: { name: 'article-broadcast-send', description: 'Announce newly published Krabiclaw articles through a Resend Broadcast' },
+  meta: { name: 'article-broadcast-send', description: 'Announce newly published KrabiClaw articles through a Resend Broadcast' },
   async run({ context }): Promise<{ result: BroadcastRunResult }> {
     const env = (context as { cloudflare?: { env?: BroadcastEnv & { DB?: D1Database } } } | undefined)?.cloudflare?.env
     const db = env?.DB

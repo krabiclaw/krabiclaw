@@ -3,11 +3,17 @@ import { test } from 'node:test'
 import type { Product } from '../../server/types/products.ts'
 import {
   catalogLabel,
+  catalogNavigation,
   catalogSummary,
   catalogSurfaces,
   collectionsOnSurface,
   countCatalog,
   isCatalogSurface,
+  locationSurfacePath,
+  parseSiteProductPath,
+  presentationForSurface,
+  productCtaKey,
+  publicLocationPath,
 } from '../../utils/product-presentation.ts'
 
 // The invariant: a Product is on the Experiences surface because it takes
@@ -50,8 +56,8 @@ test('a bookable catalog reads as experiences whatever the vertical sells otherw
 test('the same two numbers come from rows or from a count the server did', () => {
   // summarizeLocationProducts answers in this shape straight from SQL, so a
   // surface is assigned identically however the caller learned the counts.
-  assert.deepEqual(countCatalog([dish, dish, experience]), { total: 3, experiences: 1, dishes: 2 })
-  assert.equal(catalogSummary('restaurant', { total: 3, experiences: 1, dishes: 2 }), '2 dishes · 1 experience')
+  assert.deepEqual(countCatalog([dish, dish, experience]), { total: 3, experiences: 1, dishes: 2, stays: 0 })
+  assert.equal(catalogSummary('restaurant', { total: 3, experiences: 1, dishes: 2, stays: 0 }), '2 dishes · 1 experience')
 })
 
 test('only a vertical\'s own surface and experiences are pages', () => {
@@ -108,4 +114,51 @@ test('a pure menu keeps every section on the menu surface', () => {
     { name: 'Drinks', products: [dish, dish] },
   ]
   assert.deepEqual(collectionsOnSurface('restaurant', rows, 'menu').map(row => row.name), ['Antipasti', 'Drinks'])
+})
+
+const stay = { kind: 'stay' } as Pick<Product, 'kind'>
+
+test('homes are their own surface, counted apart from products', () => {
+  const counts = countCatalog([stay, stay, experience])
+  assert.deepEqual(counts, { total: 3, experiences: 1, dishes: 0, stays: 2 })
+  assert.deepEqual(catalogSurfaces('lodging', counts), ['stays', 'experiences'])
+  assert.equal(catalogSummary('lodging', counts), '2 places to stay · 1 experience')
+  assert.equal(catalogLabel('lodging', countCatalog([stay])), 'Places to stay')
+  assert.equal(isCatalogSurface('lodging', 'stays'), true)
+})
+
+test('a home is named by its own slug, and a location that is one home is that home', () => {
+  assert.deepEqual(parseSiteProductPath('/stays/ocean-studio'), { surface: 'stays', slug: 'ocean-studio' })
+  assert.deepEqual(parseSiteProductPath('/experiences/pizza%20class'), { surface: 'experiences', slug: 'pizza class' })
+  assert.equal(parseSiteProductPath('/locations/beach/products/ocean-studio'), null)
+  assert.equal(parseSiteProductPath('/stays/%E0%A4%A'), null)
+  assert.equal(publicLocationPath({ slug: 'beach', home_slug: 'ocean-studio' }), '/stays/ocean-studio')
+  assert.equal(publicLocationPath({ slug: 'beach', home_slug: null }), '/locations/beach')
+  assert.equal(locationSurfacePath('beach', 'stays'), '/stays')
+  assert.equal(locationSurfacePath('beach', 'menu'), '/locations/beach/menu')
+})
+
+test('a card names what it opens by the product kind', () => {
+  assert.equal(productCtaKey('stay'), 'stay.check_availability')
+  assert.equal(productCtaKey('dish'), 'saya.common.view_dish')
+  assert.equal(productCtaKey('experience'), 'saya.common.view_experience')
+  assert.equal(productCtaKey('item'), 'saya.common.view_item')
+})
+
+test('catalog navigation links each section where the site\'s vertical lists it, and a site without a vertical is refused', () => {
+  assert.equal(presentationForSurface('service', 'products').collectionPath, '/products')
+  assert.equal(presentationForSurface('experience', 'products').collectionPath, '/products')
+  assert.equal(presentationForSurface(null, 'stays').collectionPath, '/stays')
+  assert.equal(presentationForSurface(null, 'experiences').collectionPath, '/experiences')
+  assert.equal(presentationForSurface(null, 'menu').collectionPath, '/menu')
+  // The products surface reads the site's vertical; its absence is a site that did not load.
+  assert.throws(() => presentationForSurface(null, 'products'), /missing vertical/)
+
+  const nav = catalogNavigation('restaurant', { products: true, menu: true, stays: true, experiences: true })
+  assert.deepEqual(nav, [
+    { surface: 'menu', path: '/menu', labelKey: 'saya.footer.menu' },
+    { surface: 'products', path: '/products', labelKey: 'saya.footer.products' },
+    { surface: 'stays', path: '/stays', labelKey: 'saya.footer.stays' },
+    { surface: 'experiences', path: '/experiences', labelKey: 'saya.footer.experiences' },
+  ])
 })

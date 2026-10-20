@@ -58,7 +58,9 @@ export default defineHandler(async (event) => {
   const mediaCount = mediaRows.length
   const reviewId = crypto.randomUUID()
   const now = new Date().toISOString()
-  const authorName = result.context.guest_name || 'Guest'
+  // The request's conversation carries the guest's name (requests_guest_payload_check).
+  const authorName = result.context.guest_name?.trim()
+  if (!authorName) throw new HTTPError({ statusCode: 500, message: 'The review request has no guest name', data: { code: 'INVALID_REVIEW_REQUEST', field: 'guest_name' } })
   const userAgent = cleanString((event.req.headers.get('User-Agent')), 300)
 
   const requestIsSubmittable = `EXISTS (
@@ -151,6 +153,6 @@ export default defineHandler(async (event) => {
 
   return jsonResponse({ success: true, reviewId, status: 'pending' }, { status: 201 })
 })
-import { defineHandler } from 'nitro';
+import { defineHandler, HTTPError } from 'nitro';
 import { getHeader } from 'nitro/h3';
 import { readBody } from 'nitro/h3';

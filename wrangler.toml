@@ -1,16 +1,19 @@
 name = "krabiclaw"
 main = ".output/server/index.mjs"
 compatibility_date = "2024-11-01"
-compatibility_flags = ["nodejs_compat_v2", "global_fetch_strictly_public"]
+compatibility_flags = ["nodejs_compat_v2", "nodejs_compat_populate_process_env", "global_fetch_strictly_public", "web_socket_auto_reply_to_close"]
 
+# D1 lives in WNAM and every statement is a round trip to it. Smart placement
+# never moved execution (every request reported cf-placement local-*), so a
+# visitor paid 8-27 trans-continental hops per page. Run next to the database.
 [placement]
-mode = "smart"
+mode = "targeted"
+region = "aws:us-west-2"
 
 [assets]
 directory = ".output/public"
 
 [dev]
-host = "localhost:3000"
 port = 3000
 local_protocol = "http"
 upstream_protocol = "http"
@@ -18,7 +21,7 @@ upstream_protocol = "http"
 [triggers]
 # Every expression is dispatched through Nitro's cloudflare:scheduled hook.
 # Keep this list in sync with SCHEDULED_TASKS in server/scheduled-tasks.ts.
-crons = ["*/5 * * * *", "*/2 * * * *", "*/10 * * * *", "0 3 * * *", "0 4 * * *", "0 0 * * SUN", "0 * * * *"]
+crons = ["*/5 * * * *", "*/2 * * * *", "*/10 * * * *", "0 3 * * *", "0 0 * * SUN", "0 * * * *"]
 
 [[routes]]
 pattern = "*.krabiclaw.com/*"
@@ -35,22 +38,35 @@ zone_name = "krabiclaw.com"
 
 
 [vars]
+# Sign in with Apple audience: the native app's bundle id.
+APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
+# APNs token authentication (APNS_PRIVATE_KEY is a secret: yarn wrangler secret put APNS_PRIVATE_KEY).
+APNS_KEY_ID = "M6MMSR6BM3"
+APNS_TEAM_ID = "WDXU8XZ7J6"
+APNS_BUNDLE_ID = "com.krabiclaw.app"
 CF_SAAS_CNAME_TARGET = "customers.krabiclaw.com"
 BETTER_AUTH_URL = "https://krabiclaw.com"
 NUXT_PUBLIC_PLATFORM_DOMAIN = "https://krabiclaw.com"
 NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN = "https://krabiclaw.com"
-NUXT_PUBLIC_APP_NAME = "Krabiclaw"
+NUXT_PUBLIC_APP_NAME = "KrabiClaw"
 NUXT_PUBLIC_SITE_URL = "https://krabiclaw.com"
 NUXT_PUBLIC_HELP_URL = "https://krabiclaw.com/help"
 NUXT_PUBLIC_WHATSAPP_NUMBER = "16197200000"
 MEDIA_BASE_URL = "https://media.krabiclaw.com"
+# Channex: production uses the Channex staging account (owner decision 2026-10-16) until
+# Channex certification. CHANNEX_API_KEY and CHANNEX_WEBHOOK_SECRET are secrets.
+CHANNEX_BASE_URL = "https://staging.channex.io/api/v1"
 AI_SEARCH_NAMESPACE = "default"
 AI_SEARCH_INSTANCE_ID = "krabiclaw-platform-knowledge"
-# Production is the only environment that should send real email/WhatsApp — made explicit
-# here rather than relying on getEmailDeliveryMode/getWhatsAppDeliveryMode's default, since
-# that default now fails closed (log_only) precisely so a missing var elsewhere never sends real messages.
+# Production is the only environment that should send real email/WhatsApp. Every environment
+# states EMAIL_DELIVERY_MODE explicitly: a missing or invalid value fails email delivery
+# (EMAIL_DELIVERY_MODE_REQUIRED / INVALID_EMAIL_DELIVERY_MODE), and WHATSAPP_DELIVERY_MODE
+# likewise. EMAIL_FROM is the required sender; there is no default From address.
 EMAIL_DELIVERY_MODE = "provider"
+EMAIL_FROM = "KrabiClaw <hello@krabiclaw.com>"
 WHATSAPP_DELIVERY_MODE = "provider"
+# Startup workflow debugging: detailed MCP inputs/results expire after seven days.
+MCP_DIAGNOSTICS_ENABLED = "true"
 # Internal cron/API endpoints use CRON_SECRET:
 #   yarn wrangler secret put CRON_SECRET
 # GA4_API_SECRET (Measurement Protocol) is a secret, not a var. It belongs to the
@@ -80,8 +96,8 @@ WHATSAPP_DELIVERY_MODE = "provider"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-production-v13"
-database_id = "57d494c8-b322-4584-a5f4-e2cc40d3d7b7"
+database_name = "krabiclaw-production-v19"
+database_id = "3baf9b09-2c05-4ed8-8944-cafe9e84c9e3"
 migrations_dir = "migrations"
 remote = false
 
@@ -138,22 +154,29 @@ enabled = true
 [env.dev]
 
 [env.dev.vars]
+# Sign in with Apple audience: the native app's bundle id.
+APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
+# APNs token authentication (APNS_PRIVATE_KEY is a secret: yarn wrangler secret put APNS_PRIVATE_KEY).
+APNS_KEY_ID = "M6MMSR6BM3"
+APNS_TEAM_ID = "WDXU8XZ7J6"
+APNS_BUNDLE_ID = "com.krabiclaw.app"
 CF_SAAS_CNAME_TARGET = "customers.krabiclaw.com"
 BETTER_AUTH_URL = "https://krabiclaw.com"
 NUXT_PUBLIC_PLATFORM_DOMAIN = "https://krabiclaw.com"
 NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN = "https://krabiclaw.com"
-NUXT_PUBLIC_APP_NAME = "Krabiclaw"
+NUXT_PUBLIC_APP_NAME = "KrabiClaw"
 NUXT_PUBLIC_SITE_URL = "https://krabiclaw.com"
 NUXT_PUBLIC_HELP_URL = "https://krabiclaw.com/help"
 NUXT_PUBLIC_WHATSAPP_NUMBER = "16197200000"
 MEDIA_BASE_URL = "https://media.krabiclaw.com"
 EMAIL_DELIVERY_MODE = "provider"
+EMAIL_FROM = "KrabiClaw <hello@krabiclaw.com>"
 WHATSAPP_DELIVERY_MODE = "provider"
 
 [[env.dev.d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-production-v13"
-database_id = "57d494c8-b322-4584-a5f4-e2cc40d3d7b7"
+database_name = "krabiclaw-production-v19"
+database_id = "3baf9b09-2c05-4ed8-8944-cafe9e84c9e3"
 migrations_dir = "migrations"
 remote = false
 
@@ -193,12 +216,20 @@ routes = [
 crons = []
 
 [env.staging.vars]
+# Channex staging, where the Airbnb test accounts live. CHANNEX_API_KEY is a secret.
+CHANNEX_BASE_URL = "https://staging.channex.io/api/v1"
+# Sign in with Apple audience: the native app's bundle id.
+APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
+# APNs token authentication (APNS_PRIVATE_KEY is a secret: yarn wrangler secret put APNS_PRIVATE_KEY).
+APNS_KEY_ID = "M6MMSR6BM3"
+APNS_TEAM_ID = "WDXU8XZ7J6"
+APNS_BUNDLE_ID = "com.krabiclaw.app"
 CF_SAAS_CNAME_TARGET = "customers.krabiclaw.com"
 BETTER_AUTH_URL = "https://staging.krabiclaw.com"
 NUXT_PUBLIC_PLATFORM_DOMAIN = "https://staging.krabiclaw.com"
 MEDIA_BASE_URL = "https://staging.krabiclaw.com/__media"
 NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN = "https://krabiclaw.com"
-NUXT_PUBLIC_APP_NAME = "Krabiclaw Staging"
+NUXT_PUBLIC_APP_NAME = "KrabiClaw Staging"
 NUXT_PUBLIC_SITE_URL = "https://staging.krabiclaw.com"
 NUXT_PUBLIC_HELP_URL = "https://staging.krabiclaw.com/help"
 NUXT_PUBLIC_WHATSAPP_NUMBER = "16197200000"
@@ -206,14 +237,15 @@ NUXT_PUBLIC_WHATSAPP_NUMBER = "16197200000"
 # reconciling would rewrite production's tags. Production leaves this unset.
 ZARAZ_ANALYTICS = "absent"
 EMAIL_DELIVERY_MODE = "log_only"
+EMAIL_FROM = "KrabiClaw <hello@krabiclaw.com>"
 WHATSAPP_DELIVERY_MODE = "log_only"
 E2E_ALLOW_DEV_ROUTES = "true"
 # E2E_DEV_ROUTE_SECRET is pushed via `wrangler secret put` in ci.yml, not a plaintext var here.
 
 [[env.staging.d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-staging-v13"
-database_id = "bc7d411b-b836-4b83-9771-3e09561463e3"
+database_name = "krabiclaw-staging-v19"
+database_id = "036d7910-66a9-4343-9ae4-47398dd3c653"
 migrations_dir = "migrations"
 remote = false
 
@@ -256,28 +288,36 @@ enabled = true
 # prepared by e2e:local:prepare and has its own in-process Durable Object.
 # Search remains production-only.
 [env.e2e]
+routes = []
 
 [env.e2e.triggers]
 crons = []
 
 [env.e2e.vars]
+# Sign in with Apple audience: the native app's bundle id.
+APPLE_APP_BUNDLE_ID = "com.krabiclaw.app"
+# APNs token authentication (APNS_PRIVATE_KEY is a secret: yarn wrangler secret put APNS_PRIVATE_KEY).
+APNS_KEY_ID = "M6MMSR6BM3"
+APNS_TEAM_ID = "WDXU8XZ7J6"
+APNS_BUNDLE_ID = "com.krabiclaw.app"
 CF_SAAS_CNAME_TARGET = "customers.krabiclaw.com"
 BETTER_AUTH_URL = "http://localhost:3000"
 NUXT_PUBLIC_PLATFORM_DOMAIN = "http://localhost:3000"
 NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN = "http://localhost:3000"
-NUXT_PUBLIC_APP_NAME = "Krabiclaw"
+NUXT_PUBLIC_APP_NAME = "KrabiClaw"
 NUXT_PUBLIC_SITE_URL = "http://localhost:3000"
 NUXT_PUBLIC_HELP_URL = "http://localhost:3000/help"
 NUXT_PUBLIC_WHATSAPP_NUMBER = "16197200000"
 MEDIA_BASE_URL = "http://localhost:3000/__media"
 ZARAZ_ANALYTICS = "absent"
 EMAIL_DELIVERY_MODE = "log_only"
+EMAIL_FROM = "KrabiClaw <hello@krabiclaw.com>"
 WHATSAPP_DELIVERY_MODE = "log_only"
 
 [[env.e2e.d1_databases]]
 binding = "DB"
-database_name = "krabiclaw-production-v13"
-database_id = "57d494c8-b322-4584-a5f4-e2cc40d3d7b7"
+database_name = "krabiclaw-production-v19"
+database_id = "3baf9b09-2c05-4ed8-8944-cafe9e84c9e3"
 migrations_dir = "migrations"
 remote = false
 

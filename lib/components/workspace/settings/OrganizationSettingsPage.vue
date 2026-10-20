@@ -39,6 +39,7 @@ export interface OrganizationSettingsForm {
   announcementCtaLabel: string
   announcementCtaUrl: string
   announcementDismissible: boolean
+  announcementFormat: 'modal' | 'banner'
   logoAssetId: string | null
   logoPresentation: LogoPresentation
   logoDarkAssetId: string | null
@@ -57,7 +58,7 @@ export interface OrganizationSettingsForm {
   native_consultations: boolean
 }
 
-/** Live and Draft are the tenant's; Suspended is Krabiclaw's hold. */
+/** Live and Draft are the tenant's; Suspended is KrabiClaw's hold. */
 export type OrganizationStatus = 'active' | 'inactive' | 'suspended'
 
 export interface OrganizationSettingsResponse {
@@ -65,7 +66,7 @@ export interface OrganizationSettingsResponse {
   status: OrganizationStatus
   name?: string | null
   brand_description?: string | null
-  announcement: { headline: string; description: string | null; cta_label: string | null; cta_url: string | null; dismissible: boolean; enabled: boolean } | null
+  announcement: { headline: string; description: string | null; cta_label: string | null; cta_url: string | null; dismissible: boolean; enabled: boolean; format?: 'modal' | 'banner' | null } | null
   media?: Array<{ asset_id: string; slot: string; public_url?: string | null; presentation?: LogoPresentation | null }>
   contact_email?: string | null
   palette: SitePalette | null
@@ -89,7 +90,7 @@ export interface OrganizationSettingsEditor {
   organizationId: string
   saving: Ref<boolean>
   saveDisabled: ComputedRef<boolean>
-  editorError: Ref<string | null>
+  editorError: ComputedRef<string | null>
   validationMessage: ComputedRef<string | null>
   nameCharactersRemaining: ComputedRef<number>
   descriptionCharactersRemaining: ComputedRef<number>
@@ -115,6 +116,7 @@ import EditorNavigationList, { type EditorNavigationItem } from '~/components/da
 import { isCurrencyCode } from '~/shared/currencies'
 import { ORGANIZATION_FONT_OPTIONS, isOrganizationFontPreset, resolveOrganizationFontPreset } from '~/shared/organization-fonts'
 import { parseSitePalette } from '~/shared/site-palette'
+import { getErrorMessage } from '~/utils/errors'
 import { ORIGINAL_LOGO_PRESENTATION } from '~/shared/media-placement-contract'
 
 const props = withDefaults(defineProps<{ surface?: 'brand' | 'settings' }>(), { surface: 'settings' })
@@ -159,7 +161,7 @@ const paletteSource = computed(() => loadedSettings.value?.palette_source ?? nul
 const originalSignature = ref('')
 const form = reactive<OrganizationSettingsForm>({
   name: '', brand_description: '',
-  announcementEnabled: true, announcementAssetId: null, announcementHeadline: '', announcementDescription: '', announcementCtaLabel: '', announcementCtaUrl: '', announcementDismissible: true,
+  announcementEnabled: true, announcementAssetId: null, announcementHeadline: '', announcementDescription: '', announcementCtaLabel: '', announcementCtaUrl: '', announcementDismissible: true, announcementFormat: 'modal',
   logoAssetId: null, logoPresentation: ORIGINAL_LOGO_PRESENTATION, logoDarkAssetId: null, logoDarkPresentation: ORIGINAL_LOGO_PRESENTATION,
   faviconAssetId: null, socialShareAssetId: null, contact_email: '', palette: null, font_preset: 'default',
   default_currency: null, status: 'inactive',
@@ -173,43 +175,39 @@ const nameCharactersRemaining = computed(() => 50 - form.name.length)
 const descriptionCharactersRemaining = computed(() => 500 - form.brand_description.length)
 
 function explicitSummary(value: string | null | undefined, empty = 'Not set') { return value?.trim() || empty }
-const STATUS_LABELS: Record<OrganizationStatus, string> = { active: 'Live', inactive: 'Draft', suspended: 'Suspended' }
+const STATUS_LABELS: Record<OrganizationStatus, string> = { active: 'Published', inactive: 'Draft', suspended: 'Suspended' }
 const domainSummary = computed(() => dashboard.organization.value?.custom_domain || dashboard.organization.value?.public_url || 'Not connected')
-const organizationLinks = useDashboardOrganizationLinks()
-const CONSULTATION_MODE_SUMMARIES = { native: 'Guests book on your website', external_url: 'External booking link', native_disabled: 'Off' } as const
+const CONSULTATION_MODE_SUMMARIES = { native: 'Online service selector', external_url: 'External scheduler', native_disabled: 'Selector hidden' } as const
 const brandItems = computed<EditorNavigationItem[]>(() => [
-  { id: 'name', label: 'Brand name', summary: explicitSummary(loadedSettings.value?.name), icon: 'i-lucide-type', to: `${brandPath.value}/name` },
-  { id: 'logo', label: 'Logo', summary: loadedSettings.value?.media?.some(item => item.slot === 'logo') ? 'Logo selected' : 'Not set', icon: 'i-lucide-image', to: `${brandPath.value}/logo` },
-  { id: 'favicon', label: 'Favicon', summary: loadedSettings.value?.media?.some(item => item.slot === 'favicon') ? 'Icon selected' : 'Not set', icon: 'i-lucide-app-window', to: `${brandPath.value}/favicon` },
-  { id: 'sharing-image', label: 'Social sharing image', summary: loadedSettings.value?.media?.some(item => item.slot === 'social_share') ? 'Image selected' : 'Not set', icon: 'i-lucide-panels-top-left', to: `${brandPath.value}/sharing-image` },
-  { id: 'description', label: 'Description', summary: explicitSummary(loadedSettings.value?.brand_description), icon: 'i-lucide-align-left', to: `${brandPath.value}/description` },
-  { id: 'announcement', label: 'Announcement', summary: loadedSettings.value?.announcement?.enabled ? explicitSummary(loadedSettings.value.announcement.headline) : 'Off', icon: 'i-lucide-megaphone', to: `${brandPath.value}/announcement` },
-  // Colors are Saya's and Blawby's; Krabiclaw's platform template keeps its own.
-  ...(loadedSettings.value?.palette ? [{ id: 'color', label: 'Colors', summary: paletteSource.value === 'custom' ? 'Your colors' : 'Template colors', icon: 'i-lucide-palette', to: `${brandPath.value}/color` }] : []),
-  { id: 'font', label: 'Website font', summary: ORGANIZATION_FONT_OPTIONS.find(option => option.value === loadedSettings.value?.font_preset)?.label ?? 'Default', icon: 'i-lucide-type', to: `${brandPath.value}/font` },
-  { id: 'contact', label: 'Contact details', summary: explicitSummary(loadedSettings.value?.contact_email), icon: 'i-lucide-mail', to: `${brandPath.value}/contact` },
+  { id: 'name', label: 'Brand name', summary: explicitSummary(loadedSettings.value?.name), to: `${brandPath.value}/name` },
+  { id: 'logo', label: 'Logo', summary: loadedSettings.value?.media?.some(item => item.slot === 'logo') ? 'Logo selected' : 'Not set', to: `${brandPath.value}/logo` },
+  { id: 'favicon', label: 'Favicon', summary: loadedSettings.value?.media?.some(item => item.slot === 'favicon') ? 'Icon selected' : 'Not set', to: `${brandPath.value}/favicon` },
+  { id: 'sharing-image', label: 'Social sharing image', summary: loadedSettings.value?.media?.some(item => item.slot === 'social_share') ? 'Image selected' : 'Not set', to: `${brandPath.value}/sharing-image` },
+  { id: 'description', label: 'Description', summary: explicitSummary(loadedSettings.value?.brand_description), to: `${brandPath.value}/description` },
+  { id: 'announcement', label: 'Announcement', summary: loadedSettings.value?.announcement?.enabled ? explicitSummary(loadedSettings.value.announcement.headline) : 'Off', to: `${brandPath.value}/announcement` },
+  // Colors are Saya's and Blawby's; KrabiClaw's platform template keeps its own.
+  ...(loadedSettings.value?.palette ? [{ id: 'color', label: 'Colors', summary: paletteSource.value === 'custom' ? 'Your colors' : 'Template colors', to: `${brandPath.value}/color` }] : []),
+  { id: 'font', label: 'Website font', summary: ORGANIZATION_FONT_OPTIONS.find(option => option.value === loadedSettings.value?.font_preset)?.label ?? 'Default', to: `${brandPath.value}/font` },
+  { id: 'contact', label: 'Contact details', summary: explicitSummary(loadedSettings.value?.contact_email), to: `${brandPath.value}/contact` },
   { id: 'translations', label: 'Translations', summary: 'Translate the brand name and description', icon: 'i-lucide-languages', to: `${brandPath.value}?editMode=translations` },
 ])
 // Flat, values on the rows, the way Edit preferences reads. The site's content
 // lists and its Brand lead, because they are what the site is made of; the
 // settings a visitor never sees follow.
 const settingsItems = computed<EditorNavigationItem[]>(() => [
-  ...(organizationLinks.organizationPaths.value ? [
-    { id: 'pages', label: 'Pages', icon: 'i-lucide-file-text', to: organizationLinks.organizationPaths.value.pages },
-    { id: 'blog', label: 'Blog', icon: 'i-lucide-newspaper', to: organizationLinks.organizationPaths.value.blog },
-    { id: 'posts', label: 'Posts', icon: 'i-lucide-megaphone', to: organizationLinks.organizationPaths.value.posts },
-    { id: 'qa', label: 'Reviews and Q&A', icon: 'i-lucide-message-circle-question', to: organizationLinks.organizationPaths.value.qa },
+  ...(dashboard.organizationPaths.value ? [
+    { id: 'pages', label: 'Pages', icon: 'i-lucide-file-text', to: dashboard.organizationPaths.value.pages },
+    { id: 'blog', label: 'Blog', icon: 'i-lucide-newspaper', to: dashboard.organizationPaths.value.blog },
+    { id: 'posts', label: 'Posts', icon: 'i-lucide-megaphone', to: dashboard.organizationPaths.value.posts },
+    { id: 'qa', label: 'Reviews and Q&A', icon: 'i-lucide-message-circle-question', to: dashboard.organizationPaths.value.qa },
     { id: 'brand', label: 'Brand', summary: explicitSummary(loadedSettings.value?.name), icon: 'i-lucide-palette', to: brandPath.value },
   ] : []),
-  { id: 'status', label: 'Status', summary: loadedSettings.value ? STATUS_LABELS[loadedSettings.value.status] : 'Not set', icon: 'i-lucide-radio', to: `${settingsPath.value}/status` },
+  { id: 'status', label: 'Status', summary: loadedSettings.value ? STATUS_LABELS[loadedSettings.value.status] : 'Not set', to: `${settingsPath.value}/status` },
   { id: 'domains', label: 'Domains', summary: domainSummary.value, icon: 'i-lucide-globe-2', to: `${settingsPath.value}/domains` },
   { id: 'localization', label: 'Languages', summary: 'Languages the site is published in', icon: 'i-lucide-languages', to: `${settingsPath.value}/localization` },
-  { id: 'currency', label: 'Currency', summary: explicitSummary(loadedSettings.value?.default_currency), icon: 'i-lucide-coins', to: `${settingsPath.value}/currency` },
-  { id: 'search', label: 'Search appearance', summary: explicitSummary(loadedSettings.value?.seo_title), icon: 'i-lucide-search', to: `${settingsPath.value}/search` },
-  // Present only when the organization carries consultation settings: the
-  // domain says whether there is a website booking to switch, not the template.
+  { id: 'currency', label: 'Currency', summary: explicitSummary(loadedSettings.value?.default_currency), to: `${settingsPath.value}/currency` },
   ...(loadedSettings.value?.consultation_mode
-    ? [{ id: 'booking', label: 'Website booking', summary: CONSULTATION_MODE_SUMMARIES[loadedSettings.value.consultation_mode], icon: 'i-lucide-calendar-check', to: `${settingsPath.value}/booking` }]
+    ? [{ id: 'booking', label: 'Schedule page', summary: CONSULTATION_MODE_SUMMARIES[loadedSettings.value.consultation_mode], icon: 'i-lucide-calendar-check', to: `${settingsPath.value}/booking` }]
     : []),
 ])
 
@@ -231,7 +229,7 @@ function editorSignature(key: string | null) {
     case 'favicon': return JSON.stringify(form.faviconAssetId)
     case 'sharing-image': return JSON.stringify(form.socialShareAssetId)
     case 'description': return JSON.stringify(form.brand_description)
-    case 'announcement': return JSON.stringify([form.announcementEnabled, form.announcementAssetId, form.announcementHeadline, form.announcementDescription, form.announcementCtaLabel, form.announcementCtaUrl, form.announcementDismissible])
+    case 'announcement': return JSON.stringify([form.announcementEnabled, form.announcementAssetId, form.announcementHeadline, form.announcementDescription, form.announcementCtaLabel, form.announcementCtaUrl, form.announcementDismissible, form.announcementFormat])
     case 'color': return JSON.stringify(form.palette)
     case 'font': return JSON.stringify(form.font_preset)
     case 'contact': return JSON.stringify(form.contact_email)
@@ -246,7 +244,8 @@ function isValidUrl(value: string) {
   if (!value.trim()) return true
   try { const url = new URL(value); return url.protocol === 'http:' || url.protocol === 'https:' } catch { return false }
 }
-const dirty = computed(() => editorSignature(detailKey.value) !== originalSignature.value)
+// Nothing is a draft until settings have loaded: an unfilled form is not an edit.
+const dirty = computed(() => loadedSettings.value !== null && editorSignature(detailKey.value) !== originalSignature.value)
 const validationMessage = computed(() => {
   if (!dirty.value) return null
   switch (detailKey.value) {
@@ -288,6 +287,7 @@ function fillForm(settings: OrganizationSettingsResponse) {
   form.announcementCtaLabel = settings.announcement?.cta_label ?? ''
   form.announcementCtaUrl = settings.announcement?.cta_url ?? ''
   form.announcementDismissible = settings.announcement?.dismissible ?? true
+  form.announcementFormat = settings.announcement?.format === 'banner' ? 'banner' : 'modal'
   const logo = settings.media?.find(item => item.slot === 'logo')
   const logoDark = settings.media?.find(item => item.slot === 'logo_dark')
   form.logoAssetId = logo?.asset_id ?? null
@@ -313,10 +313,6 @@ function resetDraft() {
   if (loadedSettings.value) fillForm(loadedSettings.value)
   originalSignature.value = editorSignature(detailKey.value)
 }
-function errorMessage(error: unknown, fallback: string) {
-  if (error && typeof error === 'object' && 'data' in error) { const data = (error as { data?: { error?: string } }).data; if (data?.error) return data.error }
-  return error instanceof Error ? error.message : fallback
-}
 
 const settingsResourceKey = computed(() => `dashboard-organization-settings:${String(route.params.orgSlug)}`)
 const { data: settingsResource, error: settingsResourceError, refresh: refreshSettingsResource } = await useAsyncData<SettingsPageResource>(settingsResourceKey, async () => {
@@ -327,7 +323,7 @@ const { data: settingsResource, error: settingsResourceError, refresh: refreshSe
 })
 // The saved settings are what the request answered; the form is the draft seeded from each answer.
 const loadedSettings = computed(() => settingsResource.value?.settings.settings ?? null)
-const loadError = computed(() => settingsResourceError.value ? errorMessage(settingsResourceError.value, 'Failed to load organization settings') : null)
+const loadError = computed(() => settingsResourceError.value ? getErrorMessage(settingsResourceError.value, 'Failed to load organization settings') : null)
 watch(settingsResource, (resource) => {
   if (!resource) return
   fillForm(resource.settings.settings)
@@ -349,7 +345,7 @@ async function refreshSettings() {
 async function resetPalette() {
   saving.value = true
   editorError.value = null
-  try { await patchSettings({ palette: null }) } catch (error) { editorError.value = errorMessage(error, 'Failed to reset the colors') } finally { saving.value = false }
+  try { await patchSettings({ palette: null }) } catch (error) { editorError.value = getErrorMessage(error, 'Failed to reset the colors') } finally { saving.value = false }
 }
 function logoUrl(assetId: string | null) {
   return assetId ? loadedSettings.value?.media?.find(item => item.asset_id === assetId)?.public_url ?? null : null
@@ -377,6 +373,7 @@ async function saveCurrentEditor() {
             cta_url: form.announcementCtaUrl.trim() || null,
             dismissible: form.announcementDismissible,
             enabled: form.announcementEnabled,
+            format: form.announcementFormat,
           },
           media: [{ asset_id: form.announcementAssetId, slot: 'announcement' }],
         })
@@ -403,14 +400,15 @@ async function saveCurrentEditor() {
         break
       }
     }
-  } catch (error) { editorError.value = errorMessage(error, 'Failed to save this setting') } finally { saving.value = false }
+  } catch (error) { editorError.value = getErrorMessage(error, 'Failed to save this setting') } finally { saving.value = false }
 }
 provide(organizationSettingsEditorKey, {
   form,
   organizationId,
   saving,
   saveDisabled,
-  editorError,
+  // A leaf opened on settings that failed to load shows why.
+  editorError: computed(() => loadError.value ?? editorError.value),
   validationMessage,
   nameCharactersRemaining,
   descriptionCharactersRemaining,

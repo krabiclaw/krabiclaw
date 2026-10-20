@@ -1,16 +1,17 @@
-import type { GuestRequest } from '~/server/domain/requests'
+import type { GuestRequest, ThreadOperationalRecord } from '~/server/domain/requests'
 import type { MemberAccessPrincipal } from '~/server/utils/member-access'
 import type { GuestThreadMailbox } from './mailbox'
 
 export type GuestThreadEntryKind = 'submission' | 'message' | 'operation' | 'assignment' | 'resolution'
 export type GuestThreadActorKind = 'guest' | 'member' | 'system'
-export type GuestThreadChannel = 'web' | 'email' | 'whatsapp' | 'system'
+export type GuestThreadChannel = 'web' | 'email' | 'whatsapp' | 'airbnb' | 'system'
 export type ConversationState = 'needs_attention' | 'waiting_on_guest' | 'resolved'
-export type GuestThreadSubmissionType = 'contact' | 'reservation' | 'booking'
-export type GuestThreadDeliveryChannel = 'email' | 'whatsapp'
-export type GuestThreadDeliveryProvider = 'resend' | 'meta' | 'log_only'
-export type GuestThreadDeliveryPurpose = 'owner_alert' | 'guest_acknowledgement' | 'member_reply' | 'status_update'
-export type GuestThreadDeliveryStatus = 'pending' | 'accepted' | 'sent' | 'delivered' | 'read' | 'failed' | 'skipped'
+export type GuestThreadSubmissionType = 'contact' | 'reservation' | 'booking' | 'stay'
+export type GuestThreadDeliveryChannel = 'email' | 'whatsapp' | 'airbnb' | 'push'
+export type GuestThreadDeliveryProvider = 'resend' | 'meta' | 'channex' | 'apns' | 'log_only'
+export type GuestThreadReplyChannel = 'email' | 'airbnb'
+export type GuestThreadDeliveryPurpose = 'owner_alert' | 'guest_acknowledgement' | 'member_reply' | 'scheduled_message' | 'status_update' | 'team_message'
+export type GuestThreadDeliveryStatus = 'pending' | 'sending' | 'uncertain' | 'accepted' | 'sent' | 'delivered' | 'read' | 'failed' | 'skipped'
 
 export type GuestThreadRow = GuestRequest
 
@@ -44,13 +45,13 @@ export interface GuestThreadDeliveryRow {
 }
 
 export interface ThreadSummaryProjection {
-  guestName: string
+  guestName: string | null
+  participantLabel: string
   guestEmail: string | null
   guestPhone: string | null
   organizationId: string
   locationId: string | null
   locationTitle: string | null
-  contextLabel: string
   createdAt: string
   operationalStatus: string | null
 }
@@ -94,10 +95,16 @@ export interface GuestThreadListItemViewModel {
   organizationId?: string
   organizationName?: string | null
   organizationVertical?: string | null
-  guestName: string
+  guestName: string | null
+  participantLabel: string
+  replyChannel: GuestThreadReplyChannel
   submissionType: GuestThreadSubmissionType
-  contextLabel: string
   locationLabel: string | null
+  locationId: string | null
+  assignedMemberId: string | null
+  occurrenceAt: string | null
+  timeZone: string | null
+  latestMessageFromGuest: boolean
   conversationState: ConversationState | null
   operationalStatus: string | null
   operationalStatusLabel: string | null
@@ -115,6 +122,18 @@ export interface GuestThreadListItemViewModel {
   manuallyArchived: boolean
   canArchive: boolean
   canUnarchive: boolean
+}
+
+export interface GuestThreadPagination {
+  limit: number
+  offset: number
+  hasMore: boolean
+  nextOffset: number | null
+}
+
+export interface GuestThreadListPage {
+  threads: GuestThreadListItemViewModel[]
+  pagination: GuestThreadPagination
 }
 
 /**
@@ -150,6 +169,8 @@ export interface GuestThreadEntryViewModel {
   payload: Record<string, unknown> | null
   sequence: number | null
   occurredAt: string
+  /** Channex's original timestamp; a timezone-free value is not an instant. */
+  providerTimestamp: string | null
   deliveries: GuestThreadEntryDeliveryViewModel[]
   attachments: GuestThreadEntryAttachmentViewModel[]
 }
@@ -159,6 +180,7 @@ export interface GuestThreadDeliveryFailureViewModel {
   channel: GuestThreadDeliveryChannel
   purpose: GuestThreadDeliveryPurpose
   error: string | null
+  status: GuestThreadDeliveryStatus
   createdAt: string
 }
 
@@ -167,15 +189,19 @@ export interface GuestThreadDetailViewModel {
   organizationName: string | null
   organizationVertical: string | null
   activityPath: string | null
-  guestName: string
+  guestName: string | null
+  participantLabel: string
+  replyChannel: GuestThreadReplyChannel
+  /** The conversation belongs to a guest account, so a reply reaches its account inbox even without a guest email. */
+  guestAccountLinked: boolean
   guestEmail: string | null
   guestPhone: string | null
   submissionType: GuestThreadSubmissionType
   submissionId: string
-  contextLabel: string
   locationLabel: string | null
   conversationState: ConversationState | null
   source: ThreadDetailSourceModel
+  operationalRecord: Pick<ThreadOperationalRecord, 'id' | 'kind' | 'status' | 'starts_at' | 'ends_at' | 'timezone' | 'party_size' | 'check_in_date' | 'check_out_date'> | null
   entries: GuestThreadEntryViewModel[]
   /** What can be done to the booking. Where the conversation lives is below, separately. */
   availableActions: string[]
@@ -196,6 +222,7 @@ export interface ListGuestThreadsOptions {
   buyerAudience?: boolean
   organizationId?: string | null
   locationId?: string | null
+  assignedMemberId?: string | null
   principal?: MemberAccessPrincipal | null
   userId: string
   type?: GuestThreadSubmissionType | null
@@ -204,4 +231,5 @@ export interface ListGuestThreadsOptions {
   /** Current or Past, as `resolveGuestThreadMailbox` defines them. Null lists both. */
   mailbox?: GuestThreadMailbox | null
   limit?: number
+  offset?: number
 }

@@ -9,18 +9,19 @@ export function anonymousLinkQueries(from: string, to: string, now: string): Bat
   return [
     // An opt-out on either identity survives the merge.
     {
-      query: `INSERT INTO user_notification_preferences (user_id, category, email_enabled, whatsapp_enabled, updated_at)
-        SELECT ?, category, email_enabled, whatsapp_enabled, ? FROM user_notification_preferences WHERE user_id = ?
+      query: `INSERT INTO user_notification_preferences (user_id, category, email_enabled, whatsapp_enabled, push_enabled, updated_at)
+        SELECT ?, category, email_enabled, whatsapp_enabled, push_enabled, ? FROM user_notification_preferences WHERE user_id = ?
         ON CONFLICT (user_id, category) DO UPDATE SET
           email_enabled = user_notification_preferences.email_enabled AND excluded.email_enabled,
           whatsapp_enabled = user_notification_preferences.whatsapp_enabled AND excluded.whatsapp_enabled,
+          push_enabled = user_notification_preferences.push_enabled AND excluded.push_enabled,
           updated_at = excluded.updated_at`,
       params: [to, now, from],
     },
     { query: 'DELETE FROM user_notification_preferences WHERE user_id = ?', params: [from] },
     // Re-pointing who a record belongs to is not activity on it, so
     // updated_at — the version booking changes compare against — stays.
-    ...['requests', 'reservations', 'bookings', 'review_requests', 'reviews'].map(table => ({
+    ...['requests', 'reservations', 'bookings', 'stays', 'review_requests', 'reviews'].map(table => ({
       query: `UPDATE ${table} SET user_id = ? WHERE user_id = ?`,
       params: [to, from],
     })),

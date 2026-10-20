@@ -1,5 +1,5 @@
 <template>
-  <NuxtLayout :name="isBlawby ? 'blawby' : 'saya'">
+  <NuxtLayout :name="template.layout">
     <GuestCancelPage kind="booking" />
   </NuxtLayout>
 </template>
@@ -8,5 +8,5 @@
 import GuestCancelPage from '~/components/booking/GuestCancelPage.vue'
 
 definePageMeta({ layout: false })
-const { isBlawby } = usePublicTemplate()
+const { template } = useTenantOrganization().organization
 </script>

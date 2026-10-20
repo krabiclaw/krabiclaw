@@ -12,8 +12,14 @@
     @save="p.save(level.to.value ?? undefined)"
   >
     <template v-if="definition">
+      <USwitch
+        v-if="definition.value_type === 'boolean'"
+        :model-value="p.form.details[definition.key] === true"
+        :label="definition.name"
+        @update:model-value="p.setDetail(definition, $event)"
+      />
       <UInputTags
-        v-if="definition.value_type === 'list.single_line_text'"
+        v-else-if="definition.value_type === 'list.single_line_text'"
         :model-value="p.listValue(definition)"
         placeholder="Add a value"
         delimiter=","
@@ -31,13 +37,14 @@
 
 <script setup lang="ts">
 import { productEditorKey } from '~/components/dashboard/ProductEditorPage.vue'
+import { STAY_DESCRIPTION_DETAIL_KEYS } from '~/shared/product-details'
 
 definePageMeta({ layout: 'dashboard' })
 
 const p = inject(productEditorKey)!
 const route = useRoute()
 const level = useRouteLevel()
-const definition = computed(() => p.definitions.value.find(entry => entry.id === String(route.params.definitionId)) ?? null)
+const definition = computed(() => p.definitions.value.find(entry => entry.id === String(route.params.definitionId) && !(STAY_DESCRIPTION_DETAIL_KEYS as readonly string[]).includes(entry.key) && entry.key !== 'house_rules') ?? null)
 
 // An attribute this catalog does not define is not a page (DESIGN.md).
 watchEffect(() => {

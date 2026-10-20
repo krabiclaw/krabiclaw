@@ -143,7 +143,7 @@ async function loadOwner(db: DbClient, owner: SocialCardOwner): Promise<OwnerRec
       const hero = await queryFirst<{ data_json: string }>(db, `SELECT cb.data_json
         FROM content_documents d JOIN content_blocks cb ON cb.document_id = d.id
         WHERE d.organization_id = ? AND d.kind = 'page' AND d.row_role = 'root'
-          AND d.path = '/' AND d.locale = 'en' AND cb.type = 'hero' AND cb.parent_block_id IS NULL
+          AND d.path = '/' AND cb.type = 'hero' AND cb.parent_block_id IS NULL
         ORDER BY cb.position LIMIT 1`, [owner.owner_id])
       const copy = hero ? platformHomeSocialCardCopy(JSON.parse(hero.data_json)) : null
       return copy ? { ...record, title: copy.title, description: copy.description ?? record.description } : record
@@ -288,7 +288,7 @@ export async function refreshSocialCard(input: {
   // exists: one deleted out from under its row served 404 forever while every
   // reconcile reused it. The card is reused only while its image is served.
   const currentServed = current?.generation_key === generationKey && current.public_url
-    ? (await fetch(current.public_url, { method: 'HEAD', signal: AbortSignal.timeout(10_000) })).ok
+    ? (await fetch(current.public_url, { method: 'HEAD' })).ok
     : false
   if (currentServed && current?.public_url) {
     await executeBatch(db, [{ query: "UPDATE media_placements SET status = 'active' WHERE owner_type = ? AND owner_id = ? AND slot = 'social_card' AND asset_id = ?", params: [owner.owner_type, owner.owner_id, current.asset_id] }])
@@ -300,7 +300,8 @@ export async function refreshSocialCard(input: {
   await executeBatch(db, [{ query: "UPDATE media_placements SET status = 'pending' WHERE owner_type = ? AND owner_id = ? AND slot = 'social_card'", params: [owner.owner_type, owner.owner_id] }])
 
   if (!env.IMAGES) throw new Error('Cloudflare Images binding is required to render social cards')
-  const png = await renderOgImagePng(payload, { images: env.IMAGES })
+  if (!env.NUXT_PUBLIC_PLATFORM_DOMAIN) throw new Error('NUXT_PUBLIC_PLATFORM_DOMAIN is required to render social cards')
+  const png = await renderOgImagePng(payload, { images: env.IMAGES, publicOrigin: env.NUXT_PUBLIC_PLATFORM_DOMAIN })
   const uploaded = await uploadResolvedMediaToAssetStore({
     db,
     env,

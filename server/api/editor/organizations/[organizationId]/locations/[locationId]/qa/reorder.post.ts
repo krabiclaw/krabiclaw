@@ -1,6 +1,6 @@
 // POST /api/editor/organizations/[organizationId]/locations/[locationId]/qa/reorder
 import { jsonResponse } from '~/server/utils/api-response'
-import { reorderLocationQa } from '~/server/utils/mcp-workflows'
+import { reorderQa } from '~/server/utils/location-qa'
 import { requireLocationAccess } from '~/server/utils/location-access'
 
 export default defineHandler(async (event) => {
@@ -16,7 +16,7 @@ export default defineHandler(async (event) => {
   }
 
   const updates = (body as { updates?: Array<{ id: string; sort_order: number }> }).updates
-  const result = await reorderLocationQa(db, organization.id, locationId, updates as Array<{ id: string; sort_order: number }>)
+  const result = await reorderQa(db, { organizationId: organization.id, locationId }, updates as Array<{ id: string; sort_order: number }>)
   return jsonResponse(result)
 })
 import { defineHandler } from 'nitro';

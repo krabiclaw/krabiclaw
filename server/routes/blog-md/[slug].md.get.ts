@@ -3,8 +3,8 @@ import {
   getPublishedTenantBlogPostBySlug, renderTenantBlogMarkdown, resolvePublicOrigin, } from '~/server/utils/platform-llm'
 
 /**
- * The markdown mirror of one blog article, for any site including Krabiclaw's.
- * Krabiclaw's used to answer at /blog-md/{category}/{slug}.md, because its
+ * The markdown mirror of one blog article, for any site including KrabiClaw's.
+ * KrabiClaw's used to answer at /blog-md/{category}/{slug}.md, because its
  * article path carried the category.
  */
 export default defineHandler(async (event) => {

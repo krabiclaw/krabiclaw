@@ -29,6 +29,7 @@ export default defineHandler(async (event) => {
     // written with the product so it is carried from the first moment it exists.
     const created = await createProduct(db, {
       organizationId: organization.id,
+      env,
       product,
       actor: { actorId: session.user.id },
       publication: { published: false },

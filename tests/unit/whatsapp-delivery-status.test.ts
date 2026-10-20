@@ -1,16 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { buildWhatsAppTemplatePayload, toDashboardButtonPath } from '../../server/utils/whatsapp.ts'
+import { buildWhatsAppTemplatePayload } from '../../server/utils/whatsapp.ts'
 import { compareDeliveryStatus } from '../../server/domain/guest-threads/deliveries.ts'
 
 test('dashboard WhatsApp button paths preserve full guest-thread routes', () => {
   const fullUrl = 'https://staging.krabiclaw.com/dashboard/krabi-team/messages/thread%2Fwith%20spaces'
-
-  assert.equal(
-    toDashboardButtonPath(fullUrl),
-    'krabi-team/messages/thread%2Fwith%20spaces',
-  )
 
   const payload = buildWhatsAppTemplatePayload('new_reservation', {
     guest_name: 'Alex',
@@ -21,7 +16,7 @@ test('dashboard WhatsApp button paths preserve full guest-thread routes', () => 
     email: 'alex@example.com',
     context: 'Location: Ao Nang',
     requests: 'Window seat',
-    reply_path: toDashboardButtonPath(fullUrl),
+    reply_path: fullUrl,
   })
 
   const button = payload.components.find(component => component.type === 'button')

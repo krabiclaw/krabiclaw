@@ -6,13 +6,13 @@
 // delete-stale-items step, so orphaned items from earlier key formats may have
 // accumulated without ever being cleaned up.
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
-import { validateInternalRequest } from '~/server/utils/internal-secret'
+import { SEARCH_INTERNAL_CALLER, validateInternalRequest } from '~/server/utils/internal-secret'
 import { listAllItems } from '~/server/utils/public-search'
 
 export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
 
-  const validation = await validateInternalRequest(event, env)
+  const validation = await validateInternalRequest(event, env, SEARCH_INTERNAL_CALLER)
   if (!validation.ok) return jsonResponse({ error: validation.error }, { status: validation.status })
 
   const startedAt = Date.now()

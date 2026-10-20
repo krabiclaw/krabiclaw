@@ -1,11 +1,18 @@
 import type { MaybeRefOrGetter, Ref } from 'vue'
 
+/** The words for a record being made, wherever one is: its title and the action that makes it. */
+export function newRecordLabels(noun: string) {
+  return { title: `New ${noun}`, action: `Create ${noun}` }
+}
+
 /**
  * Creating a record walks the sections its endpoint will not accept empty, in
- * order, naming where it is going: `Start with Title` on the index, `Next: Body`
- * on a leaf while sections remain, `Create post` on the last one. The commit
- * runs once nothing is outstanding. An existing record saves the open section
- * outright, and is blocked only while that section itself is incomplete.
+ * order. Its index is titled `New post` and opens the first outstanding section
+ * at once (`firstStep`, for DashboardIndexPanel's `create`); each leaf names
+ * where it goes next — `Next: Body` while sections remain, `Create post` on the
+ * last one — and the commit runs once nothing is outstanding. An existing
+ * record saves the open section outright, and is blocked only while that
+ * section itself is incomplete.
  */
 export function useCreateWalk<K extends string>(options: {
   recordPath: Ref<string>
@@ -34,13 +41,17 @@ export function useCreateWalk<K extends string>(options: {
   const nextOutstanding = computed(() => outstanding.value.find(key => key !== options.openKey.value) ?? null)
   const openSectionIncomplete = computed(() => outstanding.value.includes(options.openKey.value))
 
-  const createActionLabel = computed(() => {
-    const next = outstanding.value[0]
-    return next ? `Start with ${label(next)}` : `Create ${toValue(options.noun)}`
+  const words = computed(() => newRecordLabels(toValue(options.noun)))
+  // The section a new record opens on: the first still outstanding, else the last.
+  const firstStep = computed(() => {
+    if (!options.isNew.value) return null
+    const order = toValue(options.order)
+    const step = outstanding.value[0] ?? order.at(-1)
+    return step ? { path: `${options.recordPath.value}/${step}`, query: route.query } : null
   })
   const saveLabel = computed(() => {
     if (!options.isNew.value) return undefined
-    return nextOutstanding.value ? `Next: ${label(nextOutstanding.value)}` : `Create ${toValue(options.noun)}`
+    return nextOutstanding.value ? `Next: ${label(nextOutstanding.value)}` : words.value.action
   })
   const saveDisabled = computed(() => options.saving.value
     || (options.isNew.value
@@ -56,11 +67,5 @@ export function useCreateWalk<K extends string>(options: {
     await options.commit()
   }
 
-  function startOrCreate() {
-    const next = outstanding.value[0]
-    if (next) return void navigateTo({ path: `${options.recordPath.value}/${next}`, query: route.query })
-    void save()
-  }
-
-  return { outstanding, nextOutstanding, createActionLabel, saveLabel, saveDisabled, save, startOrCreate }
+  return { outstanding, nextOutstanding, title: computed(() => words.value.title), firstStep, saveLabel, saveDisabled, save }
 }

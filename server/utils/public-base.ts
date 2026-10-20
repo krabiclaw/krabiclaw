@@ -22,7 +22,6 @@ export interface PublicBase {
     seo_description: string | null
     canonical_url: string | null
     search_console_verification: string | null
-    default_timezone: string | null
   }
 }
 
@@ -33,7 +32,7 @@ export interface PublicBase {
  * reached by id answers the same way as one reached by hostname.
  *
  * Live and provisioned is public. Draft, and still-provisioning, belong to the
- * holder of the tenant's preview token. `suspended` is Krabiclaw's own hold and
+ * holder of the tenant's preview token. `suspended` is KrabiClaw's own hold and
  * is nobody's to look past.
  */
 export function publicTenantVisibilitySql(alias: string, previewAuthorized: boolean | undefined): string {
@@ -59,8 +58,7 @@ export function loadPublicBase(
                 s.theme_id,
                 s.brand_description,
                 s.seo_title, s.seo_description, s.canonical_url,
-                (SELECT i.verification_token FROM organization_integrations i WHERE i.organization_id = s.id AND i.provider = 'google_search_console') AS search_console_verification,
-                json_extract(s.settings_json, '$.config.default_timezone') AS default_timezone
+                (SELECT i.verification_token FROM organization_integrations i WHERE i.organization_id = s.id AND i.provider = 'google_search_console') AS search_console_verification
            FROM organization s
           WHERE s.id = ? AND ${publicTenantVisibilitySql('s', options.previewAuthorized)}
           LIMIT 1`,

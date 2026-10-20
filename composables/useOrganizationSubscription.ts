@@ -20,11 +20,7 @@ async function organizationSubscriptionId(
   // absent from the response rather than present and empty.
   type BillingStatusResponse = {
     success: true
-    billing: {
-      stripeSubscriptionId?: string
-      subscriptionStatus?: string
-      plan: string
-    }
+    billing: { stripeSubscriptionId?: string; subscriptionStatus?: string; plan: string }
   }
   const response = await dashboardApi<BillingStatusResponse>('/api/billing/status', {
     query: { organizationId },
@@ -39,18 +35,14 @@ async function organizationSubscriptionId(
         && isKnownBillingPlan(billing.plan)
     },
   })
-  return {
-    id: response.billing.stripeSubscriptionId,
-    status: response.billing.subscriptionStatus,
-    plan: response.billing.plan,
-  }
+  return { id: response.billing.stripeSubscriptionId, status: response.billing.subscriptionStatus, plan: response.billing.plan }
 }
 
 export const useOrganizationSubscription = () => {
   const dashboard = useDashboardOrganization()
   const dashboardApi = useDashboardApi()
   const { trackSubscriptionUpgrade, trackSubscriptionDowngrade } = useAnalytics()
-  const { startSubscriptionCheckout, analyticsIntentError } = useSubscriptionCheckout()
+  const { startSubscriptionCheckout } = useSubscriptionCheckout()
 
   // Stripe's hosted portal: card, invoices, receipts, cancelling. The plugin
   // exposes nothing else for those, so nothing here draws them.
@@ -79,6 +71,8 @@ export const useOrganizationSubscription = () => {
       return
     }
     const currentPlan = subscription.plan
+    // Better Auth swaps the plan price and adds or removes the plans' metered
+    // items in one change; what they bill is charged at the end of the period.
     await startSubscriptionCheckout({
       organizationId,
       plan,
@@ -91,8 +85,5 @@ export const useOrganizationSubscription = () => {
     })
   }
 
-  // Forwarded so a checkout that went through with its billing analytics intent
-  // unrecorded is visible to whatever renders this, rather than ending in a ref
-  // nobody reads — which is the same silence in a newer place.
-  return { startOrganizationCheckout, openBillingPortal, analyticsIntentError }
+  return { startOrganizationCheckout, openBillingPortal }
 }

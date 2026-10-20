@@ -120,20 +120,20 @@ export function assertPriceShape(price: Pick<Price, 'type' | 'recurring_interval
   }
 }
 
-function billingOf(price: Price): PriceBilling {
+function billingOf(price: Pick<Price, 'type' | 'recurring_interval' | 'recurring_interval_count'>): PriceBilling {
   return price.type === 'recurring'
     ? { type: 'recurring', interval: price.recurring_interval!, interval_count: price.recurring_interval_count! }
     : { type: 'one_time' }
 }
 
-function billingMatches(price: Price, billing: PriceBilling): boolean {
+function billingMatches(price: Pick<Price, 'type' | 'recurring_interval' | 'recurring_interval_count'>, billing: PriceBilling): boolean {
   const actual = billingOf(price)
   if (actual.type !== billing.type) return false
   if (actual.type === 'one_time' || billing.type === 'one_time') return true
   return actual.interval === billing.interval && actual.interval_count === billing.interval_count
 }
 
-function coversInstant(price: Price, at: string): boolean {
+function coversInstant(price: Pick<Price, 'valid_from_at' | 'valid_until_at'>, at: string): boolean {
   if (price.valid_from_at && price.valid_from_at > at) return false
   if (price.valid_until_at && at >= price.valid_until_at) return false
   return true
@@ -194,7 +194,7 @@ export function assertNoConflictingPrices(prices: readonly Price[]): void {
 //   5. If none survives, return null. The caller renders an explicit "not
 //      purchasable" state. It does NOT substitute another currency, another
 //      location, a lapsed offer, or prose.
-export function selectPrice(prices: readonly Price[], selection: PriceSelection): Price | null {
+export function selectPrice<T extends Pick<Price, 'id' | 'active' | 'currency' | 'location_id' | 'type' | 'recurring_interval' | 'recurring_interval_count' | 'valid_from_at' | 'valid_until_at'>>(prices: readonly T[], selection: PriceSelection): T | null {
   const at = selection.at ?? new Date().toISOString()
   assertInstant(at, 'at')
   const billing: PriceBilling = selection.billing ?? { type: 'one_time' }

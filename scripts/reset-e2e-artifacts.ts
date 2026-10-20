@@ -9,7 +9,7 @@ import { spawnYarn } from './utils/spawn-yarn.mjs'
 // the indexed organization column keeps the email marker queries bounded.
 const GUEST_BOOKING_ORG_IDS = ['org-user-pottery-house', 'org-bVY8SxxUuG6Ctk2CQnfCk8T2cPsj4jJX', 'org-ncls-blawby', 'org-demo']
 
-// The onboarding actor creates throwaway `e2e-*` organizations. Both the
+// The onboarding and lodging actors create throwaway `e2e-*` organizations. Both the
 // owning actor and slug must match; copied customer organizations are retained.
 // Retained/audit tables are explicit because their organization foreign keys
 // are often SET NULL (or intentionally polymorphic), so deleting the
@@ -68,7 +68,7 @@ const eligibleOrgIds = `
   SELECT o.id FROM organization o
   WHERE o.slug LIKE 'e2e-%'
     AND EXISTS (SELECT 1 FROM member m WHERE m.organizationId = o.id
-                AND m.userId = 'user-e2e-onboarding-wizard'
+                AND m.userId IN ('user-e2e-onboarding-wizard', 'user-e2e-lodging-native', 'user-e2e-lodging-host')
                 AND instr(',' || replace(m.role, ' ', '') || ',', ',owner,') > 0)
     AND o.createdAt < ${cutoffUnixSeconds}
   LIMIT ${batchSize}
@@ -91,7 +91,7 @@ const disposableGuestRequestIds = `
 `
 
 const sql = `-- Sweeps E2E-generated rows from local D1 so they don't accumulate forever.
--- Targets only e2e-* organizations owned by the onboarding test actor and the
+-- Targets only e2e-* organizations owned by the onboarding or lodging test actor and the
 -- reserved guest-email markers used by the local tests.
 
 PRAGMA foreign_keys = ON;

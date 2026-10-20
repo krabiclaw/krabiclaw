@@ -56,6 +56,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
+      BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+      PLATFORM_OWNER_EMAILS: ${{ secrets.PLATFORM_OWNER_EMAILS }}
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY_E2E }}
       STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET_STAGING }}
       NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY_E2E }}
@@ -63,10 +65,8 @@ jobs:
       # The onboarding draft endpoints sign their preview tokens with it and
       # answer 503 without it, so the wizard never got past its first save.
       PREVIEW_SECRET: ${{ secrets.PREVIEW_SECRET_PREVIEW }}
-      # The onboarding business search is Places API (New) through the server,
-      # which answers 503 without it, and the onboarding, add-location and
-      # Settings specs pick a real Google listing.
-      GOOGLE_PLACES_API_KEY: ${{ secrets.GOOGLE_PLACES_API_KEY }}
+      # Default E2E exercises manual onboarding; live Places qualification is opt-in.
+      GOOGLE_PLACES_API_KEY: ""
       CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       CANARY_LOGIN_EMAIL: ${{ secrets.CANARY_LOGIN_EMAIL }}
@@ -92,7 +92,9 @@ jobs:
           key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
           restore-keys: yarn-${{ runner.os }}-
       - run: corepack yarn install --immutable
-      - run: corepack yarn playwright install --with-deps chromium
+      - run: &install_browsers |
+          printf 'https://archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://security.ubuntu.com/ubuntu/\tpriority:2\n' | sudo tee /etc/apt/apt-mirrors.txt > /dev/null
+          corepack yarn playwright install --with-deps chromium webkit
       # playwright.config.ts runs e2e:local:prepare itself when the worker is not
       # already prepared: local schema verification and the production build. The explicit
       # local:setup step copies the shared review credential once.
@@ -129,7 +131,7 @@ jobs:
       NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
       NUXT_PUBLIC_PLATFORM_DOMAIN: https://staging.krabiclaw.com
       NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: https://krabiclaw.com
-      NUXT_PUBLIC_APP_NAME: Krabiclaw Staging
+      NUXT_PUBLIC_APP_NAME: KrabiClaw Staging
       NUXT_PUBLIC_SITE_URL: https://staging.krabiclaw.com
       NUXT_PUBLIC_HELP_URL: https://staging.krabiclaw.com/help
       NUXT_PUBLIC_WHATSAPP_NUMBER: "16197200000"
@@ -154,7 +156,7 @@ jobs:
           key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
           restore-keys: yarn-${{ runner.os }}-
       - run: corepack yarn install --immutable
-      - run: corepack yarn playwright install --with-deps chromium
+      - run: *install_browsers
       - name: Build staging Worker
         run: yarn build
       - name: Capture Nuxt build ID
@@ -168,6 +170,18 @@ jobs:
       # schema, and the new Worker never meets a schema it predates. Deploying first
       # leaves a window of new code against old schema, and a failed migration would
       # leave that code live.
+      # Checks finish out of order, so an older push can enter the deployment
+      # queue after a newer one. Concurrency serializes jobs, not branch history.
+      - &require_current_deployment_branch
+        name: Require current deployment branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/${GITHUB_REF#refs/}" --jq '.object.sha')"
+          if [[ "$branch_sha" != "$GITHUB_SHA" ]]; then
+            echo "::error::Refusing outdated deployment $GITHUB_SHA; $GITHUB_REF now points to $branch_sha."
+            exit 1
+          fi
       - name: Apply staging migrations
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -200,6 +214,9 @@ jobs:
           https://pottery-house-staging.krabiclaw.com
           https://kikuzuki-krabi-thailand-staging.krabiclaw.com
           https://ncls-staging.krabiclaw.com
+          https://staging.krabiclaw.com
+      - name: Verify published MCP documentation
+        run: yarn mcp:catalog --check-live-docs --base-url https://staging.krabiclaw.com
       - name: Run read-only tenant rendering
         run: yarn test:e2e:tenant-rendering
       - name: Upload staging Playwright report
@@ -231,7 +248,7 @@ jobs:
       NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
       NUXT_PUBLIC_PLATFORM_DOMAIN: https://krabiclaw.com
       NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: https://krabiclaw.com
-      NUXT_PUBLIC_APP_NAME: Krabiclaw
+      NUXT_PUBLIC_APP_NAME: KrabiClaw
       NUXT_PUBLIC_SITE_URL: https://krabiclaw.com
       NUXT_PUBLIC_HELP_URL: https://krabiclaw.com/help
       NUXT_PUBLIC_WHATSAPP_NUMBER: "16197200000"
@@ -260,6 +277,7 @@ jobs:
           build_id="$(node -p 'JSON.parse(require("node:fs").readFileSync(".output/public/_nuxt/builds/latest.json", "utf8")).id')"
           printf 'id=%s\n' "$build_id" >> "$GITHUB_OUTPUT"
       # Migrations before the deploy, for the reason given in the staging job.
+      - *require_current_deployment_branch
       - name: Apply production migrations
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -275,26 +293,20 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: corepack yarn wrangler deploy --strict
-      - name: Refresh production search index
-        env:
-          PLATFORM_SEARCH_REINDEX_SECRET: ${{ secrets.PLATFORM_SEARCH_REINDEX_SECRET }}
-          SEARCH_BASE_SHA: ${{ github.event.before }}
-          SEARCH_HEAD_SHA: ${{ github.sha }}
-        run: yarn ai-search:sync:prod --changed-since "$SEARCH_BASE_SHA" --changed-until "$SEARCH_HEAD_SHA"
-
   verify-production:
     name: Verify production
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: deploy-production
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
+    environment: production
     env:
       STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
       STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
       NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY: ${{ secrets.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY }}
       NUXT_PUBLIC_PLATFORM_DOMAIN: https://krabiclaw.com
       NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: https://krabiclaw.com
-      NUXT_PUBLIC_APP_NAME: Krabiclaw
+      NUXT_PUBLIC_APP_NAME: KrabiClaw
       NUXT_PUBLIC_SITE_URL: https://krabiclaw.com
       NUXT_PUBLIC_HELP_URL: https://krabiclaw.com/help
       NUXT_PUBLIC_WHATSAPP_NUMBER: "16197200000"
@@ -307,6 +319,7 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.sha }}
+          fetch-depth: 0
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: "24.18.1"
@@ -318,13 +331,22 @@ jobs:
           key: yarn-${{ runner.os }}-${{ hashFiles('yarn.lock') }}
           restore-keys: yarn-${{ runner.os }}-
       - run: corepack yarn install --immutable
-      - run: corepack yarn playwright install --with-deps chromium
+      - run: *install_browsers
       - name: Wait for production assets to converge
         run: >-
           node scripts/wait-for-nuxt-deployment.mjs
           https://www.potteryhousekrabi.com
           https://www.kikuzuki-thailand.com
           https://www.northcarolinalegalservices.org
+          https://krabiclaw.com
+      - name: Verify published MCP documentation
+        run: yarn mcp:catalog --check-live-docs --base-url https://krabiclaw.com
+      - name: Refresh production search index
+        env:
+          PLATFORM_SEARCH_REINDEX_SECRET: ${{ secrets.PLATFORM_SEARCH_REINDEX_SECRET }}
+          SEARCH_BASE_SHA: ${{ github.event.before }}
+          SEARCH_HEAD_SHA: ${{ github.sha }}
+        run: yarn ai-search:sync:prod --changed-since "$SEARCH_BASE_SHA" --changed-until "$SEARCH_HEAD_SHA"
       - name: Run read-only production tenant rendering
         run: yarn test:e2e:tenant-rendering
       - name: Upload production Playwright report

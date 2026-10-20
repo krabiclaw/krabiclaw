@@ -1,17 +1,15 @@
 import { inject, onBeforeUnmount, onMounted, provide, ref, shallowRef, watch, type InjectionKey, type Ref } from 'vue'
 import { isDashboardInvalidation, type DashboardInvalidation } from '~/shared/dashboard-invalidations'
 
-/**
- * `unsupported` is the local worker: the guest-inbox Durable Object is not bound
- * there, so the socket can never open. Reporting that as `failed` put a warning
- * banner on every dashboard screen in development, every time, for a condition
- * nobody can act on.
- */
-export type DashboardInvalidationStatus = 'closed' | 'connecting' | 'open' | 'failed' | 'unsupported'
+export type DashboardInvalidationStatus = 'closed' | 'connecting' | 'open' | 'failed'
 
 export interface DashboardInvalidationConnection {
   status: Ref<DashboardInvalidationStatus>
   event: Ref<DashboardInvalidation | null>
+  /**
+   * Counts successful opens. Consumers reconcile both reconnect gaps and the
+   * first gap between their initial read and the completed socket upgrade.
+   */
   connectionEpoch: Ref<number>
   connect: () => void
 }
@@ -22,6 +20,16 @@ const HEARTBEAT_INTERVAL_MS = 20_000
 const HEARTBEAT_TIMEOUT_MS = 8_000
 
 export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<string | null>>): DashboardInvalidationConnection {
+  // `nuxt dev` cannot carry this socket: its dev server answers the upgrade
+  // with a plain 200 (docs/local-development.md). Realtime runs under
+  // `yarn dev:worker`, staging and production; here the dashboard stays on its
+  // reads instead of retrying a connection that cannot open and reporting it.
+  if (import.meta.dev) {
+    const connection: DashboardInvalidationConnection = { status: ref('closed'), event: shallowRef(null), connectionEpoch: ref(0), connect: () => {} }
+    provide(dashboardInvalidationKey, connection)
+    return connection
+  }
+
   const status = ref<DashboardInvalidationStatus>('closed')
   const event = shallowRef<DashboardInvalidation | null>(null)
   const connectionEpoch = ref(0)
@@ -74,10 +82,6 @@ export function provideDashboardInvalidations(organizationSlug: Readonly<Ref<str
 
   function connect() {
     if (!import.meta.client || stopped || !organizationSlug.value) return
-    if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-      status.value = 'unsupported'
-      return
-    }
     if (socket?.readyState === WebSocket.OPEN || socket?.readyState === WebSocket.CONNECTING) return
 
     clearReconnectTimer()

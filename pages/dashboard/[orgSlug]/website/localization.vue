@@ -2,7 +2,7 @@
   <DashboardLeafPanel
     id="organization-localization"
     title="Languages"
-    lead="English is the permanent source language. Growth includes two secondary languages at no extra cost."
+    lead="English is the permanent source language. Growth includes every available language at no extra cost."
     :saving="busy"
     :disabled="!newLocale || Boolean(validationMessage)"
     :error="actionError ?? ''"
@@ -53,7 +53,9 @@
 </template>
 
 <script setup lang="ts">
+import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 definePageMeta({ layout: 'dashboard' })
+const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 
 interface Language { locale: string; label: string | null; is_source: number | boolean; status: string }
 interface LocalizationSettings { effective_plan: string; languages: Language[]; available_catalogs: Array<{ locale: string; label: string; direction: string }> }
@@ -124,5 +126,7 @@ async function enableLanguage() {
 }
 async function publishLanguage(locale: string) { await mutate(`${localesPath}/${encodeURIComponent(locale)}/publish`, 'POST') }
 async function disableLanguage(locale: string) { await mutate(`${localesPath}/${encodeURIComponent(locale)}/disable`, 'POST') }
-async function deleteLanguage(locale: string) { if (window.confirm(`Permanently delete all ${locale} content for this organization?`)) await mutate(`${localesPath}/${encodeURIComponent(locale)}`, 'DELETE') }
+async function deleteLanguage(locale: string) {
+  if (await confirmDialog.open({ title: `Delete ${locale} content`, description: `Every ${locale} translation on this site is deleted permanently.`, confirmLabel: 'Delete content', cancelLabel: 'Keep content' })) await mutate(`${localesPath}/${encodeURIComponent(locale)}`, 'DELETE')
+}
 </script>

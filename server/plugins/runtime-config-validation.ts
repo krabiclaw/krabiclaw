@@ -9,7 +9,7 @@ export default definePlugin(() => {
     { key: 'public.platformDomain', env: 'NUXT_PUBLIC_PLATFORM_DOMAIN' },
     { key: 'public.freeOrganizationDomain', env: 'NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN' },
     { key: 'public.appName', env: 'NUXT_PUBLIC_APP_NAME' },
-    { key: 'public.platformUrl', env: 'NUXT_PUBLIC_SITE_URL' },
+    { key: 'public.siteUrl', env: 'NUXT_PUBLIC_SITE_URL' },
   ]
 
 

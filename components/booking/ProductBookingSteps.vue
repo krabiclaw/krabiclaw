@@ -21,7 +21,7 @@
           </fieldset>
           <!-- A guest is choosing a time, so the empty state says what they
                asked: nothing in the window they can book. -->
-          <p v-if="!sessionsPending && availabilityDates.length === 0" class="py-10 text-center text-sm text-muted">
+          <p v-if="!bookingError && !sessionsPending && availabilityDates.length === 0" class="py-10 text-center text-sm text-muted">
             {{ t('saya.experience_detail.no_availability', { count: PUBLIC_BOOKING_WINDOW_DAYS }) }}
           </p>
           <template v-else>
@@ -44,7 +44,7 @@
           </p>
         </div>
 
-        <div v-else class="flex-1 overflow-y-auto">
+        <div v-else class="flex-1 min-h-0">
           <BookingRecap
             v-if="timeSelection"
             :main-line="`${timeSelection.label} · ${formatTime(timeSelection.time, locale)}`"
@@ -57,7 +57,7 @@
           </p>
           <BookingContactForm
             :loading="submitting"
-            :submit-text="confirmationMode === 'review' ? t('booking.request_appointment') : t('saya.experience_detail.confirm_booking')"
+            :submit-text="paymentRequired ? t('payment.continue_to_pay') : confirmationMode === 'review' ? t('booking.request_appointment') : t('saya.experience_detail.confirm_booking')"
             @submit="submitBooking"
           />
         </div>
@@ -70,7 +70,8 @@ import BookingTimezoneSelect from '~/components/booking/BookingTimezoneSelect.vu
 import type { SessionBookingController } from '~/composables/useSessionBooking'
 import { formatTime } from '~/utils/timezone'
 import { PUBLIC_BOOKING_WINDOW_DAYS } from '~/shared/bookings'
-const props = defineProps<{ controller: SessionBookingController; confirmationMode: 'instant' | 'review' }>()
+// A paid booking is not confirmed in the dialog: the guest goes on to pay, so the button says so.
+const props = defineProps<{ controller: SessionBookingController; confirmationMode: 'instant' | 'review'; paymentRequired: boolean }>()
 const { bookingStep, sellableVariants, selectedVariantId, variantPriceLabel, sessionsPending,
   availabilityDates, referenceDate, timeSelection, partySize, showPartySize, allowTimezoneSelection, guestTimezone, bookingTimezone, timezoneOptions, guestsMax, bookingError, submitting, submitBooking } = props.controller
 const { t, locale } = useI18n()

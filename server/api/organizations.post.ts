@@ -1,3 +1,4 @@
+import { platformLocale } from '~/shared/platform-locales'
 import { defineHandler } from 'nitro';
 import { readBody } from 'nitro/h3';
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
@@ -5,7 +6,6 @@ import { getAuthSession } from '~/server/utils/auth'
 import { resolveRequestedOrganization } from '~/server/utils/dashboard-context'
 import { activateSessionOrganization } from '~/server/utils/session-organization'
 import { provisionOrganization, VALID_VERTICALS } from '~/server/utils/organization-provisioning'
-import { isCurrencyCode, SUPPORTED_CURRENCIES } from '~/shared/currencies'
 import type { OrganizationVertical } from '~/utils/vertical-copy'
 
 // Provisions an organization the caller already belongs to: gives it its
@@ -13,7 +13,7 @@ import type { OrganizationVertical } from '~/utils/vertical-copy'
 // the dashboard sends the route's `org` query param (dashboardFetch), API
 // callers send `organizationId` in the body. Nothing is inferred from memberships.
 export default defineHandler(async (event) => {
-  const body = await readBody<{ name?: string; subdomain?: string; vertical?: string; organizationId?: string; defaultCurrency?: string }>(event)
+  const body = await readBody<{ name?: string; subdomain?: string; vertical?: string; organizationId?: string; sourceLocale?: string }>(event)
   const name = body?.name?.trim()
   const subdomain = body?.subdomain?.trim()
   const vertical = body?.vertical
@@ -27,15 +27,8 @@ export default defineHandler(async (event) => {
       error: `vertical is required and must be one of: ${VALID_VERTICALS.join(', ')}`
     }, { status: 400 })
   }
-  // The tenant is public the moment it is provisioned, so it cannot start
-  // without a currency to quote its prices in. The caller states it; nothing
-  // here guesses one.
-  const defaultCurrency = typeof body?.defaultCurrency === 'string' ? body.defaultCurrency.trim().toUpperCase() : ''
-  if (!isCurrencyCode(defaultCurrency)) {
-    return jsonResponse({
-      error: `defaultCurrency is required and must be one of: ${SUPPORTED_CURRENCIES.join(', ')}`
-    }, { status: 400 })
-  }
+  const sourceLocale = typeof body?.sourceLocale === 'string' ? body.sourceLocale : ''
+  if (!platformLocale(sourceLocale)) return jsonResponse({ error: 'sourceLocale is required and must name a supported website language' }, { status: 400 })
 
   const env = cloudflareEnv(event)
   const db = env.DB
@@ -56,7 +49,7 @@ export default defineHandler(async (event) => {
     name,
     subdomain,
     vertical: vertical as OrganizationVertical,
-    defaultCurrency,
+    sourceLocale,
     origin: event.req,
   })
   // Provisioning is not finished until the caller's session is on the new

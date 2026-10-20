@@ -9,13 +9,13 @@ export default defineHandler(async (event) => {
   const productId = getRouterParam(event, 'productId')
   if (!organizationId || !productId) return jsonResponse({ error: 'Organization ID and product ID are required' }, { status: 400 })
   try {
-    const { db, session, organization } = await requireOrganizationAccess(event, organizationId)
+    const { db, session, organization, env } = await requireOrganizationAccess(event, organizationId)
     // A product id in the path is not authorized by the site in the path.
     await requireOrganizationProduct(db, { organizationId: organization.id, productId })
     const body = await readStrictBody<{ published: unknown }>(event, { published: 'unknown' })
     if (typeof body.published !== 'boolean') return jsonResponse({ error: 'published must be a boolean' }, { status: 400 })
     await setProductPublication(db, {
-      organizationId, productId, published: body.published, actor: { actorId: session.user.id },
+      organizationId, productId, published: body.published, actor: { actorId: session.user.id }, env,
     })
     return jsonResponse({ success: true, product: await getProduct(db, organization.id, productId) })
   } catch (error) {

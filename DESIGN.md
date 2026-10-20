@@ -81,7 +81,7 @@ theme:
 
 **Menu is a launcher, not a parent.** It lists the Earnings and Insights cards,
 then Website, Locations, Team, Integrations, Platform accounts (Better
-Auth admins, inside Krabiclaw's own organization only), Account settings,
+Auth admins, inside KrabiClaw's own organization only), Account settings,
 Switch to Personal and Log out. Each row opens a destination of its own; none
 is nested under Menu. The desktop slideover and the narrow Menu page render the
 one model in `useOrganizationSettingsNavigation`.
@@ -90,7 +90,7 @@ The destinations are files under `O`, and their URLs are their files:
 
 | Destination | URL |
 | --- | --- |
-| Website | `O/website` — Pages, Blog, Posts, Reviews and Q&A, Brand, Status, Domains, Languages, Currency, Search appearance, Website booking |
+| Website | `O/website` — Pages, Blog, Posts, Reviews and Q&A, Brand, Status, Domains, Languages, Currency, Website booking |
 | Pages | `O/website/pages`, a page `O/website/pages/:pageId`, the Links page `O/website/pages/links` |
 | Blog | `O/website/blog` |
 | Reviews and Q&A | `O/website/qa` |
@@ -116,21 +116,85 @@ Messages and a launcher Menu at `/dashboard/account/menu` — is reached only by
 Switch to Personal, which sets the active organization to none. Opening a page
 never changes it.
 
+### Today and Upcoming
+
+Today is the viewer's current work and booked activity. Upcoming is the same
+card list for future occurrences and preparation tied to real dates. Both use
+the existing `TodayAgendaCard` presentation: one small time or status line,
+headline, location or context, image and badge, with the entire card a link.
+An undated task states its status rather than inventing an appointment time.
+
+Owner/admin cards order outstanding decisions, replies and current failures
+before scheduled activity, then at most two factual performance or content
+opportunities. Assigned service members see only
+their own authorized appointments and related work. Lodging members see only
+the arrivals and departures at homes assigned to them through Better Auth
+members or teams.
+
+The card is an entrance to its data owner, never a second editor or task
+database. A reply opens its conversation; a decision opens its booking; a
+missing photo opens that Product's photo; a draft opens its article or post.
+An article-to-Facebook suggestion opens the canonical short Post creation
+flow with that article prepared, then the existing publishing controls for
+review. A performance card retains its exact reporting dates in Insights.
+
+Current domain state determines whether work remains outstanding. Reading a
+notification does not complete it; several notifications for one concern make
+one card. Resolved work disappears, while unresolved work survives midnight.
+Booking occurrences retain their own location's timezone. Future bookings
+needing a decision belong in Today now and retain their actual booking date.
+
+Stay cards read the canonical agenda and open `O/bookings/stay/:stayId`.
+The existing stay domain owns homes, assignments, nights and payments; Today
+projects its arrivals and departures rather than creating a lodging service or
+second lifecycle. Cleaner cards show the guest's first name, party size, home,
+location and check-in or checkout time. Access to each stay and its conversation
+is authorized by the existing member or team assignment. Owners receive stay
+conversation work through the same guest inbox as other booked activity.
+Lodging does not offer the appointment-assignee filter: the home's assignment
+controls its stays.
+
+### Verticals and Domain Focus
+
+KrabiClaw serves four explicit, concrete business verticals:
+1. **Restaurant**: menus, dishes, sections, table reservations.
+2. **Experience**: classes, workshops, dated ticketed sessions.
+3. **Lodging**: homes, stays, nights, check-ins, check-outs, turnovers.
+4. **Legal Services (`service`)**: solo attorneys, partners and law firms running the Blawby template (modeled after North Carolina Legal Services).
+
+The `service` vertical is exclusively and canonically **Legal Services**. Do not generalize it into an open-ended multi-service or agency platform (no salons, spas, cleaners, trades, or generic appointment widgets). Offerings are **Practice Areas & Consultations**; practitioners are **Attorneys / Legal Team**; counterparties are **Clients**; and bookings are **Legal Consultation Requests**.
+
 ### Catalog
 
-**Catalog opens on three entries — Menu, Experiences, Services — and All
-items.** They are ways into the catalog, not groupings anyone creates, and
-every organization has all three whatever its template. Each opens a view
-suited to its task; every offering, from anywhere, opens the one Product
-editor at `O/products/:productId`.
+**Catalog is where everything the business offers is found, as Airbnb's Your
+listings.** It navigates rather than edits: kind pills — All, Menu,
+Experiences, Products, Services, Places to stay, each only when the business
+has one — over one grid of photo cards, full width on a phone. A menu belongs
+to a location, so the Menu is one card per location, opening that location's
+menu; every other offering is its own card, opening the one Product editor.
+Because the menus are already per location, Catalog has no location filter.
+Dishes without a section are listed on the Menu page under its sections.
 
-| Entry | URL | First working screen |
+Every level that narrows its rows does it the same way:
+`DashboardFilterPills`, one row of round pills under the title with the chosen
+one solid, 32px from the title and from the rows — Catalog's kinds, Today's
+range, Insights views, Payments sections, the blog's and posts' states, a
+category collection, a photo category. A list carries no sentence explaining
+itself under its title.
+
+Every offering, from anywhere, opens the one Product editor at
+`O/products/:productId`. Each card names its actual sections, price and location
+relationships. Missing photos and prices say No photo and No price set.
+Online is read from the booking configuration; absent location assignments do
+not imply every location. Inactive locations and withheld or unavailable
+offerings retain their names and state. The Menu page's location is explicit
+in `?location_id=` and narrows the authorized menu without changing it.
+
+| View | URL | First working screen |
 | --- | --- | --- |
-| Menu | `O/products/menu?location_id=` | the chosen location's sections, in the order guests see them |
+| Catalog | `O/products?kind=` | one card per location's menu, then every other offering; `kind` is the pill |
+| Edit menu | `O/products/menu?location_id=` | the chosen location's sections, in the order guests see them |
 | A section | `O/products/menu/:collectionId?location_id=` | its items, in order |
-| Experiences | `O/products/experiences` | every experience; location is an optional filter |
-| Services | `O/products/services` | every service; location is an optional filter |
-| All items | `O/products/all` | everything, of every kind, filtered by `?kind` |
 
 **A menu belongs to a location.** With one location the Menu opens on it and
 names it. With several, a location must be chosen before its sections can be
@@ -146,6 +210,11 @@ the model. **Remove from section**, **stop offering at a location** and
 **delete the item** are three different actions: removing an item from a
 section changes that section's membership and nothing else, and deleting a
 section never deletes what was in it.
+
+A shared section opens without a location query; a location-owned section
+opens with its own location id. Membership and order are always edited from
+the complete organization catalog. A location filter must never turn a full
+membership replacement into a replacement of only the visible subset.
 
 Services and Experiences have no grouping step. A service's overview leads
 with Assigned team member (the booking assignment concern: who guests' bookable
@@ -195,7 +264,7 @@ editor or writer, and it never grants or hides an authorization.
 
 | Airbnb | KrabiClaw |
 | --- | --- |
-| Listings holds homes, experiences and services | Catalog opens on Menu, Experiences and Services, plus All items; each is a view of the same Products |
+| Listings holds homes, experiences and services behind kind pills | Catalog's pills are Menu, Experiences, Products, Services and Places to stay; each is a view of the same Products |
 | Homes and experiences have different editors | One Product editor at `O/products/:productId` for every kind: kind changes wording and rows, not the route or the editor |
 | Listing editor rows preview their values and open one concern | Product, location, page, post and member records do the same |
 | Pricing and availability link to the calendar; Earnings links to payouts | Catalog links to Calendar and member availability; Earnings links to the organization's Payments |
@@ -234,6 +303,35 @@ Creating a service creates the Product, its default variant, its page at a free
 retry returns the same pair. It starts sale-inactive and unpublished, with no
 price and no booking. A bound page is public exactly while its Product is
 published on the site; there is no second publish flag for it.
+
+### Places to stay
+
+A place to stay is a Product of kind `stay`, edited in the one Product editor.
+Its Stay settings row owns its one location (chosen once, when it is created),
+check-in and checkout times, how many it sleeps, the minimum nights and the
+team who look after it; it has no Scheduling or Locations rows. Its price row
+is the base nightly price. Its stays are on Today and the Calendar, on the day
+guests arrive and the day they leave, and open at the booking route as
+`bookings/stay/:stayId`. A stay taken by the host records offline payments and
+is cancelled there, and is not refused by closed nights or minimum stays —
+those are what guests and channels are offered; a stay from Airbnb or another channel is read-only and
+changes on that channel. A published place to stay is booked on the website:
+it has no external link, and it can be published only once it has a nightly
+price and online payments are set up. Guests choose nights on its page and pay
+the full amount on the site's pay page; while they pay, a checkout hold claims
+those nights (and closes them on a connected channel), and the captured payment
+becomes a confirmed direct stay with its guest conversation. A lapsed hold gives
+its nights back.
+
+What the home is and offers — its property type, bedrooms, beds and baths, its
+amenities from the fixed catalog in `shared/stay-listing.ts`, and its short- and
+long-term cancellation policies — are stay settings on the product, shown on
+its page and in its `Accommodation` data. Its address and map pin are its
+location's. Its arrival guide (check-in method and instructions, wifi,
+directions, house manual and checkout instructions) is private: only managers
+and the home's assigned members read it, and no public page carries it. The
+iPhone listing editor and MCP edit these; the web Product editor does not show
+them yet.
 
 ### Organizations
 
@@ -313,9 +411,90 @@ above or below it. A row carries one line of sub-label. A counter
 (`44/50 available`) sits above the field in `text-sm`. `hint` exists only for
 `Optional`.
 
-**Leaf width is fixed.** The shell's content column is `max-w-xl`, and a
-field does not stretch to the pane. A leaf that needs more width is a grid
-editor and says so.
+**Icons identify destinations and meaningful choices.** Follow the captured
+Airbnb host editor's restraint: amenities have recognizable pictograms;
+ordinary listing fields, house rules and safety switches stay text and their
+controls. Meaningful property choices use the same pictogram language. A title,
+description, URL or price does not need a glyph.
+KrabiClaw extends this language to its own destinations — Website, Locations,
+Team, content sections, bookings and Account settings — across every catalog
+kind. A heading or a scalar field is not a destination merely because it has a
+route.
+
+`EditorNavigationList` renders a destination's explicit `icon` as a bare 24px
+outline beside its label. A record's real picture or a provider's logo (`lead`)
+takes precedence; never add both, or put a general glyph in a decorative tile.
+The picture's missing-image footprint remains the picture's, and an icon must
+not hide the factual No photo state. Labels remain visible, icons are hidden
+from assistive technology, and selection is conveyed by a control state and
+border or check mark as well as colour.
+
+Meaningful single choices use the existing `URadioGroup` card with
+`indicator="hidden"` and its native item `icon`: 32px above the label, one
+neutral outline, a strong selected border. Amenity selection is a list of
+24–28px pictograms, labels and an explicit selected state; each complete row is
+one keyboard-operable control. Ordinary settings retain their existing switch
+or rule pair. Action glyphs stay at the existing button size.
+
+**One concept, one icon source.** Product kinds, product details, content block
+types, notification categories and stay vocabularies carry their icons in
+their existing registries. Static destinations declare theirs in the owner
+that already declares the row. Never infer an icon from a label, URL or record
+id, and never create a second navigation model for icons. Native stay symbols
+and web glyph names describe the same canonical choice.
+
+Use the installed Lucide collection first. Original domain drawings belong to
+the `krabi` collection in `build/icon-data/custom-icons.json`: a 24×24 viewBox,
+2px rounded strokes, `currentColor`, and no background or baked-in state. They
+fill recognizable gaps such as a crib, dryer, sauna or treehouse. Nuxt Icon
+bundles the used glyphs and local collection at build time; no runtime icon API
+or full server collection is needed. Check the actual rendered glyph at phone
+and desktop widths before treating a mapping as complete.
+
+**Everything starts at the gutter.** Nuxt UI's panel gutter (`px-4 sm:px-6`,
+`dashboardGutterClass`) is the one horizontal edge, the same as the top nav's:
+Back or ✕, the title, the rows, the fields and Cancel all start on it, and
+nothing is centred. A component inside a panel adds no outer padding, scroll
+container or column of its own; a row whose highlight reaches the pane's edge
+pulls itself into the gutter (`-mx-4`) so its text keeps the edge. A level that
+scrolls itself (`fill`) pads its own rows with the gutter. Every footer is
+framed by the panel — gutter, hairline, `py-3` — and holds only its row.
+
+**One header row, decided by the shell.** As Airbnb's: a tab root opens on its
+large title with its actions on the same row and no bar above it; a pushed
+level puts a round Back first — on its own row above the title on a phone,
+inline before it from `lg` — with the actions at the right of that row; a
+leaf's sheet has ✕ and its title small and centred, and the leaf's pane its
+title large. Back, ✕ and every action are the same round button. Pages
+supply `title`, `lead` and `#right`; they never place a title or an action
+themselves.
+
+**One card, one empty state, one status banner.** A card is `UCard
+variant="subtle"`; its padding and corner come from `app.config.ts`, and a
+card that links is the same card rendered `as` the link. An empty list or
+record is `UEmpty`. Status that belongs to the whole dashboard — the live
+connection, a failed background refresh — is the shell's one banner above the
+navigation, never a box repeated inside each screen; a screen shows only its
+own failures.
+
+**Leaf width is fixed from `lg`.** Below `lg` a level is the whole screen or a
+drawer and uses all of it. From `lg` the content column is `max-w-xl`, so a
+field does not stretch across a wide pane; it caps the right edge, never the
+left. A leaf that needs more width is a grid editor and says so.
+
+**A level alone in the frame is one of three things, and the empty right side
+of a desktop window is never the fourth.** Content that scales — a grid, a
+table, a calendar, a chart, cards — takes the frame: Today, Calendar, Catalog,
+Insights, Photos, Transactions name no column. A settings index pairs with its
+first row where there is a pane, as Account settings, Integrations, Payments
+and Earnings do: its rows are leaves beside it and `autoOpen` names the first.
+Only a list of records with nothing of its own to open — Notifications, Past
+activity, Paid, Platform accounts — or a true single-concern screen (Menu, a
+booking's notes, a calendar day) stands alone as a column, and says which in
+`DashboardIndexPanel column`: `reading` for the records, `leaf` for the screen.
+Beside a child every index is `leaf`. The widths live in
+`dashboardColumnWidths`; a page never states one. A column's title heads it,
+as a leaf's does. Every level title is `dashboardTitleClass`.
 
 **Short text is bare.** A name, title, headline, slug or link renders as a
 borderless 22–26px field with a counter, the way Airbnb's title and custom
@@ -324,8 +503,10 @@ link do. Long text is one bordered textarea.
 **Sizes come from the theme.** Controls are `lg` — 16px text, 44px tall, 8px
 radius — and the commit bar's Save is the one `xl` (48px). Body text is 16px
 `text-highlighted`; sub-labels and counters are 14px `text-muted`. Focus is a
-2px `text-highlighted` ring, not the brand colour; coral is for Save and the
-lit tab. Switches are black, as Airbnb's are.
+2px `text-highlighted` ring, not the brand colour. Buttons, Save included,
+are neutral: navy in light, white in dark. Coral marks status and selection
+only — the lit tab, today's date, unread dots, the chosen bar. Switches are
+black, as Airbnb's are.
 
 ## Canvas
 
@@ -359,15 +540,25 @@ is a canvas. Describing it is a field, and fields decompose.
 
 | Width | Chrome | Detail |
 | --- | --- | --- |
-| `< md` (768) | Bottom nav | Full-screen sheet: ✕ top-left, the title in the body, commit bar pinned at the base |
-| `≥ md` | Top nav | — |
+| `< md` (768) | Bottom nav | Modal leaf drawer over its visible parent: ✕ top-left, its title small and centred beside it, commit bar pinned at the base |
+| `md` to `< lg` | Top nav | The same modal leaf drawer |
 | `≥ lg` (1024) | Top nav | Pane beside the index |
 
 `md` swaps navigation chrome. `lg` swaps index/detail topology. One component
-owns both renderings of a node, and there is no separate mobile screen. The
-topology itself is CSS; the single JavaScript breakpoint is
-`useDashboardPane()`, and it decides only whether an index opens a child on
-arrival — something CSS cannot express, because it is a navigation.
+owns both renderings of a node, and there is no separate mobile screen.
+`useDashboardPane()` is the shared JavaScript breakpoint: it selects the leaf's
+drawer or inline host and decides whether an index opens a child on arrival.
+The index columns otherwise follow the route hierarchy through CSS.
+
+Below `lg`, `DashboardLeafPanel` uses the native `UDrawer` with a backdrop,
+modal focus and swipe dismissal. Its nearest parent index remains visible
+underneath; deeper ancestors still yield. Index-to-index navigation remains one
+screen at a time: a parent index is hidden by CSS only while a child index is
+rendered beside it, so it never disappears while its child is still loading
+and a leaf's drawer always rises over it. The drawer is the only motion; a
+level does not animate its own arrival. One persistent editor instance is teleported between the
+drawer and desktop pane, so resizing preserves its draft and form state.
+The drawer does not create another route, editor or draft owner.
 
 **The two columns show the deepest two levels, not the first two.** Depth is
 unbounded, and opening a child re-roots the frame: the index column becomes the
@@ -415,7 +606,7 @@ Depth is counted in matched records, not URL segments: a directory's
 | Mode | When | What the level renders |
 | --- | --- | --- |
 | `index` | nothing below me is open | my content, the full width of the frame |
-| `pair` | one of my children is open | my content as the index column, the child as the detail |
+| `pair` | one of my children is open | my content as the desktop index column; below `lg`, the backdrop for a leaf drawer or hidden for a child index |
 | `yield` | something deeper than my child is open | nothing but the route beneath me |
 
 **A level in `yield` renders no rail.** It is hidden, not unmounted, so going
@@ -441,12 +632,13 @@ parent. The logical parent is the same parent Back uses. Pane topology is
 independent of whether the level contains records, fields, settings, media, or
 another index.
 
-Destination roots stand alone and use the frame: Today, Calendar, Catalog,
-Messages, Menu, and each Menu destination — Website, Locations, Team,
-Integrations, Earnings, Payments, Insights, Notifications — as Airbnb's
-`/hosting/listings` grid does. Within a destination, levels pair with their
-parent: Pages, Blog, Reviews and Q&A, and Brand render as `Website | Pages`, and
-a Catalog entry renders beside Catalog.
+Destination roots stand alone: Today, Calendar, Catalog, Messages, Menu, and
+each Menu destination — Website, Locations, Team, Integrations, Earnings,
+Payments, Insights, Notifications — as Airbnb's `/hosting/listings` grid does.
+A root that is a grid or a chart uses the frame; a root that is settings opens
+its first row beside it (Leaf width, above). Within a destination, levels pair
+with their parent: Pages, Blog, Reviews and Q&A, and Brand render as
+`Website | Pages`, and a Catalog entry renders beside Catalog.
 
 **Auto-selection.** Auto-selection answers whether an index may choose one of
 its own children on arrival. It does not determine whether the index has a
@@ -503,21 +695,25 @@ popover, a filter chip, a confirmation — is not in it.
 
 At two columns Airbnb's leaf has no Close and no Back of its own: the index's
 Back is the way out and Save is the only control it draws. Both Close and Cancel
-belong to the sheet the leaf becomes below `lg`, where it covers the list it came
-from and needs its own way back.
+belong to the drawer the leaf becomes below `lg`, where its parent remains
+visible behind the backdrop and it needs its own way back.
 
 One shell owns that, so a leaf states what it commits and nothing about width.
 
 ### Where a level goes when it closes
 
-Back, Close and Cancel are **links** to `useRouteLevel().to`, a push to the
-level above. Nothing in the dashboard calls `router.back()`.
+Back, Close and Cancel navigate to `useRouteLevel().to`, a push to the level
+above with its query preserved. Close, Cancel, backdrop, Escape and swipe
+dismissal all discard the leaf's unsaved edits through its existing cancel
+handler, then return to that same parent after the drawer closes. Save keeps
+the record's existing commit and navigation behavior. A direct leaf URL has
+the same parent and dismissal behavior. Nothing calls `router.back()`.
 
 Measured on a live Airbnb host account (2026-09-21): their in-app Back went to
 `/hosting/listings` while the previous history entry was the leaf that had just
 been cancelled — Back, Cancel and Close all pushed. The destination is a
 property of where you are, so a deep link, a reload, and a redirect after a save
-all answer the same thing, and a sheet you just closed can never become the
+all answer the same thing, and a drawer you just closed can never become the
 place Back leads. Reading history is what produced the loop where closing a
 sheet and then pressing Back reopened it.
 
@@ -557,12 +753,17 @@ accept it without — nothing more. Everything else is a section of the record
 once it exists and has an id to hang media, prices and translations on.
 
 It is a level, not a sheet: `Add` navigates to `new` in the record's own slot,
-which renders the record's own index with only the sections the contract needs. Its
-commit names where it is going — `Start with Title`, then `Next: <section>`
-while any remain, and `Create <record>` on the last one — so the tenant reads
-what is left rather than a banner listing it. The commit creates the record and
-navigates to its real id. `useCreateWalk` is the one implementation of that
-walk; an editor supplies its sections, their order and what blocks each.
+which renders the record's own index, titled `New <record>`, with only the
+sections the contract needs. The index opens its first outstanding section at
+once at every width (`DashboardIndexPanel`'s `create`), and dismissing a
+section leaves the making for where Back goes: the list behind it is never a
+stop and carries no button of its own. Each section's commit names where it is
+going — `Next: <section>` while any remain, and `Create <record>` on the last
+one — so the tenant reads what is left rather than a banner listing it. The
+commit creates the record and navigates to its real id. `useCreateWalk` is the
+one implementation of that walk; an editor supplies its sections, their order
+and what blocks each. A record that is one leaf — a link, a session — is
+titled and committed with the same words, from `newRecordLabels`.
 
 A create level is the record's own level, so it draws no second panel or
 navbar of its own. The draft belongs to the record, not to the leaf: moving
@@ -572,7 +773,7 @@ record, never in a plain `reactive`.
 ## Committing
 
 Cancel on the left, Save on the right, pinned to the base of the detail pane
-(the sheet below `lg`). Cancel is a text button; Save is the only filled
+(the drawer below `lg`). Cancel is a text button; Save is the only filled
 control on screen. Save is disabled until there is something to save.
 Dismissing discards the draft.
 
@@ -672,9 +873,10 @@ screen, an Earnings page — each as its own freshly drawn screen. They did not
 look like Airbnb, did not look like each other, and could not be maintained,
 because every one re-stated layout, copy and state that already existed.
 
-**Read the Airbnb page before drawing anything.** Open the actual screen in the
-owner's logged-in Chrome (`chrome.sh`), read its sections, headings, rows,
-button labels and card shapes, and mirror that structure. "Inspired by" is not
+**Read the Airbnb page before drawing anything.** Start with the saved captures
+and `docs/design/airbnb-navigation-map.md`; where the evidence is missing, open
+the actual screen in the owner's logged-in browser. Read its sections, headings,
+rows, button labels and card shapes, and mirror that structure. "Inspired by" is not
 parity. Earnings is Performance card → Upcoming → Paid → Reports; the account's
 Payments is sections with *Manage payments* → *Your payments*; Payouts is *How
 you get paid* rows + *Add payout method* + *Need help?*. When Airbnb has no

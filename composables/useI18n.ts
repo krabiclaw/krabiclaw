@@ -6,6 +6,9 @@ import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 export function useI18n() {
   const composer = useVueI18n()
   const publicLocale = useState<string>('public-locale', () => 'en')
+  const sourceLocale = useState<string | null>('public-source-locale', () => null)
+  const { template } = useTenantOrganization().organization
+  const isPlatform = template.slug === 'platform'
   const representations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
   const locales = computed(() => representations.value.map(item => ({ code: item.locale, name: item.label })))
 
@@ -16,7 +19,11 @@ export function useI18n() {
     }
     return navigateTo(representation.route_path, { external: true })
   }
-  const localePath = (path: string) => formatTenantLocalePath(path, publicLocale.value)
+  const localePath = (path: string) => {
+    if (isPlatform) return path
+    if (!sourceLocale.value) throw createError({ statusCode: 500, statusMessage: 'Organization primary language is unavailable' })
+    return formatTenantLocalePath(path, publicLocale.value, sourceLocale.value)
+  }
 
   return Object.assign(composer, { locales, setLocale, localePath })
 }

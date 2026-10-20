@@ -1,4 +1,8 @@
+import { STAY_BOOKED_POLICIES } from '~/shared/stay-cancellation'
 import { refreshProductBusy } from '~/server/domain/member-scheduling'
+import { getSourceLocale } from '~/server/utils/organization-locales'
+import { platformLocale } from '~/shared/platform-locales'
+import { requireLocationReservationConfig, reservationAllocationPredicate, reservationPolicySummarySource } from '~/server/utils/reservations'
 import { sessionMemberSql } from '~/server/utils/provider-allocation'
 import type Stripe from 'stripe'
 import { HTTPError } from 'nitro'
@@ -6,155 +10,270 @@ import { execute, executeBatch, queryAll, queryFirst, type DbClient, type BatchQ
 import { assertPriceShape, PRICE_TAX_BEHAVIORS, selectPrice, type Price } from '~/shared/prices'
 import { isRecord } from '~/server/utils/type-guards'
 import { sessionAllocationPredicate } from '~/server/utils/availability'
-import { getStripeConnectedAccount, stripeLivemodeFromKey } from '~/server/utils/stripe-connect'
-import { hasOrganizationEntitlement } from '~/server/utils/billing'
+import { paymentsStripe, requireStripeCheckoutAcceptance, type StripeConnectedAccount } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { tokenHash } from './buyer'
 import { connectedBuyerCustomer } from '~/server/utils/billing-customer'
 import { assertMinorAmount, requirePayment } from './index'
 import { recordCheckoutStarted } from '~/server/domain/booking-analytics'
+import { isCurrencyCode } from '~/shared/currencies'
+import { quotePaymentsBillingFx, requireBillingFxQuote } from './fx'
+import { isStayNightConflict, stayHoldClaimQueries, stayHoldPredicate, type CheckoutStay, type StayQuote } from '~/server/domain/stays'
 
-export interface CheckoutInput {
+interface CheckoutInputBase {
   organizationId: string
   buyerUserId: string | null
-  productId: string
-  variantId: string
-  sessionId: string
-  requestId: string
+  /** The guest conversation the hold waits in; a stay's conversation opens when its payment is captured. */
+  requestId: string | null
   requestFingerprint: string
   quantity: number
   idempotencyKey: string
-  returnOrigin: string
   following: (paymentId: string) => BatchQuery[]
 }
-/** A booked session's Stripe Checkout: the guest request, its seat hold and its Payment are written together. */
-export async function createPaymentCheckout(db: DbClient, stripe: Stripe, env: CloudflareEnv, input: CheckoutInput, retry = false) {
-  assertMinorAmount(input.quantity)
-  if (input.quantity > 100 || !/^[a-zA-Z0-9_-]{8,128}$/u.test(input.idempotencyKey)) throw new HTTPError({statusCode:400,statusMessage:'Invalid checkout quantity or idempotency key'})
-  if (!await hasOrganizationEntitlement(env,input.organizationId,'payments')) throw new HTTPError({statusCode:403,statusMessage:'Payments entitlement is required for new acceptance'})
-  if (!env.STRIPE_SECRET_KEY || !env.STRIPE_PAYMENTS_METHOD_CONFIGURATION) throw new HTTPError({statusCode:503,statusMessage:'Stripe Payments synchronous-method configuration is required'})
-  if(await queryFirst(db,'SELECT stripe_account_id FROM payment_servicing_tenants WHERE organization_id=? LIMIT 1',[input.organizationId]))throw new HTTPError({statusCode:409,statusMessage:'Tenant deletion servicing prevents new payment acceptance'})
-  const origin = new URL(input.returnOrigin)
-  if (origin.protocol !== 'https:' || origin.username || origin.password || origin.pathname !== '/' || origin.search || origin.hash) throw new Error('Payments return origin must be an HTTPS origin')
-  const connected = await getStripeConnectedAccount(db,input.organizationId)
-  if (!connected?.stripeAccountId || connected.status !== 'ready' || connected.livemode !== stripeLivemodeFromKey(env.STRIPE_SECRET_KEY)) throw new HTTPError({statusCode:409,statusMessage:'Stripe account is not ready'})
-  const account = await stripe.v2.core.accounts.retrieve(connected.stripeAccountId,{include:['defaults','configuration.merchant','identity']})
-  if (account.dashboard !== 'express' || account.livemode !== connected.livemode || account.defaults?.responsibilities?.fees_collector !== 'application' || account.defaults.responsibilities.losses_collector !== 'stripe' || account.configuration?.merchant?.capabilities?.card_payments?.status !== 'active') throw new HTTPError({statusCode:409,statusMessage:'Stripe financial responsibilities or capability do not match Payments requirements'})
-  const configurations=await stripe.paymentMethodConfigurations.list({limit:100},{stripeAccount:connected.stripeAccountId})
-  if(configurations.has_more)throw new HTTPError({statusCode:409,statusMessage:'Connected checkout configuration needs bounded operator review'})
-  const matching=configurations.data.filter(configuration=>configuration.parent===env.STRIPE_PAYMENTS_METHOD_CONFIGURATION||configuration.id===env.STRIPE_PAYMENTS_METHOD_CONFIGURATION)
-  if(matching.length!==1)throw new HTTPError({statusCode:409,statusMessage:'A unique connected payment configuration inheriting the Payments parent is required'})
-  const methods=matching[0]!
-  let methodConfigurationId=methods.id
-  if (!methods.active) throw new HTTPError({statusCode:409,statusMessage:'Checkout payment method configuration is inactive'})
-  for (const [name, value] of Object.entries(methods)) {
-    if (value && typeof value==='object' && 'available' in value && 'display_preference' in value && value.available && value.display_preference && typeof value.display_preference==='object' && 'value' in value.display_preference && value.display_preference.value==='on' && !['card','link','apple_pay','google_pay'].includes(name)) throw new HTTPError({statusCode:409,statusMessage:`Disable delayed or unsupported checkout method ${name} before accepting booked payments`})
-  }
-  const [taxSettings, registrations] = await Promise.all([stripe.tax.settings.retrieve({}, {stripeAccount:connected.stripeAccountId}), stripe.tax.registrations.list({status:'active',limit:1}, {stripeAccount:connected.stripeAccountId})])
-  let automaticTax = taxSettings.status==='active' && registrations.data.length>0
-  const key = `checkout:${input.organizationId}:${input.idempotencyKey}`
-  const previous = await queryFirst<{id:string;payment_id:string;checkout_url:string|null;expires_at:string;return_token:string;status:string}>(db,'SELECT id,payment_id,checkout_url,expires_at,return_token,status FROM payment_attempts WHERE idempotency_key=?',[key])
+export type CheckoutInput = CheckoutInputBase & (
+  | { subjectType: 'booking'; productId: string; variantId: string; sessionId: string }
+  | { subjectType: 'reservation'; locationId: string; startsAt: string; endsAt: string; timezone: string }
+  /** `quote` is read only for a new checkout; a retry is held to the stay it froze, whose nights it already holds. */
+  | { subjectType: 'stay'; stay: StayRequest; guest: CheckoutStay['guest']; quote: () => Promise<StayQuote> }
+)
+
+/** Which stay a guest asked for: the home, the nights and the party. */
+export type StayRequest = Pick<StayQuote, 'product_id' | 'check_in_date' | 'check_out_date' | 'adults' | 'children' | 'infants'>
+
+/** The stay a checkout froze: the quote's nights and money, and the guest who is paying. */
+export type StayPurchase = CheckoutStay['quote'] & Pick<StayQuote, 'location_id' | 'timezone' | 'nightly'> & { guest: CheckoutStay['guest'] }
+
+export function isStayPurchase(value: unknown): value is StayPurchase {
+  if (!isRecord(value) || !isRecord(value.guest) || !Array.isArray(value.nightly)) return false
+  const guest = value.guest
+  return typeof value.product_id === 'string' && typeof value.location_id === 'string' && typeof value.timezone === 'string'
+    && typeof value.check_in_date === 'string' && typeof value.check_out_date === 'string' && value.check_out_date > value.check_in_date
+    && [value.adults, value.children, value.infants, value.total_minor].every(Number.isSafeInteger) && isCurrencyCode(value.currency)
+    && value.nightly.every(night => isRecord(night) && typeof night.date === 'string' && Number.isSafeInteger(night.price_minor))
+    && (STAY_BOOKED_POLICIES as readonly unknown[]).includes(value.cancellation_policy)
+    && typeof guest.name === 'string' && !!guest.name.trim() && typeof guest.email === 'string'
+    && (guest.phone === null || typeof guest.phone === 'string') && (guest.notes === null || typeof guest.notes === 'string')
+}
+/** The amount the buyer was shown and confirmed on the site, kept on the attempt until Stripe answers. */
+export interface PaymentReview { payment_method_id: string; subtotal: number; surcharge: number; total: number; reviewed_at: string }
+export interface PaymentHandoff { payment_id: string; pay_path: string; purchase_claim: string; expires_at: string }
+/** Stripe's PaymentIntent owns payment; one atomic batch owns the guest request, expiring capacity hold and immutable purchase. */
+export async function createPaymentCheckout(db: DbClient, env: CloudflareEnv, input: CheckoutInput, retry = false) {
+  if (!Number.isSafeInteger(input.quantity) || input.quantity < 1 || input.quantity > 99 || !input.idempotencyKey.trim() || input.idempotencyKey.trim().length > 200) throw new HTTPError({ statusCode: 400, statusMessage: 'A quantity of 1–99 and an idempotency key of 1–200 characters are required' })
+  const key = `checkout:${input.organizationId}:${input.idempotencyKey.trim()}`
+  const previous = await queryFirst<{id:string;payment_id:string;stripe_payment_intent_id:string|null;expires_at:string;return_token:string;status:string}>(db,'SELECT id,payment_id,stripe_payment_intent_id,expires_at,return_token,status FROM payment_attempts WHERE idempotency_key=?',[key])
   if(previous?.status==='failed')throw new HTTPError({statusCode:409,statusMessage:'Checkout was rejected; start a new request',data:{code:'checkout_failed'}})
-  const product = await queryFirst<{name:string;tax_code:string|null;currency:string}>(db,`SELECT p.name,p.tax_code,o.default_currency AS currency FROM products p JOIN organization o ON o.id=p.organization_id JOIN product_variants v ON v.product_id=p.id AND v.organization_id=p.organization_id WHERE p.organization_id=? AND p.id=? AND v.id=? AND p.active=1 AND v.active=1`,[input.organizationId,input.productId,input.variantId])
-  if (!product || product.currency !== 'USD') throw new HTTPError({statusCode:409,statusMessage:'An active USD offering is required'})
-  let projectionTitle=product.name,projectionTaxCode=product.tax_code
-  const session = await queryFirst<{id:string;location_id:string|null;starts_at:string;ends_at:string;calendar_group:string|null;online_payment_required:number}>(db,`SELECT s.*,c.calendar_group,c.online_payment_required FROM product_sessions s JOIN product_booking_configs c ON c.product_id=s.product_id AND c.organization_id=s.organization_id WHERE s.organization_id=? AND s.id=? AND s.product_id=?`,[input.organizationId,input.sessionId,input.productId])
-  if (!session) throw new HTTPError({statusCode:404,statusMessage:'Session not found'})
-  if (!session.online_payment_required) throw new HTTPError({statusCode:409,statusMessage:'This offering uses pay-later booking'})
-  const rawPrices = await queryAll<Price>(db,'SELECT * FROM prices WHERE organization_id=? AND product_variant_id=?',[input.organizationId,input.variantId])
   const now = new Date().toISOString()
-  let price = selectPrice(rawPrices.map(p=>({...p,active:Boolean(p.active)})),{currency:'USD',location_id:session.location_id,at:now,billing:{type:'one_time'}})
-  if (!price && !previous) throw new HTTPError({statusCode:409,statusMessage:'Offering has no current one-time price'})
-  if (price?.unit_amount === 0 && !previous) throw new HTTPError({statusCode:409,statusMessage:'Free offerings use the canonical booking flow without checkout'})
+  let price: Pick<Price, 'unit_amount' | 'currency' | 'tax_behavior'> | undefined
+  let catalogPriceId: string | null = null
+  let reservation: Record<string, unknown> | null = null
+  let stay: StayPurchase | null = null
+  const purchaseQuantity = input.subjectType === 'booking' ? input.quantity : 1
+  let connected: Pick<StripeConnectedAccount, 'stripeAccountId' | 'livemode'> | undefined
+  let projectionTitle: string
+  let projectionTaxCode: string | null
+  let automaticTax: boolean | undefined
+  let methodConfigurationId: string | undefined
+  let session: {id:string;location_id:string|null;starts_at:string;ends_at:string;online_payment_required:number;timezone:string} | null = null
   if (previous) {
     const frozen = await requirePayment(db,input.organizationId,previous.payment_id)
     const snapshot: unknown = JSON.parse(frozen.price_snapshot_json)
-    if (!isRecord(snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()
+    if (frozen.subject_type !== input.subjectType || !isRecord(snapshot) || typeof snapshot.title !== 'string' || !snapshot.title.trim()
       || (snapshot.tax_code !== null && (typeof snapshot.tax_code !== 'string' || !snapshot.tax_code.trim()))
-      || typeof snapshot.product_id !== 'string' || typeof snapshot.variant_id !== 'string'
-      || !Number.isSafeInteger(snapshot.quantity) || (snapshot.session_id !== null && typeof snapshot.session_id !== 'string')
-      || typeof snapshot.automatic_tax !== 'boolean' || typeof snapshot.method_configuration_id !== 'string' || !snapshot.method_configuration_id.trim()
-      || (snapshot.request_fingerprint !== undefined && typeof snapshot.request_fingerprint !== 'string')
-      || !isRecord(snapshot.price) || typeof snapshot.price.id !== 'string' || !snapshot.price.id.trim()
-      || snapshot.price.organization_id !== input.organizationId || snapshot.price.product_variant_id !== input.variantId
-      || snapshot.price.currency !== 'USD' || snapshot.price.type !== 'one_time'
-      || !PRICE_TAX_BEHAVIORS.includes(snapshot.price.tax_behavior as Price['tax_behavior'])
-      || (snapshot.price.compare_at_unit_amount !== null && !Number.isSafeInteger(snapshot.price.compare_at_unit_amount))
-      || (snapshot.price.valid_from_at !== null && typeof snapshot.price.valid_from_at !== 'string')
-      || (snapshot.price.valid_until_at !== null && typeof snapshot.price.valid_until_at !== 'string')) {
-      throw new HTTPError({statusCode:409,statusMessage:'Stored checkout snapshot is invalid'})
+      || snapshot.quantity !== purchaseQuantity || typeof snapshot.automatic_tax !== 'boolean'
+      || typeof snapshot.method_configuration_id !== 'string' || !snapshot.method_configuration_id.trim()
+      || snapshot.request_fingerprint !== input.requestFingerprint || !isRecord(snapshot.price)
+      || !isCurrencyCode(snapshot.price.currency) || !Number.isSafeInteger(snapshot.price.unit_amount)
+      || !PRICE_TAX_BEHAVIORS.includes(snapshot.price.tax_behavior as Price['tax_behavior'])) {
+      throw new HTTPError({ statusCode: 409, statusMessage: 'Checkout retry does not match its immutable purchase' })
     }
-    const frozenPrice = snapshot.price as unknown as Price
-    assertPriceShape(frozenPrice)
-    if (frozenPrice.unit_amount * input.quantity !== frozen.amount || frozenPrice.currency !== frozen.currency) throw new HTTPError({statusCode:409,statusMessage:'Stored checkout snapshot does not match its payment'})
+    const frozenPrice = snapshot.price as Pick<Price, 'unit_amount' | 'currency' | 'tax_behavior'>
+    if (frozenPrice.unit_amount * purchaseQuantity !== frozen.amount || frozenPrice.currency !== frozen.currency) throw new HTTPError({statusCode:409,statusMessage:'Stored checkout snapshot does not match its payment'})
     if (input.buyerUserId !== null && frozen.buyer_user_id !== input.buyerUserId) throw new HTTPError({statusCode:403,statusMessage:'Checkout belongs to another buyer'})
-    if (snapshot.product_id!==input.productId || snapshot.variant_id!==input.variantId || snapshot.quantity!==input.quantity || snapshot.session_id!==input.sessionId || snapshot.request_fingerprint!==input.requestFingerprint) throw new HTTPError({statusCode:409,statusMessage:'Checkout retry does not match its immutable purchase'})
+    if (input.subjectType === 'booking') {
+      if (snapshot.product_id !== input.productId || snapshot.variant_id !== input.variantId || snapshot.session_id !== input.sessionId
+        || typeof snapshot.price.id !== 'string' || !snapshot.price.id.trim() || snapshot.price.organization_id !== input.organizationId
+        || snapshot.price.product_variant_id !== input.variantId || snapshot.price.type !== 'one_time') throw new HTTPError({ statusCode: 409, statusMessage: 'Stored booking purchase is invalid' })
+      assertPriceShape(snapshot.price as unknown as Price)
+    } else if (input.subjectType === 'stay') {
+      const frozenStay = snapshot.stay
+      if (!isStayPurchase(frozenStay) || frozenStay.product_id !== input.stay.product_id || frozenStay.check_in_date !== input.stay.check_in_date
+        || frozenStay.check_out_date !== input.stay.check_out_date || frozenStay.adults !== input.stay.adults || frozenStay.children !== input.stay.children
+        || frozenStay.infants !== input.stay.infants || frozenStay.total_minor !== frozen.amount) throw new HTTPError({ statusCode: 409, statusMessage: 'Stored stay purchase is invalid', data: { code: 'idempotency_conflict', field: 'idempotency_key' } })
+      stay = frozenStay
+    } else {
+      if (!isRecord(snapshot.reservation) || snapshot.reservation.location_id !== input.locationId
+        || snapshot.reservation.starts_at !== input.startsAt || snapshot.reservation.ends_at !== input.endsAt
+        || snapshot.reservation.timezone !== input.timezone || snapshot.reservation.party_size !== input.quantity) throw new HTTPError({ statusCode: 409, statusMessage: 'Stored reservation purchase is invalid' })
+      reservation = snapshot.reservation
+    }
+    connected = { stripeAccountId: frozen.stripe_account_id, livemode: frozen.livemode === 1 }
     projectionTitle=snapshot.title
     projectionTaxCode=snapshot.tax_code
     price = frozenPrice
+    requireBillingFxQuote(snapshot.billing_fx, frozenPrice.currency)
     automaticTax = snapshot.automatic_tax
     methodConfigurationId=snapshot.method_configuration_id
+  } else if (input.subjectType === 'booking') {
+    const product = await queryFirst<{name:string;tax_code:string|null;currency:string}>(db,`SELECT p.name,p.tax_code,o.default_currency AS currency FROM products p JOIN organization o ON o.id=p.organization_id JOIN product_variants v ON v.product_id=p.id AND v.organization_id=p.organization_id WHERE p.organization_id=? AND p.id=? AND v.id=? AND p.active=1 AND v.active=1`,[input.organizationId,input.productId,input.variantId])
+    if (!product || !isCurrencyCode(product.currency)) throw new HTTPError({statusCode:409,statusMessage:'An active offering with a supported currency is required'})
+    session = await queryFirst(db,`SELECT s.*,c.online_payment_required FROM product_sessions s JOIN product_booking_configs c ON c.product_id=s.product_id AND c.organization_id=s.organization_id WHERE s.organization_id=? AND s.id=? AND s.product_id=?`,[input.organizationId,input.sessionId,input.productId])
+    if (!session) throw new HTTPError({statusCode:404,statusMessage:'Session not found'})
+    if (!session.online_payment_required) throw new HTTPError({statusCode:409,statusMessage:'This offering uses pay-later booking'})
+    const rawPrices = await queryAll<Price>(db,'SELECT * FROM prices WHERE organization_id=? AND product_variant_id=?',[input.organizationId,input.variantId])
+    price = selectPrice(rawPrices.map(p=>({...p,active:Boolean(p.active)})),{currency:product.currency,location_id:session.location_id,at:now,billing:{type:'one_time'}}) ?? undefined
+    if (!price) throw new HTTPError({statusCode:409,statusMessage:'Offering has no current one-time price'})
+    if (price.unit_amount === 0) throw new HTTPError({statusCode:409,statusMessage:'Free offerings use the canonical booking flow without checkout'})
+    catalogPriceId = (price as Price).id
+    projectionTitle = product.name
+    projectionTaxCode = product.tax_code
+  } else if (input.subjectType === 'stay') {
+    const guest = input.guest
+    const quote = await input.quote()
+    if (quote.product_id !== input.stay.product_id || quote.check_in_date !== input.stay.check_in_date || quote.check_out_date !== input.stay.check_out_date) throw new Error('The stay quote does not match the stay requested')
+    const product = await queryFirst<{ tax_code: string | null }>(db, 'SELECT tax_code FROM products WHERE organization_id = ? AND id = ?', [input.organizationId, quote.product_id])
+    if (!product) throw new HTTPError({ statusCode: 404, statusMessage: 'That place to stay is not open for booking', data: { code: 'STAY_NOT_FOUND', field: 'slug' } })
+    price = { unit_amount: quote.total_minor, currency: quote.currency, tax_behavior: quote.tax_behavior }
+    projectionTitle = quote.name
+    projectionTaxCode = product.tax_code
+    stay = {
+      product_id: quote.product_id, location_id: quote.location_id, timezone: quote.timezone, check_in_date: quote.check_in_date, check_out_date: quote.check_out_date,
+      adults: quote.adults, children: quote.children, infants: quote.infants, nightly: quote.nightly, total_minor: quote.total_minor, currency: quote.currency, cancellation_policy: quote.cancellation_policy, guest,
+    }
+  } else {
+    const [policy, location, locale] = await Promise.all([
+      requireLocationReservationConfig(db, { organizationId: input.organizationId, locationId: input.locationId }),
+      queryFirst<{ title: string; currency: string }>(db, 'SELECT l.title, o.default_currency AS currency FROM business_locations l JOIN organization o ON o.id = l.organization_id WHERE l.id = ? AND l.organization_id = ?', [input.locationId, input.organizationId]),
+      getSourceLocale(db, input.organizationId),
+    ])
+    if (!location || !isCurrencyCode(location.currency)) throw new HTTPError({ statusCode: 409, statusMessage: 'A reservation location with a supported business currency is required' })
+    if (!policy.deposit_required || policy.deposit_trigger_party_size !== null && input.quantity < policy.deposit_trigger_party_size) throw new HTTPError({ statusCode: 409, statusMessage: 'This reservation does not require a deposit' })
+    if (!policy.deposit_amount || !policy.deposit_currency || !policy.deposit_tax_behavior) throw new HTTPError({ statusCode: 409, statusMessage: 'Set the reservation deposit amount, currency and tax treatment', data: { missing: [...(!policy.deposit_amount ? ['deposit_amount'] : []), ...(!policy.deposit_currency ? ['deposit_currency'] : []), ...(!policy.deposit_tax_behavior ? ['deposit_tax_behavior'] : [])] } })
+    price = { unit_amount: policy.deposit_amount, currency: policy.deposit_currency, tax_behavior: policy.deposit_tax_behavior }
+    const label = platformLocale(locale)?.messages['reservations.deposit_label']
+    if (!label) throw new Error('The source language has no reservation deposit label')
+    projectionTitle = `${location.title} — ${label}`
+    projectionTaxCode = null
+    reservation = { ...reservationPolicySummarySource(policy), location_id: input.locationId, starts_at: input.startsAt, ends_at: input.endsAt, timezone: input.timezone, party_size: input.quantity, policy_updated_at: policy.updated_at }
   }
-  if(!price)throw new Error('Immutable checkout price is missing')
-  const amount = price.unit_amount*input.quantity
+  if (!previous) {
+    const acceptance = await requireStripeCheckoutAcceptance(db, env, input.organizationId)
+    connected = acceptance.connected
+    methodConfigurationId = acceptance.methodConfigurationId
+    automaticTax = acceptance.automaticTax
+  }
+  if(!price || !connected?.stripeAccountId || automaticTax === undefined || !methodConfigurationId)throw new Error('Immutable checkout price or connected account is missing')
+  const stripe = paymentsStripe(env, connected.livemode)
+  // Stripe Tax calculated the hosted Checkout's tax. The on-site payment does not run Stripe Tax calculations yet, so a business registered for it is refused rather than charged without tax.
+  if (automaticTax) throw new HTTPError({ statusCode: 409, statusMessage: 'This business collects tax through Stripe Tax, which online payments on the site do not calculate yet', data: { code: 'stripe_tax_unsupported' } })
+  const amount = price.unit_amount*purchaseQuantity
   assertMinorAmount(amount)
   const id = previous?.payment_id ?? crypto.randomUUID(), attemptId = previous?.id ?? crypto.randomUUID(), holdId = crypto.randomUUID()
   const returnToken=previous?.return_token ?? crypto.randomUUID()+crypto.randomUUID()
   const returnHash=await tokenHash(returnToken)
   const expiresAt = previous?.expires_at ?? new Date(Date.now()+60*60*1000).toISOString()
   if (expiresAt<=now) throw new HTTPError({statusCode:409,statusMessage:'Checkout hold expired; start a new request',data:{code:'checkout_expired'}})
-  if (previous?.checkout_url) {
-    // The first response may have failed after Stripe and D1 held the Checkout; its started event is recorded once, here or there.
+  const handoff = (paymentId: string): PaymentHandoff => ({ payment_id: paymentId, pay_path: `/pay/${encodeURIComponent(paymentId)}`, purchase_claim: returnToken, expires_at: expiresAt })
+  if (previous?.stripe_payment_intent_id) {
     await recordCheckoutStarted(db, await requirePayment(db,input.organizationId,previous.payment_id), null)
-    return {payment_id:previous.payment_id,checkout_url:previous.checkout_url,expires_at:expiresAt}
+    return handoff(previous.payment_id)
   }
   if (!previous) {
-    await refreshProductBusy(db,env,input.organizationId,input.productId)
+    const billingFx = await quotePaymentsBillingFx(stripe, price.currency)
+    let hold: BatchQuery
+    const preceding: BatchQuery[] = []
+    const following: BatchQuery[] = []
+    if (input.subjectType === 'booking') {
+      if (!session || !catalogPriceId) throw new Error('The selected session or price is missing')
+      await refreshProductBusy(db, env, input.organizationId, input.productId)
+      const allocation = await sessionAllocationPredicate(db, { organizationId: input.organizationId, productId: input.productId, sessionId: session.id, partySize: input.quantity, now })
+      hold = { query: `INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,buyer_user_id,request_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at,assigned_member_id,location_id,timezone)
+        SELECT ?,?,?,?,?,?,?,?,?,?,?,?,s.starts_at,s.ends_at,'active',?,?,${sessionMemberSql('s')},s.location_id,s.timezone FROM product_sessions s JOIN product_booking_configs c ON c.product_id=s.product_id AND c.organization_id=s.organization_id WHERE s.id=? AND s.organization_id=? AND s.product_id=? AND ${allocation.query}`,
+        params: [holdId,input.organizationId,input.productId,input.variantId,catalogPriceId,session.id,input.buyerUserId,input.requestId,id,input.quantity,amount,price.currency,expiresAt,now,session.id,input.organizationId,input.productId,...allocation.params!] }
+      following.push({ query: "UPDATE product_sessions SET assigned_member_id=(SELECT assigned_member_id FROM payment_checkout_holds WHERE payment_id=?) WHERE id=? AND EXISTS(SELECT 1 FROM payment_checkout_holds WHERE payment_id=? AND status='active')", params:[id,session.id,id] })
+    } else if (input.subjectType === 'stay') {
+      if (!stay) throw new Error('The selected stay is missing')
+      const scope = { organizationId: input.organizationId, productId: stay.product_id, checkIn: stay.check_in_date, checkOut: stay.check_out_date }
+      const bookable = stayHoldPredicate(scope)
+      // A lapsed hold on these nights is cleared before this one claims them; the hold's nights are claimed after it.
+      const [clearLapsed, claim] = stayHoldClaimQueries({ ...scope, holdId })
+      preceding.push(clearLapsed!)
+      hold = { query: `INSERT INTO payment_checkout_holds(id,organization_id,product_id,location_id,timezone,buyer_user_id,request_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at)
+        SELECT ?,?,?,?,?,?,NULL,?,?,?,?,?,?,'active',?,? WHERE ${bookable.query}`,
+        params: [holdId,input.organizationId,stay.product_id,stay.location_id,stay.timezone,input.buyerUserId,id,stay.adults+stay.children,amount,price.currency,stay.check_in_date,stay.check_out_date,expiresAt,now,...bookable.params] }
+      following.push(claim!)
+    } else {
+      if (!reservation || typeof reservation.policy_updated_at !== 'string') throw new Error('The selected reservation policy is missing')
+      const allocation = await reservationAllocationPredicate(db, { organizationId: input.organizationId, locationId: input.locationId, startsAt: input.startsAt, endsAt: input.endsAt, timezone: input.timezone, partySize: input.quantity, policyUpdatedAt: reservation.policy_updated_at })
+      hold = { query: `INSERT INTO payment_checkout_holds(id,organization_id,location_id,timezone,buyer_user_id,request_id,payment_id,quantity,amount,currency,starts_at,ends_at,status,expires_at,created_at)
+        SELECT ?,?,?,?,?,?,?,?,?,?,?,?,'active',?,? WHERE ${allocation.query}`, params: [holdId,input.organizationId,input.locationId,input.timezone,input.buyerUserId,input.requestId,id,input.quantity,amount,price.currency,input.startsAt,input.endsAt,expiresAt,now,...allocation.params!] }
+    }
+    const purchase = { title: projectionTitle, tax_code: projectionTaxCode, price, quantity: purchaseQuantity, automatic_tax: automaticTax, method_configuration_id: methodConfigurationId, request_fingerprint: input.requestFingerprint, billing_fx: billingFx,
+      ...(input.subjectType === 'booking' ? { product_id: input.productId, variant_id: input.variantId, session_id: input.sessionId } : input.subjectType === 'stay' ? { stay } : { reservation }) }
     try { await executeBatch(db,[
-      {query:`INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,price_snapshot_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,params:[id,input.organizationId,input.buyerUserId,connected.stripeAccountId,Number(connected.livemode),'booking',null,session.location_id,price.currency,amount,JSON.stringify({title:projectionTitle,tax_code:projectionTaxCode,price,product_id:input.productId,variant_id:input.variantId,quantity:input.quantity,session_id:input.sessionId,automatic_tax:automaticTax,method_configuration_id:methodConfigurationId,request_fingerprint:input.requestFingerprint}),now,now]},
-      {query:`INSERT INTO payment_checkout_holds(id,organization_id,product_id,variant_id,price_id,session_id,buyer_user_id,request_id,payment_id,quantity,amount,currency,calendar_group,starts_at,ends_at,status,expires_at,created_at,assigned_member_id)
-        SELECT ?,?,?,?,?,?,?,?,?,?,?,?,c.calendar_group,s.starts_at,s.ends_at,'active',?,?,${sessionMemberSql('s')} FROM product_sessions s JOIN product_booking_configs c ON c.product_id=s.product_id AND c.organization_id=s.organization_id WHERE s.id=? AND s.organization_id=? AND s.product_id=? AND ${sessionAllocationPredicate({organizationId:input.organizationId,productId:input.productId,sessionId:session.id,partySize:input.quantity,now}).query}`,params:[holdId,input.organizationId,input.productId,input.variantId,price.id,session.id,input.buyerUserId,input.requestId,id,input.quantity,amount,price.currency,expiresAt,now,session.id,input.organizationId,input.productId,...sessionAllocationPredicate({organizationId:input.organizationId,productId:input.productId,sessionId:session.id,partySize:input.quantity,now}).params!]},
-      {query:'UPDATE product_sessions SET assigned_member_id=(SELECT assigned_member_id FROM payment_checkout_holds WHERE payment_id=?) WHERE id=? AND EXISTS(SELECT 1 FROM payment_checkout_holds WHERE payment_id=? AND status=\'active\')',params:[id,session.id,id]},
+      { query: `INSERT INTO payments(id,organization_id,buyer_user_id,stripe_account_id,livemode,subject_type,subject_id,location_id,currency,amount,price_snapshot_json,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`, params:[id,input.organizationId,input.buyerUserId,connected.stripeAccountId,Number(connected.livemode),input.subjectType,null,input.subjectType === 'booking' ? session!.location_id : input.subjectType === 'stay' ? stay!.location_id : input.locationId,price.currency,amount,JSON.stringify(purchase),now,now] },
+      ...preceding, hold, ...following,
       {query:`INSERT INTO payment_attempts(id,payment_id,idempotency_key,return_token,status,expires_at,created_at,updated_at) SELECT ?,?,?,?,'creating',?,?,? WHERE EXISTS(SELECT 1 FROM payment_checkout_holds WHERE payment_id=? AND status='active')`,params:[attemptId,id,key,returnToken,expiresAt,now,now,id]},
       ...input.following(id),
       {query:'INSERT INTO payment_claims(token_hash,payment_id,expires_at) SELECT ?,?,? WHERE EXISTS(SELECT 1 FROM payment_attempts WHERE id=?)',params:[returnHash,id,new Date(Date.now()+86400000).toISOString(),attemptId]},
     ],{operation:'Reserve payment checkout'})
     } catch(error) {
       const raced=await queryFirst(db,'SELECT id FROM payment_attempts WHERE idempotency_key=?',[key])
-      if(raced && !retry) return await createPaymentCheckout(db,stripe,env,input,true)
+      if(raced && !retry) return await createPaymentCheckout(db,env,input,true)
+      if (input.subjectType === 'stay' && isStayNightConflict(error)) throw new HTTPError({ statusCode: 409, statusMessage: 'Some of these nights are no longer available', data: { code: 'STAY_NIGHTS_UNAVAILABLE', field: 'check_in_date' }, cause: error })
       throw error
     }
     const attempt = await queryFirst(db,'SELECT id FROM payment_attempts WHERE id=?',[attemptId])
     if (!attempt) {
       await execute(db,"UPDATE payments SET state='failed',updated_at=? WHERE id=?",[now,id])
-      throw new HTTPError({statusCode:409,statusMessage:'Session capacity is unavailable'})
+      if (input.subjectType === 'stay') throw new HTTPError({ statusCode: 409, statusMessage: 'This place to stay is no longer open for these nights', data: { code: 'STAY_NIGHTS_UNAVAILABLE', field: 'check_in_date' } })
+      throw new HTTPError({statusCode:409,statusMessage:'This time no longer has capacity for your party'})
     }
   }
-  // A signed-in buyer's Customer at this business: Stripe's Checkout offers, saves and removes their cards here only.
+  // A signed-in buyer's Customer at this business: the Payment Element offers, saves and removes their cards here only.
   const customer=input.buyerUserId?await connectedBuyerCustomer(db,stripe,input.buyerUserId,connected.stripeAccountId,connected.livemode):null
-  let opened:string
+  const surcharge = await surchargeBasisPoints(db, input.organizationId, connected.stripeAccountId)
   try {
-  const checkout = await stripe.checkout.sessions.create({mode:'payment',integration_identifier:'krabiclaw_payments_aqpfkmvz',...(customer?{customer:customer.customerId,saved_payment_method_options:{payment_method_save:'enabled' as const,payment_method_remove:'enabled' as const,allow_redisplay_filters:['always' as const]}}:{}),automatic_tax:{enabled:automaticTax},line_items:[{price_data:{currency:price.currency.toLowerCase(),unit_amount:price.unit_amount,tax_behavior:price.tax_behavior,product_data:{name:projectionTitle,...(projectionTaxCode?{tax_code:projectionTaxCode}:{}),metadata:{krabiclaw_variant_id:input.variantId}}},quantity:input.quantity}],payment_method_configuration:methodConfigurationId,
-    payment_intent_data:{application_fee_amount:0,metadata:{krabiclaw_payment_id:id}},metadata:{krabiclaw_payment_id:id},client_reference_id:id,
-    expires_at:Math.floor(Date.parse(expiresAt)/1000),success_url:new URL(`/account?payment_id=${encodeURIComponent(id)}&purchase_claim=${encodeURIComponent(returnToken)}`,origin).toString(),cancel_url:new URL('/account?payment=cancelled',origin).toString(),
-  },{stripeAccount:connected.stripeAccountId,idempotencyKey:key})
-  if (!checkout.url || checkout.livemode !== connected.livemode) throw new Error('Stripe Checkout returned invalid scoped handoff')
-  await execute(db,`UPDATE payment_attempts SET stripe_checkout_id=?,checkout_url=?,status='open',error=NULL,updated_at=? WHERE id=?`,[checkout.id,checkout.url,new Date().toISOString(),attemptId])
-  opened=checkout.url
+    const intent = await stripe.paymentIntents.create({
+      amount, currency: price.currency.toLowerCase(),
+      ...(customer ? { customer: customer.customerId } : {}),
+      // The connected configuration the acceptance check verified: cards, Link, wallets, and ACH Direct Debit.
+      payment_method_configuration: methodConfigurationId,
+      automatic_payment_methods: { enabled: true, allow_redirects: 'always' },
+      application_fee_amount: 0,
+      description: projectionTitle,
+      metadata: { krabiclaw_payment_id: id },
+      // Stripe reports, per card, whether a surcharge may apply and how much at most; the amount is set when the buyer confirms.
+      ...(surcharge !== null ? { amount_details: { surcharge: { enforce_validation: 'enabled' } } } : {}),
+    } as Stripe.PaymentIntentCreateParams, { stripeAccount: connected.stripeAccountId, idempotencyKey: key })
+    if (intent.livemode !== connected.livemode || !intent.client_secret) throw new Error('Stripe returned a PaymentIntent outside the connected mode')
+    await executeBatch(db, [
+      { query: `UPDATE payment_attempts SET stripe_payment_intent_id=?,status='open',error=NULL,updated_at=? WHERE id=?`, params: [intent.id, new Date().toISOString(), attemptId] },
+      { query: 'UPDATE payments SET stripe_payment_intent_id=?,updated_at=? WHERE id=?', params: [intent.id, new Date().toISOString(), id] },
+    ], { operation: 'Record the payment intent' })
   } catch(error) {
-    // A prior attempt may have reached Stripe even when its handoff was lost.
-    // Only a first-call content/auth rejection proves no Checkout was created.
+    // A prior attempt may have reached Stripe even when its response was lost.
+    // Only a first-call content/auth rejection proves no intent was created.
     const rejected=!previous&&(error instanceof stripe.errors.StripeInvalidRequestError||error instanceof stripe.errors.StripeAuthenticationError||error instanceof stripe.errors.StripePermissionError)&&error.headers?.['stripe-should-retry']!=='true'
     const failedAt=new Date().toISOString()
     await executeBatch(db,[
-      {query:"UPDATE payment_attempts SET error=?,updated_at=?,status=CASE WHEN ? THEN 'failed' ELSE status END WHERE id=?",params:[error instanceof Error?error.message.slice(0,500):'Provider checkout failed',failedAt,Number(rejected),attemptId]},
+      {query:"UPDATE payment_attempts SET error=?,updated_at=?,status=CASE WHEN ? THEN 'failed' ELSE status END WHERE id=?",params:[error instanceof Error?error.message.slice(0,500):'Provider payment intent failed',failedAt,Number(rejected),attemptId]},
       ...(rejected?[
         {query:"UPDATE payment_checkout_holds SET status='released' WHERE payment_id=? AND status='active'",params:[id]},
         {query:"UPDATE payments SET state='failed',updated_at=? WHERE id=? AND captured_amount=0",params:[failedAt,id]},
       ]:[]),
-    ],{operation:'Record rejected or uncertain Checkout creation'})
+    ],{operation:'Record rejected or uncertain payment intent creation'})
     throw error
   }
   await recordCheckoutStarted(db, await requirePayment(db,input.organizationId,id), customer?.savedCards ?? 0)
-  return {payment_id:id,checkout_url:opened,expires_at:expiresAt}
+  return handoff(id)
+}
+
+/** The business's pass-on-credit-card-fees rate on this connected account, or null when it does not pass them on. */
+export async function surchargeBasisPoints(db: DbClient, organizationId: string, stripeAccountId: string): Promise<number | null> {
+  const row = await queryFirst<{ surcharge_basis_points: number | null }>(db, 'SELECT surcharge_basis_points FROM stripe_connected_accounts WHERE organization_id=? AND stripe_account_id=?', [organizationId, stripeAccountId])
+  const points = row?.surcharge_basis_points ?? null
+  if (points === null) return null
+  if (!Number.isSafeInteger(points) || points <= 0 || points > 10_000) throw new Error('Surcharge rate is invalid')
+  return points
 }

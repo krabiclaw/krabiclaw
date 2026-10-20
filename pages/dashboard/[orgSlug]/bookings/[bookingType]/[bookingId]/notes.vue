@@ -3,10 +3,9 @@
     Your team's notes on this record: the ones written, each a leaf below, and
     the one being written, which this level's own footer saves.
   -->
-  <DashboardIndexPanel id="booking-notes" title="Your notes">
-    <div class="mx-auto w-full max-w-md space-y-6">
+  <DashboardIndexPanel id="booking-notes" title="Your notes" lead="Only your team can see these notes." column="leaf">
+    <div class="space-y-6">
       <UAlert v-if="b.noteError.value" color="error" variant="soft" icon="i-lucide-circle-alert" :description="b.noteError.value" />
-      <p class="text-base text-muted">Only your team can see these notes.</p>
       <UFormField label="New note">
         <UTextarea v-model="b.noteDraft.value" :rows="6" maxlength="2000" class="w-full" placeholder="Add a note to yourself" />
       </UFormField>

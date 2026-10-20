@@ -120,16 +120,16 @@ export function isTenantPageListResponse(value: unknown): value is { pages: Tena
       && typeof page.removable === 'boolean')
 }
 
-function isEditorContextResponse(value: unknown): value is { context: { previewToken: string; organization: { subdomain: string | null } } } {
-  return isRecord(value) && isRecord(value.context) && typeof value.context.previewToken === 'string'
+function isEditorContextResponse(value: unknown): value is { context: { previewToken: string; sourceLocale: string; organization: { subdomain: string | null } } } {
+  return isRecord(value) && isRecord(value.context) && typeof value.context.previewToken === 'string' && typeof value.context.sourceLocale === 'string'
     && isRecord(value.context.organization)
 }
 
-function emptyDraft(): TenantPageDraft {
+function emptyDraft(sourceLocale = ''): TenantPageDraft {
   return {
     id: '',
     page_id: '',
-    locale: 'en',
+    locale: sourceLocale,
     path: '',
     title: '',
     summary: '',
@@ -169,7 +169,7 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
     key,
     async () => {
       const [context, page] = await Promise.all([
-        dashboardApi<{ context: { previewToken: string; organization: { subdomain: string | null } } }>(
+        dashboardApi<{ context: { previewToken: string; sourceLocale: string; organization: { subdomain: string | null } } }>(
           `/api/editor/organizations/${organizationId}/context`,
           { validate: isEditorContextResponse },
         ),
@@ -193,7 +193,7 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
 
   function seed(page: TenantPageResponse | null) {
     accepted.value = page
-    draft.value = page ? toDraft(page) : emptyDraft()
+    draft.value = page ? toDraft(page) : emptyDraft(data.value?.context.sourceLocale)
     baseline.value = JSON.stringify(draft.value)
     seededFrom.value = page?.document.updated_at ?? 'new'
   }
@@ -246,7 +246,7 @@ export function useTenantPageDraft(organizationId: string, pageId: string) {
     const subdomain = data.value?.context.organization.subdomain
     if (!page || !token || !subdomain) return ''
     const path = page.path === '/' ? '' : page.path
-    const localizedPath = page.locale === 'en' ? path : `/${page.locale}${path}`
+    const localizedPath = page.id === page.page_id ? path : `/${page.locale}${path}`
     const origin = tenantOrganizationOrigin({
       platformDomain: String(runtimeConfig.public.platformDomain),
       freeOrganizationDomain: String(runtimeConfig.public.freeOrganizationDomain),

@@ -1,9 +1,14 @@
 /*
   Japanese faces, linked only on Japanese pages (composables/usePublicSiteBrand.ts).
-  Google serves Japanese as about 120 unicode-range slices per weight, so these
-  rules stay out of the surface sheets every other page loads.
+  Each family is about 120 unicode-range slices per weight, so these rules stay
+  out of the surface sheets every other page loads.
 */
+@import "@fontsource/noto-sans-jp/400.css";
+@import "@fontsource/noto-sans-jp/700.css";
+@import "@fontsource/noto-serif-jp/400.css";
+@import "@fontsource/noto-serif-jp/700.css";
+
 html:lang(ja) {
-  --font-script-sans: "Noto Sans JP", "Noto Sans Thai";
-  --font-script-serif: "Noto Serif JP", "Noto Serif Thai";
+  --font-script-sans: "Noto Sans JP", "Noto Sans Thai", var(--font-vietnamese-sans);
+  --font-script-serif: "Noto Serif JP", "Noto Serif Thai", var(--font-vietnamese-serif);
 }

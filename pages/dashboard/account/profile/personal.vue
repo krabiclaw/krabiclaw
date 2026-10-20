@@ -44,7 +44,7 @@
           <UButton variant="link" color="neutral" class="shrink-0" :label="account.editing.value === 'phone' ? 'Cancel' : account.sessionData.value?.user?.phoneNumber ? 'Edit' : 'Add'" @click="account.toggleEdit('phone')" />
         </div>
         <div v-if="account.editing.value === 'phone'" class="mt-4 space-y-4">
-          <UInput v-model="account.phoneInput.value" type="tel" placeholder="+66..." autofocus class="w-full" @input="account.phoneTouched.value = true" @keydown.enter="account.requestPhoneVerify" />
+          <UInput v-model="account.phoneInput.value" type="tel" placeholder="Phone number with country code" autofocus class="w-full" @input="account.phoneTouched.value = true" @keydown.enter="account.requestPhoneVerify" />
           <p v-if="account.phoneError.value" class="text-sm text-error">{{ account.phoneError.value }}</p>
           <UButton label="Verify and save" :loading="account.phoneSaving.value" :disabled="!account.phoneDirty.value || !account.phoneInput.value.trim()" @click="account.requestPhoneVerify" />
         </div>

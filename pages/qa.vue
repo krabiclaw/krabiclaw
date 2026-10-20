@@ -13,34 +13,32 @@
           :to="localePath(`/locations/${loc.slug}/qa`)"
           class="inline-flex items-center gap-2 rounded-full border border-default px-5 py-2.5 text-sm text-muted no-underline transition hover:bg-muted hover:text-default"
         >
-          <SayaIcon name="map-pin" class="size-3.5 opacity-70" />
+          <TenantIcon name="map-pin" class="size-3.5 opacity-70" />
           {{ loc.title }}
         </NuxtLink>
       </div>
     </header>
-    <LazySayaQA :qa="qaList" :show-title="false" />
+    <LazyTenantQA :qa="qaList" :show-title="false" />
   </div>
 </template>
 
 <script setup lang="ts">
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
-const { organizationId, organization } = useTenantOrganization()
-if (!organizationId) throw createError({ statusCode: 404 })
+const { organization } = useTenantOrganization()
 const { localePath, t } = useI18n()
 
-const { googleMaps, qaList, locations } = await usePublicPageData()
-const organizationName = computed(() => organization?.name?.trim() || googleMaps.value?.business?.title?.trim() || '')
+const { qaList, locations, sections } = await usePublicPageData()
+// A section with nothing on it is not a page; the navigation hides it by the same flag.
+if (sections.value?.qa === false) throw createError({ statusCode: 404 })
+const organizationName = organization.name
 
 useSocialMetadata(() => ({
   path: '/qa',
-  title: `${t('saya.qa.title')} | ${organizationName.value}`,
-  description: t('saya.qa_page.meta_description', { organization: organizationName.value }),
+  title: `${t('saya.qa.title')} | ${organizationName}`,
+  description: t('saya.qa_page.meta_description', { organization: organizationName }),
   label: t('saya.qa.title'),
-  socialImage: organization?.social_image ?? null,
-  brand: {
-    organizationName: organizationName.value,
-  },
+  socialImage: organization.social_image,
   breadcrumbs: [
     { name: t('saya.qa.title'), url: '/qa' },
   ],

@@ -8,7 +8,7 @@
       this row holds the filters, with search at its end. Search is the
       dashboard's one search, opened from here the way it opens from the Menu.
     -->
-    <header class="shrink-0 px-4 py-3">
+    <header class="shrink-0 py-3" :class="dashboardGutterClass">
       <!--
         Airbnb's own control: the kind is a dropdown labelled by what is
         selected, and Unread sits beside it as a toggle. Both are 40px pills.
@@ -54,29 +54,13 @@
     </header>
 
     <!-- Updates: what the platform told this account or business, under the same pills. -->
-    <NotificationList v-if="updatesView" :personal-scope="personalScope" class="min-h-0 flex-1 overflow-y-auto px-4 pb-4" />
-    <div v-else class="min-h-0 flex-1 overflow-y-auto">
-      <UAlert
-        v-if="realtimeFailed"
-        color="warning"
-        variant="soft"
-        icon="i-lucide-wifi-off"
-        title="Live updates are unavailable"
-        description="This list may be out of date until the dashboard reconnects."
-        class="m-3"
-      >
-        <template #actions>
-          <UButton color="warning" variant="soft" size="xs" :loading="pending" @click="refreshThreads">
-            Refresh
-          </UButton>
-        </template>
-      </UAlert>
-
+    <NotificationList v-if="updatesView" :personal-scope="personalScope" class="min-h-0 flex-1 overflow-y-auto pb-4" :class="dashboardGutterClass" />
+    <div v-else class="min-h-0 flex-1 overflow-y-auto" :class="dashboardGutterClass">
       <UAlert
         v-if="mailboxError"
         color="error"
         variant="soft"
-        class="m-3"
+        class="mb-3"
         title="The conversation could not be moved"
         :description="mailboxError"
         close
@@ -84,12 +68,12 @@
       />
 
       <UAlert
-        v-if="threadsError"
+        v-if="threadsError || nextPageError"
         color="error"
         variant="soft"
-        class="m-3"
+        class="mb-3"
         title="Messages could not be loaded"
-        :description="getErrorMessage(threadsError, 'Guest thread request failed')"
+        :description="getErrorMessage(threadsError || nextPageError, 'Guest thread request failed')"
       />
 
       <!--
@@ -111,7 +95,7 @@
         <div
           v-for="thread in threads"
           :key="thread.id"
-          class="group relative mx-3"
+          class="group relative -mx-3"
           :data-thread-row="thread.id"
         >
           <NuxtLink
@@ -122,6 +106,22 @@
               rowActions(thread).length ? 'pr-12' : '',
             ]"
           >
+            <!-- Unread indicator dot on the left of the row -->
+            <div class="flex h-14 w-2 shrink-0 items-center justify-center">
+              <Transition
+                enter-from-class="scale-0"
+                enter-active-class="transition-transform duration-200 ease-out motion-reduce:transition-none"
+                leave-to-class="scale-0"
+                leave-active-class="transition-transform duration-150 motion-reduce:transition-none"
+              >
+                <span
+                  v-if="thread.unread"
+                  class="size-2 rounded-full bg-primary"
+                  :aria-label="`${threadName(thread)}: unread`"
+                />
+              </Transition>
+            </div>
+
             <!-- The picture leads: the location's hero, or the business's logo for
                  a thread that came to the business itself. A place with neither
                  keeps the same footprint so the rows do not reflow between them. -->
@@ -145,27 +145,14 @@
               -->
               <div v-if="occurrenceLine(thread)" class="flex items-baseline justify-between gap-3 text-xs text-muted">
                 <span class="min-w-0 flex-1 truncate">{{ occurrenceLine(thread) }}</span>
-                <span class="shrink-0">{{ formatRelativeTime(thread.lastActivityAt) }}</span>
+                <span class="shrink-0">{{ thread.replyChannel === 'airbnb' ? 'Recorded ' : '' }}{{ formatRelativeTime(thread.lastActivityAt) }}</span>
               </div>
               <div class="flex items-baseline justify-between gap-3">
                 <p class="min-w-0 flex-1 truncate text-sm font-medium text-highlighted">{{ threadName(thread) }}</p>
-                <span v-if="!occurrenceLine(thread)" class="shrink-0 text-xs text-muted">{{ formatRelativeTime(thread.lastActivityAt) }}</span>
+                <span v-if="!occurrenceLine(thread)" class="shrink-0 text-xs text-muted">{{ thread.replyChannel === 'airbnb' ? 'Recorded ' : '' }}{{ formatRelativeTime(thread.lastActivityAt) }}</span>
               </div>
               <p class="mt-0.5 line-clamp-2 text-sm leading-snug text-muted">{{ thread.preview?.text || 'New conversation' }}</p>
             </div>
-
-            <Transition
-              enter-from-class="scale-0"
-              enter-active-class="transition-transform duration-200 ease-out motion-reduce:transition-none"
-              leave-to-class="scale-0"
-              leave-active-class="transition-transform duration-150 motion-reduce:transition-none"
-            >
-              <span
-                v-if="thread.unread"
-                class="mt-2 block size-2.5 shrink-0 rounded-full bg-primary"
-                :aria-label="`${threadName(thread)}: unread`"
-              />
-            </Transition>
           </NuxtLink>
 
           <!--
@@ -191,6 +178,10 @@
         </div>
       </TransitionGroup>
 
+      <div v-if="data?.pagination.hasMore" class="flex justify-center py-3">
+        <UButton color="neutral" variant="ghost" :loading="loadingMore" :disabled="pending" @click="loadMore">Load more conversations</UButton>
+      </div>
+
       <!--
         Airbnb's own: a 50px full-bleed row at the foot of the list, not a tab
         beside it. Past conversations are a different place you go to, not a
@@ -199,14 +190,14 @@
       <NuxtLink
         v-if="data && (pastOnly || threads.length > 0)"
         :to="{ path: listRoute, query: pastOnly ? withoutArchived : { ...route.query, archived: '' } }"
-        class="flex items-center justify-between gap-3 px-4 py-4 text-sm font-medium text-default transition hover:bg-elevated/60"
+        class="-mx-4 flex items-center justify-between gap-3 px-4 py-4 text-sm font-medium text-default transition hover:bg-elevated/60 sm:-mx-6 sm:px-6"
         :class="threads.length ? 'mt-2 border-t border-default' : ''"
       >
         <span>{{ pastOnly ? 'Current conversations' : 'Past conversations' }}</span>
         <UIcon name="i-lucide-chevron-right" class="size-4 shrink-0 text-muted" />
       </NuxtLink>
 
-      <div v-if="data && threads.length === 0" class="px-6 py-14 text-center">
+      <div v-if="data && threads.length === 0" class="py-14 text-center">
         <p class="text-base font-medium text-highlighted">{{ emptyTitle }}</p>
         <p class="mt-1 text-sm text-muted">{{ emptyDescription }}</p>
         <UButton
@@ -233,11 +224,13 @@ import {
   threadFilterLabel,
   type SubmissionType,
   type ThreadListItem,
+  type ThreadListPage,
 } from '~/lib/components/workspace/messages/guest-thread-client'
 import { resolveCmsCapabilities, type ProductFeature } from '~/config/cms-registry'
 import { resolvePublicTemplate } from '~/utils/template-registry'
 import { normalizeVertical, type OrganizationVertical } from '~/utils/vertical-copy'
 import { useDashboardInvalidations } from '~/composables/useDashboardInvalidations'
+import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
 /*
   The thread list, and only the list. A thread opens as this level's detail
@@ -273,7 +266,7 @@ const pastOnly = computed(() => route.query.archived !== undefined)
 const withoutArchived = computed(() => { const { archived: _archived, ...rest } = route.query; return rest })
 const activeType = computed<SubmissionType | null>(() => {
   const value = route.query.filter
-  return value === 'contact' || value === 'reservation' || value === 'booking' ? value : null
+  return value === 'contact' || value === 'reservation' || value === 'booking' || value === 'stay' ? value : null
 })
 const unreadOnly = computed(() => route.query.unread === '1')
 const updatesView = computed(() => route.query.view === 'updates')
@@ -304,7 +297,6 @@ const filtersApplied = computed(() => Boolean(route.query.query || route.query.f
 const listHydrated = ref(false)
 
 const realtime = useDashboardInvalidations()
-const realtimeFailed = computed(() => !props.personalScope && realtime.status.value === 'failed')
 
 onMounted(() => {
   listHydrated.value = true
@@ -337,13 +329,15 @@ const typeOptions = computed(() => {
   const kinds: SubmissionType[] = []
   if (effectiveFeatureSet.value.has('reservations')) kinds.push('reservation')
   if (effectiveFeatureSet.value.has('products')) kinds.push('booking')
+  // A lodging business's places to stay each carry their guest's conversation.
+  if (vertical.value && normalizeVertical(vertical.value) === 'lodging') kinds.push('stay')
   if (kinds.length === 0) return [{ value: null, label: 'All', icon: 'i-lucide-message-square' }]
   return [
     { value: null, label: 'All', icon: 'i-lucide-message-square' },
     ...kinds.map(kind => ({
       value: kind,
       label: threadFilterLabel(kind, vertical.value),
-      icon: kind === 'reservation' ? 'i-lucide-utensils' : 'i-lucide-ticket',
+      icon: kind === 'reservation' ? 'i-lucide-utensils' : kind === 'stay' ? 'i-lucide-bed-double' : 'i-lucide-ticket',
     })),
     { value: 'contact' as const, label: threadFilterLabel('contact', vertical.value), icon: 'i-lucide-mail' },
   ]
@@ -356,7 +350,7 @@ const emptyTitle = computed(() => {
 const emptyDescription = computed(() => {
   if (route.query.query) return `Nothing matched “${route.query.query}”.`
   if (filtersApplied.value) return 'Try a different filter, or clear them to see everything.'
-  if (pastOnly.value) return 'Conversations move here when their reservation or experience ends, or when you archive them.'
+  if (pastOnly.value) return 'Conversations move here when their reservation, experience or stay ends, or when you archive them.'
   return props.personalScope ? 'Your conversations with businesses will appear here.' : 'New guest conversations will appear here.'
 })
 
@@ -377,17 +371,90 @@ const listKey = computed(() => [
 
 // One loader for the list: the first render, a filter change and a live
 // update all go through it, and a refresh keeps the rows already on screen.
-const { data, pending, error: threadsError, refresh } = await useAsyncData<{ threads: ThreadListItem[] }>(listKey, async () => {
-  if (props.personalScope) return await applicationFetch<{threads:ThreadListItem[]}>('/api/account/messages',{query:listQuery.value,validate:isThreadListResponse})
-  if (!dashboardScope.value) {
+const nextPageError = ref<unknown>(null)
+const loadingMore = ref(false)
+let pageController: AbortController | null = null
+let loadedScope = listKey.value
+let loadedPages = 1
+async function loadPage(offset: number, signal?: AbortSignal): Promise<ThreadListPage> {
+  const query = { ...listQuery.value, limit: 100, offset }
+  if (!props.personalScope && !dashboardScope.value) {
     throw createError({ statusCode: 400, statusMessage: 'Dashboard route scope is incomplete' })
   }
-  return await dashboardApi<{ threads: ThreadListItem[] }>(
-    `/api/dashboard/organizations/${organizationId.value}/guest-threads`,
-    { query: listQuery.value, validate: isThreadListResponse },
-  )
+  const page = props.personalScope
+    ? await applicationFetch<ThreadListPage>('/api/account/messages', { query, signal, validate: isThreadListResponse })
+    : await dashboardApi<ThreadListPage>(`/api/dashboard/organizations/${organizationId.value}/guest-threads`, { query, signal, validate: isThreadListResponse })
+  if (page.pagination.limit !== query.limit || page.pagination.offset !== offset) throw createError({ statusCode: 502, statusMessage: 'Messages returned a different page than requested' })
+  return page
+}
+/** A conversation already loaded that reappears on a later page means the list moved between reads. */
+class ShiftedPages extends Error {}
+function appendLoadedPage(before: ThreadListPage, page: ThreadListPage): ThreadListPage {
+  const ids = new Set(before.threads.map(thread => thread.id))
+  if (page.threads.some(thread => ids.has(thread.id))) throw new ShiftedPages('Conversations moved between pages while loading')
+  return { threads: [...before.threads, ...page.threads], pagination: page.pagination }
+}
+// New activity reorders the inbox while its pages are read, which shifts a row
+// across a page boundary. That ordinary case re-reads the window from the top;
+// only a window that keeps shifting is reported.
+const WINDOW_READ_ATTEMPTS = 3
+async function loadWindow(pages: number, scope: string, signal: AbortSignal): Promise<{ page: ThreadListPage; fetched: number }> {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      let page = await loadPage(0, signal)
+      let fetched = 1
+      while (fetched < pages && page.pagination.nextOffset !== null) {
+        if (scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
+        page = appendLoadedPage(page, await loadPage(page.pagination.nextOffset, signal))
+        fetched += 1
+      }
+      return { page, fetched }
+    } catch (error) {
+      if (!(error instanceof ShiftedPages)) throw error
+      if (attempt === WINDOW_READ_ATTEMPTS) throw createError({ statusCode: 409, statusMessage: 'Conversations kept changing while loading. Reload messages to continue.' })
+    }
+  }
+}
+const { data, pending, error: threadsError, refresh } = await useAsyncData<ThreadListPage>(listKey, async (_app, { signal }) => {
+  pageController?.abort()
+  nextPageError.value = null
+  const scope = listKey.value
+  if (loadedScope !== scope) { loadedScope = scope; loadedPages = 1 }
+  const { page, fetched } = await loadWindow(loadedPages, scope, signal)
+  if (scope !== listKey.value) throw new DOMException('The message scope changed', 'AbortError')
+  loadedPages = fetched
+  return page
 }, { server: !props.personalScope })
 const threads = computed(() => data.value?.threads ?? [])
+
+async function loadMore() {
+  const before = data.value
+  if (!before || before.pagination.nextOffset === null || loadingMore.value || pending.value) return
+  const key = listKey.value
+  const controller = new AbortController()
+  pageController = controller
+  loadingMore.value = true
+  nextPageError.value = null
+  try {
+    const page = await loadPage(before.pagination.nextOffset, controller.signal)
+    if (controller.signal.aborted || key !== listKey.value || data.value !== before) return
+    try {
+      data.value = appendLoadedPage(before, page)
+      loadedPages = Math.ceil(data.value.threads.length / 100)
+    } catch (shift) {
+      if (!(shift instanceof ShiftedPages)) throw shift
+      // The list moved since the loaded pages were read: read the window and the next page again.
+      loadedPages = Math.ceil(before.threads.length / 100) + 1
+      await refresh()
+    }
+  } catch (error) {
+    if (!controller.signal.aborted) nextPageError.value = error
+  } finally {
+    if (pageController === controller) { pageController = null; loadingMore.value = false }
+  }
+}
+watch(listKey, () => pageController?.abort())
+onScopeDispose(() => pageController?.abort())
 
 const documentVisibility=useDocumentVisibility()
 useIntervalFn(()=>{if(props.personalScope&&documentVisibility.value==='visible')void refresh()},15_000)
@@ -416,7 +483,7 @@ function threadName(thread:ThreadListItem) {
     if (!thread.organizationName) throw createError({statusCode:500,statusMessage:'Conversation has no business name',fatal:true})
     return thread.organizationName
   }
-  return thread.guestName
+  return thread.participantLabel
 }
 function occurrenceLine(thread: ThreadListItem) {
   if (thread.whenLabel) return thread.whenLabel

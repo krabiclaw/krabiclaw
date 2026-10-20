@@ -1,15 +1,15 @@
 <template>
   <DashboardLeafPanel
     id="organization-website-booking"
-    title="Website booking"
-    lead="This applies to all services on your website. Guests can choose times for published online services with a weekly schedule."
+    title="Schedule page"
+    lead="Show the online service selector on Schedule. Each service keeps its own booking settings."
     :saving="editor.saving.value"
     :disabled="editor.saveDisabled.value"
     :error="editor.editorError.value ?? ''"
     @cancel="editor.revert"
     @save="editor.save"
   >
-    <SettingRow v-model="editor.form.native_consultations" label="Let guests book on this website" />
+    <SettingRow v-model="editor.form.native_consultations" label="Show online services" />
   </DashboardLeafPanel>
 </template>
 

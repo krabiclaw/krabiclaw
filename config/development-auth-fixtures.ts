@@ -43,6 +43,12 @@ export const E2E_AUTH_FIXTURES: readonly E2eAuthFixture[] = [
     memberships: [{ organizationId: 'org-demo', role: 'owner' }],
   },
   {
+    id: 'user-e2e-demo-role-owner',
+    name: 'E2E Demo Role Owner',
+    email: 'demo-role-owner@playwright.example',
+    memberships: [{ organizationId: 'org-demo', role: 'owner' }],
+  },
+  {
     id: 'user-e2e-pottery-owner',
     name: 'E2E Pottery Owner',
     email: 'pottery-owner@playwright.example',
@@ -68,12 +74,25 @@ export const E2E_AUTH_FIXTURES: readonly E2eAuthFixture[] = [
     email: 'ncls-owner@playwright.example',
     memberships: [{ organizationId: 'org-ncls-blawby', role: 'owner' }],
   },
+  {
+    id: 'user-e2e-ncls-consultation-owner',
+    name: 'E2E NCLS Consultation Owner',
+    email: 'ncls-consultation-owner@playwright.example',
+    memberships: [{ organizationId: 'org-ncls-blawby', role: 'owner' }],
+  },
   ...[
     'oauth-cimd',
     'oauth-private-cimd',
     // Drives the new-site wizard end to end; every run leaves it owning one more
     // organization, which reset-e2e-artifacts sweeps as a non-fixture org.
     'onboarding-wizard',
+    // Signs in like the native app, with a bearer session and no cookies, and
+    // owns the organization it creates for the lodging-identity spec.
+    'lodging-native',
+    // Joins that organization through an invite link.
+    'lodging-invitee',
+    // Owns the lodging organization the stays spec creates, with its homes and stays.
+    'lodging-host',
     ...[
       'inaccessible',
       'wrong-site',

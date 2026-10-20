@@ -17,8 +17,13 @@ import { addLocalDays, localDateAt } from '~/utils/timezone'
  * Generation is idempotent: it inserts the occurrences the rules name inside
  * the public booking window and leaves the rest alone. A bounded page per run,
  * with the cursor in KV, keeps one tenant's catalogue from starving another's.
+ *
+ * Every edit to a product's times materializes its whole window as it is
+ * written, so this run only carries the window's far edge forward as each
+ * local day begins and fills what an import left out. It runs hourly: a page
+ * of 50 reaches 1,200 products a day, and the edge moves once a day.
  */
-const PRODUCTS_PER_RUN = 25
+const PRODUCTS_PER_RUN = 50
 const CURSOR_KEY = 'sessions-materialize:cursor'
 
 interface BookableProduct {

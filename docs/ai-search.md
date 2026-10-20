@@ -1,6 +1,6 @@
 # AI Search
 
-Krabiclaw uses Cloudflare AI Search as the single retrieval backend for platform knowledge.
+KrabiClaw uses Cloudflare AI Search as the single retrieval backend for platform knowledge.
 
 ## Instance layout
 
@@ -19,12 +19,14 @@ went wrong.
 yarn wrangler ai-search create <AI_SEARCH_INSTANCE_ID> --namespace default --type builtin
 ```
 
-`ensurePlatformKnowledgeInstance()` then re-asserts the retrieval configuration
+`ensurePlatformKnowledgeInstance()` then checks the retrieval configuration
 (`platformKnowledgeInstanceConfig()` in `server/utils/public-search.ts`) at the start of
 every rebuild, so index method, fusion, tokenizer, and the custom metadata schema always
-match the code that queries them.
+match the code that queries them. It writes the configuration only when a value differs:
+AI Search restarts a full resync on every configuration update, so an unconditional write
+on each pass of a rebuild kept the indexing queue from ever draining.
 
-Krabiclaw uses the native production `AI_SEARCH` Workers namespace binding for
+KrabiClaw uses the native production `AI_SEARCH` Workers namespace binding for
 instance management, indexing, and search queries in the built-in `default` namespace.
 
 ## Indexed corpus
@@ -89,9 +91,11 @@ This calls only the named organization's production slice; it does not rebuild
 the platform or other businesses.
 
 Production CI (`.github/workflows/ci.yml`) runs a blocking rebuild when a file
-that defines the indexed corpus or its rendering changes. A failed rebuild fails
-the deploy job. Nonproduction drains purge caches only; they do not access or
-require AI Search.
+that defines the indexed corpus or its rendering changes, including the MCP
+registry behind the generated tool reference. Production verification waits for
+the deployed build and assets to converge, checks the published MCP documentation,
+then rebuilds the search index. A failed rebuild fails production verification.
+Nonproduction drains purge caches only; they do not access or require AI Search.
 
 ## Environment expectations
 

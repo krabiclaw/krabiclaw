@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1791264056717,
+      "tag": "0000_baseline",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1791298059212,
+      "tag": "0001_ncls_service_products",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1791338557373,
+      "tag": "0002_stripe_connect_country_from_stripe",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1791355007743,
+      "tag": "0003_discord_webhook_publishing",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1791362887872,
+      "tag": "0004_discord_better_auth",
+      "breakpoints": true
+    }
+  ]
+}

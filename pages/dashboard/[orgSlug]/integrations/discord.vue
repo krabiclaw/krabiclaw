@@ -3,80 +3,76 @@
     id="integration-discord"
     icon="i-logos-discord-icon"
     title="Discord"
-    lead="Posts you publish to Discord appear in one channel, sent by that channel's webhook under its name and avatar."
+    :lead="integrationDefinition('discord').purpose"
     :saving="saving"
-    :disabled="!webhookUrl.trim() || !label.trim()"
-    :error="error || integrations.failure.value || healthFailure || connectionProblem"
-    :save-label="discord ? 'Replace webhook' : 'Connect this channel'"
-    @save="save"
+    :disabled="!accountId || !chosenChannel"
+    :error="error || data?.error || integrations.failure.value || loadFailure"
+    :footer="!discord && Boolean(accountId) && choices.length > 0"
+    save-label="Connect this channel"
+    @save="chooseChannel"
   >
-    <IntegrationConnection
-      logo="i-logos-discord-icon"
-      :connection="discord && { name: `#${discord.target_name}`, connectedAt: discord.connected_at }"
+    <IntegrationLeaf
+      integration="discord"
+      :connection="discord && { name: `#${discord.target_name}`, connectedAt: discord.connected_at, through: discord.connected_through, status: discord.status, lastError: discord.last_error }"
       :disconnecting="disconnecting"
       @disconnect="disconnect"
-    />
-    <!-- A webhook URL is a credential: it is typed, sent to the server, and never shown back. -->
-    <div class="space-y-4" :class="discord ? 'mt-8' : 'mx-auto -mt-8 max-w-sm pb-16'">
-      <p v-if="discord" class="text-sm text-muted">To post through another webhook, or after its URL was reset in Discord, paste the new URL.</p>
-      <UFormField label="Webhook URL" help="In Discord: the channel's Edit Channel → Integrations → Webhooks → Copy Webhook URL.">
-        <UInput v-model="webhookUrl" type="password" autocomplete="off" placeholder="https://discord.com/api/webhooks/…" class="w-full" />
-      </UFormField>
-      <UFormField label="Channel name" help="Discord does not say which channel a webhook posts to by name, so name it as you'd recognize it.">
-        <UInput v-model="label" placeholder="announcements" maxlength="100" class="w-full" />
-      </UFormField>
-    </div>
+    >
+      <UButton v-if="!accountId || loadFailure || data?.error || !choices.length" icon="i-logos-discord-icon" size="xl" block :loading="linking" @click="connect()">Connect Discord</UButton>
+
+      <URadioGroup v-if="choices.length" v-model="chosenChannel" legend="Which channel should posts go to?" :items="choices" variant="card" />
+    </IntegrationLeaf>
   </DashboardLeafPanel>
 </template>
 
 <script setup lang="ts">
-import IntegrationConnection from '~/components/dashboard/IntegrationConnection.vue'
-import { integrationsKey } from '../integrations.vue'
+import { INTEGRATION_SCOPES } from '~/shared/organization-settings'
+import IntegrationLeaf from '~/components/dashboard/IntegrationLeaf.vue'
+import { integrationDefinition } from '~/shared/integrations'
+import { integrationsKey, type ConnectedIntegration } from '../integrations.vue'
 
 definePageMeta({ layout: 'dashboard' })
+
+interface DiscordLeaf {
+  account_id: string | null
+  connection: ConnectedIntegration | null
+  choices: Array<{ id: string; name: string; server: string }>
+  error: string | null
+}
 
 const integrations = inject(integrationsKey)!
 const dashboardApi = useDashboardApi()
 const api = `/api/organizations/${integrations.organizationId}/integrations/discord`
+const { accountId, error, linking, connect, clear } = useIntegrationConnection('discord', INTEGRATION_SCOPES.discord)
 const discord = computed(() => integrations.summary.value?.discord ?? null)
 
-const webhookUrl = ref('')
-const label = ref(discord.value?.target_name ?? '')
-watch(discord, value => { label.value = value?.target_name ?? '' })
-
-interface ConnectionHealth { channels: Array<{ channel: string; problems: Array<{ code: string; message: string }> }> }
-const isHealth = (value: unknown): value is ConnectionHealth => isRecord(value) && Array.isArray(value.channels)
-// The same check get_social_connections makes: Discord still accepts the webhook, and it still posts to this channel.
-const { data: health, error: healthError, refresh: refreshHealth } = await useAsyncData(
-  `integration-discord-health:${integrations.organizationId}`,
-  () => discord.value
-    ? dashboardApi('/api/integrations/social-connections', { query: { organizationId: integrations.organizationId }, validate: isHealth })
-    : Promise.resolve(null),
-  { watch: [discord] },
-)
-const connectionProblem = computed(() => health.value?.channels.find(channel => channel.channel === 'discord')?.problems
-  .map(problem => problem.message).join(' ') ?? '')
-const healthFailure = computed(() => healthError.value ? getErrorMessage(healthError.value, 'Could not check the Discord connection.') : '')
-
+const isLeaf = (value: unknown): value is DiscordLeaf =>
+  isRecord(value) && (value.account_id === null || typeof value.account_id === 'string')
+  && (value.connection === null || isRecord(value.connection)) && Array.isArray(value.choices)
 const isSuccess = (value: unknown): value is { success: true } => isRecord(value) && value.success === true
-const error = ref('')
+
+const { data, refresh, error: loadError } = await useAsyncData(
+  () => `integration-discord:${integrations.organizationId}:${accountId.value ?? ''}`,
+  () => dashboardApi(`${api}/channels`, { query: !discord.value && accountId.value ? { account_id: accountId.value } : {}, validate: isLeaf }),
+  { watch: [accountId] },
+)
+const choices = computed(() => (data.value?.choices ?? []).map(channel => ({ value: channel.id, label: `#${channel.name}`, description: channel.server })))
+const chosenChannel = ref<string | undefined>()
+
+const loadFailure = computed(() => loadError.value ? getErrorMessage(loadError.value, 'Could not load Discord.') : '')
 const saving = ref(false)
 const disconnecting = ref(false)
 
-async function save() {
+async function chooseChannel() {
+  if (!chosenChannel.value || !accountId.value) return
   saving.value = true
   error.value = ''
   try {
-    await dashboardApi(`${api}/connect`, {
-      method: 'POST',
-      body: { webhook_url: webhookUrl.value, label: label.value, ...(discord.value ? { expected_revision: discord.value.revision } : {}) },
-      validate: isSuccess,
-    })
-    webhookUrl.value = ''
-    await integrations.refresh()
-    await refreshHealth()
+    await dashboardApi(`${api}/channels`, { method: 'POST', body: { account_id: accountId.value, channel_id: chosenChannel.value }, validate: isSuccess })
+    await clear()
+    chosenChannel.value = undefined
+    await Promise.all([refresh(), integrations.refresh()])
   } catch (cause) {
-    error.value = getErrorMessage(cause, 'Could not connect that Discord webhook.')
+    error.value = getErrorMessage(cause, 'Could not connect that channel.')
   } finally {
     saving.value = false
   }
@@ -87,8 +83,9 @@ async function disconnect() {
   error.value = ''
   try {
     await dashboardApi(`${api}/disconnect`, { method: 'POST', validate: isSuccess })
-    await integrations.refresh()
-    await refreshHealth()
+    await clear()
+    chosenChannel.value = undefined
+    await Promise.all([refresh(), integrations.refresh()])
   } catch (cause) {
     error.value = getErrorMessage(cause, 'Could not disconnect Discord.')
   } finally {

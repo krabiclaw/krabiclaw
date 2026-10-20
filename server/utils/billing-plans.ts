@@ -2,15 +2,12 @@ import type Stripe from 'stripe'
 import { buildPostLoginUrl } from '~/shared/auth/return-target'
 import { createStripeClient } from '~/server/utils/stripe-client'
 import { getPlanEntitlements } from './billing-entitlements'
-import {
-  assertStripeCatalogPrices,
-  selectStripeCatalogPrice,
-} from './stripe-catalog'
+import { assertStripeCatalogPrice, readStripeCatalog, selectMeteredPrices, selectStripeCatalogPrice } from './stripe-catalog'
 import {
   isNewSalePlan,
   isKnownRecurringPlan,
   GROWTH_PLAN_ID,
-  COMMERCE_PLAN_ID,
+  BUSINESS_PLAN_ID,
   NEW_SALE_PAID_PLAN_IDS,
   PAID_PLAN_PRICES,
   STARTER_PLAN_ID,
@@ -20,7 +17,7 @@ import {
 
 export interface PlanPrice {
   id: string
-  amount: number // cents
+  amount: number // cents, the flat plan price
   currency: string
   interval: 'month' | 'year'
 }
@@ -73,7 +70,7 @@ const STARTER_PLAN: Plan = {
   highlighted: false,
   prices: [],
   features: [
-    'Free Krabiclaw ChatGPT app — build & edit your site by chatting',
+    'Free KrabiClaw ChatGPT app — build & edit your site by chatting',
     'Bookings, ticketed experiences & consultation requests',
     'Email notifications for reservations & bookings',
     'Structured SEO schema for restaurants, experiences & legal practices',
@@ -86,7 +83,7 @@ const STARTER_PLAN: Plan = {
 // CTA labels and hrefs are app config — not Stripe data.
 const PLAN_CTA: Record<string, { label: string; href: string }> = {
   [GROWTH_PLAN_ID]: { label: 'Get Growth', href: `/signup?plan=${GROWTH_PLAN_ID}&redirect=${encodeURIComponent(buildPostLoginUrl({ plan: GROWTH_PLAN_ID }))}` },
-  [COMMERCE_PLAN_ID]: { label: 'Get Commerce', href: `/signup?plan=${COMMERCE_PLAN_ID}&redirect=${encodeURIComponent(buildPostLoginUrl({ plan: COMMERCE_PLAN_ID }))}` },
+  [BUSINESS_PLAN_ID]: { label: 'Get Business', href: `/signup?plan=${BUSINESS_PLAN_ID}&redirect=${encodeURIComponent(buildPostLoginUrl({ plan: BUSINESS_PLAN_ID }))}` },
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -203,14 +200,9 @@ function parseCachedPlans(value: unknown): Plan[] {
   const paid = NEW_SALE_PAID_PLAN_IDS.map(planId => {
     const plan = value.find(plan => plan.id === planId)
     const amounts = PAID_PLAN_PRICES[planId]
-    const monthlyPrices = plan?.prices.filter(price => price.interval === 'month') ?? []
-    const annualPrices = plan?.prices.filter(price => price.interval === 'year') ?? []
-    const monthly = monthlyPrices[0]
-    const annual = annualPrices[0]
-    if (!plan || monthlyPrices.length !== 1 || annualPrices.length > 1
-      || plan.prices.length !== monthlyPrices.length + annualPrices.length
-      || monthly?.amount !== amounts.monthly || monthly.currency.toLowerCase() !== 'usd'
-      || (annual && (amounts.annual === undefined || annual.amount !== amounts.annual || annual.currency.toLowerCase() !== 'usd'))) {
+    const monthly = plan?.prices[0]
+    if (!plan || plan.prices.length !== 1 || monthly?.interval !== 'month'
+      || monthly.amount !== amounts.monthly || monthly.currency.toLowerCase() !== 'usd') {
       throw new BillingPlansError('BILLING_PLANS_CACHE_INVALID', `Billing plans cache contains an invalid ${planId} price set`)
     }
     return plan
@@ -226,45 +218,14 @@ function parseCachedPlans(value: unknown): Plan[] {
 export async function fetchStripeProducts(
   env: Record<string, string | undefined>,
 ): Promise<Plan[]> {
-  const stripe = createStripeClient(env.STRIPE_SECRET_KEY!)
+  const catalog = await readStripeCatalog(createStripeClient(env.STRIPE_SECRET_KEY!))
+  const products = catalog.products.filter(product => product.active)
 
-  // Paginate all products
-  let products: Stripe.Product[] = []
-  let prodStartingAfter: string | undefined
-  do {
-    const page = await stripe.products.list({
-      active: true,
-      limit: 100,
-      expand: ['data.default_price'],
-      ...(prodStartingAfter ? { starting_after: prodStartingAfter } : {}),
-    })
-    products = products.concat(page.data)
-    prodStartingAfter =
-      page.has_more && page.data.length > 0
-        ? page.data[page.data.length - 1]!.id
-        : undefined
-  } while (prodStartingAfter)
-
-  // Paginate all prices
-  const priceLookup: Record<string, Stripe.Price[]> = {}
-  let startingAfter: string | undefined
-  while (true) {
-    const prices = await stripe.prices.list({
-      active: true,
-      limit: 100,
-      ...(startingAfter ? { starting_after: startingAfter } : {}),
-    })
-    for (const price of prices.data) {
-      if (!price.unit_amount || price.type !== 'recurring') continue
-      const interval = price.recurring?.interval
-      if (interval !== 'month' && interval !== 'year') continue
-      const pid =
-        typeof price.product === 'string' ? price.product : price.product.id
-      if (!priceLookup[pid]) priceLookup[pid] = []
-      priceLookup[pid].push(price)
-    }
-    if (!prices.has_more || prices.data.length === 0) break
-    startingAfter = prices.data[prices.data.length - 1]?.id
+  // Each plan is sold with its metered prices; a catalog without them cannot sell the plans as published.
+  try {
+    selectMeteredPrices(catalog)
+  } catch (error) {
+    throw new BillingPlansError('BILLING_PLANS_INVALID_CATALOG', error instanceof Error ? error.message : 'Invalid metered price catalog', error)
   }
 
   const plans: Plan[] = []
@@ -300,11 +261,9 @@ export async function fetchStripeProducts(
       : []
 
     let monthly: Stripe.Price | null
-    let yearly: Stripe.Price | null
     try {
-      monthly = selectStripeCatalogPrice(product, priceLookup[product.id] ?? [], 'month')
-      yearly = selectStripeCatalogPrice(product, priceLookup[product.id] ?? [], 'year')
-      assertStripeCatalogPrices(planId, monthly, yearly)
+      monthly = selectStripeCatalogPrice(product, catalog.prices)
+      assertStripeCatalogPrice(planId, monthly)
     } catch (error) {
       throw new BillingPlansError(
         'BILLING_PLANS_INVALID_CATALOG',
@@ -312,20 +271,7 @@ export async function fetchStripeProducts(
         error,
       )
     }
-    if (!monthly) {
-      throw new BillingPlansError(
-        'BILLING_PLANS_INVALID_CATALOG',
-        `Stripe product ${product.id} for plan ${planId} is missing a canonical monthly price`,
-      )
-    }
-    const prices: PlanPrice[] = [monthly, yearly]
-      .filter((price): price is Stripe.Price => Boolean(price))
-      .map((price) => ({
-        id: price.id,
-        amount: price.unit_amount ?? 0,
-        currency: price.currency,
-        interval: price.recurring?.interval === 'year' ? 'year' : 'month',
-      }))
+    const prices: PlanPrice[] = [{ id: monthly.id, amount: monthly.unit_amount!, currency: monthly.currency, interval: 'month' }]
 
     plans.push({
       id: planId,
@@ -334,10 +280,7 @@ export async function fetchStripeProducts(
       highlighted: meta.highlighted === 'true',
       badge: meta.badge || undefined,
       image: product.images?.[0],
-      prices: prices.sort((a, b) => {
-        const rank: Record<string, number> = { month: 0, year: 1 }
-        return (rank[a.interval] ?? 0) - (rank[b.interval] ?? 0)
-      }),
+      prices,
       features,
       limits: publicPlanLimits(planId),
       cta: PLAN_CTA[planId] ?? { label: 'Get started', href: '/signup' },
@@ -374,7 +317,7 @@ const PLANS_CACHE_TTL_SECONDS = 3600
 // stub under `nuxt dev`, and Nuxt's useRuntimeConfig() is the real one.
 function plansCacheKey(buildId: string | undefined): string {
   if (!buildId) throw new BillingPlansError('BILLING_PLANS_UNAVAILABLE', 'Billing plans cache has no build id to key on')
-  return `stripe-plans:v5:${buildId}`
+  return `stripe-plans:v9:${buildId}`
 }
 
 // Single-instance in-flight guard — prevents a cache stampede where multiple

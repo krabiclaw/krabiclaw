@@ -9,9 +9,9 @@ import { isNonProductionHost, normalizeHost } from '~/server/utils/tenant-hosts'
 // params instead of host + pathname — public resources are looked up by organizationId
 // directly, not by tenant hostname, so no hostname resolution is needed here.
 //
-// Cache key: public~<organizationId>~v5~<contract>~<page>~<location>~<datasets>~<blogSlug>~<locale>,
+// Cache key: public~<organizationId>~v11~<contract>~<page>~<location>~<datasets>~<blogSlug>~<locale>,
 // each field percent-encoded (mirrors composables/usePublicPageRequest.ts's
-// usePublicPageKey(), minus `token` — cached entries are never preview/draft-authorized,
+// usePublicResourceKey() — cached entries are never preview/draft-authorized,
 // see the preview authorization guard in the shell and page services).
 // Raised from 60s to 300s once every bootstrap-relevant write path was confirmed to call
 // purgePublicResourceCache/purgePublicResourceCacheNow (dashboard editor routes + MCP were already
@@ -65,10 +65,13 @@ export async function drainPublicResourceCacheInvalidations(
   const nowIso = now.toISOString()
   const staleClaimCutoff = new Date(now.getTime() - CACHE_INVALIDATION_RETRY_AFTER_MS).toISOString()
   const terminalRetentionCutoff = new Date(now.getTime() - CACHE_INVALIDATION_TERMINAL_RETENTION_MS).toISOString()
+  // A row is processed after it is created, so the created_at bound removes
+  // nothing the processed_at one keeps; it lets the status index range-scan
+  // instead of reading every retained row on each two-minute run.
   await execute(db, `
     DELETE FROM public_resource_cache_invalidations
-     WHERE status IN ('processed', 'failed') AND processed_at < ?
-  `, [terminalRetentionCutoff])
+     WHERE status IN ('processed', 'failed') AND created_at < ? AND processed_at < ?
+  `, [terminalRetentionCutoff, terminalRetentionCutoff])
   await execute(db, `
     UPDATE public_resource_cache_invalidations
        SET status = 'failed', claimed_at = NULL, processed_at = ?,
@@ -184,12 +187,12 @@ export function buildPublicBlawbyDocumentCacheKey(
   organizationId: string,
   recipe: string,
   slug?: string | null,
-  locale = 'en',
+  locale?: string,
 ): string {
   return [
     'public',
     encodeKeyField(organizationId),
-    'v5',
+    'v12',
     'blawby-document',
     encodeKeyField(recipe),
     encodeKeyField(slug),
@@ -197,11 +200,16 @@ export function buildPublicBlawbyDocumentCacheKey(
   ].join('~')
 }
 
+/** The site's accepted payment methods, under the site's prefix so its purge clears them. */
+export function buildPublicPaymentMethodsCacheKey(organizationId: string): string {
+  return ['public', encodeKeyField(organizationId), 'v12', 'payment-methods'].join('~')
+}
+
 export function buildPublicResourceCacheKey(organizationId: string, params: PublicResourceCacheParams): string {
   return [
     'public',
     encodeKeyField(organizationId),
-    'v5',
+    'v12',
     params.contract,
     encodeKeyField(params.page),
     encodeKeyField(params.location),
@@ -262,7 +270,7 @@ export async function purgePublicResourceCache(kv: KVNamespace, organizationId: 
 }
 
 /**
- * Convenience wrapper for call sites outside /api/editor/organizations/** and mcp.post.ts.
+ * Convenience wrapper for call sites outside /api/editor/organizations/** and mcp.ts.
  * Records a durable invalidation before purging. The caller waits for the purge
  * so a successful write cannot be read back through a stale public cache.
  */

@@ -15,7 +15,6 @@ function maskPhone(phone: string): string {
 
 const GRAPH_API_VERSION = 'v25.0'
 const GRAPH_BASE = `https://graph.facebook.com/${GRAPH_API_VERSION}`
-const WHATSAPP_OTP_TIMEOUT_MS = 10_000
 
 interface WhatsAppEnv {
   WHATSAPP_PHONE_NUMBER_ID?: string
@@ -77,224 +76,124 @@ interface TemplateButtonComponent {
 
 type TemplateComponent = TemplateHeaderComponent | TemplateBodyComponent | TemplateButtonComponent
 
-function cleanTemplateText(value: string | undefined, fallback: string, maxLen = 120): string {
-  const raw = String(value ?? '').replace(/\s+/g, ' ').trim()
-  if (raw) return raw.slice(0, maxLen)
-  // Process fallback the same way so returned string respects maxLen
-  const fb = String(fallback ?? '').replace(/\s+/g, ' ').trim()
-  return fb.slice(0, maxLen)
-}
-
-// Dynamic URL buttons in approved Meta templates are declared as a fixed prefix +
-// single {{1}} variable (e.g. "https://krabiclaw.com/dashboard/{{1}}"), so callers
-// that already built a full dashboard URL only need the suffix after that prefix.
-export function toDashboardButtonPath(url: string | undefined, fallback = ''): string {
-  const marker = '/dashboard/'
-  const idx = String(url ?? '').indexOf(marker)
-  return idx >= 0 ? String(url).slice(idx + marker.length) : fallback
-}
-
-function normalizeTemplateVars(vars: Record<string, string>): Record<string, string> {
-  const out: Record<string, string> = {}
-  for (const [key, val] of Object.entries(vars)) {
-    out[key] = String(val ?? '').replace(/\s+/g, ' ').trim()
-  }
-  return out
-}
-
-// Shared by new_contact_msg and guest_thread_reply_whatsapp, which both send through the
-// same approved "new_contact_msg" Meta template and only differ in fallback copy.
-function buildContactAlertTemplate(
-  v: Record<string, string>,
-  fallbacks: { subjectFallback: string; messageFallback: string },
-): { name: string; language: { code: string }; components: TemplateComponent[] } {
-  return {
-    name: 'new_contact_msg',
-    language: { code: 'en_US' },
-    components: [
-      {
-        type: 'body',
-        parameters: [
-          { type: 'text', text: cleanTemplateText(v.guest_name, 'Guest') },
-          { type: 'text', text: cleanTemplateText(v.email, 'No email provided', 120) },
-          { type: 'text', text: cleanTemplateText(v.subject, fallbacks.subjectFallback, 40) },
-          { type: 'text', text: cleanTemplateText(v.message_preview, fallbacks.messageFallback, 100) },
-        ],
-      },
-      {
-        type: 'button',
-        sub_type: 'url',
-        index: '0',
-        parameters: [
-          { type: 'text', text: cleanTemplateText(v.reply_path, '', 300) },
-        ],
-      },
-    ],
+/**
+ * Why an alert could not be built as an approved template. Either a slot's
+ * required fact is absent (WHATSAPP_TEMPLATE_FACT_MISSING, naming the slot), or
+ * the facts present call for a variant Meta has not approved yet
+ * (WHATSAPP_TEMPLATE_NOT_APPROVED, naming that variant). Either way nothing is
+ * sent and the refusal is the delivery's recorded reason.
+ */
+export class WhatsAppTemplateRefusal extends Error {
+  readonly code: 'WHATSAPP_TEMPLATE_FACT_MISSING' | 'WHATSAPP_TEMPLATE_NOT_APPROVED'
+  readonly template: string
+  readonly field: string | null
+  constructor(code: WhatsAppTemplateRefusal['code'], template: string, field: string | null) {
+    super(code === 'WHATSAPP_TEMPLATE_FACT_MISSING' ? `${code}: ${template} requires ${field}` : `${code}: ${template}`)
+    this.code = code
+    this.template = template
+    this.field = field
   }
 }
 
-// Map our template names to Meta template names + variable builders.
+/**
+ * Each Meta template, slot by slot. Every slot is required: Meta rejects an
+ * empty parameter, and a slot is never filled with text standing in for a fact
+ * the event does not have.
+ *
+ * `optional` names the slots whose fact an event may genuinely lack. Each
+ * combination of absent optional facts is its own Meta template, named
+ * `<name>_no_<absent slots>`, with those slots removed; the facts present
+ * choose it. A variant is refused with WHATSAPP_TEMPLATE_NOT_APPROVED until Meta has
+ * approved it and it is listed in APPROVED_VARIANTS.
+ *
+ * A URL button is approved as a fixed "https://krabiclaw.com/dashboard/{{1}}"
+ * prefix plus one variable, so `button` names the var holding the full
+ * dashboard URL and the slot takes the part after `/dashboard/`. `otp_code`
+ * repeats its code in the button instead.
+ */
+interface TemplateSpec {
+  name: string
+  header?: Array<[field: string, maxLen: number]>
+  body: Array<[field: string, maxLen: number]>
+  optional?: string[]
+  button: { dashboardUrl: string } | { text: string }
+}
+
+const CONTACT_ALERT: Omit<TemplateSpec, 'name'> = {
+  body: [['guest_name', 120], ['email', 120], ['subject', 40], ['message_preview', 100]],
+  button: { dashboardUrl: 'reply_path' },
+}
+
 // Meta template names must match exactly what was approved in Business Manager.
-const TEMPLATES: Record<
-  WhatsAppTemplate,
-  (_vars: Record<string, string>) => { name: string; language: { code: string }; components: TemplateComponent[] }
-> = {
-  booking_change_update: (v) => ({
+const TEMPLATES: Record<WhatsAppTemplate, TemplateSpec> = {
+  booking_change_update: {
     name: 'booking_change_update',
-    language: { code: 'en_US' },
-    components: [
-      { type: 'body', parameters: [
-        { type: 'text', text: cleanTemplateText(v.booking_type, 'reservation') },
-        { type: 'text', text: cleanTemplateText(v.guest_name, 'Guest') },
-        { type: 'text', text: cleanTemplateText(v.status, 'requested') },
-        { type: 'text', text: cleanTemplateText(v.location, 'Location not provided') },
-        // Never the bare field name: a slot that falls back to "Date" is what
-        // told guests their booking moved to "Date" at "Time".
-        { type: 'text', text: cleanTemplateText(v.date, 'See dashboard') },
-        { type: 'text', text: cleanTemplateText(v.time, 'See dashboard') },
-        { type: 'text', text: cleanTemplateText(v.guests, '1') },
-        { type: 'text', text: cleanTemplateText(v.message, 'Open the dashboard for details.', 250) },
-      ] },
-      { type: 'button', sub_type: 'url', index: '0', parameters: [
-        { type: 'text', text: cleanTemplateText(v.reply_path, '', 300) },
-      ] },
-    ],
-  }),
-  new_review: (v) => ({
-    name: 'new_review',
-    language: { code: 'en_US' },
-    components: [
-      {
-        type: 'header',
-        parameters: [
-          { type: 'text', text: cleanTemplateText(v.organization_name, '', 60) },
-        ],
-      },
-      {
-        type: 'body',
-        parameters: [
-          { type: 'text', text: v.rating ?? '5' },
-          { type: 'text', text: cleanTemplateText(v.excerpt, 'Open the dashboard for the full review.', 300) },
-        ],
-      },
-      {
-        type: 'button',
-        sub_type: 'url',
-        index: '0',
-        parameters: [
-          { type: 'text', text: toDashboardButtonPath(v.reviews_url) },
-        ],
-      },
-    ],
-  }),
-  new_contact_msg: (v) => buildContactAlertTemplate(v, { subjectFallback: 'General', messageFallback: 'No message preview' }),
-  // Reuses the approved owner contact template shape so guest reply alerts
-  // stay within Meta's existing parameter contract while deep-linking into
-  // the exact dashboard thread.
-  guest_thread_reply_whatsapp: (v) => buildContactAlertTemplate(v, { subjectFallback: 'Guest reply', messageFallback: 'Open the dashboard for the full reply.' }),
-  new_reservation: (v) => ({
+    body: [['booking_type', 120], ['guest_name', 120], ['status', 120], ['location', 120], ['date', 120], ['time', 120], ['guests', 120], ['message', 250]],
+    optional: ['date', 'time'],
+    button: { dashboardUrl: 'reply_path' },
+  },
+  new_review: { name: 'new_review', header: [['organization_name', 60]], body: [['rating', 120], ['excerpt', 300]], button: { dashboardUrl: 'reviews_url' } },
+  new_contact_msg: { name: 'new_contact_msg', ...CONTACT_ALERT },
+  // A guest reply is sent through the approved new_contact_msg template; a guest who wrote in without an email has none to show.
+  guest_thread_reply_whatsapp: { name: 'new_contact_msg', ...CONTACT_ALERT, optional: ['email'] },
+  new_reservation: {
     name: 'new_reservation',
-    language: { code: 'en_US' },
-    components: [
-      {
-        type: 'body',
-        parameters: [
-          { type: 'text', text: cleanTemplateText(v.guest_name, 'Guest') },
-          { type: 'text', text: cleanTemplateText(v.date, 'Date pending', 40) },
-          { type: 'text', text: cleanTemplateText(v.time, 'Time pending', 40) },
-          { type: 'text', text: cleanTemplateText(v.guests, 'Unknown', 24) },
-          { type: 'text', text: cleanTemplateText(v.phone, 'No phone provided', 40) },
-          { type: 'text', text: cleanTemplateText(v.email, 'No email provided', 100) },
-          { type: 'text', text: cleanTemplateText(v.context, 'Context not provided', 100) },
-          { type: 'text', text: cleanTemplateText(v.requests, 'None', 100) },
-        ],
-      },
-      {
-        type: 'button',
-        sub_type: 'url',
-        index: '0',
-        parameters: [
-          { type: 'text', text: cleanTemplateText(v.reply_path, '', 300) },
-        ],
-      },
-    ],
-  }),
-  reservation_cancelled: (v) => ({
+    body: [['guest_name', 120], ['date', 40], ['time', 40], ['guests', 24], ['phone', 40], ['email', 100], ['context', 100], ['requests', 100]],
+    optional: ['phone', 'context', 'requests'],
+    button: { dashboardUrl: 'reply_path' },
+  },
+  reservation_cancelled: {
     name: 'reservation_cancelled',
-    language: { code: 'en_US' },
-    components: [
-      {
-        type: 'body',
-        parameters: [
-          { type: 'text', text: cleanTemplateText(v.guest_name, 'Guest') },
-          { type: 'text', text: cleanTemplateText(v.date, 'Date pending', 40) },
-          { type: 'text', text: cleanTemplateText(v.time, 'Time pending', 40) },
-          { type: 'text', text: cleanTemplateText(v.guests, 'Unknown', 24) },
-          { type: 'text', text: cleanTemplateText(v.phone, 'No phone provided', 40) },
-          { type: 'text', text: cleanTemplateText(v.context, 'Context not provided', 100) },
-          { type: 'text', text: cleanTemplateText(v.requests, 'None', 100) },
-        ],
-      },
-      {
-        type: 'button',
-        sub_type: 'url',
-        index: '0',
-        parameters: [
-          { type: 'text', text: cleanTemplateText(v.reply_path, '', 300) },
-        ],
-      },
-    ],
-  }),
-  domain_update: (v) => ({
-    name: 'domain_update',
-    language: { code: 'en_US' },
-    components: [
-      {
-        type: 'header',
-        parameters: [
-          { type: 'text', text: cleanTemplateText(v.domain, 'your domain', 60) },
-        ],
-      },
-      {
-        type: 'body',
-        parameters: [
-          { type: 'text', text: cleanTemplateText(v.status, 'updated', 40) },
-        ],
-      },
-      {
-        type: 'button',
-        sub_type: 'url',
-        index: '0',
-        parameters: [
-          { type: 'text', text: toDashboardButtonPath(v.dashboard_url, 'settings') },
-        ],
-      },
-    ],
-  }),
-  otp_code: (v) => ({
-    name: 'otp_code',
-    language: { code: 'en_US' },
-    components: [
-      {
-        type: 'body',
-        parameters: [
-          { type: 'text', text: cleanTemplateText(v.code, '', 12) },
-        ],
-      },
-      {
-        type: 'button',
-        sub_type: 'url',
-        index: '0',
-        parameters: [
-          { type: 'text', text: cleanTemplateText(v.code, '', 12) },
-        ],
-      },
-    ],
-  }),
+    body: [['guest_name', 120], ['date', 40], ['time', 40], ['guests', 24], ['phone', 40], ['context', 100], ['requests', 100]],
+    optional: ['phone', 'requests'],
+    button: { dashboardUrl: 'reply_path' },
+  },
+  domain_update: { name: 'domain_update', header: [['domain', 60]], body: [['status', 40]], button: { dashboardUrl: 'dashboard_url' } },
+  otp_code: { name: 'otp_code', body: [['code', 12]], button: { text: 'code' } },
 }
+
+/** Variants Meta has approved, by name. Add one here only once Business Manager shows it approved. */
+const APPROVED_VARIANTS = new Set<string>([
+  'booking_change_update_no_date',
+  'booking_change_update_no_time',
+  'booking_change_update_no_date_time',
+  'new_contact_msg_no_email',
+  'new_reservation_no_context',
+  'new_reservation_no_context_requests',
+  'new_reservation_no_phone',
+  'new_reservation_no_requests',
+  'new_reservation_no_phone_context',
+  'new_reservation_no_phone_context_requests',
+  'new_reservation_no_phone_requests',
+  'reservation_cancelled_no_phone',
+  'reservation_cancelled_no_phone_requests',
+  'reservation_cancelled_no_requests',
+])
 
 export function buildWhatsAppTemplatePayload(template: WhatsAppTemplate, vars: Record<string, string>) {
-  return TEMPLATES[template](normalizeTemplateVars(vars))
+  const spec = TEMPLATES[template]
+  const value = (field: string) => String(vars[field] ?? '').replace(/\s+/g, ' ').trim()
+  const absent = new Set((spec.optional ?? []).filter(field => !value(field)))
+  const name = absent.size ? `${spec.name}_no_${[...absent].join('_')}` : spec.name
+  const text = (field: string, maxLen: number) => {
+    if (!value(field)) throw new WhatsAppTemplateRefusal('WHATSAPP_TEMPLATE_FACT_MISSING', name, field)
+    return { type: 'text' as const, text: value(field).slice(0, maxLen) }
+  }
+  const marker = '/dashboard/'
+  const button = (() => {
+    if ('text' in spec.button) return text(spec.button.text, 12)
+    const url = value(spec.button.dashboardUrl)
+    const index = url.indexOf(marker)
+    if (index < 0 || index + marker.length === url.length) throw new WhatsAppTemplateRefusal('WHATSAPP_TEMPLATE_FACT_MISSING', name, spec.button.dashboardUrl)
+    return { type: 'text' as const, text: url.slice(index + marker.length) }
+  })()
+  const components: TemplateComponent[] = [
+    ...(spec.header ? [{ type: 'header' as const, parameters: spec.header.map(([field, maxLen]) => text(field, maxLen)) }] : []),
+    { type: 'body', parameters: spec.body.filter(([field]) => !absent.has(field)).map(([field, maxLen]) => text(field, maxLen)) },
+    { type: 'button', sub_type: 'url', index: '0', parameters: [button] },
+  ]
+  if (absent.size && !APPROVED_VARIANTS.has(name)) throw new WhatsAppTemplateRefusal('WHATSAPP_TEMPLATE_NOT_APPROVED', name, null)
+  return { name, language: { code: 'en_US' }, components }
 }
 
 export type SendWhatsAppResult =
@@ -320,8 +219,16 @@ export async function sendWhatsAppNotification(
   const accessToken = env.WHATSAPP_ACCESS_TOKEN
 
   const attemptId = crypto.randomUUID()
-  const normalizedPhone = parsePhoneOrThrow(opts.toPhone, { defaultCountry: 'TH' })
-  const vars = normalizeTemplateVars(opts.vars ?? {})
+  const normalizedPhone = parsePhoneOrThrow(opts.toPhone)
+  // The template is built in every delivery mode, so a missing required fact
+  // or an unapproved variant fails here, recorded on the delivery as its reason.
+  let templatePayload: ReturnType<typeof buildWhatsAppTemplatePayload>
+  try {
+    templatePayload = buildWhatsAppTemplatePayload(opts.template, opts.vars ?? {})
+  } catch (error) {
+    if (error instanceof WhatsAppTemplateRefusal) return { success: false, status: 'failed', error: error.message }
+    throw error
+  }
 
   if (!shouldSendRealWhatsApp(env)) {
     const messageId = logOnlyWhatsAppMessageId('notification')
@@ -332,8 +239,6 @@ export async function sendWhatsAppNotification(
   if (!phoneNumberId || !accessToken) {
     return { success: false, status: 'failed', error: 'WhatsApp env vars not configured' }
   }
-
-  const templatePayload = buildWhatsAppTemplatePayload(opts.template, vars)
 
   let result: SendWhatsAppResult
   try {
@@ -389,7 +294,7 @@ export async function sendWhatsAppOtp(
   const accessToken = env.WHATSAPP_ACCESS_TOKEN
 
   if (!shouldSendRealWhatsApp(env)) {
-    console.log('whatsapp_delivery_log_only', { kind: 'otp', to: maskPhone(parsePhoneOrThrow(toPhone, { defaultCountry: 'TH' })) })
+    console.log('whatsapp_delivery_log_only', { kind: 'otp', to: maskPhone(parsePhoneOrThrow(toPhone)) })
     return
   }
 
@@ -397,12 +302,11 @@ export async function sendWhatsAppOtp(
     throw new Error('WhatsApp env vars not configured')
   }
 
-  const normalized = parsePhoneOrThrow(toPhone, { defaultCountry: 'TH' })
-  const templatePayload = TEMPLATES.otp_code({ code })
+  const normalized = parsePhoneOrThrow(toPhone)
+  const templatePayload = buildWhatsAppTemplatePayload('otp_code', { code })
 
   const response = await fetch(`${GRAPH_BASE}/${phoneNumberId}/messages`, {
     method: 'POST',
-    signal: AbortSignal.timeout(WHATSAPP_OTP_TIMEOUT_MS),
     headers: {
       Authorization: `Bearer ${accessToken}`,
       'Content-Type': 'application/json',
@@ -433,7 +337,7 @@ export async function sendWhatsAppText(
     const messageId = logOnlyWhatsAppMessageId('text')
     let normalized: string
     try {
-      normalized = parsePhoneOrThrow(toPhone, { defaultCountry: 'TH' })
+      normalized = parsePhoneOrThrow(toPhone)
     } catch (err) {
       return { success: false, status: 'failed', error: err instanceof Error ? err.message : String(err) }
     }
@@ -446,7 +350,7 @@ export async function sendWhatsAppText(
   }
 
   try {
-    const normalized = parsePhoneOrThrow(toPhone, { defaultCountry: 'TH' })
+    const normalized = parsePhoneOrThrow(toPhone)
     const response = await fetch(`${GRAPH_BASE}/${phoneNumberId}/messages`, {
       method: 'POST',
       headers: {

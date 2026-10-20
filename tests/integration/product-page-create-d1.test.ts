@@ -29,8 +29,8 @@ async function boot(plan: 'growth' | null) {
     const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
       STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example' } as CloudflareEnv
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
-    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at)
-      VALUES (?, 'Legal Services', 'legal-services', 'legal-services', '{"config":{"default_timezone":"America/New_York"}}', 'blawby-theme-v1', 'USD', 'active', 'complete', 'flat', 'service', ?)`).bind(ORG, NOW).run()
+    await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
+      VALUES (?, 'Legal Services', 'legal-services', 'legal-services', '{}', 'blawby-theme-v1', 'USD', 'active', 'complete', 'flat', 'service', ?, 'America/New_York')`).bind(ORG, NOW).run()
     await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Owner', 'owner@proof.example', 0, 0, 0)").bind(ACTOR.actorId).run()
     await db.prepare("INSERT INTO member (id, organizationId, userId, role) VALUES ('member-owner', ?, ?, 'owner')").bind(ORG, ACTOR.actorId).run()
     await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('locale-en', ?, 'en', 1, 'published')").bind(ORG).run()
@@ -77,7 +77,7 @@ test('a service, its default variant, its page and their binding commit together
       JOIN content_documents d ON d.organization_id = p.organization_id AND d.product_id = p.id
      WHERE p.id = ?`).bind(created.id).first<Record<string, unknown>>()
     assert.deepEqual(row, {
-      id: created.id, kind: 'service', slug: 'family-law', active: 0, published: 0,
+      id: created.id, kind: 'service', slug: 'family-law', active: 1, published: 0,
       page_id: created.page?.id, path: '/services/family-law-2', title: 'Family Law', product_id: created.id, row_role: 'root',
       variants: 1, prices: 0, booking: 0,
     })
@@ -115,8 +115,10 @@ test('a refused page creates no product, and one page per product holds at the w
 
     await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, periodEnd) VALUES ('sub', 'growth', ?, 'active', ?)")
       .bind(ORG, Math.floor(Date.now() / 1000) + 86400).run()
-    const product = await createProduct(db, { organizationId: ORG, actor: ACTOR, product: { kind: 'service', name: 'Probate' } })
-    assert.equal(product.page, null)
+    // A legacy imported service has no page yet; concurrent page writers
+    // must still obey the native one-page-per-product constraint.
+    await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by) VALUES('service','legacy-probate',?,'Probate','probate',?,?)").bind(ORG,ACTOR.actorId,ACTOR.actorId).run()
+    const product = { id: 'legacy-probate' }
 
     // Two pages prepared for one product, each passing its own checks before
     // either is written: the database keeps the second from binding.

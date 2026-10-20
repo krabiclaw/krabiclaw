@@ -32,7 +32,6 @@
             Cancel
           </UButton>
           <UButton
-            color="primary"
             :loading="otpVerifying"
             :disabled="otpCode.length !== 6"
             @click="verifyPhone"
@@ -110,6 +109,7 @@ import { dashboardScopeHeaderModelKey } from '~/lib/components/workspace/dashboa
 // -nocheck
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import { authClient } from '~/lib/auth-client'
+import { parsePhoneOrThrow } from '~/utils/phone'
 
 
 // The level runs while setup is still synchronous: it injects the record the
@@ -259,7 +259,7 @@ const notificationSummary = computed(() => {
   const preferences = notificationPreferences.value
   if (!preferences) return ''
   const settings = Object.values(preferences)
-  const on = settings.filter(setting => setting.email || setting.whatsapp).length
+  const on = settings.filter(setting => setting.email || setting.whatsapp || setting.push).length
   return on === settings.length ? 'All on' : `${on} of ${settings.length} on`
 })
 
@@ -267,15 +267,15 @@ const groups = computed<EditorNavigationGroup[]>(() => [
   {
     id: 'account',
     items: [
-      { id: 'personal', label: 'Personal information', summary: [sessionData.value?.user?.name, sessionData.value?.user?.phoneNumber].filter(Boolean).join(' · ') || 'Name, photo, WhatsApp number', to: `${profilePath.value}/personal` },
-      { id: 'login', label: 'Login & security', summary: sessionData.value?.user?.email ?? '', to: `${profilePath.value}/login` },
-      { id: 'notifications', label: 'Notifications', summary: notificationSummary.value, to: `${profilePath.value}/notifications` },
+      { id: 'personal', icon: 'i-lucide-contact-round', label: 'Personal information', summary: [sessionData.value?.user?.name, sessionData.value?.user?.phoneNumber].filter(Boolean).join(' · ') || 'Name, photo, WhatsApp number', to: `${profilePath.value}/personal` },
+      { id: 'login', icon: 'i-lucide-shield-check', label: 'Login & security', summary: sessionData.value?.user?.email ?? '', to: `${profilePath.value}/login` },
+      { id: 'notifications', icon: 'i-lucide-bell', label: 'Notifications', summary: notificationSummary.value, to: `${profilePath.value}/notifications` },
       // Inside an organization, availability is that organization's; Personal names one first.
-      { id: 'calendar', label: 'Your availability', summary: 'Hours, time off and Google Calendar', to: organization.value ? `${profilePath.value}/calendar/${encodeURIComponent(organization.value.id)}` : `${profilePath.value}/calendar` },
-      { id: 'appearance', label: 'Appearance', summary: `${themePreference.value.charAt(0).toUpperCase()}${themePreference.value.slice(1)} theme`, to: `${profilePath.value}/appearance` },
-      { id: 'payments', label: 'Payments', summary: 'Your payments and refunds', to: `${profilePath.value}/payments` },
-      { id: 'organizations', label: 'Organizations', summary: organizationsSummary.value, to: `${profilePath.value}/organizations` },
-      { id: 'log-out', label: 'Log out', action: {} },
+      { id: 'calendar', icon: 'i-lucide-calendar-clock', label: 'Your availability', summary: 'Hours, time off and Google Calendar', to: organization.value ? `${profilePath.value}/calendar/${encodeURIComponent(organization.value.id)}` : `${profilePath.value}/calendar` },
+      { id: 'appearance', icon: 'i-lucide-sun-moon', label: 'Appearance', summary: `${themePreference.value.charAt(0).toUpperCase()}${themePreference.value.slice(1)} theme`, to: `${profilePath.value}/appearance` },
+      { id: 'payments', icon: 'i-lucide-credit-card', label: 'Payments', summary: 'Your payments and refunds', to: `${profilePath.value}/payments` },
+      { id: 'organizations', icon: 'i-lucide-building-2', label: 'Organizations', summary: organizationsSummary.value, to: `${profilePath.value}/organizations` },
+      { id: 'log-out', icon: 'i-lucide-log-out', label: 'Log out', action: {} },
     ],
   },
 ])
@@ -363,8 +363,10 @@ async function requestPhoneVerify() {
   phoneSaving.value = true
   phoneError.value = null
   try {
-    const res = await authClient.phoneNumber.sendOtp({ phoneNumber: phoneInput.value.trim() })
+    const phoneNumber = parsePhoneOrThrow(phoneInput.value)
+    const res = await authClient.phoneNumber.sendOtp({ phoneNumber })
     if (res.error) throw new Error(res.error.message || 'Failed to send OTP')
+    phoneInput.value = phoneNumber
     
     otpCode.value = ''
     verifyError.value = ''
@@ -427,7 +429,7 @@ async function confirmDeleteAccount() {
   }
 }
 
-useSeoMeta({ title: 'Account settings | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Account settings | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 provide(accountEditorKey, {
   sessionData,
   editing, toggleEdit,

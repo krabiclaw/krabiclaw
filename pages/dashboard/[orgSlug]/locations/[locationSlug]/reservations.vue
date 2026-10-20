@@ -17,7 +17,7 @@
         description="This location does not take reservations yet. Saving a policy opens them."
       />
       <!-- Notice, seats and cancellation are the calendar's settings; this page holds the guests' notes. -->
-      <UFormField label="Anything else" description="Shown at the end of the list on your public page.">
+      <UFormField label="Anything else" hint="Optional">
         <UTextarea
           :model-value="editor.reservationForm.value.additional_notes_html ?? ''"
           :rows="4"

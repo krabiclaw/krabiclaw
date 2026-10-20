@@ -122,7 +122,7 @@ export function addLocalDays(value: string, days: number): string {
 
 // Bookings must identify exactly one instant. Calendar-day boundaries explicitly
 // include the whole day: the earlier repeated midnight or the end of a gap.
-export function localDateTimeToInstant(date: string, time: string, timeZone: string, disambiguation: 'reject' | 'compatible' = 'reject'): Date {
+export function localDateTimeToInstant(date: string, time: string, timeZone: string, disambiguation: 'reject' | 'compatible' | 'earlier' | 'later' = 'reject'): Date {
   assertCalendarDate(date)
   if (!MINUTE_TIME_PATTERN.test(time) && !PRECISE_TIME_PATTERN.test(time)) throw new Error('Invalid local time')
   if (!isValidTimezone(timeZone)) throw new Error('A valid explicit timezone is required')

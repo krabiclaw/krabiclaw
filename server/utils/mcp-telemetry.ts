@@ -1,11 +1,13 @@
 import { execute, type DbClient } from "~/server/db";
+import { describeErrorForTelemetry } from "~/shared/error-telemetry";
 import { anonymizeId } from "~/server/utils/platform-telemetry";
 import { recordUsageEvent } from "~/server/utils/usage-metering";
+import { isRecord } from "~/server/utils/type-guards";
 
-// Only typed operational facts are stored. Free text, names, identifiers,
-// attachment URLs and arbitrary request/result fields never enter summaries.
+// Normal telemetry stores typed operational facts. Startup diagnostics are
+// explicitly enabled on the Worker and expire after seven days.
 const COUNT_FIELDS = new Set(['count', 'total', 'limit', 'offset', 'party_size', 'quantity', 'capacity', 'remaining_capacity', 'duration_ms', 'unit_amount', 'amount']);
-const BOOLEAN_FIELDS = new Set(['success', 'isError', 'completed', 'operation_completed', 'action_required', 'has_more', 'has_next_page', 'acknowledge_guest', 'confirm', 'replayed']);
+const BOOLEAN_FIELDS = new Set(['success', 'isError', 'completed', 'operation_completed', 'mutation_applied', 'retry_with_same_idempotency_key', 'action_required', 'has_more', 'has_next_page', 'acknowledge_guest', 'confirm', 'replayed']);
 const STATUS_VALUES = new Set(['success', 'error', 'auth_required', 'blocked', 'action_required', 'pending', 'pending_review', 'confirmed', 'cancelled', 'declined', 'rejected', 'draft', 'published', 'unpublished', 'active', 'inactive', 'paid', 'unpaid', 'refunded', 'partially_refunded', 'failed', 'processing', 'completed']);
 const CONTAINER_FIELDS = new Set(['structuredContent', 'result', 'data', 'page_info', 'booking', 'reservation', 'payment']);
 const MCP_METHODS = new Set(['initialize', 'ping', 'notifications/initialized', 'tools/list', 'tools/call', 'resources/list', 'resources/templates/list', 'resources/read', 'prompts/list', 'prompts/get']);
@@ -32,6 +34,47 @@ function operationalSummary(value: unknown, depth = 0): Record<string, unknown> 
 export function summarizeForTelemetry(value: unknown): string | null {
   const summary = operationalSummary(value);
   return summary ? JSON.stringify(summary) : null;
+}
+
+const DIAGNOSTIC_SECRET_KEY = /(?:authorization|cookie|secret|token|password|api[_-]?key|access[_-]?key|download[_-]?url|file[_-]?data|base64|^_meta$)/i;
+const MAX_DIAGNOSTIC_LENGTH = 256_000;
+
+export function mcpDiagnosticPayload(value: unknown): string | null {
+  if (value == null) return null;
+  function replacer() {
+    const ancestors: object[] = [];
+    return function redact(this: Record<string, unknown>, key: string, field: unknown): unknown {
+    if (key === '_request') return undefined;
+    if (DIAGNOSTIC_SECRET_KEY.test(key)) return '[redacted]';
+    if (key === 'data' && (this.type === 'image' || this.type === 'audio')) return '[binary omitted]';
+    if (typeof field === 'string') {
+      const redacted = field
+        .replace(/\b[rs]k_(?:test|live)_[A-Za-z0-9_*]+/g, '[key redacted]')
+        .replace(/\bBearer\s+[^\s,"']+/gi, 'Bearer [redacted]')
+        .replace(/https?:\/\/[^\s<>"']+/gi, url => url.replace(/\?[^#]*/, '?[redacted]').replace(/#.*/, '#[redacted]'));
+      // MCP text often repeats structured JSON. Redact that copy as well.
+      if (/^\s*[{[]/.test(field)) {
+        try {
+          return JSON.stringify(JSON.parse(field), replacer());
+        } catch {
+          return redacted;
+        }
+      }
+      return redacted;
+    }
+    if (field && typeof field === 'object') {
+      while (ancestors.length && ancestors.at(-1) !== this) ancestors.pop();
+      if (ancestors.includes(field)) return '[circular]';
+      ancestors.push(field);
+    }
+      return field;
+    };
+  }
+  const data = JSON.stringify(value, replacer());
+  if (data === undefined) return null;
+  return JSON.stringify(data.length > MAX_DIAGNOSTIC_LENGTH
+    ? { _diagnostic: true, truncated: true, original_length: data.length, preview: data.slice(0, MAX_DIAGNOSTIC_LENGTH) }
+    : { _diagnostic: true, data: JSON.parse(data) });
 }
 
 export type McpToolCallStatus = "success" | "error" | "auth_required" | "blocked";
@@ -65,6 +108,26 @@ export interface LogMcpToolCallEventInput {
   durationMs?: number | null;
 }
 
+function toolErrorFields(result: unknown): Pick<LogMcpToolCallEventInput, 'httpStatus' | 'errorCode' | 'errorMessage'> {
+  if (!isRecord(result)) return {};
+  let details: unknown = result.structuredContent ?? result;
+  let text: string | undefined;
+  if (result.isError === true && Array.isArray(result.content)) {
+    text = result.content.filter(isRecord).filter(entry => entry.type === 'text' && typeof entry.text === 'string').map(entry => entry.text).join('\n');
+    if (!result.structuredContent && text) {
+      try { details = JSON.parse(text); } catch { return { errorMessage: text }; }
+    }
+  }
+  if (!isRecord(details)) return { errorMessage: text };
+  const failure = isRecord(details.data) ? { ...details, ...details.data } : details;
+  const status = failure.http_status ?? failure.status;
+  return {
+    httpStatus: Number.isInteger(status) && Number(status) >= 400 && Number(status) < 600 ? Number(status) : undefined,
+    errorCode: typeof failure.code === 'string' || typeof failure.code === 'number' ? failure.code : undefined,
+    errorMessage: typeof failure.message === 'string' ? failure.message : typeof failure.error === 'string' ? failure.error : text,
+  };
+}
+
 function hashIdentifier(env: ApiRecord | null | undefined, value: string | null | undefined) {
   if (!env || !value) return null;
   try {
@@ -82,6 +145,17 @@ export async function logMcpToolCallEvent(
   input: LogMcpToolCallEventInput,
 ): Promise<void> {
   const mcpSurface = input.mcpSurface ?? "client";
+  const diagnostic = input.env?.MCP_DIAGNOSTICS_ENABLED === 'true'
+    && mcpSurface === 'client' && (input.method === 'tools/call' || input.method === 'tools/list');
+  const failure = toolErrorFields(input.method === 'tools/call' && input.status === 'error' ? input.result : undefined);
+  const errorCode = failure.errorCode ?? input.errorCode;
+  const failureMessage = failure.errorMessage ?? input.errorMessage;
+  const httpStatus = failure.httpStatus ?? input.httpStatus;
+  const errorMessage = failureMessage
+    ? diagnostic ? describeErrorForTelemetry(failureMessage) : "MCP operation failed; see error code and status."
+    : null;
+  const jsonrpcErrorMessage = input.jsonrpcErrorMessage;
+  const eventId = crypto.randomUUID();
   await execute(
       db,
       `
@@ -95,7 +169,7 @@ export async function logMcpToolCallEvent(
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `,
       [
-        crypto.randomUUID(),
+        eventId,
         input.organizationId ?? null,
         input.locationId ?? null,
         input.userId ?? null,
@@ -105,14 +179,14 @@ export async function logMcpToolCallEvent(
         input.unknownToolName ? null : input.toolName ?? null,
         input.toolDomain ?? null,
         input.isMutating == null ? null : input.isMutating ? 1 : 0,
-        summarizeForTelemetry(input.arguments),
-        summarizeForTelemetry(input.result),
+        diagnostic ? mcpDiagnosticPayload(input.arguments ?? {}) : summarizeForTelemetry(input.arguments),
+        diagnostic ? mcpDiagnosticPayload(input.result) : summarizeForTelemetry(input.result),
         input.status,
-        input.errorCode == null ? null : String(input.errorCode),
-        input.errorMessage ? "MCP operation failed; see error code and status." : null,
-        input.httpStatus ?? null,
-        input.jsonrpcErrorCode ?? (typeof input.errorCode === "number" ? input.errorCode : null),
-        (input.jsonrpcErrorMessage ?? input.errorMessage) ? "MCP operation failed; see error code and status." : null,
+        errorCode == null ? null : String(errorCode),
+        errorMessage,
+        httpStatus ?? null,
+        input.jsonrpcErrorCode ?? null,
+        jsonrpcErrorMessage ? diagnostic ? describeErrorForTelemetry(jsonrpcErrorMessage) : "MCP operation failed; see error code and status." : null,
         input.protocolVersion ?? null,
         hashIdentifier(input.env, input.sessionId),
         hashIdentifier(input.env, input.oauthClientId),
@@ -137,9 +211,10 @@ export async function logMcpToolCallEvent(
           toolName: input.toolName ?? null,
           toolDomain: input.toolDomain ?? null,
           status: input.status,
-          httpStatus: input.httpStatus ?? null,
+          httpStatus: httpStatus ?? null,
         },
-        idempotencyKey: `mcp:${mcpSurface}:${input.requestId == null ? crypto.randomUUID() : String(input.requestId)}`,
+        // Hosts may reuse an RPC ID on separate HTTP requests.
+        idempotencyKey: `mcp:${mcpSurface}:${eventId}`,
     });
   }
 }
@@ -148,6 +223,8 @@ export async function logMcpToolCallEvent(
 // was created. Runs in the daily analytics task beside the pageview cleanup.
 export async function cleanupMcpToolCallEvents(db: DbClient, now = new Date()): Promise<number> {
   const cutoff = new Date(now.getTime() - 180 * 86_400_000).toISOString();
-  const result = await execute(db, "DELETE FROM mcp_tool_call_events WHERE created_at < ?", [cutoff]);
+  const diagnosticCutoff = new Date(now.getTime() - 7 * 86_400_000).toISOString();
+  const result = await execute(db, `DELETE FROM mcp_tool_call_events WHERE created_at < ?
+    OR (created_at < ? AND json_extract(arguments_summary_json, '$._diagnostic') = 1)`, [cutoff, diagnosticCutoff]);
   return Number(result.meta.changes);
 }

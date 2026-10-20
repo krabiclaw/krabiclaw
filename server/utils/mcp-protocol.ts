@@ -1,11 +1,14 @@
-// Error-shaping shared between the MCP route (server/api/mcp.post.ts) and
+// Error-shaping shared between the MCP route (server/api/mcp.ts) and
 // every tool executor. JSON-RPC envelope parsing, protocol-version
 // negotiation, and the standard non-tool-call methods now belong to
-// @modelcontextprotocol/server (see server/api/mcp.post.ts) — this file only
+// @modelcontextprotocol/server (see server/api/mcp.ts) — this file only
 // keeps the pieces executors and the route still need: a typed error shape
-// business logic can throw, and the two envelope builders used for the
-// handful of responses the route still builds by hand (credential-missing,
-// pre-dispatch auth failures) before handing off to the SDK.
+// business logic can throw, and the error envelope for pre-dispatch HTTP
+// auth failures. Every tool result is encoded by the SDK.
+
+import { isAPIError } from 'better-auth/api'
+import { isChannelPush } from '~/shared/channel-push'
+import { isValidCalendarDate, isValidInstant } from '~/utils/timezone'
 
 export type JsonRpcId = string | number | null
 
@@ -31,14 +34,6 @@ export const MCP_ERROR = {
   internal: -32603,
 } as const
 
-export function mcpSuccess(id: JsonRpcId | undefined, result: unknown) {
-  return {
-    jsonrpc: '2.0',
-    id: id ?? null,
-    result,
-  }
-}
-
 export function mcpFailure(id: JsonRpcId | undefined, error: McpErrorShape) {
   return {
     jsonrpc: '2.0',
@@ -53,22 +48,72 @@ export function mcpProtocolError(code: number, message: string, data?: unknown, 
   return error
 }
 
+export function mcpErrorRecoveryIds(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const details = value as Record<string, unknown>
+  return Object.fromEntries(['organization_id', 'draft_id', 'invitation_id', 'location_id', 'product_id', 'stay_id', 'request_id'].flatMap(key =>
+    typeof details[key] === 'string' && /^[A-Za-z0-9_:-]{1,200}$/.test(details[key]) ? [[key, details[key]]] : [],
+  ))
+}
+
+export function mcpErrorRecoveryDetails(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const details = value as Record<string, unknown>
+  const recovery: Record<string, unknown> = mcpErrorRecoveryIds(details)
+  if (typeof details.code === 'string' && /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(details.code)) recovery.code = details.code
+  if (details.committed === true) {
+    recovery.committed = true
+    if (typeof details.field === 'string' && /^[A-Za-z_][A-Za-z0-9_.\[\]]*$/.test(details.field)) recovery.field = details.field
+    if (Number.isInteger(details.version) && Number(details.version) >= 1) recovery.version = details.version
+    if (isValidInstant(details.updated_at)) recovery.updated_at = details.updated_at
+    if (typeof details.reason === 'string' && details.reason.trim()) recovery.reason = details.reason
+    if (isChannelPush(details.channel_push)) recovery.channel_push = details.channel_push === null ? null : { state: details.channel_push.state, detail: details.channel_push.detail }
+    if (details.channel_outcome === 'unknown') recovery.channel_outcome = 'unknown'
+    if (Array.isArray(details.ranges) && details.ranges.every(range => range && typeof range === 'object'
+      && isValidCalendarDate(range.from) && isValidCalendarDate(range.to) && range.from < range.to)) recovery.ranges = details.ranges.map(({ from, to }) => ({ from, to }))
+    if (Array.isArray(details.failures) && details.failures.every(failure => failure && typeof failure === 'object' && failure.committed === true
+      && typeof failure.code === 'string' && /^[A-Za-z_][A-Za-z0-9_.-]*$/.test(failure.code))) recovery.failures = details.failures.map(mcpErrorRecoveryDetails)
+  }
+  for (const key of ['missing', 'missing_fields', 'invalid_fields', 'fields', 'missing_product_ids', 'draft_ids', 'removed_block_ids', 'resource_ids']) {
+    const values = details[key]
+    const pattern = ['missing', 'missing_fields', 'invalid_fields', 'fields'].includes(key) ? /^[A-Za-z_][A-Za-z0-9_.\[\]]*$/ : /^[A-Za-z0-9_:-]{1,200}$/
+    if (Array.isArray(values) && values.every(value => typeof value === 'string' && pattern.test(value))) recovery[key] = values
+  }
+  if (typeof details.resource_type === 'string' && /^[a-z_]+$/.test(details.resource_type)) recovery.resource_type = details.resource_type
+  if (Number.isInteger(details.index) && Number(details.index) >= 0) recovery.index = details.index
+  if (Array.isArray(details.missing_prices) && details.missing_prices.every(value => value && typeof value === 'object' && typeof value.product_id === 'string' && typeof value.name === 'string')) {
+    recovery.missing_prices = details.missing_prices.map(({ product_id, name }) => ({ product_id, name }))
+  }
+  if (Array.isArray(details.skipped) && details.skipped.every(value => value && typeof value === 'object'
+    && ['rule_id', 'local_date', 'local_start_time'].every(key => typeof value[key] === 'string')
+    && ['nonexistent_local_time', 'ambiguous_local_time', 'location_closed'].includes(value.reason))) {
+    recovery.skipped = details.skipped.map(({ rule_id, local_date, local_start_time, reason }) => ({ rule_id, local_date, local_start_time, reason }))
+  }
+  return recovery
+}
+
 export function asMcpError(error: unknown): McpErrorShape {
   if (error && typeof error === 'object' && 'mcp' in error) {
     const shape = (error as { mcp: McpErrorShape }).mcp
     return { code: shape.code, message: shape.message, data: shape.data, kind: shape.kind }
   }
 
-  // Business-logic validation shared between REST dashboard routes and MCP
-  // tool executors (e.g. server/utils/experiences.ts) throws h3's HTTPError
-  // with statusCode 400/404 rather than mcpProtocolError, since it has no MCP
-  // awareness. Treat those as tool execution failures so tools/call converts
-  // them to isError:true results instead of leaking raw HTTP errors.
-  if (error && typeof error === 'object' && [400, 404].includes(Number((error as { statusCode?: unknown }).statusCode))) {
+  // REST and MCP share typed failures. Preserve their status and recovery fields.
+  const status = error && typeof error === 'object' && 'statusCode' in error ? Number(error.statusCode) : NaN
+  if (error && typeof error === 'object' && Number.isInteger(status) && status >= 400 && status < 600) {
     const message = typeof (error as { statusMessage?: unknown }).statusMessage === 'string'
       ? (error as { statusMessage: string }).statusMessage
       : error instanceof Error ? error.message : 'Invalid request.'
-    return { code: MCP_ERROR.invalidParams, message, kind: 'tool_execution' }
+    const details = isAPIError(error) ? error.body ?? {} : 'data' in error && error.data && typeof error.data === 'object' ? error.data : {}
+    const data = {
+      status,
+      ...mcpErrorRecoveryDetails(details),
+      ...('dashboard_url' in details && typeof details.dashboard_url === 'string' ? { dashboard_url: details.dashboard_url } : {}),
+    }
+    return { code: [400, 404].includes(status) ? MCP_ERROR.invalidParams : MCP_ERROR.internal, message,
+      kind: status === 401 ? 'auth' : status === 403 ? 'forbidden' : status >= 500 ? 'transport' : 'tool_execution',
+      data,
+    }
   }
 
   if (error instanceof Error) {

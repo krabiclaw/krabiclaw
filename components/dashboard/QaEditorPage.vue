@@ -1,6 +1,6 @@
 <template>
   <!-- A question: its rows are the three things it holds, each a leaf below. -->
-  <DashboardIndexPanel id="organization-qa-record" :title="isNew ? 'New question' : form.question || 'Question'" :auto-open="navigationGroups[0]?.items.find(item => item.to)?.to ?? null">
+  <DashboardIndexPanel id="organization-qa-record" :title="isNew ? newTitle : form.question || 'Question'" :auto-open="navigationGroups[0]?.items.find(item => item.to)?.to ?? null" :create="firstStep">
     <template v-if="!isNew" #right>
       <DashboardResourceLocalization
         :organization-id="organizationId"
@@ -29,9 +29,6 @@
       icon="i-lucide-triangle-alert"
       :description="errorMessage"
     />
-    <div v-if="isNew" class="mb-6 flex justify-end">
-      <UButton :label="createActionLabel" :loading="saving" @click="startOrCreate" />
-    </div>
     <EditorNavigationList :groups="navigationGroups" :active-item="level.child.value" />
   </DashboardIndexPanel>
 </template>
@@ -39,7 +36,7 @@
 <script lang="ts">
 import type { InjectionKey, Reactive, Ref } from 'vue'
 
-export const SECTION_LABELS = { question: 'Question', answer: 'Answer', visibility: 'Visibility' } as const
+export const SECTION_LABELS = { question: 'Question', answer: 'Answer', visibility: 'Status' } as const
 export type SectionKey = keyof typeof SECTION_LABELS
 
 /** The question's draft and the save walk its leaves commit through. */
@@ -135,14 +132,14 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => [
   {
     id: 'question',
     items: [
-      { id: 'question', label: 'Question', summary: form.question.trim() || 'Not written yet', icon: 'i-lucide-circle-help', to: sectionUrl('question') },
-      { id: 'answer', label: 'Answer', summary: form.answer.trim() || 'No answer yet', icon: 'i-lucide-message-square', to: sectionUrl('answer') },
-      { id: 'visibility', label: 'Visibility', summary: form.published ? 'Published' : 'Hidden', icon: 'i-lucide-eye', to: sectionUrl('visibility') },
+      { id: 'question', label: 'Question', summary: form.question.trim() || 'Not written yet', to: sectionUrl('question') },
+      { id: 'answer', label: 'Answer', summary: form.answer.trim() || 'No answer yet', to: sectionUrl('answer') },
+      { id: 'visibility', label: 'Status', summary: form.published ? 'Published' : 'Draft', to: sectionUrl('visibility') },
     ],
   },
 ])
 
-const { createActionLabel, saveLabel, saveDisabled, save: saveOpenSection, startOrCreate } = useCreateWalk({
+const { title: newTitle, firstStep, saveLabel, saveDisabled, save: saveOpenSection } = useCreateWalk({
   recordPath,
   isNew,
   openKey,
@@ -204,5 +201,5 @@ function revert() {
 
 provide(qaEditorKey, { form, saving, saveDisabled, saveLabel, errorMessage, revert, save: saveOpenSection })
 
-useSeoMeta({ title: 'Question | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Question | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>

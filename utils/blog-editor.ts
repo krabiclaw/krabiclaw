@@ -134,61 +134,9 @@ export function normalizeBlogSlug(value: string, fallback = 'post') {
     .replace(/^-+|-+$/g, '') || fallback
 }
 
-export function resolveBlogSeo(input: {
-  title: string
-  excerpt?: string | null
-  slug: string
-  baseUrl: string
-  pathPrefix?: string
-  publicPath?: string
-  organizationName?: string | null
-  descriptionMaxLength?: number
-}) {
-  const path = input.publicPath || `${(input.pathPrefix || '/blog').replace(/\/$/, '')}/${encodeURIComponent(input.slug)}`
-  const maxLength = input.descriptionMaxLength ?? 160
-  const rawDescription = input.excerpt?.trim() || `A post from ${input.organizationName?.trim() || 'this organization'}.`
-  const description = rawDescription.length <= maxLength
-    ? rawDescription
-    : `${rawDescription.slice(0, maxLength - 1).replace(/\s+\S*$/, '').trim()}…`
-  return {
-    title: input.title.trim(),
-    description,
-    canonicalUrl: new URL(path, input.baseUrl).toString(),
-  }
-}
-
 export function firstImageAssetId(blocks: EditorContentBlock[]) {
   const image = blocks.find(block => block.type === 'image' && block.data.status !== 'inactive')
   return image?.media?.find(item => item.slot === 'media')?.asset_id ?? null
-}
-
-export function structuredComponentsFromBlocks(blocks: EditorContentBlock[]): Array<{
-  type: 'faq' | 'how_to' | 'ai_assistance'
-  position: number
-  status: 'active' | 'inactive'
-  render_enabled: boolean
-  schema_enabled: boolean
-  data: Record<string, unknown>
-}> {
-  const components: ReturnType<typeof structuredComponentsFromBlocks> = []
-  blocks.forEach((block, position) => {
-    if (block.type === 'faq') {
-      const items = Array.isArray(block.data.items)
-        ? block.data.items.filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object'))
-          .map(item => ({ question: item.title ?? item.question, answer: item.description ?? item.answer }))
-        : []
-      components.push({ type: 'faq', position, status: block.data.status === 'inactive' ? 'inactive' : 'active', render_enabled: block.data.render_enabled !== false, schema_enabled: block.data.schema_enabled !== false, data: { items } })
-    }
-    if (block.type === 'how_to') {
-      const steps = Array.isArray(block.data.steps) ? block.data.steps.filter(item => item && typeof item === 'object') : []
-      components.push({ type: 'how_to', position, status: block.data.status === 'inactive' ? 'inactive' : 'active', render_enabled: block.data.render_enabled !== false, schema_enabled: block.data.schema_enabled !== false, data: { steps } })
-    }
-    if (block.type === 'ai_assistance') {
-      const prompts = Array.isArray(block.data.prompts) ? block.data.prompts.filter(item => item && typeof item === 'object') : []
-      components.push({ type: 'ai_assistance', position, status: block.data.status === 'inactive' ? 'inactive' : 'active', render_enabled: block.data.render_enabled !== false, schema_enabled: false, data: { ...block.data, prompts } })
-    }
-  })
-  return components
 }
 
 export function resolveSlugMutation(input: {

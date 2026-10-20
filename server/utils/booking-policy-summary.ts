@@ -1,3 +1,7 @@
+import { platformLocale } from '~/shared/platform-locales'
+import { isCurrencyCode } from '~/shared/currencies'
+import { formatMinorAmount } from '~/shared/prices'
+
 export type BookingPolicySummaryType = 'reservation' | 'experience'
 
 export interface BookingPolicySummarySource {
@@ -7,6 +11,9 @@ export interface BookingPolicySummarySource {
   reschedule_allowed: boolean | null
   reschedule_cutoff_minutes: number | null
   deposit_required: boolean | null
+  deposit_amount?: number | null
+  deposit_currency?: string | null
+  deposit_tax_behavior?: 'inclusive' | 'exclusive' | null
   deposit_trigger_party_size: number | null
   minimum_guest_age: number | null
   accessibility_contact_required: boolean | null
@@ -24,88 +31,62 @@ export interface FormattedBookingPolicySummary {
   additional_notes_html: string | null
 }
 
-function isThaiLocale(locale: string) {
-  return locale.toLowerCase().startsWith('th')
+// The guest's own language comes from its platform catalog; a locale without
+// one has no sentences to render and fails rather than answering in English.
+function policyMessages(locale: string) {
+  const catalog = platformLocale(locale)
+  if (!catalog) throw new Error(`No platform locale catalog for booking policy locale "${locale}"`)
+  const messages = catalog.messages
+  return (key: string, values: Record<string, string | number>) => {
+    const message = messages[`booking_policy.${key}`]
+    if (!message) throw new Error(`Platform locale ${locale} is missing booking_policy.${key}`)
+    return message.replace(/\{([A-Za-z0-9_]+)\}/g, (_, name: string) => String(values[name]))
+  }
 }
 
 function formatMinutes(minutes: number, locale: string) {
-  const th = isThaiLocale(locale)
-  if (minutes % 1440 === 0) {
-    const days = minutes / 1440
-    return th ? `${days} วัน` : `${days} day${days === 1 ? '' : 's'}`
-  }
-  if (minutes % 60 === 0) {
-    const hours = minutes / 60
-    return th ? `${hours} ชั่วโมง` : `${hours} hour${hours === 1 ? '' : 's'}`
-  }
-  return th ? `${minutes} นาที` : `${minutes} minute${minutes === 1 ? '' : 's'}`
+  const unit = minutes % 1440 === 0 ? 'day' : minutes % 60 === 0 ? 'hour' : 'minute'
+  const count = unit === 'day' ? minutes / 1440 : unit === 'hour' ? minutes / 60 : minutes
+  return new Intl.NumberFormat(locale, { style: 'unit', unit, unitDisplay: 'long' }).format(count)
 }
 
 export function formatBookingPolicySummary(
   policy: BookingPolicySummarySource,
-  locale = 'en',
-  _vertical?: string | null,
+  locale: string,
+  productKind?: string | null,
 ): FormattedBookingPolicySummary {
-  const th = isThaiLocale(locale)
+  const t = policyMessages(locale)
+  const experience = policy.policy_type === 'experience'
   const items: FormattedBookingPolicySummaryItem[] = []
 
-  if (policy.free_cancellation_until_minutes) {
-    items.push({
-      id: 'cancellation',
-      text: policy.policy_type === 'experience'
-        ? (th
-            ? `ยกเลิกได้ฟรีล่วงหน้าสูงสุด ${formatMinutes(policy.free_cancellation_until_minutes, locale)} ก่อนเริ่มกิจกรรม`
-            : `Free cancellation is available up to ${formatMinutes(policy.free_cancellation_until_minutes, locale)} before the experience starts.`)
-        : (th
-            ? `ยกเลิกได้ฟรีล่วงหน้าสูงสุด ${formatMinutes(policy.free_cancellation_until_minutes, locale)} ก่อนเวลาจอง`
-            : `Cancel free up to ${formatMinutes(policy.free_cancellation_until_minutes, locale)} before your booking.`),
-    })
+  if (policy.free_cancellation_until_minutes !== null) {
+    const duration = formatMinutes(policy.free_cancellation_until_minutes, locale)
+    items.push({ id: 'cancellation', text: t(policy.free_cancellation_until_minutes === 0 ? 'cancellation_until_start' : experience ? 'experience_cancellation' : 'reservation_cancellation', { duration }) })
   }
-
-  if (policy.policy_type === 'experience' && policy.reschedule_allowed && policy.reschedule_cutoff_minutes) {
-    items.push({
-      id: 'reschedule',
-      text: th
-        ? `สามารถเปลี่ยนเวลาได้ล่วงหน้าสูงสุด ${formatMinutes(policy.reschedule_cutoff_minutes, locale)} ก่อนเวลาเริ่ม`
-        : `You can reschedule up to ${formatMinutes(policy.reschedule_cutoff_minutes, locale)} before the start time.`,
-    })
+  if (policy.reschedule_allowed !== null) {
+    const key = !policy.reschedule_allowed ? 'reschedule_disallowed' : policy.reschedule_cutoff_minutes === null ? 'reschedule_allowed' : policy.reschedule_cutoff_minutes === 0 ? 'reschedule_until_start' : 'reschedule'
+    items.push({ id: 'reschedule', text: t(key, policy.reschedule_cutoff_minutes === null ? {} : { duration: formatMinutes(policy.reschedule_cutoff_minutes,locale) }) })
   }
-
-  if (policy.policy_type === 'experience' && policy.deposit_required) {
+  if (policy.deposit_required) {
     items.push({
       id: 'deposit',
       text: policy.deposit_trigger_party_size
-        ? (th
-            ? `กลุ่มตั้งแต่ ${policy.deposit_trigger_party_size} ท่านขึ้นไปอาจต้องวางมัดจำ`
-            : `Parties of ${policy.deposit_trigger_party_size}+ guests may require a deposit.`)
-        : (th
-            ? 'อาจต้องวางมัดจำก่อนยืนยันการจอง'
-            : 'A deposit may be required before confirmation.'),
+        ? t('deposit_party', { count: policy.deposit_trigger_party_size })
+        : t('deposit', {}),
     })
+    if (policy.deposit_amount != null && isCurrencyCode(policy.deposit_currency)) {
+      items.push({ id: 'deposit_amount', text: t(policy.deposit_tax_behavior === 'exclusive' ? 'deposit_amount_exclusive' : 'deposit_amount', { amount: formatMinorAmount(policy.deposit_amount, policy.deposit_currency, locale) }) })
+    }
   }
-
-  if (policy.policy_type === 'experience' && policy.minimum_guest_age) {
-    items.push({
-      id: 'minimum_guest_age',
-      text: th
-        ? `อายุขั้นต่ำสำหรับผู้เข้าร่วมคือ ${policy.minimum_guest_age} ปี`
-        : `The minimum guest age is ${policy.minimum_guest_age}.`,
-    })
+  if (policy.minimum_guest_age) {
+    items.push({ id: 'minimum_guest_age', text: t('minimum_guest_age', { age: policy.minimum_guest_age }) })
   }
-
-  if (policy.policy_type === 'experience' && policy.accessibility_contact_required) {
-    items.push({
-      id: 'accessibility',
-      text: th
-        ? 'หากต้องการการช่วยเหลือด้านการเข้าถึง โปรดติดต่อเราก่อนทำการจอง'
-        : 'Please contact us before booking if you need accessibility arrangements.',
-    })
+  if (policy.accessibility_contact_required) {
+    items.push({ id: 'accessibility', text: t('accessibility', {}) })
   }
 
   return {
-    heading: th
-      ? (policy.policy_type === 'experience' ? 'นโยบายประสบการณ์' : 'นโยบายการจอง')
-      : (policy.policy_type === 'experience' ? 'Experience policies' : 'Reservation policies'),
+    heading: t(experience ? productKind === 'service' ? 'consultation_heading' : 'experience_heading' : 'reservation_heading', {}),
     items,
     additional_notes_html: policy.additional_notes_html,
   }

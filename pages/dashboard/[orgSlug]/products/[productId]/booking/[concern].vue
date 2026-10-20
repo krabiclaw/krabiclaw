@@ -1,42 +1,61 @@
 <template>
-  <DashboardLeafPanel :id="`booking-${concern}`" :title="setting.title" :lead="setting.lead" :saving="p.saving.value" :disabled="!p.product.value || !valid || !dirty" :error="p.loadError.value ?? p.saveError.value ?? ''" @cancel="p.revert" @save="save">
-    <template v-if="p.product.value">
-      <SettingRow v-if="concern === 'enabled'" v-model="p.form.bookable" label="Use a booking calendar" />
-      <UFormField v-else-if="concern === 'duration'" label="Duration in minutes" required>
+  <DashboardLeafPanel :id="`booking-${concern}`" :title="setting.title" :lead="setting.lead" :saving="p.saving.value" :disabled="!p.product.value || !valid || (!form?.dirty && !p.saveError.value)" :error="p.loadError.value ?? p.saveError.value ?? ''" @cancel="reset" @save="form?.submit()">
+    <!-- Nuxt UI's form state says whether the owner changed anything; Save waits for it. -->
+    <UForm v-if="p.product.value" :key="formKey" ref="form" :state="p.form" @submit="save">
+      <UFormField v-if="concern === 'enabled'" name="bookable">
+        <SettingRow v-model="p.form.bookable" label="Use a booking calendar" />
+      </UFormField>
+      <UFormField v-else-if="concern === 'duration'" name="booking_duration" label="Duration in minutes" required>
         <UInput v-model="p.form.booking_duration" inputmode="numeric" pattern="[0-9]*" class="w-full" />
       </UFormField>
       <div v-else-if="concern === 'capacity'" class="space-y-6">
-        <URadioGroup v-model="capacityChoice" :items="capacityOptions" variant="card" />
-        <UFormField v-if="capacityChoice === 'group'" label="Maximum guests per session" required>
+        <UFormField name="booking_capacity">
+          <URadioGroup v-model="capacityChoice" :items="capacityOptions" variant="card" />
+        </UFormField>
+        <UFormField v-if="capacityChoice === 'group'" name="booking_capacity" label="Maximum guests per session" required>
           <UInput v-model="p.form.booking_capacity" inputmode="numeric" pattern="[0-9]*" class="w-full" />
         </UFormField>
       </div>
-      <URadioGroup v-else-if="concern === 'confirmation'" v-model="p.form.confirmation_mode" :items="[{ value: 'instant', label: 'Confirm automatically' }, { value: 'review', label: 'Review each request' }]" variant="card" />
-      <UFormField v-else-if="concern === 'assignment'" label="Who guests meet">
-        <p v-if="membersError" role="alert" class="mb-3 text-error">Team members could not be loaded.</p>
-        <URadioGroup v-else v-model="assignedMember" :items="memberOptions" variant="card" class="w-full" />
+      <UFormField v-else-if="concern === 'confirmation'" name="confirmation_mode">
+        <URadioGroup v-model="p.form.confirmation_mode" :items="[{ value: 'instant', label: 'Confirm automatically' }, { value: 'review', label: 'Review each request' }]" variant="card" />
       </UFormField>
-      <div v-else-if="concern === 'payment'">
+      <div v-else-if="concern === 'assignment'" class="space-y-6">
+        <UFormField name="assigned_member_id" label="Host">
+          <p v-if="membersError" role="alert" class="mb-3 text-error">Team members could not be loaded.</p>
+          <p v-else-if="membersStatus !== 'success'" class="mb-3 text-muted">Loading team members…</p>
+          <URadioGroup v-else v-model="host" :items="hostOptions" variant="card" indicator="end" color="neutral" class="w-full" :ui="{ item: 'items-center', wrapper: 'flex items-center gap-4' }">
+            <template #label="{ item }">
+              <span class="flex items-center gap-4">
+                <UAvatar :src="item.avatar ?? undefined" :alt="item.label" :icon="item.team ? 'i-lucide-users' : undefined" size="xl" />
+                <span>
+                  <span class="block font-medium text-highlighted">{{ item.label }}</span>
+                  <span class="block text-sm font-normal" :class="item.published ? 'text-muted' : 'text-warning'">{{ item.state }}</span>
+                </span>
+              </span>
+            </template>
+          </URadioGroup>
+          <UButton v-if="unpublishedHost" class="mt-4" color="neutral" variant="outline" :to="`/dashboard/${route.params.orgSlug}/team/${unpublishedHost.id}/profile`">Edit {{ unpublishedHost.name }}'s profile</UButton>
+        </UFormField>
+        <SettingRow v-model="hostHours" :disabled="!host || p.form.held_online" label="Book the host's working hours" description="Guests choose from the host's own hours instead of the weekly schedule." />
+      </div>
+      <UFormField v-else-if="concern === 'payment'" name="online_payment_required">
         <SettingRow v-model="p.form.online_payment_required" :disabled="!paymentEntitled && !p.form.online_payment_required" label="Require online payment for paid sessions" />
         <template v-if="!paymentEntitled">
-          <p class="mt-4 text-sm text-muted">Online payments require Commerce. Paid sessions can be booked without online payment when this setting is off.</p>
+          <p class="mt-4 text-sm text-muted">Online payments require Business. Paid sessions can be booked without online payment when this setting is off.</p>
           <UButton class="mt-3" :to="`/dashboard/${route.params.orgSlug}/payments?tab=plan`" variant="outline">View plans</UButton>
         </template>
-      </div>
-      <LocationTimezoneField v-else-if="concern === 'location'" v-model="onlineTimezone" />
-      <UFormField v-else-if="concern === 'calendar'" label="Calendar name" hint="Optional">
-        <p class="mb-3 text-sm text-muted">{{ p.form.calendar_group.length }}/64</p>
-        <UInput v-model="p.form.calendar_group" :maxlength="64" variant="none" :ui="{ base: 'px-0 text-2xl md:text-2xl' }" class="w-full" />
       </UFormField>
-    </template>
+      <UFormField v-else-if="concern === 'location'" name="held_online">
+        <SettingRow v-model="p.form.held_online" :disabled="p.form.scheduling_mode !== 'provider' && !p.form.held_online" label="Held online" />
+        <UButton v-if="p.form.scheduling_mode !== 'provider'" class="mt-4" variant="outline" :to="`${level.to.value}/assignment`">Book the host's working hours</UButton>
+      </UFormField>
+    </UForm>
   </DashboardLeafPanel>
 </template>
 
 <script setup lang="ts">
 import SettingRow from '~/components/dashboard/SettingRow.vue'
 import { productEditorKey, type BookingConcern } from '~/components/dashboard/ProductEditorPage.vue'
-import LocationTimezoneField from '~/lib/components/workspace/location/LocationTimezoneField.vue'
-import { isValidTimezone } from '~/utils/timezone'
 import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
 
 definePageMeta({ layout: 'dashboard' })
@@ -49,10 +68,9 @@ const settings = {
   duration: { title: 'Duration', lead: 'How long does each session last? Existing appointments keep their saved duration.' },
   capacity: { title: 'Guest limit', lead: 'How many guests can book the same session? Existing appointments keep their saved guest limit.' },
   confirmation: { title: 'Confirmation', lead: 'Confirm bookings as soon as guests reserve, or review each request before confirming.' },
-  assignment: { title: 'Who guests meet', lead: 'Choose whose availability guests can book.' },
+  assignment: { title: 'Host', lead: 'Who runs it. Guests see the host\'s published profile on the page.' },
   payment: { title: 'Payment', lead: 'Guests pay before their booking is made. Free sessions remain bookable.' },
-  location: { title: 'Meeting location', lead: 'Choose a city for your online schedule; times follow its time zone and daylight saving is handled automatically.' },
-  calendar: { title: 'Shared availability', lead: 'Use the same calendar name for online services that cannot run at the same time. Leave it empty for an independent schedule.' },
+  location: { title: 'Meeting location', lead: 'Online, guests book in the working hours of whoever provides it, shown in their own time zone.' },
 }
 const dashboard = useDashboardOrganization()
 const paymentEntitled = computed(() => {
@@ -60,18 +78,39 @@ const paymentEntitled = computed(() => {
   if (!plan) throw createError({ statusCode: 500, statusMessage: 'Organization billing status is unavailable', fatal: true })
   return getPlanEntitlements(plan).payments === true
 })
-const { data: members, error: membersError, status: membersStatus } = await useFetch<{ members: { id: string; name: string }[] }>(() => `/api/organizations/${dashboard.organization.value?.id}/members/scheduling`)
-const assignedMember = computed({ get: () => p.form.assigned_member_id, set: (value: string | null) => { p.form.assigned_member_id = value ?? ''; p.form.scheduling_mode = value ? 'provider' : 'legacy' } })
-const memberOptions = computed(() => [{ label: 'Use the business schedule', value: '' }, ...(members.value?.members.map(member => ({ label: member.name, value: member.id })) ?? [])])
+const { data: members, error: membersError, status: membersStatus } = await useMemberSchedulingList(() => dashboard.organization.value?.id)
+// The host is who runs it: one member or one team. Whose hours guests book is a separate choice.
+const host = computed({
+  get: () => p.form.assigned_team_id ? `team:${p.form.assigned_team_id}` : p.form.assigned_member_id ? `member:${p.form.assigned_member_id}` : undefined,
+  set: (value: string | undefined) => {
+    p.form.assigned_team_id = value?.startsWith('team:') ? value.slice(5) : null
+    p.form.assigned_member_id = value?.startsWith('member:') ? value.slice(7) : null
+  },
+})
+const hostHours = computed({
+  get: () => p.form.scheduling_mode === 'provider',
+  set: (value: boolean) => { p.form.scheduling_mode = value ? 'provider' : 'legacy' },
+})
+const profileState = (published: boolean) => published ? 'Profile published' : 'Profile not published: guests can\'t see it yet'
+// Offered only once the list has loaded; see the template's loading and error states.
+// A chosen member guests can't see yet: their profile is one step away.
+const unpublishedHost = computed(() => members.value?.members.find(member => `member:${member.id}` === host.value && member.scheduling?.public_approved !== 1) ?? null)
+// Each host as guests will see them: the published photo, else the account picture.
+const hostOptions = computed(() => members.value ? [
+  ...members.value.members.map(member => ({ label: member.name, avatar: member.scheduling?.public_photo_url || member.image, published: member.scheduling?.public_approved === 1, team: false, state: profileState(member.scheduling?.public_approved === 1), value: `member:${member.id}` })),
+  ...members.value.teams.map(team => ({ label: team.name, avatar: null, published: true, team: true, state: `${team.members.length} ${team.members.length === 1 ? 'member' : 'members'}: guests see each one with a published profile`, value: `team:${team.id}` })),
+] : [])
 const setting = computed(() => settings[concern.value as keyof typeof settings] ?? { title: '', lead: '' })
 watchEffect(() => {
   if (level.mode.value === 'yield') return
-  if ((['location', 'calendar'].includes(concern.value) && p.locationId.value) || (concern.value === 'calendar' && p.product.value && !p.loadError.value && !p.product.value.booking?.online_timezone) || !(concern.value in settings) || (concern.value !== 'enabled' && p.product.value && !p.loadError.value && !p.product.value.booking)) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
+  if ((concern.value === 'location' && p.locationId.value) || !(concern.value in settings) || (concern.value !== 'enabled' && p.product.value && !p.loadError.value && !p.product.value.booking)) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
 })
 const capacityOptions = [{ value: 'one', label: 'One guest' }, { value: 'group', label: 'A group of guests' }, { value: 'unlimited', label: 'No guest limit' }, { value: 'closed', label: 'Closed to new guests' }]
 const capacityChoice = ref('unlimited')
+const formKey = ref(0)
 function reset() {
   p.revert()
+  formKey.value++
   capacityChoice.value = p.form.booking_capacity === '' ? 'unlimited' : p.form.booking_capacity === '1' ? 'one' : p.form.booking_capacity === '0' ? 'closed' : 'group'
 }
 watch([concern, p.product], reset, { immediate: true })
@@ -81,29 +120,15 @@ watch(capacityChoice, choice => {
   else if (choice === 'closed') p.form.booking_capacity = '0'
   else if (Number(p.form.booking_capacity) < 2) p.form.booking_capacity = ''
 })
-const onlineTimezone = computed({ get: () => p.form.online_timezone, set: value => { p.form.online_timezone = value; p.form.online_schedule = Boolean(value) } })
 const valid = computed(() => {
-  if (concern.value === 'assignment') return membersStatus.value === 'success'
+  if (concern.value === 'assignment') return membersStatus.value === 'success' && Boolean(host.value)
   if (concern.value === 'duration') return Number.isSafeInteger(Number(p.form.booking_duration)) && Number(p.form.booking_duration) > 0
   if (concern.value === 'capacity') return capacityChoice.value !== 'group' || (Number.isSafeInteger(Number(p.form.booking_capacity)) && Number(p.form.booking_capacity) >= 2)
-  if (concern.value === 'location') return isValidTimezone(p.form.online_timezone)
+  if (concern.value === 'location') return !p.form.held_online || p.form.scheduling_mode === 'provider'
   if (concern.value === 'payment') return !p.form.online_payment_required || paymentEntitled.value
   return true
 })
-const dirty = computed(() => {
-  const config = p.product.value?.booking
-  switch (concern.value) {
-    case 'enabled': return p.form.bookable !== Boolean(config)
-    case 'duration': return Number(p.form.booking_duration) !== config?.duration_minutes
-    case 'capacity': return (p.form.booking_capacity === '' ? null : Number(p.form.booking_capacity)) !== config?.default_capacity
-    case 'confirmation': return p.form.confirmation_mode !== config?.confirmation_mode
-    case 'assignment': return p.form.assigned_member_id !== (config?.assigned_member_id ?? '') || p.form.scheduling_mode !== config?.scheduling_mode
-    case 'payment': return p.form.online_payment_required !== config?.online_payment_required
-    case 'location': return (p.form.online_schedule ? p.form.online_timezone : null) !== config?.online_timezone
-    case 'calendar': return (p.form.calendar_group.trim() || null) !== config?.calendar_group
-    default: return false
-  }
-})
+const form = useTemplateRef('form')
 function save() { return p.save(level.to.value ?? undefined, concern.value as BookingConcern) }
 onBeforeRouteLeave(() => { p.revert() })
 </script>

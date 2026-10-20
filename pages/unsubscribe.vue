@@ -64,9 +64,10 @@ async function submit() {
   try {
     // Same signed query the List-Unsubscribe header carries, so both routes in
     // and the API have one contract.
-    await $fetch('/api/public/notifications/unsubscribe', {
+    await publicApiMutation('/api/public/notifications/unsubscribe', {
       method: 'POST',
       query: { user: route.query.user, category: route.query.category, token: route.query.token },
+      validate: (value): value is { success: true; category: string } => isRecord(value) && value.success === true && typeof value.category === 'string' && value.category === route.query.category,
     })
     state.value = 'done'
   } catch (cause) {
@@ -78,7 +79,7 @@ async function submit() {
 
 useSocialMetadata({
   path: '/unsubscribe',
-  title: 'Unsubscribe | Krabiclaw',
+  title: 'Unsubscribe | KrabiClaw',
   description: 'Manage your email subscription preferences.',
   socialImage: null,
   discoverability: 'private',

@@ -1,6 +1,6 @@
 # KrabiClaw marketing source of truth
 
-Source reconciliation: 2026-10-04 against staging `baa1bd2ee`, current PRODUCT.md, and owner-approved issue bodies #941/#939. This is a source review, not new runtime, listing, email-delivery or customer-outcome verification. Use this file for directory listings, launch pages, press requests, social profiles, and reusable marketing copy. Update facts here before reusing them elsewhere.
+Current MCP and template claim reconciliation: 2026-10-15 against the released [MCP contract](../mcp.md), [website setup tools](../../server/utils/mcp-tools/organizations.ts), [location tools](../../server/utils/mcp-tools/locations.ts), [media contract](../../server/utils/mcp-tools/shared.ts), [billing policy](../../shared/billing-model.ts), [entitlements](../../server/utils/billing-entitlements.ts), and [template registry](../../utils/template-registry.ts). Company and voice sources were reconciled on 2026-10-04 against staging `baa1bd2ee` and owner-approved issue bodies #941/#939. This source review does not establish new client sessions, directory approval, email delivery or customer outcomes. Use this file for directory listings, launch pages, press requests, social profiles, and reusable marketing copy. Update facts here before reusing them elsewhere.
 
 ## Product identity
 
@@ -14,10 +14,10 @@ Source reconciliation: 2026-10-04 against staging `baa1bd2ee`, current PRODUCT.m
 | Start date | May 2026 | First repository commit that renamed the project to KrabiClaw: 2026-05-03 |
 | Initial commitment | Full time | Confirmed by the owner on 2026-09-07 |
 | Product type | Web SaaS | Product contract and pricing model |
-| Business model | Free Basic and paid Growth/Commerce subscriptions | PRODUCT.md; current production pricing read 2026-10-07; paid display name and prices belong to Stripe |
-| Primary audience | Restaurants, experience operators, and professional-service businesses | `PRODUCT.md` and `CONTEXT.md` |
+| Business model | Free Basic, Growth and Business subscriptions | PRODUCT.md; paid display name and prices belong to Stripe |
+| Primary audience | Restaurants, experience operators, and law firms | Owner direction, 2026-10-15; `utils/template-registry.ts` |
 | MCP endpoint | https://krabiclaw.com/api/mcp | `docs/mcp.md` |
-| MCP registry identity | io.github.paulchrisluke/krabiclaw | Historical listing; re-verify live status before reuse (#941) |
+| MCP registry identity | io.github.krabiclaw/krabiclaw | Published 2026-10-16 under the krabiclaw GitHub org; the former io.github.paulchrisluke/krabiclaw entry was deleted to release the endpoint URL |
 
 Owner-approved company facts ([#941](https://github.com/paulchrisluke/krabiclaw/issues/941), reviewed 2026-10-04): bootstrapped/self-funded; no outside investment to date; open to investment; Salt Lake City, Utah, USA; global from day one. Do not publish a street address for general marketing.
 
@@ -27,17 +27,25 @@ Public contacts approved in #941: hello@krabiclaw.com (general), privacy@krabicl
 
 ## Positioning
 
-KrabiClaw helps restaurants, experience operators and professional-service businesses keep their websites current through the dashboard and supported conversational clients, Claude and ChatGPT, using one MCP service. Site/location creation and domain setup remain in the CMS ([MCP contract](../mcp.md)). A supported client is not proof of public directory approval or a successful current session.
+KrabiClaw helps restaurants, experience operators and law firms build and keep their websites current through the dashboard and compatible MCP clients, including Claude and ChatGPT. One MCP service manages the same business data with the same membership, assignment and plan permissions as the dashboard. Compatibility does not establish public directory approval or a successful current client session.
+
+Owners can save and revise website setup, publish the completed website draft, and add locations through MCP using supplied business facts. Publication requires the saved draft's current revision and completed required fields; location creation respects the plan's existing location allowance. Domain setup, Google Places lookup, external-account linking, and location copying/deletion remain in the dashboard. See the [MCP contract](../mcp.md) and its owning tools linked above.
+
+Saya serves restaurants and experience operators; Blawby focuses on lawyers and law firms. Both themes are included on every plan. Basic is free, and every plan includes two locations. Paid capabilities and additional locations follow the [current pricing](https://krabiclaw.com/pricing) and canonical billing policy; theme inclusion does not grant every paid feature.
+
+Compatible clients can select and place existing media-library assets through ordinary MCP tools. New conversation attachments currently use ChatGPT's file-reference rewriting (`download_url` and `file_id`) and OpenAI file-parameter annotations in [media tools](../../server/utils/mcp-tools/media.ts). Do not promise identical attachment uploads in Claude or every other client. Videos require a poster image.
 
 The next restaurant campaign should show a supported task being completed: the real request, product action and resulting menu/content. Choose actual chat interaction for conversational features and CMS recordings for visual workflows such as calendars. Customer menu/location stills support the result; they do not demonstrate how it was produced. Keep the broader product positioning across all three verticals. Do not imply measured time savings, sales uplift, bookings or rankings without evidence and permission.
 
-### Claims that remain unresolved
+### Pricing and claim boundaries
 
-[PRODUCT.md](../../PRODUCT.md) owns current product policy; read its open decisions before any plan comparison. Paid names, amounts, currency and cadence come from the current `/api/billing/plans` Stripe-backed response, not this profile or an old snapshot. Never infer an annual amount, substitute an interval or turn missing data into zero. Basic is the current free/no-subscription display name; its runtime identity remains `free`. Commerce enables online payments, while Basic and Growth retain bookings without online payment. Verify merchant readiness and product configuration before promising a paid booking.
+[PRODUCT.md](../../PRODUCT.md) describes the product contract; the canonical billing policy and operation gates determine current plan availability. Paid names, amounts, currency and cadence come from the current `/api/billing/plans` Stripe-backed response and [pricing page](https://krabiclaw.com/pricing), not this profile or an old snapshot. Never infer an annual amount, substitute an interval or turn missing data into zero. Basic is the free/no-subscription contract; its runtime identity remains `free`.
 
-Review-request sending is currently paid, with the Free decision open. WhatsApp business notifications require paid messaging; authentication OTP is separate. Saya/Blawby provisioning and Growth marketing disagree. Community/Priority support copy does not establish a service promise. Do not publish settled comparison claims until these discrepancies are resolved. Customer GA4/Search Console integration, automatic social synchronization and ranking guarantees are not established by internal analytics or a tool name.
+Review-request sending and WhatsApp business notifications follow their paid entitlements; authentication OTP is separate. Community/Priority support copy does not establish a service promise. Customer GA4/Search Console integration, automatic social synchronization and ranking guarantees are not established by internal analytics or a tool name.
 
 [#939](https://github.com/paulchrisluke/krabiclaw/issues/939) and #941 retain their approved-design/released-UI gates. This profile reconciliation does not approve final launch collateral, replace their design source, or complete either issue.
+
+Owner-approved pricing consolidation (2026-10-15): the current packages are Basic, Growth and Business. Business includes Growth, payments and managed advertising. Owner-approved Business price: $149 per month with 2 locations included, then $49 per additional location per month (2026-10-20, #1503: locations are the only count billed; homes are not billed). One Business plan covers lodging; there is no separate lodging subscription, and the iOS app is a free companion to the account. Usage charges and Google ad spend remain separate as described in the [current pricing](https://krabiclaw.com/pricing). Commerce and Marketing remain existing customer contracts and are unavailable for new subscriptions. Current public amounts, names and bullets remain Stripe-owned.
 
 ### Paul's voice
 
@@ -117,13 +125,13 @@ Update your KrabiClaw website with Claude or ChatGPT: edit products, publish pos
 **Directory description**
 
 ```text
-KrabiClaw lets local business owners launch websites in the dashboard and manage existing content with Claude or ChatGPT. Owners can update pages, products, menus, photos, translations, and posts, then review customer inquiries and bookings from the same permissioned business data.
+KrabiClaw helps restaurants, experience operators and law firms build and manage websites through the dashboard or compatible MCP clients, including Claude and ChatGPT. Owners can prepare and publish website drafts, update menus and pages, place media-library photos, and review inquiries and bookings from the same permissioned business data. Attachment uploads and available actions depend on the client, role and plan.
 ```
 
 **Founder motivation**
 
 ```text
-KrabiClaw exists so restaurants and local businesses can keep a polished, multilingual website current without wrestling with a traditional CMS. Owners manage real website content, bookings, inquiries, products, experiences, media, translations, and analytics through Claude or ChatGPT, while the dashboard and assistant use the same permissioned business data.
+KrabiClaw exists so restaurants, experience operators and law firms can keep a polished website current without wrestling with a traditional CMS. Owners manage real website content, bookings, inquiries, products, experiences, media-library assets and analytics through compatible MCP clients, including Claude and ChatGPT, while the dashboard and assistant use the same permissioned business data. Additional languages use manually authored content and follow the plan's entitlements.
 ```
 
 ## Calendar release content
@@ -179,7 +187,7 @@ the release content.
 - Platform: Web / Online / SaaS.
 - Pricing label: Freemium or Paid with a free plan, depending on the directory vocabulary.
 - Suggested alternatives: Squarespace, Webflow, Wix, BentoBox, and Toast where the directory permits meaningful comparisons.
-- Do not claim that site or location setup happens in Claude or ChatGPT. Setup remains in the CMS.
+- Website drafts, publication and location creation are supported MCP operations. Keep domain setup, Google Places lookup and external-account linking in the dashboard; qualify client-specific attachment handling.
 - Do not claim public ChatGPT directory approval unless it has been verified separately.
 
 ## Assets and customer-proof permissions

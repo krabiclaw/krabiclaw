@@ -11,8 +11,8 @@ export default defineHandler(async (event) => {
   const query = getQuery(event)
   const recipe = typeof query.recipe === 'string' ? query.recipe as BlawbyRouteRecipe : null
   const slug = typeof query.slug === 'string' ? query.slug : null
-  const locale = query.locale === undefined ? 'en' : query.locale
-  if (!organizationId || !recipe || !RECIPES.has(recipe) || typeof locale !== 'string') {
+  const locale = query.locale
+  if (!organizationId || !recipe || !RECIPES.has(recipe) || (locale !== undefined && typeof locale !== 'string')) {
     return apiErrorResponse(event, 400, 'BLAWBY_DOCUMENT_REQUIRED', 'Valid organization ID and Blawby route recipe required')
   }
 

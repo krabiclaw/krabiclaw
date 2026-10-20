@@ -1803,6 +1803,153 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@fontsource-variable/jost@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource-variable/jost@npm:5.3.0"
+  checksum: 10c0/7af324be7aa2067e0b601e1c9d145f0b4fb76f53afe3a7d8c5967a675639f906544224a11412b4de14bc7a6f0168aada07472a9095ef468001e0022b24ec1ee5
+  languageName: node
+  linkType: hard
+
+"@fontsource/cormorant-garamond@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/cormorant-garamond@npm:5.3.0"
+  checksum: 10c0/74f1fd9aa5c62d77e60df14b52c3f1737949f2fec8a2cb383c304f4409664b4c95e5cc5065a78269849959a4ae7d7922d997336f2159b4008c285e61a40b1284
+  languageName: node
+  linkType: hard
+
+"@fontsource/dm-sans@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/dm-sans@npm:5.3.0"
+  checksum: 10c0/e283f1b5a1cccd881457014de27894cf82bde0a4274b98d94608aefbea0cb31c3ead2276ffcd4edf6e9b79041e2054e2123ecdb78b140f8390d14fdad0e5f7d1
+  languageName: node
+  linkType: hard
+
+"@fontsource/ibm-plex-sans-thai@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/ibm-plex-sans-thai@npm:5.3.0"
+  checksum: 10c0/bc28094808334654d357bd2934a01e4617c8a80d9ca0c01d75bdf1b6f044362c388226bde6ac4c4a1869bdb30919c92e36a93801a188a1a019531d773fc25bcf
+  languageName: node
+  linkType: hard
+
+"@fontsource/instrument-serif@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/instrument-serif@npm:5.3.0"
+  checksum: 10c0/4b04757b67e17b00b631d6ecc9897fbe3129bff2a4320d222827be54f5685565b055ed7b656885da32c3cc05827b080513705d92aa746c666b5a785b3c9f30a2
+  languageName: node
+  linkType: hard
+
+"@fontsource/inter@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/inter@npm:5.3.0"
+  checksum: 10c0/568601c10c83601c23005f8cd7434499df6e007eaa22c4dabbb1dcae327cc8e4a148ece8d4a4edaa8bafc5d2371ea97a37d1cc91ffbed77a43e2d8c15a6e831b
+  languageName: node
+  linkType: hard
+
+"@fontsource/kanit@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/kanit@npm:5.3.0"
+  checksum: 10c0/834e554cce043992cf2fd348bcd88d4f71be3a80a2b0371d3fe0424733b13a74b62bf4609447aaa530866a585a589c1257100ffc33f0dcd39e9cf23b5067dce7
+  languageName: node
+  linkType: hard
+
+"@fontsource/lora@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/lora@npm:5.3.0"
+  checksum: 10c0/f9cab55344176c975504fc5fb9d9fe73d86addb71b42118242e95ae37927508692f0daee45ab05379bc3c33dd7081bebcd3454175bf7792aed0a3f86c060e5f5
+  languageName: node
+  linkType: hard
+
+"@fontsource/mali@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/mali@npm:5.3.0"
+  checksum: 10c0/2be69249fe0406ce6b3d4696fa1cc80b18425dd25ec052d255e498268130bd6b7098bab00b4b9b10a05b02bde1a700367c85dbeb994928dff07c76084577edba
+  languageName: node
+  linkType: hard
+
+"@fontsource/marcellus@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/marcellus@npm:5.3.0"
+  checksum: 10c0/ffbab04576d60cf5c193a7993edf22d47b35c49c87371d72d6997ea36cf9782f2a6991e2972a742afcf8307f2f71aab6341d3c9236472accaf86180a9f0742a4
+  languageName: node
+  linkType: hard
+
+"@fontsource/montserrat@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/montserrat@npm:5.3.0"
+  checksum: 10c0/6670ec471a9ae9cfa89593a11ba62062a9797049d0f93825f106b1bddd0d46f930ace87e79e56ebbd4a56186ff07844f073c2f2f4f1aca85115dde4cc02d8135
+  languageName: node
+  linkType: hard
+
+"@fontsource/noto-sans-display@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/noto-sans-display@npm:5.3.0"
+  checksum: 10c0/85c4c2b4dca5a3bdecf47a93067e8c80ba5ed50052a5536a3bf7d485863d9896bd8ccfc12613e161693bfc40d91250e5dd7598f2eeb839e5b9cd035df2dd21cb
+  languageName: node
+  linkType: hard
+
+"@fontsource/noto-sans-jp@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/noto-sans-jp@npm:5.3.0"
+  checksum: 10c0/6d330f3e48674edf003ef7d3b11babdea2b66ce50ea0c21b837d696ad6f142fcf20cf3ecf0f61df9c8a2fdbe17df13e91fac99a5415a2bc8840874fd543ebfe1
+  languageName: node
+  linkType: hard
+
+"@fontsource/noto-sans-thai@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/noto-sans-thai@npm:5.3.0"
+  checksum: 10c0/373df8a821e5af663f05b3417458027e80b34c1c72ade7e6b6681799b900a216eb121e373c65e85b08a69891dfbdaf4240bc9115a1b3215381ed6b02ebd4c023
+  languageName: node
+  linkType: hard
+
+"@fontsource/noto-serif-display@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/noto-serif-display@npm:5.3.0"
+  checksum: 10c0/4c074f759a96a4a7407bef4b3bb54302c6c23fcc482ba6f39d52089b2ef0e935ede1754c175422b61e952249f8987c4ab55f37bd97c52c689623d5a38e874a1d
+  languageName: node
+  linkType: hard
+
+"@fontsource/noto-serif-jp@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/noto-serif-jp@npm:5.3.0"
+  checksum: 10c0/9f9cbf0246ef26dca2d61fc65b849978eca26c021d6bc01754d9b830d33b265588b455c8941300201847eec2b83e98f04c23f55d3a793e5e4fb53f2a0dea31aa
+  languageName: node
+  linkType: hard
+
+"@fontsource/noto-serif-thai@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/noto-serif-thai@npm:5.3.0"
+  checksum: 10c0/b03780c61f35ca063c3793a5800b3f528699e84be4280bcc5571e8c2cdcb1e4371583fb476f0de23f59dcb09ee3495db194fbb9d4357f71f7416f8355b846290
+  languageName: node
+  linkType: hard
+
+"@fontsource/playfair-display@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/playfair-display@npm:5.3.0"
+  checksum: 10c0/ba8c3808fc5bc75444825e044921e216dd9ea9af84334cd56d46575ee1c1ccfd32d78859c2dc208e58871f7f93caf97800cbae7a9be1116ff9ae76fde954b64f
+  languageName: node
+  linkType: hard
+
+"@fontsource/poppins@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/poppins@npm:5.3.0"
+  checksum: 10c0/869fe85c618645a84f4ff331fd61b3fd856a6df15a42fff21c311b599a81104541f7402feccb3446ad50ddd73cfea20bd9191e9cfa533a382ec68d9ba1093038
+  languageName: node
+  linkType: hard
+
+"@fontsource/prompt@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/prompt@npm:5.3.0"
+  checksum: 10c0/d011f1e084f8d274af11587ede6880205ed28b53ac10810d61cefd9c1ec8405075cab3822584f9f0eccd59703da22eef5f1092157f802ba0d33a59004abcc905
+  languageName: node
+  linkType: hard
+
+"@fontsource/sarabun@npm:^5.3.0":
+  version: 5.3.0
+  resolution: "@fontsource/sarabun@npm:5.3.0"
+  checksum: 10c0/d6179bbec690dba39c53412728e8f6b725a2d89895e980d46a6f1695a02758de6a543d67f187912991329c56cccb5c73da3a3b4cb26f6a99af59531b0c1b1e2a
+  languageName: node
+  linkType: hard
+
 "@formatjs/ecma402-abstract@npm:2.3.6":
   version: 2.3.6
   resolution: "@formatjs/ecma402-abstract@npm:2.3.6"
@@ -2344,6 +2491,21 @@ __metadata:
   peerDependencies:
     zod: ^4.0.0
   checksum: 10c0/15f4224df1256b0ffe7f0a7e4b44e7e616adbfa5affc471236ad46108e9478d51ef83c2899243671bad4cf07f58643feec7a4c9caf585b47ba78c363408c2944
+  languageName: node
+  linkType: hard
+
+"@modelcontextprotocol/client@npm:2.0.0":
+  version: 2.0.0
+  resolution: "@modelcontextprotocol/client@npm:2.0.0"
+  dependencies:
+    "@modelcontextprotocol/core": "npm:2.0.0"
+    cross-spawn: "npm:^7.0.5"
+    eventsource: "npm:^3.0.2"
+    eventsource-parser: "npm:^3.0.0"
+    jose: "npm:^6.1.3"
+    pkce-challenge: "npm:^5.0.0"
+    zod: "npm:^4.2.0"
+  checksum: 10c0/23d1d16539c76a69d1848dc67c495b3aa6d048946dd894ed449bca0de7ce9835a71904476c6eeb9f75fe8dfca1964c61372d9d7d283b7cabfa3258d288db6859
   languageName: node
   linkType: hard
 
@@ -5986,6 +6148,87 @@ __metadata:
   languageName: node
   linkType: hard
 
+"better-auth@patch:better-auth@npm%3A1.7.5#~/patches/better-auth-npm-1.7.5.patch":
+  version: 1.7.5
+  resolution: "better-auth@patch:better-auth@npm%3A1.7.5#~/patches/better-auth-npm-1.7.5.patch::version=1.7.5&hash=049cef"
+  dependencies:
+    "@better-auth/core": "npm:1.7.5"
+    "@better-auth/drizzle-adapter": "npm:1.7.5"
+    "@better-auth/kysely-adapter": "npm:1.7.5"
+    "@better-auth/memory-adapter": "npm:1.7.5"
+    "@better-auth/mongo-adapter": "npm:1.7.5"
+    "@better-auth/prisma-adapter": "npm:1.7.5"
+    "@better-auth/telemetry": "npm:1.7.5"
+    "@better-auth/utils": "npm:0.4.2"
+    "@better-fetch/fetch": "npm:1.3.2"
+    "@noble/ciphers": "npm:^2.2.0"
+    "@noble/hashes": "npm:^2.2.0"
+    better-call: "npm:1.4.0"
+    defu: "npm:^6.1.4"
+    jose: "npm:^6.2.3"
+    kysely: "npm:^0.28.17 || ^0.29.0"
+    nanostores: "npm:^1.3.0"
+    zod: "npm:^4.5.4"
+  peerDependencies:
+    "@lynx-js/react": "*"
+    "@prisma/client": ^5.0.0 || ^6.0.0 || ^7.0.0
+    "@sveltejs/kit": ^2.0.0
+    "@tanstack/react-start": ^1.0.0
+    "@tanstack/solid-start": ^1.0.0
+    drizzle-kit: ">=0.31.4 || >=1.0.0-beta.1"
+    drizzle-orm: ^0.45.2 || >=1.0.0-rc.1 <2.0.0
+    mongodb: ^6.0.0 || ^7.0.0
+    mysql2: ^3.0.0
+    next: ^14.0.0 || ^15.0.0 || ^16.0.0
+    pg: ^8.0.0
+    prisma: ^5.0.0 || ^6.0.0 || ^7.0.0
+    react: ^18.0.0 || ^19.0.0
+    react-dom: ^18.0.0 || ^19.0.0
+    solid-js: ^1.0.0
+    svelte: ^4.0.0 || ^5.0.0
+    vitest: ^2.0.0 || ^3.0.0 || ^4.0.0 || ^5.0.0
+    vue: ^3.0.0
+  peerDependenciesMeta:
+    "@lynx-js/react":
+      optional: true
+    "@prisma/client":
+      optional: true
+    "@sveltejs/kit":
+      optional: true
+    "@tanstack/react-start":
+      optional: true
+    "@tanstack/solid-start":
+      optional: true
+    drizzle-kit:
+      optional: true
+    drizzle-orm:
+      optional: true
+    mongodb:
+      optional: true
+    mysql2:
+      optional: true
+    next:
+      optional: true
+    pg:
+      optional: true
+    prisma:
+      optional: true
+    react:
+      optional: true
+    react-dom:
+      optional: true
+    solid-js:
+      optional: true
+    svelte:
+      optional: true
+    vitest:
+      optional: true
+    vue:
+      optional: true
+  checksum: 10c0/864e18b24d52820efb986a0e6166efcb2fb841b86521ede54179bf6d6d3688627ea5e3b35130d154e9c3ecc6e9bf245feaf31c91c108b179db60b19710f29381
+  languageName: node
+  linkType: hard
+
 "better-call@npm:1.4.0":
   version: 1.4.0
   resolution: "better-call@npm:1.4.0"
@@ -6442,7 +6685,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"cross-spawn@npm:^7.0.3, cross-spawn@npm:^7.0.6":
+"cross-spawn@npm:^7.0.3, cross-spawn@npm:^7.0.5, cross-spawn@npm:^7.0.6":
   version: 7.0.6
   resolution: "cross-spawn@npm:7.0.6"
   dependencies:
@@ -7154,7 +7397,7 @@ __metadata:
   languageName: node
   linkType: hard
 
-"env-runner@npm:^0.1.12":
+"env-runner@npm:0.1.16":
   version: 0.1.16
   resolution: "env-runner@npm:0.1.16"
   dependencies:
@@ -7179,6 +7422,34 @@ __metadata:
   bin:
     env-runner: dist/cli.mjs
   checksum: 10c0/67561779929f3cb0d6a7a0594f43248ef2b33433b814fba26da4ea2f393417e09d57a025275af83cf0a07962f53f885edfddde1244338c20f3db476cd63c2e0d
+  languageName: node
+  linkType: hard
+
+"env-runner@patch:env-runner@npm%3A0.1.16#~/patches/env-runner-npm-0.1.16.patch":
+  version: 0.1.16
+  resolution: "env-runner@patch:env-runner@npm%3A0.1.16#~/patches/env-runner-npm-0.1.16.patch::version=0.1.16&hash=88f40b"
+  dependencies:
+    crossws: "npm:^0.4.8"
+    exsolve: "npm:^1.1.0"
+    httpxy: "npm:^0.5.4"
+    srvx: "npm:^0.11.19"
+  peerDependencies:
+    "@netlify/runtime": ^4.1.23
+    "@vercel/queue": ">=0.2.0"
+    miniflare: ^4.20260515.0
+    wrangler: ^4.0.0
+  peerDependenciesMeta:
+    "@netlify/runtime":
+      optional: true
+    "@vercel/queue":
+      optional: true
+    miniflare:
+      optional: true
+    wrangler:
+      optional: true
+  bin:
+    env-runner: dist/cli.mjs
+  checksum: 10c0/d5863dbc41add8a144a1929a64046b6320782f7897d8fb9f1364530dafa00b8136f708010475fcca478eaea5a63fe5b820873df5225ec5e81a0706297d999f3e
   languageName: node
   linkType: hard
 
@@ -7919,6 +8190,29 @@ __metadata:
   version: 2.0.3
   resolution: "esutils@npm:2.0.3"
   checksum: 10c0/9a2fe69a41bfdade834ba7c42de4723c97ec776e40656919c62cbd13607c45e127a003f05f724a1ea55e5029a4cf2de444b13009f2af71271e42d93a637137c7
+  languageName: node
+  linkType: hard
+
+"eventsource-parser@npm:^3.0.0, eventsource-parser@npm:^3.0.1":
+  version: 3.1.1
+  resolution: "eventsource-parser@npm:3.1.1"
+  checksum: 10c0/dd3236c61140587253dcaaf947de528ac0e7371caffdc53c77afaeee36a17661f00e251a6ea16af56c99be5ac138303e67b5d750630e7c41b02e3564e8ad8c44
+  languageName: node
+  linkType: hard
+
+"eventsource-parser@npm:^4.1.0":
+  version: 4.1.0
+  resolution: "eventsource-parser@npm:4.1.0"
+  checksum: 10c0/0591250f4f3df7ebef56ddfbba0e19aee5450d81347609d7d2417f08191060aea3fbb3aa71a02c25515b198ee17bd0c94d30190f576e0aa937c93c9e9f605e6f
+  languageName: node
+  linkType: hard
+
+"eventsource@npm:^3.0.2":
+  version: 3.0.7
+  resolution: "eventsource@npm:3.0.7"
+  dependencies:
+    eventsource-parser: "npm:^3.0.1"
+  checksum: 10c0/c48a73c38f300e33e9f11375d4ee969f25cbb0519608a12378a38068055ae8b55b6e0e8a49c3f91c784068434efe1d9f01eb49b6315b04b0da9157879ce2f67d
   languageName: node
   linkType: hard
 
@@ -8870,6 +9164,13 @@ __metadata:
   dependencies:
     "@discoveryjs/natural-compare": "npm:^1.1.0"
   checksum: 10c0/5b62db218e7f2a0b16eeefdd0111b1110763caca95fd3ccfaee019550d13b1cdab35f77a968933f2f3e649059569c441a2e5f9ac138af7f1a47dab285214ff6d
+  languageName: node
+  linkType: hard
+
+"jose@npm:^6.1.3":
+  version: 6.2.12
+  resolution: "jose@npm:6.2.12"
+  checksum: 10c0/e8582b946fabcae228819982dda4849908c353e9cb098f02f773635aa0d2f4917f17484c7441b8d526e564013b4cf96951455c94f81d0a39ee765bad44ce293d
   languageName: node
   linkType: hard
 
@@ -10119,9 +10420,31 @@ __metadata:
     "@better-auth/oauth-provider": "npm:1.7.5"
     "@better-auth/stripe": "npm:1.7.5"
     "@cloudflare/workers-types": "npm:5.20260926.1"
+    "@fontsource-variable/jost": "npm:^5.3.0"
+    "@fontsource/cormorant-garamond": "npm:^5.3.0"
+    "@fontsource/dm-sans": "npm:^5.3.0"
+    "@fontsource/ibm-plex-sans-thai": "npm:^5.3.0"
+    "@fontsource/instrument-serif": "npm:^5.3.0"
+    "@fontsource/inter": "npm:^5.3.0"
+    "@fontsource/kanit": "npm:^5.3.0"
+    "@fontsource/lora": "npm:^5.3.0"
+    "@fontsource/mali": "npm:^5.3.0"
+    "@fontsource/marcellus": "npm:^5.3.0"
+    "@fontsource/montserrat": "npm:^5.3.0"
+    "@fontsource/noto-sans-display": "npm:^5.3.0"
+    "@fontsource/noto-sans-jp": "npm:^5.3.0"
+    "@fontsource/noto-sans-thai": "npm:^5.3.0"
+    "@fontsource/noto-serif-display": "npm:^5.3.0"
+    "@fontsource/noto-serif-jp": "npm:^5.3.0"
+    "@fontsource/noto-serif-thai": "npm:^5.3.0"
+    "@fontsource/playfair-display": "npm:^5.3.0"
+    "@fontsource/poppins": "npm:^5.3.0"
+    "@fontsource/prompt": "npm:^5.3.0"
+    "@fontsource/sarabun": "npm:^5.3.0"
     "@iconify-json/lucide": "npm:^1.2.127"
     "@iconify/utils": "npm:^3.1.4"
     "@internationalized/date": "npm:^3.12.3"
+    "@modelcontextprotocol/client": "npm:2.0.0"
     "@modelcontextprotocol/server": "npm:2.0.0"
     "@noble/hashes": "npm:^2.4.0"
     "@nuxt/eslint-config": "npm:^1.17.0"
@@ -10152,7 +10475,7 @@ __metadata:
     "@vue-email/style": "npm:0.0.3"
     "@vue-email/text": "npm:0.0.3"
     ajv: "npm:8.20.0"
-    better-auth: "npm:1.7.5"
+    better-auth: "patch:better-auth@npm%3A1.7.5#~/patches/better-auth-npm-1.7.5.patch"
     better-sqlite3: "npm:^12.11.1"
     cookie-es: "npm:^3.1.1"
     cross-env: "npm:^10.1.0"
@@ -10160,6 +10483,7 @@ __metadata:
     drizzle-orm: "npm:^0.45.2"
     email-reply-parser: "npm:2.3.9"
     eslint: "npm:^10.9.1"
+    eventsource-parser: "npm:^4.1.0"
     h3: "npm:2.0.1-rc.29"
     html-to-text: "npm:10.0.1"
     isomorphic-dompurify: "npm:^3.23.0"
@@ -10860,6 +11184,13 @@ __metadata:
   version: 4.0.7
   resolution: "picomatch@npm:4.0.7"
   checksum: 10c0/beb6ae02c43ae44e84883b90830196d9046b1726ead292adcf7f57945e0bb0d992d68563d87e03b484b6f3c9a5c6defda7523477f047d7f0e663f126cc01787f
+  languageName: node
+  linkType: hard
+
+"pkce-challenge@npm:^5.0.0":
+  version: 5.0.1
+  resolution: "pkce-challenge@npm:5.0.1"
+  checksum: 10c0/207f4cb976682f27e8324eb49cf71937c98fbb8341a0b8f6142bc6f664825b30e049a54a21b5c034e823ee3c3d412f10d74bd21de78e17452a6a496c2991f57c
   languageName: node
   linkType: hard
 

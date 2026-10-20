@@ -1,7 +1,7 @@
 import { HTTPError } from 'nitro'
 import { FAQ_BLOCK_SOURCES, type FaqBlockSource } from '~/shared/faq-block'
 import { getPersistedSourceLocale } from '~/server/utils/localization'
-import { createContentDocumentWithBlocks, prepareContentDocumentDeletion } from '~/server/utils/content/documents'
+import { createContentDocumentWithBlocks, documentOfRootSql, prepareContentDocumentDeletion } from '~/server/utils/content/documents'
 import { executeBatch, queryAll, queryFirst, type DbClient } from '../db/index.ts'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { d1JsonStringSet, d1JsonValue } from '../db/d1-limits.ts'
@@ -112,7 +112,8 @@ function normalizeQaInput(input: UpdateQaInput, creating = false) {
  * it has read it, so an id lookup replaces the scope clause rather than
  * narrowing it. Without an id this behaves exactly as before.
  */
-export async function listQa(db: DbClient, organizationId: string, locationId: string | null, publishedOnly = false, pagePath?: string | null, locale = 'en', qaId?: string | null) {
+export async function listQa(db: DbClient, organizationId: string, locationId: string | null, publishedOnly = false, pagePath?: string | null, locale?: string, qaId?: string | null) {
+  locale ??= (await getPersistedSourceLocale(db, organizationId)).locale
   const scope = qaId
     ? { clause: 'root.id = ?', params: [qaId] as unknown[] }
     : scopeSql(locationId, pagePath)
@@ -122,7 +123,7 @@ export async function listQa(db: DbClient, organizationId: string, locationId: s
       (root.metadata_json ->> '$.question_date') AS question_date, (root.metadata_json ->> '$.answer_author') AS answer_author,
       (root.metadata_json ->> '$.answer_date') AS answer_date, (root.metadata_json ->> '$.is_owner_answer') AS is_owner_answer,
       (root.metadata_json ->> '$.upvote_count') AS upvote_count, root.source, root.status, root.sort_order, p.created_at, p.updated_at
-    FROM content_documents root JOIN content_documents p ON COALESCE(p.root_id,p.id) = root.id AND p.locale = ?
+    FROM content_documents root JOIN content_documents p ON ${documentOfRootSql('p', 'root')} AND p.locale = ?
     WHERE root.row_role = 'root' AND root.kind = 'qa' AND root.organization_id = ?
       AND ${scope.clause.replace(/\b(location_id|scope_path)\b/g, 'root.$1')}${publishedOnly ? " AND root.status = 'published'" : ''}
     ORDER BY root.sort_order, is_owner_answer DESC, upvote_count DESC, p.created_at
@@ -135,12 +136,20 @@ export function faqBlockSource(block: { type: string; data: Record<string, unkno
 }
 
 /** The published records a FAQ block with `source` lists on `pagePath`. */
-export function listFaqBlockQa(db: DbClient, organizationId: string, pagePath: string, source: FaqBlockSource, locale = 'en') {
+export function listFaqBlockQa(db: DbClient, organizationId: string, pagePath: string, source: FaqBlockSource, locale?: string) {
   return listQa(db, organizationId, null, true, source === 'page_qa' ? pagePath : null, locale)
 }
 
 export function faqItems(rows: QaDocument[]) {
-  return rows.map(row => ({ id: String(row.id), title: String(row.question), description: typeof row.answer === 'string' ? row.answer : undefined }))
+  return rows.map(row => {
+    if (typeof row.question !== 'string' || !row.question.trim()) {
+      throw new HTTPError({ statusCode: 500, statusMessage: `Stored Q&A ${row.id} question is missing`, data: { code: 'INVALID_STORED_CONTENT' } })
+    }
+    if (row.answer !== null && typeof row.answer !== 'string') {
+      throw new HTTPError({ statusCode: 500, statusMessage: `Stored Q&A ${row.id} answer is invalid`, data: { code: 'INVALID_STORED_CONTENT' } })
+    }
+    return { id: row.id, title: row.question, description: row.answer ?? undefined }
+  })
 }
 
 /**
@@ -149,7 +158,7 @@ export function faqItems(rows: QaDocument[]) {
  * surface renders the same items.
  */
 export async function attachPageQa<T extends { type: string; data: Record<string, unknown> }>(
-  db: DbClient, organizationId: string, pagePath: string, blocks: T[], locale = 'en',
+  db: DbClient, organizationId: string, pagePath: string, blocks: T[], locale?: string,
 ): Promise<T[]> {
   const sources = new Set(blocks.map(faqBlockSource).filter((source): source is FaqBlockSource => source !== null))
   if (!sources.size) return blocks
@@ -168,7 +177,7 @@ export async function attachPageQa<T extends { type: string; data: Record<string
  * dashboard says to manage it in Google.
  *
  * Making *every* Q&A read-only instead stranded the 72 records four sites had
- * authored — NCLS's practice-area answers and Krabiclaw's own 50 docs questions
+ * authored — NCLS's practice-area answers and KrabiClaw's own 50 docs questions
  * among them — with no way left to correct a word.
  */
 export async function createQa(db: DbClient, scope: QaScope, input: CreateQaInput) {
@@ -179,12 +188,12 @@ export async function createQa(db: DbClient, scope: QaScope, input: CreateQaInpu
   const status = normalized.status === 'hidden' ? 'hidden' : 'published'
   const explicitSortOrder = normalized.sort_order === undefined ? null : normalized.sort_order as number
 
-  await getPersistedSourceLocale(db, scope.organizationId)
+  const source = await getPersistedSourceLocale(db, scope.organizationId)
   const id = crypto.randomUUID()
   const pagePath = scope.locationId === null ? normalizePagePath(scope.pagePath) : null
   const scoped = scopeSql(scope.locationId, pagePath)
   await createContentDocumentWithBlocks(db, {
-    id, rowRole: 'root', kind: 'qa', locale: 'en', organizationId: scope.organizationId,
+    id, rowRole: 'root', kind: 'qa', locale: source.locale, organizationId: scope.organizationId,
     locationId: scope.locationId, scopePath: pagePath, status, source: 'manual', sortOrder: explicitSortOrder ?? 0,
     title: question, summary: answer,
     metadata: { question_author: stringOrNull(normalized.question_author, 120),

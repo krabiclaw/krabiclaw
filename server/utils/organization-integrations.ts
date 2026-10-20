@@ -5,9 +5,8 @@ import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 /**
  * What an organization connected, one row per provider in
  * `organization_integrations`. The database holds both rules: one Facebook,
- * Instagram, Discord, Analytics and Search Console connection per
- * organization, and each provider resource on at most one organization.
- * Discord's encrypted webhook token is read only by `readIntegrationCredential`.
+ * Instagram, Discord, Analytics and Search Console connection per organization, and
+ * each provider resource on at most one organization.
  */
 
 const NAMES: Record<IntegrationProvider, string> = {
@@ -16,6 +15,7 @@ const NAMES: Record<IntegrationProvider, string> = {
   instagram: 'Instagram connection',
   discord: 'Discord connection',
   google_analytics: 'Google Analytics connection',
+  google_ads: 'Google Ads connection',
   google_search_console: 'Search Console connection',
 }
 
@@ -25,10 +25,11 @@ const TARGETS: Record<IntegrationProvider, string> = {
   instagram: 'That Instagram account',
   discord: 'That Discord channel',
   google_analytics: 'That Google Analytics property',
+  google_ads: 'That Google Ads account',
   google_search_console: 'That Search Console site',
 }
 
-const COLUMNS = 'organization_id, provider, account_id, target_id, target_name, webhook_id, guild_id, measurement_id, verified, verification_token, status, last_error, revision, created_at, updated_at'
+const COLUMNS = 'organization_id, provider, account_id, target_id, target_name, measurement_id, verified, verification_token, status, last_error, revision, created_at, updated_at'
 
 type Row = Omit<OrganizationIntegration, 'verified'> & { verified: number | null }
 const project = (row: Row): OrganizationIntegration => ({ ...row, verified: row.verified === null ? null : row.verified === 1 })
@@ -42,13 +43,6 @@ export async function listIntegrations(db: DbClient, organizationId: string): Pr
   return (await queryAll<Row>(db, `SELECT ${COLUMNS} FROM organization_integrations WHERE organization_id = ? ORDER BY provider`, [organizationId])).map(project)
 }
 
-/** The encrypted credential a connection holds (Discord's webhook token), at the revision the caller read. */
-export async function readIntegrationCredential(db: DbClient, organizationId: string, provider: 'discord', revision: string): Promise<string> {
-  const row = await queryFirst<{ credential: string | null }>(db, 'SELECT credential FROM organization_integrations WHERE organization_id = ? AND provider = ? AND revision = ?', [organizationId, provider, revision])
-  if (!row?.credential) throw new HTTPError({ statusCode: 409, message: `The ${NAMES[provider]} changed. Read it again.` })
-  return row.credential
-}
-
 /** The organizations connected through one linked account. */
 export async function integrationsThroughAccount(db: DbClient, provider: IntegrationProvider, accountId: string): Promise<string[]> {
   return (await queryAll<{ organization_id: string }>(db, 'SELECT organization_id FROM organization_integrations WHERE provider = ? AND account_id = ? ORDER BY organization_id', [provider, accountId]))
@@ -56,15 +50,12 @@ export async function integrationsThroughAccount(db: DbClient, provider: Integra
 }
 
 export interface IntegrationSelection {
-  /** The Better Auth linked account; null only for Discord. */
-  account_id: string | null
+  account_id: string
   target_id: string
   target_name: string
   measurement_id?: string | null
   verified?: boolean | null
   verification_token?: string | null
-  /** Discord only: the webhook, its guild and its encrypted token. */
-  webhook?: { webhook_id: string; guild_id: string; credential: string } | null
 }
 
 /**
@@ -83,19 +74,18 @@ export async function storeIntegration(
 ): Promise<string> {
   const now = new Date().toISOString()
   const revision = crypto.randomUUID()
-  const fields = [selection.account_id, selection.target_id, selection.target_name, selection.webhook?.webhook_id ?? null, selection.webhook?.guild_id ?? null,
-    selection.webhook?.credential ?? null, selection.measurement_id ?? null,
+  const fields = [selection.account_id, selection.target_id, selection.target_name, selection.measurement_id ?? null,
     selection.verified === undefined || selection.verified === null ? null : Number(selection.verified), selection.verification_token ?? null, revision]
-  const replace = `account_id = ?, target_id = ?, target_name = ?, webhook_id = ?, guild_id = ?, credential = ?, measurement_id = ?, verified = ?, verification_token = ?, revision = ?, updated_at = ?`
-  const insert = `INSERT INTO organization_integrations (account_id, target_id, target_name, webhook_id, guild_id, credential, measurement_id, verified, verification_token, revision, updated_at, id, organization_id, provider, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  const replace = `account_id = ?, target_id = ?, target_name = ?, measurement_id = ?, verified = ?, verification_token = ?, revision = ?, updated_at = ?`
+  const insert = `INSERT INTO organization_integrations (account_id, target_id, target_name, measurement_id, verified, verification_token, revision, updated_at, id, organization_id, provider, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   const statement = expected?.revision
     ? { query: `UPDATE organization_integrations SET ${replace} WHERE organization_id = ? AND provider = ? AND revision = ?`, params: [...fields, now, organizationId, provider, expected.revision] }
     : expected
       // Only where nothing is connected: a row already there is a conflict.
       ? { query: `${insert} ON CONFLICT (organization_id, provider) DO NOTHING`, params: [...fields, now, crypto.randomUUID(), organizationId, provider, now] }
       : { query: `${insert} ON CONFLICT (organization_id, provider) DO UPDATE SET account_id = excluded.account_id, target_id = excluded.target_id, target_name = excluded.target_name,
-          webhook_id = excluded.webhook_id, guild_id = excluded.guild_id, credential = excluded.credential, measurement_id = excluded.measurement_id, verified = excluded.verified, verification_token = excluded.verification_token,
+          measurement_id = excluded.measurement_id, verified = excluded.verified, verification_token = excluded.verification_token,
           revision = excluded.revision, updated_at = excluded.updated_at`, params: [...fields, now, crypto.randomUUID(), organizationId, provider, now] }
   let changes: number | undefined
   try {
@@ -124,12 +114,12 @@ export async function deleteIntegration(db: DbClient, organizationId: string, pr
   return (result.meta?.changes ?? 0) > 0
 }
 
-/** What the dashboard shows of a connection: names and ids, never a token. */
+/** What the dashboard shows of a connection: names and ids, never the verification token. */
 export function integrationSummary(integration: OrganizationIntegration | null) {
   return integration && {
     account_id: integration.account_id, target_id: integration.target_id, target_name: integration.target_name,
-    webhook_id: integration.webhook_id, guild_id: integration.guild_id, revision: integration.revision,
     measurement_id: integration.measurement_id, verified: integration.verified,
+    status: integration.status, last_error: integration.last_error,
     // Choosing a property, Page or account writes the row, so `created_at` is when this connection was made.
     connected_at: integration.created_at,
   }

@@ -1,7 +1,6 @@
 import type { Subscription } from '@better-auth/stripe'
 import { HTTPError } from 'nitro'
 import { createAuth, type CloudflareEnv } from '~/server/utils/auth'
-import { betterAuthTimestampToIso } from '~/server/utils/better-auth-timestamps'
 import { getPlanEntitlements, type EntitlementsMap } from '~/server/utils/billing-entitlements'
 
 /**
@@ -71,31 +70,35 @@ export async function readOrganizationSubscriptions(
 }
 
 /**
- * The plan those rows name for one organization, by the rule at the top of
- * this file. Pure, so the single read above can answer both the plan and the
- * billing projection.
+ * The one subscription row that entitles this organization, by the rule at the
+ * top of this file, or null on free. Pure, so the single read above can answer
+ * the plan, its location quantity and the billing projection.
  */
+export function entitlingSubscription(
+  organizationId: string,
+  rows: Subscription[],
+  now = new Date(),
+): Subscription | null {
+  let current: Subscription | null = null
+  for (const row of rows) {
+    if (row.referenceId !== organizationId) continue
+    if (row.status !== 'active' && row.status !== 'trialing') continue
+    if (row.periodEnd != null) {
+      if (row.periodEnd.getTime() <= now.getTime()) continue
+    }
+    if (current) subscriptionStateInvalid(organizationId, 'has multiple current subscriptions')
+    if (!row.plan?.trim()) subscriptionStateInvalid(organizationId, `subscription ${row.id} has no plan`)
+    current = row
+  }
+  return current
+}
+
 export function planFromSubscriptions(
   organizationId: string,
   rows: Subscription[],
   now = new Date(),
 ): string {
-  let plan = FREE_PLAN
-  let found = false
-  for (const row of rows) {
-    if (row.referenceId !== organizationId) continue
-    if (row.status !== 'active' && row.status !== 'trialing') continue
-    if (row.periodEnd != null) {
-      const periodEnd = Date.parse(betterAuthTimestampToIso(row.periodEnd, 'subscription.periodEnd'))
-      if (periodEnd <= now.getTime()) continue
-    }
-    if (found) subscriptionStateInvalid(organizationId, 'has multiple current subscriptions')
-    found = true
-    const named = row.plan?.trim().toLowerCase()
-    if (!named) subscriptionStateInvalid(organizationId, `subscription ${row.id} has no plan`)
-    plan = named
-  }
-  return plan
+  return entitlingSubscription(organizationId, rows, now)?.plan.trim().toLowerCase() ?? FREE_PLAN
 }
 
 export async function getOrganizationPlans(

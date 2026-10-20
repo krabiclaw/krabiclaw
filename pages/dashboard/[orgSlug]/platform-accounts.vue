@@ -1,6 +1,6 @@
 <template>
-  <DashboardIndexPanel id="platform-accounts" title="Platform accounts">
-    <div class="mx-auto w-full max-w-3xl">
+  <DashboardIndexPanel id="platform-accounts" title="Platform accounts" column="reading">
+    <div>
       <div class="space-y-6">
         <p class="text-sm text-muted">
           Every account on the platform. Impersonating opens that person's dashboard exactly as they see it; use their
@@ -13,14 +13,13 @@
              it opens. Showing it never impersonates; the button does. -->
         <template v-if="target">
           <UAlert v-if="targetError" color="error" variant="soft" title="Could not open this customer" :description="getErrorMessage(targetError, 'Failed to load this account.')" />
-          <div v-else-if="targetUser && targetUser.id === target.userId" class="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-default bg-elevated p-4" data-testid="focused-account">
+          <UCard v-else-if="targetUser && targetUser.id === target.userId" variant="subtle" :ui="{ body: 'flex flex-wrap items-center justify-between gap-3' }" data-testid="focused-account">
             <div class="min-w-0">
               <p class="truncate text-base text-highlighted">{{ targetUser.name || targetUser.email }}</p>
               <p class="truncate text-sm text-muted">{{ targetUser.email }}</p>
             </div>
             <UButton
               size="sm"
-              color="primary"
               class="rounded-full"
               :disabled="targetUser.id === currentUserId"
               :loading="impersonatingUserId === targetUser.id"
@@ -28,7 +27,7 @@
             >
               Impersonate and open their business
             </UButton>
-          </div>
+          </UCard>
         </template>
 
         <UAlert v-if="loadError" color="error" variant="soft" title="Could not load accounts" :description="getErrorMessage(loadError, 'Failed to load accounts.')" />
@@ -73,7 +72,7 @@ import { canOpenPlatformAccounts } from '~/utils/platform-admin-access'
 // admin has: pick a person and act as them. It sits beside Team and Billing
 // because it is about accounts rather than about a site — under a site's URL it
 // read as "this site's people", which it has never been. It exists only inside
-// Krabiclaw's own organization and only for a Better Auth admin; anywhere else
+// KrabiClaw's own organization and only for a Better Auth admin; anywhere else
 // it is not a page, the same rule that decides Menu's row.
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
 
@@ -83,7 +82,7 @@ if (!dashboard.organization.value || !canOpenPlatformAccounts(dashboard.organiza
   throw createError({ statusCode: 404, statusMessage: 'Page not found' })
 }
 
-useSeoMeta({ title: 'Platform accounts | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Platform accounts | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 
 interface PlatformUser { id: string; name: string | null; email: string; role?: string | null; banned?: boolean | null }
 

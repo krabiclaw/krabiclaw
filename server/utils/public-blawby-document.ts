@@ -1,3 +1,4 @@
+import { getSourceLocale } from '~/server/utils/organization-locales'
 import { HTTPError, type H3Event } from 'nitro'
 import { setHeader } from 'nitro/h3'
 import { cloudflareEnv } from '~/server/utils/api-response'
@@ -36,7 +37,6 @@ export async function loadPublicBlawbyDocument(
 ): Promise<BlawbyDocumentPayload> {
   options.signal?.throwIfAborted()
   const slug = options.slug?.trim() || null
-  const locale = assertExactCanonicalLocale(options.locale === undefined ? 'en' : options.locale)
   if (!RECIPES.has(recipe)) {
     throw new HTTPError({ statusCode: 400, statusMessage: 'Valid Blawby route recipe required' })
   }
@@ -51,6 +51,7 @@ export async function loadPublicBlawbyDocument(
   const env = cloudflareEnv(event)
   const db = env.db
   if (!db) throw new HTTPError({ statusCode: 503, statusMessage: 'Database unavailable' })
+  const locale = assertExactCanonicalLocale(options.locale ?? await getSourceLocale(db, organizationId))
 
   const host = event.req.headers.get('host') ?? ''
   const cache = env.ORGANIZATION_CACHE

@@ -508,47 +508,39 @@ async function handleMessage(db: D1Database, env: ApiRecord, message: WhatsAppMe
       const text = messageText(message)
       const { photos, unshown } = sortGuestFiles(await messageFiles(env, message))
       if (text || photos.length || unshown.length) {
-        try {
-          const thread = await getGuestRequest(db, match.submissionId, undefined, match.submissionType)
+        const thread = await getGuestRequest(db, match.submissionId, undefined, match.submissionType)
+        if (!thread) throw new Error(`WhatsApp guest reply matched conversation ${match.submissionId}, which no longer exists`)
+        const entry = await appendEntry(db, {
+          threadId: thread.id,
+          kind: 'message',
+          actorKind: 'guest',
+          body: text || null,
+          payloadJson: unshown.length ? { unshownFiles: unshown } : null,
+          dedupeKey: `whatsapp:${message.id}`,
+        })
+        await attachGuestPhotos(db, env, match.organizationId, entry.id, photos)
+        await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id, { conversationState: 'needs_attention' })
+        // The guest's message is in the thread before the owner is alerted, so an alert that fails cannot hide it.
+        await publishGuestInboxThreadEvent(env, db, { threadId: thread.id, type: 'entry.appended' })
 
-          if (!thread) throw new Error('Submission not found')
-          const entry = await appendEntry(db, {
-            threadId: thread.id,
-            kind: 'message',
-            actorKind: 'guest',
-            body: text || null,
-            payloadJson: unshown.length ? { unshownFiles: unshown } : null,
-            dedupeKey: `whatsapp:${message.id}`,
-          })
-          await attachGuestPhotos(db, env, match.organizationId, entry.id, photos)
-          await updateThreadProjectionIfLatestEntry(db, thread.id, entry.id, { conversationState: 'needs_attention' })
-
-          const source = thread
-          if (source) {
-            const summary = await requestSummary(db, source)
-            await notifyGuestThreadReply(env, db, {
-              organizationId: match.organizationId,
-              locationId: summary.locationId,
-              threadId: thread.id,
-              sourceEntryId: entry.id,
-              submissionType: match.submissionType,
-              submissionId: match.submissionId,
-              guestName: summary.guestName,
-              guestEmail: summary.guestEmail,
-              guestPhone: summary.guestPhone,
-              inboundChannel: 'whatsapp',
-              messagePreview: messagePreview(text, photos.length),
-            })
-          }
-          await publishGuestInboxThreadEvent(env, db, { threadId: thread.id, type: 'entry.appended' })
-        } catch (err) {
-          console.error('[whatsapp] Failed to insert guest reply for submission:', err)
-          throw err
-        }
+        const summary = await requestSummary(db, thread)
+        await notifyGuestThreadReply(env, db, {
+          organizationId: match.organizationId,
+          locationId: summary.locationId,
+          threadId: thread.id,
+          sourceEntryId: entry.id,
+          submissionType: match.submissionType,
+          submissionId: match.submissionId,
+          participantLabel: summary.participantLabel,
+          guestEmail: summary.guestEmail,
+          guestPhone: summary.guestPhone,
+          inboundChannel: 'whatsapp',
+          messagePreview: messagePreview(text, photos.length),
+        })
       }
       return
     }
-    await reply(env, toPhone, `To continue, open Krabiclaw: ${platformLoginUrl(env)}`)
+    await reply(env, toPhone, `To continue, open KrabiClaw: ${platformLoginUrl(env)}`)
     return
   }
 

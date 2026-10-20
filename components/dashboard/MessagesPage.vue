@@ -1,6 +1,6 @@
 <template>
   <!-- Airbnb's Messages: the title, then the list with its own All / Unread pills. Updates is a choice in All. -->
-  <DashboardIndexPanel :id="personalScope ? 'account-messages' : 'organization-messages'" :title="pastOnly ? 'Past conversations' : 'Messages'" :auto-open="firstThread" :ui="{ body: 'p-0 sm:p-0 gap-0' }">
+  <DashboardIndexPanel :id="personalScope ? 'account-messages' : 'organization-messages'" :title="pastOnly ? 'Past conversations' : 'Messages'" :auto-open="firstThread" fill>
     <GuestThreadList :personal-scope="personalScope" @first="firstThread = $event" />
   </DashboardIndexPanel>
 </template>
@@ -12,5 +12,5 @@ defineProps<{ personalScope?: boolean }>()
 const route = useRoute()
 const pastOnly = computed(() => route.query.archived !== undefined && route.query.view !== 'updates')
 const firstThread = ref<RouteLocationRaw | null>(null)
-useSeoMeta({ title: 'Messages | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Messages | KrabiClaw', robots: 'noindex, nofollow' })
 </script>

@@ -15,12 +15,12 @@ import {
   createMediaContainer, getInstagramAccount, instagramAccessToken, publishContainer, readContainerStatus, readMedia, type InstagramTarget,
 } from '~/server/utils/instagram'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
-import { readIntegration, readIntegrationCredential } from '~/server/utils/organization-integrations'
+import { readIntegration } from '~/server/utils/organization-integrations'
 import {
-  decryptWebhookToken, discordMessageLink, DiscordError, executeWebhook, getWebhook, getWebhookMessage,
+  createMessage, discordMessageLink, DiscordError, getMessage, listMessages, readMessageChannel,
   DISCORD_ATTACHMENT_LIMIT, DISCORD_CONTENT_LIMIT, DISCORD_DESCRIPTION_LIMIT, DISCORD_FILE_LIMIT_BYTES, DISCORD_MEDIA_TYPES, DISCORD_REQUEST_LIMIT_BYTES,
-  type DiscordFile, type DiscordMessage, type DiscordWebhook,
-} from '~/server/utils/discord-webhooks'
+  type DiscordFile, type DiscordMessage,
+} from '~/server/utils/discord-bot'
 
 /**
  * Publishing a post to its website and to the Facebook Page, Instagram
@@ -37,10 +37,10 @@ import {
  * scheduler and no queue; an invocation does what fits in its budget and says
  * what it left.
  *
- * A Discord incoming webhook has nothing to prepare: the one call is Execute
- * Webhook, sent with `wait=true` so Discord answers with the message it saved.
- * It has no idempotency key, so a call whose answer was lost is `unknown` and
- * only a message someone names to reconcile_post_publication can resolve it.
+ * Discord has nothing to prepare: the KrabiClaw bot, added to the server when
+ * the owner linked Discord through Better Auth, creates the message in the
+ * chosen channel. Discord answers with the message it saved, and the
+ * publication's nonce makes a repeated create return that same message.
  */
 
 export const PUBLISH_BUDGET_MS = 30_000
@@ -102,9 +102,6 @@ interface ConnectionRead {
   targetName: string | null
   revision: string | null
   accountId: string | null
-  /** Discord only. */
-  webhookId: string | null
-  guildId: string | null
 }
 
 async function readConnection(env: CloudflareEnv, organizationId: string, channel: SocialChannel): Promise<ConnectionRead> {
@@ -113,7 +110,6 @@ async function readConnection(env: CloudflareEnv, organizationId: string, channe
     channel, connected: Boolean(connection), targetId: connection?.target_id ?? null,
     targetName: connection ? (channel === 'instagram' ? `@${connection.target_name}` : connection.target_name) : null,
     revision: connection?.revision ?? null, accountId: connection?.account_id ?? null,
-    webhookId: connection?.webhook_id ?? null, guildId: connection?.guild_id ?? null,
   }
 }
 
@@ -126,37 +122,26 @@ const SUPPORTED_FORMATS: Record<SocialChannel, string[]> = {
 const SUPPORTED_OPERATIONS: Record<SocialChannel, Array<'list' | 'read' | 'publish' | 'delete'>> = {
   facebook: ['list', 'read', 'publish', 'delete'],
   instagram: ['list', 'read', 'publish'],
-  // An incoming webhook can read and delete only messages it sent, by id; it cannot list channel history.
-  discord: ['read', 'publish', 'delete'],
+  discord: ['list', 'read', 'publish', 'delete'],
 }
 
 const NOT_CONNECTED: Record<SocialChannel, string> = {
   facebook: 'No Facebook Page is connected.',
   instagram: 'No Instagram professional account is connected.',
-  discord: 'No Discord channel webhook is connected.',
+  discord: 'No Discord channel is connected.',
 }
 
-/** The connected webhook, with its token read and decrypted at the revision the caller holds. */
-async function discordTargetFor(env: CloudflareEnv, organizationId: string, connection: ConnectionRead): Promise<DiscordConnection> {
-  if (connection.channel !== 'discord' || !connection.connected || !connection.targetId || !connection.webhookId || !connection.guildId || !connection.revision) throw new Error('The Discord connection is incomplete. Connect Discord again.')
-  const credential = await readIntegrationCredential(env.DB, organizationId, 'discord', connection.revision)
-  return { webhook: { webhookId: connection.webhookId, token: await decryptWebhookToken(env, credential) }, channelId: connection.targetId, guildId: connection.guildId }
-}
-
-export interface DiscordConnection { webhook: DiscordWebhook; channelId: string; guildId: string }
+export interface DiscordConnection { channelId: string; guildId: string }
 
 /**
- * The webhook as Discord reports it now must still be the incoming webhook,
- * guild and channel that were connected. A webhook moved to another channel, or
- * replaced, needs a new connection; nothing is sent through it until then.
+ * The connected channel as the bot sees it now. A channel the bot can no
+ * longer see, or that stopped being a text or announcement channel, needs a
+ * new connection; nothing is sent until then.
  */
-async function discordDestinationProblem(target: DiscordConnection, deadline?: MetaDeadline): Promise<{ code: string; message: string } | null> {
-  const info = await getWebhook(target.webhook, deadline)
-  if (info.type !== 1) return { code: 'not_incoming_webhook', message: 'The connected Discord webhook is no longer an incoming webhook. Connect Discord again.' }
-  if (info.guild_id !== target.guildId || info.channel_id !== target.channelId) {
-    return { code: 'destination_changed', message: 'The Discord webhook now posts to a different channel than the one connected. Connect Discord again to choose it.' }
-  }
-  return null
+async function discordTargetFor(env: CloudflareEnv, connection: ConnectionRead, deadline?: MetaDeadline): Promise<DiscordConnection> {
+  if (connection.channel !== 'discord' || !connection.connected || !connection.targetId) throw new Error('The Discord connection is incomplete. Connect Discord again.')
+  const channel = await readMessageChannel(env, connection.targetId, deadline)
+  return { channelId: channel.id, guildId: channel.guild_id }
 }
 
 /**
@@ -172,10 +157,7 @@ export async function getSocialConnections(env: CloudflareEnv, organizationId: s
     const problems: Array<{ code: string; message: string }> = []
     if (!entitled) problems.push({ code: 'growth_plan_required', message: GROWTH_PLAN_REQUIRED })
     if (!connection.connected) problems.push({ code: 'not_connected', message: NOT_CONNECTED[channel] })
-    else if (channel === 'discord') {
-      const access = await discordAccessProblem(env, organizationId, connection)
-      if (access) problems.push(access)
-    } else if (!connection.accountId || !(await readLinkedAccount(env, connection.accountId))) problems.push({ code: 'account_unlinked', message: `The ${channel} account this connection was made through is no longer linked. Connect it again.` })
+    else if (!connection.accountId || !(await readLinkedAccount(env, connection.accountId))) problems.push({ code: 'account_unlinked', message: `The ${channel} account this connection was made through is no longer linked. Connect it again.` })
     else {
       const access = await currentAccessProblem(env, connection)
       if (access) problems.push(access)
@@ -189,7 +171,6 @@ export async function getSocialConnections(env: CloudflareEnv, organizationId: s
       supported_formats: SUPPORTED_FORMATS[channel],
       supported_operations: SUPPORTED_OPERATIONS[channel],
       deletion_unavailable_reason: channel === 'instagram' ? 'Meta supports media deletion only with Facebook Login; this account uses Instagram Login. Delete it in Instagram.' : null,
-      listing_unavailable_reason: channel === 'discord' ? 'A Discord incoming webhook cannot read channel history. Read a message by the provider_post_id of its publication receipt.' : null,
       problems,
       connect_url: `${links.dashboardBase}/integrations/${channel}`,
     }
@@ -199,16 +180,6 @@ export async function getSocialConnections(env: CloudflareEnv, organizationId: s
 
 const GROWTH_PLAN_REQUIRED = 'Publishing to Facebook, Instagram and Discord requires the Growth plan.'
 
-/** Whether Discord still accepts the webhook and still posts it to the connected channel. */
-async function discordAccessProblem(env: CloudflareEnv, organizationId: string, connection: ConnectionRead): Promise<{ code: string; message: string } | null> {
-  try {
-    return await discordDestinationProblem(await discordTargetFor(env, organizationId, connection))
-  } catch (error) {
-    if (error instanceof DiscordError) return failureOf(error)
-    throw error
-  }
-}
-
 /**
  * Whether the saved connection still works, asked of Meta now: Facebook lists
  * the Pages assigned to the linked system user, Instagram reads the account
@@ -216,8 +187,12 @@ async function discordAccessProblem(env: CloudflareEnv, organizationId: string, 
  * owner can act on; any other failure is not, and is thrown.
  */
 async function currentAccessProblem(env: CloudflareEnv, connection: ConnectionRead): Promise<{ code: string; message: string } | null> {
-  if (connection.channel === 'discord') throw new Error('Discord access is read by discordAccessProblem')
   try {
+    if (connection.channel === 'discord') {
+      // The bot still sees the connected channel as a text or announcement channel.
+      await discordTargetFor(env, connection)
+      return null
+    }
     if (connection.channel === 'facebook') {
       const pages = await listLinkedFacebookPages(env, connection.accountId!)
       if (!pages.some(page => page.id === connection.targetId)) {
@@ -232,7 +207,7 @@ async function currentAccessProblem(env: CloudflareEnv, connection: ConnectionRe
     }
     return null
   } catch (error) {
-    if (error instanceof MetaGraphError) return failureOf(error)
+    if (error instanceof MetaGraphError || error instanceof DiscordError) return failureOf(error)
     throw error
   }
 }
@@ -244,12 +219,7 @@ export async function connectedSocialTarget(env: CloudflareEnv, organizationId: 
   if (!connection.connected) throw new HTTPError({ statusCode: 409, statusMessage: NOT_CONNECTED[target.channel] })
   if (connection.targetId !== target.target_id || connection.revision !== target.connection_revision) throw new HTTPError({ statusCode: 409, statusMessage: 'The channel connection changed; read get_social_connections again.' })
   if (target.channel === 'facebook') return { channel: 'facebook' as const, target: await facebookTargetFor(env, connection) }
-  if (target.channel === 'discord') {
-    const discord = await discordTargetFor(env, organizationId, connection)
-    const problem = await discordDestinationProblem(discord)
-    if (problem) throw new HTTPError({ statusCode: 409, statusMessage: problem.message })
-    return { channel: 'discord' as const, target: discord }
-  }
+  if (target.channel === 'discord') return { channel: 'discord' as const, target: await discordTargetFor(env, connection) }
   if (!connection.targetName?.startsWith('@') || connection.targetName.length < 2) throw new Error('The Instagram connection has no username. Connect Instagram again.')
   return { channel: 'instagram' as const, target: await instagramTargetFor(env, connection), username: connection.targetName.slice(1) }
 }
@@ -328,8 +298,7 @@ interface PublicationRecord {
   organization_id: string
   post_id: string | null
   channel: SocialChannel
-  /** Null for Discord, whose messages have no OAuth application. */
-  provider_app_id: string | null
+  provider_app_id: string
   provider_subject_id: string
   provider_target_id: string
   state: 'preparing' | 'publishing' | 'published' | 'failed' | 'unknown' | 'removed'
@@ -450,9 +419,6 @@ function outcome(context: ChannelContext, status: PublishOutcomeStatus, extra: P
 /** The provider's failure, as publications and channel tools report it. */
 export function failureOf(error: unknown): { code: string; message: string } {
   if (error instanceof MetaGraphError || error instanceof DiscordError) {
-    if (error instanceof DiscordError && error.threadRequired) {
-      return { code: 'unsupported_destination', message: 'The Discord webhook posts to a forum or media channel, which needs a thread. Connect a webhook of an ordinary text channel.' }
-    }
     if (error instanceof DiscordError && error.failure === 'rate_limited') {
       return { code: 'rate_limited', message: `${error.message}. Nothing was sent; try again${error.retryAfterMs !== null ? ` in ${Math.ceil(error.retryAfterMs / 1000)} seconds` : ' later'}.` }
     }
@@ -613,7 +579,7 @@ async function discordFiles(post: Post, deadline: MetaDeadline): Promise<Discord
   for (const [index, item] of post.media.entries()) {
     const remaining = deadline.remaining()
     if (remaining <= 250) throw new DiscordError('transport', 'The operation ran out of time while reading the post media')
-    const response = await fetch(item.public_url, { redirect: 'follow', signal: AbortSignal.timeout(Math.min(20_000, remaining)) })
+    const response = await fetch(item.public_url, { redirect: 'follow' })
     if (!response.ok) throw new Error(`Asset ${item.asset_id} could not be read from ${item.public_url}: HTTP ${response.status}`)
     const type = (response.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase()
     if (DISCORD_MEDIA_TYPES[type] !== item.kind) return { code: 'unsupported_media_type', message: `Asset ${item.asset_id} is served as ${type || 'an unknown type'}, which is not a Discord ${item.kind} format here` }
@@ -640,21 +606,19 @@ async function discordFiles(post: Post, deadline: MetaDeadline): Promise<Discord
   return files
 }
 
-/** The confirmed message is this publication's only when it is in the connected channel, sent by the connected webhook. */
-function discordMessageMismatch(message: DiscordMessage, publication: Pick<PublicationRecord, 'provider_subject_id' | 'provider_target_id'>): string | null {
-  if (message.channel_id !== publication.provider_target_id) return `Discord saved message ${message.id} in channel ${message.channel_id}, not the connected channel ${publication.provider_target_id}.`
-  if (message.webhook_id !== publication.provider_subject_id) return `Discord message ${message.id} was not sent by the connected webhook.`
+/** A message is this publication's only when the KrabiClaw bot sent it to the connected channel. */
+function discordMessageMismatch(env: CloudflareEnv, message: DiscordMessage, channelId: string): string | null {
+  if (message.channel_id !== channelId) return `Discord message ${message.id} is in channel ${message.channel_id}, not the connected channel ${channelId}.`
+  if (message.author.id !== env.DISCORD_CLIENT_ID) return `Discord message ${message.id} was not sent by the KrabiClaw bot.`
   return null
 }
 
+/** Discord's nonce is at most 25 characters; the publication id is its identity. */
+const discordNonce = (publicationId: string) => publicationId.replaceAll('-', '').slice(0, 25)
+
 async function publishToDiscord(context: ChannelContext, target: DiscordConnection): Promise<ChannelResult> {
-  const { deadline } = context
+  const { env, deadline } = context
   const fence = claimed(context.db, context.publication.id, context.attemptId)
-  const problem = await discordDestinationProblem(target, deadline)
-  if (problem) {
-    await fence.failed(problem.code, problem.message, {})
-    return outcome(context, 'failed', problem)
-  }
   const files = await discordFiles(context.post, deadline)
   if (!Array.isArray(files)) {
     await fence.failed(files.code, files.message, {})
@@ -665,7 +629,7 @@ async function publishToDiscord(context: ChannelContext, target: DiscordConnecti
   await fence.beginFinal()
   let message: DiscordMessage
   try {
-    message = await executeWebhook(target.webhook, { content: context.caption, files }, deadline)
+    message = await createMessage(env, target.channelId, { content: context.caption, files, nonce: discordNonce(context.publication.id) }, deadline)
   } catch (error) {
     if (error instanceof DiscordError && error.failure === 'rate_limited') {
       // Discord's 429 says nothing was sent: the publication is ready to send again.
@@ -674,14 +638,14 @@ async function publishToDiscord(context: ChannelContext, target: DiscordConnecti
     }
     throw error
   }
-  const mismatch = discordMessageMismatch(message, context.publication)
+  const mismatch = discordMessageMismatch(env, message, target.channelId)
   if (mismatch) {
-    // Sent, but not to the channel this publication names: it is not published there.
-    await fence.failed('destination_mismatch', `${mismatch} Check that channel, then connect Discord again.`, {})
+    await fence.failed('destination_mismatch', mismatch, {})
     return outcome(context, 'failed', { code: 'destination_mismatch', message: mismatch })
   }
-  await fence.published({ providerPostId: message.id, permalink: discordMessageLink(target.guildId, message.channel_id, message.id), publishedAt: instantOf(message.timestamp), handles: {} })
-  return outcome(context, 'published', { public_url: discordMessageLink(target.guildId, message.channel_id, message.id) })
+  const link = discordMessageLink(target.guildId, message.channel_id, message.id)
+  await fence.published({ providerPostId: message.id, permalink: link, publishedAt: instantOf(message.timestamp), handles: {} })
+  return outcome(context, 'published', { public_url: link })
 }
 
 /**
@@ -758,10 +722,17 @@ async function discardPreparation(env: CloudflareEnv, organizationId: string, pu
   for (const id of ids) await deletePageObject(target, id, deadline)
 }
 
+/** The provider application a publication is made through: Meta's app, or KrabiClaw's Discord application. */
+function providerAppId(env: CloudflareEnv, channel: SocialChannel): string {
+  const [name, value] = channel === 'facebook' ? ['FACEBOOK_APP_ID', env.FACEBOOK_APP_ID] : channel === 'instagram' ? ['INSTAGRAM_APP_ID', env.INSTAGRAM_APP_ID] : ['DISCORD_CLIENT_ID', env.DISCORD_CLIENT_ID]
+  if (typeof value !== 'string' || !value) throw new Error(`${name} is not configured`)
+  return value
+}
+
 /** Claims the publication row for this invocation, or says why it cannot. */
 async function claimPublication(
   db: DbClient, env: CloudflareEnv, organizationId: string, post: Post,
-  target: Extract<PublishTarget, { channel: SocialChannel }>, identity: { appId: string | null; subjectId: string }, payloadHash: string, deadline: MetaDeadline,
+  target: Extract<PublishTarget, { channel: SocialChannel }>, identity: { appId: string; subjectId: string }, payloadHash: string, deadline: MetaDeadline,
 ): Promise<{ publication: PublicationRecord; attemptId: string } | PublishOutcome> {
   const attemptId = crypto.randomUUID()
   const existing = await readPublication(db, organizationId, { postId: post.id, channel: target.channel })
@@ -805,19 +776,11 @@ async function publishExternal(
 ): Promise<PublishOutcome> {
   const connection = await readConnection(env, organizationId, target.channel)
   if (!connection.connected || connection.targetId !== target.target_id || connection.revision !== target.connection_revision) return { channel: target.channel, target_id: target.target_id, status: 'failed', code: 'connection_changed', message: 'The channel connection changed; read get_social_connections again.' }
-  let identity: { appId: string | null; subjectId: string }
-  if (target.channel === 'discord') {
-    // The webhook that sends the message is its author; Discord has no application or account here.
-    identity = { appId: null, subjectId: connection.webhookId! }
-  } else {
-    const account = connection.accountId ? await readLinkedAccount(env, connection.accountId) : null
-    if (!account) return { channel: target.channel, target_id: target.target_id, status: 'skipped', code: 'account_unlinked', message: `The ${target.channel} account behind this connection is no longer linked. Connect it again.` }
-    const appId = target.channel === 'facebook' ? env.FACEBOOK_APP_ID : env.INSTAGRAM_APP_ID
-    if (typeof appId !== 'string' || !appId) throw new Error(`${target.channel === 'facebook' ? 'FACEBOOK_APP_ID' : 'INSTAGRAM_APP_ID'} is not configured`)
-    identity = { appId, subjectId: account.providerAccountId }
-  }
+  const account = connection.accountId ? await readLinkedAccount(env, connection.accountId) : null
+  if (!account) return { channel: target.channel, target_id: target.target_id, status: 'skipped', code: 'account_unlinked', message: `The ${target.channel} account behind this connection is no longer linked. Connect it again.` }
+  const appId = providerAppId(env, target.channel)
   const payloadHash = await postPayloadFingerprint(post, { channel: target.channel, target_id: target.target_id })
-  const claim = await claimPublication(db, env, organizationId, post, target, identity, payloadHash, deadline)
+  const claim = await claimPublication(db, env, organizationId, post, target, { appId, subjectId: account.accountId }, payloadHash, deadline)
   if (!('attemptId' in claim)) return claim
   const context: ChannelContext = {
     db, env, organizationId, post, caption: providerCaption(post.body, post.call_to_action), publication: claim.publication,
@@ -826,7 +789,7 @@ async function publishExternal(
   const fence = claimed(db, claim.publication.id, claim.attemptId)
   try {
     if (target.channel === 'facebook') return await publishToFacebook(context, await facebookTargetFor(env, connection))
-    if (target.channel === 'discord') return await publishToDiscord(context, await discordTargetFor(env, organizationId, connection))
+    if (target.channel === 'discord') return await publishToDiscord(context, await discordTargetFor(env, connection, deadline))
     return await publishToInstagram(context, await instagramTargetFor(env, connection))
   } catch (error) {
     if (error instanceof ClaimLost) return outcome(context, 'processing', { code: 'claim_lost', message: error.message })
@@ -888,7 +851,9 @@ export async function publishPost(
 
   for (const target of input.targets) {
     if (target.channel === 'organization') {
-      if (post.status === 'published') outcomes.push({ channel: 'organization', target_id: organizationId, status: 'already_published', public_url: post.canonical_url })
+      if (post.status === 'published') outcomes.push(post.canonical_url
+        ? { channel: 'organization', target_id: organizationId, status: 'already_published', public_url: post.canonical_url }
+        : { channel: 'organization', target_id: organizationId, status: 'failed', code: 'website_publication_incomplete', message: 'The post has no published website URL' })
       else if (stale) outcomes.push(staleOutcome('organization', organizationId))
       else if (!publishable(post)) outcomes.push({ channel: 'organization', target_id: organizationId, status: 'failed', code: 'empty_post', message: 'A post needs words, media or a call to action before it can be published' })
       else publishWebsite = true
@@ -896,6 +861,7 @@ export async function publishPost(
     }
     const existing = post.publications.find(publication => publication.channel === target.channel)
     let record = existing ? await readPublication(db, organizationId, { id: existing.id }) : null
+    if (existing && !record) throw new HTTPError({ statusCode: 404, statusMessage: 'Publication not found' })
     // An invocation that died after its final call began left `publishing`
     // behind; once its claim is stale that is an unconfirmed final call, and
     // only reconciliation may say what became of it.
@@ -904,6 +870,7 @@ export async function publishPost(
           error_message = 'The call that was publishing this stopped before it confirmed the result', updated_at = ?
         WHERE id = ? AND state = 'publishing' AND updated_at = ?`, [nowIso(), record.id, record.updated_at])
       record = await readPublication(db, organizationId, { id: record.id })
+      if (!record) throw new HTTPError({ statusCode: 404, statusMessage: 'Publication not found' })
     }
     if (record && record.provider_target_id !== target.target_id) {
       outcomes.push({ channel: target.channel, target_id: target.target_id, status: 'failed', publication_id: record.id, code: 'target_conflict',
@@ -942,7 +909,10 @@ export async function publishPost(
     publicResourceCacheInvalidationQuery(organizationId, 'post-publish')])
     if (Number(result?.meta.changes ?? 0) === 1) {
       const published = await getPost(db, env, organizationId, postId)
-      outcomes.push({ channel: 'organization', target_id: organizationId, status: 'published', public_url: published?.canonical_url ?? null })
+      if (!published) throw new HTTPError({ statusCode: 404, statusMessage: 'Post not found' })
+      outcomes.push(published.status === 'published' && published.canonical_url
+        ? { channel: 'organization', target_id: organizationId, status: 'published', public_url: published.canonical_url }
+        : { channel: 'organization', target_id: organizationId, status: 'failed', code: 'website_publication_incomplete', message: 'The post has no published website URL' })
     } else {
       outcomes.push(staleOutcome('organization', organizationId))
     }
@@ -952,10 +922,11 @@ export async function publishPost(
   const order = input.targets.map(target => target.channel)
   outcomes.sort((a, b) => order.indexOf(a.channel) - order.indexOf(b.channel))
   const current = await queryFirst<{ updated_at: string }>(db, 'SELECT updated_at FROM content_documents WHERE id = ?', [postId])
+  if (!current) throw new HTTPError({ statusCode: 404, statusMessage: 'Post not found' })
   return {
     ok: outcomes.length === input.targets.length && outcomes.every(item => item.status === 'published' || item.status === 'already_published'),
     post_id: postId,
-    updated_at: current?.updated_at ?? post.updated_at,
+    updated_at: current.updated_at,
     outcomes,
   }
 }
@@ -976,17 +947,12 @@ export async function reconcilePostPublication(env: CloudflareEnv, organizationI
     throw new HTTPError({ statusCode: 409, statusMessage: `This publication is ${publication.provider_post_id}; ${providerPostId} is a different ${publication.channel} post` })
   }
   const connection = await readConnection(env, organizationId, publication.channel)
-  const notConnected = () => new HTTPError({ statusCode: 409, statusMessage: `Reconciling needs the ${publication.channel} connection that made this publication (target ${publication.provider_target_id}); it is not connected now` })
-  if (publication.channel === 'discord') {
-    if (!connection.connected || connection.targetId !== publication.provider_target_id || connection.webhookId !== publication.provider_subject_id) throw notConnected()
-    return await reconcileDiscordPublication(env, organizationId, publication, await discordTargetFor(env, organizationId, connection), providerPostId)
-  }
   const account = connection.accountId ? await readLinkedAccount(env, connection.accountId) : null
-  const appId = publication.channel === 'facebook' ? env.FACEBOOK_APP_ID : env.INSTAGRAM_APP_ID
   if (!connection.connected || connection.targetId !== publication.provider_target_id || !account
-    || account.providerAccountId !== publication.provider_subject_id || appId !== publication.provider_app_id) {
-    throw notConnected()
+    || account.accountId !== publication.provider_subject_id || providerAppId(env, publication.channel) !== publication.provider_app_id) {
+    throw new HTTPError({ statusCode: 409, statusMessage: `Reconciling needs the ${publication.channel} connection that made this publication (target ${publication.provider_target_id}); it is not connected now` })
   }
+  if (publication.channel === 'discord') return await reconcileDiscordPublication(env, organizationId, publication, await discordTargetFor(env, connection), providerPostId)
   const deadline = new MetaDeadline(PUBLISH_BUDGET_MS)
   const handles = JSON.parse(publication.provider_handles_json) as Handles
   const record = async (state: 'published' | 'preparing' | 'failed', fields: { providerPostId?: string | null; permalink?: string | null; publishedAt?: string | null; code?: string; message?: string }) => {
@@ -1029,45 +995,52 @@ export async function reconcilePostPublication(env: CloudflareEnv, organizationI
     }
   }
   const updated = await readPublication(db, organizationId, { id: publicationId })
-  return { publication: updated ? receipt(updated) : null, state: updated?.state ?? null }
+  if (!updated) throw new HTTPError({ statusCode: 404, statusMessage: 'Publication not found' })
+  return { publication: receipt(updated), state: updated.state }
 }
 
-/** How far a Discord message's own timestamp may sit outside the attempt that may have sent it. */
-const DISCORD_CLOCK_SKEW_MS = 60_000
-
 /**
- * Discord has no idempotency key and an incoming webhook cannot list the
- * channel, so an unconfirmed send is resolved only by a message someone names.
- * It is attached only when the connected webhook can read it and it is
- * exactly what this attempt sent: the same channel, the same webhook, the same
- * text, the same attachments in order, and a time inside the attempt. Anything
- * less is refused and the publication stays as it was.
+ * Reads the connected channel for what one Discord publication sent. A
+ * supplied `provider_post_id` is read and must be the bot's message in that
+ * channel. Without one, the bot's messages sent since the publication began
+ * are searched for exactly this post's text and media in order; one match is
+ * the publication, and none or several leaves it unknown.
  */
 async function reconcileDiscordPublication(env: CloudflareEnv, organizationId: string, publication: PublicationRecord, target: DiscordConnection, providerPostId: string | null) {
   const db = env.DB as DbClient
   if (publication.state !== 'unknown' && publication.state !== 'published') {
     throw new HTTPError({ statusCode: 409, statusMessage: `This Discord publication is ${publication.state}; only an unknown or published one is reconciled` })
   }
-  const messageId = providerPostId ?? publication.provider_post_id
-  if (!messageId) {
-    throw new HTTPError({ statusCode: 400, statusMessage: 'Discord cannot be searched for the message this attempt may have sent. Find it in the channel and supply its message id as provider_post_id; without one the outcome stays unknown.' })
-  }
   const deadline = new MetaDeadline(PUBLISH_BUDGET_MS)
-  const message = await readDiscordMessage(target, messageId, deadline)
-  if (publication.state !== 'published') {
+  const messageId = providerPostId ?? publication.provider_post_id
+  let message: DiscordMessage | null
+  if (messageId) {
+    message = await readDiscordMessage(env, target, messageId, deadline)
+  } else {
     const post = publication.post_id ? await getPost(db, env, organizationId, publication.post_id) : null
-    if (!post) throw new HTTPError({ statusCode: 409, statusMessage: 'The website post this publication sent is gone, so the message cannot be compared with it' })
-    if (await postPayloadFingerprint(post, { channel: 'discord', target_id: publication.provider_target_id }) !== publication.payload_hash) {
-      throw new HTTPError({ statusCode: 409, statusMessage: 'The post changed after this attempt, so the message cannot be compared with what was sent' })
+    if (!post || await postPayloadFingerprint(post, { channel: 'discord', target_id: publication.provider_target_id }) !== publication.payload_hash) {
+      throw new HTTPError({ statusCode: 409, statusMessage: 'The post changed or is gone since this attempt, so the channel cannot be searched for what it sent. Supply the Discord message id.' })
     }
-    if (message.content !== providerCaption(post.body, post.call_to_action)) throw new HTTPError({ statusCode: 409, statusMessage: `Discord message ${message.id} does not carry this post's text` })
-    const expected = post.media.map((item, index) => `${index + 1}-${item.asset_id}.`)
-    if (message.attachments.length !== expected.length || message.attachments.some((attachment, index) => !attachment.filename.startsWith(expected[index]!))) {
-      throw new HTTPError({ statusCode: 409, statusMessage: `Discord message ${message.id} does not carry this post's media in order` })
+    const caption = providerCaption(post.body, post.call_to_action)
+    const since = Date.parse(publication.created_at)
+    const matches = (candidate: DiscordMessage) => !discordMessageMismatch(env, candidate, target.channelId) && Date.parse(candidate.timestamp) >= since
+      && candidate.content === caption && candidate.attachments.length === post.media.length
+      && candidate.attachments.every((attachment, index) => attachment.filename.startsWith(`${index + 1}-${post.media[index]!.asset_id}.`))
+    // Newest first, page by page, back to when the publication began.
+    const sent: DiscordMessage[] = []
+    let before: string | null = null
+    let complete = false
+    while (deadline.remaining() > 5_000) {
+      const page = await listMessages(env, target.channelId, { before, limit: 100 }, deadline)
+      sent.push(...page.filter(matches))
+      if (page.length < 100 || Date.parse(page.at(-1)!.timestamp) < since) { complete = true; break }
+      before = page.at(-1)!.id
     }
-    const sentAt = Date.parse(message.timestamp)
-    if (!Number.isFinite(sentAt) || sentAt < Date.parse(publication.created_at) - DISCORD_CLOCK_SKEW_MS || sentAt > Date.parse(publication.updated_at) + DISCORD_CLOCK_SKEW_MS) {
-      throw new HTTPError({ statusCode: 409, statusMessage: `Discord message ${message.id} was sent at ${message.timestamp}, outside this publication attempt` })
+    message = complete && sent.length === 1 ? sent[0]! : null
+    if (!message) {
+      return { publication: receipt(publication), state: publication.state, message: !complete
+        ? 'The channel has more messages since this attempt than one check can read; check again.'
+        : sent.length ? `${sent.length} messages match this post; supply the Discord message id.` : 'No message of this post is in the channel; it stays unknown.' }
     }
   }
   const result = await execute(db, `UPDATE post_publications SET state = 'published', attempt_id = NULL, provider_post_id = ?, provider_permalink = ?,
@@ -1076,19 +1049,21 @@ async function reconcileDiscordPublication(env: CloudflareEnv, organizationId: s
   [message.id, discordMessageLink(target.guildId, message.channel_id, message.id), instantOf(message.timestamp), nowIso(), publication.id, publication.updated_at])
   if (Number(result.meta?.changes ?? 0) !== 1) throw new HTTPError({ statusCode: 409, statusMessage: 'The publication changed while it was being reconciled; read it again' })
   const updated = await readPublication(db, organizationId, { id: publication.id })
-  return { publication: updated ? receipt(updated) : null, state: updated?.state ?? null }
+  if (!updated) throw new HTTPError({ statusCode: 404, statusMessage: 'Publication not found' })
+  return { publication: receipt(updated), state: updated.state }
 }
 
-/** One message the connected webhook sent to the connected channel, read through that webhook; anything else is refused. */
-export async function readDiscordMessage(target: DiscordConnection, messageId: string, deadline: MetaDeadline): Promise<DiscordMessage> {
+/** One message the KrabiClaw bot sent to the connected channel; anything else is refused. */
+export async function readDiscordMessage(env: CloudflareEnv, target: DiscordConnection, messageId: string, deadline: MetaDeadline): Promise<DiscordMessage> {
+  if (!/^\d{15,25}$/.test(messageId)) throw new HTTPError({ statusCode: 400, statusMessage: 'A Discord message id is a numeric snowflake.' })
   let message: DiscordMessage
   try {
-    message = await getWebhookMessage(target.webhook, messageId, deadline)
+    message = await getMessage(env, target.channelId, messageId, deadline)
   } catch (error) {
-    if (error instanceof DiscordError && error.messageMissing) throw new HTTPError({ statusCode: 404, statusMessage: `The connected Discord webhook has no message ${messageId}` })
+    if (error instanceof DiscordError && error.objectMissing) throw new HTTPError({ statusCode: 404, statusMessage: `The connected Discord channel has no message ${messageId}` })
     throw error
   }
-  const mismatch = discordMessageMismatch(message, { provider_subject_id: target.webhook.webhookId, provider_target_id: target.channelId })
+  const mismatch = discordMessageMismatch(env, message, target.channelId)
   if (mismatch) throw new HTTPError({ statusCode: 409, statusMessage: mismatch })
   return message
 }

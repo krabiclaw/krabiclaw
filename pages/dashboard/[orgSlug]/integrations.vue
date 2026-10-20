@@ -6,24 +6,25 @@
   -->
   <DashboardIndexPanel id="organization-integrations" title="Integrations" :auto-open="items[0]?.to ?? null">
     <UAlert v-if="error" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="error.message" />
-    <EditorNavigationList v-else :groups="[{ id: 'integrations', items }]" :active-item="level.child.value" />
+    <EditorNavigationList v-else :groups="groups" :active-item="level.child.value" />
   </DashboardIndexPanel>
 </template>
 
 <script lang="ts">
 import type { InjectionKey, Ref } from 'vue'
 
-/** A connected Page, account, property, site or Discord channel, as the settings payload names it. */
+/** A connected Page, account, property, site or channel, as the settings payload names it. */
 export interface ConnectedIntegration {
-  account_id: string | null
+  account_id: string
   target_id: string
   target_name: string
-  webhook_id: string | null
-  guild_id: string | null
-  revision: string
   measurement_id: string | null
   verified: boolean | null
+  status: 'active' | 'disabled' | 'error' | null
+  last_error: string | null
   connected_at: string
+  /** Whose linked account the connection acts through. */
+  connected_through: { email: string | null; name: string | null } | null
 }
 
 export interface IntegrationsSummary {
@@ -40,12 +41,14 @@ export interface IntegrationsSummary {
     review_count: number | null
     last_synced_at: string | null
   }>
-  google_calendar: { account_id: string; calendar_name: string; status: 'active' | 'disabled' | 'error'; connected_at: string } | null
+  google_calendar: { account_id: string; calendar_name: string; status: 'active' | 'disabled' | 'error'; last_error: string | null; connected_at: string; connected_through: { email: string | null; name: string | null } | null } | null
   google_analytics: ConnectedIntegration | null
+  google_ads: ConnectedIntegration | null
   google_search_console: ConnectedIntegration | null
   facebook: ConnectedIntegration | null
   instagram: ConnectedIntegration | null
   discord: ConnectedIntegration | null
+  airbnb: { status: string; connected_at: string | null } | null
 }
 
 /** The summary the list shows, and what a leaf refreshes after it changes a connection. */
@@ -60,9 +63,10 @@ export const integrationsKey = Symbol('integrations') as InjectionKey<{
 
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
+import { INTEGRATIONS, INTEGRATION_GROUP_LABELS, type IntegrationKey } from '~/shared/integrations'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
-useSeoMeta({ title: 'Integrations | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Integrations | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 
 const route = useRoute()
 const level = useRouteLevel()
@@ -79,33 +83,52 @@ const { data: summary, error, refresh } = await useAsyncData(
   async () => (await dashboardApi('/api/dashboard/settings', { validate: isSummaryResponse })).settings.integrations,
 )
 
-// A connection that exists names what it is connected to.
-const connection = (value: ConnectedIntegration | null, name = value?.target_name): Pick<EditorNavigationItem, 'summary' | 'status'> =>
-  value ? { summary: name, status: 'success' } : { summary: 'Not connected', status: 'neutral' }
+// A row says what the connection is and how it is: the target it names, a dot
+// for working or failing, and the plan it waits on when the plan lacks it.
+const connection = (value: ConnectedIntegration | null, name = value?.target_name): Pick<EditorNavigationItem, 'summary' | 'status'> => {
+  if (!value) return { summary: 'Not connected', status: 'neutral' }
+  if (value.status === 'error') return { summary: `${name} · Needs attention`, status: 'error' }
+  return { summary: name, status: 'success' }
+}
 
-const items = computed<EditorNavigationItem[]>(() => {
+const rows = computed<Record<IntegrationKey, Pick<EditorNavigationItem, 'summary' | 'status'>>>(() => {
   const s = summary.value
   const maps = s?.google_maps ?? []
   const connected = maps.filter(location => location.google_place_id).length
-  return [
-    { id: 'google-maps', label: 'Google Maps', lead: { icon: 'i-logos-google-maps' }, to: `${base.value}/google-maps`,
-      ...(maps.length
-        ? { summary: `${connected} of ${maps.length} ${maps.length === 1 ? 'location' : 'locations'} connected`, status: connected ? 'success' as const : 'neutral' as const }
-        : { summary: 'No locations yet' }) },
-    { id: 'google-analytics', label: 'Google Analytics', lead: { icon: 'i-logos-google-analytics' }, to: `${base.value}/google-analytics`,
-      ...connection(s?.google_analytics ?? null) },
-    { id: 'google-search-console', label: 'Google Search Console', lead: { icon: 'i-logos-google-search-console' }, to: `${base.value}/google-search-console`,
-      ...connection(s?.google_search_console ?? null) },
-    { id: 'google-calendar', label: 'Google Calendar', lead: { icon: 'i-lucide-calendar-days' }, to: `${base.value}/google-calendar`,
-      ...(s?.google_calendar ? { summary: s.google_calendar.calendar_name, status: s.google_calendar.status === 'active' ? 'success' as const : 'error' as const } : { summary: 'Not connected' }) },
-    { id: 'facebook', label: 'Facebook', lead: { icon: 'i-logos-facebook' }, to: `${base.value}/facebook`,
-      ...connection(s?.facebook ?? null) },
-    { id: 'instagram', label: 'Instagram', lead: { icon: 'i-skill-icons-instagram' }, to: `${base.value}/instagram`,
-      ...connection(s?.instagram ?? null, s?.instagram ? `@${s.instagram.target_name}` : undefined) },
-    { id: 'discord', label: 'Discord', lead: { icon: 'i-logos-discord-icon' }, to: `${base.value}/discord`,
-      ...connection(s?.discord ?? null, s?.discord ? `#${s.discord.target_name}` : undefined) },
-  ]
+  const calendar = s?.google_calendar
+  return {
+    'google-maps': maps.length
+      ? { summary: `${connected} of ${maps.length} ${maps.length === 1 ? 'location' : 'locations'} connected`, status: connected ? 'success' : 'neutral' }
+      : { summary: 'No locations yet' },
+    'google-analytics': connection(s?.google_analytics ?? null),
+    'google-ads': connection(s?.google_ads ?? null),
+    'google-search-console': connection(s?.google_search_console ?? null),
+    'google-calendar': calendar
+      ? { summary: calendar.status === 'error' ? `${calendar.calendar_name} · Needs attention` : calendar.calendar_name, status: calendar.status === 'active' ? 'success' : 'error' }
+      : { summary: 'Not connected', status: 'neutral' },
+    'facebook': connection(s?.facebook ?? null),
+    'instagram': connection(s?.instagram ?? null, s?.instagram ? `@${s.instagram.target_name}` : undefined),
+    'discord': connection(s?.discord ?? null, s?.discord ? `#${s.discord.target_name}` : undefined),
+    'airbnb': (() => {
+      const a = s?.airbnb
+      if (!a || a.status === 'not_connected') return { summary: 'Not connected', status: 'neutral' as const }
+      if (a.status === 'connected') return { summary: 'Connected', status: 'success' as const }
+      if (a.status === 'needs_review') return { summary: 'Needs review', status: 'error' as const }
+      return { summary: a.status, status: 'neutral' as const }
+    })(),
+  }
 })
+
+const items = computed<EditorNavigationItem[]>(() => INTEGRATIONS.map(definition => ({
+  id: definition.key, label: definition.name, lead: { icon: definition.logo }, to: `${base.value}/${definition.key}`,
+  ...rows.value[definition.key],
+})))
+
+// Grouped by the job the connection does, under its own heading (DESIGN.md: rows on the pane, no cards).
+const groups = computed(() => (Object.keys(INTEGRATION_GROUP_LABELS) as Array<keyof typeof INTEGRATION_GROUP_LABELS>).map(group => ({
+  id: group, label: INTEGRATION_GROUP_LABELS[group],
+  items: items.value.filter(item => INTEGRATIONS.find(definition => definition.key === item.id)?.group === group),
+})))
 
 provide(integrationsKey, {
   organizationId,

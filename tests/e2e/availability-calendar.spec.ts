@@ -27,6 +27,13 @@ test('concurrent guests cannot claim the same final reservation seat', async ({ 
     const today = new Date()
     const date = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 21)).toISOString().slice(0, 10)
 
+    const original = await page.request.get(configUrl)
+    expect(original.status()).toBe(200)
+    const priorPolicy = (await original.json()).config
+    const priorDuration = priorPolicy.duration_minutes
+    const duration = await page.request.put(configUrl, { data: { duration_minutes: 60, expected_updated_at: priorPolicy.updated_at } })
+    expect(duration.status(), await duration.text()).toBe(200)
+
     const read = await page.request.get(availabilityUrl, { params: { from: date, to: date }, headers: devLoginHeaders() ?? {} })
     expect(read.status(), await read.text()).toBe(200)
     const { days }: { days: Day[] } = await read.json()
@@ -39,12 +46,13 @@ test('concurrent guests cannot claim the same final reservation seat', async ({ 
     // comes from.
     const priorConfig = await page.request.get(configUrl, { headers: devLoginHeaders() ?? {} })
     expect(priorConfig.status(), await priorConfig.text()).toBe(200)
-    const priorCapacity = (await priorConfig.json()).config?.slot_capacity ?? null
+    const configuredPolicy = (await priorConfig.json()).config
+    const priorCapacity = configuredPolicy.slot_capacity
 
     const capacity = slot!.claimed + 1
     const configured = await page.request.put(configUrl, {
       headers: devLoginHeaders() ?? {},
-      data: { slot_capacity: capacity },
+      data: { slot_capacity: capacity, expected_updated_at: configuredPolicy.updated_at },
     })
     expect(configured.status(), await configured.text()).toBe(200)
 
@@ -53,6 +61,7 @@ test('concurrent guests cannot claim the same final reservation seat', async ({ 
       const results = await Promise.all([1, 2].map(guest => request.post(`${baseURL}/api/public/reservations`, {
         headers: tenantTestExtraHeaders(),
         data: {
+          idempotency_key: crypto.randomUUID(),
           name: `Last seat guest ${guest}`,
           email: `last-seat-${attempt}-${guest}@playwright.example`,
           phone: '+66812345678',
@@ -71,7 +80,10 @@ test('concurrent guests cannot claim the same final reservation seat', async ({ 
       })
     } finally {
       // The standing capacity is the location's, not this test's.
-      await page.request.put(configUrl, { headers: devLoginHeaders() ?? {}, data: { slot_capacity: priorCapacity } })
+      const current = await page.request.get(configUrl)
+      expect(current.status()).toBe(200)
+      const restored = await page.request.put(configUrl, { headers: devLoginHeaders() ?? {}, data: { slot_capacity: priorCapacity, duration_minutes: priorDuration, expected_updated_at: (await current.json()).config.updated_at } })
+      expect(restored.status(), await restored.text()).toBe(200)
     }
   } finally {
     await releaseTenantMutationLock()

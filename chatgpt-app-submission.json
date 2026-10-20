@@ -4,32 +4,44 @@
   "app_info": {
     "display_name": "KrabiClaw",
     "subtitle": "Manage your business website",
-    "description": "Manage your KrabiClaw website and business operations from ChatGPT. Edit products, variants, prices, announcements, articles, translations and media. Read customer inquiries, create and manage bookings, and propose changes for guest acceptance. Read payment reports, transactions and payout history. Content changes can appear publicly, media uploads create public assets, and booking actions may email guests. Online payment collection, refund preparation and refund execution require the authenticated KrabiClaw dashboard. Publish to connected Facebook or Instagram accounts only when requested. A KrabiClaw account with access to the selected business is required. Create sites and locations and manage payment setup in the dashboard.",
+    "description": "Create and manage your KrabiClaw business website from ChatGPT. Save a private website draft, publish it once its required details are complete, and add locations. Edit products, prices, announcements, articles, translations and media. Read customer inquiries, manage bookings and propose changes for guest acceptance. Read payment reports, transactions and payouts. Publishing a website emails KrabiClaw operators; live content and uploaded media can be public, and booking actions may email guests. Payment setup, online payment collection, refund preparation and refund execution require the authenticated KrabiClaw dashboard. Publish to connected Facebook, Instagram or Discord destinations only when requested. A KrabiClaw account is required, with access to each business you manage.",
     "category": "BUSINESS"
   },
   "tools": {
-    "append_content_block": {
+    "add_organization_language": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Adds a disabled website language for private authoring or refreshes its stored catalog label; existing publication status and translations are preserved.",
+        "open_world_justification": "Adds a disabled website language for private authoring or refreshes its stored catalog label; existing publication status and translations are preserved. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Adds a disabled website language for private authoring or refreshes its stored catalog label; existing publication status and translations are preserved."
+      }
+    },
+    "append_content_block": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "Inserts one block into the selected blog article or tenant page after a named block, leaving every other block as it is.",
-        "open_world_justification": "Inserts one block into the selected blog article or tenant page after a named block, leaving every other block as it is. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Inserts one block into the selected blog article or tenant page after a named block, leaving every other block as it is. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Adds content visible to website visitors when the selected article or page is published.",
+        "destructive_justification": "Inserts one block into the selected blog article or tenant page after a named block, leaving every other block as it is."
       }
     },
     "attach_media": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "Adds an existing asset to a public content collection without replacing its existing placements.",
-        "open_world_justification": "Adds an existing asset to a public content collection without replacing its existing placements. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Adds an existing asset to a public content collection without replacing its existing placements. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Adds an asset to a gallery or document collection that can be visible on the public website.",
+        "destructive_justification": "Adds an existing asset to a public content collection without replacing its existing placements."
       }
     },
     "batch_create_products": {
@@ -41,19 +53,31 @@
       "justifications": {
         "read_only_justification": "Creates products from the supplied catalog entries and records product events.",
         "open_world_justification": "Creates products from the supplied catalog entries and records product events. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Creates products from the supplied catalog entries and records product events. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Creates products from the supplied catalog entries and records product events."
       }
     },
     "block_dates": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Overwrites the selected location's special hours with an added closure for the given days, so guests cannot book them on the public website.",
-        "open_world_justification": "Overwrites the selected location's special hours with an added closure for the given days, so guests cannot book them on the public website. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Overwrites the selected location's special hours with an added closure for the given days, so guests cannot book them on the public website. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Closes the selected dates to guests using the public booking website.",
+        "destructive_justification": "Overwrites the selected location's special hours with an added closure for the given days, so guests cannot book them on the public website."
+      }
+    },
+    "cancel_organization_invitation": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Cancels a pending Better Auth invitation in the selected business.",
+        "open_world_justification": "Cancels a pending Better Auth invitation in the selected business. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Cancels a pending Better Auth invitation in the selected business."
       }
     },
     "cancel_product_booking": {
@@ -65,7 +89,31 @@
       "justifications": {
         "read_only_justification": "Cancels an existing product booking, releasing capacity once and emailing the guest. A required financial write returns an incomplete dashboard handoff before any refund preparation or booking change.",
         "open_world_justification": "Sends a cancellation email to the booking guest.",
-        "destructive_justification": "Cancels an existing product booking, releasing capacity once and emailing the guest. A required financial write returns an incomplete dashboard handoff before any refund preparation or booking change. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "destructive_justification": "Cancels an existing product booking, releasing capacity once and emailing the guest. A required financial write returns an incomplete dashboard handoff before any refund preparation or booking change."
+      }
+    },
+    "cancel_scheduled_guest_message": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Cancels one pending scheduled guest message so it is never sent; a message already sending, sent or under review is refused.",
+        "open_world_justification": "Cancels one pending scheduled guest message so it is never sent; a message already sending, sent or under review is refused. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Cancels one pending scheduled guest message so it is never sent; a message already sending, sent or under review is refused."
+      }
+    },
+    "cancel_stay": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Cancels a host-entered stay under its version and frees its nights; sends no email and moves no money.",
+        "open_world_justification": "Cancels a host-entered stay under its version and frees its nights; sends no email and moves no money. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Cancels a host-entered stay under its version and frees its nights; sends no email and moves no money."
       }
     },
     "cancel_table_reservation": {
@@ -77,7 +125,19 @@
       "justifications": {
         "read_only_justification": "Cancels a real restaurant table Reservation through the canonical inbox operation, releasing capacity once and sending its guest status message.",
         "open_world_justification": "Sends a cancellation email to the reservation guest.",
-        "destructive_justification": "Cancels a real restaurant table Reservation through the canonical inbox operation, releasing capacity once and sending its guest status message. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "destructive_justification": "Cancels a real restaurant table Reservation through the canonical inbox operation, releasing capacity once and sending its guest status message."
+      }
+    },
+    "clone_google_ads_campaign": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Copies an existing campaign in the connected Google Ads account to a new destination URL using a durable retry key; it can start spending the account’s budget.",
+        "open_world_justification": "Writes to the Google Ads account the business explicitly connected; it spends that account’s own advertising budget on Google.",
+        "destructive_justification": "Copies an existing campaign in the connected Google Ads account to a new destination URL using a durable retry key; it can start spending the account’s budget."
       }
     },
     "confirm_product_booking": {
@@ -89,7 +149,7 @@
       "justifications": {
         "read_only_justification": "Confirms a pending Product review booking through the canonical inbox operation, without allocating capacity again, and sends its guest status message.",
         "open_world_justification": "Sends a confirmation email to the booking guest.",
-        "destructive_justification": "Confirms a pending Product review booking through the canonical inbox operation, without allocating capacity again, and sends its guest status message. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "destructive_justification": "Confirms a pending Product review booking through the canonical inbox operation, without allocating capacity again, and sends its guest status message."
       }
     },
     "create_article_category": {
@@ -101,7 +161,7 @@
       "justifications": {
         "read_only_justification": "Creates an empty category in the selected organization's blog or documentation; articles are placed in it separately.",
         "open_world_justification": "Creates an empty category in the selected organization's blog or documentation; articles are placed in it separately. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Creates an empty category in the selected organization's blog or documentation; articles are placed in it separately. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Creates an empty category in the selected organization's blog or documentation; articles are placed in it separately."
       }
     },
     "create_blog_post": {
@@ -113,19 +173,55 @@
       "justifications": {
         "read_only_justification": "Creates a draft tenant blog article and its content document; it is not public until published.",
         "open_world_justification": "Creates a draft tenant blog article and its content document; it is not public until published. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Creates a draft tenant blog article and its content document; it is not public until published. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Creates a draft tenant blog article and its content document; it is not public until published."
       }
     },
     "create_collection": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "Creates an empty collection for the selected organization; products are added to it separately.",
-        "open_world_justification": "Creates an empty collection for the selected organization; products are added to it separately. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Creates an empty collection for the selected organization; products are added to it separately. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Creates a site or menu section used by the public product catalog.",
+        "destructive_justification": "Creates an empty collection for the selected organization; products are added to it separately."
+      }
+    },
+    "create_google_ads_search_campaign": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates a Google Ads search campaign, ad group, keywords and ad in the connected account using a durable retry key; it can start spending the account’s budget.",
+        "open_world_justification": "Writes to the Google Ads account the business explicitly connected; it spends that account’s own advertising budget on Google.",
+        "destructive_justification": "Creates a Google Ads search campaign, ad group, keywords and ad in the connected account using a durable retry key; it can start spending the account’s budget."
+      }
+    },
+    "create_location": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates a location in the selected business using a durable retry key; its details can appear on the live website.",
+        "open_world_justification": "Adds location details that can appear on the selected business’s public website.",
+        "destructive_justification": "Creates a location in the selected business using a durable retry key; its details can appear on the live website."
+      }
+    },
+    "create_message_template": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Saves a guest reply, optionally scheduled for named homes; planning creates pending scheduled messages for eligible future stays and sends nothing immediately.",
+        "open_world_justification": "A schedule makes the production cron later send this text to eligible guests through each conversation’s email or Airbnb address.",
+        "destructive_justification": "Saves a guest reply, optionally scheduled for named homes; planning creates pending scheduled messages for eligible future stays and sends nothing immediately."
       }
     },
     "create_post": {
@@ -137,19 +233,19 @@
       "justifications": {
         "read_only_justification": "Creates a private draft short post with its media; nothing is public until it is published.",
         "open_world_justification": "Creates a private draft short post with its media; nothing is public until it is published. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Creates a private draft short post with its media; nothing is public until it is published. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Creates a private draft short post with its media; nothing is public until it is published."
       }
     },
     "create_product": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a product with an explicit kind, variants, prices and named details; publication and placements are assigned separately.",
-        "open_world_justification": "Creates a product with an explicit kind, variants, prices and named details; publication and placements are assigned separately. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Creates a product with an explicit kind, variants, prices and named details; publication and placements are assigned separately. No existing record is deleted, cancelled or refunded by it."
+        "read_only_justification": "Atomically creates a product, variants, prices and supplied booking setup using a durable retry key. Services receive a bound detail page; experience publication requires booking setup or an external destination.",
+        "open_world_justification": "Can publish an experience or configured booking offering and create its website page for public visitors.",
+        "destructive_justification": "Atomically creates a product, variants, prices and supplied booking setup using a durable retry key. Services receive a bound detail page; experience publication requires booking setup or an external destination."
       }
     },
     "create_product_booking": {
@@ -161,31 +257,79 @@
       "justifications": {
         "read_only_justification": "Atomically creates a tenant Product booking and guest inbox thread, with caller idempotency, operator provenance and explicit guest acknowledgement choice. Uses existing capacity and payment policy. Required online collection returns a dashboard link before creating any booking, payment, order or hold.",
         "open_world_justification": "Sends owner alerts and, when requested, an acknowledgement email to the supplied guest address.",
-        "destructive_justification": "Atomically creates a tenant Product booking and guest inbox thread, with caller idempotency, operator provenance and explicit guest acknowledgement choice. Uses existing capacity and payment policy. Required online collection returns a dashboard link before creating any booking, payment, order or hold. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "destructive_justification": "Atomically creates a tenant Product booking and guest inbox thread, with caller idempotency, operator provenance and explicit guest acknowledgement choice. Uses existing capacity and payment policy. Required online collection returns a dashboard link before creating any booking, payment, order or hold."
+      }
+    },
+    "create_product_session": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Adds dated sessions for the offering’s assigned providers using a durable retry key and canonical availability checks.",
+        "open_world_justification": "Adds dated sessions available through the public booking website.",
+        "destructive_justification": "Adds dated sessions for the offering’s assigned providers using a durable retry key and canonical availability checks."
       }
     },
     "create_qa": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": false
       },
       "justifications": {
         "read_only_justification": "Creates a new authored question and answer; retries may create duplicates.",
-        "open_world_justification": "Creates a new authored question and answer; retries may create duplicates. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Creates a new authored question and answer; retries may create duplicates. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Adds authored questions and answers that can appear on the public site, page or location.",
+        "destructive_justification": "Creates a new authored question and answer; retries may create duplicates."
       }
     },
     "create_site_page": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates a tenant page and its structured content document.",
+        "open_world_justification": "Creates an authored page that can become publicly accessible on a live site.",
+        "destructive_justification": "Creates a tenant page and its structured content document."
+      }
+    },
+    "create_stay": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Creates a tenant page and its structured content document.",
-        "open_world_justification": "Creates a tenant page and its structured content document. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Creates a tenant page and its structured content document. No existing record is deleted, cancelled or refunded by it."
+        "read_only_justification": "Creates a host-entered stay with caller idempotency, holding its nights atomically; a night another stay holds refuses it. Sends no email and takes no payment.",
+        "open_world_justification": "Creates a host-entered stay with caller idempotency, holding its nights atomically; a night another stay holds refuses it. Sends no email and takes no payment. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Creates a host-entered stay with caller idempotency, holding its nights atomically; a night another stay holds refuses it. Sends no email and takes no payment."
+      }
+    },
+    "create_table_reservation": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Allocates a table reservation and guest conversation using configured duration, hours, capacity and policy; sends canonical notices. Required deposits hand off before operational or financial writes.",
+        "open_world_justification": "Sends owner alerts and the requested acknowledgement to the supplied guest address.",
+        "destructive_justification": "Allocates a table reservation and guest conversation using configured duration, hours, capacity and policy; sends canonical notices. Required deposits hand off before operational or financial writes."
+      }
+    },
+    "create_team": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Creates a named Better Auth team in the selected business.",
+        "open_world_justification": "Creates a named Better Auth team in the selected business. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Creates a named Better Auth team in the selected business."
       }
     },
     "delete_article_category": {
@@ -197,19 +341,19 @@
       "justifications": {
         "read_only_justification": "Deletes an empty category of the selected organization's blog or documentation; a category that still has articles is refused.",
         "open_world_justification": "Deletes an empty category of the selected organization's blog or documentation; a category that still has articles is refused. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Deletes an empty category of the selected organization's blog or documentation; a category that still has articles is refused. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "destructive_justification": "Deletes an empty category of the selected organization's blog or documentation; a category that still has articles is refused."
       }
     },
     "delete_blog_post": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Deletes the selected tenant blog article and its associated content.",
-        "open_world_justification": "Deletes the selected tenant blog article and its associated content. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Deletes the selected tenant blog article and its associated content. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "open_world_justification": "Removes the selected article from the public website.",
+        "destructive_justification": "Deletes the selected tenant blog article and its associated content."
       }
     },
     "delete_channel_post": {
@@ -221,115 +365,175 @@
       "justifications": {
         "read_only_justification": "Deletes the explicitly named Facebook Page post and updates its publication receipt; website content is retained.",
         "open_world_justification": "Removes a public Facebook Page post through Meta and updates its local publication receipt.",
-        "destructive_justification": "Deletes the explicitly named Facebook Page post and updates its publication receipt; website content is retained. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "destructive_justification": "Deletes the explicitly named Facebook Page post and updates its publication receipt; website content is retained."
       }
     },
     "delete_collection": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Deletes the selected collection and every product membership in it; the products themselves are untouched.",
-        "open_world_justification": "Deletes the selected collection and every product membership in it; the products themselves are untouched. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Deletes the selected collection and every product membership in it; the products themselves are untouched. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "open_world_justification": "Removes a collection and its product memberships from the public catalog.",
+        "destructive_justification": "Deletes the selected collection and every product membership in it; the products themselves are untouched."
       }
     },
     "delete_content_block": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Deletes one block, and the blocks nested under it, from the selected blog article or tenant page after a version check.",
-        "open_world_justification": "Deletes one block, and the blocks nested under it, from the selected blog article or tenant page after a version check. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Deletes one block, and the blocks nested under it, from the selected blog article or tenant page after a version check. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "open_world_justification": "Removes content from the selected published article or page seen by website visitors.",
+        "destructive_justification": "Deletes one block, and the blocks nested under it, from the selected blog article or tenant page after a version check."
       }
     },
     "delete_media_asset": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Removes an asset and its placements, and deletes backing Cloudflare storage when no other asset references it.",
-        "open_world_justification": "Removes an asset and its placements, and deletes backing Cloudflare storage when no other asset references it. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Removes an asset and its placements, and deletes backing Cloudflare storage when no other asset references it. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "open_world_justification": "Removes website placements and deletes the public Cloudflare file when no other asset references it.",
+        "destructive_justification": "Removes an asset and its placements, and deletes backing Cloudflare storage when no other asset references it."
+      }
+    },
+    "delete_message_template": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Deletes a saved guest reply under its version and cancels its pending scheduled messages, keeping earlier delivery records.",
+        "open_world_justification": "Deletes a saved guest reply under its version and cancels its pending scheduled messages, keeping earlier delivery records. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Deletes a saved guest reply under its version and cancels its pending scheduled messages, keeping earlier delivery records."
+      }
+    },
+    "delete_organization_language": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Deletes a disabled website language and its translations while preserving source content.",
+        "open_world_justification": "Deletes a disabled website language and its translations while preserving source content. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Deletes a disabled website language and its translations while preserving source content."
       }
     },
     "delete_post": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Deletes the selected short post from the website; its Facebook, Instagram and Discord posts are left as they are.",
-        "open_world_justification": "Deletes the selected short post from the website; its Facebook, Instagram and Discord posts are left as they are. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Deletes the selected short post from the website; its Facebook, Instagram and Discord posts are left as they are. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "open_world_justification": "Removes the selected short post from the public website while retaining its existing social publications.",
+        "destructive_justification": "Deletes the selected short post from the website; its Facebook, Instagram and Discord posts are left as they are."
       }
     },
     "delete_product": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Deletes the selected product and its owned variants, prices, attributes and placements; booking history or a referencing site page prevents deletion.",
-        "open_world_justification": "Deletes the selected product and its owned variants, prices, attributes and placements; booking history or a referencing site page prevents deletion. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Deletes the selected product and its owned variants, prices, attributes and placements; booking history or a referencing site page prevents deletion. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "read_only_justification": "Deletes the selected product, its bound page and owned catalog records; booking history or active checkout holds prevent deletion.",
+        "open_world_justification": "Removes the product, its public offering and bound website page from visitors’ access.",
+        "destructive_justification": "Deletes the selected product, its bound page and owned catalog records; booking history or active checkout holds prevent deletion."
       }
     },
     "delete_product_booking_config": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Disables product booking when no booking history exists.",
-        "open_world_justification": "Disables product booking when no booking history exists. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Disables product booking when no booking history exists. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "open_world_justification": "Disables the product’s session booking path for public website visitors.",
+        "destructive_justification": "Disables product booking when no booking history exists."
       }
     },
     "delete_qa": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Deletes selected authored Q&A and its translations.",
-        "open_world_justification": "Deletes selected authored Q&A and its translations. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Deletes selected authored Q&A and its translations. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "open_world_justification": "Removes authored Q&A and its translations from the public website.",
+        "destructive_justification": "Deletes selected authored Q&A and its translations."
       }
     },
     "delete_resource_localization": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Deletes the selected translated resource representation.",
-        "open_world_justification": "Deletes the selected translated resource representation. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Deletes the selected translated resource representation. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "open_world_justification": "Removes the selected translated representation and its owned route content from the public website.",
+        "destructive_justification": "Deletes the selected translated resource representation."
       }
     },
     "delete_site_page": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Deletes a tenant page; deleting its source locale removes every translation with it.",
+        "open_world_justification": "Removes the selected page or translation from the public website; source deletion also removes its translations.",
+        "destructive_justification": "Deletes a tenant page; deleting its source locale removes every translation with it."
+      }
+    },
+    "delete_stay_payment": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Deletes a tenant page; deleting its source locale removes every translation with it.",
-        "open_world_justification": "Deletes a tenant page; deleting its source locale removes every translation with it. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Deletes a tenant page; deleting its source locale removes every translation with it. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "read_only_justification": "Deletes one offline payment record from a host-entered stay.",
+        "open_world_justification": "Deletes one offline payment record from a host-entered stay. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Deletes one offline payment record from a host-entered stay."
+      }
+    },
+    "delete_team": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Deletes a Better Auth team and removes its offering assignments. Existing bookings retain their saved provider.",
+        "open_world_justification": "Deletes a Better Auth team and removes its offering assignments. Existing bookings retain their saved provider. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Deletes a Better Auth team and removes its offering assignments. Existing bookings retain their saved provider."
+      }
+    },
+    "disable_organization_language": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Disables an existing secondary website language’s public routes while preserving its translations.",
+        "open_world_justification": "Removes public access to the selected authored language’s routes.",
+        "destructive_justification": "Disables an existing secondary website language’s public routes while preserving its translations."
       }
     },
     "get_blog_post": {
@@ -341,7 +545,7 @@
       "justifications": {
         "read_only_justification": "Reads the selected tenant blog article and content for editing.",
         "open_world_justification": "Reads the selected tenant blog article and content for editing. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads the selected tenant blog article and content for editing. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads the selected tenant blog article and content for editing."
       }
     },
     "get_calendar": {
@@ -353,7 +557,7 @@
       "justifications": {
         "read_only_justification": "Reads what is on one location's calendar between two dates and which dates it cannot take. Nothing is written.",
         "open_world_justification": "Reads what is on one location's calendar between two dates and which dates it cannot take. Nothing is written. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads what is on one location's calendar between two dates and which dates it cannot take. Nothing is written. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads what is on one location's calendar between two dates and which dates it cannot take. Nothing is written."
       }
     },
     "get_channel_post": {
@@ -365,7 +569,43 @@
       "justifications": {
         "read_only_justification": "Reads one live post belonging to the explicitly selected connected channel.",
         "open_world_justification": "Reads one live post belonging to the explicitly selected connected channel. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads one live post belonging to the explicitly selected connected channel. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads one live post belonging to the explicitly selected connected channel."
+      }
+    },
+    "get_google_ads_campaign": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads one campaign, its ad groups, keywords and responsive search ads from the connected Google Ads account.",
+        "open_world_justification": "Reads one campaign, its ad groups, keywords and responsive search ads from the connected Google Ads account. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads one campaign, its ad groups, keywords and responsive search ads from the connected Google Ads account."
+      }
+    },
+    "get_guest_conversation": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads an authorized conversation, its messages, operational record, proposals, attachments and delivery receipts.",
+        "open_world_justification": "Reads an authorized conversation, its messages, operational record, proposals, attachments and delivery receipts. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads an authorized conversation, its messages, operational record, proposals, attachments and delivery receipts."
+      }
+    },
+    "get_guest_messaging_context": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads the home, private check-in instructions and optional stay behind one guest conversation.",
+        "open_world_justification": "Reads the home, private check-in instructions and optional stay behind one guest conversation. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads the home, private check-in instructions and optional stay behind one guest conversation."
       }
     },
     "get_location": {
@@ -377,7 +617,7 @@
       "justifications": {
         "read_only_justification": "Reads the selected location, including operational contact and notification settings.",
         "open_world_justification": "Reads the selected location, including operational contact and notification settings. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads the selected location, including operational contact and notification settings. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads the selected location, including operational contact and notification settings."
       }
     },
     "get_member_scheduling": {
@@ -389,7 +629,7 @@
       "justifications": {
         "read_only_justification": "Reads authorized team scheduling records; ordinary members can read only themselves. Public profile approval and interval-only Calendar status share CMS records.",
         "open_world_justification": "Reads authorized team scheduling records; ordinary members can read only themselves. Public profile approval and interval-only Calendar status share CMS records. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads authorized team scheduling records; ordinary members can read only themselves. Public profile approval and interval-only Calendar status share CMS records. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads authorized team scheduling records; ordinary members can read only themselves. Public profile approval and interval-only Calendar status share CMS records."
       }
     },
     "get_organization": {
@@ -401,7 +641,7 @@
       "justifications": {
         "read_only_justification": "Reads the selected accessible organization and workspace context.",
         "open_world_justification": "Reads the selected accessible organization and workspace context. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads the selected accessible organization and workspace context. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads the selected accessible organization and workspace context."
       }
     },
     "get_organization_analytics": {
@@ -413,7 +653,7 @@
       "justifications": {
         "read_only_justification": "Reads website analytics reports from stored aggregates and retained raw events without creating aggregates.",
         "open_world_justification": "Reads website analytics reports from stored aggregates and retained raw events without creating aggregates. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads website analytics reports from stored aggregates and retained raw events without creating aggregates. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads website analytics reports from stored aggregates and retained raw events without creating aggregates."
       }
     },
     "get_organization_media_assets": {
@@ -425,7 +665,7 @@
       "justifications": {
         "read_only_justification": "Lists the selected organization media library and public asset URLs.",
         "open_world_justification": "Lists the selected organization media library and public asset URLs. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Lists the selected organization media library and public asset URLs. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Lists the selected organization media library and public asset URLs."
       }
     },
     "get_organization_settings": {
@@ -437,7 +677,7 @@
       "justifications": {
         "read_only_justification": "Reads the selected organization settings.",
         "open_world_justification": "Reads the selected organization settings. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads the selected organization settings. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads the selected organization settings."
       }
     },
     "get_payment": {
@@ -449,7 +689,7 @@
       "justifications": {
         "read_only_justification": "Reads one authorized tenant payment, its native refund and dispute projections.",
         "open_world_justification": "Reads one authorized tenant payment, its native refund and dispute projections. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads one authorized tenant payment, its native refund and dispute projections. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads one authorized tenant payment, its native refund and dispute projections."
       }
     },
     "get_payment_payouts": {
@@ -461,7 +701,7 @@
       "justifications": {
         "read_only_justification": "Reads native Stripe balance and payouts in the selected seller account; moves no funds.",
         "open_world_justification": "Reads native Stripe balance and payouts in the selected seller account; moves no funds. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads native Stripe balance and payouts in the selected seller account; moves no funds. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads native Stripe balance and payouts in the selected seller account; moves no funds."
       }
     },
     "get_payment_summary": {
@@ -473,7 +713,7 @@
       "justifications": {
         "read_only_justification": "Reads UTC tenant financial and usage summaries, retaining separate currency totals.",
         "open_world_justification": "Reads UTC tenant financial and usage summaries, retaining separate currency totals. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads UTC tenant financial and usage summaries, retaining separate currency totals. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads UTC tenant financial and usage summaries, retaining separate currency totals."
       }
     },
     "get_payments_dashboard_link": {
@@ -485,7 +725,7 @@
       "justifications": {
         "read_only_justification": "Reads the selected organization and returns its authenticated payment settings URL; creates no account, onboarding session or financial record.",
         "open_world_justification": "Reads the selected organization and returns its authenticated payment settings URL; creates no account, onboarding session or financial record. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads the selected organization and returns its authenticated payment settings URL; creates no account, onboarding session or financial record. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads the selected organization and returns its authenticated payment settings URL; creates no account, onboarding session or financial record."
       }
     },
     "get_payments_usage": {
@@ -495,9 +735,9 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads durable attributable usage delivery state and native Metronome invoices.",
-        "open_world_justification": "Reads durable attributable usage delivery state and native Metronome invoices. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads durable attributable usage delivery state and native Metronome invoices. No existing record is deleted, cancelled or refunded by it."
+        "read_only_justification": "Reads the plan subscription’s metered fee prices from Stripe and undelivered usage in the outbox.",
+        "open_world_justification": "Reads the plan subscription’s metered fee prices from Stripe and undelivered usage in the outbox. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads the plan subscription’s metered fee prices from Stripe and undelivered usage in the outbox."
       }
     },
     "get_post": {
@@ -509,7 +749,7 @@
       "justifications": {
         "read_only_justification": "Reads the selected short post and the state of its external publications.",
         "open_world_justification": "Reads the selected short post and the state of its external publications. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads the selected short post and the state of its external publications. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads the selected short post and the state of its external publications."
       }
     },
     "get_product": {
@@ -521,7 +761,7 @@
       "justifications": {
         "read_only_justification": "Reads the selected product and its price and content.",
         "open_world_justification": "Reads the selected product and its price and content. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads the selected product and its price and content. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads the selected product and its price and content."
       }
     },
     "get_product_booking": {
@@ -533,7 +773,7 @@
       "justifications": {
         "read_only_justification": "Reads one tenant Product booking with guest snapshot, operational status, provenance and updated timestamp.",
         "open_world_justification": "Reads one tenant Product booking with guest snapshot, operational status, provenance and updated timestamp. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads one tenant Product booking with guest snapshot, operational status, provenance and updated timestamp. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads one tenant Product booking with guest snapshot, operational status, provenance and updated timestamp."
       }
     },
     "get_product_catalog_localization": {
@@ -545,7 +785,7 @@
       "justifications": {
         "read_only_justification": "Reads product catalog translations for the selected organization and locale.",
         "open_world_justification": "Reads product catalog translations for the selected organization and locale. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads product catalog translations for the selected organization and locale. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads product catalog translations for the selected organization and locale."
       }
     },
     "get_reservation_policy": {
@@ -557,7 +797,7 @@
       "justifications": {
         "read_only_justification": "Reads the reservation policy of the selected location.",
         "open_world_justification": "Reads the reservation policy of the selected location. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads the reservation policy of the selected location. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads the reservation policy of the selected location."
       }
     },
     "get_resource_localization": {
@@ -569,7 +809,7 @@
       "justifications": {
         "read_only_justification": "Reads a resource translation and any existing authoring document.",
         "open_world_justification": "Reads a resource translation and any existing authoring document. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads a resource translation and any existing authoring document. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads a resource translation and any existing authoring document."
       }
     },
     "get_site_page": {
@@ -581,7 +821,7 @@
       "justifications": {
         "read_only_justification": "Reads the selected tenant page and its existing content document.",
         "open_world_justification": "Reads the selected tenant page and its existing content document. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads the selected tenant page and its existing content document. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads the selected tenant page and its existing content document."
       }
     },
     "get_social_connections": {
@@ -593,7 +833,43 @@
       "justifications": {
         "read_only_justification": "Reads which website, Facebook Page and Instagram account the organization can publish to, and whether Meta currently accepts each connection, without returning any token.",
         "open_world_justification": "Reads which website, Facebook Page and Instagram account the organization can publish to, and whether Meta currently accepts each connection, without returning any token. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads which website, Facebook Page and Instagram account the organization can publish to, and whether Meta currently accepts each connection, without returning any token. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads which website, Facebook Page and Instagram account the organization can publish to, and whether Meta currently accepts each connection, without returning any token."
+      }
+    },
+    "get_stay": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads one stay with its guest details and the offline payments recorded against it.",
+        "open_world_justification": "Reads one stay with its guest details and the offline payments recorded against it. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads one stay with its guest details and the offline payments recorded against it."
+      }
+    },
+    "get_stay_calendar": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads each night of a date range at one place to stay: whether it is free, its price and rules, and the stay holding it.",
+        "open_world_justification": "Reads each night of a date range at one place to stay: whether it is free, its price and rules, and the stay holding it. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads each night of a date range at one place to stay: whether it is free, its price and rules, and the stay holding it."
+      }
+    },
+    "get_website_draft": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads the authenticated user’s saved website draft, revision and missing publication fields.",
+        "open_world_justification": "Reads the authenticated user’s saved website draft, revision and missing publication fields. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads the authenticated user’s saved website draft, revision and missing publication fields."
       }
     },
     "get_workspace_context": {
@@ -605,7 +881,31 @@
       "justifications": {
         "read_only_justification": "Reads the authenticated user workspace selection and available context.",
         "open_world_justification": "Reads the authenticated user workspace selection and available context. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads the authenticated user workspace selection and available context. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads the authenticated user workspace selection and available context."
+      }
+    },
+    "invite_organization_member": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Creates or explicitly resends a Better Auth invitation, emails its recipient and returns the saved invitation and delivery receipt.",
+        "open_world_justification": "Emails the invitation recipient through the native Better Auth invitation hook and shared delivery lifecycle.",
+        "destructive_justification": "Creates or explicitly resends a Better Auth invitation, emails its recipient and returns the saved invitation and delivery receipt."
+      }
+    },
+    "launch_omnichannel_campaign": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Creates or clones a Google Ads campaign and publishes the explicitly requested posts to the selected connected social channels and website using a durable retry key.",
+        "open_world_justification": "Writes to the connected Google Ads account and publishes only to the social channels and website destinations named in the request.",
+        "destructive_justification": "Creates or clones a Google Ads campaign and publishes the explicitly requested posts to the selected connected social channels and website using a durable retry key."
       }
     },
     "list_article_categories": {
@@ -617,7 +917,7 @@
       "justifications": {
         "read_only_justification": "Lists the categories of the selected organization's blog or documentation.",
         "open_world_justification": "Lists the categories of the selected organization's blog or documentation. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Lists the categories of the selected organization's blog or documentation. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Lists the categories of the selected organization's blog or documentation."
       }
     },
     "list_blog_posts": {
@@ -629,7 +929,7 @@
       "justifications": {
         "read_only_justification": "Lists the selected organization blog articles.",
         "open_world_justification": "Lists the selected organization blog articles. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Lists the selected organization blog articles. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Lists the selected organization blog articles."
       }
     },
     "list_channel_posts": {
@@ -641,7 +941,7 @@
       "justifications": {
         "read_only_justification": "Reads live posts from the explicitly selected connected channel; it does not create website content.",
         "open_world_justification": "Reads live posts from the explicitly selected connected channel; it does not create website content. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads live posts from the explicitly selected connected channel; it does not create website content. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads live posts from the explicitly selected connected channel; it does not create website content."
       }
     },
     "list_collections": {
@@ -653,19 +953,31 @@
       "justifications": {
         "read_only_justification": "Lists the collections of the selected organization.",
         "open_world_justification": "Lists the collections of the selected organization. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Lists the collections of the selected organization. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Lists the collections of the selected organization."
       }
     },
-    "list_contact_inquiries": {
+    "list_google_ads_campaigns": {
       "annotations": {
         "readOnlyHint": true,
         "openWorldHint": false,
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads authorized customer contact inquiries, including personal contact information.",
-        "open_world_justification": "Reads authorized customer contact inquiries, including personal contact information. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads authorized customer contact inquiries, including personal contact information. No existing record is deleted, cancelled or refunded by it."
+        "read_only_justification": "Reads campaigns, budgets and performance metrics from the Google Ads account the selected business connected.",
+        "open_world_justification": "Reads campaigns, budgets and performance metrics from the Google Ads account the selected business connected. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads campaigns, budgets and performance metrics from the Google Ads account the selected business connected."
+      }
+    },
+    "list_guest_conversations": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads authorized contact, reservation and booking conversations and their inbox state.",
+        "open_world_justification": "Reads authorized contact, reservation and booking conversations and their inbox state. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads authorized contact, reservation and booking conversations and their inbox state."
       }
     },
     "list_location_products": {
@@ -677,7 +989,7 @@
       "justifications": {
         "read_only_justification": "Lists products in the explicitly selected location.",
         "open_world_justification": "Lists products in the explicitly selected location. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Lists products in the explicitly selected location. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Lists products in the explicitly selected location."
       }
     },
     "list_location_qa": {
@@ -689,7 +1001,7 @@
       "justifications": {
         "read_only_justification": "Lists questions and answers for the selected location.",
         "open_world_justification": "Lists questions and answers for the selected location. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Lists questions and answers for the selected location. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Lists questions and answers for the selected location."
       }
     },
     "list_location_reviews": {
@@ -701,7 +1013,7 @@
       "justifications": {
         "read_only_justification": "Lists reviews for the selected location.",
         "open_world_justification": "Lists reviews for the selected location. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Lists reviews for the selected location. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Lists reviews for the selected location."
       }
     },
     "list_locations": {
@@ -713,7 +1025,19 @@
       "justifications": {
         "read_only_justification": "Lists locations accessible in the selected organization.",
         "open_world_justification": "Lists locations accessible in the selected organization. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Lists locations accessible in the selected organization. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Lists locations accessible in the selected organization."
+      }
+    },
+    "list_message_templates": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads the selected business’s saved guest replies and their automatic-delivery schedules.",
+        "open_world_justification": "Reads the selected business’s saved guest replies and their automatic-delivery schedules. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads the selected business’s saved guest replies and their automatic-delivery schedules."
       }
     },
     "list_organization_locales": {
@@ -725,7 +1049,19 @@
       "justifications": {
         "read_only_justification": "Reads the selected organization locale records without provisioning translations.",
         "open_world_justification": "Reads the selected organization locale records without provisioning translations. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads the selected organization locale records without provisioning translations. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads the selected organization locale records without provisioning translations."
+      }
+    },
+    "list_organization_members": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads Better Auth memberships, pending invitations and their actual email delivery receipts for the selected business.",
+        "open_world_justification": "Reads Better Auth memberships, pending invitations and their actual email delivery receipts for the selected business. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads Better Auth memberships, pending invitations and their actual email delivery receipts for the selected business."
       }
     },
     "list_organization_qa": {
@@ -737,7 +1073,7 @@
       "justifications": {
         "read_only_justification": "Lists questions and answers for the selected organization.",
         "open_world_justification": "Lists questions and answers for the selected organization. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Lists questions and answers for the selected organization. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Lists questions and answers for the selected organization."
       }
     },
     "list_organization_reviews": {
@@ -749,7 +1085,7 @@
       "justifications": {
         "read_only_justification": "Lists reviews and their provenance for the selected organization.",
         "open_world_justification": "Lists reviews and their provenance for the selected organization. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Lists reviews and their provenance for the selected organization. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Lists reviews and their provenance for the selected organization."
       }
     },
     "list_organizations": {
@@ -761,7 +1097,7 @@
       "justifications": {
         "read_only_justification": "Lists organizations accessible to the authenticated user without provisioning one.",
         "open_world_justification": "Lists organizations accessible to the authenticated user without provisioning one. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Lists organizations accessible to the authenticated user without provisioning one. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Lists organizations accessible to the authenticated user without provisioning one."
       }
     },
     "list_payments": {
@@ -773,7 +1109,7 @@
       "justifications": {
         "read_only_justification": "Reads a bounded page of seller-scoped tenant transactions and immutable purchase snapshots.",
         "open_world_justification": "Reads a bounded page of seller-scoped tenant transactions and immutable purchase snapshots. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads a bounded page of seller-scoped tenant transactions and immutable purchase snapshots. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads a bounded page of seller-scoped tenant transactions and immutable purchase snapshots."
       }
     },
     "list_posts": {
@@ -785,7 +1121,7 @@
       "justifications": {
         "read_only_justification": "Lists short posts for the selected organization.",
         "open_world_justification": "Lists short posts for the selected organization. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Lists short posts for the selected organization. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Lists short posts for the selected organization."
       }
     },
     "list_product_booking_sessions": {
@@ -797,7 +1133,7 @@
       "justifications": {
         "read_only_justification": "Reads existing tenant Product sessions and canonical capacity, including the shared online calendar exclusion.",
         "open_world_justification": "Reads existing tenant Product sessions and canonical capacity, including the shared online calendar exclusion. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads existing tenant Product sessions and canonical capacity, including the shared online calendar exclusion. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads existing tenant Product sessions and canonical capacity, including the shared online calendar exclusion."
       }
     },
     "list_product_bookings": {
@@ -809,7 +1145,7 @@
       "justifications": {
         "read_only_justification": "Reads operational Product bookings and guest snapshots within the selected tenant.",
         "open_world_justification": "Reads operational Product bookings and guest snapshots within the selected tenant. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads operational Product bookings and guest snapshots within the selected tenant. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads operational Product bookings and guest snapshots within the selected tenant."
       }
     },
     "list_products": {
@@ -821,7 +1157,7 @@
       "justifications": {
         "read_only_justification": "Lists the products of the selected organization.",
         "open_world_justification": "Lists the products of the selected organization. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Lists the products of the selected organization. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Lists the products of the selected organization."
       }
     },
     "list_reservation_inquiries": {
@@ -833,7 +1169,19 @@
       "justifications": {
         "read_only_justification": "Reads authorized reservation inquiries, including guest contact and reservation information.",
         "open_world_justification": "Reads authorized reservation inquiries, including guest contact and reservation information. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads authorized reservation inquiries, including guest contact and reservation information. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads authorized reservation inquiries, including guest contact and reservation information."
+      }
+    },
+    "list_scheduled_guest_messages": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads scheduled guest-message snapshots with their status and recorded failure reasons; members see only assigned homes.",
+        "open_world_justification": "Reads scheduled guest-message snapshots with their status and recorded failure reasons; members see only assigned homes. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads scheduled guest-message snapshots with their status and recorded failure reasons; members see only assigned homes."
       }
     },
     "list_site_pages": {
@@ -845,31 +1193,67 @@
       "justifications": {
         "read_only_justification": "Lists tenant pages for the selected organization.",
         "open_world_justification": "Lists tenant pages for the selected organization. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Lists tenant pages for the selected organization. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Lists tenant pages for the selected organization."
+      }
+    },
+    "list_stays": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads stays at the selected business’s places to stay overlapping a date range; members see only the homes their team looks after.",
+        "open_world_justification": "Reads stays at the selected business’s places to stay overlapping a date range; members see only the homes their team looks after. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads stays at the selected business’s places to stay overlapping a date range; members see only the homes their team looks after."
+      }
+    },
+    "list_teams": {
+      "annotations": {
+        "readOnlyHint": true,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Reads Better Auth teams and their members in the selected business.",
+        "open_world_justification": "Reads Better Auth teams and their members in the selected business. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads Better Auth teams and their members in the selected business."
       }
     },
     "open_dates": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Overwrites the selected location's special hours with the given days reopened, so guests can book them on the public website again.",
-        "open_world_justification": "Overwrites the selected location's special hours with the given days reopened, so guests can book them on the public website again. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Overwrites the selected location's special hours with the given days reopened, so guests can book them on the public website again. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Reopens the selected dates for guests using the public booking website.",
+        "destructive_justification": "Overwrites the selected location's special hours with the given days reopened, so guests can book them on the public website again."
       }
     },
     "publish_blog_post": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Publishes the selected draft blog article on the website.",
-        "open_world_justification": "Publishes the selected draft blog article on the website. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Publishes the selected draft blog article on the website. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "open_world_justification": "Makes the selected blog or documentation article available to public website visitors.",
+        "destructive_justification": "Publishes the selected draft blog article on the website."
+      }
+    },
+    "publish_organization_language": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Publishes an added website language after entitlement and translated-homepage checks; public routes show only authored translations.",
+        "open_world_justification": "Makes the selected authored language’s translations available on public website routes.",
+        "destructive_justification": "Publishes an added website language after entitlement and translated-homepage checks; public routes show only authored translations."
       }
     },
     "publish_post": {
@@ -879,21 +1263,33 @@
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Publishes the selected post only to the explicitly requested website, Facebook Page or Instagram targets and records their outcomes.",
-        "open_world_justification": "Can send the requested caption and media to the public audience of an explicitly selected Facebook Page or Instagram account. Website-only publication remains within the selected site.",
-        "destructive_justification": "Publishes the selected post only to the explicitly requested website, Facebook Page or Instagram targets and records their outcomes. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "read_only_justification": "Publishes the selected post only to the explicitly requested website, Facebook Page, Instagram or Discord targets and records their outcomes.",
+        "open_world_justification": "Makes the post visible to public website visitors or sends its caption and media to the explicitly selected Facebook Page, Instagram account or Discord channel.",
+        "destructive_justification": "Publishes the selected post only to the explicitly requested website, Facebook Page, Instagram or Discord targets and records their outcomes."
+      }
+    },
+    "publish_website": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Activates a complete saved website draft, selects the new business as the user’s workspace and sends the native operator notification.",
+        "open_world_justification": "Makes the saved website available to public visitors and sends the native onboarding notification to KrabiClaw operators.",
+        "destructive_justification": "Activates a complete saved website draft, selects the new business as the user’s workspace and sends the native operator notification."
       }
     },
     "put_resource_localization": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Creates or overwrites translated resource values and supplied translated content.",
-        "open_world_justification": "Creates or overwrites translated resource values and supplied translated content. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Creates or overwrites translated resource values and supplied translated content. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "open_world_justification": "Changes translated content visible on enabled public website language routes.",
+        "destructive_justification": "Creates or overwrites translated resource values and supplied translated content."
       }
     },
     "query_organization_analytics": {
@@ -905,7 +1301,7 @@
       "justifications": {
         "read_only_justification": "Reads individual native analytics events, retained sessions and grouped breakdowns from the selected organization's stored analytics without modifying them.",
         "open_world_justification": "Reads individual native analytics events, retained sessions and grouped breakdowns from the selected organization's stored analytics without modifying them. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads individual native analytics events, retained sessions and grouped breakdowns from the selected organization's stored analytics without modifying them. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads individual native analytics events, retained sessions and grouped breakdowns from the selected organization's stored analytics without modifying them."
       }
     },
     "reassign_product_booking": {
@@ -917,31 +1313,43 @@
       "justifications": {
         "read_only_justification": "Atomically reassigns every live attendee in a Session to the offering’s current member, refusing overlap and active checkout holds, retaining IDs and auditing old/new actor values, then sending the canonical guest notice.",
         "open_world_justification": "Sends the changed-assignment notice through the existing guest delivery lifecycle after the atomic reassignment.",
-        "destructive_justification": "Atomically reassigns every live attendee in a Session to the offering’s current member, refusing overlap and active checkout holds, retaining IDs and auditing old/new actor values, then sending the canonical guest notice. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "destructive_justification": "Atomically reassigns every live attendee in a Session to the offering’s current member, refusing overlap and active checkout holds, retaining IDs and auditing old/new actor values, then sending the canonical guest notice."
       }
     },
     "reconcile_post_publication": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
-        "destructiveHint": false
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Reads Facebook or Instagram to record the proven outcome of one publication; it never publishes.",
         "open_world_justification": "Reads Facebook or Instagram to record the proven outcome of one publication; it never publishes. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads Facebook or Instagram to record the proven outcome of one publication; it never publishes. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Reads Facebook or Instagram to record the proven outcome of one publication; it never publishes."
       }
     },
     "reconcile_products": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Creates or updates catalog products by supplied product_id; entries without an ID create new products on each call. Disables sale of omitted products only when deactivate_missing is requested.",
-        "open_world_justification": "Creates or updates catalog products by supplied product_id; entries without an ID create new products on each call. Disables sale of omitted products only when deactivate_missing is requested. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Creates or updates catalog products by supplied product_id; entries without an ID create new products on each call. Disables sale of omitted products only when deactivate_missing is requested. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "read_only_justification": "Atomically creates or updates catalog products using supplied IDs and a durable retry key. Disables omitted products only when deactivate_missing is requested.",
+        "open_world_justification": "Changes catalog content or availability shown for published products on the public website.",
+        "destructive_justification": "Atomically creates or updates catalog products using supplied IDs and a durable retry key. Disables omitted products only when deactivate_missing is requested."
+      }
+    },
+    "record_stay_payment": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": false
+      },
+      "justifications": {
+        "read_only_justification": "Records money the host received outside KrabiClaw against a host-entered stay, idempotently per key; moves no money.",
+        "open_world_justification": "Records money the host received outside KrabiClaw against a host-entered stay, idempotently per key; moves no money. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Records money the host received outside KrabiClaw against a host-entered stay, idempotently per key; moves no money."
       }
     },
     "reject_product_booking": {
@@ -953,127 +1361,151 @@
       "justifications": {
         "read_only_justification": "Declines a pending product booking, releasing capacity and emailing the guest. A required financial write returns an incomplete dashboard handoff before any refund preparation or booking change.",
         "open_world_justification": "Sends a decision email to the booking guest.",
-        "destructive_justification": "Declines a pending product booking, releasing capacity and emailing the guest. A required financial write returns an incomplete dashboard handoff before any refund preparation or booking change. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "destructive_justification": "Declines a pending product booking, releasing capacity and emailing the guest. A required financial write returns an incomplete dashboard handoff before any refund preparation or booking change."
       }
     },
     "remove_media": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Removes an asset placement from public content while retaining the underlying media asset.",
-        "open_world_justification": "Removes an asset placement from public content while retaining the underlying media asset. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Removes an asset placement from public content while retaining the underlying media asset. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Removes an asset placement from content shown to public website visitors.",
+        "destructive_justification": "Removes an asset placement from public content while retaining the underlying media asset."
+      }
+    },
+    "remove_organization_member": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Removes a Better Auth membership, subject to native permissions and last-owner protection.",
+        "open_world_justification": "Removes a Better Auth membership, subject to native permissions and last-owner protection. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Removes a Better Auth membership, subject to native permissions and last-owner protection."
       }
     },
     "remove_product_location": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Removes a product from a location, so the location no longer offers it.",
-        "open_world_justification": "Removes a product from a location, so the location no longer offers it. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Removes a product from a location, so the location no longer offers it. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "open_world_justification": "Removes the selected product offering from that location’s public website surfaces.",
+        "destructive_justification": "Removes a product from a location, so the location no longer offers it."
       }
     },
     "reorder_article_categories": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Overwrites the order the categories of the selected organization's blog or documentation are presented in.",
-        "open_world_justification": "Overwrites the order the categories of the selected organization's blog or documentation are presented in. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Overwrites the order the categories of the selected organization's blog or documentation are presented in. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Changes category ordering shown in the public article index, sidebar and menu.",
+        "destructive_justification": "Overwrites the order the categories of the selected organization's blog or documentation are presented in."
       }
     },
     "reorder_blog_posts": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Overwrites the order one of the selected organization's article collections (blog or documentation) is presented in.",
-        "open_world_justification": "Overwrites the order one of the selected organization's article collections (blog or documentation) is presented in. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Overwrites the order one of the selected organization's article collections (blog or documentation) is presented in. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Changes the article display order in the public blog or documentation collection.",
+        "destructive_justification": "Overwrites the order one of the selected organization's article collections (blog or documentation) is presented in."
       }
     },
     "reorder_collections": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Overwrites the order collections are presented in on the selected organization.",
-        "open_world_justification": "Overwrites the order collections are presented in on the selected organization. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Overwrites the order collections are presented in on the selected organization. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Changes collection display order in the public catalog or location menu.",
+        "destructive_justification": "Overwrites the order collections are presented in on the selected organization."
       }
     },
     "reorder_media": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Overwrites media placement ordering for the selected public content collection.",
-        "open_world_justification": "Overwrites media placement ordering for the selected public content collection. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Overwrites media placement ordering for the selected public content collection. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Changes media ordering in galleries or document collections shown on the public website.",
+        "destructive_justification": "Overwrites media placement ordering for the selected public content collection."
       }
     },
     "reorder_qa": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Overwrites authored Q&A sort positions in one scope.",
-        "open_world_justification": "Overwrites authored Q&A sort positions in one scope. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Overwrites authored Q&A sort positions in one scope. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Changes the order of authored Q&A shown to public website visitors.",
+        "destructive_justification": "Overwrites authored Q&A sort positions in one scope."
       }
     },
     "replace_content_block": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Replaces one block's data and media in the selected blog article or tenant page after a version check, keeping its position.",
-        "open_world_justification": "Replaces one block's data and media in the selected blog article or tenant page after a version check, keeping its position. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Replaces one block's data and media in the selected blog article or tenant page after a version check, keeping its position. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "open_world_justification": "Changes content visible to website visitors when the selected article or page is published.",
+        "destructive_justification": "Replaces one block's data and media in the selected blog article or tenant page after a version check, keeping its position."
       }
     },
     "replace_product_weekly_schedule": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Replaces weekly availability for one product and location, cancelling removed future sessions with no booking history while preserving any booked history.",
-        "open_world_justification": "Replaces weekly availability for one product and location, cancelling removed future sessions with no booking history while preserving any booked history. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Replaces weekly availability for one product and location, cancelling removed future sessions with no booking history while preserving any booked history. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "open_world_justification": "Changes weekly start times offered through the public booking website.",
+        "destructive_justification": "Replaces weekly availability for one product and location, cancelling removed future sessions with no booking history while preserving any booked history."
       }
     },
     "replace_resource_localizations": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Replaces the submitted translations for one resource type and locale; omitted resources remain untouched.",
-        "open_world_justification": "Replaces the submitted translations for one resource type and locale; omitted resources remain untouched. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Replaces the submitted translations for one resource type and locale; omitted resources remain untouched. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "open_world_justification": "Replaces submitted resource translations shown on enabled public website language routes.",
+        "destructive_justification": "Replaces the submitted translations for one resource type and locale; omitted resources remain untouched."
+      }
+    },
+    "reply_to_guest": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Saves a reply and optional photo in the guest conversation, emails the guest or, for a mapped Airbnb conversation, sends the text through Channex; a guest who joined through an invite also sees it in their KrabiClaw inbox. Updates the inbox state using the supplied retry key.",
+        "open_world_justification": "Downloads a supplied host photo when present and emails the reply and attachments to the conversation’s guest, or sends a text reply to a mapped Airbnb conversation through Channex.",
+        "destructive_justification": "Saves a reply and optional photo in the guest conversation, emails the guest or, for a mapped Airbnb conversation, sends the text through Channex; a guest who joined through an invite also sees it in their KrabiClaw inbox. Updates the inbox state using the supplied retry key."
       }
     },
     "request_product_booking_change": {
@@ -1085,7 +1517,7 @@
       "justifications": {
         "read_only_justification": "Records an audited immutable Product session/party change proposal and emails the guest to approve. Allocation remains unchanged until guest acceptance.",
         "open_world_justification": "Emails a change proposal to the booking guest for acceptance.",
-        "destructive_justification": "Records an audited immutable Product session/party change proposal and emails the guest to approve. Allocation remains unchanged until guest acceptance. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "destructive_justification": "Records an audited immutable Product session/party change proposal and emails the guest to approve. Allocation remains unchanged until guest acceptance."
       }
     },
     "request_table_reservation_change": {
@@ -1097,269 +1529,413 @@
       "justifications": {
         "read_only_justification": "Records an audited immutable restaurant table location/date/time/party change proposal and emails the guest to approve. Allocation remains unchanged until guest acceptance.",
         "open_world_justification": "Emails a change proposal to the reservation guest for acceptance.",
-        "destructive_justification": "Records an audited immutable restaurant table location/date/time/party change proposal and emails the guest to approve. Allocation remains unchanged until guest acceptance. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "destructive_justification": "Records an audited immutable restaurant table location/date/time/party change proposal and emails the guest to approve. Allocation remains unchanged until guest acceptance."
       }
     },
     "save_media_attachment": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": true,
-        "destructiveHint": false
+        "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Stores a conversation file in Cloudflare media storage and returns a public URL, even before assignment to a page.",
-        "open_world_justification": "Downloads the host-supplied file URL and stores the attachment at a public Cloudflare media URL.",
-        "destructive_justification": "Stores a conversation file in Cloudflare media storage and returns a public URL, even before assignment to a page. No existing record is deleted, cancelled or refunded by it."
+        "read_only_justification": "Stores a host attachment using a durable retry key and returns its actual public URL. An optional placement can replace a single website asset or append it to a gallery.",
+        "open_world_justification": "Downloads the host-supplied file URL, stores a public Cloudflare media asset and can place it on the public website.",
+        "destructive_justification": "Stores a host attachment using a durable retry key and returns its actual public URL. An optional placement can replace a single website asset or append it to a gallery."
       }
     },
-    "set_collection_products": {
+    "save_website_draft": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
         "destructiveHint": true
       },
       "justifications": {
+        "read_only_justification": "Creates or updates the authenticated user’s private website draft using a retry key and current revision; it does not publish.",
+        "open_world_justification": "Creates or updates the authenticated user’s private website draft using a retry key and current revision; it does not publish. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Creates or updates the authenticated user’s private website draft using a retry key and current revision; it does not publish."
+      }
+    },
+    "set_collection_products": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
         "read_only_justification": "Overwrites the complete membership and order of the selected collection; products left out lose their place in it.",
-        "open_world_justification": "Overwrites the complete membership and order of the selected collection; products left out lose their place in it. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Overwrites the complete membership and order of the selected collection; products left out lose their place in it. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "open_world_justification": "Replaces the products and their display order in the selected public catalog collection.",
+        "destructive_justification": "Overwrites the complete membership and order of the selected collection; products left out lose their place in it."
       }
     },
     "set_consultation_mode": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Updates the existing site consultation mode through the shared CMS writer without provider allocation, payment capture or commercial plan changes.",
-        "open_world_justification": "Updates the existing site consultation mode through the shared CMS writer without provider allocation, payment capture or commercial plan changes. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Updates the existing site consultation mode through the shared CMS writer without provider allocation, payment capture or commercial plan changes. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Changes the public Schedule page’s booking, external scheduler or contact path.",
+        "destructive_justification": "Updates the existing site consultation mode through the shared CMS writer without provider allocation, payment capture or commercial plan changes."
+      }
+    },
+    "set_guest_conversation_archived": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Changes the selected conversation’s archive state using the supplied retry key; it does not cancel the operational record.",
+        "open_world_justification": "Changes the selected conversation’s archive state using the supplied retry key; it does not cancel the operational record. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Changes the selected conversation’s archive state using the supplied retry key; it does not cancel the operational record."
       }
     },
     "set_media": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Replaces or clears the asset assigned to a single public media placement.",
-        "open_world_justification": "Replaces or clears the asset assigned to a single public media placement. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Replaces or clears the asset assigned to a single public media placement. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Replaces or clears a cover, hero, logo or other single media placement shown on the public website.",
+        "destructive_justification": "Replaces or clears the asset assigned to a single public media placement."
       }
     },
     "set_member_busy_calendars": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
-        "destructiveHint": false
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Selects already-linked Google busy calendars or disconnects input, then rechecks interval-only busy data. Grants no OAuth access.",
         "open_world_justification": "Selects already-linked Google busy calendars or disconnects input, then rechecks interval-only busy data. Grants no OAuth access. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Selects already-linked Google busy calendars or disconnects input, then rechecks interval-only busy data. Grants no OAuth access. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Selects already-linked Google busy calendars or disconnects input, then rechecks interval-only busy data. Grants no OAuth access."
       }
     },
     "set_member_scheduling": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Replaces authorized member hours, timezone, time off and approved public profile using optimistic revision. Existing Booking assignments remain fixed.",
-        "open_world_justification": "Replaces authorized member hours, timezone, time off and approved public profile using optimistic revision. Existing Booking assignments remain fixed. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Replaces authorized member hours, timezone, time off and approved public profile using optimistic revision. Existing Booking assignments remain fixed. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Changes public booking availability and any approved member profile shown to website visitors.",
+        "destructive_justification": "Replaces authorized member hours, timezone, time off and approved public profile using optimistic revision. Existing Booking assignments remain fixed."
       }
     },
     "set_product_booking_config": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Sets inputs for new occurrences without changing omitted defaults or existing session facts.",
-        "open_world_justification": "Sets inputs for new occurrences without changing omitted defaults or existing session facts. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Sets inputs for new occurrences without changing omitted defaults or existing session facts. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Changes the booking configuration used by guests requesting this public offering.",
+        "destructive_justification": "Sets inputs for new occurrences without changing omitted defaults or existing session facts."
       }
     },
     "set_product_location": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Creates or overwrites the selected product’s location availability and publication settings.",
-        "open_world_justification": "Creates or overwrites the selected product’s location availability and publication settings. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Creates or overwrites the selected product’s location availability and publication settings. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Changes whether visitors see and can request the product at the selected public location.",
+        "destructive_justification": "Creates or overwrites the selected product’s location availability and publication settings."
       }
     },
     "set_product_publication": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Creates or overwrites the selected product’s publication setting, including removing it from public display.",
-        "open_world_justification": "Creates or overwrites the selected product’s publication setting, including removing it from public display. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Creates or overwrites the selected product’s publication setting, including removing it from public display. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Shows or withholds the selected product on the public website.",
+        "destructive_justification": "Creates or overwrites the selected product’s publication setting, including removing it from public display."
+      }
+    },
+    "set_stay_nights": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Changes nightly prices, availability or stay rules on the website and pushes them to the home’s connected Airbnb listing through Channex; channel_push reports the delivery outcome.",
+        "open_world_justification": "Changes publicly bookable nights and prices on the website and, when connected, the home’s Airbnb listing through Channex.",
+        "destructive_justification": "Changes nightly prices, availability or stay rules on the website and pushes them to the home’s connected Airbnb listing through Channex; channel_push reports the delivery outcome."
+      }
+    },
+    "set_team_member": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Adds or removes an existing business teammate from a Better Auth team. Existing bookings retain their saved provider.",
+        "open_world_justification": "Adds or removes an existing business teammate from a Better Auth team. Existing bookings retain their saved provider. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Adds or removes an existing business teammate from a Better Auth team. Existing bookings retain their saved provider."
       }
     },
     "set_workspace_context": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
-        "destructiveHint": false
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Overwrites the authenticated user selected workspace organization or location.",
         "open_world_justification": "Overwrites the authenticated user selected workspace organization or location. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Overwrites the authenticated user selected workspace organization or location. No existing record is deleted, cancelled or refunded by it."
+        "destructive_justification": "Overwrites the authenticated user selected workspace organization or location."
       }
     },
     "update_article_category": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Overwrites the selected category's name, description or parent category.",
-        "open_world_justification": "Overwrites the selected category's name, description or parent category. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Overwrites the selected category's name, description or parent category. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Changes category names, descriptions or hierarchy shown on the public blog or documentation pages.",
+        "destructive_justification": "Overwrites the selected category's name, description or parent category."
       }
     },
     "update_blog_post": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Updates supplied fields of an existing website article. Supplied content_blocks replaces its current body, and edits to a published article appear publicly.",
-        "open_world_justification": "Updates supplied fields of an existing website article. Supplied content_blocks replaces its current body, and edits to a published article appear publicly. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Updates supplied fields of an existing website article. Supplied content_blocks replaces its current body, and edits to a published article appear publicly. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "open_world_justification": "Changes content, metadata or visibility seen by visitors to a published blog or documentation article.",
+        "destructive_justification": "Updates supplied fields of an existing website article. Supplied content_blocks replaces its current body, and edits to a published article appear publicly."
       }
     },
     "update_collection": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Overwrites the selected collection name, description or placement.",
-        "open_world_justification": "Overwrites the selected collection name, description or placement. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Overwrites the selected collection name, description or placement. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Changes collection text or position shown in the public product catalog.",
+        "destructive_justification": "Overwrites the selected collection name, description or placement."
+      }
+    },
+    "update_google_ads_campaign": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Pauses, enables or changes the daily budget of one campaign in the connected Google Ads account.",
+        "open_world_justification": "Changes status or budget only in the Google Ads account the business explicitly connected.",
+        "destructive_justification": "Pauses, enables or changes the daily budget of one campaign in the connected Google Ads account."
       }
     },
     "update_location": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Overwrites supplied location address, contact details, hours, timezone, capacity metadata or SEO fields.",
-        "open_world_justification": "Overwrites supplied location address, contact details, hours, timezone, capacity metadata or SEO fields. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Overwrites supplied location address, contact details, hours, timezone, capacity metadata or SEO fields. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Changes public location details and hours that visitors see and use for booking availability.",
+        "destructive_justification": "Overwrites supplied location address, contact details, hours, timezone, capacity metadata or SEO fields."
       }
     },
     "update_media_asset": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Overwrites media metadata such as alt text or category.",
-        "open_world_justification": "Overwrites media metadata such as alt text or category. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Overwrites media metadata such as alt text or category. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Changes alt text that can appear with the asset on the public website; category changes organize the media library.",
+        "destructive_justification": "Overwrites media metadata such as alt text or category."
+      }
+    },
+    "update_menu": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Atomically creates or updates menu dishes, prices, sections and location publication using a durable retry key. Existing sections, items and their positions remain; new entries append in supplied order.",
+        "open_world_justification": "Publishes supplied dishes, prices and location offerings on the public menu while preserving omitted items and existing order.",
+        "destructive_justification": "Atomically creates or updates menu dishes, prices, sections and location publication using a durable retry key. Existing sections, items and their positions remain; new entries append in supplied order."
+      }
+    },
+    "update_message_template": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Replaces a saved guest reply and its schedule under its version, re-planning only pending scheduled messages; completed, failed and uncertain sends are kept.",
+        "open_world_justification": "A schedule makes the production cron later send this text to eligible guests through each conversation’s email or Airbnb address.",
+        "destructive_justification": "Replaces a saved guest reply and its schedule under its version, re-planning only pending scheduled messages; completed, failed and uncertain sends are kept."
+      }
+    },
+    "update_organization_member_role": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Changes a Better Auth membership role, subject to native owner permissions and last-owner protection.",
+        "open_world_justification": "Changes a Better Auth membership role, subject to native owner permissions and last-owner protection. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Changes a Better Auth membership role, subject to native owner permissions and last-owner protection."
       }
     },
     "update_organization_settings": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Overwrites supplied site branding, contact email, default currency, announcement, public status or SEO fields.",
-        "open_world_justification": "Overwrites supplied site branding, contact email, default currency, announcement, public status or SEO fields. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Overwrites supplied site branding, contact email, default currency, announcement, public status or SEO fields. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "open_world_justification": "Changes public branding, contact details, announcements, SEO or whether the website is live.",
+        "destructive_justification": "Overwrites supplied site branding, contact email, default currency, announcement, public status or SEO fields."
       }
     },
     "update_post": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Overwrites supplied fields of an existing short post on the website.",
-        "open_world_justification": "Overwrites supplied fields of an existing short post on the website. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Overwrites supplied fields of an existing short post on the website. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Changes the selected published short post’s website content or visibility.",
+        "destructive_justification": "Overwrites supplied fields of an existing short post on the website."
       }
     },
     "update_product": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
+        "openWorldHint": true,
         "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Updates supplied product fields and preserves omitted variants, prices and options. Explicit replacement can delete omitted variants or prices; product content and price edits can appear publicly.",
-        "open_world_justification": "Updates supplied product fields and preserves omitted variants, prices and options. Explicit replacement can delete omitted variants or prices; product content and price edits can appear publicly. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Updates supplied product fields and preserves omitted variants, prices and options. Explicit replacement can delete omitted variants or prices; product content and price edits can appear publicly. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "open_world_justification": "Changes published product content or prices and can publish configured booking availability to website visitors.",
+        "destructive_justification": "Updates supplied product fields and preserves omitted variants, prices and options. Explicit replacement can delete omitted variants or prices; product content and price edits can appear publicly."
+      }
+    },
+    "update_product_session": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Overwrites selected session time, capacity or state using its current revision. Guest commitments prevent incompatible edits.",
+        "open_world_justification": "Changes session times, capacity or state exposed through public booking availability.",
+        "destructive_justification": "Overwrites selected session time, capacity or state using its current revision. Guest commitments prevent incompatible edits."
       }
     },
     "update_qa": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Overwrites selected authored Q&A fields and public visibility.",
-        "open_world_justification": "Overwrites selected authored Q&A fields and public visibility. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Overwrites selected authored Q&A fields and public visibility. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Changes authored Q&A text or visibility shown to public website visitors.",
+        "destructive_justification": "Overwrites selected authored Q&A fields and public visibility."
       }
     },
     "update_reservation_policy": {
       "annotations": {
         "readOnlyHint": false,
-        "openWorldHint": false,
-        "destructiveHint": false
+        "openWorldHint": true,
+        "destructiveHint": true
       },
       "justifications": {
         "read_only_justification": "Creates or overwrites the reservation policy of the selected location, which is what opens reservations there.",
-        "open_world_justification": "Creates or overwrites the reservation policy of the selected location, which is what opens reservations there. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Creates or overwrites the reservation policy of the selected location, which is what opens reservations there. No existing record is deleted, cancelled or refunded by it."
+        "open_world_justification": "Changes the reservation options, availability rules and policy summary shown to public website guests.",
+        "destructive_justification": "Creates or overwrites the reservation policy of the selected location, which is what opens reservations there."
       }
     },
     "update_site_page": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": true,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Overwrites tenant page metadata or supplied structured content, subject to version and removal checks.",
+        "open_world_justification": "Changes a published page’s content, metadata, address or product binding seen by public website visitors.",
+        "destructive_justification": "Overwrites tenant page metadata or supplied structured content, subject to version and removal checks."
+      }
+    },
+    "update_stay": {
       "annotations": {
         "readOnlyHint": false,
         "openWorldHint": false,
         "destructiveHint": true
       },
       "justifications": {
-        "read_only_justification": "Overwrites tenant page metadata or supplied structured content, subject to version and removal checks.",
-        "open_world_justification": "Overwrites tenant page metadata or supplied structured content, subject to version and removal checks. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Overwrites tenant page metadata or supplied structured content, subject to version and removal checks. The result is irreversible or hard to reverse, so the tool requires the user's confirmation."
+        "read_only_justification": "Changes a host-entered stay’s dates, party, guest details, total or notes under its version, moving its night claims; channel stays are refused.",
+        "open_world_justification": "Changes a host-entered stay’s dates, party, guest details, total or notes under its version, moving its night claims; channel stays are refused. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Changes a host-entered stay’s dates, party, guest details, total or notes under its version, moving its night claims; channel stays are refused."
+      }
+    },
+    "update_stay_arrival_guide": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Saves one home’s private arrival guide (check-in method and instructions, wifi, directions, house manual, checkout instructions); nothing is sent to a guest or published.",
+        "open_world_justification": "Saves one home’s private arrival guide (check-in method and instructions, wifi, directions, house manual, checkout instructions); nothing is sent to a guest or published. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Saves one home’s private arrival guide (check-in method and instructions, wifi, directions, house manual, checkout instructions); nothing is sent to a guest or published."
+      }
+    },
+    "update_team": {
+      "annotations": {
+        "readOnlyHint": false,
+        "openWorldHint": false,
+        "destructiveHint": true
+      },
+      "justifications": {
+        "read_only_justification": "Overwrites the selected Better Auth team name.",
+        "open_world_justification": "Overwrites the selected Better Auth team name. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Overwrites the selected Better Auth team name."
       }
     }
   },
   "test_cases": [
     {
-      "description": "Edit one price on a prepared product with two variants while preserving all other product data.",
-      "user_prompt": "At Ember & Slice in West Village, change the large Review Iced Coffee to 85 baht. Leave the small coffee, its prices, options and everything else as they are. Show me the updated menu.",
+      "description": "Change the Brooklyn Margherita price while preserving the other location and product data.",
+      "user_prompt": "At Ember & Slice in Brooklyn, change the Margherita price from $18 to $19. Leave West Village's Margherita at $18. Keep the Brooklyn photo, description and Featured status unchanged. Show me the updated menu.",
       "file_attachment_urls": null,
       "tools_triggered": "list_organizations, list_locations, list_location_products, get_product, update_product",
-      "expected_output": "Uses the independently prepared Review Iced Coffee fixture. Changes only the selected large-variant THB price to 8500 minor units. Readback preserves all sibling variant and price IDs, options, selections, and unrelated fields. The website shows the updated price.",
+      "expected_output": "Uses the existing Brooklyn Margherita price. Changes only that price from 1800 to 1900 minor units. Public readback shows Brooklyn at $19 and West Village at $18, with the Brooklyn photo, description, Featured status and unrelated variant/price data unchanged. Restore Brooklyn to $18 in a separate cleanup request and verify both locations return to $18.",
       "expected_output_url": null
     },
     {
@@ -1381,29 +1957,29 @@
       "expected_output_url": null
     },
     {
-      "description": "Propose a change to an independently prepared table reservation and apply it only after guest acceptance.",
-      "user_prompt": "At Ember & Slice in West Village, ask the guest on Review Reservation to move their table to the next available evening slot. Email the proposal. Keep the original time until they accept.",
+      "description": "Create a regular Brooklyn table reservation, then propose a one-hour change for guest acceptance.",
+      "user_prompt": "Book a regular table for two at Ember & Slice in Brooklyn next Friday at 7 PM for Taylor Review, using the reviewer contact details in the review instructions. Then ask the guest to move it to 8 PM. Email the proposal and keep 7 PM until they accept.",
       "file_attachment_urls": null,
-      "tools_triggered": "list_organizations, list_locations, list_reservation_inquiries, get_calendar, request_table_reservation_change",
-      "expected_output": "Uses a separate prepared future reservation and controlled guest inbox. Emails one proposal while the dashboard still shows the original time and capacity. Guest acceptance updates the reservation once; repeated acceptance or the same proposal retry causes no duplicate allocation or email.",
+      "tools_triggered": "list_organizations, list_locations, get_booking_policy, get_calendar, create_table_reservation, list_reservation_inquiries, request_table_reservation_change",
+      "expected_output": "Creates one regular table reservation using the actual location policy and controlled reviewer contact details. Emails one proposal for 8 PM while the reservation remains at 7 PM. Guest acceptance updates the same reservation once; reopening the accepted link preserves the accepted state. Experience bookings remain separate. Cancel the review reservation after verification.",
       "expected_output_url": null
     },
     {
-      "description": "Read independently prepared payment and payout records without changing financial state.",
-      "user_prompt": "Show the reviewer business’s payments for the last 30 days, and its balance and recent payouts. Keep each currency separate. Don’t change anything.",
+      "description": "Read an unconfigured business's payment state without inventing transactions or changing financial state.",
+      "user_prompt": "Show Ember & Slice's October payment summary, transactions, balance and recent payouts. Keep each currency separate. If payments are not connected, give me the authenticated dashboard setup link. Don't change anything.",
       "file_attachment_urls": null,
-      "tools_triggered": "list_organizations, get_payment_summary, list_payments, get_payment, get_payment_payouts",
-      "expected_output": "Uses the review business with independent sample transaction and payout history and appropriate read permissions. Reports the requested organization and time period, groups amounts by currency, and matches dashboard transaction details and payout history. No payment, authorization, refund, transfer, order or Checkout record is created or changed.",
+      "tools_triggered": "list_organizations, get_payment_summary, list_payments, get_payment_payouts, get_payments_dashboard_link",
+      "expected_output": "Reads Ember's actual October state. Reports zero returned transactions and explicitly unavailable balance and payout history because Stripe is unconfigured, then returns the authenticated dashboard setup link. Creates or changes no payment, order, Checkout, refund, transfer or payout record.",
       "expected_output_url": null
     }
   ],
   "negative_test_cases": [
     {
-      "description": "A refund or money transfer must not execute or prepare a financial operation through MCP.",
-      "user_prompt": "Refund the payment on Review Paid Booking and transfer its balance to my bank.",
+      "description": "A refund or transfer request must not invent a payment or create a financial write when Ember payments are unconfigured.",
+      "user_prompt": "Refund Ember & Slice's latest payment and transfer its balance to my bank.",
       "file_attachment_urls": null,
       "tools_triggered": null,
-      "expected_output": "May read the independently prepared payment and return its authenticated dashboard link. Reports that financial action remains incomplete. No refund authorization, refund, transfer, Checkout or queued financial operation is created, including on retry.",
+      "expected_output": "Reports that Ember's Stripe account is unconfigured and that no matching payment or balance is available; returns the authenticated setup link when applicable. It does not invent a payment or create a refund, transfer, Checkout, payment, authorization or payout record, including on retry.",
       "expected_output_url": null
     },
     {
@@ -1415,11 +1991,11 @@
       "expected_output_url": null
     },
     {
-      "description": "An explicit record from a real inaccessible organization must be denied.",
-      "user_prompt": "Open the foreign business’s private booking listed in the review instructions and cancel it. Use that record, not one of my businesses.",
+      "description": "A read of a private record from a real inaccessible organization must be denied.",
+      "user_prompt": "Read the foreign business’s private booking listed in the review instructions and show me its details. Use that record, not one of my businesses.",
       "file_attachment_urls": null,
       "tools_triggered": null,
-      "expected_output": "Uses an existing record from an independently prepared organization to which the reviewer has no membership. Authorization fails without returning customer, booking or payment data. No record is mutated and no alternate organization is substituted.",
+      "expected_output": "Returns an authorization or not-found denial without disclosing booking, customer or payment data. No record is mutated and no alternate organization is substituted.",
       "expected_output_url": null
     }
   ]

@@ -396,7 +396,7 @@ function validateArtifacts(checks, manifest) {
   pushCheck(
     checks,
     [...referencedMediaUrls].every(url => verifiedMediaUrls.has(url)),
-    'Every nested Krabiclaw media/file reference resolves through verified inventory',
+    'Every nested KrabiClaw media/file reference resolves through verified inventory',
     { unmatched: [...referencedMediaUrls].filter(url => !verifiedMediaUrls.has(url)) },
   )
   const complianceAssetIds = new Set((manifest.compliance?.media ?? []).map(item => item.asset_id))

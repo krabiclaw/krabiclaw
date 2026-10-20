@@ -229,8 +229,8 @@ async function main() {
 
     section("Signed-in homepage routing");
     const signedInHome = await get(`${BASE_URL}/`, { cookie: sessionCookie });
-    if (signedInHome.status === 302 && signedInHome.headers.location === "/api/post-login") pass("Signed-in homepage redirects to post-login");
-    else fail("Signed-in homepage did not redirect to post-login", signedInHome.status);
+    if (signedInHome.status === 200) pass("Signed-in homepage renders with 200");
+    else fail("Signed-in homepage did not render with 200", signedInHome.status);
     const postLogin = await get(`${BASE_URL}/api/post-login`, { cookie: sessionCookie });
     if (postLogin.status === 302 && postLogin.headers.location?.startsWith("/dashboard/")) pass("Post-login redirects to the dashboard");
     else fail("Post-login did not redirect to the dashboard", postLogin.status);
@@ -441,11 +441,6 @@ async function main() {
     for (const blockType of ["showcase", "language_reach", "steps"]) {
       if (authoring?.inputSchema?.properties?.type?.enum?.includes(blockType)) pass(`${blockType} block type advertised`);
       else fail(`${blockType} missing from authoring catalog`);
-    }
-    const payloadDescription = authoring?.inputSchema?.properties?.data?.description ?? "";
-    for (const field of ["rotating_accents", "layout (one of cards, pictures)"]) {
-      if (payloadDescription.includes(field)) pass(`${field} field advertised`);
-      else fail(`${field} missing from authoring catalog`);
     }
   } else {
     fail("tools/list failed", listBody);

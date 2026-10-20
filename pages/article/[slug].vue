@@ -1,11 +1,11 @@
 <template>
-  <ArticlePage collection="blog" />
+  <div />
 </template>
 
 <script setup lang="ts">
-import ArticlePage from '~/components/blog/ArticlePage.vue'
-
-// /article is a blog article's address on templates that declare it (Blawby); nowhere else.
-if (usePublicTemplate().template.value.serviceRoutes.articleDetailPrefix !== '/article') throw createError({ statusCode: 404, statusMessage: 'Article not found' })
-definePageMeta({ layout: 'articles', articleCollection: 'blog' })
+// /article/:slug is permanently moved to /blog/:slug across all templates.
+definePageMeta({
+  middleware: 'tenant-blog-canonical',
+})
 </script>
+

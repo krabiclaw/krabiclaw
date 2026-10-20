@@ -6,7 +6,7 @@ import {
   type LocalizedResourceType,
   type LocalizedValues,
 } from '~/server/utils/localization-registry'
-import type { ProductKind } from '~/shared/product-details'
+import { PRODUCT_DETAIL_FIELDS, type ProductKind } from '~/shared/product-details'
 import { HTTPError } from 'nitro'
 import { queryAll, type DbClient } from '~/server/db'
 import { assertPublicOrganizationLanguageEntitlement } from '~/server/utils/localization'
@@ -77,6 +77,9 @@ export function projectExactLocalizedResource<T extends { id: string }>(
     throw new Error('Localized resource does not match its canonical resource')
   }
   const definition = RESOURCE_LOCALIZATION_REGISTRY[resourceType]
+  const canonicalDetails = (canonical as { details?: unknown }).details
+  const unlocalizedDetails = Object.fromEntries(PRODUCT_DETAIL_FIELDS.filter(field => !field.localizable).flatMap(field =>
+    isRecord(canonicalDetails) && Object.hasOwn(canonicalDetails, field.key) ? [[field.key, canonicalDetails[field.key]]] : []))
   // Clearing a field is the empty state of its declared type. A map of
   // translated attributes empties to a map with nothing in it: "this product
   // has no translated attributes" is a readable answer, an absent map is not.
@@ -87,13 +90,14 @@ export function projectExactLocalizedResource<T extends { id: string }>(
   // An address is not cleared: its translated parts sit on the location's own.
   const clearedValues = Object.fromEntries(
     Object.entries(definition.fields).flatMap(([field, shape]): Array<[string, unknown]> => {
-      if (shape === 'details') return [[field, {}]]
+      if (shape === 'details') return [[field, unlocalizedDetails]]
       if (shape === 'string_array') return [[field, []]]
       if (shape === 'text') return [[field, (canonical as Record<string, unknown>)[field] === null ? null : '']]
       return []
     }),
   )
   const projectedValues = { ...localization.values }
+  if (isRecord(projectedValues.details)) projectedValues.details = { ...unlocalizedDetails, ...projectedValues.details }
   const titleField: Partial<Record<LocalizedResourceType, string>> = {
     organization: 'name',
     business_location: 'title',
@@ -164,8 +168,9 @@ export function resolveLocalizedRouteResourceId(
 
 export function projectLocalizedMediaAlt<T extends { asset_id: string; alt_text: string | null }>(
   media: readonly T[],
-  localizations: readonly ExactPublicLocalization[],
+  localizations: readonly ExactPublicLocalization[] | null,
 ): T[] {
+  if (localizations === null) return [...media]
   const byResourceId = new Map(
     localizations
       .filter(localization => localization.resourceType === 'media_asset')

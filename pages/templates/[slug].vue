@@ -1,218 +1,123 @@
 <template>
-  <div>
+  <div class="template-page">
     <Teleport to="body">
-      <div
-        v-if="isDemoPreviewOpen"
-        ref="previewDialogRef"
-        class="fixed inset-0 z-[100] bg-zinc-950"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="`${template.displayName} template demo preview`"
-      >
-        <div class="fixed inset-x-0 top-0 z-[101] border-b border-white/10 bg-zinc-950/95 backdrop-blur-md">
-          <div class="mx-auto flex max-w-7xl items-center gap-3 px-4 py-3 sm:px-6">
-            <button
-              ref="closePreviewButtonRef"
-              type="button"
-              class="inline-flex size-10 shrink-0 items-center justify-center rounded-full border border-white/20 text-white transition hover:bg-white/10"
-              aria-label="Close demo preview"
-              @click="closeDemoPreview"
-            >
-              <PlatformIcon name="x" class="size-5" />
-            </button>
-            <div class="flex min-w-0 items-center gap-3">
-              <img
-                v-if="template.logoUrl"
-                :src="template.logoUrl"
-                :alt="`${template.displayName} logo`"
-                class="h-8 w-8 shrink-0 rounded-lg object-contain"
-              />
-              <div v-else class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-white" style="background: linear-gradient(135deg, var(--kc-navy) 0%, var(--kc-navy-700) 100%);">
-                {{ template.displayName.charAt(0) }}
-              </div>
-              <div class="min-w-0">
-                <p class="text-sm font-semibold text-white">{{ template.displayName }}</p>
-                <p class="truncate text-xs text-white/50">by Krabiclaw · {{ template.priceLabel }}</p>
-              </div>
-            </div>
-            <div class="ml-auto">
-              <PlatformAccountCta :to="template.ctaTo" :label="template.ctaLabel" variant="gradient" size="md" />
-            </div>
+      <div v-if="isDemoPreviewOpen" ref="previewDialogRef" class="template-preview" role="dialog" aria-modal="true" :aria-label="`${template.displayName} template demo preview`">
+        <div class="template-preview__bar">
+          <button ref="closePreviewButtonRef" type="button" class="template-preview__close" aria-label="Close demo preview" @click="closeDemoPreview">
+            <PlatformIcon name="x" class="size-5" />
+          </button>
+          <img v-if="template.logoUrl" :src="template.logoUrl" width="32" height="32" :alt="`${template.displayName} logo`" class="template-preview__logo">
+          <div class="template-preview__name">
+            <p>{{ template.displayName }}</p>
+            <span>{{ template.priceLabel }}</span>
           </div>
+          <PlatformAccountCta :to="template.ctaTo" :label="template.ctaLabel" size="md" class="template-preview__start" />
         </div>
-        <iframe
-          :src="demoUrl"
-          class="absolute inset-x-0 top-[113px] h-[calc(100dvh-113px)] w-full border-0 sm:top-[65px] sm:h-[calc(100dvh-65px)]"
-          :title="`${template.displayName} template live demo`"
-        />
+        <iframe :src="demoUrl" class="template-preview__site" :title="`${template.displayName} template live demo`" />
       </div>
     </Teleport>
 
     <div :inert="isDemoPreviewOpen">
-
-    <!-- ── Page hero ─────────────────────────────────────────────────── -->
-    <section class="relative overflow-hidden py-16 lg:py-20">
-      <div class="pointer-events-none absolute inset-0 -z-10">
-        <div class="absolute -top-20 right-1/4 w-[500px] h-[500px] rounded-full opacity-20 blur-3xl" style="background: radial-gradient(circle, var(--kc-coral-200) 0%, transparent 70%);"></div>
-        <div class="absolute -bottom-10 left-1/3 w-[400px] h-[400px] rounded-full opacity-15 blur-3xl" style="background: radial-gradient(circle, var(--kc-teal-100) 0%, transparent 70%);"></div>
-      </div>
-
-      <div class="mx-auto max-w-6xl px-4 sm:px-6 text-center">
-        <span class="inline-flex items-center gap-2 text-[11px] font-bold tracking-[0.3em] uppercase text-(--kc-teal-600) bg-(--kc-teal-100) px-3.5 py-1.5 rounded-full border border-(--kc-teal)/20 mb-5">
-          <span class="w-1.5 h-1.5 rounded-full bg-(--kc-teal) shrink-0" />
-          Templates
-        </span>
-        <h1 class="text-[clamp(32px,5vw,56px)] font-extrabold tracking-tight leading-[1.05] mb-4 m-0">
-          <span class="text-default">{{ template.displayName }}</span>
-        </h1>
-        <p class="text-lg text-muted max-w-xl mx-auto">{{ template.tagline }}</p>
-      </div>
-    </section>
-
-    <!-- ── Preview card ─────────────────────────────────────────────── -->
-    <section class="mx-auto max-w-6xl px-4 py-4 sm:px-6">
-      <div class="relative overflow-hidden rounded-2xl border border-default" style="background: var(--ui-bg-elevated);">
-        <div class="absolute top-0 inset-x-0 h-0.5" style="background: linear-gradient(90deg, var(--kc-coral) 0%, var(--kc-teal) 100%);"></div>
-        <div class="relative aspect-[16/10] overflow-hidden bg-zinc-950">
-          <iframe
-            :src="demoUrl"
-            class="absolute inset-0 w-full h-full border-0"
-            loading="lazy"
-            :title="`${template.displayName} template live preview`"
-          />
-        </div>
-
-        <div class="border-t border-default px-6 py-4" style="background: var(--ui-bg-elevated);">
-          <div class="flex flex-wrap items-center justify-between gap-4">
-            <div class="flex items-center gap-3">
-              <img
-                v-if="template.logoUrl"
-                :src="template.logoUrl"
-                :alt="`${template.displayName} logo`"
-                class="h-8 w-8 rounded-lg object-contain"
-              />
-              <div v-else class="w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm font-bold" style="background: linear-gradient(135deg, var(--kc-navy) 0%, var(--kc-navy-700) 100%);">
-                {{ template.displayName.charAt(0) }}
-              </div>
-              <div>
-                <p class="text-sm font-semibold text-default">{{ template.displayName }}</p>
-                <p class="text-xs text-muted">{{ template.priceNote }}</p>
-              </div>
-            </div>
-
-            <div class="flex items-center gap-3">
-              <PlatformButton variant="outline" size="md" @click="openDemoPreview">
-                <PlatformIcon name="arrow-up-right" class="size-4" />
-                {{ isNclsShowcase ? 'Open customer site' : 'Open demo' }}
-              </PlatformButton>
-              <PlatformAccountCta :to="template.ctaTo" :label="template.ctaLabel" variant="gradient" size="md" />
-            </div>
+      <section v-if="isNclsShowcase" class="theme-intro theme-intro--law">
+        <div class="theme-intro__copy">
+          <NuxtLink to="/templates" class="theme-back">← All templates</NuxtLink>
+          <p class="theme-eyebrow">{{ template.displayName }} / Websites for lawyers</p>
+          <h1>{{ template.tagline }}</h1>
+          <p class="theme-intro__summary">{{ template.summary }}</p>
+          <div class="theme-actions">
+            <PlatformAccountCta :to="template.ctaTo" :label="template.ctaLabel" size="xl" class="theme-start" />
+            <button type="button" class="theme-text-action" @click="openDemoPreview">View live customer site <span aria-hidden="true">↗</span></button>
           </div>
-          <p v-if="isNclsShowcase" class="mt-3 text-xs text-muted">
-            This is a live, approved customer site — North Carolina Legal Services — shown here as a real-world Blawby example, not a synthetic demo.
-          </p>
+          <p class="theme-note">{{ template.priceLabel }}</p>
         </div>
-      </div>
-    </section>
+        <figure class="theme-intro__painting">
+          <img :src="template.artworkUrl" width="1122" height="1402" alt="A warmly lit law office, painted in indigo and coral" fetchpriority="high" decoding="async">
+        </figure>
+      </section>
 
-    <!-- ── Template detail ─────────────────────────────────────────── -->
-    <div class="mx-auto max-w-6xl px-6 py-16 lg:py-20">
-      <div class="grid gap-16 lg:grid-cols-[1fr_360px]">
+      <section v-else class="theme-intro theme-intro--saya">
+        <div class="theme-intro__top">
+          <div>
+            <NuxtLink to="/templates" class="theme-back">← All templates</NuxtLink>
+            <p class="theme-eyebrow">{{ template.displayName }} / Restaurants & experiences</p>
+            <h1>{{ template.tagline }}</h1>
+          </div>
+          <div class="theme-intro__copy">
+            <p class="theme-intro__summary">{{ template.summary }}</p>
+            <div class="theme-actions">
+              <PlatformAccountCta :to="template.ctaTo" :label="template.ctaLabel" size="xl" class="theme-start" />
+              <button type="button" class="theme-text-action" @click="openDemoPreview">View live demo <span aria-hidden="true">↗</span></button>
+            </div>
+            <p class="theme-note">{{ template.priceLabel }}</p>
+          </div>
+        </div>
+        <figure class="theme-saya-preview">
+          <img :src="template.previewImageUrl" width="2048" height="1340" alt="Kikuzuki restaurant’s Saya website, with its menu, experiences, and location links" fetchpriority="high" decoding="async" class="theme-saya-preview__desktop">
+          <img src="/images/products/pottery-phone.png" width="946" height="1884" alt="Pottery House Krabi’s Saya website on a phone" decoding="async" class="theme-saya-preview__phone">
+          <figcaption>Real places, made with Saya. Kikuzuki & Pottery House Krabi.</figcaption>
+        </figure>
+      </section>
+
+      <section class="theme-story" :class="{ 'theme-story--law': isNclsShowcase }">
+        <div class="theme-story__heading">
+          <p class="theme-eyebrow">{{ isNclsShowcase ? 'Built around your practice' : 'A welcome that feels like you' }}</p>
+          <h2>{{ isNclsShowcase ? 'Make the first step\nfeel straightforward.' : 'Tell the story\nbehind the visit.' }}</h2>
+        </div>
+        <p class="theme-story__body">{{ template.description }}</p>
+        <figure v-if="isNclsShowcase" class="theme-customer">
+          <button type="button" :aria-label="template.demoLabel" @click="openDemoPreview">
+            <img :src="template.previewImageUrl" width="2048" height="1466" alt="North Carolina Legal Services’ live Blawby website, with a clear consultation call to action" loading="lazy" decoding="async">
+          </button>
+          <figcaption><span>North Carolina Legal Services · A live customer website built with Blawby.</span><button type="button" class="theme-text-action" @click="openDemoPreview">Explore the site <span aria-hidden="true">↗</span></button></figcaption>
+        </figure>
+        <figure v-else class="theme-story__art">
+          <img :src="template.artworkUrl" width="1536" height="1024" alt="Food and hands-on craft, painted in warm coral and indigo" loading="lazy" decoding="async">
+        </figure>
+      </section>
+
+      <section class="theme-features">
+        <div class="theme-features__intro">
+          <p class="theme-eyebrow">Made for your day to day</p>
+          <h2>{{ isNclsShowcase ? 'A website with\nyour clients in mind.' : 'The details that\nbring people in.' }}</h2>
+        </div>
+        <ol class="theme-features__list">
+          <li v-for="(feature, index) in template.features" :key="feature.label">
+            <span class="theme-features__number">0{{ index + 1 }}</span>
+            <div><h3>{{ feature.label }}</h3><p>{{ feature.description }}</p></div>
+          </li>
+        </ol>
+      </section>
+
+      <section class="theme-included">
         <div>
-          <div class="mb-2 flex items-center gap-3">
-            <h2 class="text-3xl font-bold text-default">{{ template.displayName }}</h2>
-            <span
-              v-if="template.status === 'coming_soon'"
-              class="rounded-full bg-elevated px-3 py-0.5 text-sm font-medium text-muted"
-            >
-              Coming soon
-            </span>
-            <span v-else class="rounded-full bg-primary/10 px-3 py-0.5 text-sm font-medium text-primary">
-              {{ template.priceLabel }}
-            </span>
-          </div>
-          <p class="mt-3 text-lg leading-relaxed text-muted">{{ template.description }}</p>
-
-          <div class="mt-6 flex flex-wrap gap-1.5">
-            <span
-              v-for="vertical in template.supportedVerticals"
-              :key="vertical"
-              class="rounded-full border border-default px-2.5 py-0.5 text-xs font-medium text-default"
-            >
-              {{ vertical }}
-            </span>
-          </div>
-
-          <!-- Feature grid -->
-          <div class="mt-10 grid gap-4 sm:grid-cols-2">
-            <div v-for="feature in template.features" :key="feature.label" class="group overflow-hidden rounded-xl border border-default bg-elevated hover:border-(--kc-coral)/30 hover:shadow-md transition-all duration-300">
-              <div class="relative flex aspect-video items-center justify-center overflow-hidden" style="background: linear-gradient(135deg, var(--ui-bg-muted) 0%, var(--ui-bg-elevated) 100%);">
-                <div class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" style="background: linear-gradient(135deg, var(--kc-coral-50) 0%, var(--kc-teal-100)/30 100%);"></div>
-                <div class="relative w-14 h-14 rounded-2xl flex items-center justify-center" style="background: linear-gradient(135deg, var(--kc-navy) 0%, var(--kc-navy-700) 100%); box-shadow: 0 8px 24px rgba(31,37,71,0.2);">
-                  <PlatformIcon :name="feature.icon" class="size-6 text-white" />
-                </div>
-              </div>
-              <div class="p-4">
-                <p class="text-sm font-semibold text-default">{{ feature.label }}</p>
-                <p class="mt-1 text-xs leading-relaxed text-muted">{{ feature.description }}</p>
-              </div>
-            </div>
-          </div>
-
-          <!-- What's included -->
-          <div class="mt-12">
-            <h3 class="text-xl font-semibold text-default mb-6">What's included</h3>
-            <div class="grid gap-3 sm:grid-cols-2">
-              <div v-for="item in template.included" :key="item" class="flex items-start gap-3">
-                <PlatformIcon name="check" class="mt-0.5 size-4 shrink-0 text-primary" />
-                <span class="text-sm text-default">{{ item }}</span>
-              </div>
-            </div>
-          </div>
+          <p class="theme-eyebrow">Your starting point</p>
+          <h2>Ready to make yours.</h2>
+          <p>Both templates are included on every plan. Start free with two locations. Add your own domain on Growth or Business. Payment features require Business and provider setup.</p>
+          <NuxtLink to="/pricing" class="theme-text-action">See plans and what’s included <span aria-hidden="true">↗</span></NuxtLink>
         </div>
+        <ul><li v-for="item in template.included" :key="item">{{ item }}</li></ul>
+      </section>
 
-        <!-- Right: sticky sidebar -->
-        <div class="lg:sticky lg:top-8 lg:self-start">
-          <div class="rounded-2xl border border-default overflow-hidden" style="background: var(--ui-bg-elevated); box-shadow: 0 8px 40px rgba(31,37,71,0.08);">
-            <div class="h-1" style="background: linear-gradient(90deg, var(--kc-coral) 0%, var(--kc-teal) 100%);"></div>
-            <div class="p-6">
-              <img
-                v-if="template.logoUrl"
-                :src="template.logoUrl"
-                :alt="`${template.displayName} logo`"
-                class="w-12 h-12 rounded-xl object-contain mb-4"
-              />
-              <div v-else class="w-12 h-12 rounded-xl flex items-center justify-center text-white text-xl font-bold mb-4" style="background: linear-gradient(135deg, var(--kc-navy) 0%, var(--kc-navy-700) 100%); box-shadow: 0 4px 12px rgba(31,37,71,0.2);">
-                {{ template.displayName.charAt(0) }}
-              </div>
-              <h3 class="text-xl font-bold text-default">{{ template.displayName }}</h3>
-              <p class="mt-1 text-sm text-muted">{{ template.tagline }}</p>
-
-              <div class="mt-6 space-y-3">
-                <PlatformAccountCta :to="template.ctaTo" :label="template.ctaLabel" variant="gradient" size="lg" block />
-                <PlatformButton variant="outline" size="lg" block @click="openDemoPreview">
-                  <PlatformIcon name="arrow-up-right" class="size-4" />
-                  {{ template.demoLabel }}
-                </PlatformButton>
-              </div>
-
-              <div class="mt-6 border-t border-default pt-6 space-y-2">
-                <div v-for="spec in template.specs" :key="spec.label" class="flex justify-between text-sm">
-                  <span class="text-muted">{{ spec.label }}</span>
-                  <span class="font-medium text-default">{{ spec.value }}</span>
-                </div>
-              </div>
-            </div>
-          </div>
+      <section class="theme-connect">
+        <div>
+          <p class="theme-eyebrow">Keep it current</p>
+          <h2>Your next update<br>starts with a conversation.</h2>
+          <p>Use the dashboard, or connect ChatGPT, Claude, or another compatible MCP client to manage your website with the AI assistant you already use.</p>
+          <NuxtLink to="/plugin" class="theme-text-action">Explore AI connections <span aria-hidden="true">↗</span></NuxtLink>
         </div>
-      </div>
-    </div>
+        <div class="theme-connect__start">
+          <p>Start with {{ template.displayName }}.<br>Make it your own.</p>
+          <PlatformAccountCta :to="template.ctaTo" :label="template.ctaLabel" size="xl" class="theme-start" />
+          <button type="button" class="theme-text-action" @click="openDemoPreview">{{ template.demoLabel }} <span aria-hidden="true">↗</span></button>
+        </div>
+      </section>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { findPublishedTemplateMarketing } from '~/utils/template-registry'
+import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 
 // Keyed by full path so navigating directly between two template slugs (e.g.
 // /templates/saya -> /templates/blawby) remounts the page instead of Vue
@@ -224,10 +129,8 @@ definePageMeta({ layout: 'platform', key: route => route.fullPath })
 const route = useRoute()
 const slug = String(route.params.slug ?? '')
 
-// Static, local-data-driven lookup — no server round trip and no async
-// fetch, so the "nested SSR self-fetch loses Cloudflare bindings" pitfall in
-// This route does not use the public tenant data loader. Unknown or unpublished
-// slugs 404 immediately.
+// These code-owned routes read the canonical theme marketing registry.
+// Unknown or unpublished slugs 404 immediately.
 const template = findPublishedTemplateMarketing(slug)
 
 if (!template) {
@@ -235,9 +138,6 @@ if (!template) {
 }
 
 const config = useRuntimeConfig()
-const requestUrl = useRequestURL()
-const platformHostname = config.public.freeOrganizationDomain?.replace(/^https?:\/\//, '').replace(/\/$/, '')
-if (!platformHostname) throw createError({ statusCode: 500, statusMessage: 'NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN is required' })
 const isDemoPreviewOpen = ref(false)
 const previewDialogRef = ref<HTMLElement | null>(null)
 const closePreviewButtonRef = ref<HTMLButtonElement | null>(null)
@@ -245,18 +145,17 @@ let previewTrigger: HTMLElement | null = null
 
 const isNclsShowcase = template.slug === 'blawby'
 
-// Saya has no static registry demoUrl (see TemplateMarketingMetadata.demoUrl
-// doc) because its demo runs on an ephemeral seeded subdomain that differs
-// between dev and production — resolved the same way pages/templates.vue
-// always has. Blawby's demoUrl is the literal NCLS-approved production URL.
+// The shared resolver addresses the existing demo tenant in this environment,
+// including local ports and staging aliases. Blawby keeps its approved showcase.
 const demoUrl = computed(() => {
   if (template.demoUrl) return template.demoUrl
-  const isLocalOrigin = requestUrl.hostname === 'localhost'
-    || requestUrl.hostname === '127.0.0.1'
-    || requestUrl.hostname.endsWith('.localhost')
-  return isLocalOrigin
-    ? requestUrl.origin
-    : `https://demo.${platformHostname}`
+  const origin = tenantOrganizationOrigin({
+    platformDomain: config.public.platformDomain,
+    freeOrganizationDomain: config.public.freeOrganizationDomain,
+    subdomain: 'demo',
+  })
+  if (!origin) throw createError({ statusCode: 500, statusMessage: 'NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN is required' })
+  return origin
 })
 
 function openDemoPreview(event: MouseEvent) {
@@ -301,19 +200,12 @@ onUnmounted(() => {
   if (import.meta.client) document.documentElement.classList.remove('overflow-hidden')
 })
 
-const organizationUrl = config.public.platformUrl
+const organizationUrl = config.public.siteUrl
 
-// Marketing-page schema only: a Product node describing the template
-// offering itself. This is intentionally not the ProfessionalService/
-// LegalService business graph built by utils/professional-service-schema.ts
-// (used by useSocialMetadata for actual Blawby tenant sites, e.g. the linked NCLS production site) —
-// that builder needs a real tenant org identity and is not applicable to a
-// platform page describing the template product itself, so it is reused by
-// reference here, not duplicated.
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
+const { social_image: organizationSocialImage, template: organizationTemplate } = useTenantOrganization().organization
+if (organizationTemplate.slug !== 'platform') throw createError({ statusCode: 404, statusMessage: 'Page not found', fatal: true })
 useSocialMetadata({
-  template: 'platform',
   path: `/templates/${template.slug}`,
   socialImage: organizationSocialImage,
   title: template.seo.title,
@@ -343,3 +235,91 @@ useSocialMetadata({
   ],
 })
 </script>
+
+<style scoped>
+.template-page { background: #f6f4ef; color: #171920; }
+.theme-intro, .theme-story, .theme-features, .theme-included, .theme-connect { padding: clamp(4rem, 7.5vw, 7.5rem) max(7%, calc((100% - 86rem) / 2)); }
+.theme-eyebrow { color: #945448; text-transform: uppercase; letter-spacing: .15em; font-size: .75rem; font-weight: 600; margin: 0 0 1.5rem; }
+.theme-back { display: inline-block; color: #65666e; font-size: .85rem; text-decoration: none; margin-bottom: 3.5rem; }
+.theme-back:hover { text-decoration: underline; }
+.theme-intro h1 { margin: 0; font-size: clamp(3.4rem, 6.7vw, 6.7rem); line-height: 1.02; font-weight: 400; letter-spacing: -.055em; white-space: pre-line; text-wrap: balance; }
+.theme-intro__summary { max-width: 32rem; color: #62646c; font-size: clamp(1.1rem, 1.6vw, 1.45rem); line-height: 1.6; margin: 2rem 0; }
+.theme-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 1.75rem; }
+.theme-text-action { display: inline-flex; align-items: center; gap: .8rem; padding: .4rem 0; border: 0; border-bottom: 1px solid currentColor; background: transparent; color: #944537; font-size: .95rem; font-weight: 500; text-decoration: none; cursor: pointer; }
+.theme-text-action:hover { opacity: .75; }
+.theme-note { margin: 1.25rem 0 0; color: #75757a; font-size: .85rem; }
+.template-page :deep(.theme-start) { background: #171b31; color: #fff; border-radius: 999px; padding: 1rem 1.75rem; }
+.theme-intro--law { display: grid; grid-template-columns: 1.15fr 1fr; align-items: center; gap: 5%; padding-top: 3rem; padding-bottom: 3rem; }
+.theme-intro--law .theme-intro__copy { padding-bottom: 2rem; }
+.theme-intro__painting { margin: 0; height: clamp(34rem, 53vw, 50rem); }
+.theme-intro__painting img { display: block; width: 100%; height: 100%; object-fit: cover; }
+.theme-intro--saya { background: #161c32; color: #f8f7f3; padding-top: 3rem; padding-bottom: 4rem; }
+.theme-intro--saya .theme-back, .theme-intro--saya .theme-note { color: #b9bdcc; }
+.theme-intro--saya .theme-eyebrow, .theme-intro--saya .theme-text-action { color: #ffab98; }
+.theme-intro--saya :deep(.theme-start) { background: #f8f7f3; color: #171b31; }
+.theme-intro__top { display: grid; grid-template-columns: 1.3fr 1fr; gap: 4rem; align-items: end; }
+.theme-intro--saya .theme-intro__summary { color: #c5c8d2; margin-top: 0; }
+.theme-intro--saya h1 { font-size: clamp(3.2rem, 6vw, 6rem); }
+.theme-saya-preview { position: relative; margin: 4rem 3rem 0 0; padding-right: 14%; padding-bottom: 2.5rem; }
+.theme-saya-preview__desktop { display: block; width: 100%; height: auto; }
+.theme-saya-preview__phone { position: absolute; right: 0; bottom: 4rem; width: 22%; height: auto; box-shadow: 0 1rem 2rem #0005; }
+.theme-saya-preview figcaption { margin-top: 1rem; color: #b9bdcc; font-size: .85rem; }
+.theme-story { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem 5rem; align-items: center; }
+.theme-story h2, .theme-features h2, .theme-included h2, .theme-connect h2 { margin: 0; font-size: clamp(2.5rem, 4.7vw, 4.7rem); font-weight: 400; letter-spacing: -.045em; line-height: 1.05; white-space: pre-line; text-wrap: balance; }
+.theme-story__body { grid-column: 2; color: #62646c; font-size: clamp(1.1rem, 1.6vw, 1.45rem); line-height: 1.6; margin: 0; }
+.theme-story__art { grid-column: 1; grid-row: 1 / 3; margin: 0; }
+.theme-story__art img { display: block; width: 100%; height: auto; }
+.theme-story:not(.theme-story--law) .theme-story__heading { grid-column: 2; }
+.theme-customer { grid-column: 1 / -1; margin: 2rem 0 0; }
+.theme-customer > button { display: block; width: 100%; padding: 3rem 8%; border: 0; background: #d9dfe6; cursor: pointer; }
+.theme-customer img { display: block; width: 100%; height: auto; box-shadow: 0 1rem 2rem #17192024; }
+.theme-customer figcaption { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 1rem; color: #62646c; font-size: .85rem; padding-top: 1rem; }
+.theme-features { display: grid; grid-template-columns: 1fr 1.1fr; gap: 6rem; background: #e9e6de; }
+.theme-features__intro { align-self: start; }
+.theme-features__list { margin: 0; padding: 0; list-style: none; }
+.theme-features__list li { display: grid; grid-template-columns: 2rem 1fr; gap: 1.5rem; padding: 2rem 0; border-top: 1px solid #c8c5bf; }
+.theme-features__list li:first-child { padding-top: 0; border-top: 0; }
+.theme-features__number { color: #945448; font-size: .85rem; padding-top: .35rem; }
+.theme-features h3 { font-size: clamp(1.4rem, 2.4vw, 2rem); font-weight: 400; letter-spacing: -.025em; line-height: 1.2; margin: 0; }
+.theme-features__list p { color: #62646c; font-size: 1.05rem; line-height: 1.65; margin: 1rem 0 0; }
+.theme-included { display: grid; grid-template-columns: 1fr 1fr; gap: 6rem; }
+.theme-included h2 { font-size: clamp(2.5rem, 4vw, 4rem); }
+.theme-included p:not(.theme-eyebrow) { max-width: 32rem; color: #62646c; font-size: 1.1rem; line-height: 1.65; margin: 1.5rem 0; }
+.theme-included ul { list-style: none; padding: 0; margin: 0; }
+.theme-included li { padding: 1.1rem 0; border-bottom: 1px solid #d4d1c9; font-size: 1.05rem; }
+.theme-included li:first-child { border-top: 1px solid #d4d1c9; }
+.theme-connect { display: grid; grid-template-columns: 1.2fr 1fr; gap: 6rem; background: #161c32; color: #f8f7f3; }
+.theme-connect .theme-eyebrow, .theme-connect .theme-text-action { color: #ffab98; }
+.theme-connect h2 { font-size: clamp(2.5rem, 4vw, 4rem); }
+.theme-connect p:not(.theme-eyebrow) { max-width: 32rem; color: #c5c8d2; font-size: 1.1rem; line-height: 1.65; margin: 1.5rem 0; }
+.theme-connect__start { align-self: end; padding-left: 3rem; border-left: 1px solid #ffffff29; }
+.theme-connect .theme-connect__start p { font-size: 1.75rem; line-height: 1.3; letter-spacing: -.025em; }
+.theme-connect :deep(.theme-start) { display: table; background: #f8f7f3; color: #171b31; margin-bottom: 1rem; }
+.template-preview { position: fixed; inset: 0; z-index: 100; display: flex; flex-direction: column; background: #0b0d13; }
+.template-preview__bar { display: flex; flex-wrap: wrap; flex: none; align-items: center; gap: .75rem; padding: .75rem 1rem; border-bottom: 1px solid #ffffff29; color: white; }
+.template-preview__close { display: inline-flex; align-items: center; justify-content: center; width: 2.5rem; height: 2.5rem; border: 1px solid #ffffff4d; border-radius: 50%; background: transparent; color: white; cursor: pointer; }
+.template-preview__close:hover { background: #ffffff1a; }
+.template-preview__logo { width: 2rem; height: 2rem; object-fit: contain; }
+.template-preview__name p { margin: 0; font-size: .9rem; font-weight: 600; }
+.template-preview__name span { font-size: .75rem; color: #b9bdcc; }
+.template-preview__start { margin-left: auto; }
+.template-preview__site { display: block; width: 100%; flex: 1; min-height: 0; border: 0; background: white; }
+@media (max-width: 767px) {
+  .theme-intro--law, .theme-intro__top, .theme-story, .theme-features, .theme-included, .theme-connect { grid-template-columns: 1fr; gap: 2.5rem; }
+  .theme-intro--law { padding-top: 2rem; }
+  .theme-back { margin-bottom: 2.5rem; }
+  .theme-intro__painting { height: auto; }
+  .theme-intro__painting img { height: auto; }
+  .theme-intro__top { gap: 1.5rem; }
+  .theme-saya-preview { margin: 3rem 0 0; padding-bottom: 1rem; }
+  .theme-saya-preview__phone { width: 26%; bottom: 4rem; }
+  .theme-saya-preview figcaption { max-width: 75%; font-size: .75rem; }
+  .theme-story__body, .theme-story:not(.theme-story--law) .theme-story__heading, .theme-story__art, .theme-customer { grid-column: auto; grid-row: auto; }
+  .theme-story__art { order: 3; }
+  .theme-customer { margin-top: 0; }
+  .theme-customer > button { padding: 1.25rem; }
+  .theme-connect__start { padding: 2rem 0 0; border-left: 0; border-top: 1px solid #ffffff29; }
+  .template-preview__name { min-width: 0; flex: 1; }
+  .template-preview__logo { display: none; }
+}
+</style>

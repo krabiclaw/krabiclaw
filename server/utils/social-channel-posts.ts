@@ -7,7 +7,7 @@ import { MetaDeadline } from './meta-graph'
 import { organizationEventQuery } from './organization-events'
 import { publicResourceCacheInvalidationQuery } from './public-resource-cache'
 import { connectedSocialTarget, parsePublishTargets, readDiscordMessage, type DiscordConnection, type PublishTarget, type SocialChannel } from './social-publication'
-import { deleteWebhookMessage, discordMessageLink, type DiscordMessage } from './discord-webhooks'
+import { deleteMessage, discordMessageLink, listMessages, type DiscordMessage } from './discord-bot'
 
 type ChannelTarget = Extract<PublishTarget, { channel: SocialChannel }>
 export function parseChannelTarget(args: Record<string, unknown>): ChannelTarget {
@@ -63,14 +63,20 @@ function instagramPost(record: InstagramMediaRecord, targetId: string, username:
 /** Read provider inventory without importing documents, media or progress state. */
 export async function listChannelPosts(env: CloudflareEnv, organizationId: string, input: ChannelTarget, page: { after: string | null; limit: number }) {
   if (!Number.isInteger(page.limit) || page.limit < 1 || page.limit > 100) throw new HTTPError({ statusCode: 400, statusMessage: 'limit must be an integer between 1 and 100' })
-  if (input.channel === 'discord') throw new HTTPError({ statusCode: 400, statusMessage: 'A Discord incoming webhook cannot read channel history. Read a message with get_channel_post using the provider_post_id of its publication receipt.' })
   const connection = await connectedSocialTarget(env, organizationId, input)
   const deadline = new MetaDeadline(30_000)
   if (connection.channel === 'facebook') {
     const result = await listPagePosts(connection.target, page, deadline)
     return { posts: result.items.map(item => facebookPost(item, input.target_id)), next_after: result.after }
   }
-  if (connection.channel === 'discord') throw new Error('The selected channel changed')
+  if (connection.channel === 'discord') {
+    // The channel's messages newest first; only the KrabiClaw bot's are channel posts. `after` is the oldest message id read.
+    const messages = await listMessages(env, connection.target.channelId, { before: page.after, limit: page.limit }, deadline)
+    return {
+      posts: messages.filter(message => message.author.id === env.DISCORD_CLIENT_ID).map(message => discordPost(message, connection.target)),
+      next_after: messages.length === page.limit ? messages.at(-1)!.id : null,
+    }
+  }
   const result = await listMedia(connection.target, page, deadline)
   return { posts: result.items.map(item => instagramPost(item, input.target_id, connection.username)), next_after: result.after }
 }
@@ -82,7 +88,7 @@ export async function getChannelPost(env: CloudflareEnv, organizationId: string,
     if (!providerPostId.startsWith(`${input.target_id}_`)) throw new HTTPError({ statusCode: 400, statusMessage: 'provider_post_id must belong to the explicitly selected Page.' })
     return facebookPost(await readPagePostRecord(connection.target, providerPostId, deadline), input.target_id)
   }
-  if (connection.channel === 'discord') return discordPost(await readDiscordMessage(connection.target, providerPostId, deadline), connection.target)
+  if (connection.channel === 'discord') return discordPost(await readDiscordMessage(env, connection.target, providerPostId, deadline), connection.target)
   return instagramPost(await readMedia(connection.target, providerPostId, deadline), input.target_id, connection.username)
 }
 
@@ -102,9 +108,9 @@ export async function deleteChannelPost(env: CloudflareEnv, organizationId: stri
     facebookPost(await readPagePostRecord(connection.target, providerPostId, deadline), input.target_id)
     await deletePageObject(connection.target, providerPostId, deadline)
   } else {
-    // Only a message this webhook sent to this channel is read, and only that one is deleted.
-    await readDiscordMessage(connection.target, providerPostId, deadline)
-    await deleteWebhookMessage(connection.target.webhook, providerPostId, deadline)
+    // Only the bot's own message in the connected channel is read, and only that one is deleted.
+    await readDiscordMessage(env, connection.target, providerPostId, deadline)
+    await deleteMessage(env, connection.target.channelId, providerPostId, deadline)
   }
   const now = new Date().toISOString()
   await executeBatch(env.DB, [

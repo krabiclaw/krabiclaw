@@ -36,13 +36,13 @@ export default defineHandler(async (event) => {
   if (!requestOk) return jsonResponse({ error: 'Too many cancellation attempts. Please try again later.' }, { status: 429 })
 
   const existing = await getGuestRequest(db, requestId, organizationId)
-  if (!existing || existing.kind === 'contact') {
+  if (!existing || existing.kind === 'contact' || existing.kind === 'stay') {
     return jsonResponse({ error: 'Booking not found or already cancelled' }, { status: 404 })
   }
 
   const tokenHash = await hashReservationCancelToken(token)
   const now = new Date().toISOString()
-  const cancelled = await cancelBookingRequest(db, { id: requestId, organizationId, kind: existing.kind, tokenHash, now })
+  const cancelled = await cancelBookingRequest(db, { id: requestId, organizationId, kind: existing.kind, tokenHash, now, env })
   if (!cancelled) return jsonResponse({ error: 'Booking not found or already cancelled' }, { status: 404 })
 
   await notifyGuestCancellation(env, db, cancelled)

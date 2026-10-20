@@ -3,7 +3,7 @@
 
     <template v-if="location">
       <!-- Sub-nav (Level 2) -->
-      <SayaSubNav
+      <TenantSubNav
         :location-slug="slug"
         active="posts"
       />
@@ -34,12 +34,10 @@
 import SocialPosts from '~/components/social/SocialPosts.vue'
 const { localePath, t } = useI18n()
 
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const route = useRoute()
-const { organizationId, organization } = useTenantOrganization()
-if (!organizationId) throw createError({ statusCode: 404 })
-
+const { organization } = useTenantOrganization()
 const slug = computed(() => String(route.params.slug))
 const organizationName = computed(() => String((organization as ApiValue)?.name ?? '').trim())
 
@@ -48,6 +46,8 @@ const { location } = await usePublicPageData()
 // around a null location answered 200 with an empty shell — a soft 404 a
 // crawler indexes. The sibling menu and product indexes already refuse it.
 if (!location.value) throw createError({ statusCode: 404, statusMessage: 'Location not found' })
+// A section with nothing on it is not a page; the navigation hides it by the same flag.
+if (!location.value.sections.posts) throw createError({ statusCode: 404 })
 
 const feed = await useSocialPostFeed(() => ({ locationId: location.value!.id }))
 
@@ -56,9 +56,6 @@ useSocialMetadata(() => ({
   title: `Updates · ${location.value?.title || slug.value}`,
   description: `Latest news and updates from ${location.value?.title || slug.value} at ${organizationName.value}.`,
   socialImage: location.value?.social_image ?? null,
-  brand: {
-    organizationName: organizationName.value,
-  },
   breadcrumbs: [
     { name: 'Locations', url: '/locations' },
     { name: location.value?.title ?? slug.value, url: `/locations/${slug.value}` },

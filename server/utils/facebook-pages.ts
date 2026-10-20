@@ -77,7 +77,7 @@ export const listLinkedFacebookPages = async (env: CloudflareEnv, accountId: str
 }
 
 /** The connected Page's token, read through the linked account that manages it. */
-export const facebookPageToken = async (env: CloudflareEnv, connection: Pick<OrganizationIntegration, 'target_id' | 'target_name'> & { account_id: string }): Promise<string> => {
+export const facebookPageToken = async (env: CloudflareEnv, connection: Pick<OrganizationIntegration, 'account_id' | 'target_id' | 'target_name'>): Promise<string> => {
   const page = (await listLinkedFacebookPages(env, connection.account_id)).find(candidate => candidate.id === connection.target_id)
   if (!page) throw new Error(`The linked Facebook system user has no assignment for Page ${connection.target_name}. Check its delegated Page access.`)
   return page.access_token

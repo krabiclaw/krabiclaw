@@ -88,18 +88,17 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   // A single-choice step is answered by the press itself: no Next to confirm it.
   await expect(step('type')).toBeVisible()
   await page.getByRole('button', { name: 'Restaurant, café or bar' }).click()
+  await expect(step('language')).toBeVisible()
+  await page.getByRole('button', { name: 'English', exact: true }).click()
 
-  // The business step is one Google Maps search. A name Google does not know
-  // is entered manually from under the predictions, and that path never asks
-  // Google for a place.
-  const placeDetailsRequests: string[] = []
+  // Manual business entry completes without any Google Places request.
+  const placesRequests: string[] = []
   page.on('request', (sent) => {
-    if (sent.url().includes('/api/dashboard/google-places/details')) placeDetailsRequests.push(sent.url())
+    if (sent.url().includes('/api/dashboard/google-places/')) placesRequests.push(sent.url())
   })
   await expect(step('business')).toBeVisible()
-  await page.getByPlaceholder('Search for your business on Google Maps').fill(name)
-  await page.getByRole('button', { name: 'Enter details manually' }).click()
-  await expect(step('location')).toBeVisible()
+  await page.getByLabel('Name', { exact: true }).fill(name)
+  await advance('Next', 'location')
 
   // Location: the country is asked once, and nothing proposes one — it is what
   // the timezone and the currency are both derived from, so the owner names it.
@@ -109,15 +108,27 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   await page.getByPlaceholder('Search country...').fill('Thailand')
   await page.getByRole('option', { name: /Thailand/ }).click()
 
-  // The first save creates the organization through Better Auth and then the
-  // site itself — seeded pages, a location, a team and the system subdomain —
-  // before the pane has anything to frame.
-  await advance('Next', 'contact')
+  await advance('Next', 'hours')
+
+  // Hours: the timezone follows the single-zone country the owner named. Zones
+  // read as the city and its current offset, not the IANA identifier.
+  await expect(step('hours')).toContainText('Bangkok · GMT+7')
+  await advance('Save hours', 'currency')
+
+  // Currency: proposed from the country the owner named, and confirmed here
+  // before anything is priced. Thailand prices in baht.
+  await expect(step('currency')).toContainText('Thai Baht (THB)')
+
+  // The first save needs both answers and creates the organization through
+  // Better Auth and its pending site before the pane has anything to frame.
+  await step('currency').getByRole('button', { name: 'Show popup', exact: true }).click()
+  await page.getByRole('option', { name: 'Thai Baht (THB)', exact: true }).click()
+  await expect(step('contact')).toBeVisible()
 
   // The draft holds the typed name as a manual business, with no Google place.
   const saved = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(saved.status(), await saved.text()).toBe(200)
-  expect((await saved.json() as { draft: unknown }).draft).toMatchObject({ sourceType: 'manual', placeId: null, details: { name } })
+  expect((await saved.json() as { draft: unknown }).draft).toMatchObject({ sourceType: 'manual', placeId: null, details: { name, currency: 'THB', timezone: 'Asia/Bangkok' } })
 
   const previewFrame = page.locator('iframe[title="Site preview"]')
   await expect(previewFrame).toHaveAttribute('src', /preview_token=/)
@@ -134,7 +145,14 @@ test('a new owner builds a draft and creates a site through the routed flow', as
     const frame = page.frame({ url: /preview_token=/ })
     expect(frame).not.toBeNull()
     await frame!.evaluate(() => { window.location.href = window.location.pathname })
+    await frame!.waitForURL(`${organizationOrigin}/`)
     await expect(preview.locator('body')).toContainText(name)
+    const config = await frame!.evaluate(async () => {
+      const response = await fetch('/api/public/config')
+      return { status: response.status, body: await response.json() }
+    })
+    expect(config.status).toBe(200)
+    expect(config.body).toMatchObject({ success: true, config: { default_currency: 'THB' } })
   }
 
   // Nobody else can see it yet. `request` has its own cookie jar, so this asks
@@ -145,7 +163,9 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   const asAnyone = tenantHostIsAddressable()
     ? { url: `${organizationOrigin}/`, headers: {} }
     : { url: `${baseURL}/`, headers: { 'x-preview-tenant': organizationSubdomain(organizationOrigin) } }
-  expect(await (await request.get(asAnyone.url, { headers: asAnyone.headers })).text()).not.toContain(name)
+  const anonymousPreview = await request.get(asAnyone.url, { headers: asAnyone.headers })
+  expect(anonymousPreview.status()).toBe(404)
+  expect(await anonymousPreview.text()).not.toContain(name)
 
   // Contact: the phone picker arrives seeded with that country, and the number
   // is accepted the way a Thai owner writes it, trunk zero included.
@@ -153,16 +173,6 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   await expect(phone).toBeEnabled()
   await phone.fill('0812345678')
   await expect(phone).toHaveValue('081 234 5678')
-  await advance('Next', 'hours')
-
-  // Hours: the timezone follows the single-zone country the owner named. Zones
-  // read as the city and its current offset, not the IANA identifier.
-  await expect(step('hours')).toContainText('Bangkok · GMT+7')
-  await advance('Save hours', 'currency')
-
-  // Currency: proposed from the country the owner named, and confirmed here
-  // before anything is priced. Thailand prices in baht.
-  await expect(step('currency')).toContainText('Thai Baht (THB)')
   await advance('Next', 'products')
 
   // The menu is optional, but a dish the owner names lands in the section they
@@ -172,18 +182,18 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   await page.getByPlaceholder('Small plates, Skewers, Drinks…').fill('Small plates')
   await page.getByRole('button', { name: 'Add dish' }).click()
   await expect(step('products')).toContainText(formatMinorAmount(18000, 'THB'))
-  // The front of house is not optional: colour, logo and photo are, but the
-  // headline becomes the home page's only h1, so Next stays disabled until it
-  // is answered.
+  // The business name supplies the headline; the owner can customize it.
   await advance('Next', 'look')
   const next = page.getByRole('button', { name: 'Next', exact: true })
-  await expect(next).toBeDisabled()
+  const headline = page.getByPlaceholder('A clear promise guests remember')
+  await expect(headline).toHaveValue(name)
+  await expect(next).toBeEnabled()
   // The look: a starter palette and a font, both written to the site.
   await page.getByRole('button', { name: 'Use the Forest colors' }).click()
   await expect(page.getByRole('button', { name: 'Use the Forest colors' })).toHaveAttribute('aria-pressed', 'true')
   await step('look').getByRole('combobox').click({ timeout: 30_000 })
   await page.getByRole('option', { name: 'Lora', exact: true }).click({ timeout: 30_000 })
-  await page.getByPlaceholder('A clear promise guests remember').fill('Fresh from the Andaman, every morning')
+  await headline.fill('Fresh from the Andaman, every morning')
   await expect(next).toBeEnabled()
   await advance('Next', 'review')
 
@@ -247,7 +257,7 @@ test('a new owner builds a draft and creates a site through the routed flow', as
   await expect(section).toContainText('Grilled squid')
   await expect(section).toContainText(formatMinorAmount(18000, 'THB'))
   await visitor.close()
-  expect(placeDetailsRequests).toEqual([])
+  expect(placesRequests).toEqual([])
 })
 
 // Kikuzuki's own listing, answered by the real Places API (New) through the
@@ -256,6 +266,7 @@ test('a new owner builds a draft and creates a site through the routed flow', as
 const KIKUZUKI = { placeId: 'ChIJi-IgEJ2VUTAR1R3W1qDnhQ8', name: 'Kikuzuki Japanese Robatayaki & Izakaya' }
 
 test('a new owner picks their Google listing and it seeds location, contact and hours', async ({ page, baseURL }) => {
+  test.skip(process.env.E2E_GOOGLE_PLACES !== 'true', 'Live Google Places qualification requires E2E_GOOGLE_PLACES=true')
   await dismissPreviewToolbar(page)
   await loginAs(page.request, baseURL!, 'user-e2e-onboarding-wizard')
   const discarded = await page.request.delete('/api/dashboard/onboarding/drafts/active')
@@ -272,7 +283,10 @@ test('a new owner picks their Google listing and it seeds location, contact and 
   await page.goto('/dashboard/onboarding/type')
   await expect(page.locator('[data-onboarding-hydrated="true"]')).toBeVisible()
   await page.getByRole('button', { name: 'Restaurant, café or bar' }).click()
+  await expect(step('language')).toBeVisible()
+  await page.getByRole('button', { name: 'English', exact: true }).click()
   await expect(step('business')).toBeVisible()
+  await page.getByRole('button', { name: 'Import from Google Maps', exact: true }).click()
 
   // Predictions appear as the owner types; each names the place and its area.
   const autocomplete = page.waitForRequest(sent => sent.url().includes('/api/dashboard/google-places/autocomplete'))
@@ -294,20 +308,25 @@ test('a new owner picks their Google listing and it seeds location, contact and 
   await expect(step('location')).toContainText('Thailand')
   await page.getByRole('button', { name: 'Next', exact: true }).click()
 
-  // Contact: Google's national number, read in the place's own country.
-  await expect(step('contact')).toBeVisible()
-  await expect(page.getByPlaceholder('Phone number')).toHaveValue('095 293 2112')
-  await page.getByRole('button', { name: 'Next', exact: true }).click()
-
   // Hours: the place's timezone and its opening hours.
   await expect(step('hours')).toBeVisible()
   await expect(step('hours')).toContainText('Bangkok · GMT+7')
+  await page.getByRole('button', { name: 'Save hours', exact: true }).click()
+
+  // Currency is confirmed before the first save creates the pending site.
+  await expect(step('currency')).toBeVisible()
+  await expect(step('currency')).toContainText('Thai Baht (THB)')
+  await page.getByRole('button', { name: 'Next', exact: true }).click()
+
+  // Contact: Google's national number, read in the place's own country.
+  await expect(step('contact')).toBeVisible()
+  await expect(page.getByPlaceholder('Phone number')).toHaveValue('095 293 2112')
 
   // The saved draft names the Google place, which the server fetched itself.
   const saved = await page.request.get('/api/dashboard/onboarding/drafts/active')
   expect(saved.status(), await saved.text()).toBe(200)
-  const draft = (await saved.json() as { draft: { sourceType: string; placeId: string; details: { name: string; phone: string; timezone: string; openingHours: { periods: unknown[] } } } }).draft
-  expect(draft).toMatchObject({ sourceType: 'google_places', placeId: KIKUZUKI.placeId, details: { name: KIKUZUKI.name, phone: '+66952932112', timezone: 'Asia/Bangkok' } })
+  const draft = (await saved.json() as { draft: { sourceType: string; placeId: string; details: { name: string; phone: string; timezone: string; currency: string; openingHours: { periods: unknown[] } } } }).draft
+  expect(draft).toMatchObject({ sourceType: 'google_places', placeId: KIKUZUKI.placeId, details: { name: KIKUZUKI.name, phone: '+66952932112', timezone: 'Asia/Bangkok', currency: 'THB' } })
   expect(draft.details.openingHours.periods.length).toBeGreaterThan(0)
 
   const cleared = await page.request.delete('/api/dashboard/onboarding/drafts/active')
@@ -324,7 +343,7 @@ test('deleting a site through Better Auth also deletes the draft that created it
 
   const name = `E2E Deleted ${Date.now().toString(36)}`
   const firstSave = await page.request.post('/api/dashboard/onboarding/drafts/active', {
-    data: { sourceType: 'manual', vertical: 'restaurant', name, details: { country: 'TH', city: 'Ao Nang', streetAddress: '88 Moo 2' } },
+    data: { sourceType: 'manual', vertical: 'restaurant', name, details: { sourceLocale: 'en', currency: 'THB', timezone: 'Asia/Bangkok', country: 'TH', city: 'Ao Nang', streetAddress: '88 Moo 2' } },
   })
   expect(firstSave.status(), await firstSave.text()).toBe(200)
   const { organizationId } = await firstSave.json() as { organizationId: string }
@@ -351,57 +370,96 @@ test('the business search API refuses what the picker would never send', async (
   expect(malformed.status(), await malformed.text()).toBe(400)
   const detailsMalformed = await request.post('/api/dashboard/google-places/details', { data: { placeId: KIKUZUKI.placeId, sessionToken: 'not-a-uuid' } })
   expect(detailsMalformed.status(), await detailsMalformed.text()).toBe(400)
-
-  // Add-location takes a picked placeId or a typed name, never a Maps link or
-  // a search to resolve.
-  for (const data of [{ mapsUrl: 'https://maps.app.goo.gl/abc' }, { query: 'Kikuzuki' }, { mapsUrl: 'https://maps.app.goo.gl/abc', previewOnly: true }]) {
-    const refused = await request.post('/api/dashboard/locations?org=ember-slice-demo', { data })
-    expect(refused.status(), await refused.text()).toBe(400)
-    expect(await refused.json()).toEqual({ error: 'Exactly one of placeId or name is required' })
-  }
 })
 
-// Add-location walks the same business step with the same picker, and Settings
-// → Google Maps connects a location by the same selection. Both run against the
-// demo tenant's local copy; the location this adds is deactivated at the end.
-test('add-location and Settings connect a location through the same business picker', async ({ page, baseURL }) => {
-  await dismissPreviewToolbar(page)
+// Ember & Slice is on Business with the 2 included locations in use. A paid
+// plan refuses no location: a third is made by the createLocation every surface
+// shares, counted in the plan's usage, and billed at the end of the period.
+test('a paid plan adds a location past the included ones and counts it', async ({ page, baseURL }) => {
   await loginAs(page.request, baseURL!, 'user-e2e-demo-owner')
-  const org = 'ember-slice-demo'
-  const step = (id: string) => page.locator(`[data-onboarding-step="${id}"]`)
-  const next = (label = 'Next') => page.getByRole('button', { name: label, exact: true }).click()
+  const status = async () => {
+    const response = await page.request.get('/api/billing/status?organizationId=org-demo')
+    expect(response.status(), await response.text()).toBe(200)
+    return (await response.json() as { billing: { plan: string; usage: { locations: number } } }).billing
+  }
+  const before = await status()
+  expect(before.plan).toBe('business')
+  expect(before.usage.locations).toBe(2)
+
+  // The new location's own level walks its sections; nothing asks to extend the plan first.
+  await page.goto('/dashboard/ember-slice-demo/locations/new')
+  await expect(page).toHaveURL(/\/dashboard\/ember-slice-demo\/locations\/new\/name$/)
+  await expect(page.locator('[data-location-limit]')).toHaveCount(0)
+
+  const created = await page.request.post('/api/dashboard/locations?org=ember-slice-demo', { data: { title: 'Third branch', timezone: 'America/New_York' } })
+  expect(created.status(), await created.text()).toBe(201)
+  const location = (await created.json() as { location: { id: string } }).location
+  expect((await status()).usage.locations).toBe(3)
+  const deleted = await page.request.delete(`/api/organizations/org-demo/locations/${location.id}`)
+  expect(deleted.status(), await deleted.text()).toBe(200)
+  expect((await status()).usage.locations).toBe(2)
+})
+
+// NCLS has one of the two locations its plan includes. Adding one walks the
+// location record's own create level: Name, then Hours, then Create location,
+// which opens the location it made.
+test('a location is created by walking its own record', async ({ page, baseURL }) => {
+  await dismissPreviewToolbar(page)
+  await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
+  const org = 'north-carolina-legal-services'
+  await page.goto(`/dashboard/${org}/locations/new`)
+  await expect(page).toHaveURL(new RegExp(`/dashboard/${org}/locations/new/name$`))
+  await expect(page.getByRole('heading', { name: 'New location' })).toBeVisible()
+  await page.getByRole('textbox', { name: 'Name' }).fill('Raleigh Annex')
+  await page.getByRole('button', { name: 'Next: Hours', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/dashboard/${org}/locations/new/hours/timezone$`))
+  await page.getByRole('button', { name: 'Time zone', exact: true }).click()
+  await page.getByPlaceholder('Search by city, e.g. Bangkok').fill('America/New_York')
+  await page.getByRole('option').first().click()
+  await page.getByRole('button', { name: 'Create location', exact: true }).click()
+  await expect(page).toHaveURL(new RegExp(`/dashboard/${org}/locations/raleigh-annex$`))
+
+  const created = await page.request.get(`/api/dashboard/locations?org=${org}`)
+  expect(created.status(), await created.text()).toBe(200)
+  const listed = ((await created.json()) as { locations: Array<{ id: string; slug: string }> }).locations
+    .find(candidate => candidate.slug === 'raleigh-annex')
+  expect(listed).toBeDefined()
+  const read = await page.request.get(`/api/dashboard/locations/${listed!.id}`)
+  expect(read.status(), await read.text()).toBe(200)
+  expect(((await read.json()) as { location: { title: string; timezone: string } }).location)
+    .toMatchObject({ title: 'Raleigh Annex', timezone: 'America/New_York' })
+  const deleted = await page.request.delete(`/api/organizations/org-ncls-blawby/locations/${listed!.id}`)
+  expect(deleted.status(), await deleted.text()).toBe(200)
+})
+
+// A location made by its own record has no place yet; Settings → Google Maps
+// connects it through the business picker, and connects another the same way.
+// Runs against the NCLS tenant's local copy; the location is deactivated at the end.
+test('Settings connects a new location to Google Maps through the business picker', async ({ page, baseURL }) => {
+  test.skip(process.env.E2E_GOOGLE_PLACES !== 'true', 'Live Google Places qualification requires E2E_GOOGLE_PLACES=true')
+  await dismissPreviewToolbar(page)
+  await loginAs(page.request, baseURL!, 'user-e2e-ncls-owner')
+  const org = 'north-carolina-legal-services'
   const connected = async () => {
     const settings = await page.request.get(`/api/dashboard/settings?org=${org}`)
     expect(settings.status(), await settings.text()).toBe(200)
     return (await settings.json() as { settings: { integrations: { google_maps: Array<{ id: string; slug: string; google_place_id: string | null }> } } }).settings.integrations.google_maps
   }
 
-  await page.goto(`/dashboard/${org}/locations/new`)
-  await expect(step('business')).toBeVisible()
-  await page.getByPlaceholder('Search for your business on Google Maps').pressSequentially("Joe's Pizza Carmine Street")
+  const made = await page.request.post(`/api/dashboard/locations?org=${org}`, { data: { title: "Joe's Pizza", timezone: 'America/New_York' } })
+  expect(made.status(), await made.text()).toBe(201)
+  const { location } = await made.json() as { location: { id: string; slug: string } }
+  await page.goto(`/dashboard/${org}/integrations/google-maps/${location.slug}`)
   const picked = page.waitForRequest(sent => sent.url().includes('/api/dashboard/google-places/details'))
+  await page.getByPlaceholder('Search for your business on Google Maps').pressSequentially(' Carmine Street')
   await page.getByRole('option', { name: /Carmine St/ }).first().click()
   const placeId = ((await picked).postDataJSON() as { placeId: string }).placeId
+  await expect(page.getByText('Connected to Google Maps')).toBeVisible()
 
-  await expect(step('location')).toBeVisible()
-  await expect(page.getByPlaceholder('123 Main Street')).toHaveValue('7 Carmine St')
-  await next()
-  await expect(step('contact')).toBeVisible()
-  await expect(page.getByPlaceholder('Phone number')).not.toHaveValue('')
-  await next()
-  await expect(step('hours')).toBeVisible()
-  await expect(step('hours')).toContainText('New York')
-  await next('Save hours')
-  await expect(step('review')).toBeVisible()
-  await next('Add location')
-  await expect(page.getByRole('heading', { name: 'Location added' })).toBeVisible()
-
-  const added = (await connected()).find(location => location.google_place_id === placeId)
+  const added = (await connected()).find(candidate => candidate.google_place_id === placeId)
   expect(added, `no location connected to ${placeId}`).toBeTruthy()
 
-  // Settings: choosing another prediction is the confirmation, and connects it.
-  await page.goto(`/dashboard/${org}/integrations/google-maps/${added!.slug}`)
-  await expect(page.getByText('Connected to Google Maps')).toBeVisible()
+  // Choosing another prediction is the confirmation, and connects it.
   await page.getByRole('button', { name: 'Connect a different place' }).click()
   const search = page.getByPlaceholder('Search for your business on Google Maps')
   await expect(search).toHaveValue("Joe's Pizza")

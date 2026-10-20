@@ -1,12 +1,12 @@
 <template>
   <!--
-    Every blog and Krabiclaw's docs, on every template: the site's own chrome,
+    Every blog and KrabiClaw's docs, on every template: the site's own chrome,
     and inside it one article layout — the collection by category down the
     side, the page beside it. Below the width where the template's header
     collapses, the list moves into that header's menu: one navigation, not a
     second drawer beside the hamburger.
   -->
-  <NuxtLayout :name="template.slug">
+  <NuxtLayout :name="template.layout">
     <div class="mx-auto px-5 py-8 sm:px-8 lg:px-10" :class="[split.grid, isDocs ? 'docs-shell max-w-360' : 'max-w-7xl']">
       <aside class="hidden" :class="split.aside">
         <!-- Desktop search leads the sidebar; collapsed, it leads the header's menu. -->
@@ -39,19 +39,24 @@ import { articleNavKey } from '~/composables/useArticleNav'
 const { t } = useI18n()
 const route = useRoute()
 const isDocs = computed(() => route.meta.articleCollection === 'docs')
-const { template } = usePublicTemplate()
+const { organization } = useTenantOrganization()
+const { template } = organization
 const nav = await useArticleNav()
 provide(articleNavKey, nav)
 const searchLabel = computed(() => t('saya.search.dialog_title', { surface: nav.value.indexLabel }))
 
 // The sidebar shows exactly where the template's header stops collapsing:
-// Krabiclaw's header at `nav` (1080px), the tenant templates' at `lg`.
-const split = computed(() => template.value.slug === 'platform'
+// KrabiClaw's header at `nav` (1080px), the tenant templates' at `lg`.
+const split = computed(() => template.slug === 'platform'
   ? { grid: isDocs.value ? 'nav:grid nav:grid-cols-[280px_minmax(0,1fr)] nav:gap-10' : 'nav:grid nav:grid-cols-[220px_minmax(0,1fr)] nav:gap-12', aside: 'nav:sticky nav:top-28 nav:block nav:h-fit nav:max-h-[calc(100vh-8rem)] nav:overflow-y-auto' }
   : { grid: isDocs.value ? 'lg:grid lg:grid-cols-[280px_minmax(0,1fr)] lg:gap-10' : 'lg:grid lg:grid-cols-[240px_minmax(0,1fr)] lg:gap-10', aside: 'lg:sticky lg:top-28 lg:block lg:h-fit lg:max-h-[calc(100vh-8rem)] lg:overflow-y-auto' })
 </script>
 
 <style>
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
 .docs-shell { font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 .docs-shell h1, .docs-shell h2, .docs-shell h3 { font-family: inherit; }
 .docs-shell h1 { font-weight: 650; }

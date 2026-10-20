@@ -3,16 +3,16 @@
     <div class="grid min-h-0 flex-1 overflow-hidden lg:grid-cols-[minmax(24rem,45%)_1fr]">
       <!-- The step column. One question at a time, its own header and footer. -->
       <div class="flex min-h-0 flex-col border-r border-default bg-default">
-        <div v-if="currentStep" class="flex shrink-0 items-center px-6 py-3">
+        <div v-if="currentStep" class="flex shrink-0 items-center py-3" :class="dashboardGutterClass">
           <UButton to="/dashboard" color="neutral" variant="outline" size="sm" label="Save & exit" />
         </div>
 
-        <div class="min-h-0 flex-1 overflow-y-auto px-6 pb-6">
+        <div class="min-h-0 flex-1 overflow-y-auto pb-6" :class="dashboardGutterClass">
           <p v-if="restoreError" class="py-16 text-sm text-error" role="alert">{{ getErrorMessage(restoreError, 'Your saved answers could not be loaded.') }}</p>
-          <NuxtPage v-else />
+          <NuxtPage v-else @advance="goNext" />
         </div>
 
-        <div v-if="currentStep && !restoreError" class="shrink-0 border-t border-default px-6 py-4">
+        <div v-if="currentStep && !restoreError" class="shrink-0 border-t border-default py-3" :class="dashboardGutterClass">
           <p v-if="draft.error.value" class="mb-3 text-sm text-error">{{ draft.error.value }}</p>
           <div class="flex items-center justify-between gap-4">
             <UButton variant="link" color="neutral" label="Back" @click="goBack" />
@@ -77,10 +77,11 @@ import { useDashboardTopNavAction } from '~/composables/useDashboardTopNavAction
 import {
   onboardingStep,
   onboardingStepPath,
-  startOnboardingFlow,
+  useOnboardingState,
   useOnboardingSteps,
 } from '~/composables/useOnboardingFlow'
 import { useOnboardingDraft } from '~/composables/useOnboardingDraft'
+import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
 // This route creates a new site, so it has no org or site of its own yet: there
 // is no orgSlug segment, so the dashboard layout requests no context, and it
@@ -90,11 +91,11 @@ definePageMeta({ layout: 'dashboard', tabs: false })
 const route = useRoute()
 const router = useRouter()
 const config = useRuntimeConfig()
-const state = startOnboardingFlow('new-site')
+const state = useOnboardingState()
 const draft = useOnboardingDraft()
 const { indexOf, nextOf, previousOf, resumeStep } = useOnboardingSteps()
 
-const currentStep = computed(() => onboardingStep(String(route.params.step ?? ''), 'new-site'))
+const currentStep = computed(() => onboardingStep(String(route.params.step ?? '')))
 const previousStep = computed(() => currentStep.value ? previousOf(currentStep.value.id) : null)
 const nextStep = computed(() => currentStep.value ? nextOf(currentStep.value.id) : null)
 const nextLabel = computed(() => currentStep.value?.nextLabel?.(state.value)
@@ -141,7 +142,8 @@ async function goNext() {
   const step = currentStep.value
   if (!step || !canAdvance.value) return
 
-  if (!step.intro && !await draft.save()) return
+  // The first save creates the site, so it waits for the currency and the clock the site cannot exist without.
+  if (!['type', 'language', 'business', 'location', 'hours'].includes(step.id) && !await draft.save()) return
 
   if (step.action === 'commit') {
     if (!await draft.activate()) return
@@ -159,7 +161,9 @@ const selectedLocationId = ref<string | null>(null)
 const previewReloadToken = ref(0)
 const mobilePreviewOpen = ref(false)
 const hasAutoOpenedMobilePreview = ref(false)
-const isMobilePreviewViewport = ref(false)
+const pane = useDashboardPane()
+const isMobilePreviewViewport = computed(() => !pane.value)
+watch(pane, (wide) => { if (wide) mobilePreviewOpen.value = false })
 
 const organizationOriginFor = (subdomain: string) => tenantOrganizationOrigin({
   platformDomain: String(config.public.platformDomain),
@@ -258,27 +262,11 @@ useDashboardTopNavAction(() => state.value.preview
     }
   : null)
 
-let stopViewportListener: (() => void) | null = null
-
 onMounted(() => {
-  const query = window.matchMedia('(max-width: 1023.98px)')
-  const update = () => {
-    isMobilePreviewViewport.value = query.matches
-    if (!query.matches) mobilePreviewOpen.value = false
-  }
-  update()
-  query.addEventListener('change', update)
-  stopViewportListener = () => query.removeEventListener('change', update)
-
   if (route.query.payment === 'cancelled') {
     draft.error.value = 'Payment cancelled. Your subscription was not completed.'
     void router.replace({ query: { ...route.query, payment: undefined } })
   }
-})
-
-onUnmounted(() => {
-  stopViewportListener?.()
-  stopViewportListener = null
 })
 
 // Step order changes with the answers (the products step does not exist for a

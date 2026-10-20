@@ -14,26 +14,26 @@
 
     <form class="space-y-4" novalidate @submit.prevent="handleSubmit">
       <div class="grid gap-4 sm:grid-cols-2">
-        <SayaFormField v-slot="{ id, describedBy, invalid }" label="Name" name="name" required :error="fieldError('name')">
+        <TenantFormField v-slot="{ id, describedBy, invalid }" label="Name" name="name" required :error="fieldError('name')">
           <input :id="id" v-model="form.name" type="text" placeholder="Your name" :class="inputClass" :aria-describedby="describedBy" :aria-invalid="invalid" />
-        </SayaFormField>
-        <SayaFormField v-slot="{ id, describedBy, invalid }" label="Email" name="email" required :error="fieldError('email')">
+        </TenantFormField>
+        <TenantFormField v-slot="{ id, describedBy, invalid }" label="Email" name="email" required :error="fieldError('email')">
           <input :id="id" v-model="form.email" type="email" placeholder="you@example.com" :class="inputClass" :aria-describedby="describedBy" :aria-invalid="invalid" />
-        </SayaFormField>
+        </TenantFormField>
       </div>
 
-      <SayaFormField v-slot="{ id, describedBy, invalid }" label="Topic" name="topic" required :error="fieldError('topic')">
+      <TenantFormField v-slot="{ id, describedBy, invalid }" label="Topic" name="topic" required :error="fieldError('topic')">
         <input :id="id" v-model="form.topic" type="text" placeholder="What do you need help with?" :class="inputClass" :aria-describedby="describedBy" :aria-invalid="invalid" />
-      </SayaFormField>
+      </TenantFormField>
 
-      <SayaFormField v-slot="{ id, describedBy, invalid }" label="Message" name="message" required :error="fieldError('message')">
+      <TenantFormField v-slot="{ id, describedBy, invalid }" label="Message" name="message" required :error="fieldError('message')">
         <textarea :id="id" v-model="form.message" rows="5" placeholder="Share the details..." :class="inputClass" :aria-describedby="describedBy" :aria-invalid="invalid" />
-      </SayaFormField>
+      </TenantFormField>
 
       <label class="flex items-start gap-3 rounded-xl border border-default bg-elevated/60 px-4 py-3 text-sm">
         <input v-model="form.consent" type="checkbox" class="mt-0.5 size-4 rounded border-default" />
         <span class="leading-relaxed text-muted">
-          I consent to Krabiclaw storing and using these details to respond to my support request.
+          I consent to KrabiClaw storing and using these details to respond to my support request.
         </span>
       </label>
       <p v-if="fieldError('consent')" class="text-sm text-red-500">{{ fieldError('consent') }}</p>
@@ -79,8 +79,9 @@ const emit = defineEmits<{
 }>()
 
 const inputClass = FORM_INPUT_CLASS
-// The help form is the Krabiclaw site's contact form: it files into that site's inbox like every tenant's.
-const { organizationId } = useTenantOrganization()
+// The help form is the KrabiClaw site's contact form: it files into that site's inbox like every tenant's.
+const { id: organizationId } = useTenantOrganization().organization
+const { locale } = useI18n()
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const form = ref({
   name: '',
@@ -125,10 +126,11 @@ async function handleSubmit() {
 
   submitting.value = true
   try {
-    if (!organizationId) throw new Error('This form is only available on the Krabiclaw site.')
+    if (!organizationId) throw new Error('This form is only available on the KrabiClaw site.')
     await $fetch<unknown>(`/api/public/contact`, {
       method: 'POST',
       body: {
+        locale: locale.value,
         name: form.value.name.trim(),
         email: form.value.email.trim(),
         topic: form.value.topic.trim(),

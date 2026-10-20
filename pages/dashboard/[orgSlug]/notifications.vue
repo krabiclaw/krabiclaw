@@ -1,5 +1,5 @@
 <template>
-  <DashboardIndexPanel id="organization-notifications" title="Notifications">
+  <DashboardIndexPanel id="organization-notifications" title="Notifications" column="reading">
     <NotificationList />
   </DashboardIndexPanel>
 </template>
@@ -8,5 +8,5 @@
 import NotificationList from '~/components/dashboard/NotificationList.vue'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
-useSeoMeta({ title: 'Notifications | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Notifications | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>

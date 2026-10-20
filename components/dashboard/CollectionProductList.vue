@@ -1,11 +1,14 @@
 <template>
-  <!-- One collection: its products, in the order customers see them. Each opens its one editor in Catalog. -->
+  <!--
+    One section: the rows that describe it — name, description, photo — then
+    its items in the order guests see them, each opening its one editor in Catalog.
+  -->
   <DashboardIndexPanel id="menu-section" :title="collection?.name ?? 'Section'">
+    <EditorNavigationList class="mb-8" :groups="rows" :active-item="level.child.value" />
     <DashboardListEditor
       v-model:editing="editing"
       v-model:selected="selected"
       :title="collection?.name ?? 'Section'"
-      description="Guests see items in this order."
       :items="listItems"
       :error="loadError"
       empty-title="No items in this section yet"
@@ -48,20 +51,10 @@
       @save="moveSelected"
     >
       <UFormField label="Choose a section">
-        <div class="space-y-2">
-          <label
-            v-for="option in moveTargets"
-            :key="option.id"
-            class="flex cursor-pointer items-center gap-3 rounded-lg border border-default px-3 py-2"
-            :class="moveTargetId === option.id ? 'border-primary' : ''"
-          >
-            <input v-model="moveTargetId" type="radio" :value="option.id" :name="`move-target`">
-            <span class="text-sm text-highlighted">{{ option.name }}</span>
-          </label>
-          <p v-if="!moveTargets.length" class="text-sm text-muted">
-            There is nowhere else to move these yet. Add another section first.
-          </p>
-        </div>
+        <URadioGroup v-if="moveTargets.length" v-model="moveTargetId" :items="moveTargets.map(option => ({ value: option.id, label: option.name }))" variant="card" />
+        <p v-else class="text-sm text-muted">
+          There is nowhere else to move these yet. Add another section first.
+        </p>
       </UFormField>
     </DashboardListItemDialog>
     <UAlert v-if="orderError" color="error" variant="soft" icon="i-lucide-circle-alert" :description="orderError" class="mt-4" />
@@ -71,20 +64,28 @@
 <script setup lang="ts">
 // One menu section's items. Rendered by `products/menu/[collectionId].vue`, which owns the frame.
 import DashboardListEditor from '~/components/dashboard/DashboardListEditor.vue'
+import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardMediaThumb from '~/components/dashboard/DashboardMediaThumb.vue'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import type { Product } from '~/server/types/products'
 import { getErrorMessage } from '~/utils/errors'
+import { groupProductsByCollection } from '~/utils/product-presentation'
+
+defineProps<{ /** The rows that describe the section, from its editor. */ rows: EditorNavigationGroup[] }>()
 
 
 const route = useRoute()
+const level = useRouteLevel()
 const router = useRouter()
 const dashboardApi = useDashboardApi()
 const organizationId = await useDashboardOrganizationId()
 const collectionId = computed(() => String(route.params.collectionId ?? route.params.categoryId ?? ''))
 const locationId = useLocationScope()
 
-const catalog = useProductCatalog(organizationId, locationId)
+// A section's membership is edited whole. Location is only the price/editor
+// scope; filtering the membership source here would remove its other members.
+const catalog = useProductCatalog(organizationId, ref(null))
+await catalog.load
 const collections = catalog.collections
 
 // Reorder is a mode: the local order stands while the edit state is open and
@@ -96,17 +97,9 @@ const localOrder = ref<Product[] | null>(null)
  * Position is on the membership row, so the same product can sit third here
  * and first in another collection without being copied.
  */
-const products = computed(() => {
-  if (localOrder.value) return localOrder.value
-  const positions = new Map<string, number>()
-  for (const product of catalog.products.value) {
-    const membership = product.collections.find(entry => entry.collection_id === collectionId.value)
-    if (membership) positions.set(product.id, membership.sort_order)
-  }
-  return catalog.products.value
-    .filter(product => positions.has(product.id))
-    .sort((left, right) => (positions.get(left.id)! - positions.get(right.id)!) || left.name.localeCompare(right.name))
-})
+const products = computed(() => localOrder.value
+  ?? groupProductsByCollection(catalog.products.value, collections.value).find(group => group.id === collectionId.value)?.products
+  ?? [])
 
 const editing = ref(false)
 const selected = ref<string[]>([])
@@ -124,7 +117,7 @@ const listItems = computed(() => products.value.map(row => ({ id: row.id, title:
 // Another collection in the same scope: the site-wide ones, or this one's location's.
 const moveTargets = computed(() => collections.value.filter(row => row.id !== collectionId.value && row.location_id === collection.value?.location_id))
 
-useSeoMeta({ title: () => `${collection.value?.name ?? 'Section'} | Krabiclaw Dashboard`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${collection.value?.name ?? 'Section'} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
 
 const { locations } = await useOrganizationLocations()
 const { priceLabel } = useCatalogPrice(locationId, locations)
@@ -134,7 +127,7 @@ const load = catalog.refresh
 // A category that is not in the catalog is not a page. Thrown from an effect it
 // would be an unhandled rejection rather than the 404 screen, so it is shown.
 watchEffect(() => {
-  if (!catalog.pending.value && catalog.collections.value.length && !collection.value) {
+  if (!catalog.pending.value && !catalog.error.value && !collection.value) {
     showError(createError({ statusCode: 404, statusMessage: 'Section not found' }))
   }
 })
@@ -154,26 +147,38 @@ function moveProduct(item: { row: Product }, direction: -1 | 1) {
 /**
  * Save the pending order and return the order this collection now has.
  *
- * The caller needs that list: once the local order is cleared, `products`
- * recomputes from a catalog that has not been refetched, so it reads back the
- * order from before the reorder. A caller that then sent it as definitive
- * silently undid what the merchant had just arranged. Null means the save
- * failed and the list was reloaded.
+ * The caller needs that complete list for a subsequent move or removal.
+ * Refresh the canonical catalog before discarding the displayed draft.
+ * Null means the save failed and its error is shown.
  */
 async function commitOrder(): Promise<string[] | null> {
+  const sourceId = collectionId.value
   const order = products.value.map(row => row.id)
-  if (!orderDirty.value) return order
+  const hadDraft = orderDirty.value
   orderDirty.value = false
-  localOrder.value = null
   orderError.value = null
   try {
+    // A create walk or another section can have changed the shared cache since
+    // this list opened. Every replacement starts from the current full set.
+    await load()
+    if (catalog.error.value) throw catalog.error.value
+    if (!collections.value.some(collection => collection.id === sourceId)) throw new Error('This section no longer exists.')
+    const current = groupProductsByCollection(catalog.products.value, collections.value).find(group => group.id === sourceId)?.products.map(product => product.id) ?? []
+    if (!hadDraft) return current
+    if (JSON.stringify([...current].sort()) !== JSON.stringify([...order].sort())) throw new Error('Section membership changed. Review its current items before reordering them.')
     // The complete intended membership and order for this collection.
-    await dashboardApi(`/api/editor/organizations/${organizationId}/collections/${collectionId.value}/products`, {
+    await dashboardApi(`/api/editor/organizations/${organizationId}/collections/${sourceId}/products`, {
       method: 'PUT',
       body: { product_ids: order },
       validate: isRecord,
     })
+    await load()
+    if (catalog.error.value) throw catalog.error.value
+    if (collectionId.value === sourceId) localOrder.value = null
+    const persisted = groupProductsByCollection(catalog.products.value, collections.value).find(group => group.id === sourceId)?.products.map(product => product.id) ?? []
+    if (JSON.stringify(persisted) !== JSON.stringify(order)) throw new Error('Section membership changed. Review its current order before editing again.')
   } catch (error) {
+    if (collectionId.value === sourceId) localOrder.value = null
     orderError.value = getErrorMessage(error, 'Failed to save the new order')
     await load()
     return null
@@ -198,6 +203,8 @@ watch(moveDialogOpen, (open) => {
 
 async function moveSelected() {
   if (!moveTargetId.value || !selected.value.length) return
+  const sourceId = collectionId.value, targetId = moveTargetId.value
+  const selectedIds = [...selected.value]
   moving.value = true
   moveError.value = null
   try {
@@ -208,27 +215,33 @@ async function moveSelected() {
     if (!committed) return
     // Moving is a membership change: the products leave this collection and
     // join the target, and each collection's order is sent whole.
-    const remaining = committed.filter(productId => !selected.value.includes(productId))
-    const targetPositions = new Map<string, number>()
-    for (const product of catalog.products.value) {
-      const membership = product.collections.find(entry => entry.collection_id === moveTargetId.value)
-      if (membership) targetPositions.set(product.id, membership.sort_order)
-    }
-    const targetOrder = [...targetPositions.keys()]
-      .sort((left, right) => targetPositions.get(left)! - targetPositions.get(right)!)
-      .concat(selected.value.filter(id => !targetPositions.has(id)))
-    await dashboardApi(`/api/editor/organizations/${organizationId}/collections/${collectionId.value}/products`, {
-      method: 'PUT', body: { product_ids: remaining }, validate: isRecord,
-    })
-    await dashboardApi(`/api/editor/organizations/${organizationId}/collections/${moveTargetId.value}/products`, {
+    const remaining = committed.filter(productId => !selectedIds.includes(productId))
+    const targetMembers = groupProductsByCollection(catalog.products.value, collections.value)
+      .find(group => group.id === targetId)?.products.map(product => product.id) ?? []
+    const targetOrder = targetMembers.concat(selectedIds.filter(id => !targetMembers.includes(id)))
+    // Add to the destination before leaving the source. A failed destination
+    // write must never leave the selected products in neither section.
+    await dashboardApi(`/api/editor/organizations/${organizationId}/collections/${targetId}/products`, {
       method: 'PUT', body: { product_ids: targetOrder }, validate: isRecord,
     })
-    moveDialogOpen.value = false
-    selected.value = []
-    editing.value = false
+    await dashboardApi(`/api/editor/organizations/${organizationId}/collections/${sourceId}/products`, {
+      method: 'PUT', body: { product_ids: remaining }, validate: isRecord,
+    })
     await load()
+    if (catalog.error.value) throw catalog.error.value
+    const persistedGroups = groupProductsByCollection(catalog.products.value, collections.value)
+    const persistedSource = persistedGroups.find(group => group.id === sourceId)?.products.map(product => product.id) ?? []
+    const persistedTarget = persistedGroups.find(group => group.id === targetId)?.products.map(product => product.id) ?? []
+    if (JSON.stringify(persistedSource) !== JSON.stringify(remaining)
+      || JSON.stringify(persistedTarget) !== JSON.stringify(targetOrder)) throw new Error('Section membership changed. Review the current sections before moving items again.')
+    if (collectionId.value === sourceId) {
+      moveDialogOpen.value = false
+      selected.value = []
+      editing.value = false
+    }
   } catch (error) {
     moveError.value = getErrorMessage(error, 'Failed to move items')
+    await load()
   } finally {
     moving.value = false
   }
@@ -239,19 +252,28 @@ const removing = ref(false)
 /** Takes the selected items out of this section; the section's remaining order is sent whole. */
 async function removeSelected() {
   if (!selected.value.length) return
+  const sourceId = collectionId.value
+  const selectedIds = [...selected.value]
   removing.value = true
   orderError.value = null
   try {
     const committed = await commitOrder()
     if (!committed) return
-    await dashboardApi(`/api/editor/organizations/${organizationId}/collections/${collectionId.value}/products`, {
-      method: 'PUT', body: { product_ids: committed.filter(productId => !selected.value.includes(productId)) }, validate: isRecord,
+    const remaining = committed.filter(productId => !selectedIds.includes(productId))
+    await dashboardApi(`/api/editor/organizations/${organizationId}/collections/${sourceId}/products`, {
+      method: 'PUT', body: { product_ids: remaining }, validate: isRecord,
     })
-    selected.value = []
-    editing.value = false
     await load()
+    if (catalog.error.value) throw catalog.error.value
+    const persisted = groupProductsByCollection(catalog.products.value, collections.value).find(group => group.id === sourceId)?.products.map(product => product.id) ?? []
+    if (JSON.stringify(persisted) !== JSON.stringify(remaining)) throw new Error('Section membership changed. Review its current items before removing any more.')
+    if (collectionId.value === sourceId) {
+      selected.value = []
+      editing.value = false
+    }
   } catch (error) {
     orderError.value = getErrorMessage(error, 'Failed to remove items from this section')
+    await load()
   } finally {
     removing.value = false
   }
@@ -269,10 +291,8 @@ function openNew() {
 
 
 // Resets this list's own edit state when the catalog underneath it changes.
-// It does not refetch: the catalog is one keyed `useAsyncData` whose key holds
-// the location, so it reloads itself. Calling `refresh` here as well turned
-// `pending` true for every level sharing that key, and the server rendered the
-// catalog column as skeletons while the payload beside it already held the rows.
+// The full catalog is one keyed read. Changing the price scope never narrows
+// the membership that a subsequent edit writes.
 watch([locationId, collectionId], () => {
   orderDirty.value = false
   localOrder.value = null

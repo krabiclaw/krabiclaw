@@ -94,7 +94,7 @@ export async function notifyNewUserSignup(db: DbClient): Promise<void> {
     template: NOTIFICATION_EVENT_TYPES.PLATFORM_USER_SIGNUP,
     severity: 'info',
     title: 'New user signup',
-    message: 'A new Krabiclaw account was created.',
+    message: 'A new KrabiClaw account was created.',
     deepLink: '/dashboard',
   })
 }

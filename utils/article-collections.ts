@@ -1,5 +1,5 @@
 /**
- * An article belongs to a collection. Every site has a blog; Krabiclaw's own
+ * An article belongs to a collection. Every site has a blog; KrabiClaw's own
  * site (the platform template) also publishes documentation. Both collections
  * share the article model, the editor, the renderer, the feeds and the
  * markdown mirror; the collection decides the URL prefix and nothing else.

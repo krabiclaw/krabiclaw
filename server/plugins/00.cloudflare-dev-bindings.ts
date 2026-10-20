@@ -1,30 +1,17 @@
 import { definePlugin } from 'nitro'
-import type { PlatformProxy, Unstable_DevWorker } from 'wrangler'
+import type { PlatformProxy } from 'wrangler'
 
 let platformProxy: Promise<PlatformProxy> | undefined
-let guestInboxHubWorker: Promise<Unstable_DevWorker> | undefined
 
 async function loadWrangler() {
   const packageName = 'wrangler'
   return await import(/* @vite-ignore */ packageName) as typeof import('wrangler')
 }
 
-// The Durable Object cannot run inside the platform proxy (it proxies an empty
-// script), so its class is served by a second local Worker that `[env.dev]`
-// reaches by script_name through Wrangler's dev registry. It must be up before
-// the proxy resolves the binding.
-async function startGuestInboxHubWorker() {
-  const { unstable_dev } = await loadWrangler()
-  return await unstable_dev('server/cloudflare/dev/guest-inbox-hub.worker.ts', {
-    config: 'server/cloudflare/dev/wrangler.toml',
-    local: true,
-    logLevel: 'warn',
-    experimental: { disableExperimentalWarning: true },
-  })
-}
-
+// `GUEST_INBOX_HUBS` reaches the Durable Object Worker that
+// build/guest-inbox-hub-dev.ts keeps running for the whole `nuxt dev` process;
+// the proxy follows it through Wrangler's dev registry.
 async function createPlatformProxy() {
-  await (guestInboxHubWorker ??= startGuestInboxHubWorker())
   const { getPlatformProxy } = await loadWrangler()
   return await getPlatformProxy({
     configPath: 'wrangler.toml',
@@ -53,10 +40,10 @@ export default definePlugin((nitroApp) => {
     ;(request as unknown as { cf: PlatformProxy['cf'] }).cf = proxy.cf
   })
 
+  // Each rebuild replaces this app's worker thread; the patched env-runner
+  // closes the old one first, so its proxy and the local D1 it holds go with it.
   nitroApp.hooks.hook('close', async () => {
     if (platformProxy) await (await platformProxy).dispose()
     platformProxy = undefined
-    if (guestInboxHubWorker) await (await guestInboxHubWorker).stop()
-    guestInboxHubWorker = undefined
   })
 })

@@ -36,8 +36,6 @@ function hasValidConsultation(value: unknown) {
     && typeof value.schedule_path === 'string'
     && typeof value.confirmation_path === 'string'
     && typeof value.tracking_enabled === 'boolean'
-    && typeof value.contact_form_enabled === 'boolean'
-    && isRecord(value.metadata)
 }
 
 function hasRequiredRouteContent(route: Record<string, unknown>) {
@@ -55,12 +53,11 @@ export const isBlawbyDocumentPayload = (
   && isRecord(value.route)
   && hasValidIdentity(value.shell.identity)
   && hasValidConsultation(value.shell.consultation)
+  && typeof value.shell.canSchedule === 'boolean'
   && Array.isArray(value.shell.pageLinks)
   && (value.shell.searchConsoleVerification === null || typeof value.shell.searchConsoleVerification === 'string')
   && typeof value.route.recipe === 'string'
   && RECIPES.has(value.route.recipe)
   && value.route.recipe === expectedRecipe
   && Array.isArray(value.route.localeRepresentations)
-  && Array.isArray(value.route.qa)
-  && Array.isArray(value.route.reviews)
   && hasRequiredRouteContent(value.route)

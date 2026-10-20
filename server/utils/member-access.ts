@@ -4,19 +4,13 @@ import { queryFirst, type DbClient } from '~/server/db'
 import { getOrgAdapter, hasPermission } from 'better-auth/plugins'
 import { parsePhoneOrThrow } from '~/utils/phone'
 import { oncePerRequest } from '~/server/utils/request-scope'
+import { sessionMemberSql } from '~/server/utils/provider-allocation'
 import type { H3Event } from 'nitro'
 import type { CloudflareEnv, organizationOptions } from '~/server/utils/auth'
 import type { OrganizationPermissions } from '~/utils/organization-access'
 
-// Authorization is the Better Auth organization role. Owner and admin are the
-// roles, both organization-wide, and there is no second way to answer whether
-// someone may reach a location.
-//
-// There used to be one: a `location:<id>` Better Auth team, which scoped an
-// `editor`. That role existed so a phone number configured on a location could
-// be a notification target without being an owner. Notifications now resolve
-// from the member to their own verified phone, so the number needs no role, the
-// role needed no team, and none of it had a single user.
+// Better Auth owns membership, roles and teams. Service and appointment access
+// narrows those permissions using the saved provider assignment below.
 
 /**
  * A membership this request actually resolved: one lookup keyed by
@@ -83,10 +77,7 @@ export async function resolveMemberId(
   if (!input.env) {
     throw new Error('resolveMemberId requires CloudflareEnv so Better Auth can resolve organization membership')
   }
-  const { createAuth } = await import('~/server/utils/auth')
-  const auth = createAuth(input.env)
-  const authContext = await auth.$context
-  const orgAdapter = getOrgAdapter(authContext as Parameters<typeof getOrgAdapter>[0], {})
+  const orgAdapter = await organizationAdapter(input.env)
   const member = await orgAdapter.findMemberByOrgId({
     userId: input.userId,
     organizationId: input.organizationId,
@@ -124,8 +115,7 @@ export function isOrganizationWideRole(role: string): boolean {
  * database only under `dynamicAccessControl`, which is off here, so this costs
  * no round trip.
  *
- * This answers "may this role do X at all". Which tenant is the membership the
- * principal was minted from; there is no narrower scope than the organization.
+ * This answers "may this role do X at all"; resource guards then check its row.
  */
 export type { OrganizationPermissions }
 
@@ -145,20 +135,17 @@ export async function assertRoleAllows(
   input: { organizationId: string; role: string; permissions: OrganizationPermissions; message?: string },
 ): Promise<void> {
   if (await roleAllows(input)) return
-  throw new HTTPError({ statusCode: 403, message: input.message ?? 'Access denied' })
+  throw new HTTPError({ statusCode: 403, message: input.message ?? 'Access denied', data: { code: 'FORBIDDEN', field: 'permissions' } })
 }
 
-// The adapter has to be built with the same organization options the plugin
-// runs with: getOrgAdapter filters organization output through the options'
-// additionalFields, so an adapter built with {} silently drops
-// every role/team limit the plugin was configured with.
+// All surfaces use the provider adapter with the configured organization options.
 export type OrganizationAdapter = ReturnType<typeof getOrgAdapter<typeof organizationOptions>>
 
 export async function organizationAdapter(env: CloudflareEnv): Promise<OrganizationAdapter> {
   const { createAuth, organizationOptions: options } = await import('~/server/utils/auth')
   const auth = createAuth(env)
   const context = await auth.$context
-  return getOrgAdapter(context as Parameters<typeof getOrgAdapter>[0], options)
+  return getOrgAdapter(context as unknown as Parameters<typeof getOrgAdapter>[0], options)
 }
 
 /**
@@ -171,7 +158,7 @@ export async function organizationAdapter(env: CloudflareEnv): Promise<Organizat
  * mid-request. Pass the event and the second resolution is free; without one
  * (scheduled jobs, tenant deletion) they read as before.
  */
-function organizationById(env: CloudflareEnv, id: string, event?: H3Event) {
+export function organizationById(env: CloudflareEnv, id: string, event?: H3Event) {
   const read = async () => (await organizationAdapter(env)).findOrganizationById(id)
   return event ? oncePerRequest(event, `organization:${id}`, read) : read()
 }
@@ -199,7 +186,7 @@ export async function resolveOrganizationMembership(
   return resolvedMembershipOf({
     userId: input.userId,
     organizationId: input.organizationId,
-    role: String(member.role),
+    role: member.role,
     memberId: member.id,
     organizationSlug: organization.slug,
     organizationName: organization.name,
@@ -225,7 +212,7 @@ export async function resolveMembership(
   return resolvedMembershipOf({
     userId: input.userId,
     organizationId: input.organizationId,
-    role: String(member.role),
+    role: member.role,
   })
 }
 
@@ -253,7 +240,7 @@ export async function resolveUserOrganization(
     id: organization.id,
     name: organization.name,
     slug: organization.slug,
-    role: String(member.role),
+    role: member.role,
     memberId: member.id,
   })
 }
@@ -262,7 +249,7 @@ export async function resolveUserOrganization(
 // complete membership (not just a bounded page for display) must walk every
 // page via its own total, or a large organization silently loses members
 // past the first 100.
-async function listAllOrganizationMembers(adapter: OrganizationAdapter, organizationId: string) {
+export async function listAllOrganizationMembers(adapter: OrganizationAdapter, organizationId: string) {
   const pageSize = 100
   const firstPage = await adapter.listMembers({ organizationId, limit: pageSize, offset: 0, sortBy: 'createdAt', sortOrder: 'asc' })
   const members = [...firstPage.members]
@@ -311,7 +298,7 @@ export async function listOrganizationNotificationMembers(
   // a duplicated alert.
   const byUserId = new Map<string, { id: string; email: string }>()
   for (const member of members) {
-    if (!member.user || !(isOrganizationWideRole(String(member.role)) || options.includeMemberIds?.includes(member.id))) continue
+    if (!(isOrganizationWideRole(member.role) || options.includeMemberIds?.includes(member.id))) continue
     byUserId.set(member.user.id, { id: member.user.id, email: member.user.email })
   }
   if (byUserId.size === 0) return []
@@ -321,32 +308,26 @@ export async function listOrganizationNotificationMembers(
   // adapter that owns it. Reading `member.user.phoneNumber` silently produced
   // undefined for everyone, which is a tenant hearing nothing on WhatsApp.
   const { createAuth } = await import('~/server/utils/auth')
-  const context = await createAuth(env).$context
-  const userAdapter = context.adapter as unknown as {
-    findMany<T>(_input: {
-      model: string
-      where: Array<{ field: string; operator: string; value: string[] }>
-      select?: string[]
-      limit?: number
-    }): Promise<T[]>
-  }
+  const auth = createAuth(env)
+  const context = await auth.$context
   const ids = [...byUserId.keys()]
-  const rows = await userAdapter.findMany<{ id: string; phoneNumber: string | null; phoneNumberVerified: boolean | number | null }>({
+  const rows = await context.adapter.findMany<Pick<typeof auth.$Infer.Session.user, 'id' | 'phoneNumber' | 'phoneNumberVerified'>>({
     model: 'user',
     where: [{ field: 'id', operator: 'in', value: ids }],
     select: ['id', 'phoneNumber', 'phoneNumberVerified'],
     limit: ids.length,
   })
-  const verifiedPhone = new Map(rows.map(row => [
-    row.id,
-    row.phoneNumber && row.phoneNumberVerified ? row.phoneNumber : null,
-  ]))
+  const usersById = new Map(rows.map(row => [row.id, row]))
 
-  return ids.map(id => ({
-    userId: id,
-    email: byUserId.get(id)!.email,
-    phone: verifiedPhone.get(id) ?? null,
-  }))
+  return ids.map(id => {
+    const user = usersById.get(id)
+    if (!user) throw new Error(`Better Auth user ${id} is missing for an organization notification member`)
+    return {
+      userId: id,
+      email: byUserId.get(id)!.email,
+      phone: user.phoneNumber && user.phoneNumberVerified ? user.phoneNumber : null,
+    }
+  })
 }
 
 export async function listUserOrganizations(env: CloudflareEnv, userId: string) {
@@ -354,53 +335,125 @@ export async function listUserOrganizations(env: CloudflareEnv, userId: string) 
   return await adapter.listOrganizations(userId)
 }
 
-export async function findOrganizationMemberById(
-  env: CloudflareEnv,
-  memberId: string,
-): Promise<{ id: string; userId: string; organizationId: string; role: string } | null> {
-  const adapter = await organizationAdapter(env)
-  const member = await adapter.findMemberById(memberId)
-  if (!member) return null
-  return {
-    id: member.id,
-    userId: member.userId,
-    organizationId: member.organizationId,
-    role: String(member.role),
-  }
-}
-
 export async function findOrganizationById(env: CloudflareEnv, organizationId: string) {
   return await organizationAdapter(env).then(adapter => adapter.findOrganizationById(organizationId))
 }
 
-export async function listOrganizationMembers(env: CloudflareEnv, organizationId: string) {
-  const adapter = await organizationAdapter(env)
-  return await listAllOrganizationMembers(adapter, organizationId)
-}
-
-export async function deleteOrganization(env: CloudflareEnv, organizationId: string): Promise<void> {
-  await organizationAdapter(env).then(adapter => adapter.deleteOrganization(organizationId))
-}
-
 /**
- * Organization-wide management access, which is now the only kind.
+ * Organization-wide management access.
  *
- * Authorization is the Better Auth organization role and nothing else. There
- * used to be a second answer — membership in a `location:<id>` Better Auth
- * team — so "may this person reach this location" could be decided two ways.
- * That existed to scope the `editor` role, `editor` existed to receive WhatsApp
- * at a configured number, and neither has any user.
+ * Authorization is the Better Auth organization role (owner or admin).
  */
 export async function assertOrganizationWideAccess(_db: DbClient, input: MemberAccessPrincipal): Promise<void> {
   if (isOrganizationWideRole(input.role)) return
   throw new HTTPError({ statusCode: 404, message: 'Not found or access denied' })
 }
 
-/** The location must belong to the tenant the caller authorized against; reaching it is the organization role. */
-export async function assertLocationAccess(db: DbClient, input: MemberAccessPrincipal & { locationId: string }): Promise<void> {
-  await assertOrganizationWideAccess(db, input)
-  const location = await findLocation(db, { organizationId: input.organizationId, locationId: input.locationId })
-  if (!location) throw new HTTPError({ statusCode: 404, message: 'Resource not found' })
+/** The offering's host is this tenant's Better Auth member or team. */
+export const ASSIGNED_SERVICE_SQL = `(p.kind = 'service' OR p.kind = 'experience') AND EXISTS (
+  SELECT 1 FROM product_booking_configs c
+  WHERE c.organization_id = p.organization_id AND c.product_id = p.id
+    AND (EXISTS (SELECT 1 FROM member m WHERE m.id = c.assigned_member_id AND m.organizationId = c.organization_id AND m.userId = ?)
+      OR EXISTS (SELECT 1 FROM team t JOIN teamMember tm ON tm.teamId = t.id
+        JOIN member m ON m.userId = tm.userId AND m.organizationId = t.organizationId
+        WHERE t.id = c.assigned_team_id AND t.organizationId = c.organization_id AND m.userId = ?))
+)`
+
+export async function assertProductAccess(db: DbClient, input: MemberAccessPrincipal & { productId: string; patch?: Record<string, unknown> }): Promise<void> {
+  if (await roleAllows({ ...input, permissions: { products: ['update'] } })) return
+  await assertRoleAllows({ ...input, permissions: { products: ['assigned'] } })
+  const assigned = await queryFirst<{ kind: string; scheduling_mode: string; assigned_member_id: string | null; assigned_team_id: string | null; held_online: number }>(db, `SELECT p.kind, c.scheduling_mode, c.assigned_member_id, c.assigned_team_id, c.held_online
+    FROM products p JOIN product_booking_configs c ON c.product_id = p.id AND c.organization_id = p.organization_id
+    WHERE p.organization_id = ? AND p.id = ? AND (${ASSIGNED_SERVICE_SQL})`, [input.organizationId, input.productId, input.userId, input.userId])
+  if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Offering not found or access denied' })
+  if (input.patch?.kind !== undefined && input.patch.kind !== assigned.kind) throw new HTTPError({ statusCode: 403, message: 'Offering kind requires admin access' })
+  const booking = input.patch?.booking && typeof input.patch.booking === 'object' ? input.patch.booking as Record<string, unknown> : input.patch
+  for (const field of ['scheduling_mode', 'assigned_member_id', 'assigned_team_id', 'held_online']) {
+    if (booking?.[field] !== undefined && booking[field] !== (field === 'held_online' ? assigned[field as keyof typeof assigned] === 1 : assigned[field as keyof typeof assigned])) throw new HTTPError({ statusCode: 403, message: 'Offering assignment requires admin access' })
+  }
+  if (input.patch?.booking !== undefined) throw new HTTPError({ statusCode: 403, message: 'Offering creation requires admin access; edit saved booking settings and schedule separately' })
+}
+
+/**
+ * The home is looked after by the caller, directly or through their team.
+ * `alias` is a product_stay_configs row; the statement binds the caller's
+ * userId twice.
+ */
+export function assignedHomeSql(alias: string): string {
+  return `(EXISTS (SELECT 1 FROM member m WHERE m.id = ${alias}.assigned_member_id AND m.organizationId = ${alias}.organization_id AND m.userId = ?)
+    OR EXISTS (SELECT 1 FROM team t JOIN teamMember tm ON tm.teamId = t.id
+      JOIN member m ON m.userId = tm.userId AND m.organizationId = t.organizationId
+      WHERE t.id = ${alias}.assigned_team_id AND t.organizationId = ${alias}.organization_id AND m.userId = ?))`
+}
+
+export function assignedBookingSql(alias: string): string {
+  return `EXISTS (SELECT 1 FROM member m
+    WHERE m.id = ${alias}.assigned_member_id AND m.organizationId = ${alias}.organization_id AND m.userId = ?)`
+}
+
+/**
+ * The location is looked after by the caller, directly or through their team.
+ * `alias` is a business_locations row; the statement binds the caller's
+ * userId twice.
+ */
+export function assignedLocationSql(alias: string): string {
+  return `(EXISTS (SELECT 1 FROM member m WHERE m.id = ${alias}.assigned_member_id AND m.organizationId = ${alias}.organization_id AND m.userId = ?)
+    OR EXISTS (SELECT 1 FROM team t JOIN teamMember tm ON tm.teamId = t.id
+      JOIN member m ON m.userId = tm.userId AND m.organizationId = t.organizationId
+      WHERE t.id = ${alias}.assigned_team_id AND t.organizationId = ${alias}.organization_id AND m.userId = ?))`
+}
+
+/** The same assigned-conversation scope is used by lists, reads, writes and realtime. */
+export function assignedGuestThreadScope(alias: string, userId: string): { sql: string; params: string[] } {
+  return {
+    sql: `(EXISTS (SELECT 1 FROM bookings b WHERE b.request_id = ${alias}.id AND b.organization_id = ${alias}.organization_id AND ${assignedBookingSql('b')})
+      OR EXISTS (SELECT 1 FROM stays st JOIN product_stay_configs c ON c.organization_id = st.organization_id AND c.product_id = st.product_id
+        WHERE st.request_id = ${alias}.id AND st.organization_id = ${alias}.organization_id AND ${assignedHomeSql('c')})
+      OR EXISTS (SELECT 1 FROM channel_threads ct JOIN product_stay_configs c ON c.organization_id = ct.organization_id AND c.product_id = ct.product_id
+        WHERE ct.request_id = ${alias}.id AND ct.organization_id = ${alias}.organization_id AND ${assignedHomeSql('c')})
+      OR (${alias}.location_id IS NOT NULL AND EXISTS (SELECT 1 FROM business_locations bl
+        WHERE bl.id = ${alias}.location_id AND bl.organization_id = ${alias}.organization_id AND ${assignedLocationSql('bl')}))
+      OR EXISTS (SELECT 1 FROM reservations res JOIN business_locations bl ON bl.id = res.location_id AND bl.organization_id = res.organization_id
+        WHERE res.request_id = ${alias}.id AND res.organization_id = ${alias}.organization_id AND ${assignedLocationSql('bl')}))`,
+    params: [userId, userId, userId, userId, userId, userId, userId, userId, userId],
+  }
+}
+
+/** Appointments retain their own member even after the service is reassigned. */
+export async function assertAssignedBookingAccess(db: DbClient, input: MemberAccessPrincipal & { bookingId?: string; requestId?: string; sessionId?: string }): Promise<void> {
+  if (await roleAllows({ ...input, permissions: { operations: ['update'] } })) return
+  await assertRoleAllows({ ...input, permissions: { operations: ['assigned'] } })
+  const threadScope = assignedGuestThreadScope('r', input.userId)
+  const assigned = input.requestId && !input.bookingId
+    ? await queryFirst(db, `SELECT r.id FROM requests r WHERE r.organization_id = ? AND r.id = ? AND ${threadScope.sql}`, [input.organizationId, input.requestId, ...threadScope.params])
+    : await queryFirst(db, `SELECT b.id FROM bookings b WHERE b.organization_id = ? AND (${assignedBookingSql('b')})
+      AND b.id = ?`, [input.organizationId, input.userId, input.bookingId])
+  if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Conversation not found or access denied', data: { code: 'THREAD_NOT_FOUND', field: input.requestId ? 'threadId' : 'bookingId' } })
+  if (input.sessionId) {
+    const destination = await queryFirst(db, `SELECT s.id FROM product_sessions s JOIN bookings b ON b.product_id = s.product_id AND b.organization_id = s.organization_id
+      WHERE b.organization_id = ? AND ${input.bookingId ? 'b.id' : 'b.request_id'} = ? AND s.id = ? AND ${sessionMemberSql('s')} = b.assigned_member_id`, [input.organizationId, input.bookingId ?? input.requestId, input.sessionId])
+    if (!destination) throw new HTTPError({ statusCode: 403, message: 'Changing the assigned provider requires admin access', data: { code: 'PROVIDER_ASSIGNMENT_FORBIDDEN', field: 'sessionId' } })
+  }
+}
+
+/** The location must belong to the tenant the caller authorized against; reaching it is an org-wide role or location assignment. */
+export async function assertLocationAccess(db: DbClient, input: MemberAccessPrincipal & { locationId: string; patch?: Record<string, unknown> }): Promise<void> {
+  if (await roleAllows({ ...input, permissions: { locations: ['update'] } })) {
+    const location = await findLocation(db, { organizationId: input.organizationId, locationId: input.locationId })
+    if (!location) throw new HTTPError({ statusCode: 404, message: 'Resource not found' })
+    return
+  }
+  await assertRoleAllows({ ...input, permissions: { locations: ['assigned'] } })
+  const assigned = await queryFirst<{ id: string; assigned_member_id: string | null; assigned_team_id: string | null }>(db, `SELECT bl.id, bl.assigned_member_id, bl.assigned_team_id
+    FROM business_locations bl
+    WHERE bl.organization_id = ? AND bl.id = ? AND (${assignedLocationSql('bl')})`, [input.organizationId, input.locationId, input.userId, input.userId])
+  if (!assigned) throw new HTTPError({ statusCode: 404, message: 'Location not found or access denied' })
+  if (input.patch?.assigned_member_id !== undefined && input.patch.assigned_member_id !== assigned.assigned_member_id) {
+    throw new HTTPError({ statusCode: 403, message: 'Location assignment requires admin access' })
+  }
+  if (input.patch?.assigned_team_id !== undefined && input.patch.assigned_team_id !== assigned.assigned_team_id) {
+    throw new HTTPError({ statusCode: 403, message: 'Location assignment requires admin access' })
+  }
 }
 
 /** A resource that may or may not belong to one location (e.g. a review row) — dispatches to assertOrganizationWideAccess when the row's own location_id is null, assertLocationAccess otherwise. Check the target row's location_id, never a caller-supplied param. Media authorization uses its placement owner instead. */
@@ -411,9 +464,9 @@ export async function assertResourceAccess(db: DbClient, input: MemberAccessPrin
   return assertLocationAccess(db, { ...input, locationId: input.resourceLocationId })
 }
 
-export async function assertMemberScope(db: DbClient, input: MemberAccessPrincipal & { locationId?: string | null }): Promise<void> {
+export async function assertMemberScope(db: DbClient, input: MemberAccessPrincipal & { locationId?: string | null; patch?: Record<string, unknown> }): Promise<void> {
   if (input.locationId) {
-    await assertLocationAccess(db, { ...input, locationId: input.locationId })
+    await assertLocationAccess(db, { ...input, locationId: input.locationId, patch: input.patch })
     return
   }
   await assertOrganizationWideAccess(db, input)
@@ -444,7 +497,7 @@ export async function resolveAuthorizedWhatsAppRecipient(
   const { findVerifiedAuthUserByPhone } = await import('~/server/utils/auth')
   const user = await findVerifiedAuthUserByPhone(
     input.env,
-    parsePhoneOrThrow(input.phone, { defaultCountry: 'TH' }),
+    parsePhoneOrThrow(input.phone),
   )
   if (!user) return null
   const membership = await resolveOrganizationMembership(input.env, {

@@ -6,7 +6,7 @@ import type { H3Event } from 'nitro'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import { getAuthSession, type CloudflareEnv } from '~/server/utils/auth'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
-import { assertOrganizationWideAccess, memberAccessPrincipal, resolveUserOrganization, type ResolvedMembership } from '~/server/utils/member-access'
+import { assertOrganizationWideAccess, assignedLocationSql, ASSIGNED_SERVICE_SQL, memberAccessPrincipal, resolveUserOrganization, type ResolvedMembership } from '~/server/utils/member-access'
 import { getOrganizationPlan } from '~/server/utils/billing-access'
 
 import { parsePostalAddress } from '~/utils/postal-address'
@@ -30,22 +30,25 @@ export interface DashboardOrganizationConfig {
   public_url: string | null
   status: string
   onboarding_status: string
-  default_currency: string | null
+  default_currency: string
 }
 
 export type DashboardOrganizationRow = ResolvedMembership & {
   id: string
   name: string
   slug: string
+  /** The caller's Better Auth member row in this organization. */
+  memberId: string
 } & DashboardOrganizationConfig
 
-const ORGANIZATION_CONFIG_SQL = `
-  SELECT theme_id, vertical, subdomain,
+const ORGANIZATION_CONFIG_SELECT = `
+  SELECT id, theme_id, vertical, subdomain,
          (SELECT domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active' AND type = 'custom') AS custom_domain,
          (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url,
          status, onboarding_status, default_currency
-  FROM organization WHERE id = ? LIMIT 1
-`
+  FROM organization`
+const ORGANIZATION_CONFIG_BY_ID_SQL = `${ORGANIZATION_CONFIG_SELECT} WHERE id = ? LIMIT 1`
+const ORGANIZATION_CONFIG_BY_SLUG_SQL = `${ORGANIZATION_CONFIG_SELECT} WHERE slug = ? LIMIT 1`
 
 // The dashboard shows the business's mark and nothing else of its media: the
 // sidebar avatar is its `logo`, or no avatar at all.
@@ -77,6 +80,7 @@ export interface DashboardLocationRow {
   slug: string
   title: string
   status: string
+  timezone: string | null
   address: string | null
   media: PublicSocialMedia['media']
   social_image: PublicSocialMedia['social_image']
@@ -103,6 +107,8 @@ export interface DashboardLocationContextRow {
   google_place_id: string | null
   google_review_url: string | null
   timezone: string | null
+  assigned_member_id: string | null
+  assigned_team_id: string | null
 }
 
 export interface DashboardContextOptions {
@@ -158,6 +164,7 @@ export async function resolveRequestedOrganization(
       throw new HTTPError({
         statusCode: 400,
         message: 'Organization context conflict: the requested organization does not match the current dashboard context.',
+        data: { code: 'ORGANIZATION_CONTEXT_CONFLICT', field: 'org' },
       })
     }
     if (headerOrg) return headerOrg
@@ -171,6 +178,98 @@ export async function resolveRequestedOrganization(
   if (!activeOrganizationId) return null
 
   return await resolveUserOrganization(env, { userId, organizationId: activeOrganizationId }, event)
+}
+
+export async function getDashboardMemberContext(
+  _event: H3Event,
+  _options: DashboardContextOptions & { requireOrganization: false }
+): Promise<{
+  env: ReturnType<typeof cloudflareEnv>
+  db: D1Database
+  session: NonNullable<Awaited<ReturnType<typeof getAuthSession>>>
+  userId: string
+  organization: DashboardOrganizationRow | null
+}>
+export async function getDashboardMemberContext(
+  _event: H3Event,
+  _options?: DashboardContextOptions
+): Promise<{
+  env: ReturnType<typeof cloudflareEnv>
+  db: D1Database
+  session: NonNullable<Awaited<ReturnType<typeof getAuthSession>>>
+  userId: string
+  organization: DashboardOrganizationRow
+}>
+export async function getDashboardMemberContext(event: H3Event, options: DashboardContextOptions = {}): Promise<{
+  env: ReturnType<typeof cloudflareEnv>
+  db: D1Database
+  session: NonNullable<Awaited<ReturnType<typeof getAuthSession>>>
+  userId: string
+  organization: DashboardOrganizationRow | null
+}> {
+  const env = cloudflareEnv(event)
+  const db = env.DB
+
+  if (!db) {
+    throw new HTTPError({ statusCode: 503, message: 'Database not available', data: { code: 'DATABASE_UNAVAILABLE', field: 'DB' } })
+  }
+
+  const session = await getAuthSession(event, env)
+  if (!session?.user?.id) {
+    throw new HTTPError({ statusCode: 401, message: 'Authentication required', data: { code: 'UNAUTHORIZED', field: 'session' } })
+  }
+
+  // Session-wide activeOrganizationId is only ever considered when this specific
+  // caller has declared it has no URL-scoped org context (requireOrganization: false —
+  // the dashboard boot-discovery endpoint and the notifications badge, both of which
+  // run outside any /dashboard/{orgSlug}/... route). Every other caller must resolve
+  // strictly from the `org` query param; a missing one there is a real error, not
+  // a cue to guess from a session field that can be stale relative to the URL.
+  const sessionRecord = session.session as typeof session.session & { activeOrganizationId?: string | null }
+  const activeOrganizationId = options.requireOrganization === false && typeof sessionRecord.activeOrganizationId === 'string'
+    ? sessionRecord.activeOrganizationId
+    : null
+
+  // The route names the organization by slug, so its configuration row is read
+  // beside the membership resolution instead of after it: one round trip fewer
+  // on every dashboard call. The row only counts once the membership confirms
+  // it is the same organization.
+  const requestedSlug = options.organizationSlug ?? dashboardOrgQueryParam(event)
+  const [membership, configBySlug] = await Promise.all([
+    resolveRequestedOrganization(event, db, session.user.id, {
+      activeOrganizationId,
+      organizationSlug: options.organizationSlug,
+    }),
+    requestedSlug ? queryFirst<DashboardOrganizationConfig & { id: string }>(db, ORGANIZATION_CONFIG_BY_SLUG_SQL, [requestedSlug]) : null,
+  ])
+
+  if (!membership) {
+    if (options.requireOrganization === false) {
+      return { env, db, session, userId: session.user.id, organization: null }
+    }
+    const hasQueryParam = Boolean(options.organizationSlug ?? dashboardOrgQueryParam(event))
+    throw new HTTPError({
+      statusCode: hasQueryParam ? 404 : 400,
+      message: hasQueryParam
+        ? 'Organization not found'
+        : 'Organization context is required. Use /dashboard/{orgSlug} routes.',
+      data: { code: hasQueryParam ? 'ORGANIZATION_NOT_FOUND' : 'ORGANIZATION_REQUIRED', field: 'org' },
+    })
+  }
+
+  // Better Auth owns the membership and the organization's identity; its own
+  // adapter does not return the tenant configuration columns beside them, so
+  // they are read here from the same row and carried on one object.
+  const configRow = configBySlug?.id === membership.id
+    ? configBySlug
+    : await queryFirst<DashboardOrganizationConfig & { id: string }>(db, ORGANIZATION_CONFIG_BY_ID_SQL, [membership.id])
+  if (!configRow) {
+    throw new HTTPError({ statusCode: 404, message: 'Organization not found', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'org' } })
+  }
+  const { id: _configId, ...config } = configRow
+  const organization: DashboardOrganizationRow = Object.assign(membership, config)
+
+  return { env, db, session, userId: session.user.id, organization }
 }
 
 export async function getDashboardContext(
@@ -193,66 +292,10 @@ export async function getDashboardContext(
   userId: string
   organization: DashboardOrganizationRow
 }>
-export async function getDashboardContext(event: H3Event, options: DashboardContextOptions = {}): Promise<{
-  env: ReturnType<typeof cloudflareEnv>
-  db: D1Database
-  session: NonNullable<Awaited<ReturnType<typeof getAuthSession>>>
-  userId: string
-  organization: DashboardOrganizationRow | null
-}> {
-  const env = cloudflareEnv(event)
-  const db = env.DB
-
-  if (!db) {
-    throw new HTTPError({ statusCode: 503, message: 'Database not available' })
-  }
-
-  const session = await getAuthSession(event, env)
-  if (!session?.user?.id) {
-    throw new HTTPError({ statusCode: 401, message: 'Authentication required' })
-  }
-
-  // Session-wide activeOrganizationId is only ever considered when this specific
-  // caller has declared it has no URL-scoped org context (requireOrganization: false —
-  // the dashboard boot-discovery endpoint and the notifications badge, both of which
-  // run outside any /dashboard/{orgSlug}/... route). Every other caller must resolve
-  // strictly from the `org` query param; a missing one there is a real error, not
-  // a cue to guess from a session field that can be stale relative to the URL.
-  const sessionRecord = session.session as typeof session.session & { activeOrganizationId?: string | null }
-  const activeOrganizationId = options.requireOrganization === false && typeof sessionRecord.activeOrganizationId === 'string'
-    ? sessionRecord.activeOrganizationId
-    : null
-
-  const membership = await resolveRequestedOrganization(event, db, session.user.id, {
-    activeOrganizationId,
-    organizationSlug: options.organizationSlug,
-  })
-
-  if (!membership) {
-    if (options.requireOrganization === false) {
-      return { env, db, session, userId: session.user.id, organization: null }
-    }
-    const hasQueryParam = Boolean(options.organizationSlug ?? dashboardOrgQueryParam(event))
-    throw new HTTPError({
-      statusCode: hasQueryParam ? 404 : 400,
-      message: hasQueryParam
-        ? 'Organization not found'
-        : 'Organization context is required. Use /dashboard/{orgSlug} routes.',
-    })
-  }
-
-  // Better Auth owns the membership and the organization's identity; its own
-  // adapter does not return the tenant configuration columns beside them, so
-  // they are read here from the same row and carried on one object.
-  const config = await queryFirst<DashboardOrganizationConfig>(db, ORGANIZATION_CONFIG_SQL, [membership.id])
-  if (!config) {
-    throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
-  }
-  const organization: DashboardOrganizationRow = Object.assign(membership, config)
-
-  await assertOrganizationWideAccess(db, memberAccessPrincipal(organization, { env, event }))
-
-  return { env, db, session, userId: session.user.id, organization }
+export async function getDashboardContext(event: H3Event, options: DashboardContextOptions = {}) {
+  const context = await getDashboardMemberContext(event, options)
+  if (context.organization) await assertOrganizationWideAccess(context.db, memberAccessPrincipal(context.organization, { env: context.env, event }))
+  return context
 }
 
 export async function getDashboardLocationContext(event: H3Event, locationId: string): Promise<{
@@ -280,7 +323,7 @@ export async function getDashboardLocationContext(event: H3Event, locationId: st
            bl.latitude, bl.longitude, bl.opening_hours, bl.categories, bl.rating, bl.review_count, bl.status,
            bl.last_synced_at, bl.description, bl.short_description, bl.special_hours, bl.price_level, bl.email,
            bl.google_place_id, bl.google_review_url, bl.created_at, bl.updated_at, bl.timezone, bl.max_capacity,
-           bl.seo_title, bl.seo_description, bl.canonical_url
+           bl.seo_title, bl.seo_description, bl.canonical_url, bl.assigned_member_id, bl.assigned_team_id
     FROM business_locations bl
     WHERE bl.id = ?
     LIMIT 1
@@ -290,14 +333,15 @@ export async function getDashboardLocationContext(event: H3Event, locationId: st
     throw new HTTPError({ statusCode: 404, message: 'Location not found' })
   }
 
-  const membership = await resolveUserOrganization(env, {
-    userId: session.user.id,
-    organizationId: row.organization_id,
-  }, event)
+  // The location row already names its organization, so the membership and the
+  // configuration row are read in the same round trip.
+  const [membership, configRow] = await Promise.all([
+    resolveUserOrganization(env, { userId: session.user.id, organizationId: row.organization_id }, event),
+    queryFirst<DashboardOrganizationConfig & { id: string }>(db, ORGANIZATION_CONFIG_BY_ID_SQL, [row.organization_id]),
+  ])
   if (!membership) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
-
-  const config = await queryFirst<DashboardOrganizationConfig>(db, ORGANIZATION_CONFIG_SQL, [membership.id])
-  if (!config) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
+  if (!configRow) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
+  const { id: _configId, ...config } = configRow
 
   return {
     env,
@@ -312,14 +356,18 @@ export async function getDashboardLocationContext(event: H3Event, locationId: st
 export async function listDashboardLocations(
   db: DbClient,
   organizationId: string,
+  assignedUserId?: string,
+  includeInactive = false,
 ) {
 
   const locations = await queryAll<Omit<DashboardLocationRow, 'media' | 'social_image' | 'address'> & { address: string | null }>(db, `
-    SELECT id, slug, title, status, address
-    FROM business_locations
-    WHERE organization_id = ? AND status = 'active'
-    ORDER BY title ASC
-  `, [organizationId])
+    SELECT l.id, l.slug, l.title, l.status, l.timezone, l.address
+    FROM business_locations l
+    WHERE l.organization_id = ? ${includeInactive ? '' : "AND l.status = 'active'"}
+      ${assignedUserId ? `AND (EXISTS (SELECT 1 FROM product_locations pl JOIN products p ON p.id = pl.product_id AND p.organization_id = pl.organization_id
+        WHERE pl.organization_id = l.organization_id AND pl.location_id = l.id AND (${ASSIGNED_SERVICE_SQL})) OR ${assignedLocationSql('l')})` : ''}
+    ORDER BY l.title ASC
+  `, assignedUserId ? [organizationId, assignedUserId, assignedUserId, assignedUserId, assignedUserId] : [organizationId])
   const [media, organizationPlacements] = await Promise.all([
     loadPublicSocialMedia(db, organizationId, 'business_location', locations.map(location => location.id)),
     readMediaPlacements(db, { organizationId, ownerType: 'organization', ownerIds: [organizationId], slot: 'social_share' }),

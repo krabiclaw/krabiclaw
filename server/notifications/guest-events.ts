@@ -1,4 +1,5 @@
 import type { NotificationFact, NotificationMessage } from './messages'
+import { platformLocale } from '~/shared/platform-locales'
 
 /**
  * Guest-facing and account mail. Email only: a guest has no account, no
@@ -9,9 +10,10 @@ import type { NotificationFact, NotificationMessage } from './messages'
  * preference switches off.
  */
 
-function fact(key: string, label: string, value: string | null | undefined): NotificationFact | null {
-  const text = (value ?? '').toString().trim()
-  return text ? { key, label, value: text } : null
+// A fact the message has is stated as it is; one it genuinely lacks is null and
+// left out. Nothing is dropped for being blank or written in for being absent.
+function fact(key: string, label: string, value: string | null): NotificationFact | null {
+  return value === null ? null : { key, label, value: value.trim() }
 }
 
 function facts(...entries: Array<NotificationFact | null>): NotificationFact[] {
@@ -21,7 +23,7 @@ function facts(...entries: Array<NotificationFact | null>): NotificationFact[] {
 export function verifyEmailMessage(input: { verificationUrl: string }): NotificationMessage {
   return {
     title: 'Verify your email',
-    preheader: 'Confirm your address to finish setting up your Krabiclaw account.',
+    preheader: 'Confirm your address to finish setting up your KrabiClaw account.',
     hero: null,
     intro: 'Confirm your email address to finish setting up your account and keep your sign-in secure.',
     facts: [],
@@ -34,7 +36,7 @@ export function verifyEmailMessage(input: { verificationUrl: string }): Notifica
 export function resetPasswordMessage(input: { resetUrl: string }): NotificationMessage {
   return {
     title: 'Reset your password',
-    preheader: 'Choose a new Krabiclaw password.',
+    preheader: 'Choose a new KrabiClaw password.',
     hero: null,
     intro: 'We received a request to reset your password. The link below is secure and single-use.',
     facts: [],
@@ -52,7 +54,7 @@ export function organizationInviteMessage(input: {
 }): NotificationMessage {
   return {
     title: `You're invited to ${input.organizationName}`,
-    preheader: `${input.inviterName} invited you to join ${input.organizationName} on Krabiclaw.`,
+    preheader: `${input.inviterName} invited you to join ${input.organizationName} on KrabiClaw.`,
     hero: null,
     facts: facts(
       fact('invitedBy', 'Invited by', input.inviterName),
@@ -66,6 +68,7 @@ export function organizationInviteMessage(input: {
 }
 
 export interface GuestBookingInput {
+  locale?: string
   guestName: string
   organizationName: string
   organizationLogoUrl?: string | null
@@ -77,41 +80,54 @@ export interface GuestBookingInput {
   notes?: string | null
   contactPhone?: string | null
   contactEmail?: string | null
-  cancelUrl?: string | null
+  /** The guest's receipt on the business's site: what they booked, paid and can cancel. */
+  receiptUrl?: string | null
+  /** What the guest paid on the site, formatted; absent when nothing was paid online. */
+  paid?: string | null
   heroImageUrl?: string | null
   /** The platform sign-up the guest's email joins this booking to. */
   accountUrl?: string | null
 }
 
-const accountAction = (url: string | null | undefined) => url ? { url, label: 'Create an account' } : undefined
+function guestLocale(input: { locale?: string }) {
+  const locale = platformLocale(input.locale ?? 'en')
+  if (!locale) throw new Error('Guest email language is not supported')
+  return locale
+}
+
+const accountAction = (url: string | null | undefined, locale?: string) => url ? { url, label: guestLocale({ locale }).messages['guest_account.create']! } : undefined
 
 function guestVisitFacts(input: GuestBookingInput): NotificationFact[] {
+  const labels = guestLocale(input).messages
   return facts(
-    fact('what', input.productTitle ? 'Experience' : 'Location', input.productTitle ?? input.locationName),
-    fact('date', 'Date', input.date),
-    fact('time', 'Time', input.time),
-    fact('partySize', 'Party size', input.partySize),
-    fact('notes', 'Special requests', input.notes),
+    fact('what', labels[input.productTitle ? 'booking.receipt' : 'saya.experience_detail.meeting_point']!, input.productTitle ?? input.locationName ?? null),
+    input.productTitle ? fact('location', labels['saya.experience_detail.meeting_point']!, input.locationName ?? null) : null,
+    fact('date', labels['saya.reservation_cancel.date']!, input.date),
+    fact('time', labels['saya.reservation_cancel.time']!, input.time),
+    fact('partySize', labels['saya.experience_detail.party_size']!, input.partySize),
+    fact('notes', labels['saya.experience_detail.special_requests']!, input.notes ?? null),
+    fact('total', labels['payment.paid']!, input.paid ?? null),
   )
 }
 
 function contactSection(input: GuestBookingInput) {
   const details = [input.contactPhone, input.contactEmail].filter(Boolean).join(' · ')
   return details
-    ? [{ title: `Questions for ${input.organizationName}?`, body: details }]
-    : [{ title: `Questions for ${input.organizationName}?`, body: `${input.organizationName} will be in touch using the details you provided.` }]
+    ? [{ title: guestLocale(input).messages['saya.contact_page.contact_us']!, body: details }]
+    : []
 }
 
 export function guestReservationReceivedMessage(input: GuestBookingInput): NotificationMessage {
+  const locale = guestLocale(input)
   return {
-    title: 'Your reservation is confirmed',
-    preheader: `${input.organizationName} · ${input.date} at ${input.time}`,
+    locale: locale.locale,
+    title: locale.messages['reservations.confirmed']!,
+    preheader: `${input.organizationName} · ${input.date} · ${input.time}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.organizationName } : null,
     facts: guestVisitFacts(input),
-    primaryAction: input.cancelUrl ? { url: input.cancelUrl, label: 'Manage your reservation' } : undefined,
-    secondaryAction: accountAction(input.accountUrl),
+    primaryAction: input.receiptUrl ? { url: input.receiptUrl, label: locale.messages['booking.receipt']! } : undefined,
+    secondaryAction: accountAction(input.accountUrl, locale.locale),
     sections: contactSection(input),
-    finePrint: input.cancelUrl ? 'The link above stays valid for 30 days.' : undefined,
     category: 'account_security',
     organizationName: input.organizationName,
     organizationLogoUrl: input.organizationLogoUrl,
@@ -119,9 +135,11 @@ export function guestReservationReceivedMessage(input: GuestBookingInput): Notif
 }
 
 export function guestReservationCancelledMessage(input: GuestBookingInput & { wasConfirmed: boolean }): NotificationMessage {
+  const locale = guestLocale(input)
   return {
-    title: input.wasConfirmed ? 'Your reservation was cancelled' : 'Your reservation request was cancelled',
-    preheader: `${input.organizationName} · ${input.date} at ${input.time}`,
+    locale: locale.locale,
+    title: locale.messages['saya.reservation_cancel.cancelled_title']!,
+    preheader: `${input.organizationName} · ${input.date} · ${input.time}`,
     hero: null,
     facts: guestVisitFacts(input),
     sections: contactSection(input),
@@ -132,16 +150,66 @@ export function guestReservationCancelledMessage(input: GuestBookingInput & { wa
 }
 
 export function guestBookingReceivedMessage(input: GuestBookingInput & { productTitle: string; status?: 'pending' | 'confirmed' }): NotificationMessage {
+  const locale = guestLocale(input)
   return {
-    title: input.status === 'pending' ? 'Your booking request was sent' : 'Your booking is confirmed',
-    preheader: `${input.productTitle} · ${input.date} at ${input.time}`,
+    locale: locale.locale,
+    title: locale.messages[input.status === 'pending' ? 'booking.request_received' : 'booking.confirmed']!,
+    preheader: `${input.productTitle} · ${input.date} · ${input.time}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle ?? '' } : null,
-    intro: input.status === 'pending' ? `Thanks, ${input.guestName}. ${input.organizationName} will review your request shortly.` : `Thanks, ${input.guestName}. Your booking with ${input.organizationName} is confirmed.`,
+    intro: input.status === 'pending' ? locale.messages['booking.pending_message']! : undefined,
     facts: guestVisitFacts(input),
-    primaryAction: input.cancelUrl ? { url: input.cancelUrl, label: 'Manage your booking' } : undefined,
-    secondaryAction: accountAction(input.accountUrl),
+    primaryAction: input.receiptUrl ? { url: input.receiptUrl, label: locale.messages['booking.receipt']! } : undefined,
+    secondaryAction: accountAction(input.accountUrl, locale.locale),
     sections: contactSection(input),
-    finePrint: input.cancelUrl ? 'The link above stays valid for 30 days.' : undefined,
+    category: 'account_security',
+    organizationName: input.organizationName,
+    organizationLogoUrl: input.organizationLogoUrl,
+  }
+}
+
+export interface GuestStayInput {
+  locale?: string
+  guestName: string
+  organizationName: string
+  organizationLogoUrl: string | null
+  homeName: string
+  checkIn: string
+  checkOut: string
+  nights: string
+  guests: string
+  total: string
+  checkInInstructions: string | null
+  contactPhone: string | null
+  contactEmail: string | null
+  heroImageUrl: string | null
+  accountUrl: string | null
+  /** The stay on the business's site. */
+  receiptUrl: string | null
+}
+
+/** The guest's confirmation of a stay they booked and paid for on the site. */
+export function guestStayConfirmedMessage(input: GuestStayInput): NotificationMessage {
+  const locale = guestLocale(input)
+  const labels = locale.messages
+  return {
+    locale: locale.locale,
+    title: labels['stay.confirmed_title']!,
+    preheader: `${input.homeName} · ${input.checkIn} – ${input.checkOut}`,
+    hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.homeName } : null,
+    facts: facts(
+      fact('what', labels['stay.your_stay']!, input.homeName),
+      fact('checkIn', labels['stay.check_in']!, input.checkIn),
+      fact('checkOut', labels['stay.check_out']!, input.checkOut),
+      fact('nights', labels['stay.nights']!, input.nights),
+      fact('partySize', labels['stay.guests']!, input.guests),
+      fact('total', labels['payment.paid']!, input.total),
+    ),
+    primaryAction: input.receiptUrl ? { url: input.receiptUrl, label: labels['booking.receipt']! } : undefined,
+    secondaryAction: accountAction(input.accountUrl, locale.locale),
+    sections: [
+      ...(input.checkInInstructions ? [{ title: labels['stay.check_in_instructions']!, body: input.checkInInstructions }] : []),
+      ...contactSection({ ...input, date: input.checkIn, time: '', partySize: input.guests }),
+    ],
     category: 'account_security',
     organizationName: input.organizationName,
     organizationLogoUrl: input.organizationLogoUrl,
@@ -149,9 +217,11 @@ export function guestBookingReceivedMessage(input: GuestBookingInput & { product
 }
 
 export function guestBookingCancelledMessage(input: GuestBookingInput & { productTitle: string; wasConfirmed: boolean }): NotificationMessage {
+  const locale = guestLocale(input)
   return {
-    title: input.wasConfirmed ? 'Your booking was cancelled' : 'Your booking request was cancelled',
-    preheader: `${input.productTitle} · ${input.date} at ${input.time}`,
+    locale: locale.locale,
+    title: locale.messages['saya.experience_cancel.cancelled_title']!,
+    preheader: `${input.productTitle} · ${input.date} · ${input.time}`,
     hero: null,
     facts: guestVisitFacts(input),
     sections: contactSection(input),
@@ -162,6 +232,7 @@ export function guestBookingCancelledMessage(input: GuestBookingInput & { produc
 }
 
 export function guestContactReceivedMessage(input: {
+  locale?: string
   guestName: string
   organizationName: string
   organizationLogoUrl: string | null
@@ -171,18 +242,20 @@ export function guestContactReceivedMessage(input: {
   consentAcknowledged: boolean
   accountUrl?: string | null
 }): NotificationMessage {
+  const locale = guestLocale(input)
+  const labels = locale.messages
   return {
-    title: 'Your message was sent',
-    preheader: `Your message to ${input.organizationName} was received.`,
+    locale: locale.locale,
+    title: labels['saya.contact_page.confirmed_title']!,
+    preheader: input.organizationName,
     hero: null,
-    intro: `Thanks, ${input.guestName}. ${input.organizationName} will reply using the contact details you provided.`,
     facts: facts(
-      fact('subject', 'Subject', input.subject),
-      fact('productTitle', 'Regarding', input.productTitle),
-      input.consentAcknowledged ? fact('consent', 'Contact/privacy notice', 'Acknowledged') : null,
+      fact('subject', labels['saya.contact_page.what_about']!, input.subject),
+      fact('productTitle', labels['booking.service']!, input.productTitle),
+      input.consentAcknowledged ? fact('consent', labels['legal.privacy']!, '✓') : null,
     ),
-    primaryAction: accountAction(input.accountUrl),
-    sections: [{ title: 'Your message', body: input.message }],
+    primaryAction: accountAction(input.accountUrl, locale.locale),
+    sections: [{ title: labels['saya.contact_page.your_message']!, body: input.message }],
     category: 'account_security',
     organizationName: input.organizationName,
     organizationLogoUrl: input.organizationLogoUrl,
@@ -211,6 +284,7 @@ export function guestThreadReplyMessage(input: {
 }
 
 export function guestThreadStatusMessage(input: {
+  locale?: string
   organizationName: string
   organizationLogoUrl: string | null
   heading: string
@@ -219,6 +293,7 @@ export function guestThreadStatusMessage(input: {
   actionLabel?: string | null
 }): NotificationMessage {
   return {
+    locale: input.locale,
     title: input.heading,
     preheader: input.body.slice(0, 120),
     hero: null,
@@ -232,6 +307,7 @@ export function guestThreadStatusMessage(input: {
 }
 
 export function bookingChangeProposalMessage(input: {
+  locale?: string
   guestName: string
   organizationName: string
   organizationLogoUrl: string | null
@@ -242,6 +318,7 @@ export function bookingChangeProposalMessage(input: {
   actionLabel?: string | null
 }): NotificationMessage {
   return {
+    locale: input.locale,
     title: input.heading,
     preheader: input.intro.slice(0, 120),
     hero: null,

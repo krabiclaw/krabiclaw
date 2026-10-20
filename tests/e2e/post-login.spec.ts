@@ -8,6 +8,11 @@ test('signed-out dashboard deep links preserve their destination through login',
 
   expect(response.status()).toBe(302)
   expect(response.headers().location).toBe(`/login?redirect=${encodeURIComponent(target)}`)
+
+  const appTarget = '/dashboard/app/products/menu?tab=specials'
+  const appResponse = await request.get(appTarget, { maxRedirects: 0 })
+  expect(appResponse.status()).toBe(302)
+  expect(appResponse.headers().location).toBe(`/login?redirect=${encodeURIComponent(appTarget)}`)
 })
 
 test('a verified user without an organization starts onboarding and can explicitly visit their profile', async ({ request, baseURL }) => {
@@ -17,9 +22,26 @@ test('a verified user without an organization starts onboarding and can explicit
   expect(destination.status()).toBe(302)
   expect(destination.headers().location).toBe('/dashboard/onboarding')
 
+  const appDestination = await request.get('/api/post-login?redirect=/dashboard/app/products', { maxRedirects: 0 })
+  expect(appDestination.status()).toBe(302)
+  expect(appDestination.headers().location).toBe('/dashboard/onboarding')
+
   const profile = await request.get('/api/post-login?redirect=/dashboard/account/profile', { maxRedirects: 0 })
   expect(profile.status()).toBe(302)
   expect(profile.headers().location).toBe('/dashboard/account/profile')
+})
+
+test('a signed-in owner resolves dashboard deep links with their query string even when a plan is supplied', async ({ request, baseURL }) => {
+  await loginAs(request, baseURL!, 'user-e2e-demo-owner')
+
+  const target = '/dashboard/app/products/menu?tab=specials&source=notification'
+  for (const plan of [undefined, 'growth']) {
+    const params = new URLSearchParams({ redirect: target })
+    if (plan) params.set('plan', plan)
+    const appDestination = await request.get(`/api/post-login?${params}`, { maxRedirects: 0 })
+    expect(appDestination.status()).toBe(302)
+    expect(appDestination.headers().location).toBe('/dashboard/ember-slice-demo/products/menu?tab=specials&source=notification')
+  }
 })
 
 // One journey, run once. The route matrix, the redirects and the SSR HTML do
@@ -33,6 +55,8 @@ test('public auth CTAs reflect the SSR session', async ({ page, baseURL }) => {
   // it instead.
   await page.setViewportSize({ width: 390, height: 900 })
   await page.goto('/')
+  // The menu button is server-rendered; it opens the menu once Vue owns it.
+  await waitForNuxtHydration(page)
   const narrowHeader = page.locator('header').first()
   await expect(narrowHeader.getByRole('link', { name: 'Start free', exact: true }).first()).toBeVisible()
   await expect(narrowHeader.getByRole('link', { name: 'Sign in', exact: true }).first()).toBeHidden()
@@ -55,14 +79,7 @@ test('public auth CTAs reflect the SSR session', async ({ page, baseURL }) => {
   await loginAs(page.request, baseURL!, 'user-e2e-oauth-private-cimd')
   const session = await (await page.request.get('/api/auth/get-session')).json()
 
-  // The marketing homepage is for people without an account. A signed-in
-  // owner is sent to their dashboard rather than shown the pitch, which is
-  // what stopped a returning owner clicking "Start free" a second time.
-  const home = await page.request.get('/', { maxRedirects: 0 })
-  expect(home.status()).toBe(302)
-  expect(home.headers().location).toBe('/api/post-login')
-
-  for (const path of ['/docs', '/plugin', '/features', '/pricing', '/templates/saya']) {
+  for (const path of ['/', '/docs', '/plugin', '/features', '/pricing', '/templates/saya']) {
     const response = await page.goto(path)
     expect(response?.status()).toBe(200)
     expect(response!.headers()['cache-control']).toContain('no-store')
@@ -120,14 +137,16 @@ test('invitation account switching updates the reactive session without reloadin
 test('signed-in paid CTAs retain their selected plan through the canonical billing redirect', async ({ page, baseURL }) => {
   await loginAs(page.request, baseURL!, 'user-e2e-demo-owner')
   await page.goto('/pricing')
-  for (const [plan, label] of [['growth', 'Get Growth'], ['commerce', 'Get Commerce']] as const) {
+  for (const [plan, label] of [['growth', 'Get Growth'], ['business', 'Get Business']] as const) {
     await expect(page.getByRole('link', { name: label, exact: true })).toHaveAttribute('href', `/api/post-login?plan=${plan}`)
     const destination = await page.request.get(`/api/post-login?plan=${plan}`, { maxRedirects: 0 })
     expect(destination.status()).toBe(302)
     expect(destination.headers().location).toBe(`/dashboard/ember-slice-demo/payments?tab=plan&plan=${plan}`)
   }
-  const invalid = await page.request.get('/api/post-login?plan=unknown', { maxRedirects: 0 })
-  expect(invalid.status()).toBe(400)
+  for (const plan of ['commerce', 'marketing', 'unknown']) {
+    const invalid = await page.request.get(`/api/post-login?plan=${plan}`, { maxRedirects: 0 })
+    expect(invalid.status()).toBe(400)
+  }
 })
 
 test('sign-in surfaces the last used method without remembering the account', async ({ page, baseURL }) => {

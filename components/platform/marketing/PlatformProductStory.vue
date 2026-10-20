@@ -11,7 +11,18 @@
       </div>
       <div v-if="examples.length" class="kc-product-story__pictures">
         <figure v-for="(example, index) in examples" :key="index" :class="'kc-product-story__picture--' + (index + 1)">
-          <img :src="mediaStillUrl(example.image)!" :alt="example.image.alt_text || example.title" :width="example.image.width ?? undefined" :height="example.image.height ?? undefined" loading="lazy" decoding="async">
+          <video
+            v-if="mediaPlaybackUrl(example.image)"
+            :src="mediaPlaybackUrl(example.image)!"
+            :poster="mediaStillUrl(example.image)!"
+            :width="example.image.width ?? undefined"
+            :height="example.image.height ?? undefined"
+            :aria-label="example.image.alt_text || example.title"
+            controls
+            playsinline
+            preload="none"
+          />
+          <img v-else :src="mediaStillUrl(example.image)!" :alt="example.image.alt_text || example.title" :width="example.image.width ?? undefined" :height="example.image.height ?? undefined" loading="lazy" decoding="async">
         </figure>
       </div>
       <div v-if="text(block.data.caption)" class="kc-product-story__caption">
@@ -28,7 +39,7 @@
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
 import { blockMedia, blockRecords, blockText as text, isInternalRoute } from '~/utils/tenant-page-block-data'
-import { mediaStillUrl } from '~/shared/media-placement-contract'
+import { mediaStillUrl, mediaPlaybackUrl } from '~/shared/media-placement-contract'
 
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 const { localePath } = useI18n()
@@ -50,7 +61,7 @@ const examples = computed(() => {
 .kc-product-story__copy > p { font-size: clamp(1rem, 1.6vw, 1.55rem); line-height: 1.55; color: #606168; margin: 0; }
 .kc-product-story__pictures { grid-column: 2; grid-row: 1 / 3; }
 .kc-product-story__pictures figure { margin: 0; }
-.kc-product-story__pictures img { display: block; max-width: 100%; width: 100%; height: auto; max-height: 38rem; object-fit: contain; }
+.kc-product-story__pictures img, .kc-product-story__pictures video { display: block; max-width: 100%; width: 100%; height: auto; max-height: 38rem; object-fit: contain; }
 .kc-product-story__heading { grid-column: 1; }
 .kc-product-story__copy { grid-column: 1; }
 .kc-product-story__caption { grid-column: 1 / -1; border-top: 1px solid #cbc9c3; padding-top: 1.5rem; margin-top: 2rem; display: flex; gap: 2rem; justify-content: space-between; color: #606168; font-size: .95rem; }
@@ -74,7 +85,7 @@ const examples = computed(() => {
   .kc-product-story__inner { display: flex; flex-direction: column; align-items: stretch; gap: 2rem; }
   .kc-product-story__copy { align-self: auto; }
   .kc-product-story__pictures { order: 2; }
-  .kc-product-story__pictures img { max-height: 28rem; }
+  .kc-product-story__pictures img, .kc-product-story__pictures video { max-height: 28rem; }
   .kc-product-story__caption { order: 3; flex-direction: column; gap: 1rem; }
   .kc-product-story__caption ul { gap: 1rem; font-size: .8rem; }
   .kc-product-story--gallery .kc-product-story__pictures { height: 21rem; margin-top: 0; }

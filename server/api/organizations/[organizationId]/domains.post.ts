@@ -44,7 +44,7 @@ export default defineHandler(async (event) => {
   if (liveResolution.resolves_elsewhere && body.acknowledge_live_cutover !== true) {
     return jsonResponse({
       error: 'This domain currently points somewhere else.', live_cutover_warning: {
-        hostname: liveResolution.hostname, records: liveResolution.records, message: 'This domain currently points elsewhere and may be live. Changing DNS now can take it offline until Krabiclaw validation finishes.', }, }, { status: 409 })
+        hostname: liveResolution.hostname, records: liveResolution.records, message: 'This domain currently points elsewhere and may be live. Changing DNS now can take it offline until KrabiClaw validation finishes.', }, }, { status: 409 })
   }
 
   try {

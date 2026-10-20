@@ -23,3 +23,19 @@ export function formatProductMoney(price: Price | null, locale?: string): string
 export function formatVariantPrice(variant: ProductVariant, selection: PriceSelection, locale?: string): string | null {
   return formatProductMoney(selectPrice(variant.prices, selection), locale)
 }
+
+/** Card prices use the same offer selection as the chosen variant at checkout. */
+export function summarizeProductPrices(variants: readonly ProductVariant[], selections: readonly PriceSelection[]) {
+  const offers = [...new Map(selections.flatMap(selection => variants.filter(variant => variant.active)
+    .flatMap(variant => selectPrice(variant.prices, selection) ?? [])).map(offer => [offer.id, offer])).values()]
+  if (!offers.length) return { lowest: null, highest: null, count: 0 }
+  if (new Set(offers.map(offer => offer.currency)).size !== 1) throw new Error('A price range requires one currency')
+  offers.sort((left, right) => left.unit_amount - right.unit_amount)
+  return { lowest: offers[0]!, highest: offers.at(-1)!, count: offers.length }
+}
+
+export function formatProductPriceRange(summary: ReturnType<typeof summarizeProductPrices>, locale?: string): string | null {
+  if (!summary.lowest || !summary.highest) return null
+  const lowest = formatProductMoney(summary.lowest, locale)!
+  return summary.lowest.unit_amount === summary.highest.unit_amount ? lowest : `${lowest} – ${formatProductMoney(summary.highest, locale)}`
+}

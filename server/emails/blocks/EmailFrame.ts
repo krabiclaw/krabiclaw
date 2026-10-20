@@ -1,6 +1,7 @@
 import { defineComponent, h, type PropType } from 'vue'
 import { EHtml, EHead, EBody, EPreview, EContainer, ESection, EText, ELink, EImg, EStyle } from '../vue-email'
-import { light, dark, brand, font, layout, type } from '../tokens'
+import { light, dark, font, layout, type } from '../tokens'
+import { platformLocale } from '~/shared/platform-locales'
 
 /**
  * The frame every message renders into.
@@ -16,6 +17,7 @@ import { light, dark, brand, font, layout, type } from '../tokens'
  */
 export default defineComponent({
   props: {
+    locale: { type: String, default: undefined },
     preheader: { type: String, required: true },
     /** The tenant this is sent for, named in the footer. Null for platform mail. */
     organizationName: { type: String as PropType<string | null>, default: null },
@@ -27,6 +29,8 @@ export default defineComponent({
     platformDomain: { type: String, required: true },
   },
   setup(props, { slots }) {
+    const locale = platformLocale(props.locale ?? 'en')
+    if (!locale) throw new Error('Email language is not supported')
     const year = new Date().getFullYear()
     // A domain given with its own scheme keeps it, so a local origin stays
     // reachable over http; a bare domain is https, which is every deployment.
@@ -39,7 +43,7 @@ export default defineComponent({
       const orgName = props.organizationName
       const orgLogo = props.organizationLogoUrl
 
-      return h(EHtml, { lang: 'en', dir: 'ltr' }, () => [
+      return h(EHtml, { lang: locale.locale, dir: locale.direction }, () => [
         h(EHead, null, () => [
           h('meta', { name: 'color-scheme', content: 'light dark' }),
           h('meta', { name: 'supported-color-schemes', content: 'light dark' }),
@@ -60,14 +64,15 @@ export default defineComponent({
               /* The hero's letterbox is the page behind the picture, so it
                  follows the scheme rather than staying a light band. */
               .email-hero-img { background-color: ${dark.bg} !important; }
-              /* The coral button keeps its white label in both schemes, like
-                 the product's own. The label lives in a span inside the anchor
-                 and the generic span rule above sets that span's colour
-                 directly, so the button has to out-specify it: a class plus
-                 universal selector loses to a class plus element, which left
-                 the label muted grey on coral at 1.61:1. */
+              /* The primary button inverts with the scheme, like the
+                 product's: navy on light, white on dark. The label lives in a
+                 span inside the anchor and the generic span rule above sets
+                 that span's colour directly, so the button has to out-specify
+                 it: a class plus universal selector loses to a class plus
+                 element. */
               .email-body .email-cta-secondary, .email-body .email-cta-secondary span { border-color: ${dark.border} !important; color: ${dark.text} !important; }
-              .email-body .email-cta-primary, .email-body .email-cta-primary span { color: ${brand.onPrimary} !important; }
+              .email-body .email-cta-primary { background-color: ${light.surface} !important; }
+              .email-body .email-cta-primary, .email-body .email-cta-primary span { color: ${light.text} !important; }
             }
             @media only screen and (max-width: 600px) {
               .email-gutter { padding-left: 20px !important; padding-right: 20px !important; }
@@ -91,8 +96,8 @@ export default defineComponent({
                 h('tbody', null, [
                   h('tr', null, [
                     // The mark is whose mail this is: a tenant's logo, or on
-                    // Krabiclaw's own mail the crab. A tenant with no logo is
-                    // named alone; Krabiclaw's mark never stands in for it.
+                    // KrabiClaw's own mail the crab. A tenant with no logo is
+                    // named alone; KrabiClaw's mark never stands in for it.
                     orgName
                       ? (orgLogo
                           ? h('td', { style: 'vertical-align:middle;line-height:0' }, [
@@ -108,7 +113,7 @@ export default defineComponent({
                       : h('td', { style: 'vertical-align:middle;line-height:0' }, [
                           h(EImg, {
                             src: `${origin}/krabi-claw-logo.png`,
-                            alt: 'Krabiclaw',
+                            alt: 'KrabiClaw',
                             width: '32',
                             height: '32',
                             style: 'display:inline-block;vertical-align:middle;width:32px;height:32px',
@@ -130,11 +135,11 @@ export default defineComponent({
             h(ESection, { class: 'email-gutter', style: `padding:40px ${layout.gutter} 40px` }, () => [
               h('div', { class: 'email-divider', style: `border-top:1px solid ${light.border};padding-top:24px` }, [
                 h(EText, { class: 'email-footer', style: `margin:0;${type.footer};color:${light.textDimmed}` }, () => [
-                  `© ${year} Krabiclaw · `,
+                  `© ${year} KrabiClaw · `,
                   h(ELink, { href: origin, style: `color:${light.textMuted};text-decoration:underline` }, () => 'krabiclaw.com'),
                 ]),
-                props.organizationName
-                  ? h(EText, { class: 'email-footer', style: `margin:6px 0 0;${type.footer};color:${light.textDimmed}` }, () => `Sent by ${props.organizationName} via Krabiclaw.`)
+                props.organizationName && !props.locale
+                  ? h(EText, { class: 'email-footer', style: `margin:6px 0 0;${type.footer};color:${light.textDimmed}` }, () => `Sent by ${props.organizationName} via KrabiClaw.`)
                   : null,
                 // Preferences first: someone who only wants less of one thing
                 // should not have to switch the category off to get it.

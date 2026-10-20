@@ -1,5 +1,5 @@
 import { getGuestRequest } from '~/server/domain/requests'
-import { defineHandler } from 'nitro'
+import { defineHandler, HTTPError } from 'nitro'
 import { getRouterParam, readBody } from 'nitro/h3'
 
 // Canonical guest-thread operation endpoint (issue #442 Locked Decision #8). Every
@@ -7,9 +7,8 @@ import { getRouterParam, readBody } from 'nitro/h3'
 // flows through here. The inbox must never call source-specific editor endpoints
 // directly.
 import { jsonResponse } from '~/server/utils/api-response'
-import { requireOrganizationAccess } from '~/server/utils/location-access'
-import { assertMemberScope, memberAccessPrincipal } from '~/server/utils/member-access'
-import { getCloudflareWaitUntil } from '~/server/utils/mcp-route-helpers'
+import { requireOrganizationMembership } from '~/server/utils/location-access'
+import { assertAssignedBookingAccess, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
 import { getGuestThreadDetail } from '~/server/domain/guest-threads/detail'
 import { executeGuestThreadOperation, GUEST_THREAD_ACTIONS } from '~/server/domain/guest-threads/operations'
 import { publishDashboardInvalidation } from '~/server/cloudflare/guest-inbox-events'
@@ -18,14 +17,14 @@ export default defineHandler(async (event) => {
   const organizationId = getRouterParam(event, 'organizationId')
   const threadId = getRouterParam(event, 'threadId')
   const action = getRouterParam(event, 'action')
-  if (!organizationId || !threadId || !action) return jsonResponse({ error: 'Missing params' }, { status: 400 })
-  if (!GUEST_THREAD_ACTIONS.has(action)) return jsonResponse({ error: `Unknown action "${action}"` }, { status: 400 })
+  if (!organizationId || !threadId || !action) return jsonResponse({ error: 'Missing params', code: 'VALIDATION_ERROR', field: 'params' }, { status: 400 })
+  if (!GUEST_THREAD_ACTIONS.has(action)) return jsonResponse({ error: `Unknown action "${action}"`, code: 'UNKNOWN_ACTION', field: 'action' }, { status: 400 })
 
-  const { env, db, session, organization } = await requireOrganizationAccess(event, organizationId)
+  const { env, db, session, organization } = await requireOrganizationMembership(event, organizationId)
 
   const thread = await getGuestRequest(db, threadId, organizationId)
-  if (!thread) return jsonResponse({ error: 'Thread not found' }, { status: 404 })
-  await assertMemberScope(db, { ...memberAccessPrincipal(organization.membership, { env, event }), locationId: thread.location_id })
+  if (!thread) return jsonResponse({ error: 'Thread not found', code: 'THREAD_NOT_FOUND', field: 'threadId' }, { status: 404 })
+  await assertAssignedBookingAccess(db, { ...memberAccessPrincipal(organization.membership, { env, event }), requestId: thread.id })
 
   // A reply with photos arrives as a form, its photos as `photos` parts in the
   // order they were chosen; every other operation is JSON.
@@ -44,7 +43,7 @@ export default defineHandler(async (event) => {
   const idempotencyKey = field('idempotencyKey') || headerKey || undefined
 
   if (!idempotencyKey) {
-    return jsonResponse({ error: 'Idempotency key is required' }, { status: 400 })
+    return jsonResponse({ error: 'Idempotency key is required', code: 'MISSING_IDEMPOTENCY_KEY', field: 'idempotencyKey' }, { status: 400 })
   }
 
   const outcome = await executeGuestThreadOperation(db, {
@@ -52,6 +51,7 @@ export default defineHandler(async (event) => {
     organizationId,
     action,
     actorUserId: session.user.id,
+    financialWritesAllowed: await roleAllows({ ...organization.membership, permissions: { payments: ['refund'] } }),
     body: field('body'),
     photos,
     idempotencyKey,
@@ -81,35 +81,35 @@ export default defineHandler(async (event) => {
       }))
     }
     // The change is not done until the open inboxes have been told about it.
-    const publication = Promise.all(invalidations)
-    const waitUntil = getCloudflareWaitUntil(event)
-    if (waitUntil) waitUntil(publication)
-    else await publication
+    await Promise.all(invalidations)
   }
 
   if (outcome.ok === false) {
     if (outcome.reason === 'thread_not_found' || outcome.reason === 'source_not_found') {
-      return jsonResponse({ error: 'Thread not found' }, { status: 404 })
+      return jsonResponse({ error: 'Thread not found', code: 'THREAD_NOT_FOUND', field: 'threadId' }, { status: 404 })
     }
     if (outcome.reason === 'invalid_transition') {
-      return jsonResponse({ error: outcome.message }, { status: 409 })
+      return jsonResponse({ error: outcome.message, code: 'INVALID_TRANSITION', field: 'action' }, { status: 409 })
     }
     if (outcome.reason === 'no_guest_email') {
-      return jsonResponse({ error: 'This guest has no email on file' }, { status: 400 })
+      return jsonResponse({ error: 'This guest has no email on file', code: 'NO_GUEST_EMAIL', field: 'guest.email' }, { status: 400 })
+    }
+    if (outcome.reason === 'guest_invite_required') {
+      return jsonResponse({ error: outcome.message, code: outcome.code, field: outcome.field }, { status: outcome.status })
     }
     if (outcome.reason === 'empty_body') {
-      return jsonResponse({ error: 'Write a message or add a photo' }, { status: 400 })
+      return jsonResponse({ error: 'Write a message or add a photo', code: 'EMPTY_MESSAGE', field: 'body' }, { status: 400 })
     }
     if (outcome.reason === 'invalid_photo') {
-      return jsonResponse({ error: outcome.message }, { status: 400 })
+      return jsonResponse({ error: outcome.message, code: 'INVALID_PHOTO', field: 'photos' }, { status: 400 })
     }
     if (outcome.reason === 'missing_idempotency_key') {
-      return jsonResponse({ error: 'Idempotency key is required' }, { status: 400 })
+      return jsonResponse({ error: 'Idempotency key is required', code: 'MISSING_IDEMPOTENCY_KEY', field: 'idempotencyKey' }, { status: 400 })
     }
     if (outcome.reason === 'delivery_failed') {
-      return jsonResponse({ error: outcome.message }, { status: outcome.status })
+      return jsonResponse({ ...outcome, error: outcome.message }, { status: outcome.status })
     }
-    return jsonResponse({ error: 'Operation failed' }, { status: 400 })
+    throw new HTTPError({ statusCode: 500, message: 'Guest-thread operation returned an unhandled outcome', data: { code: 'INVALID_OPERATION_OUTCOME', field: 'outcome.reason' } })
   }
 
   const detail = await getGuestThreadDetail(db, threadId, organizationId)

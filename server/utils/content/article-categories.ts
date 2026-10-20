@@ -1,3 +1,4 @@
+import { getSourceLocale } from '~/server/utils/organization-locales'
 import { HTTPError } from 'nitro'
 
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
@@ -5,6 +6,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { slugifyTitle } from '~/utils/post-slugs'
 import { loadExactPublicLocalizations, type ExactPublicLocalization } from '~/server/utils/public-localization'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
+import { documentOfRootSql } from '~/server/utils/content/documents'
 import { isArticleCollection, type ArticleCollection } from '~/utils/article-collections'
 
 /**
@@ -326,7 +328,7 @@ export async function listPublicArticleCategories(env: CloudflareEnv, db: DbClie
       FROM article_categories c
       LEFT JOIN article_category_articles m ON m.category_id = c.id
       LEFT JOIN content_documents root ON root.id = m.article_id AND root.status = 'published' AND root.visibility = 'listed'
-      LEFT JOIN content_documents p ON COALESCE(p.root_id, p.id) = root.id
+      LEFT JOIN content_documents p ON ${documentOfRootSql('p', 'root')}
      WHERE c.organization_id = ? AND c.collection = ?
      GROUP BY c.id
   `, [organizationId, collection])).map(row => ({ ...mapRow(row), locales: JSON.parse(String(row.locales ?? '[]')) as string[] }))
@@ -342,7 +344,7 @@ export async function listPublicArticleCategories(env: CloudflareEnv, db: DbClie
   }
   const rows = orderCategoryTree([...byId.values()].filter(category => category.public))
     .map(({ public: _public, locales, ...category }) => ({ ...category, locales: [...locales] }))
-  if (locale === 'en') return rows
+  if (locale === await getSourceLocale(db, organizationId)) return rows
   const translations = new Map((await loadExactPublicLocalizations(env, db, organizationId, locale))
     .filter(localization => localization.resourceType === 'article_category')
     .map(localization => [localization.resourceId, localization.values]))
@@ -376,7 +378,7 @@ export function attachArticleCategory<T extends Record<string, unknown>>(record:
 
 /** Articles read in a language other than the source name their category in it. */
 export async function localizeArticleCategories<T extends { category: ArticleCategoryRef | null }>(env: CloudflareEnv, db: DbClient, organizationId: string, locale: string, records: T[], loaded?: ExactPublicLocalization[]): Promise<T[]> {
-  if (locale === 'en') return records
+  if (locale === await getSourceLocale(db, organizationId)) return records
   const names = new Map((loaded ?? await loadExactPublicLocalizations(env, db, organizationId, locale))
     .filter(localization => localization.resourceType === 'article_category' && typeof localization.values.name === 'string')
     .map(localization => [localization.resourceId, String(localization.values.name)]))

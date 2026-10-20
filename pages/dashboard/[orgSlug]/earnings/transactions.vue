@@ -6,16 +6,16 @@
     record it paid for.
   -->
   <DashboardIndexPanel id="earnings-transactions" title="Transactions">
-    <div class="mx-auto w-full max-w-3xl pb-24">
-      <div class="flex flex-wrap items-center gap-2">
+    <div>
+      <div class="mb-8 flex flex-wrap items-center gap-2">
         <UDropdownMenu :items="monthItems" :content="{ align: 'start' }" :ui="{ content: 'w-56' }">
-          <UButton :label="periodLabel" trailing-icon="i-lucide-chevron-down" color="neutral" :variant="from ? 'solid' : 'soft'" class="rounded-full" />
+          <UButton :label="periodLabel" trailing-icon="i-lucide-chevron-down" color="neutral" :variant="from ? 'solid' : 'outline'" class="h-10 rounded-full px-4 text-sm font-normal" />
         </UDropdownMenu>
         <UDropdownMenu v-if="locations.length > 1" :items="locationItems" :content="{ align: 'start' }" :ui="{ content: 'w-64' }">
-          <UButton :label="locationLabel" trailing-icon="i-lucide-chevron-down" color="neutral" :variant="locationId ? 'solid' : 'soft'" class="rounded-full" />
+          <UButton :label="locationLabel" trailing-icon="i-lucide-chevron-down" color="neutral" :variant="locationId ? 'solid' : 'outline'" class="h-10 rounded-full px-4 text-sm font-normal" />
         </UDropdownMenu>
         <UDropdownMenu :items="typeItems" :content="{ align: 'start' }" :ui="{ content: 'w-56' }">
-          <UButton :label="typeLabel" trailing-icon="i-lucide-chevron-down" color="neutral" :variant="earningsType ? 'solid' : 'soft'" class="rounded-full" />
+          <UButton :label="typeLabel" trailing-icon="i-lucide-chevron-down" color="neutral" :variant="earningsType ? 'solid' : 'outline'" class="h-10 rounded-full px-4 text-sm font-normal" />
         </UDropdownMenu>
       </div>
 
@@ -45,7 +45,7 @@
     </div>
 
     <template v-if="rows.length" #footer>
-      <div class="flex items-center justify-between gap-4 px-4 py-3 sm:px-6">
+      <div class="flex items-center justify-between gap-4">
         <p class="text-lg font-semibold text-highlighted">{{ total }}</p>
         <UButton label="Export CSV" size="lg" @click="exportCsv" />
       </div>
@@ -61,7 +61,7 @@ import type { CurrencyCode } from '~/shared/currencies'
 import { formatCalendarDate, formatTimestamp } from '~/utils/timezone'
 
 definePageMeta({ layout: 'dashboard' })
-useSeoMeta({ title: 'Transactions | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Transactions | KrabiClaw', robots: 'noindex, nofollow' })
 
 const route = useRoute()
 const router = useRouter()

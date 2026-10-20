@@ -5,17 +5,19 @@
 // claim. Delete it now — nothing was ever public — and close the draft so the
 // next save starts a fresh one at the address the new name derives.
 //
-// The draft closes only once its site and organization are actually gone. A
-// success here with the site still standing is what leaves the owner unable to
-// re-enter onboarding under the same business name: site creation refuses the
-// address as already taken and there is no longer a draft that owns it.
+// Abandonment fences activation before cleanup starts. The saved target stays
+// recoverable until native deletion is verified; a failed cleanup never reports
+// a completed discard.
 
 import { defineHandler } from 'nitro'
 
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
-import { execute, queryFirst } from '~/server/db'
+import { execute } from '~/server/db'
 import { deleteAbandonedDraftTenant } from '~/server/utils/tenant-deletion'
+import { readActiveOnboardingDraft } from '~/server/utils/onboarding-drafts'
+import { findOnboardingOrganization } from '~/server/utils/organization-provisioning'
+import { resolveOrganizationMembership } from '~/server/utils/member-access'
 
 export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
@@ -25,38 +27,39 @@ export default defineHandler(async (event) => {
   const session = await getAuthSession(event, env)
   if (!session?.user?.id) return jsonResponse({ error: 'Authentication required' }, { status: 401 })
 
-  const draft = await queryFirst<{ id: string; organization_id: string | null; subdomain_candidate: string }>(db, `
-    SELECT id, organization_id, subdomain_candidate
-    FROM onboarding_drafts
-    WHERE user_id = ? AND status = 'active'
-    LIMIT 1
-  `, [session.user.id])
+  const draft = await readActiveOnboardingDraft(db, session.user.id, true)
   if (!draft) return jsonResponse({ success: true, deleted: false })
 
+  const organizationId = draft.organization_id ?? (await findOnboardingOrganization(env, session.user.id, { draftId: draft.id, slug: draft.subdomain_candidate }))?.organizationId ?? null
+  if (organizationId && (await resolveOrganizationMembership(env, { organizationId, userId: session.user.id }))?.role !== 'owner') return jsonResponse({ error: 'Only an owner of this organization can discard its draft.' }, { status: 403 })
+  const revision = new Date(Math.max(Date.now(), Date.parse(draft.updated_at) + 1)).toISOString()
+  const claimed = await execute(db, `
+    UPDATE onboarding_drafts SET status = 'abandoned', organization_id = COALESCE(organization_id, ?), updated_at = ?
+    WHERE id = ? AND user_id = ? AND status IN ('active', 'abandoned') AND updated_at = ?
+      AND (? IS NULL OR EXISTS (SELECT 1 FROM organization o WHERE o.id = ? AND o.onboarding_status IN ('pending', 'failed') AND NOT EXISTS (SELECT 1 FROM bookings WHERE organization_id = o.id)))
+  `, [organizationId, revision, draft.id, session.user.id, draft.updated_at, organizationId, organizationId])
+  if (!claimed.meta.changes) return jsonResponse({ error: 'Website draft changed or is already live. Reload before discarding.', code: 'ONBOARDING_DRAFT_CHANGED', draft_id: draft.id }, { status: 409 })
+
   let deleted = false
-  if (draft.organization_id) {
+  if (organizationId) {
     const outcome = await deleteAbandonedDraftTenant(env, {
-      organizationId: draft.organization_id,
+      draftId: draft.id,
+      updatedAt: revision,
+      organizationId,
       subdomain: draft.subdomain_candidate,
       userId: session.user.id,
     })
     if ('refused' in outcome) {
-      // The draft stays open: it still owns the address, and closing it here
-      // would strand the organization with nothing left to discard it from.
       if (outcome.refused === 'organization_is_live') {
         return jsonResponse({ error: 'This site is already live. Delete it from its dashboard instead.' }, { status: 409 })
       }
       if (outcome.refused === 'not_owner') {
         return jsonResponse({ error: 'Only an owner of this organization can discard its draft.' }, { status: 403 })
       }
-      return jsonResponse({ error: 'Could not discard this draft. Please try again.' }, { status: 500 })
+      return jsonResponse({ error: 'Website draft cleanup is incomplete. Retry discarding this draft.', code: 'ONBOARDING_DRAFT_DISCARD_INCOMPLETE', draft_id: draft.id }, { status: outcome.refused === 'draft_changed' ? 409 : 500 })
     }
     deleted = outcome.removed !== 'nothing'
   }
-
-  await execute(db, `
-    UPDATE onboarding_drafts SET status = 'abandoned', updated_at = ? WHERE id = ? AND status = 'active'
-  `, [new Date().toISOString(), draft.id])
 
   return jsonResponse({ success: true, deleted })
 })

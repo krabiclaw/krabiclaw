@@ -27,16 +27,6 @@ export interface PublicPageRequest {
   locale: string | null;
 }
 
-export function getPublicCriticalHomeRequest(params: PublicPageRequest): PublicPageRequest {
-  return {
-    ...params,
-    page: 'home',
-    location: null,
-    datasets: ['content'],
-    blogSlug: null,
-  }
-}
-
 export function getPublicPageRequest(path: string): Omit<PublicPageRequest, "locale"> {
 
   // Location sub-pages: /locations/[slug]/*
@@ -176,6 +166,14 @@ export function getPublicPageRequest(path: string): Omit<PublicPageRequest, "loc
       datasets: ['products'],
       blogSlug: null,
     };
+  // A home's page is site-wide too, so /stays/<slug> reads its collection's dataset.
+  if (path === '/stays' || path.startsWith('/stays/'))
+    return {
+      page: 'stays',
+      location: null,
+      datasets: ['products'],
+      blogSlug: null,
+    };
   if (path === "/blog" || path === "/blog/")
     return {
       page: "blog",
@@ -195,12 +193,13 @@ export function getPublicPageRequest(path: string): Omit<PublicPageRequest, "loc
 export const usePublicPageRequest = () => {
   const route = useRoute();
   const locale = useState<string>('public-locale', () => 'en')
+  const sourceLocale = useState<string | null>('public-source-locale', () => null)
 
   return computed<PublicPageRequest>(() => {
     const effectivePath = route.path
     const explicitLocale = typeof route.params.locale === 'string'
       ? route.params.locale
-      : locale.value !== 'en' && effectivePath.startsWith(`/${locale.value}`)
+      : locale.value !== sourceLocale.value && (effectivePath === `/${locale.value}` || effectivePath.startsWith(`/${locale.value}/`))
         ? locale.value
         : null
     const localePath = explicitLocale
@@ -214,7 +213,7 @@ export const usePublicPageRequest = () => {
     return {
       ...request,
       datasets: request.datasets,
-      locale: localePath.localeSegment ?? locale.value,
+      locale: localePath.localeSegment,
     }
   });
 };
@@ -229,12 +228,12 @@ const encodeKeyField = (value: string | null | undefined): string =>
 
 export const usePublicResourceKey = (
   resourceKind: 'shell' | 'page',
-  organizationId: string | null | undefined,
+  organizationId: string,
   params: PublicPageRequest,
 ) =>
   [
     resourceKind,
-    encodeKeyField(organizationId ?? "none"),
+    encodeKeyField(organizationId),
     encodeKeyField(params.page),
     encodeKeyField(params.location),
     encodeKeyField([...params.datasets].sort().join(',')),
@@ -242,13 +241,7 @@ export const usePublicResourceKey = (
     encodeKeyField(params.locale),
   ].join("~");
 
-export const usePublicPageKey = (
-  organizationId: string | null | undefined,
-  params: PublicPageRequest,
-) => usePublicResourceKey('page', organizationId, params)
-
 export const buildPublicPageUrl = (
-  organizationId: string | null | undefined,
   params: PublicPageRequest,
   resourceKind: 'shell' | 'page' = 'page',
 ) => {
@@ -257,7 +250,7 @@ export const buildPublicPageUrl = (
   if (params.location) qs.set("location", params.location);
   if (params.datasets.length) qs.set("datasets", [...params.datasets].sort().join(','));
   if (params.blogSlug) qs.set("blogSlug", params.blogSlug);
-  if (params.locale && params.locale !== 'en') qs.set('locale', params.locale)
+  if (params.locale) qs.set('locale', params.locale)
   const q = qs.toString();
   return `/api/public/${resourceKind}${q ? `?${q}` : ""}`;
 };

@@ -3,10 +3,10 @@
     id="organization-blog-category"
     :title="category?.name ?? 'Category'"
     :saving="saving"
-    :disabled="!dirty || !name.trim()"
+    :disabled="(!form?.dirty && !actionError) || !name.trim()"
     :error="actionError || loadFailure"
-    @cancel="reset"
-    @save="save"
+    @cancel="reset(); revision += 1"
+    @save="form?.submit()"
   >
     <template v-if="category" #right>
       <DashboardResourceLocalization
@@ -18,18 +18,18 @@
         :language-settings-path="`/dashboard/${route.params.orgSlug}/website/localization`"
       />
     </template>
-    <div v-if="category" class="space-y-6">
-      <UFormField label="Name" required>
+    <UForm v-if="category" ref="form" :key="revision" :state="{ name, description, parent }" class="space-y-6" @submit="save">
+      <UFormField name="name" label="Name" required>
         <UInput v-model="name" autofocus class="w-full" />
       </UFormField>
-      <UFormField label="Description" help="Shown on the category's page and used as its search description.">
+      <UFormField name="description" label="Description">
         <UTextarea v-model="description" :rows="4" autoresize class="w-full" />
       </UFormField>
       <!-- Where it sits: under another category of the collection, or at the top. Its page's address does not change. -->
-      <UFormField label="Parent" help="Categories nest up to three levels deep.">
-        <USelect v-model="parent" :items="parentOptions" value-key="value" class="w-full" />
+      <UFormField name="parent" label="Parent">
+        <USelect v-model.nullable="parent" :items="parentOptions" value-key="value" class="w-full" />
       </UFormField>
-    </div>
+    </UForm>
   </DashboardLeafPanel>
 </template>
 
@@ -62,8 +62,7 @@ const localizationFields = computed(() => [
   { key: 'description', label: 'Description', source: category.value?.description, multiline: true },
 ])
 const { data: siblings } = await useArticleCategories(organizationId, () => category.value?.collection ?? 'blog')
-// The top of the collection is the empty choice; a category cannot sit under itself or anything under it.
-const TOP_LEVEL = ''
+// A category without a parent is top-level; it cannot sit under itself or anything under it.
 const parentOptions = computed(() => {
   const all = siblings.value ?? []
   const excluded = new Set<string>([categoryId.value])
@@ -71,20 +70,20 @@ const parentOptions = computed(() => {
     grew = false
     for (const row of all) if (row.parent_id && excluded.has(row.parent_id) && !excluded.has(row.id)) { excluded.add(row.id); grew = true }
   }
-  return [{ label: 'Top level', value: TOP_LEVEL }, ...all.filter(row => !excluded.has(row.id)).map(row => ({ label: row.name, value: row.id }))]
+  return [{ label: 'Top level', value: null }, ...all.filter(row => !excluded.has(row.id)).map(row => ({ label: row.name, value: row.id }))]
 })
 const name = ref('')
 const description = ref('')
-const parent = ref(TOP_LEVEL)
+const parent = ref<string | null>(null)
 function reset() {
   name.value = category.value?.name ?? ''
   description.value = category.value?.description ?? ''
-  parent.value = category.value?.parent_id ?? TOP_LEVEL
+  parent.value = category.value?.parent_id ?? null
 }
 watch(category, reset, { immediate: true })
-const dirty = computed(() => !!category.value && (name.value.trim() !== category.value.name
-  || (description.value.trim() || null) !== category.value.description
-  || (parent.value || null) !== category.value.parent_id))
+const form = useTemplateRef('form')
+// Cancel restores the draft; a new revision is a fresh form, so nothing reads as changed.
+const revision = ref(0)
 
 const saving = ref(false)
 const actionError = ref('')
@@ -93,7 +92,7 @@ async function save() {
   actionError.value = ''
   try {
     await dashboardApi(`/api/editor/organizations/${organizationId}/blog/categories/${categoryId.value}`, {
-      method: 'PATCH', body: { name: name.value.trim(), description: description.value.trim() || null, parent_id: parent.value || null }, validate: isCategoryResponse,
+      method: 'PATCH', body: { name: name.value.trim(), description: description.value.trim() || null, parent_id: parent.value }, validate: isCategoryResponse,
     })
     await Promise.all([refresh(), refreshNuxtData(`article-categories:${organizationId}:${category.value?.collection}`)])
   } catch (cause) {

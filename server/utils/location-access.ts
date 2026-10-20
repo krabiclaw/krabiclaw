@@ -4,7 +4,7 @@ import { cloudflareEnv } from '~/server/utils/api-response'
 import { getAuthSession, type CloudflareEnv } from '~/server/utils/auth'
 import { queryFirst, type DbClient } from '~/server/db'
 import { oncePerRequest } from '~/server/utils/request-scope'
-import { assertLocationAccess, assertOrganizationWideAccess, memberAccessPrincipal, resolveOrganizationMembership, type ResolvedMembership } from '~/server/utils/member-access'
+import { assertLocationAccess, assertOrganizationWideAccess, assertProductAccess, memberAccessPrincipal, resolveOrganizationMembership, type ResolvedMembership } from '~/server/utils/member-access'
 import type { H3Event } from 'nitro';
 import { getDashboardContext } from '~/server/utils/dashboard-context'
 
@@ -47,12 +47,8 @@ export function loadMemberOrganizationRow(event: H3Event, db: DbClient, env: Clo
 }
 
 async function readMemberOrganizationRow(db: DbClient, env: CloudflareEnv, organizationId: string, userId: string, event: H3Event): Promise<OrganizationAccessRow | null> {
-  // No role-name filter here on purpose: access is decided by the caller's
-  // requested access class (organization-wide / location / context) via
-  // member-access.ts, not by which role names are allowed to reach this
-  // route. An unrelated org member who isn't owner/admin/editor still fails
-  // the scope check inside assertOrganizationWideAccess/assertLocationAccess/
-  // assertOrganizationWideAccess (isScopedRole/isOrganizationWideRole both false).
+  // Membership identifies the tenant. Each caller then authorizes its operation
+  // through member-access.ts.
   const row = await queryFirst<Omit<OrganizationAccessRow, 'slug' | 'name' | 'user_id' | 'member_role' | 'membership'>>(db, `
     SELECT id, subdomain,
            (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url,
@@ -80,18 +76,18 @@ async function readMemberOrganizationRow(db: DbClient, env: CloudflareEnv, organ
  * location. Use for any resource genuinely owned by one location (Products and
  * reviews with a location_id set, experiences, bookings, location QA/settings).
  */
-export async function requireLocationAccess(event: H3Event, organizationId: string, locationId: string) {
+export async function requireLocationAccess(event: H3Event, organizationId: string, locationId: string, patch?: Record<string, unknown>) {
   const env = cloudflareEnv(event)
   const db = env.DB
-  if (!db) throw new HTTPError({ statusCode: 500, message: 'Database not available' })
+  if (!db) throw new HTTPError({ statusCode: 500, message: 'Database not available', data: { code: 'DATABASE_UNAVAILABLE', field: 'DB' } })
 
   const session = await getAuthSession(event, env)
-  if (!session?.user?.id) throw new HTTPError({ statusCode: 401, message: 'Authentication required' })
+  if (!session?.user?.id) throw new HTTPError({ statusCode: 401, message: 'Authentication required', data: { code: 'UNAUTHORIZED', field: 'session' } })
 
   const organization = await loadMemberOrganizationRow(event, db, env, organizationId, session.user.id)
-  if (!organization) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied' })
+  if (!organization) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'organizationId' } })
 
-  await assertLocationAccess(db, { ...memberAccessPrincipal(organization.membership, { env, event }), locationId })
+  await assertLocationAccess(db, { ...memberAccessPrincipal(organization.membership, { env, event }), locationId, patch })
 
   const location = await queryFirst<LocationAccessRow>(db, `
     SELECT id
@@ -101,40 +97,40 @@ export async function requireLocationAccess(event: H3Event, organizationId: stri
   `, [locationId, organization.id])
 
   if (!location) {
-    throw new HTTPError({ statusCode: 404, message: 'Location not found' })
+    throw new HTTPError({ statusCode: 404, message: 'Location not found', data: { code: 'LOCATION_NOT_FOUND', field: 'locationId' } })
   }
 
   return { env, db, session, organization, location }
 }
 
-/**
- * Organization-wide access: tenant settings, blog, localized content,
- * professional-services, analytics, domains, the contact-submissions inbox, and
- * the discovery reads that load the tenant principal.
- *
- * There used to be an `accessClass` telling those two apart, because a
- * location-scoped editor could reach navigation but not configuration. Owner
- * and admin are the only roles now and both are organization-wide, so the two
- * classes asked the same question and every caller got the same answer.
- */
-export async function requireOrganizationAccess(
+/** Resolve identity and tenant membership before the operation's resource guard. */
+export async function requireOrganizationMembership(
   event: H3Event,
   organizationId: string,
 ) {
   const env = cloudflareEnv(event)
   const db = env.DB
-  if (!db) throw new HTTPError({ statusCode: 500, message: 'Database not available' })
+  if (!db) throw new HTTPError({ statusCode: 500, message: 'Database not available', data: { code: 'DATABASE_UNAVAILABLE', field: 'DB' } })
 
   const session = await getAuthSession(event, env)
-  if (!session?.user?.id) throw new HTTPError({ statusCode: 401, message: 'Authentication required' })
+  if (!session?.user?.id) throw new HTTPError({ statusCode: 401, message: 'Authentication required', data: { code: 'UNAUTHORIZED', field: 'session' } })
 
   const organization = await loadMemberOrganizationRow(event, db, env, organizationId, session.user.id)
-  if (!organization) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied' })
-
-  const principal = memberAccessPrincipal(organization.membership, { env, event })
-  await assertOrganizationWideAccess(db, principal)
+  if (!organization) throw new HTTPError({ statusCode: 404, message: 'Not found or access denied', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'organizationId' } })
 
   return { env, db, session, organization }
+}
+
+export async function requireOrganizationAccess(event: H3Event, organizationId: string) {
+  const context = await requireOrganizationMembership(event, organizationId)
+  await assertOrganizationWideAccess(context.db, memberAccessPrincipal(context.organization.membership, { env: context.env, event }))
+  return context
+}
+
+export async function requireProductAccess(event: H3Event, organizationId: string, productId: string, patch?: Record<string, unknown>) {
+  const context = await requireOrganizationMembership(event, organizationId)
+  await assertProductAccess(context.db, { ...memberAccessPrincipal(context.organization.membership, { env: context.env, event }), productId, patch })
+  return context
 }
 
 export async function requireRequestedOrganizationWideAccess(event: H3Event, explicitOrganizationId?: string | null) {
@@ -142,7 +138,7 @@ export async function requireRequestedOrganizationWideAccess(event: H3Event, exp
 
   const context = await getDashboardContext(event, { requireOrganization: true })
   if (!context.organization) {
-    throw new HTTPError({ statusCode: 404, message: 'Not found or access denied' })
+    throw new HTTPError({ statusCode: 404, message: 'Not found or access denied', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'organizationId' } })
   }
   await assertOrganizationWideAccess(context.db, memberAccessPrincipal(context.organization, { env: context.env }))
   return {
@@ -163,7 +159,7 @@ export async function requireRequestedLocationAccess(event: H3Event, locationId:
 
   const context = await getDashboardContext(event, { requireOrganization: true })
   if (!context.organization) {
-    throw new HTTPError({ statusCode: 404, message: 'Not found or access denied' })
+    throw new HTTPError({ statusCode: 404, message: 'Not found or access denied', data: { code: 'ORGANIZATION_NOT_FOUND', field: 'organizationId' } })
   }
   await assertLocationAccess(context.db, {
     ...memberAccessPrincipal(context.organization, { env: context.env }),
@@ -174,7 +170,7 @@ export async function requireRequestedLocationAccess(event: H3Event, locationId:
     WHERE id = ? AND organization_id = ?
     LIMIT 1
   `, [locationId, context.organization.id])
-  if (!location) throw new HTTPError({ statusCode: 404, message: 'Location not found' })
+  if (!location) throw new HTTPError({ statusCode: 404, message: 'Location not found', data: { code: 'LOCATION_NOT_FOUND', field: 'locationId' } })
 
   return {
     env: context.env,

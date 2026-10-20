@@ -1,8 +1,7 @@
 import type { Ref } from 'vue'
 import type { Product } from '~/server/types/products'
 import { isCurrencyCode } from '~/shared/currencies'
-import { selectPrice } from '~/shared/prices'
-import { formatProductMoney } from '~/utils/product-money'
+import { summarizeProductPrices, formatProductPriceRange } from '~/utils/product-money'
 
 /**
  * What a product costs in Catalog's scope, through the one price selection
@@ -19,9 +18,7 @@ export function useCatalogPrice(locationId: Ref<string | null>, locations: Ref<R
   function priceLabel(product: Product) {
     const at = new Date().toISOString()
     const scopes = locationId.value ? [locationId.value] : [null, ...locations.value.map(location => location.id)]
-    const offers = scopes.flatMap(location_id => product.variants.filter(variant => variant.active).flatMap(variant => selectPrice(variant.prices, { currency, location_id, at }) ?? []))
-    const lowest = offers.reduce<typeof offers[number] | null>((best, offer) => (!best || offer.unit_amount < best.unit_amount ? offer : best), null)
-    return formatProductMoney(lowest) ?? ''
+    return formatProductPriceRange(summarizeProductPrices(product.variants, scopes.map(location_id => ({ currency, location_id, at })))) ?? ''
   }
 
   return { priceLabel }

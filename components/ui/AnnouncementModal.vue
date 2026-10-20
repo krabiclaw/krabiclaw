@@ -53,7 +53,7 @@
                 :href="announcement.cta_url"
                 target="_blank"
                 rel="noopener noreferrer"
-                class="mt-2 inline-flex w-full items-center justify-center rounded-lg bg-primary px-4 py-2.5 text-sm font-semibold text-on-primary no-underline hover:opacity-90"
+                class="mt-2 inline-flex w-full items-center justify-center rounded-lg bg-action px-4 py-2.5 text-sm font-semibold text-on-action no-underline hover:opacity-90"
                 @click="trackCtaClick"
               >
                 {{ announcement.cta_label }}
@@ -67,66 +67,15 @@
 </template>
 
 <script setup lang="ts">
+import { usePublicAnnouncement } from '~/composables/usePublicAnnouncement'
 
-interface PublicAnnouncement {
-  headline: string
-  description: string | null
-  cta_label: string | null
-  cta_url: string | null
-  dismissible: boolean
-  enabled: boolean
-  image_url: string | null
-}
-
-const isPublicAnnouncement = (value: unknown): value is PublicAnnouncement =>
-  isRecord(value) && typeof value.headline === 'string'
-  && (value.description === null || typeof value.description === 'string')
-  && (value.cta_label === null || typeof value.cta_label === 'string')
-  && (value.cta_url === null || typeof value.cta_url === 'string')
-  && typeof value.dismissible === 'boolean'
-  && (value.image_url === null || typeof value.image_url === 'string')
-
-const { organizationId } = useTenantOrganization()
-const requestEvent = useRequestEvent()
 const route = useRoute()
 const { trackAnnouncementView, trackAnnouncementCtaClick } = useOrganizationConversionTracking()
 
 const dismissed = ref(false)
-const announcement = ref<PublicAnnouncement | null>(null)
+const { announcement, storageKey } = await usePublicAnnouncement()
 
-// The dashboard, auth and onboarding surfaces render inside this same app shell but are never the
-// public site a visitor reads — mounting globally in app.vue must not make this component the
-// thing that can break them, so it fetches nothing there.
-const isPublicSurface = !route.path.startsWith('/dashboard') && !route.path.startsWith('/api')
-
-if (organizationId && isPublicSurface) {
-  // SSR uses the existing request-scoped public provider, preserving tenant and
-  // Cloudflare bindings without an HTTP request back into this same Worker.
-  const { data, error } = await useAsyncData(
-    `public-announcement:${organizationId}`,
-    () => loadPublicResourcePayload<{ announcement: unknown }>({
-      organizationId,
-      resourceKind: 'config',
-      url: '/api/public/config',
-      key: `public-announcement:${organizationId}`,
-      query: {},
-      requestEvent,
-      failureMessage: 'Public site configuration failed',
-      validate: (value): value is { announcement: unknown } => isRecord(value),
-    }),
-    { server: true },
-  )
-  if (error.value) throw createError(error.value)
-  const loaded = data.value!.announcement
-  if (loaded !== null && !isPublicAnnouncement(loaded)) throw createError({ statusCode: 500, statusMessage: 'The site announcement is invalid' })
-  announcement.value = loaded
-}
-
-const storageKey = computed(() => announcement.value
-  ? `announcement-dismissed:${organizationId}:${JSON.stringify(announcement.value)}`
-  : null)
-
-const visible = computed(() => !!announcement.value && !dismissed.value)
+const visible = computed(() => !!announcement.value && !dismissed.value && (announcement.value.format ?? 'modal') === 'modal')
 
 function dismiss() {
   if (announcement.value?.dismissible && storageKey.value) {
@@ -140,7 +89,7 @@ function trackCtaClick() {
 }
 
 onMounted(() => {
-  if (!announcement.value || !storageKey.value) return
+  if (!announcement.value || !storageKey.value || (announcement.value.format ?? 'modal') !== 'modal') return
   try {
     if (localStorage.getItem(storageKey.value) === '1') { dismissed.value = true; return }
   } catch { /* private browsing or blocked storage: never previously dismissed */ }

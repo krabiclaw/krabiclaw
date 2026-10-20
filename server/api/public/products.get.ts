@@ -2,8 +2,11 @@ import { cloudflareEnv, jsonResponse, rethrowHttpError } from '~/server/utils/ap
 import { previewSecretOf, resolvePreviewAuthorization } from '~/server/utils/preview-token'
 import { listPublicOnlineProducts } from '~/server/utils/public-session-booking'
 import { loadPublicProductApiCollection } from '~/server/utils/public-products'
+import { getSourceLocale } from '~/server/utils/organization-locales'
+import { assertExactCanonicalLocale } from '~/server/utils/localization'
+import { loadExactPublicLocalizations, projectExactLocalizedCollection } from '~/server/utils/public-localization'
 import { defineHandler } from 'nitro'
-import { getQuery, getRouterParam } from 'nitro/h3'
+import { getQuery } from 'nitro/h3'
 
 export default defineHandler(async (event) => {
   const organizationId = event.context.organizationId as string | null | undefined
@@ -12,13 +15,20 @@ export default defineHandler(async (event) => {
   const rawLocation = getQuery(event).location
   const location = typeof rawLocation === 'string' && rawLocation.trim() ? rawLocation.trim() : null
   try {
-    const db = cloudflareEnv(event).DB
+    const env = cloudflareEnv(event)
+    const db = env.DB
     if (!db) return jsonResponse({ error: 'Database unavailable' }, { status: 503 })
-    const previewAuthorized = await resolvePreviewAuthorization(event, organizationId, previewSecretOf(cloudflareEnv(event)))
+    const locale = getQuery(event).locale === undefined ? undefined : assertExactCanonicalLocale(getQuery(event).locale)
+    const previewAuthorized = await resolvePreviewAuthorization(event, organizationId, previewSecretOf(env))
     if (getQuery(event).online === 'true') {
-      return jsonResponse(await listPublicOnlineProducts(db, organizationId, previewAuthorized))
+      const result = await listPublicOnlineProducts(db, organizationId, previewAuthorized, env)
+      if (locale && locale !== await getSourceLocale(db, organizationId)) {
+        const localizations = await loadExactPublicLocalizations(env, db, organizationId, locale)
+        result.products = projectExactLocalizedCollection('product', result.products, localizations)
+      }
+      return jsonResponse(result)
     }
-    const result = await loadPublicProductApiCollection(db, organizationId, previewAuthorized, location)
+    const result = await loadPublicProductApiCollection(env, db, organizationId, previewAuthorized, location, locale)
     if (!result) return jsonResponse({ error: 'Products not found' }, { status: 404 })
     return jsonResponse({
       products: result.products,

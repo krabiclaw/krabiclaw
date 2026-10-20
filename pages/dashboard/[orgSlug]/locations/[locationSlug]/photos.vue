@@ -1,13 +1,12 @@
 <template>
   <DashboardIndexPanel id="location-photos" title="Photos">
-    <div class="mx-auto w-full max-w-3xl">
+    <div>
       <div class="space-y-6">
 
       <DashboardGridEditor
         v-model:selecting="selecting"
         v-model:selected="selectedIds"
         title="Photos"
-        description="Upload images or videos here, or attach existing media to this location."
         :items="gridItems"
         :error="photosError ? getErrorMessage(photosError, 'Failed to load photos') : null"
         empty-title="No location media yet"
@@ -25,18 +24,7 @@
         </template>
 
         <template #filters>
-          <div class="flex flex-wrap items-center gap-2">
-            <UButton
-              v-for="item in categoryItems"
-              :key="item.id"
-              size="sm"
-              color="neutral"
-              :variant="categoryFilter === item.id ? 'soft' : 'ghost'"
-              @click="categoryFilter = item.id"
-            >
-              {{ item.label }}
-            </UButton>
-          </div>
+          <DashboardFilterPills id="photo-category" v-model="categoryFilter" label="Category" :items="categoryItems.map(item => ({ value: item.id, label: item.label }))" />
           <UAlert v-if="uploadError" color="error" variant="soft" :description="uploadError" icon="i-lucide-triangle-alert" class="mt-4" />
           <UInput ref="fileInput" type="file" accept="image/*,video/*" class="hidden" :disabled="uploading" @change="onFileSelect" />
         </template>
@@ -192,7 +180,7 @@ const assets = computed(() => photosResource.value?.media ?? [])
 // The categories this business has, not every category the column can store:
 // a law firm was being offered Food and Menu.
 const categoryItems = computed(() => [
-  { id: 'all', label: 'All categories' },
+  { id: 'all', label: 'All' },
   ...photoCategories(dashboard.organization.value?.vertical, assets.value.map(asset => asset.category)),
 ])
 
@@ -379,5 +367,5 @@ async function detachMany(ids: string[]) {
   }
 }
 
-useSeoMeta({ title: 'Photos | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Photos | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>

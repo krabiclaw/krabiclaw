@@ -33,7 +33,7 @@
         <NuxtLink
           v-for="loc in locations"
           :key="loc.id"
-          :to="localePath(`/locations/${loc.slug}`)"
+          :to="localePath(publicLocationPath(loc))"
           class="group block overflow-hidden border border-default text-default no-underline transition-colors hover:border-muted"
         >
           <!-- Photo -->
@@ -54,7 +54,7 @@
               class="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
             >
             <div v-else class="flex h-full w-full items-center justify-center">
-              <SayaIcon name="map-pin" class="size-10 text-muted" />
+              <TenantIcon name="map-pin" class="size-10 text-muted" />
             </div>
           </div>
 
@@ -87,13 +87,13 @@
       <!-- Empty state -->
       <div v-else>
         <div class="border border-dashed border-default px-8 py-16 text-center">
-          <SayaIcon name="map-pin" class="mx-auto size-10 text-muted" />
+          <TenantIcon name="map-pin" class="mx-auto size-10 text-muted" />
           <p class="mt-4 text-sm text-muted">{{ locale === 'en' ? 'No locations are published yet.' : t('saya.common.temporarily_unavailable') }}</p>
         </div>
         <div v-if="isAuthenticated" class="mt-8 text-center">
-          <SayaButton to="/dashboard">
+          <TenantButton to="/dashboard">
             {{ locationsCopy.connectGoogleLocationsCta }}
-          </SayaButton>
+          </TenantButton>
         </div>
       </div>
     </div>
@@ -104,11 +104,11 @@
 import { authClient } from '~/lib/auth-client'
 import { getTodayHoursLabel } from '~/shared/reservation-hours'
 import { addressPlaceName, formatPostalAddress, type PostalAddress } from '~/utils/postal-address'
+import { publicLocationPath } from '~/utils/product-presentation'
 
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
-const { organizationId, organization } = useTenantOrganization()
-if (!organizationId) throw createError({ statusCode: 404 })
+const { organization } = useTenantOrganization()
 const session = authClient.useSession()
 const isAuthenticated = computed(() => Boolean(session.value.data?.user))
 const { locale, localePath, t } = useI18n()
@@ -141,15 +141,11 @@ function todayHours(location: ApiRecord): string {
 const organizationName = computed(() => unref(organization)?.name || '')
 
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
 useSocialMetadata(() => ({
   path: '/locations',
-  socialImage: organizationSocialImage,
+  socialImage: organization.social_image,
   title: t('saya.locations.collection_title', { organization: organizationName.value }),
   description: t('saya.locations.meta_description'),
-  brand: {
-    organizationName: organizationName.value,
-  },
   breadcrumbs: [
     { name: t('saya.header.locations'), url: '/locations' },
   ],

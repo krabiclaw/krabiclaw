@@ -6,17 +6,20 @@
   -->
   <DashboardIndexPanel id="product-page" :title="p.sectionLabels['page']">
     <UAlert v-if="p.loadError.value" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="p.loadError.value" />
-    <div v-else-if="p.product.value?.page" class="rounded-2xl border border-default bg-elevated px-6 py-20 text-center">
-      <UIcon name="i-lucide-file-text" class="mx-auto size-6 text-muted" />
-      <h2 class="mt-5 text-base font-semibold text-highlighted">{{ p.product.value.page.path }}</h2>
-      <UButton class="mt-6" label="Edit page content" :to="`/dashboard/${String(route.params.orgSlug)}/website/pages/${encodeURIComponent(p.product.value.page.id)}`" />
-    </div>
-    <div v-else class="rounded-2xl border border-default bg-elevated px-6 py-20 text-center">
-      <UIcon name="i-lucide-file-text" class="mx-auto size-6 text-muted" />
-      <h2 class="mt-5 text-base font-semibold text-highlighted">No page</h2>
-      <UButton class="mt-6" label="Create page" icon="i-lucide-plus" :loading="p.saving.value" @click="p.createPage" />
-      <UAlert v-if="p.saveError.value" class="mt-6 text-left" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="p.saveError.value" />
-    </div>
+    <UEmpty
+      v-else-if="p.product.value?.page"
+      icon="i-lucide-file-text"
+      :title="p.product.value.page.path"
+      :actions="[{ label: 'Edit page content', to: `/dashboard/${String(route.params.orgSlug)}/website/pages/${encodeURIComponent(p.product.value.page.id)}` }]"
+    />
+    <UEmpty
+      v-else
+      icon="i-lucide-file-text"
+      title="No page"
+      :actions="[{ label: 'Create page', icon: 'i-lucide-plus', loading: p.saving.value, onClick: p.createPage }]"
+    >
+      <UAlert v-if="p.saveError.value" class="text-left" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="p.saveError.value" />
+    </UEmpty>
   </DashboardIndexPanel>
 </template>
 

@@ -1,6 +1,12 @@
 <template>
+  <!-- A post being made gives its headline first; the article is written once it exists. -->
+  <DashboardIndexPanel v-if="isNew" id="organization-blog-new" :title="newTitle" :create="firstStep">
+    <UAlert v-if="createFailure" color="error" variant="soft" :description="createFailure" />
+    <EditorNavigationList :groups="createGroups" :active-item="level.child.value" />
+  </DashboardIndexPanel>
+
   <UAlert
-    v-if="loadError"
+    v-else-if="loadError"
     color="error"
     variant="soft"
     icon="i-lucide-triangle-alert"
@@ -33,14 +39,33 @@
   </BlogPostEditor>
 </template>
 
+<script lang="ts">
+import type { InjectionKey, Ref } from 'vue'
+
+/** The headline a post is made with, for its one create leaf. */
+export interface BlogPostCreateEditor {
+  draft: Ref<{ title: string; idempotency_key: string }>
+  saving: Ref<boolean>
+  error: Ref<string | null>
+  saveLabel: Ref<string | undefined>
+  saveDisabled: Ref<boolean>
+  save: () => Promise<void>
+  revert: () => void
+}
+
+export const blogPostCreateKey = Symbol('blog-post-create') as InjectionKey<BlogPostCreateEditor>
+</script>
+
 <script setup lang="ts">
+import { isNavigationFailure } from 'vue-router'
+import EditorNavigationList from '~/components/dashboard/EditorNavigationList.vue'
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
 import { tenantBlogRepository } from '~/lib/components/workspace/blog/tenantBlogRepository'
 import { isBlogPostResponse } from '~/lib/components/workspace/blog/blog-response-contracts'
 import BlogPostEditor from '~/lib/components/workspace/blog/BlogPostEditor.vue'
 import MediaPicker from '~/lib/components/workspace/media/MediaPicker.vue'
 import type { BlogEditorBlock, BlogPost } from '~/lib/components/workspace/blog/types'
-import { blankBlogLocalizedText, blogLocalizedTextFields, writeBlogLocalizedText, type BlogLocalizedFieldPath } from '~/utils/blog-editor'
+import { blankBlogLocalizedText, blogLocalizedTextFields, initialBlogEditorBlocks, writeBlogLocalizedText, type BlogLocalizedFieldPath } from '~/utils/blog-editor'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { publicTemplateRegistry } from '~/utils/template-registry'
 import { getErrorMessage, isNotFoundError } from '~/utils/errors'
@@ -55,10 +80,50 @@ if (!postId) throw createError({ statusCode: 400, statusMessage: 'Post ID is req
 
 const blogPath = `/dashboard/${orgSlug}/website/blog`
 const organizationLocalizationSettingsPath = `/dashboard/${orgSlug}/website/localization`
+const level = useRouteLevel()
+const isNew = postId === 'new'
+const repository = tenantBlogRepository({ organizationId, orgSlug })
 
+// ── A post being made ───────────────────────────────────
+const blankDraft = () => ({ title: '', idempotency_key: crypto.randomUUID() })
+const draftKey = `blog-create:${organizationId}`
+const draft = useState(draftKey, blankDraft)
+const creating = ref(false)
+const createFailure = ref<string | null>(null)
+const createGroups = computed(() => [{ id: 'new-article', items: [{
+  id: 'headline', label: 'Headline', summary: draft.value.title || 'No headline',
+  placeholder: !draft.value.title, to: `${level.path.value}/headline`,
+}] }])
+const { title: newTitle, firstStep, saveLabel, saveDisabled, save } = useCreateWalk({
+  recordPath: level.path, isNew: computed(() => isNew), openKey: computed(() => 'headline' as const),
+  labels: { headline: 'Headline' }, order: ['headline'], missing: () => !draft.value.title.trim(),
+  noun: 'post', saving: creating, commit: createPost,
+})
+async function createPost() {
+  creating.value = true
+  createFailure.value = null
+  try {
+    const post = await repository.create({ title: draft.value.title.trim(), content_blocks: initialBlogEditorBlocks(), idempotency_key: draft.value.idempotency_key })
+    const navigation = await navigateTo(repository.editUrl(post.id), { replace: true })
+    if (isNavigationFailure(navigation)) throw navigation
+    clearNuxtState(draftKey)
+  } catch (cause) {
+    createFailure.value = getErrorMessage(cause, 'Failed to create the post.')
+  } finally {
+    creating.value = false
+  }
+}
+provide(blogPostCreateKey, { draft, saving: creating, error: createFailure, saveLabel, saveDisabled, save, revert: () => { draft.value = blankDraft() } })
+// Only the headline is asked before a post exists, and an existing post's headline is its document's.
+watchEffect(() => {
+  const child = level.child.value
+  if (child && (isNew ? child !== 'headline' : child === 'headline')) showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
+})
+
+// ── An existing post ────────────────────────────────────
 const { data: postResource, error: postError } = await useAsyncData(
   `dashboard-blog-post:${organizationId}:${postId}`,
-  () => dashboardFetch<{ post: BlogPost }>(
+  () => isNew ? Promise.resolve(null) : dashboardFetch<{ post: BlogPost }>(
     `/api/editor/organizations/${organizationId}/blog/${postId}`,
     { orgSlug },
     { validate: isBlogPostResponse },
@@ -75,8 +140,6 @@ watchEffect(() => {
 const loadError = computed(() => (postError.value && !isNotFoundError(postError.value)
   ? getErrorMessage(postError.value, 'Failed to load this post')
   : null))
-
-const repository = tenantBlogRepository({ organizationId, orgSlug })
 
 const dashboardApi = useDashboardApi()
 type BlogTranslationResponse = { localization: Record<string, unknown> & { metadata: Record<string, unknown>; updated_at: string; content_blocks: BlogEditorBlock[] } }
@@ -103,7 +166,6 @@ const blogLocalizationFields = computed(() => {
   const fields: Array<{ key: string; label: string; source: string | null | undefined; multiline?: boolean; rows?: number }> = [
     { key: 'title', label: 'Title', source: post?.title },
     { key: 'summary', label: 'Excerpt', source: post?.excerpt, multiline: true, rows: 4 },
-    { key: 'seo_keywords', label: 'Search keywords', source: post?.seo_keywords },
   ]
   sourceBlogBlocks.value.forEach((block, blockIndex) => {
     blogLocalizedTextFields(block).forEach((field) => {
@@ -166,7 +228,7 @@ async function saveBlogLocalization(locale: string, submitted: Record<string, un
     })
   })
   const values: Record<string, unknown> = {}
-  for (const key of ['title', 'summary', 'seo_keywords']) {
+  for (const key of ['title', 'summary']) {
     if (Object.hasOwn(submitted, key)) values[key] = submitted[key]
   }
   const post = postResource.value?.post
@@ -194,5 +256,5 @@ async function saveBlogLocalization(locale: string, submitted: Record<string, un
   }
 }
 
-useSeoMeta({ title: 'Edit Post | Dashboard' })
+useSeoMeta({ title: () => `${isNew ? newTitle.value : postResource.value?.post.title || 'Post'} | KrabiClaw Dashboard`, robots: 'noindex, nofollow' })
 </script>

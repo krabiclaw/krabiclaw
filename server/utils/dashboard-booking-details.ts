@@ -4,9 +4,12 @@ import { resolveLocationContact } from '~/server/utils/contact-resolution'
 import type { H3Event } from 'nitro'
 import { HTTPError } from 'nitro'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
-import { getDashboardContext } from '~/server/utils/dashboard-context'
-import { assertResourceAccess, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
-import { getLocationReservationConfig, reservationPolicySummarySource, renderBookingPolicySummary, type RenderedBookingPolicySummary } from '~/server/utils/reservations'
+import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
+import { assertResourceAccess, assertAssignedBookingAccess, memberAccessPrincipal, roleAllows } from '~/server/utils/member-access'
+import { productPolicySummarySource, renderBookingPolicySummary, type RenderedBookingPolicySummary } from '~/server/utils/reservations'
+import type { BookingPolicySummarySource } from '~/server/utils/booking-policy-summary'
+import { assertProductKind, validateProductDetails, type ProductKind } from '~/shared/product-details'
+import { getSourceLocale } from '~/server/utils/organization-locales'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { localPartsAt } from '~/utils/timezone'
 import { appendEntry, getEntryById, GuestThreadEntryDedupeConflictError } from '~/server/domain/guest-threads/entries'
@@ -14,6 +17,7 @@ import { requestBookingChange } from '~/server/domain/guest-threads/booking-chan
 import { publishGuestInboxThreadEvent } from '~/server/cloudflare/guest-inbox-events'
 import { isBookingComplete, type BookingStatus } from '~/shared/bookings'
 import { readPaymentDetails } from '~/server/domain/payments'
+import { canRetryGuestReservationRefund } from '~/server/domain/payments/visit-refund'
 import {paymentDisplay,paymentRefundsDisplay,paymentOrderDisplay,type PaymentDisplay,type PaymentRefundDisplay,type PaymentOrderDisplay} from '~/shared/payment-display'
 
 export type DashboardBookingType = 'reservation' | 'booking'
@@ -49,6 +53,9 @@ interface BookingRow {
   cancellation_used_at: string | null
   created_at: string
   updated_at: string
+  policy_json: string | null
+  product_kind: string | null
+  product_details_json: string | null
 }
 
 export interface DashboardBookingNote {
@@ -109,21 +116,23 @@ export interface DashboardBookingDetails {
   payments: Array<{payment:PaymentDisplay;refunds:PaymentRefundDisplay[];order:PaymentOrderDisplay|null}> | null
   /** The guest's own self-service cancellation is still open. */
   guestCanCancel: boolean
+  /** An interrupted deposit refund can resume the already-recorded guest cancellation. */
+  guestCanRetryCancellation: boolean
   /** The business's phone for this booking, as the guest reaches it. */
   contactPhone: string | null
 }
 
 interface BookingAccessContext {
-  env: Awaited<ReturnType<typeof getDashboardContext>>['env']
+  env: Awaited<ReturnType<typeof getDashboardMemberContext>>['env']
   db: DbClient
   userId: string
-  organization: NonNullable<Awaited<ReturnType<typeof getDashboardContext>>['organization']>
+  organization: NonNullable<Awaited<ReturnType<typeof getDashboardMemberContext>>['organization']>
 }
 
 
 
 async function bookingContext(event: H3Event, organizationSlug?: string | null): Promise<BookingAccessContext> {
-  const context = await getDashboardContext(event, {
+  const context = await getDashboardMemberContext(event, {
         organizationSlug,
   })
   if (!context.organization) throw new HTTPError({ statusCode: 404, message: 'Organization not found' })
@@ -148,7 +157,7 @@ async function loadBookingRow(
   // refers to — a reservation or a booking — not on the thread. The thread
   // carries the conversation and the guest.
   return queryFirst<BookingRow>(db, `SELECT r.id, record.id AS operational_id, r.organization_id, s.name AS organization_name, s.vertical,
-    record.assigned_member_id, record.operational_updated_at, record.location_id, l.slug AS location_slug, l.title AS location_title,
+    record.assigned_member_id, record.operational_updated_at, record.policy_json, record.product_kind, record.product_details_json, record.location_id, l.slug AS location_slug, l.title AS location_title,
     json_extract(r.payload_json, '$.guest.name') AS guest_name, json_extract(r.payload_json, '$.guest.email') AS guest_email, json_extract(r.payload_json, '$.guest.phone') AS guest_phone,
     (SELECT u.image FROM user u WHERE u.id = r.user_id) AS guest_image_url, record.party_size, record.starts_at, record.ends_at, record.timezone, record.status, json_extract(r.payload_json, '$.notes') AS requests,
     record.product_id AS experience_id, record.product_name AS experience_title, record.product_session_id AS session_id,
@@ -156,16 +165,17 @@ async function loadBookingRow(
     FROM requests r
     JOIN organization s ON s.id = r.organization_id
     JOIN (
-      SELECT b.id, b.request_id, b.status, b.party_size, ps.starts_at, ps.ends_at, ps.timezone, ps.location_id, b.product_id, p.name AS product_name, ps.id AS product_session_id, b.assigned_member_id, b.updated_at AS operational_updated_at
+      SELECT b.id, b.request_id, b.status, b.party_size, ps.starts_at, ps.ends_at, ps.timezone, ps.location_id, b.product_id, p.name AS product_name, ps.id AS product_session_id, b.assigned_member_id, b.updated_at AS operational_updated_at, NULL AS policy_json, p.kind AS product_kind, p.details_json AS product_details_json
         FROM bookings b JOIN product_sessions ps ON ps.id = b.product_session_id JOIN products p ON p.id = b.product_id
       UNION ALL
-      SELECT res.id, res.request_id, res.status, res.party_size, res.starts_at, res.ends_at, res.timezone, res.location_id, NULL, NULL, NULL, NULL, res.updated_at FROM reservations res
+      SELECT res.id, res.request_id, res.status, res.party_size, res.starts_at, res.ends_at, res.timezone, res.location_id, NULL, NULL, NULL, NULL, res.updated_at, res.policy_json, NULL, NULL FROM reservations res
     ) record ON record.request_id = r.id
     LEFT JOIN business_locations l ON l.id = record.location_id
     WHERE r.id = ? AND r.kind = ? AND ${scope.buyerUserId ? `r.user_id = ? AND ${REQUEST_CURRENT_BUYER_SQL}` : 'r.organization_id = ?'}`, [bookingId, type, scope.buyerUserId ?? scope.organizationId])
 }
 
 async function assertBookingAccess(context: BookingAccessContext, row: BookingRow) {
+  if (row.experience_id) return assertAssignedBookingAccess(context.db, { ...memberAccessPrincipal(context.organization, { env: context.env }), bookingId: row.operational_id })
   await assertResourceAccess(context.db, {
     ...memberAccessPrincipal(context.organization, { env: context.env}),
     resourceLocationId: row.location_id,
@@ -265,14 +275,15 @@ async function composeBookingDetails(
   const visibleLocations = locations.filter(location => type === 'reservation' || location.id === row.location_id)
   const locationPictures = await loadOwnerPictures(db, row.organization_id, 'business_location', visibleLocations.map(location => location.id))
 
-  const [resourceImageUrl, resolvedPolicy, notes, timeZone, contact] = await Promise.all([
+  let policy = row.policy_json ? JSON.parse(row.policy_json) as BookingPolicySummarySource : null
+  let productKind: ProductKind | undefined
+  if (type === 'booking') {
+    productKind = assertProductKind(row.product_kind)
+    policy = productPolicySummarySource(validateProductDetails(productKind, JSON.parse(row.product_details_json!)))
+  }
+  const [resourceImageUrl, policyLocale, notes, timeZone, contact] = await Promise.all([
     loadResourceImage(db, row, type),
-    // A reservation's terms are its location's typed policy. A booking's are
-    // the product's own attributes, which travel with the product — there is
-    // no site-level policy to merge underneath either.
-    type === 'reservation' && row.location_id
-      ? getLocationReservationConfig(db, { organizationId: row.organization_id, locationId: row.location_id })
-      : Promise.resolve(null),
+    policy ? getSourceLocale(db,row.organization_id) : Promise.resolve(null),
     reader.buyerUserId ? Promise.resolve([]) : listInternalNotes(db, row.request_id),
     Promise.resolve(row.timezone),
     row.location_id
@@ -291,6 +302,8 @@ async function composeBookingDetails(
   }))
   const now = new Date().toISOString()
   const complete = isBookingComplete({ status: row.status as BookingStatus, ends_at: row.ends_at }, now)
+  const guestCanRetryCancellation = Boolean(reader.buyerUserId && type === 'reservation' && row.status === 'cancelled' && row.cancellation_used_at
+    && await canRetryGuestReservationRefund(db, { organizationId: row.organization_id, reservationId: row.operational_id, requestId: row.id, buyerUserId: reader.buyerUserId }))
   return {
     assignedMemberId: row.assigned_member_id, assignedMemberName:provider?.name??null,providerConflict:Boolean(provider?.conflict),providerCalendarStatus: scheduling?.calendar_ids.length && scheduling.calendar_status !== 'ready' ? scheduling.busy_error || `Busy-calendar status: ${scheduling.calendar_status}` : null,operationalUpdatedAt:row.operational_updated_at,
     id: row.id,
@@ -324,9 +337,8 @@ async function composeBookingDetails(
     threadId: row.request_id,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    // Null means this location states no reservation policy, which the
-    // screen shows as such rather than inventing default terms.
-    policy: resolvedPolicy ? renderBookingPolicySummary(reservationPolicySummarySource(resolvedPolicy)) : null,
+    // Products state their current terms; reservations keep their captured location policy.
+    policy: policy && policyLocale ? renderBookingPolicySummary(policy, policyLocale, productKind) : null,
     notes,
     pendingChange: await pendingBookingChange(db, row.request_id),
     locations: visibleLocations.map(location => ({ ...location, imageUrl: locationPictures.get(location.id)?.imageUrl ?? null })),
@@ -334,6 +346,7 @@ async function composeBookingDetails(
     // The same rule the public cancel route applies, read here so the screen
     // does not offer a cancellation the write would refuse.
     guestCanCancel: ['pending', 'confirmed'].includes(row.status) && row.ends_at > now && !complete && !row.cancellation_used_at,
+    guestCanRetryCancellation,
     contactPhone: contact?.contactPhone ?? null,
   }
 }
@@ -350,6 +363,7 @@ export async function requestDashboardBookingChange(
   const threadId = row.id
   const thread = await getGuestRequest(context.db, row.id, row.organization_id, input.type)
   if (!thread) throw new HTTPError({ statusCode: 404, message: 'Booking not found' })
+  if (input.type === 'booking') await assertAssignedBookingAccess(context.db, { ...memberAccessPrincipal(context.organization, { env: context.env }), bookingId: row.operational_id, sessionId: 'sessionId' in input.body && typeof input.body.sessionId === 'string' ? input.body.sessionId : undefined })
   await requestBookingChange(context.db, context.env, thread, context.userId, input.body, input.body.idempotencyKey)
   await publishGuestInboxThreadEvent(context.env, context.db, { threadId: threadId, type: 'thread.changed' })
   return await loadDashboardBookingDetails(event, { type: input.type, bookingId: row.id })
@@ -467,6 +481,7 @@ async function composePurchaseDetails(db: DbClient, scope: BookingScope, payment
     locations: [],
     payments: [{ payment: paymentDisplay(detail.payment), refunds: paymentRefundsDisplay(detail.refunds), order: paymentOrderDisplay(detail.order) }],
     guestCanCancel: false,
+    guestCanRetryCancellation: false,
     contactPhone: contact?.contactPhone ?? null,
   }
 }

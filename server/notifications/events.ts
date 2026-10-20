@@ -12,9 +12,11 @@ import type { NotificationFact, NotificationMessage } from './messages'
  * cells is how a reservation reads at a glance.
  */
 
-function fact(key: string, label: string, value: string | null | undefined, lead = false): NotificationFact | null {
-  const text = (value ?? '').toString().trim()
-  return text ? { key, label, value: text, lead } : null
+// A fact the event has is stated as it is; one the event genuinely lacks is
+// null and is left out. Nothing here writes in text for a fact that is absent:
+// a WhatsApp template whose slot it would have filled fails the send instead.
+function fact(key: string, label: string, value: string | null, lead = false): NotificationFact | null {
+  return value === null ? null : { key, label, value: value.trim(), lead }
 }
 
 function facts(...entries: Array<NotificationFact | null>): NotificationFact[] {
@@ -45,9 +47,9 @@ export function reservationCreatedMessage(input: ReservationEventInput): Notific
       fact('date', 'Date', input.date, true),
       fact('time', 'Time', input.time, true),
       fact('partySize', 'Party size', input.partySize, true),
-      fact('context', 'Location', input.locationName ?? 'Location not provided'),
+      fact('context', 'Location', input.locationName),
       fact('guestPhone', 'Phone', input.guestPhone),
-      fact('guestEmail', 'Email', input.guestEmail),
+      fact('guestEmail', 'Email', input.guestEmail, true),
       fact('notes', 'Special requests', input.notes),
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Reply in dashboard' } : undefined,
@@ -82,6 +84,69 @@ export function reservationCancelledMessage(input: ReservationEventInput & { was
   }
 }
 
+/** A stay a guest booked and paid for on the site. */
+export interface StayEventInput {
+  guestName: string
+  guestEmail: string
+  guestPhone: string | null
+  homeName: string
+  checkIn: string
+  checkOut: string
+  nights: string
+  guests: string
+  total: string
+  notes: string | null
+  organizationName: string
+  heroImageUrl: string | null
+  replyUrl: string | null
+}
+
+export function stayBookedMessage(input: StayEventInput): NotificationMessage {
+  return {
+    title: `New stay booked by ${input.guestName}`,
+    preheader: `${input.homeName} · ${input.checkIn} – ${input.checkOut}`,
+    hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.homeName } : null,
+    facts: facts(
+      fact('context', 'Place to stay', input.homeName, true),
+      fact('guestName', 'Guest', input.guestName, true),
+      fact('checkIn', 'Check-in', input.checkIn, true),
+      fact('checkOut', 'Check-out', input.checkOut, true),
+      fact('nights', 'Nights', input.nights, true),
+      fact('partySize', 'Guests', input.guests, true),
+      fact('total', 'Paid', input.total, true),
+      fact('guestPhone', 'Phone', input.guestPhone),
+      fact('guestEmail', 'Email', input.guestEmail, true),
+      fact('notes', 'Message from the guest', input.notes),
+    ),
+    primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Reply in dashboard' } : undefined,
+    category: 'reservations_bookings',
+    organizationName: input.organizationName,
+  }
+}
+
+/** A guest cancelled their stay on the site; the refund is what their booked policy returned. */
+export function stayCancelledMessage(input: Omit<StayEventInput, 'notes' | 'total'> & { refund: string }): NotificationMessage {
+  return {
+    title: `Stay cancelled by ${input.guestName}`,
+    preheader: `${input.homeName} · ${input.checkIn} – ${input.checkOut}`,
+    hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.homeName } : null,
+    facts: facts(
+      fact('context', 'Place to stay', input.homeName, true),
+      fact('guestName', 'Guest', input.guestName, true),
+      fact('checkIn', 'Check-in', input.checkIn, true),
+      fact('checkOut', 'Check-out', input.checkOut, true),
+      fact('nights', 'Nights', input.nights, true),
+      fact('partySize', 'Guests', input.guests, true),
+      fact('refund', 'Refunded by your cancellation policy', input.refund, true),
+      fact('guestPhone', 'Phone', input.guestPhone),
+      fact('guestEmail', 'Email', input.guestEmail, true),
+    ),
+    primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open in dashboard' } : undefined,
+    category: 'reservations_bookings',
+    organizationName: input.organizationName,
+  }
+}
+
 export interface BookingEventInput extends ReservationEventInput {
   productTitle: string
 }
@@ -98,7 +163,7 @@ export function bookingCreatedMessage(input: BookingEventInput): NotificationMes
       fact('time', 'Time', input.time, true),
       fact('partySize', 'Party size', input.partySize, true),
       fact('guestPhone', 'Phone', input.guestPhone),
-      fact('guestEmail', 'Email', input.guestEmail),
+      fact('guestEmail', 'Email', input.guestEmail, true),
       fact('notes', 'Special requests', input.notes),
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Reply in dashboard' } : undefined,
@@ -182,7 +247,7 @@ export function guestReplyMessage(input: GuestReplyEventInput): NotificationMess
     facts: facts(
       fact('guestName', 'From', input.guestName, true),
       fact('subject', 'Conversation', subject, true),
-      fact('guestEmail', 'Email', input.guestEmail ?? 'No email provided'),
+      fact('guestEmail', 'Email', input.guestEmail),
       fact('message', 'Message', input.messagePreview, true),
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open thread in dashboard' } : undefined,
@@ -266,7 +331,9 @@ export interface BookingChangeEventInput {
 
 export function bookingChangeMessage(input: BookingChangeEventInput): NotificationMessage {
   return {
-    title: `${input.guestName} ${input.status} the ${input.recordKind} change`,
+    title: input.status === 'requested'
+      ? `Changes requested for ${input.guestName}'s ${input.recordKind}`
+      : `${input.guestName} ${input.status} the ${input.recordKind} changes`,
     preheader: input.summary,
     hero: null,
     intro: input.summary,
@@ -274,15 +341,15 @@ export function bookingChangeMessage(input: BookingChangeEventInput): Notificati
       fact('recordKind', 'Type', input.recordKind, true),
       fact('guestName', 'Guest', input.guestName, true),
       fact('status', 'Decision', input.status, true),
-      fact('location', 'Location', input.location),
-      // The approved template has a date slot and a time slot. A proposal
-      // recorded before those were stored separately has only the combined
-      // label, so it fills the date slot and the time slot says to look it up
-      // rather than falling back to the template's own placeholder.
-      fact('date', 'Date', input.date ?? input.whenLabel, true),
-      fact('time', 'Time', input.time ?? 'See dashboard', true),
+      fact('location', 'Location', input.location, true),
+      // A proposal recorded before the date and time were stored separately
+      // has only the combined label. It is stated as itself, never put in the
+      // date slot, and WhatsApp uses the template variant without date and time.
+      fact('when', 'When', input.whenLabel),
+      fact('date', 'Date', input.date, true),
+      fact('time', 'Time', input.time, true),
       fact('partySize', 'Party size', input.partySize, true),
-      fact('summary', 'Summary', input.summary),
+      fact('summary', 'Summary', input.summary, true),
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'View in dashboard' } : undefined,
     category: 'reservations_bookings',

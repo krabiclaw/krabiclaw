@@ -4,111 +4,57 @@
  * Subscription state itself is the plugin's: its webhook handlers own the
  * `subscription` table, and server/utils/billing-access.ts is the only reader.
  * This module resolves plan identity and canonical prices, nothing more.
+ *
+ * Each plan is a flat monthly price at quantity 1 (Better Auth's `seats` is
+ * always 1), and its metered prices are the plan's `lineItems`: Better Auth's
+ * Checkout adds them, its `upgrade` adds and removes the ones that differ
+ * between two plans, and a metered item carries no quantity. What they bill is
+ * reported to their meters (server/utils/billing-meters.ts) and charged on the
+ * subscription's invoice at the end of the period.
  */
 import type Stripe from 'stripe'
 import type { StripePlan } from '@better-auth/stripe'
 import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
-import {
-  isKnownRecurringPlan,
-  isNewSalePlan,
-} from '~/shared/billing-model'
-import {
-  assertStripeCatalogPrices,
-  selectStripeCatalogPrice,
-} from '~/server/utils/stripe-catalog'
+import { isKnownRecurringPlan, isNewSalePlan, planMeters } from '~/shared/billing-model'
+import { assertStripeCatalogPrice, readStripeCatalog, selectMeteredPrices, selectStripeCatalogPrice } from '~/server/utils/stripe-catalog'
 
-export async function getBetterAuthStripePlans(
-  stripe: Stripe,
-  _env?: ApiRecord,
-  options: { includeFeatureDisabled?: boolean } = {},
-): Promise<StripePlan[]> {
-  const products: Stripe.Product[] = []
-  let productsStartingAfter: string | undefined
-  do {
-    const page = await stripe.products.list({
-      active: true,
-      limit: 100,
-      ...(productsStartingAfter ? { starting_after: productsStartingAfter } : {}),
-    })
-    products.push(...page.data)
-    productsStartingAfter = page.has_more ? page.data.at(-1)?.id : undefined
-  } while (productsStartingAfter)
-
-  const prices: Stripe.Price[] = []
-  let pricesStartingAfter: string | undefined
-  do {
-    const page = await stripe.prices.list({
-      active: true,
-      type: 'recurring',
-      limit: 100,
-      ...(pricesStartingAfter ? { starting_after: pricesStartingAfter } : {}),
-    })
-    prices.push(...page.data)
-    pricesStartingAfter = page.has_more ? page.data.at(-1)?.id : undefined
-  } while (pricesStartingAfter)
-
-  const pricesByProduct = new Map<string, Stripe.Price[]>()
-  for (const price of prices) {
-    const productId = typeof price.product === 'string' ? price.product : price.product.id
-    const productPrices = pricesByProduct.get(productId) ?? []
-    productPrices.push(price)
-    pricesByProduct.set(productId, productPrices)
-  }
-
+export async function getBetterAuthStripePlans(stripe: Stripe): Promise<StripePlan[]> {
+  const catalog = await readStripeCatalog(stripe)
+  const metered = selectMeteredPrices(catalog)
   const plans: StripePlan[] = []
   const planIds = new Set<string>()
 
-  for (const product of products) {
+  for (const product of catalog.products) {
     const planId = product.metadata?.plan_id?.trim()
-    if (!planId) continue
-    // Stripe may contain old or unrelated products. Only the canonical
-    // recurring plans are meaningful to Better Auth billing. Runtime plan
-    // identity comes from shared billing policy; retired catalog products
-    // remain an operator cleanup concern, not an entitlement source.
-    if (!isKnownRecurringPlan(planId)) continue
-    if (!options.includeFeatureDisabled && !isNewSalePlan(planId)) continue
-    if (planIds.has(planId)) throw new Error(`Stripe has multiple active products for plan ${planId}`)
-
-    const billablePrices = (pricesByProduct.get(product.id) ?? []).filter(
-      price => typeof price.unit_amount === 'number' && price.unit_amount > 0,
-    )
-    const monthly = selectStripeCatalogPrice(product, billablePrices, 'month')
-    if (!monthly) {
-      throw new Error(`Stripe product ${product.id} for plan ${planId} is missing a canonical monthly price`)
-    }
-    const yearly = selectStripeCatalogPrice(product, billablePrices, 'year')
+    // Archived products and prices still identify existing contracts. Better
+    // Auth needs their exact price IDs to process those subscription webhooks.
+    if (!planId || !isKnownRecurringPlan(planId)) continue
+    if (planIds.has(planId)) throw new Error(`Stripe has multiple products for plan ${planId}`)
+    const productPrices = catalog.prices.filter(price => (typeof price.product === 'string' ? price.product : price.product.id) === product.id)
+    let monthly: Stripe.Price | null
     if (isNewSalePlan(planId)) {
-      assertStripeCatalogPrices(planId, monthly, yearly)
+      if (!product.active) throw new Error(`Stripe product ${product.id} for plan ${planId} is archived`)
+      monthly = selectStripeCatalogPrice(product, productPrices)
+      assertStripeCatalogPrice(planId, monthly)
+    } else {
+      monthly = productPrices.find(price => price.id === product.metadata?.monthly_price_id?.trim()) ?? null
+      if (!monthly) throw new Error(`Stripe product ${product.id} has an invalid monthly_price_id contract price`)
     }
-    if (yearly && yearly.currency !== monthly.currency) {
-      throw new Error(`Stripe product ${product.id} has monthly and annual prices in different currencies`)
+    const lineItems = planMeters(planId).map(key => ({ price: metered[key].id }))
+    const plan = { limits: getPlanEntitlements(planId), group: 'krabiclaw', ...(lineItems.length ? { lineItems } : {}) }
+    // Put the current offer first: Better Auth selects upgrades by plan name,
+    // but resolves webhook identity by every configured exact price ID.
+    plans.push({ name: planId, priceId: monthly.id, ...plan })
+    for (const price of productPrices) {
+      if (price.id !== monthly.id) plans.push({ name: planId, priceId: price.id, ...plan })
     }
-    const configuredCurrency = product.metadata?.currency?.trim().toLowerCase()
-    if (configuredCurrency && configuredCurrency !== monthly.currency.toLowerCase()) {
-      throw new Error(`Stripe product ${product.id} currency metadata does not match its canonical price`)
-    }
-
-    plans.push({
-      name: planId,
-      priceId: monthly.id,
-      ...(monthly.lookup_key?.trim() ? { lookupKey: monthly.lookup_key.trim() } : {}),
-      annualDiscountPriceId: yearly?.id,
-      ...(yearly?.lookup_key?.trim() ? { annualDiscountLookupKey: yearly.lookup_key.trim() } : {}),
-      limits: getPlanEntitlements(planId),
-      group: 'krabiclaw',
-      ...(product.metadata?.seat_price_id?.trim()
-        ? { seatPriceId: product.metadata.seat_price_id.trim() }
-        : {}),
-    })
     planIds.add(planId)
   }
 
   return plans
 }
 
-export type StripePlanLoader = (
-  _options?: { includeFeatureDisabled?: boolean },
-) => Promise<StripePlan[]>
+export type StripePlanLoader = () => Promise<StripePlan[]>
 
 const STRIPE_PLAN_CACHE_TTL_MS = 60_000
 const stripePlanSnapshots = new Map<string, { plans: StripePlan[]; expiresAt: number }>()
@@ -128,9 +74,10 @@ function stripePlanCacheScope(env?: ApiRecord): string {
 }
 
 /**
- * Keeps one validated Stripe catalog snapshot per option set and coalesces
+ * Keeps one validated Stripe catalog snapshot per account and coalesces
  * concurrent refreshes. A refresh failure remains an error; callers must not
  * turn an unavailable or invalid catalog into an apparently valid checkout.
+ * Each call answers its own copy, so no request can change another's plans.
  */
 export function createStripePlanLoader(
   stripe: Stripe,
@@ -138,22 +85,26 @@ export function createStripePlanLoader(
   ttlMs = STRIPE_PLAN_CACHE_TTL_MS,
   cacheScope = stripePlanCacheScope(env),
 ): StripePlanLoader {
-  return async (options = {}) => {
-    const key = `${cacheScope}:${String(Boolean(options.includeFeatureDisabled))}`
+  return async () => {
+    const key = cacheScope
     const now = Date.now()
     const snapshot = stripePlanSnapshots.get(key)
-    if (snapshot && snapshot.expiresAt > now) return snapshot.plans
+    if (snapshot && snapshot.expiresAt > now) return copyPlans(snapshot.plans)
 
     const existing = stripePlanPending.get(key)
-    if (existing) return existing
+    if (existing) return copyPlans(await existing)
 
-    const refresh = getBetterAuthStripePlans(stripe, env, options)
+    const refresh = getBetterAuthStripePlans(stripe)
       .then((plans) => {
         stripePlanSnapshots.set(key, { plans, expiresAt: Date.now() + ttlMs })
         return plans
       })
       .finally(() => stripePlanPending.delete(key))
     stripePlanPending.set(key, refresh)
-    return refresh
+    return copyPlans(await refresh)
   }
+}
+
+function copyPlans(plans: StripePlan[]): StripePlan[] {
+  return plans.map(plan => ({ ...plan, ...(plan.lineItems ? { lineItems: plan.lineItems.map(item => ({ ...item })) } : {}) }))
 }

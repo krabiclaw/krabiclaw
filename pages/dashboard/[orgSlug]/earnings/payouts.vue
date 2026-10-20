@@ -4,8 +4,8 @@
     on the right, a total and Export CSV at the foot. Upcoming payouts head the
     list. A payout opens as a leaf of this level.
   -->
-  <DashboardIndexPanel id="earnings-payouts" title="Paid">
-    <div class="mx-auto w-full max-w-3xl pb-24">
+  <DashboardIndexPanel id="earnings-payouts" title="Paid" column="reading">
+    <div>
       <UAlert v-if="error" color="error" :description="error.message" />
       <template v-else-if="data">
         <template v-if="data.configured === false">
@@ -35,10 +35,11 @@
           <UButton v-if="data.next_cursor" class="mt-4" color="neutral" variant="soft" label="Show more" @click="after = data.next_cursor" />
         </template>
       </template>
+      <PaymentsHelp class="mt-8" />
     </div>
 
     <template v-if="paid.length" #footer>
-      <div class="flex items-center justify-between gap-4 px-4 py-3 sm:px-6">
+      <div class="flex items-center justify-between gap-4">
         <p class="text-lg font-semibold text-highlighted">{{ total }}</p>
         <UButton label="Export CSV" size="lg" @click="exportCsv" />
       </div>
@@ -47,13 +48,14 @@
 </template>
 
 <script setup lang="ts">
+import PaymentsHelp from '~/components/dashboard/PaymentsHelp.vue'
 import { paymentMoney } from '~/shared/payment-display'
 import { downloadCsv, isPayoutsView, payoutDate, payoutStatusLabel, type PayoutRow, type PayoutsView } from '~/shared/earnings-display'
 import { minorAmountToMajor } from '~/shared/prices'
 import type { CurrencyCode } from '~/shared/currencies'
 
 definePageMeta({ layout: 'dashboard' })
-useSeoMeta({ title: 'Paid | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Paid | KrabiClaw', robots: 'noindex, nofollow' })
 
 const route = useRoute()
 const api = useDashboardApi()

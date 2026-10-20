@@ -5,6 +5,7 @@ import {
 import { E2E_KIKUZUKI_ORGANIZATION_ID, E2E_POTTERY_ORGANIZATION_ID, devLoginHeaders, kikuzukiTestBaseUrl, kikuzukiTestExtraHeaders, testBaseUrl } from './test-env'
 import { loginAs } from './helpers/auth'
 import { mcpData, mcpRequest } from './helpers/mcp'
+import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 
 type NotificationRow = { template: string }
 type DeliveryRow = { channel: 'email' | 'whatsapp'; purpose: string; status: string }
@@ -102,46 +103,72 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expectOwnerDispatch(state)
   })
 
-  test('Kikuzuki restaurant reservation persists and creates log-only owner dispatch', async ({ page, request }) => {
+  test('Kikuzuki restaurant reservation persists and creates log-only owner dispatch', async ({ page, request }, testInfo) => {
     const baseURL = kikuzukiTestBaseUrl()
     const since = new Date().toISOString()
     const email = `kikuzuki-reservation-${Date.now()}@playwright.example`
-    await openTenantPage(page, `${baseURL}/reservations`, kikuzukiTestExtraHeaders())
-    await waitForNuxtHydration(page)
-    await page.locator('article').filter({ has: page.getByRole('heading', { name: 'Kikuzuki Japanese Robatayaki & Izakaya', exact: true }) }).getByRole('button', { name: 'Request Reservation', exact: true }).click()
-    await chooseFirstAvailableTime(page)
-    await page.getByLabel('Full name').fill('Kikuzuki Journey Test')
-    await page.getByLabel('Email address').fill(email)
-    await page.getByLabel(/Phone number/i).fill('+66812345679')
-    const submission = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/api/public/reservations'))
-    await page.getByLabel('Your details').getByRole('button', { name: /request reservation|ขอจองโต๊ะ/i }).click()
-    const response = await submission
-    expect(response.status()).toBe(201)
-    const reservation: { id?: unknown; cancellationToken?: unknown; message?: unknown } = await response.json()
-    expect(reservation.message).toBe('Your reservation is confirmed.')
-    expect(reservation.id).toEqual(expect.any(String))
-    expect(reservation.cancellationToken).toEqual(expect.any(String))
-    if (typeof reservation.id !== 'string' || typeof reservation.cancellationToken !== 'string') {
-      throw new Error('Reservation response omitted its lookup credentials')
+    const unlock = await acquireTenantMutationLock(testInfo, E2E_KIKUZUKI_ORGANIZATION_ID)
+    const policyUrl = `${testBaseUrl()}/api/editor/organizations/${E2E_KIKUZUKI_ORGANIZATION_ID}/locations/loc-kikuzuki/reservation-config`
+    let original: { duration_minutes: number | null; updated_at: string | null } | null | undefined
+    try {
+      await loginAs(request, testBaseUrl(), 'user-e2e-kikuzuki-owner')
+      const read = await request.get(policyUrl)
+      expect(read.status(), await read.text()).toBe(200)
+      original = (await read.json()).config
+      const configured = await request.put(policyUrl, { data: { duration_minutes: 60, expected_updated_at: original?.updated_at ?? null } })
+      expect(configured.status(), await configured.text()).toBe(200)
+      await openTenantPage(page, `${baseURL}/reservations`, kikuzukiTestExtraHeaders())
+      await waitForNuxtHydration(page)
+      await page.locator('article').filter({ has: page.getByRole('heading', { name: 'Kikuzuki Japanese Robatayaki & Izakaya', exact: true }) }).getByRole('button', { name: 'Request Reservation', exact: true }).click()
+      await chooseFirstAvailableTime(page)
+      await page.getByLabel('Full name').fill('Kikuzuki Journey Test')
+      await page.getByLabel('Email address').fill(email)
+      await page.getByLabel(/Phone number/i).fill('+66812345679')
+      const submission = page.waitForResponse(response => response.request().method() === 'POST' && response.url().endsWith('/api/public/reservations'))
+      await page.getByLabel('Your details').getByRole('button', { name: /request reservation|ขอจองโต๊ะ/i }).click()
+      const response = await submission
+      expect(response.status()).toBe(201)
+      const reservation: { id?: unknown; cancellationToken?: unknown; message?: unknown } = await response.json()
+      expect(reservation.message).toBe('Your reservation is confirmed.')
+      expect(reservation.id).toEqual(expect.any(String))
+      expect(reservation.cancellationToken).toEqual(expect.any(String))
+      if (typeof reservation.id !== 'string' || typeof reservation.cancellationToken !== 'string') {
+        throw new Error('Reservation response omitted its lookup credentials')
+      }
+      // A booking and a reservation are read back through one route: what holds
+      // the seats differs, what the guest is shown does not.
+      const persisted = await request.get(`${baseURL}/api/public/booking-requests/${reservation.id}`, {
+        headers: { ...kikuzukiTestExtraHeaders(), Authorization: `Bearer ${reservation.cancellationToken}` },
+      })
+      expect(persisted.status(), await persisted.text()).toBe(200)
+      const persistedBody: { booking?: { kind?: unknown; status?: unknown } } = await persisted.json()
+      expect(persistedBody.booking?.kind).toBe('reservation')
+      expect(persistedBody.booking?.status).toBe('confirmed')
+      await expect(page).toHaveURL(/\/reservations\/confirmed/)
+      await expect(page.locator('main')).toContainText('Reservation confirmed')
+      await expect(page.locator('main')).not.toContainText(/confirm your .* shortly/i)
+      const state = await waitForNotifications(request, baseURL, E2E_KIKUZUKI_ORGANIZATION_ID, since, state =>
+        state.notifications.some(row => row.template === 'new_reservation')
+        && state.deliveries.some(row => row.purpose === 'owner_alert' && row.channel === 'whatsapp' && row.status === 'sent')
+        && state.deliveries.some(row => row.purpose === 'guest_acknowledgement' && row.channel === 'email' && row.status === 'sent'),
+      )
+      expectOwnerDispatch(state)
+    } finally {
+      try {
+        if (original !== undefined) {
+          const current = await request.get(policyUrl)
+          expect(current.status(), await current.text()).toBe(200)
+          // A location that had no usable reservation policy is returned to
+          // disabled reservations, rather than writing an incomplete policy.
+          const restored = !original || original.duration_minutes === null
+            ? await request.delete(policyUrl)
+            : await request.put(policyUrl, { data: { duration_minutes: original.duration_minutes, expected_updated_at: (await current.json()).config.updated_at } })
+          expect(restored.status(), await restored.text()).toBe(200)
+        }
+      } finally {
+        await unlock()
+      }
     }
-    // A booking and a reservation are read back through one route: what holds
-    // the seats differs, what the guest is shown does not.
-    const persisted = await request.get(`${baseURL}/api/public/booking-requests/${reservation.id}`, {
-      headers: { ...kikuzukiTestExtraHeaders(), Authorization: `Bearer ${reservation.cancellationToken}` },
-    })
-    expect(persisted.status(), await persisted.text()).toBe(200)
-    const persistedBody: { booking?: { kind?: unknown; status?: unknown } } = await persisted.json()
-    expect(persistedBody.booking?.kind).toBe('reservation')
-    expect(persistedBody.booking?.status).toBe('confirmed')
-    await expect(page).toHaveURL(/\/reservations\/confirmed/)
-    await expect(page.locator('main')).toContainText('Reservation confirmed')
-    await expect(page.locator('main')).not.toContainText(/confirm your .* shortly/i)
-    const state = await waitForNotifications(request, baseURL, E2E_KIKUZUKI_ORGANIZATION_ID, since, state =>
-      state.notifications.some(row => row.template === 'new_reservation')
-      && state.deliveries.some(row => row.purpose === 'owner_alert' && row.channel === 'whatsapp' && row.status === 'sent')
-      && state.deliveries.some(row => row.purpose === 'guest_acknowledgement' && row.channel === 'email' && row.status === 'sent'),
-    )
-    expectOwnerDispatch(state)
   })
 
   test('Pottery House contact persists and creates an owner notification', async ({ page, request }) => {
@@ -170,7 +197,7 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     // A guest names a SESSION, not a date and a time: the occurrence is a real
     // row, so there is nothing to re-derive and no slot to invent.
     const book = (name: string, email: string, sessionId: string) => request.post(`${baseURL}/api/public/products/pottery-wheel-class/book`, {
-      headers, data: { guest_name: name, guest_email: email, party_size: 1, session_id: sessionId },
+      headers, data: { guest_name: name, guest_email: email, party_size: 1, session_id: sessionId, idempotency_key: crypto.randomUUID() },
     })
     expect((await book('Missing Session', 'past@playwright.example', '')).status()).toBe(400)
     expect((await book('Unknown Session', 'slot@playwright.example', 'session-that-does-not-exist')).status()).toBe(404)
@@ -187,6 +214,10 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expect(JSON.stringify(body)).not.toContain('cancel-once@playwright.example')
     const cancelURL = `${baseURL}/api/public/booking-requests/${body.booking_id}/cancel`
     const authHeaders = { ...headers, Authorization: `Bearer ${body.cancellation_token}` }
+    const receiptURL = cancelURL.replace(/\/cancel$/, '')
+    const before = await request.get(receiptURL, { headers: authHeaders })
+    expect(before.status()).toBe(200)
+    const receipt = await before.json() as { success: true; booking: Record<string, unknown> }
     const cancelled = await request.post(cancelURL, { headers: authHeaders })
     expect(cancelled.status()).toBe(200)
     expect(await cancelled.json()).toEqual({ success: true, kind: 'booking' })
@@ -198,8 +229,18 @@ test.describe('tenant guest journeys (disposable local/preview data only)', () =
     expect((await request.post(cancelURL, {
       headers: { ...headers, Authorization: 'Bearer invalid-cancellation-token' },
     })).status()).toBe(404)
-    // A spent token no longer grants the pre-cancellation guest read.
-    expect((await request.get(cancelURL.replace(/\/cancel$/, ''), { headers: authHeaders })).status()).toBe(404)
+    // The guest can still read the receipt after cancellation.
+    const after = await request.get(receiptURL, { headers: authHeaders })
+    expect(after.status()).toBe(200)
+    expect(await after.json()).toEqual({ ...receipt, booking: { ...receipt.booking, status: 'cancelled' } })
+    for (const deniedHeaders of [
+      { ...headers, Authorization: 'Bearer invalid-cancellation-token' },
+      { ...authHeaders, 'x-preview-tenant': 'demo' },
+    ]) {
+      const denied = await request.get(receiptURL, { headers: deniedHeaders })
+      expect(denied.status()).toBe(404)
+      expect(await denied.json()).toEqual({ error: 'Booking not found' })
+    }
   })
 })
 
@@ -216,10 +257,6 @@ for (const target of [
     expect(created.status(), await created.text()).toBe(201)
     const product = (await created.json()).product
     try {
-      const locations = await page.request.put(`${editor}/${product.id}/locations/${target.location}`, { data: { active: true, published: true } })
-      expect(locations.status()).toBe(200)
-      expect((await page.request.put(`${editor}/${product.id}/publication`, { data: { published: true } })).status()).toBe(200)
-      if (target.experience) expect((await page.request.put(`${editor}/${product.id}/booking`, { data: { duration_minutes: 60, default_capacity: 8 } })).status()).toBe(200)
       const externalUrl = `https://example.com/?checkout=${target.slug}`
       await page.goto(`/dashboard/${target.slug}/products/${product.id}/order-url`)
       await page.getByLabel('Website address', { exact: true }).fill(externalUrl)
@@ -232,6 +269,10 @@ for (const target of [
       await page.getByRole('textbox', { name: label, exact: true }).fill(detail)
       await page.getByRole('button', { name: 'Save', exact: true }).click()
       await expect(page).toHaveURL(new RegExp(`/products/${product.id}/attributes$`))
+      const locations = await page.request.put(`${editor}/${product.id}/locations/${target.location}`, { data: { active: true, published: true } })
+      expect(locations.status(), await locations.text()).toBe(200)
+      const publication = await page.request.put(`${editor}/${product.id}/publication`, { data: { published: true } })
+      expect(publication.status(), await publication.text()).toBe(200)
       const viaMcp = mcpData<{ product: { kind: string; details: Record<string, string> } }>(await (await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: target.org, product_id: product.id } })).json()).product
       expect(viaMcp.kind).toBe(target.kind)
       expect(viaMcp.details[field]).toBe(detail)
@@ -262,15 +303,26 @@ for (const target of [
       await expect(availability).toHaveAttribute('aria-checked', 'true')
       await availability.click()
       await page.getByRole('button', { name: 'Save', exact: true }).click()
-      await expect(page).toHaveURL(new RegExp(`/products/${product.id}$`))
+      await expect(page).toHaveURL(new RegExp(`/products/${product.id}/publication$`))
       const paused = mcpData<{ product: { active: boolean; publications: Array<{ organization_id: string; published: boolean }> } }>(await (await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: target.org, product_id: product.id } })).json()).product
       expect(paused.active).toBe(false)
       expect(paused.publications).toContainEqual(expect.objectContaining({ organization_id: target.org, published: true }))
+      const pausedView = page.waitForResponse(response => new URL(response.url()).pathname === '/api/public/conversion-events'
+        && response.request().postDataJSON()?.event_name === 'product_view' && response.request().postDataJSON()?.product_id === product.id)
       await openTenantPage(page, `${target.base}${publicPath}`, target.headers)
       await expect(page.getByRole('heading', { name: product.name, level: 1, exact: true })).toBeVisible()
       await expect(page.getByText(detail, { exact: true })).toBeVisible()
       await expect(page.locator(`a[href="${externalUrl}"]:visible`)).toHaveCount(0)
       await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', `${target.base}${publicPath}`)
+      const pausedViewResponse = await pausedView
+      expect(pausedViewResponse.status()).toBe(201)
+      const pausedViewId = (await pausedViewResponse.json()).id
+      const events = await mcpRequest(page.request, baseURL!, { method: 'tools/call', toolName: 'query_organization_analytics', args: {
+        organization_id: target.org, mode: 'events', filters: { event_name: 'product_view', entity_id: product.id },
+      } })
+      expect(mcpData<{ rows: Array<Record<string, unknown>> }>(await events.json()).rows).toContainEqual(expect.objectContaining({
+        event_id: pausedViewId, subject: { type: 'product', id: product.id },
+      }))
     } finally {
       expect((await page.request.delete(`${editor}/${product.id}`)).status()).toBe(200)
     }

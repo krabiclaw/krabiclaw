@@ -11,10 +11,12 @@ export default defineHandler(async (event) => {
   const locationId = getRouterParam(event, 'locationId')
   if (!organizationId || !locationId) return jsonResponse({ error: 'Organization ID and location ID are required' }, { status: 400 })
   try {
-    const { db, session, organization } = await requireLocationAccess(event, organizationId, locationId)
-    const patch = await validateLocationReservationConfigPatch(await readRequiredBody<Record<string, unknown>>(event))
+    const { env, db, session, organization } = await requireLocationAccess(event, organizationId, locationId)
+    const { expected_updated_at, ...fields } = await readRequiredBody<Record<string, unknown>>(event)
+    if (expected_updated_at !== undefined && expected_updated_at !== null && typeof expected_updated_at !== 'string') return jsonResponse({ error: 'expected_updated_at must be a timestamp or null' }, { status: 400 })
+    const patch = await validateLocationReservationConfigPatch(fields)
     const config = await upsertLocationReservationConfig(db, {
-      organizationId: organization.id, locationId, patch, actorId: session.user.id,
+      env, organizationId: organization.id, locationId, patch, actorId: session.user.id, expectedUpdatedAt: expected_updated_at as string | null | undefined,
     })
     const locale = await getSourceLocale(db, organization.id)
     return jsonResponse({ success: true, config, summary: renderBookingPolicySummary(reservationPolicySummarySource(config), locale) })

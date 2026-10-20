@@ -18,15 +18,19 @@
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { register } from 'node:module'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Database from 'better-sqlite3'
+import { drizzle } from 'drizzle-orm/better-sqlite3'
 import { CONTENT_DOCUMENT_SCOPE_QUERY, MEDIA_PLACEMENT_OWNER_AUDIT_QUERY } from './audit-orphaned-media-placements.mjs'
 import { isSupportedMediaPlacement } from '../shared/media-placement-contract.ts'
 import { organizationRoles } from '../utils/organization-access.ts'
 import { validateProductDetails, assertProductKind } from '../shared/product-details.ts'
 import { TEMPLATE_PALETTES, parseSitePalette } from '../shared/site-palette.ts'
 import { getDarkModeVariant } from '../utils/color-utils.ts'
+
+register('../tests/unit/support/alias-hooks.mjs', import.meta.url)
 
 /** The roles the access matrix declares. Anything else evaluates to no permissions. */
 const DECLARED_ORGANIZATION_ROLES = new Set(Object.keys(organizationRoles))
@@ -77,6 +81,8 @@ const RETIRED_COLUMNS = {
   organization: ['integrations_json', 'feature_overrides'],
   business_locations: ['description_provenance', 'feature_overrides'],
   products: ['tags'],
+  product_booking_configs: ['online_timezone', 'calendar_group'],
+  payment_checkout_holds: ['calendar_group'],
 }
 
 /**
@@ -175,16 +181,19 @@ export const TARGET_INVARIANT_QUERIES = {
   placements_show_live_assets: `SELECT p.id FROM media_placements p JOIN media_assets a ON a.id = p.asset_id
     WHERE p.status = 'active' AND a.status = 'deleted'`,
   media_keys_live_under_their_organization: `SELECT id FROM media_assets
-    WHERE r2_key IS NOT NULL AND r2_key NOT LIKE 'organizations/' || organization_id || '/%'`,
+    WHERE r2_key IS NOT NULL AND instr(r2_key, 'organizations/' || organization_id || '/') <> 1`,
   retired_site_names_are_gone: `SELECT id FROM analytics_summaries WHERE kind = 'site_day'
     UNION ALL SELECT id FROM content_blocks WHERE data_json ->> '$.source' LIKE 'site\\_%' ESCAPE '\\'
     UNION ALL SELECT id FROM activity_entries WHERE json_type(payload_json, '$.visibility_scope') IS NOT NULL OR instr(payload_json ->> '$.deep_link', '/sites/') > 0`,
   media_owner_scope: MEDIA_PLACEMENT_OWNER_AUDIT_QUERY,
   document_owner_scope: `WITH scope AS (${CONTENT_DOCUMENT_SCOPE_QUERY}) SELECT d.id FROM content_documents d WHERE (SELECT count(*) FROM scope s WHERE s.id = d.id) <> 1`,
   editorial_representation_scope: `SELECT d.id FROM content_documents d WHERE d.row_role = 'representation' AND NOT EXISTS (
-    SELECT 1 FROM content_documents r WHERE r.id = d.root_id AND r.row_role = 'root' AND r.locale = 'en'
+    SELECT 1 FROM content_documents r WHERE r.id = d.root_id AND r.row_role = 'root'
       AND r.kind = d.kind AND r.organization_id = d.organization_id)`,
-  english_source_locale: `SELECT o.id FROM organization o WHERE NOT EXISTS (SELECT 1 FROM organization_locales l WHERE l.organization_id = o.id AND l.locale = 'en' AND l.is_source = 1)`,
+  organization_source_locale: `SELECT o.id FROM organization o WHERE
+    (o.subdomain IS NOT NULL OR EXISTS(SELECT 1 FROM organization_locales l WHERE l.organization_id=o.id)
+     OR EXISTS(SELECT 1 FROM content_documents d WHERE d.organization_id=o.id AND d.row_role='root'))
+    AND (SELECT count(*) FROM organization_locales l WHERE l.organization_id=o.id AND l.is_source=1 AND l.status='published')<>1`,
   block_parent_scope: `SELECT b.id FROM content_blocks b WHERE b.parent_block_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM content_blocks p WHERE p.id = b.parent_block_id AND p.document_id = b.document_id)`,
   // Every localized resource is scoped by its organization. This used to add a
   // site to that scope for all but Product, which was the same organization
@@ -192,7 +201,15 @@ export const TARGET_INVARIANT_QUERIES = {
   localized_resource_owner_scope: `SELECT r.id FROM resource_localizations r WHERE NOT (
     ${Object.entries(LOCALIZED_OWNER_TABLES).map(([type, table]) => `(r.resource_type = '${type}' AND EXISTS (SELECT 1 FROM ${table} o WHERE o.id = r.resource_id AND ${type === 'organization' ? 'o.id' : 'o.organization_id'} = r.organization_id))`).join(' OR ')})`,
   activity_request_scope: `SELECT e.id FROM activity_entries e WHERE e.scope_kind = 'request' AND NOT EXISTS (
-    SELECT 1 FROM requests r WHERE r.id = e.request_id AND r.kind IN ('contact','reservation','booking'))`,
+    SELECT 1 FROM requests r WHERE r.id = e.request_id AND r.kind IN ('contact','reservation','booking','stay'))`,
+  channel_thread_scope: `SELECT t.external_thread_id FROM channel_threads t JOIN requests r ON r.id = t.request_id
+    JOIN product_stay_configs c ON c.product_id = t.product_id AND c.organization_id = t.organization_id
+    WHERE r.kind <> 'stay' OR r.organization_id <> t.organization_id OR r.location_id IS NOT c.location_id`,
+  channel_participant_addressable: `SELECT r.id FROM requests r WHERE json_type(r.payload_json, '$.participant') IS NOT NULL
+    AND NOT EXISTS (SELECT 1 FROM channel_threads t WHERE t.request_id = r.id AND t.organization_id = r.organization_id)`,
+  channel_booking_thread_scope: `SELECT t.external_thread_id FROM channel_threads t JOIN stays s
+    ON s.provider = t.provider AND s.external_booking_id = t.external_booking_id
+    WHERE s.organization_id <> t.organization_id OR s.product_id <> t.product_id OR s.request_id IS NOT t.request_id`,
   // The retired model must leave no trace.
   no_hero_description: "SELECT id FROM content_blocks WHERE type = 'hero' AND json_type(data_json, '$.description') IS NOT NULL",
   no_slug_cased_page_titles: "SELECT id FROM content_documents WHERE kind = 'page' AND title IN ('home','about','contact','location','services','pricing','donate','schedule','privacy','terms','third-party-notices')",
@@ -200,6 +217,8 @@ export const TARGET_INVARIANT_QUERIES = {
   // Every Product is buyable: at least one variant. SQL cannot express this as
   // a constraint without making inserts circular, so it is audited here.
   every_product_has_a_variant: 'SELECT p.id FROM products p WHERE NOT EXISTS (SELECT 1 FROM product_variants v WHERE v.product_id = p.id)',
+  // A place to stay is at one location with its stay settings; the kind alone is not a home.
+  every_home_has_stay_settings: "SELECT p.id FROM products p WHERE p.kind = 'stay' AND NOT EXISTS (SELECT 1 FROM product_stay_configs c WHERE c.organization_id = p.organization_id AND c.product_id = p.id)",
   // A location-scoped price belongs to a product that location actually offers.
   price_location_scope: `SELECT p.id FROM prices p WHERE p.location_id IS NOT NULL AND NOT EXISTS (
     SELECT 1 FROM product_variants v JOIN product_locations pl ON pl.product_id = v.product_id AND pl.location_id = p.location_id
@@ -309,6 +328,7 @@ export function writePayload(target, payloadPath, schemaSql, { withoutJwks = fal
   const leftBehind = {}
   try {
     const lines = ['PRAGMA foreign_keys = OFF;', 'PRAGMA defer_foreign_keys = ON;', ...(earlier ? [] : order.map(table => `DELETE FROM ${qi(table)};`))]
+    let chunkedText = false
     for (const table of [...order].reverse()) {
       const names = columns(target, table)
       let rows = target.prepare(`SELECT * FROM ${qi(table)}`).all()
@@ -333,9 +353,33 @@ export function writePayload(target, payloadPath, schemaSql, { withoutJwks = fal
         if (changed.length || deleted.length) leftBehind[table] = { changed, deleted }
       }
       for (const row of rows) {
-        lines.push(`INSERT INTO ${qi(table)} (${names.map(qi).join(', ')}) VALUES (${names.map(name => sqlLiteral(row[name])).join(', ')});`)
+        let values = names.map(name => sqlLiteral(row[name]))
+        const insert = () => `INSERT INTO ${qi(table)} (${names.map(qi).join(', ')}) VALUES (${values.join(', ')});`
+        // A D1 row may hold 2 MB, but each SQL statement is limited to 100 KB.
+        // Assemble oversized text inside this import, preserving its exact bytes
+        // and JSON constraints. The import table is removed before verification.
+        if (Buffer.byteLength(insert()) > 100_000) {
+          if (!chunkedText) lines.push('CREATE TABLE IF NOT EXISTS __transfer_payload_text (column_name TEXT NOT NULL, part INTEGER NOT NULL, value TEXT NOT NULL, PRIMARY KEY (column_name, part));')
+          chunkedText = true
+          lines.push('DELETE FROM __transfer_payload_text;')
+          values = names.map(name => {
+            if (typeof row[name] !== 'string') return sqlLiteral(row[name])
+            let text = '', bytes = 0, part = 0
+            const flush = () => { lines.push(`INSERT INTO __transfer_payload_text VALUES (${sqlLiteral(name)}, ${part++}, ${sqlLiteral(text)});`); text = ''; bytes = 0 }
+            for (const character of row[name]) {
+              const size = Buffer.byteLength(character)
+              if (bytes + size > 40_000) flush()
+              text += character; bytes += size
+            }
+            flush()
+            return `(SELECT group_concat(value, '') FROM (SELECT value FROM __transfer_payload_text WHERE column_name=${sqlLiteral(name)} ORDER BY part))`
+          })
+        }
+        assert(Buffer.byteLength(insert()) <= 100_000, `D1 statement exceeds 100 KB: ${table}`)
+        lines.push(insert())
       }
     }
+    if (chunkedText) lines.push('DROP TABLE __transfer_payload_text;')
     lines.push('PRAGMA foreign_keys = ON;')
     writeFileSync(payloadPath, lines.join('\n') + '\n', { mode: 0o600 })
 
@@ -386,7 +430,7 @@ export const SCHEMA_OBJECTS_QUERY = "SELECT type, name, sql FROM sqlite_schema W
  * @typedef {{ table: string, source_rows: number, target_rows: number }} TableTransfer
  * @typedef {{ baseline_sha256: string, source_migrations: string[], tables: TableTransfer[], transforms: Array<{ name: string, changes: number, sql_sha256: string }>,
  *   invariants: Array<{ name: string, violations: number, sql_sha256: string }>, payload?: { tables: number, statements: number, delta?: Record<string, number>, left_behind?: Record<string, { changed: string[], deleted: string[] }> },
- *   schema?: Array<{ type: string, name: string, sql: string }> }} TransferManifest
+ *   provider_hours_session_ids: string[], provider_hours_session_source_hashes: Record<string, string>, schema?: Array<{ type: string, name: string, sql: string }> }} TransferManifest
  */
 
 /**
@@ -398,9 +442,9 @@ export const SCHEMA_OBJECTS_QUERY = "SELECT type, name, sql FROM sqlite_schema W
  * @param {string} sourcePath
  * @param {string} targetPath
  * @param {{ payloadPath?: string | null, withoutJwks?: boolean, deltaFrom?: string | null }} [options]
- * @returns {TransferManifest}
+ * @returns {Promise<TransferManifest>}
  */
-export function transferDatabaseExport(sourcePath, targetPath, { payloadPath = null, withoutJwks = false, deltaFrom = null } = {}) {
+export async function transferDatabaseExport(sourcePath, targetPath, { payloadPath = null, withoutJwks = false, deltaFrom = null } = {}) {
   assert(!existsSync(targetPath), `Target already exists: ${targetPath}`)
   assert(!deltaFrom || payloadPath, 'A delta is a payload; pass --payload with --delta-from')
   const files = readdirSync(resolve(MIGRATIONS_DIRECTORY)).filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort()
@@ -415,7 +459,7 @@ export function transferDatabaseExport(sourcePath, targetPath, { payloadPath = n
   const target = new Database(targetPath)
   /** @type {TransferManifest} */
   const manifest = {
-    baseline_sha256: hash(baseSql), source_migrations: [], tables: [], transforms: [], invariants: [],
+    baseline_sha256: hash(baseSql), source_migrations: [], tables: [], transforms: [], invariants: [], provider_hours_session_ids: [], provider_hours_session_source_hashes: {},
   }
   try {
     const hasLedger = source.prepare("SELECT count(*) AS n FROM sqlite_schema WHERE type = 'table' AND name = 'd1_migrations'").get().n === 1
@@ -425,7 +469,7 @@ export function transferDatabaseExport(sourcePath, targetPath, { payloadPath = n
     let sourceFiles = files
     assert(ledger.length > 0, 'Source migration ledger is missing')
     let recognized = false
-    for (const directory of [MIGRATIONS_DIRECTORY, 'migrations-history/v12', 'migrations-history/v11', 'migrations-history/v10', 'migrations-history/v9', 'migrations-history/v8', 'migrations-history/v7']) {
+    for (const directory of [MIGRATIONS_DIRECTORY, 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11', 'migrations-history/v10', 'migrations-history/v9', 'migrations-history/v8', 'migrations-history/v7']) {
       const candidates = readdirSync(resolve(directory)).filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort()
       if (ledger.length > candidates.length || !ledger.every((name, index) => name === candidates[index])) continue
       const expected = new Database(':memory:')
@@ -528,13 +572,13 @@ export function transferDatabaseExport(sourcePath, targetPath, { payloadPath = n
       stage.exec(normalizedTable)
     }
     // An older archived chain reaches v11 through v11's forward migrations, which the v12 baseline absorbed.
-    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v12', 'migrations-history/v11'].includes(sourceDirectory)) {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12', 'migrations-history/v11'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v11').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v11', name), 'utf8'))
       }
     }
     // An older archived chain reaches v12 through v12's forward migrations, which the v13 baseline absorbed.
-    if (sourceDirectory !== MIGRATIONS_DIRECTORY && sourceDirectory !== 'migrations-history/v12') {
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13', 'migrations-history/v12'].includes(sourceDirectory)) {
       for (const name of readdirSync('migrations-history/v12').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
         stage.exec(readFileSync(resolve('migrations-history/v12', name), 'utf8'))
       }
@@ -549,6 +593,137 @@ export function transferDatabaseExport(sourcePath, targetPath, { payloadPath = n
     }
     const paletteChanges = sitePaletteChanges(stage)
     if (paletteChanges) manifest.transforms.push({ name: 'brand_color_and_theme_tokens_to_site_palette', changes: paletteChanges })
+    // v14 absorbs v13's deployed forward chain. Native Better Auth teams
+    // start empty; existing booking commitments and source languages keep every
+    // recorded fact. The new nullable fields stay unknown until an owner sets
+    // them or a native financial event supplies its actual billing basis.
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14', 'migrations-history/v13'].includes(sourceDirectory)) {
+      for (const name of readdirSync('migrations-history/v13').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
+        stage.exec(readFileSync(resolve('migrations-history/v13', name), 'utf8'))
+      }
+    }
+    for (const [table, column, type] of [
+      ['invitation', 'teamId', 'TEXT'],
+      ['product_booking_configs', 'assigned_team_id', 'TEXT'],
+      ['reservations', 'policy_json', 'TEXT'],
+      ['location_reservation_configs', 'duration_minutes', 'INTEGER'],
+      ['location_reservation_configs', 'deposit_amount', 'INTEGER'],
+      ['location_reservation_configs', 'deposit_currency', 'TEXT'],
+      ['location_reservation_configs', 'deposit_tax_behavior', 'TEXT'],
+      ['payment_checkout_holds', 'location_id', 'TEXT'],
+      ['payment_checkout_holds', 'timezone', 'TEXT'],
+      ['payment_checkout_holds', 'converted_reservation_id', 'TEXT'],
+      ['payment_usage_events', 'billing_basis_json', 'TEXT'],
+      ['payment_cost_snapshots', 'billing_basis_json', 'TEXT'],
+    ]) {
+      if (!columns(stage, table).includes(column)) stage.exec(`ALTER TABLE ${qi(table)} ADD COLUMN ${qi(column)} ${type}`)
+    }
+    for (const table of ['team', 'teamMember']) {
+      if (tableNames(stage).includes(table)) continue
+      const definition = baseSql.split('--> statement-breakpoint').find(statement => statement.includes(`CREATE TABLE \`${table}\``))
+      assert(definition, `Native Better Auth ${table} schema is missing`)
+      stage.exec(definition)
+    }
+    // v15 relaxes the calendar group CHECK only. Older chains still pass
+    // through v14's canonical content data migration before the exact copy.
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16', 'migrations-history/v15', 'migrations-history/v14'].includes(sourceDirectory)) {
+      for (const name of readdirSync('migrations-history/v14').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
+        stage.exec(readFileSync(resolve('migrations-history/v14', name), 'utf8'))
+      }
+    }
+    // v16: the facts a business, a location and an online offering cannot run
+    // without are required, and nothing stands in for them. A row without one
+    // fails the transfer rather than receiving a value nobody chose.
+    if (!columns(stage, 'organization').includes('timezone')) {
+      const unanswered = stage.prepare(`SELECT id FROM organization WHERE default_currency IS NULL
+        OR json_type(settings_json, '$.config.default_timezone') IS NOT 'text' OR json_extract(settings_json, '$.config.default_timezone') = 'UTC'`).all()
+      assert(unanswered.length === 0, `Organizations without their own currency or timezone (the retired 'UTC' default is not one): ${unanswered.map(row => row.id).join(', ')}; no rows were copied`)
+      const placeless = stage.prepare('SELECT id FROM business_locations WHERE timezone IS NULL OR timezone = \'\'').all()
+      assert(placeless.length === 0, `Locations without a timezone: ${placeless.map(row => row.id).join(', ')}; no rows were copied`)
+      const grouped = stage.prepare('SELECT (SELECT count(*) FROM product_booking_configs WHERE calendar_group IS NOT NULL) + (SELECT count(*) FROM payment_checkout_holds WHERE calendar_group IS NOT NULL) AS n').get().n
+      assert(grouped === 0, 'Shared online calendars are retired: a provider\'s own hours and bookings exclude overlaps; no rows were copied')
+      // The stage keeps v15's CHECK on the settings key; the target drops the key after the copy.
+      stage.exec(`ALTER TABLE organization ADD COLUMN timezone TEXT;
+        UPDATE organization SET timezone = json_extract(settings_json, '$.config.default_timezone');`)
+      manifest.transforms.push({ name: 'organization_timezone_column', changes: stage.prepare('SELECT count(*) AS n FROM organization').get().n })
+      // An online offering's times are its provider's hours, in the provider's zone.
+      const unprovided = stage.prepare(`SELECT product_id FROM product_booking_configs WHERE online_timezone IS NOT NULL
+        AND NOT (scheduling_mode = 'provider' AND (assigned_member_id IS NOT NULL OR assigned_team_id IS NOT NULL))`).all()
+      assert(unprovided.length === 0, `Online offerings with nobody to provide them: ${unprovided.map(row => row.product_id).join(', ')}; no rows were copied`)
+      const unheld = stage.prepare(`SELECT s.id FROM product_sessions s JOIN product_booking_configs c ON c.product_id = s.product_id AND c.organization_id = s.organization_id
+        WHERE s.location_id IS NULL AND s.assigned_member_id IS NULL AND (c.online_timezone IS NULL OR c.assigned_member_id IS NULL)`).all()
+      assert(unheld.length === 0, `Online sessions without a single provider to hold them: ${unheld.length}; no rows were copied`)
+      stage.exec('ALTER TABLE product_booking_configs ADD COLUMN held_online INTEGER NOT NULL DEFAULT 0')
+      const held = stage.prepare('UPDATE product_booking_configs SET held_online = 1 WHERE online_timezone IS NOT NULL').run().changes
+      const assigned = stage.prepare(`UPDATE product_sessions SET assigned_member_id = (SELECT c.assigned_member_id FROM product_booking_configs c WHERE c.product_id = product_sessions.product_id AND c.organization_id = product_sessions.organization_id)
+        WHERE location_id IS NULL AND assigned_member_id IS NULL`).run().changes
+      // Their weekly rules become provenance only; the sessions they made keep
+      // every booking and take the provider-hours identity the generator uses,
+      // so it reopens or retires them instead of adding a twin beside them.
+      const detached = stage.prepare(`UPDATE product_sessions SET availability_rule_id = NULL,
+          source_occurrence_key = 'hours:' || assigned_member_id || ':' || starts_at
+        WHERE location_id IS NULL`).run().changes
+      const rules = stage.prepare('DELETE FROM product_availability_rules WHERE location_id IS NULL').run().changes
+      manifest.transforms.push({ name: 'online_offerings_held_by_providers', changes: held + assigned + detached + rules })
+    }
+    // v17 absorbs v16's deployed forward chain (authored contact sections, the
+    // retired public OAuth flag, team member times, the Google Ads provider,
+    // invite links, full-remaining refunds and payment intents). Older chains pass through it before the exact copy; a v16
+    // source already ran its pending ones above.
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v18', 'migrations-history/v17', 'migrations-history/v16'].includes(sourceDirectory)) {
+      for (const name of readdirSync('migrations-history/v16').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
+        stage.exec(readFileSync(resolve('migrations-history/v16', name), 'utf8'))
+      }
+    }
+    // A baseline can introduce tables an older chain never had (v17's places to
+    // stay), and a later forward migration may change one of them, so the stage
+    // gets each such table, empty, with its indexes (a composite foreign key
+    // needs its parent's unique index), before that chain's forward migrations run.
+    const withBaselineTables = baseline => {
+      const statements = baseline.split('--> statement-breakpoint')
+      const added = new Set()
+      for (const statement of statements) {
+        const table = statement.match(/CREATE TABLE `([^`]+)`/u)?.[1]
+        if (table && !tableNames(stage).includes(table)) {
+          stage.exec(statement)
+          added.add(table)
+        }
+      }
+      for (const statement of statements) {
+        const table = statement.match(/CREATE (?:UNIQUE )?INDEX `[^`]+` ON `([^`]+)`/u)?.[1]
+        if (table && added.has(table)) stage.exec(statement)
+      }
+    }
+    // v18 absorbs v17's deployed forward chain (Channex connections, channel
+    // mappings, the sync log, night pushes and stay threads). Older chains pass
+    // through it before the exact copy; a v17 source already ran its pending ones above.
+    if (![MIGRATIONS_DIRECTORY, 'migrations-history/v18', 'migrations-history/v17'].includes(sourceDirectory)) {
+      withBaselineTables(readFileSync('migrations-history/v17/0000_baseline.sql', 'utf8'))
+      for (const name of readdirSync('migrations-history/v17').filter(name => /^\d{4}_.+\.sql$/u.test(name)).sort().slice(1)) {
+        stage.exec(readFileSync(resolve('migrations-history/v17', name), 'utf8'))
+      }
+    }
+    if (sourceDirectory !== MIGRATIONS_DIRECTORY) withBaselineTables(baseSql)
+    // v19 adds facts no older row has: no copied stay was received as a new
+    // reservation and no home has private instructions yet. A saved category
+    // preference predates push, so its push switch is that category's
+    // product default, exactly as for a person who never saved one.
+    for (const [table, column, type] of [
+      ['stays', 'booking_received_at', 'TEXT'],
+      ['product_stay_configs', 'check_in_instructions', 'TEXT'],
+    ]) {
+      if (!columns(stage, table).includes(column)) stage.exec(`ALTER TABLE ${qi(table)} ADD COLUMN ${qi(column)} ${type}`)
+    }
+    if (tableNames(stage).includes('user_notification_preferences') && !columns(stage, 'user_notification_preferences').includes('push_enabled')) {
+      const { NOTIFICATION_CATEGORY_DEFAULTS } = await import('../shared/notification-categories.ts')
+      stage.exec('ALTER TABLE user_notification_preferences ADD COLUMN push_enabled INTEGER')
+      const update = stage.prepare('UPDATE user_notification_preferences SET push_enabled = ? WHERE category = ?')
+      const changes = Object.entries(NOTIFICATION_CATEGORY_DEFAULTS).reduce((total, [category, setting]) => total + update.run(setting.push ? 1 : 0, category).changes, 0)
+      const unmapped = stage.prepare('SELECT count(*) AS n FROM user_notification_preferences WHERE push_enabled IS NULL').get().n
+      assert(unmapped === 0, `${unmapped} notification preferences name a category with no push default; no rows were copied`)
+      if (changes) manifest.transforms.push({ name: 'notification_preferences_push_default', changes })
+    }
+    // The current chain's forward migrations run on the v19 shape the facts above complete.
     if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
       for (const name of files.slice(1)) stage.exec(readFileSync(resolve(MIGRATIONS_DIRECTORY, name), 'utf8'))
     }
@@ -569,12 +744,98 @@ export function transferDatabaseExport(sourcePath, targetPath, { payloadPath = n
       }
     })
     copy()
+    const retiredSettings = target.prepare("UPDATE organization SET settings_json = json_remove(settings_json, '$.config.default_timezone') WHERE json_type(settings_json, '$.config.default_timezone') IS NOT NULL").run().changes
+    if (retiredSettings) manifest.transforms.push({ name: 'organization_timezone_out_of_settings', changes: retiredSettings })
     if (fromV7) {
       const names = Object.keys(integrations[0] ?? { id: null })
       const insert = target.prepare(`INSERT INTO organization_integrations (${names.map(qi).join(',')}) VALUES (${names.map(() => '?').join(',')})`)
       target.transaction(() => { for (const row of integrations) insert.run(...names.map(name => row[name])) })()
       assert(count(target, 'organization_integrations') === integrations.length, 'organization_integrations differs from the connections it maps')
       manifest.transforms.push({ name: 'integrations_json_to_organization_integrations', changes: integrations.length })
+    }
+    if (sourceDirectory !== MIGRATIONS_DIRECTORY) {
+      const configs = target.prepare('SELECT * FROM product_booking_configs WHERE held_online = 1 ORDER BY product_id').all()
+      const previousSourceRows = new Map()
+      if (deltaFrom) {
+        const { sessionMemberSql } = await import('../server/utils/provider-allocation.ts')
+        const currentProvider = target.prepare(`WITH candidate AS (SELECT ? AS id, ? AS organization_id, ? AS product_id, ? AS assigned_member_id)
+          SELECT 1 FROM candidate JOIN member_scheduling ms ON ms.member_id=candidate.assigned_member_id AND ms.organization_id=candidate.organization_id
+            JOIN member m ON m.id=ms.member_id AND m.organizationId=ms.organization_id
+          WHERE ${sessionMemberSql('candidate')} IS candidate.assigned_member_id`)
+        // These rows were derived on the replacement, never held by the old
+        // source. Seed their canonical occurrences before regeneration so the
+        // native unique index retains their identities across a final delta.
+        // Real source sessions are not inventoried, so their deletions remain
+        // visible in the payload audit rather than being restored here.
+        const previous = JSON.parse(readFileSync(`${deltaFrom}.manifest.json`, 'utf8'))
+        assert(previous.baseline_sha256 === manifest.baseline_sha256, 'The initial transfer was built from another baseline')
+        assert(Array.isArray(previous.provider_hours_session_ids) && previous.provider_hours_session_ids.every(id => typeof id === 'string')
+          && new Set(previous.provider_hours_session_ids).size === previous.provider_hours_session_ids.length,
+        'The initial transfer has no valid provider-hours session inventory; repeat the initial preflight before deriving a delta')
+        assert(previous.provider_hours_session_source_hashes && typeof previous.provider_hours_session_source_hashes === 'object'
+          && !Array.isArray(previous.provider_hours_session_source_hashes) && Object.values(previous.provider_hours_session_source_hashes).every(value => typeof value === 'string' && /^[a-f0-9]{64}$/u.test(value)),
+        'The initial transfer has no valid provider-hours source signatures; repeat the initial preflight before deriving a delta')
+        const earlier = new Database(deltaFrom, { readonly: true, fileMustExist: true })
+        try {
+          assert(sameSchema(earlier, target), 'The initial transfer schema differs from the current target')
+          for (const [id, signature] of Object.entries(previous.provider_hours_session_source_hashes)) {
+            const row = earlier.prepare('SELECT * FROM product_sessions WHERE id = ?').get(id)
+            assert(row, `Initial provider-hours source session is missing: ${id}`)
+            previousSourceRows.set(id, { row, signature })
+          }
+          const sessionColumns = columns(target, 'product_sessions')
+          const insert = target.prepare(`INSERT INTO product_sessions (${sessionColumns.map(qi).join(',')}) VALUES (${sessionColumns.map(() => '?').join(',')})`)
+          const sourceOccurrence = target.prepare('SELECT id FROM product_sessions WHERE product_id = ? AND starts_at = ? AND assigned_member_id = ? AND location_id IS NULL LIMIT 1')
+          const held = new Set(configs.map(config => config.product_id))
+          let retained = 0
+          target.transaction(() => {
+            for (const id of previous.provider_hours_session_ids) {
+              const row = earlier.prepare('SELECT * FROM product_sessions WHERE id = ?').get(id)
+              assert(row && row.location_id === null && row.assigned_member_id !== null
+                && row.source_occurrence_key === `hours:${row.assigned_member_id}:${row.starts_at}`, `Invalid initial provider-hours session: ${id}`)
+              if (!held.has(row.product_id) || !currentProvider.get(row.id, row.organization_id, row.product_id, row.assigned_member_id)) continue
+              const occupied = sourceOccurrence.get(row.product_id, row.starts_at, row.assigned_member_id)
+              assert(!occupied, `Source session ${occupied?.id} occupies initial derived session ${id}; explicitly reconcile this occurrence before a creations-only delta. No replacement rows were overwritten.`)
+              insert.run(...sessionColumns.map(name => row[name]))
+              retained++
+            }
+          })()
+          manifest.transforms.push({ name: 'provider_hours_session_identities_retained', changes: retained })
+        } finally { earlier.close() }
+      }
+      if (configs.length) {
+        const { prepareProviderHoursSessions } = await import('../server/utils/availability.ts')
+        const db = drizzle(target)
+        const before = new Map(target.prepare('SELECT * FROM product_sessions').all().map(row => [row.id, row]))
+        const now = new Date().toISOString()
+        const queries = []
+        for (const config of configs) queries.push(...await prepareProviderHoursSessions(db, config, { actorId: 'system', now }))
+        const changes = target.transaction(() => queries.reduce((total, { query, params }) => total + target.prepare(query).run(...params).changes, 0))()
+        const sourceSessions = new Map(source.prepare('SELECT * FROM product_sessions').all().map(row => [row.id, hash(JSON.stringify(row))]))
+        const sessions = target.prepare('SELECT * FROM product_sessions ORDER BY id').all()
+        const retainTimestamp = target.prepare('UPDATE product_sessions SET updated_at = ?, updated_by = ? WHERE id = ?')
+        target.transaction(() => {
+          for (const row of sessions.filter(row => sourceSessions.has(row.id))) {
+            const original = before.get(row.id)
+            const signature = sourceSessions.get(row.id)
+            const previous = previousSourceRows.get(row.id)
+            // A raw source may still say scheduled where the canonical
+            // horizon cancels the slot. Rebuilding that unchanged source must
+            // not invent a new audit time for identical derived facts. Only
+            // the metadata is retained, after the generator has respected the
+            // current source's bookings/holds and provider configuration.
+            if (previous?.signature === signature && Object.keys(row).every(name => ['updated_at', 'updated_by'].includes(name) || row[name] === previous.row[name])) {
+              retainTimestamp.run(previous.row.updated_at, previous.row.updated_by, row.id)
+              row.updated_at = previous.row.updated_at
+              row.updated_by = previous.row.updated_by
+            }
+            if (JSON.stringify(row) !== JSON.stringify(original)) manifest.provider_hours_session_source_hashes[row.id] = signature
+          }
+        })()
+        manifest.provider_hours_session_ids = sessions.filter(row => !sourceSessions.has(row.id)).map(row => row.id)
+        const created = sessions.filter(row => !before.has(row.id)).length
+        manifest.transforms.push({ name: 'online_provider_hours_sessions_created', changes: created }, { name: 'online_provider_hours_sessions_updated', changes: changes - created })
+      }
     }
     manifest.tables = names.map(table => ({ table, source_rows: sourceTables.includes(table) ? count(source, table) : 0, target_rows: count(target, table) }))
     const violations = target.pragma('foreign_key_check')
@@ -622,6 +883,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const deltaFrom = option('--delta-from')
   const [sourcePath, targetPath] = args
   if (!sourcePath || !targetPath) throw new Error('Usage: transfer-database-export.mjs <source.sql|source.sqlite> <target.sqlite> [--payload <payload.sql>] [--without-jwks] [--delta-from <earlier-target.sqlite>]')
-  printTransferReport(transferDatabaseExport(sourcePath, targetPath, { payloadPath, withoutJwks, deltaFrom }))
+  printTransferReport(await transferDatabaseExport(sourcePath, targetPath, { payloadPath, withoutJwks, deltaFrom }))
   console.log('Transfer passed.')
 }

@@ -3,6 +3,7 @@
     id="integration-facebook"
     icon="i-logos-facebook"
     title="Facebook"
+    :lead="integrationDefinition('facebook').purpose"
     :saving="saving"
     :disabled="!accountId || !chosenPage"
     :error="error || data?.error || integrations.failure.value || loadFailure"
@@ -10,22 +11,23 @@
     save-label="Connect this Page"
     @save="choosePage"
   >
-    <IntegrationConnection
-      logo="i-logos-facebook"
-      :connection="facebook && { name: facebook.target_name, connectedAt: facebook.connected_at }"
+    <IntegrationLeaf
+      integration="facebook"
+      :connection="facebook && { name: facebook.target_name, connectedAt: facebook.connected_at, through: facebook.connected_through, status: facebook.status, lastError: facebook.last_error }"
       :disconnecting="disconnecting"
       @disconnect="disconnect"
     >
       <UButton v-if="!accountId || loadFailure || data?.error || !choices.length" icon="i-simple-icons-facebook" size="xl" block :loading="linking" @click="connect()">Connect Facebook</UButton>
 
       <URadioGroup v-if="choices.length" v-model="chosenPage" legend="Which Page is this business?" :items="choices" variant="card" />
-    </IntegrationConnection>
+    </IntegrationLeaf>
   </DashboardLeafPanel>
 </template>
 
 <script setup lang="ts">
 import { INTEGRATION_SCOPES } from '~/shared/organization-settings'
-import IntegrationConnection from '~/components/dashboard/IntegrationConnection.vue'
+import IntegrationLeaf from '~/components/dashboard/IntegrationLeaf.vue'
+import { integrationDefinition } from '~/shared/integrations'
 import { integrationsKey, type ConnectedIntegration } from '../integrations.vue'
 
 definePageMeta({ layout: 'dashboard' })

@@ -85,10 +85,6 @@ const sayaTemplateCatalog: CmsTemplateCatalog = {
   locationVocabularyDefault: 'location',
 }
 
-// blawby has one dashboard page (professional-services.vue) covering services/practice areas,
-// policies & notices, and compliance & consultation together — modeled as a single 'services'
-// manager rather than three managers pointing at the same route (which the registry validator
-// below now rejects as a duplicate effective route at the same scope).
 const blawbyTemplateCatalog: CmsTemplateCatalog = {
   pages: [
     { id: 'home', feature: 'contact', label: 'Home', route: '/', scope: 'organization', editor: 'tenant_pages' },
@@ -104,7 +100,7 @@ const blawbyTemplateCatalog: CmsTemplateCatalog = {
     { key: 'organization.blog', id: 'blog', label: 'Blog', section: 'collections', route: 'blog', scope: 'organization' },
     { key: 'organization.qa', id: 'qa', label: 'Reviews and Q&A', section: 'collections', route: 'qa', scope: 'organization' },
     { key: 'organization.locations', id: 'locations', label: 'Offices / service areas', section: 'locations', route: '', scope: 'organization' },
-    { key: 'organization.services', id: 'services', label: 'Services', section: 'collections', route: 'professional-services', scope: 'organization' },
+    { key: 'organization.services', id: 'services', label: 'Services', section: 'collections', route: 'products/services', scope: 'organization' },
     { key: 'location.qa', id: 'qa', label: 'Reviews and Q&A', section: 'collections', route: ':location/qa', scope: 'location' },
     { key: 'location.posts', id: 'posts', label: 'Posts', section: 'collections', route: ':location/posts', scope: 'location' },
     { key: 'location.photos', id: 'photos', label: 'Photos', section: 'media', route: ':location/photos', scope: 'location' },
@@ -114,7 +110,7 @@ const blawbyTemplateCatalog: CmsTemplateCatalog = {
   locationVocabularyDefault: 'office/service area',
 }
 
-// Krabiclaw's own site. Its documentation is ordinary page documents under /docs,
+// KrabiClaw's own site. Its documentation is ordinary page documents under /docs,
 // so the pages index lists them without a catalog entry per page. The platform
 // owner's operations (organizations, every domain, platform analytics, staff) are
 // dashboard pages gated on this template, not content managers.
@@ -144,6 +140,7 @@ const supportedCombinations: Record<OrganizationVertical, readonly PublicTemplat
   restaurant: ['saya'],
   experience: ['saya'],
   service: ['blawby', 'platform'],
+  lodging: ['saya'],
 }
 
 // Always-on features: 'contact'/'locations'/'settings' are infra; 'blog'/'qa'/
@@ -166,6 +163,9 @@ const verticalDefaultFeatures: Record<OrganizationVertical, readonly ProductFeat
   restaurant: ['products', 'reservations'],
   experience: ['products', 'reservations'],
   service: ['services'],
+  // Stays are the places to stay module, not a CMS module; what a rental sells
+  // here are its extras and experiences, so it has products and no table reservations.
+  lodging: ['products'],
 }
 
 // Vocabulary/label differences that are purely cosmetic (same underlying feature, different

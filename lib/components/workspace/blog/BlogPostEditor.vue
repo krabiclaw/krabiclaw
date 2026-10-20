@@ -98,7 +98,6 @@ export interface BlogEditor {
   categoriesError: Ref<unknown>
   generatedSlug: ComputedRef<string>
   resolvedExcerpt: ComputedRef<string>
-  resolvedSeo: ComputedRef<{ title: string; description: string; canonicalUrl: string }>
   resolvedPrimaryImageUrl: ComputedRef<string | null>
   resolvedPrimaryVideoUrl: ComputedRef<string | null>
   slugResetRequested: Ref<boolean>
@@ -114,11 +113,9 @@ export const blogEditorKey = Symbol('blog-editor') as InjectionKey<BlogEditor>
 import BlogArticleRenderer from '~/components/blog/BlogArticleRenderer.vue'
 import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
 import { ARTICLE_COLLECTIONS, ARTICLE_COLLECTION_SLUGS } from '~/utils/article-collections'
-import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
-import { publicTemplateRegistry } from '~/utils/template-registry'
 import { youTubeVideoId } from '~/shared/youtube-video'
 import type { BlogLifecycleState, BlogPostRepository, BlogPost, BlogEditorBlock, BlogPostUpdateInput } from './types'
-import { cloneEditorBlocks, generatedExcerpt, initialBlogEditorBlocks, normalizeBlogSlug, resolveBlogSeo } from '~/utils/blog-editor'
+import { cloneEditorBlocks, generatedExcerpt, initialBlogEditorBlocks, normalizeBlogSlug } from '~/utils/blog-editor'
 import { getErrorMessage } from '~/utils/errors'
 import { resolveSocialImageUrl } from '~/utils/social-metadata'
 
@@ -181,9 +178,6 @@ const statusLabel = computed(() => {
 })
 const generatedSlug = computed(() => normalizeBlogSlug(form.title))
 const resolvedExcerpt = computed(() => generatedExcerpt(blocks.value))
-const resolvedOrganizationName = computed(() => post.value?.editor_organization_name || '')
-const publicPath = computed(() => tenantBlogPostPath({ themeId: publicTemplateRegistry[templateName.value].themeId }, slugResetRequested.value ? generatedSlug.value : form.slug || generatedSlug.value, form.collection))
-const resolvedSeo = computed(() => resolveBlogSeo({ title: form.title, excerpt: form.excerpt || resolvedExcerpt.value, slug: form.slug || generatedSlug.value, baseUrl: windowOrigin(), publicPath: publicPath.value, organizationName: resolvedOrganizationName.value }))
 /**
  * The post's cover is its leading image block and nothing else. The post's
  * images are one set; the cover is the lead one; the share card derives from
@@ -217,7 +211,7 @@ const settingsGroups = computed<EditorNavigationGroup[]>(() => {
       id: 'about',
       label: 'About this post',
       items: [
-        row('category', `${ARTICLE_COLLECTIONS[form.collection].label} · Category`, categories.value?.find(category => category.id === form.category_id)?.name),
+        { ...row('category', `${ARTICLE_COLLECTIONS[form.collection].label} · Category`, categories.value?.find(category => category.id === form.category_id)?.name), icon: 'i-lucide-folder' },
         {
           id: 'excerpt',
           label: 'Excerpt',
@@ -231,7 +225,7 @@ const settingsGroups = computed<EditorNavigationGroup[]>(() => {
       id: 'publishing',
       label: 'Publishing',
       items: [
-        { id: 'publishing', to: `${postPath.value}/publishing`, label: 'Visibility', summary: publishingSummary.value },
+        { id: 'publishing', to: `${postPath.value}/publishing`, label: 'Visibility', icon: 'i-lucide-eye', summary: publishingSummary.value },
         row('url', 'URL', form.slug || generatedSlug.value, 'Generated from the headline'),
       ],
     },
@@ -242,6 +236,7 @@ const settingsGroups = computed<EditorNavigationGroup[]>(() => {
         {
           id: 'share',
           label: 'Share preview',
+          lead: { image: resolvedPrimaryImageUrl.value, icon: 'i-lucide-share-2' },
           to: `${postPath.value}/share`,
           summary: resolvedPrimaryImageUrl.value || resolvedPrimaryVideoUrl.value ? 'Set' : 'No image yet',
           placeholder: !resolvedPrimaryImageUrl.value && !resolvedPrimaryVideoUrl.value,
@@ -461,7 +456,7 @@ function handleInsertBlock(index: number, _cursorPosition: number) {
 // every freshly inserted image block unsavable. `changeImage` writes the chosen
 // asset to `media`; only alt and caption belong here.
 function structuralBlockData(type: string) {
-  return type === 'faq' ? { source: 'page_qa' } : type === 'how_to' ? { steps: [{ text: '' }] } : type === 'image' ? { caption: '' } : type === 'video' ? { url: '', title: '', caption: '' } : type === 'cta' ? { title: '', description: null, label: null, url: null } : {}
+  return type === 'faq' ? { source: 'page_qa' } : type === 'how_to' ? { steps: [{ name: '', text: '' }] } : type === 'image' ? { caption: '' } : type === 'video' ? { url: '', title: '', caption: '' } : type === 'cta' ? { title: '', description: null, label: null, url: null } : {}
 }
 // A non-text block (image/FAQ/how-to/divider/etc.) left as the last block in
 // the post is a dead end — there's no textarea or rich editor to click into
@@ -539,7 +534,6 @@ function changeImage(index: number, value: unknown) {
   }
 }
 
-function windowOrigin() { return import.meta.client ? window.location.origin : 'https://krabiclaw.com' }
 function resetSlugOverride() { slugResetRequested.value = true; form.slug = generatedSlug.value }
 function syncServerVersion(value: BlogPost) { serverPostUpdatedAt = value.updated_at }
 
@@ -554,7 +548,6 @@ provide(blogEditorKey, {
   categoriesError,
   generatedSlug,
   resolvedExcerpt,
-  resolvedSeo,
   resolvedPrimaryImageUrl,
   resolvedPrimaryVideoUrl,
   slugResetRequested,

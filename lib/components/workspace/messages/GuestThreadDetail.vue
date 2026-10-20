@@ -1,38 +1,22 @@
 <template>
   <div class="flex h-full min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
-    <UAlert
-      v-if="realtimeFailed"
-      color="warning"
-      variant="soft"
-      icon="i-lucide-wifi-off"
-      title="Live updates are unavailable"
-      description="This conversation may be out of date until the dashboard reconnects."
-      class="m-3"
-    >
-      <template #actions>
-        <UButton color="warning" variant="soft" size="xs" :loading="pending" @click="refreshThreadState">
-          Refresh
-        </UButton>
-      </template>
-    </UAlert>
-
     <!-- A request that failed, or a conversation that is gone, is a state this
          surface shows rather than a blank column. -->
-    <UAlert
-      v-if="!thread && !pending"
-      class="m-3"
-      color="error"
-      variant="soft"
-      :title="isNotFoundError(error) ? 'This conversation is no longer available' : 'Conversation could not be loaded'"
-      :description="isNotFoundError(error) ? 'It may have been deleted, or the link is from another business.' : getErrorMessage(error, 'Guest thread request failed')"
-    />
+    <div v-if="!thread && !pending" class="pt-3" :class="dashboardGutterClass">
+      <UAlert
+        color="error"
+        variant="soft"
+        :title="isNotFoundError(error) ? 'This conversation is no longer available' : 'Conversation could not be loaded'"
+        :description="isNotFoundError(error) ? 'It may have been deleted, or the link is from another business.' : getErrorMessage(error, 'Guest thread request failed')"
+      />
+    </div>
 
     <template v-else-if="thread">
       <!-- Positioned so UChatMessages' jump-to-latest button sits over the
            stream rather than scrolling away with it. -->
       <div class="relative flex min-h-0 flex-1 flex-col">
         <div ref="scroller" class="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-          <UChatMessages :auto-scroll="{ size: 'sm' }" :ui="{ root: 'gap-0 px-4 py-4 sm:px-6' }">
+          <UChatMessages :auto-scroll="{ size: 'sm' }" :ui="{ root: ['gap-0 py-4', dashboardGutterClass] }">
             <!-- What is already here appears at once; what arrives while the
                  thread is open rises into place. -->
             <TransitionGroup
@@ -72,7 +56,8 @@
                 >
                   <template v-if="item.startsRun" #header>
                     <span class="font-medium text-highlighted">{{ item.who }}</span>
-                    <span class="ms-1.5">{{ formatClockTime(item.occurredAt) }}</span>
+                    <span class="ms-1.5">{{ item.providerTimestamp ? 'Recorded ' : '' }}{{ formatClockTime(item.occurredAt) }}</span>
+                  <span v-if="item.providerTimestamp" class="block break-all text-xs text-muted">Provider timestamp: {{ item.providerTimestamp }}</span>
                   </template>
                   <template #body>
                     <!-- Photos lead, the way they do on Airbnb: each one whole,
@@ -117,6 +102,9 @@
                       </template>
                       <span v-else class="whitespace-pre-wrap break-words">{{ item.body }}</span>
                     </div>
+                    <div v-if="item.attachmentLinks.length" class="mt-1 flex flex-col gap-1 text-sm">
+                      <a v-for="(url, index) in item.attachmentLinks" :key="url" :href="url" target="_blank" rel="noopener noreferrer" class="underline">Open attachment {{ index + 1 }}</a>
+                    </div>
                     <!-- A file the guest sent that the conversation cannot show
                          is named, so nothing they sent goes missing silently. -->
                     <p v-if="item.unshown.length" class="mt-1 flex items-center gap-1.5 text-xs text-muted">
@@ -140,7 +128,7 @@
         </div>
       </div>
 
-      <div class="shrink-0 px-4 pb-4 pt-2 sm:px-6">
+      <div class="shrink-0 pb-4 pt-2" :class="dashboardGutterClass">
         <TransitionGroup
           tag="div"
           class="space-y-2"
@@ -184,7 +172,7 @@
           :autofocus="false"
           placeholder="Write a message…"
           color="neutral"
-          :disabled="(!props.personalScope && !thread.guestEmail)"
+          :disabled="!canReply"
           :rows="2"
           :maxrows="8"
           class="gap-2 rounded-2xl px-5 pb-2.5 pt-4"
@@ -224,8 +212,8 @@
               class="-ms-1.5 size-9 justify-center rounded-full p-0"
               :ui="{ leadingIcon: 'size-6' }"
               aria-label="Add photos"
-              title="Add photos"
-              :disabled="(!props.personalScope && !thread.guestEmail) || chosen.length >= MAX_PHOTOS"
+              :title="thread.replyChannel === 'airbnb' ? 'Photo replies via Airbnb are unavailable here' : 'Add photos'"
+              :disabled="!canReply || thread.replyChannel === 'airbnb' || chosen.length >= MAX_PHOTOS"
               @click="picker?.click()"
             />
             <input ref="picker" type="file" accept="image/jpeg,image/png,image/webp,image/gif,image/avif" multiple class="hidden" @change="addPickedPhotos">
@@ -238,7 +226,7 @@
               :ui="{ leadingIcon: 'size-4' }"
               aria-label="Send reply"
               title="Send reply"
-              :disabled="(!props.personalScope && !thread.guestEmail) || sending || (!draft.trim() && !chosen.length)"
+              :disabled="!canReply || sending || (!draft.trim() && !chosen.length)"
             />
           </template>
         </UChatPrompt>
@@ -291,7 +279,7 @@
           </template>
         </UModal>
 
-        <p v-if="!props.personalScope && !thread.guestEmail" class="mt-2 text-xs text-warning">This guest has no email on file, so a reply cannot be sent.</p>
+        <p v-if="!canReply" class="mt-2 text-xs text-warning">This guest has no email on file. Once they accept an invite to this conversation, your replies reach their KrabiClaw inbox.</p>
       </div>
     </template>
   </div>
@@ -305,6 +293,7 @@ import { isThreadDetailResponse, threadRecordTitle, type ThreadDetail } from '~/
 import type { GuestThreadDeliveryFailureViewModel, GuestThreadEntryViewModel } from '~/server/domain/guest-threads/types'
 import { useDashboardInvalidations } from '~/composables/useDashboardInvalidations'
 import { authClient } from '~/lib/auth-client'
+import { dashboardGutterClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 
 /*
   One guest thread: the conversation and its composer. The list is a separate
@@ -316,13 +305,13 @@ const props = withDefaults(defineProps<{ threadId: string; personalScope?:boolea
 const dashboard = useDashboardOrganization()
 const dashboardApi = useDashboardApi(useDashboardRouteScope())
 const realtime = useDashboardInvalidations()
-const realtimeFailed = computed(() => !props.personalScope && realtime.status.value === 'failed')
 const { locale } = useI18n()
 const session = authClient.useSession()
 
 // The one copy of this thread. The record beside the conversation reads the
 // same entry, so writing a reply's answer into it updates both.
 const { data, thread, pending, error, refresh } = await useGuestThread(computed(() => props.threadId),computed(()=>props.personalScope))
+const canReply = computed(() => props.personalScope || thread.value?.replyChannel === 'airbnb' || Boolean(thread.value?.guestEmail) || Boolean(thread.value?.guestAccountLinked))
 const threadPath = computed(() => props.personalScope ? `/api/account/messages/${encodeURIComponent(props.threadId)}` : `/api/dashboard/organizations/${dashboard.organizationId.value}/guest-threads/${encodeURIComponent(props.threadId)}`)
 
 const draft = ref('')
@@ -343,7 +332,7 @@ const settledKeys = ref<Record<string, string>>({})
 async function sendReply() {
   const body = draft.value.trim()
   const photos = chosen.value
-  if (!thread.value || (!body && !photos.length) || sending.value) return
+  if (!thread.value || !canReply.value || (!body && !photos.length) || sending.value) return
   if (attempt.value?.body !== body || !samePhotos(attempt.value.photos, photos)) {
     attempt.value = { key: crypto.randomUUID(), body, photos, sentAfter: new Set(thread.value.entries.map(entry => entry.id)) }
   }
@@ -386,6 +375,10 @@ const picker = useTemplateRef<HTMLInputElement>('picker')
 const viewer = ref<{ photos: MessagePhotoView[]; at: number } | null>(null)
 
 function addPhotos(files: File[]) {
+  if (thread.value?.replyChannel === 'airbnb') {
+    actionError.value = 'Photo replies via Airbnb are unavailable here.'
+    return
+  }
   const accepted = files.filter(file => ACCEPTED_PHOTO_TYPES.has(file.type))
   const refused = files.length - accepted.length
   const room = MAX_PHOTOS - chosen.value.length
@@ -511,7 +504,7 @@ const recordNoun = computed(() => thread.value
 */
 const announcement = computed(() => {
   const current = thread.value
-  if (!current || current.submissionType === 'contact') return null
+  if (!current?.operationalRecord) return null
   const fields = current.source.fields
   // `guests` is the party size alone ("6", or "6+" when it is a minimum).
   const size = fields.guests?.trim() ? `${fields.guests} ${fields.guests === '1' ? 'guest' : 'guests'}` : null
@@ -534,13 +527,15 @@ const openingMessage = computed(() => {
   return text?.trim() ? text : null
 })
 
-type Speaker = 'platform' | 'guest' | 'member'
+type Speaker = 'platform' | 'guest' | 'member' | 'system'
 type MessagePhotoView = { url: string; alt: string | null; width: number | null; height: number | null }
 type MessageItem = {
   type: 'message'
   key: string
   body: string | null
   photos: MessagePhotoView[]
+  attachmentLinks: string[]
+  providerTimestamp: string | null
   unshown: string[]
   occurredAt: string
   run: string
@@ -581,13 +576,14 @@ const stream = computed<StreamItem[]>(() => {
     items.push(item)
   }
 
+  // The decoder guarantees every member and system message carries its actor label.
   const message = (key: string, occurredAt: string, body: string | null, speaker: Speaker, label: string | null, extra: Partial<MessageItem> = {}) => {
-    const who = extra.own ? 'You' : speaker === 'platform' ? 'Krabiclaw' : speaker === 'guest' ? current.guestName : label || 'Team member'
+    const who = extra.own ? 'You' : speaker === 'platform' ? 'KrabiClaw' : speaker === 'guest' ? current.participantLabel : label as string
     const avatar: AvatarProps = speaker === 'platform'
       ? { src: '/platform/krabiclaw-symbol.svg', alt: who }
       : { alt: who }
     const outgoing = props.personalScope ? Boolean(extra.own) : speaker === 'member'
-    push(occurredAt, { type: 'message', key, body, photos: [], unshown: [], occurredAt, run: `${speaker}:${who}`, who, own: false, outgoing, avatar, startsRun: true, endsRun: true, ...extra })
+    push(occurredAt, { type: 'message', key, body, photos: [], attachmentLinks: [], providerTimestamp: null, unshown: [], occurredAt, run: `${speaker}:${who}`, who, own: false, outgoing, avatar, startsRun: true, endsRun: true, ...extra })
   }
 
   for (const entry of current.entries) {
@@ -600,16 +596,20 @@ const stream = computed<StreamItem[]>(() => {
       if (announcement.value) message(`${key}:announcement`, entry.occurredAt, null, 'platform', null, { announcement: announcement.value })
       if (openingMessage.value) message(key, entry.occurredAt, openingMessage.value, 'guest', null)
       if (!announcement.value && !openingMessage.value) {
-        push(entry.occurredAt, { type: 'event', key, icon: 'i-lucide-sparkles', label: `${current.guestName} started this conversation` })
+        push(entry.occurredAt, { type: 'event', key, icon: 'i-lucide-sparkles', label: `Conversation with ${current.participantLabel} recorded` })
       }
     } else if (entry.kind === 'message') {
-      const member = entry.actorKind !== 'guest'
+      const member = entry.actorKind === 'member'
+      const mirrored = entry.eventName === 'channel.message_mirrored'
       const unshown = entry.payload?.unshownFiles
-      message(key, entry.occurredAt, entry.body, member ? 'member' : 'guest', entry.actorLabel, {
+      message(key, entry.occurredAt, entry.body, member ? 'member' : entry.actorKind === 'system' ? 'system' : 'guest', entry.actorLabel, {
         own: props.personalScope && entry.actorKind === 'guest' && entry.channel === 'web' && entry.actorUserId !== null && entry.actorUserId === session.value.data?.user.id,
-        photos: entry.attachments,
+        photos: mirrored ? [] : entry.attachments,
+        attachmentLinks: mirrored ? entry.attachments.map(attachment => attachment.url) : [],
+        providerTimestamp: entry.providerTimestamp,
+        ...(mirrored ? { run: `provider:${entry.id}` } : {}),
         unshown: Array.isArray(unshown) ? unshown.filter((name): name is string => typeof name === 'string') : [],
-        ...(member ? { receipt: receiptFor(entry) } : {}),
+        ...(member ? { receipt: receiptFor(entry, current.participantLabel) } : {}),
       })
     } else {
       push(entry.occurredAt, { type: 'event', key, icon: systemEventIcon(entry), label: systemEventLabel(entry) })
@@ -639,21 +639,23 @@ const stream = computed<StreamItem[]>(() => {
   return items
 })
 
-const RECEIPT_RANK = ['pending', 'accepted', 'sent', 'delivered', 'read'] as const
-const CHANNEL_LABELS = { email: 'email', whatsapp: 'WhatsApp' } as const
+const RECEIPT_RANK = ['pending', 'sending', 'accepted', 'sent', 'delivered', 'read'] as const
+const CHANNEL_LABELS = { email: 'email', whatsapp: 'WhatsApp', airbnb: 'Airbnb', push: 'push notification' } as const
 
-function receiptFor(entry: GuestThreadEntryViewModel): MessageItem['receipt'] {
-  const replies = entry.deliveries.filter(delivery => delivery.purpose === 'member_reply')
+function receiptFor(entry: GuestThreadEntryViewModel, participantLabel: string): MessageItem['receipt'] {
+  const replies = entry.deliveries.filter(delivery => delivery.purpose === 'member_reply' || delivery.purpose === 'scheduled_message')
   if (!replies.length) return undefined
-  const best = replies.reduce((top, delivery) =>
+  const best = replies.find(delivery => delivery.status === 'uncertain') ?? replies.reduce((top, delivery) =>
     RECEIPT_RANK.indexOf(delivery.status as typeof RECEIPT_RANK[number]) > RECEIPT_RANK.indexOf(top.status as typeof RECEIPT_RANK[number]) ? delivery : top)
   const channel = CHANNEL_LABELS[best.channel]
   switch (best.status) {
-    case 'read': return { label: `Read by ${thread.value?.guestName ?? 'the guest'}`, failed: false }
+    case 'read': return { label: `Read by ${participantLabel}`, failed: false }
     case 'delivered': return { label: `Delivered on ${channel}`, failed: false }
-    case 'sent':
-    case 'accepted': return { label: `Sent by ${channel}`, failed: false }
+    case 'accepted': return { label: `Accepted by ${channel}`, failed: false }
+    case 'sent': return { label: `Sent by ${channel}`, failed: false }
+    case 'sending': return { label: 'Awaiting provider receipt', failed: false }
     case 'pending': return { label: 'Sending…', failed: false }
+    case 'uncertain': return { label: 'Send outcome unknown — review before sending again', failed: true }
     case 'failed': return { label: 'Not delivered', failed: true }
     default: return undefined
   }
@@ -708,14 +710,18 @@ const DELIVERY_PURPOSE_LABELS = {
   guest_acknowledgement: 'guest acknowledgement',
   member_reply: 'reply',
   status_update: 'status update',
+  scheduled_message: 'scheduled message',
+  team_message: 'team message',
 } satisfies Record<GuestThreadDeliveryFailureViewModel['purpose'], string>
 
 function deliveryFailureTitle(failure: GuestThreadDeliveryFailureViewModel) {
-  const delivery = `${failure.channel === 'whatsapp' ? 'WhatsApp' : 'Email'} ${DELIVERY_PURPOSE_LABELS[failure.purpose]}`
+  if (failure.status === 'uncertain') return 'Reply needs review: send outcome unknown'
+  const delivery = `${CHANNEL_LABELS[failure.channel]} ${DELIVERY_PURPOSE_LABELS[failure.purpose]}`
   return `${delivery} could not be sent`
 }
 
 function deliveryFailureDescription(failure: GuestThreadDeliveryFailureViewModel) {
+  if (failure.status === 'uncertain') return failure.error ?? 'The provider may have accepted this message. Review the conversation before sending again.'
   return failure.error ?? `The ${failure.channel} provider rejected this delivery.`
 }
 </script>

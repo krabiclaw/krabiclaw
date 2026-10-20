@@ -1,14 +1,17 @@
 import { HTTPError } from 'nitro';
 import type { H3Event } from 'nitro';
-import { } from 'nitro/h3';
-import { verifyJwsAccessToken } from 'better-auth/oauth2'
-import type { JSONWebKeySet, JWTPayload } from 'jose'
+import { createDpopReplayStore } from 'better-auth/oauth2'
+import { APIError, getEndpoints } from 'better-auth/api'
+import { oauthProviderResourceClient } from '@better-auth/oauth-provider/resource-client'
+import type { JWTPayload } from 'jose'
 import { createAuth, getAuthSession, type CloudflareEnv } from '~/server/utils/auth'
 import { hasPlatformEventPermission } from '~/server/utils/platform-admin-users'
 import { queryFirst } from '~/server/db'
 import { assertOrganizationWideAccess, isOrganizationWideRole, resolveOrganizationMembership, memberAccessPrincipal, type ResolvedMembership, roleAllows, type OrganizationPermissions } from '~/server/utils/member-access'
 import { getOrganizationEntitlements } from '~/server/utils/billing-access'
 import { cloudflareEnv } from '~/server/utils/api-response'
+import { publicTenantVisibilitySql } from '~/server/utils/public-base'
+import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 
 export type McpToolRole = 'owner' | 'admin' | 'member'
 
@@ -18,17 +21,15 @@ export type McpToolRole = 'owner' | 'admin' | 'member'
  * `minimumRole` stays on the tool definition because it is published to MCP
  * clients in `_meta`, but the decision it drives comes from the same matrix as
  * every other authorization in the repository (utils/organization-access.ts)
- * rather than from a rank ladder that could disagree with it. `editor` is
- * "takes part in tenant content at all"; `admin` is the site-settings floor the
- * three configuration tools need.
+ * rather than from a rank ladder that could disagree with it. `member` is
+ * scoped to assigned work; `admin` is the organization management floor;
+ * `owner` owns billing and deletion.
  */
 const TOOL_ROLE_PERMISSIONS: Record<McpToolRole, OrganizationPermissions> = {
   member: { scheduling: ['own'] },
   admin: { settings: ['update'] },
   owner: { organization: ['delete'] },
 }
-
-const MCP_AUTH_JWKS_CACHE_KEY = {}
 
 export interface McpUserContext {
   env: CloudflareEnv
@@ -37,6 +38,8 @@ export interface McpUserContext {
   isPlatformAdmin: boolean
   scopes: string[]
   oauthClientId?: string | null
+  sessionId?: string | null
+  oauthClaims?: Pick<JWTPayload, 'jti' | 'iat' | 'exp'>
   // Only populated for session-based auth (ChowBot/dashboard) — bearer-token
   // auth (e.g. ChatGPT connector) has no browser session to read this from.
   activeOrganizationId?: string
@@ -53,32 +56,17 @@ export interface McpOrganizationContext extends McpUserContext {
   // executors authorize from it rather than pairing role with an organization
   // id from elsewhere.
   membership: ResolvedMembership
-  sessionId?: string | null
-}
-
-interface McpAuthChallengeDetails {
-  error: 'invalid_token' | 'insufficient_scope'
-  description: string
-  scope?: string
 }
 
 export interface RequireMcpUserOptions {
   audiences?: string[]
   requiredScopes?: string[]
-  forbiddenScopes?: string[]
 }
 
 export async function requireMcpUser(
   event: H3Event,
   options: RequireMcpUserOptions = {},
 ): Promise<McpUserContext> {
-  // No implicit forbidding: a token can legitimately present more scopes than a
-  // call needs. The real boundary is `audiences` (aud claim, bound to the
-  // resource param) plus the DB site-membership check each route performs.
-  const normalizedOptions: RequireMcpUserOptions = {
-    ...options,
-    forbiddenScopes: options.forbiddenScopes ?? [],
-  }
   const env = cloudflareEnv(event)
   const db = env?.DB
   if (!env || !db) {
@@ -86,8 +74,8 @@ export async function requireMcpUser(
   }
 
   const authHeader = (event.req.headers.get('authorization'))
-  if (authHeader?.startsWith('Bearer ')) {
-    return await verifyBearerToken(event, authHeader.slice(7), env, db, normalizedOptions)
+  if (authHeader) {
+    return await verifyOAuthRequest(event, authHeader, env, db, options)
   }
 
   const session = await getAuthSession(event, env)
@@ -96,30 +84,30 @@ export async function requireMcpUser(
   }
 
   // Session-based auth has no token to derive scopes from, so the caller's
-  // requested scopes are taken as granted; forbiddenScopes and the site
-  // membership check in requireMcpOrganization enforce the real restrictions.
+  // requested scopes are taken as granted; organization membership authorizes it.
   const sessionRecord = session.session as typeof session.session & { activeOrganizationId?: string }
   const user = {
     env,
     db,
     userId: session.user.id,
     isPlatformAdmin: await hasPlatformEventPermission(event, env, { platform: ['access'] }),
-    scopes: normalizedOptions.requiredScopes ?? ['tenant'],
+    scopes: options.requiredScopes ?? ['tenant'],
+    sessionId: session.session.id,
     activeOrganizationId: typeof sessionRecord.activeOrganizationId === 'string' ? sessionRecord.activeOrganizationId : undefined,
   }
-  ensureForbiddenScopesAbsent(user.scopes, normalizedOptions.forbiddenScopes)
   return user
 }
 
-async function verifyBearerToken(
+async function verifyOAuthRequest(
   event: H3Event,
-  token: string,
+  authorization: string,
   env: CloudflareEnv,
   db: D1Database,
   options: RequireMcpUserOptions,
 ): Promise<McpUserContext> {
   const baseUrl = env.BETTER_AUTH_URL?.replace(/\/$/, '')
   if (!baseUrl) throw new HTTPError({ statusCode: 500, statusMessage: 'BETTER_AUTH_URL is required' })
+  const token = authorization.slice(authorization.indexOf(' ') + 1).trim()
   const tokenFingerprint = (await sha256Base64Url(token)).slice(0, 12)
 
   const audiences = options.audiences?.length
@@ -128,22 +116,26 @@ async function verifyBearerToken(
   // Use ?? (not ?.length ? :) so a caller can explicitly opt out of any scope
   // requirement by passing requiredScopes: [].
   const requiredScopes = options.requiredScopes ?? ['tenant']
+  const auth = createAuth(env)
+  const context = await auth.$context
 
   let payload: JWTPayload & { client_id?: unknown }
   try {
-    payload = await verifyJwsAccessToken(token, {
-      jwksFetch: () => getAuthJwks(event, env),
-      jwksCacheKey: MCP_AUTH_JWKS_CACHE_KEY,
+    payload = await oauthProviderResourceClient(auth).getActions().verifyAccessTokenRequest({
+      authorizationHeader: authorization,
+      dpopProofJwt: event.req.headers.get('dpop'),
+      method: event.req.method,
+      url: event.req.url,
+    }, {
+      jwksUrl: `${baseUrl}/api/auth/jwks`,
+      requiredScopes,
       verifyOptions: {
         audience: audiences,
         issuer: baseUrl,
       },
+      dpop: { replayStore: createDpopReplayStore(context.internalAdapter) },
     })
-    if (hasDpopBinding(payload)) {
-      throw new Error('DPoP-bound access token requires request verification')
-    }
   } catch (error) {
-    const authChallenge = mcpAuthChallengeFromVerifyError(error, requiredScopes)
     // claimed_* fields are decoded WITHOUT signature verification — never use
     // them for auth decisions, only to see what a rejected token *claims*
     // (aud/exp/iss mismatches are otherwise invisible: the verifier only
@@ -153,45 +145,15 @@ async function verifyBearerToken(
       token_fingerprint: tokenFingerprint,
       token_shape: token.split('.').length === 3 ? 'jwt' : 'opaque',
       reason: error instanceof Error ? error.message : String(error),
-      oauth_error: authChallenge.error,
       audiences_checked: audiences,
       required_scopes: requiredScopes,
       now_iso: new Date().toISOString(),
       ...(await decodeJwtClaimsUnsafe(token)),
     })
-    // Always 401, matching the pre-existing behavior for both invalid_token
-    // and insufficient_scope: asMcpError maps statusCode 403 to kind
-    // 'forbidden', a different code path used for tool-role permission
-    // denials (server/api/mcp.post.ts returns a plain tool-error result
-    // there, dropping the WWW-Authenticate challenge). RFC 6750 §3.1 permits
-    // 401 for insufficient_scope too ("MAY" 403, not "SHOULD"), so this stays
-    // spec-compliant while keeping the challenge intact on every path.
-    throw new HTTPError({
-      statusCode: 401,
-      statusMessage: authChallenge.description,
-      data: { mcpAuth: authChallenge },
-    })
+    throw error
   }
 
   const scopes = parseScopesFromJwtPayload(payload.scope)
-  const missingScopes = requiredScopes.filter(requiredScope => !scopes.includes(requiredScope))
-  if (missingScopes.length > 0) {
-    const requiredScopeValue = requiredScopes.join(' ')
-    logMcpAuth(event, 'warn', 'credential_rejected', {
-      path: event.path,
-      token_fingerprint: tokenFingerprint,
-      reason: 'scope_missing',
-      missing_scopes: missingScopes,
-      audiences_checked: audiences,
-      required_scopes: requiredScopes,
-    })
-    throw new HTTPError({
-      statusCode: 401,
-      statusMessage: `${requiredScopeValue} scopes required`,
-      data: { mcpAuth: { error: 'insufficient_scope', description: `${requiredScopeValue} scopes required`, scope: requiredScopeValue } },
-    })
-  }
-  ensureForbiddenScopesAbsent(scopes, options.forbiddenScopes)
 
   const userId = typeof payload.sub === 'string' ? payload.sub : null
   if (!userId) {
@@ -200,11 +162,7 @@ async function verifyBearerToken(
       token_fingerprint: tokenFingerprint,
       reason: 'subject_missing',
     })
-    throw new HTTPError({
-      statusCode: 401,
-      statusMessage: 'Token missing, expired, invalid, or not issued for this MCP resource',
-      data: { mcpAuth: { error: 'invalid_token', description: 'Token missing, expired, invalid, or not issued for this MCP resource' } },
-    })
+    throw new APIError('UNAUTHORIZED', { message: 'The access token has no user identity' })
   }
   const oauthClientId = typeof payload.client_id === 'string' ? payload.client_id : null
 
@@ -221,59 +179,38 @@ async function verifyBearerToken(
     db,
     userId,
     oauthClientId,
+    sessionId: typeof payload.sid === 'string' ? payload.sid : null,
+    oauthClaims: { jti: payload.jti, iat: payload.iat, exp: payload.exp },
     isPlatformAdmin,
     scopes,
   }
 }
 
-async function getAuthJwks(event: H3Event, env: CloudflareEnv): Promise<JSONWebKeySet | undefined> {
-  const baseUrl = env.BETTER_AUTH_URL?.replace(/\/$/, '')
-  if (!baseUrl) throw new HTTPError({ statusCode: 500, statusMessage: 'BETTER_AUTH_URL is required' })
-  const response = await createAuth(env).handler(new Request(`${baseUrl}/api/auth/jwks`, {
-    method: 'GET',
-    headers: Object.fromEntries(event.req.headers.entries()) as HeadersInit,
-  }))
-  if (!response.ok) return undefined
-  return await response.json() as JSONWebKeySet
-}
-
-function hasDpopBinding(payload: JWTPayload): boolean {
-  const cnf = payload.cnf
-  return !!cnf && typeof cnf === 'object' && 'jkt' in cnf
-}
-
-// Better Auth's verifyBearerToken throws a better-call APIError: status
-// FORBIDDEN with message `invalid scope ${scope}` for a missing required
-// scope, status UNAUTHORIZED for anything else (expired/invalid signature/
-// wrong audience/wrong issuer/not a JWT at all). Duck-typed rather than
-// checked with `instanceof`/`isAPIError` — a differently-bundled copy of
-// better-call across packages can fail an instanceof check even though the
-// thrown value carries the real .status/.statusCode/.message shape (verified
-// empirically against the installed better-auth/@better-auth/oauth-provider
-// version pair).
-function isBetterAuthApiError(error: unknown): error is { status: string; message: string } {
-  return !!error && typeof error === 'object' && 'status' in error && 'statusCode' in error && typeof (error as { message?: unknown }).message === 'string'
-}
-
-function mcpAuthChallengeFromVerifyError(error: unknown, requiredScopes: string[]): McpAuthChallengeDetails {
-  if (isBetterAuthApiError(error) && error.status === 'FORBIDDEN') {
-    // @better-auth/core's verifyAccessTokenPayload only ever throws FORBIDDEN
-    // for a missing required scope — the status alone is the reliable
-    // classification signal. The `invalid scope ${sc}` message text is only
-    // used as a best-effort way to name which scope for the challenge/log;
-    // an upstream wording change degrades that naming, not the
-    // insufficient_scope classification itself.
-    const missingScope = requiredScopes.find(scope => error.message.includes(scope)) ?? requiredScopes[0]
-    return {
-      error: 'insufficient_scope',
-      description: missingScope ? `${missingScope} scope required` : 'Required scope missing',
-      scope: missingScope,
-    }
+/** Native organization endpoints receive the already-authenticated MCP principal. */
+export async function requireMcpOrganizationApi(event: H3Event | undefined, user: McpOrganizationContext) {
+  const auth = createAuth(user.env)
+  if (!event) throw new HTTPError({ statusCode: 500, statusMessage: 'Authenticated MCP request is required' })
+  const headers = new Headers(event.req.headers)
+  const authorization = headers.get('authorization')
+  if (!authorization) return { api: auth.api, headers }
+  const claims = user.oauthClaims
+  if (!authorization.startsWith('Bearer ') || !claims || typeof claims.jti !== 'string' || !claims.jti
+    || typeof claims.iat !== 'number' || !Number.isFinite(claims.iat) || typeof claims.exp !== 'number' || !Number.isFinite(claims.exp)) {
+    throw new HTTPError({ statusCode: 401, statusMessage: 'The verified OAuth identity is incomplete', data: { code: 'authentication_required' } })
   }
-  return {
-    error: 'invalid_token',
-    description: 'Token missing, expired, invalid, or not issued for this MCP resource',
-  }
+  const context = await auth.$context
+  const currentUser = await context.internalAdapter.findUserById(user.userId)
+  if (!currentUser) throw new HTTPError({ statusCode: 401, statusMessage: 'The authenticated user was not found', data: { code: 'authentication_required' } })
+  // This per-call view uses the existing access token's identity and lifetime.
+  // It carries no active browser workspace and creates no stored session.
+  const api = getEndpoints(Promise.resolve({ ...context, session: {
+    user: currentUser,
+    session: { id: claims.jti, token: authorization.slice(7), userId: user.userId,
+      createdAt: new Date(claims.iat * 1000), updatedAt: new Date(claims.iat * 1000), expiresAt: new Date(claims.exp * 1000) },
+  } }), auth.options).api
+  headers.delete('authorization')
+  headers.delete('cookie')
+  return { api, headers }
 }
 
 // Decodes a JWT's payload segment without verifying the signature — used only
@@ -327,13 +264,6 @@ function parseScopesFromJwtPayload(scopeClaim: unknown) {
   return scopeClaim.split(' ').filter(Boolean)
 }
 
-function ensureForbiddenScopesAbsent(scopes: string[], forbiddenScopes?: string[]) {
-  const blocked = (forbiddenScopes ?? []).find(scope => scopes.includes(scope))
-  if (blocked) {
-    throw new HTTPError({ statusCode: 403, statusMessage: `Token scope ${blocked} is not allowed for this MCP surface` })
-  }
-}
-
 export async function requireMcpOrganization(
   event: H3Event,
   organizationId: string,
@@ -345,7 +275,7 @@ export async function requireMcpOrganization(
   const organization = await queryFirst<{ id: string; subdomain: string | null; custom_domain: string | null; public_url: string | null }>(
     user.db,
     `
-      SELECT o.id, o.subdomain, (SELECT domain FROM organization_domains WHERE organization_id = o.id AND role = 'canonical' AND status = 'active' AND type = 'custom') AS custom_domain, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = o.id AND role = 'canonical' AND status = 'active') AS public_url
+      SELECT o.id, o.subdomain, (SELECT domain FROM organization_domains WHERE organization_id = o.id AND role = 'canonical' AND status = 'active' AND type = 'custom') AS custom_domain, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = o.id AND role = 'canonical' AND status = 'active' AND ${publicTenantVisibilitySql('o', false)}) AS public_url
       FROM organization o
       WHERE o.id = ?
       LIMIT 1
@@ -367,8 +297,7 @@ export async function requireMcpOrganization(
     throw new HTTPError({ statusCode: 403, statusMessage: 'Insufficient permissions' })
   }
 
-  // Tenant-wide tools retain owner/admin access. The member floor is reserved
-  // for scheduling tools whose domain writer also checks the target member.
+  // Member tools check their own scheduling, service or appointment target.
   if (!isOrganizationWideRole(role) && minimumRole !== 'member') {
     await assertOrganizationWideAccess(user.db, memberAccessPrincipal(membership, { env: user.env }))
   }
@@ -379,7 +308,12 @@ export async function requireMcpOrganization(
     organizationSlug: membership.organizationSlug || undefined,
     subdomain: organization.subdomain ?? null,
     customDomain: organization.custom_domain ?? null,
-    publicUrl: organization.public_url ?? null,
+    publicUrl: organization.public_url ? tenantOrganizationOrigin({
+      platformDomain: user.env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '',
+      freeOrganizationDomain: user.env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN ?? '',
+      subdomain: organization.subdomain ?? '',
+      canonicalDomain: organization.public_url,
+    }) : null,
     role,
     // Kept so the tool executors authorize from the membership this call
     // resolved rather than reassembling one out of role and organizationId.
@@ -420,13 +354,4 @@ export async function roleSatisfies(organizationId: string, actual: string, mini
 export function normalizeRole(role: string | null | undefined): McpToolRole | null {
   if (role === 'owner' || role === 'admin' || role === 'member') return role
   return null
-}
-
-export function requestOrigin(headers: HeadersInit | undefined) {
-  const normalized = new Headers(headers)
-  return normalized.get('origin')
-}
-
-export function requestHeaders(event: H3Event) {
-  return Object.fromEntries(event.req.headers.entries()) as HeadersInit
 }

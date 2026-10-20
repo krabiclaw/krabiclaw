@@ -31,8 +31,8 @@ export function seatsSummary(capacity: number | null | undefined): string {
 }
 
 /**
- * Named cancellation terms stored by the calendar editor. The persisted
- * reschedule fields are retained; the reservation flow does not enforce them.
+ * Named reservation terms shared by the calendar and MCP. Free cancellation
+ * controls the deposit refund; changes use the same deadline unless the business approves an exception.
  */
 export const CANCELLATION_TIERS = [
   { id: 'flexible', label: 'Flexible', minutes: 2 * HOUR, points: ['Free cancellation until 2 hours before'] },
@@ -59,7 +59,7 @@ export function cancellationSummary(policy: Pick<LocationReservationConfigPatch,
   const tier = cancellationTierOf(policy)
   if (tier) return CANCELLATION_TIERS.find(entry => entry.id === tier)!.label
   const minutes = policy.free_cancellation_until_minutes ?? null
-  return minutes === null ? 'Not set' : `Custom · free until ${formatMinutes(minutes)} before`
+  return minutes === null ? 'No deadline' : `Custom · free until ${formatMinutes(minutes)} before`
 }
 
 /** "Mon–Sat · Closed Sun", the way Airbnb's card states a value in one line. */

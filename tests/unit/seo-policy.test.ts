@@ -1,18 +1,19 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { isNonIndexableHost, isPrivateSeoPath, isTenantOnlySeoPath, resolveRuntimeSeoConfig } from '../../server/utils/seo-policy.ts'
-import { DEMO_HOSTS, DEMO_ORG_ID, isDemoHost, isDemoOrg } from '../../shared/demo.ts'
+import { DEMO_HOSTS, isDemoHost, isDemoOrganization } from '../../shared/demo.ts'
 import { TENANT_TYPES } from '../../utils/tenant-routing.ts'
 
-test('demo contracts correctly identify the showcase tenant and hosts', () => {
-  assert.equal(DEMO_ORG_ID, 'org-demo')
+test('demo contracts correctly identify the showcase tenants and hosts', () => {
   assert.ok(DEMO_HOSTS.has('demo.krabiclaw.com'))
   assert.ok(DEMO_HOSTS.has('demo.localhost'))
 
-  assert.equal(isDemoOrg('org-demo'), true)
-  assert.equal(isDemoOrg('org-other'), false)
-  assert.equal(isDemoOrg(null), false)
-  assert.equal(isDemoOrg(undefined), false)
+  assert.equal(isDemoOrganization({ subdomain: 'demo' }), true)
+  assert.equal(isDemoOrganization({ subdomain: 'saltleaf-stays-demo' }), true)
+  assert.equal(isDemoOrganization({ subdomain: 'pottery-house-krabi' }), false)
+  assert.equal(isDemoOrganization({ subdomain: null }), false)
+  assert.equal(isDemoOrganization(null), false)
+  assert.equal(isDemoOrganization(undefined), false)
 
   assert.equal(isDemoHost('demo.krabiclaw.com'), true)
   assert.equal(isDemoHost('demo.krabiclaw.com:443'), true)
@@ -42,7 +43,7 @@ test('isNonIndexableHost classifies staging, cloudflare previews, and demo showc
   assert.equal(isNonIndexableHost('kikuzuki.krabiclaw.com'), false)
 })
 
-test('resolveRuntimeSeoConfig produces non-indexable configuration for demo hosts and demo organization', () => {
+test('resolveRuntimeSeoConfig produces non-indexable configuration for demo hosts and demo organizations', () => {
   const demoHostResult = resolveRuntimeSeoConfig({
     tenantType: TENANT_TYPES.TENANT,
     origin: 'https://demo.krabiclaw.com',
@@ -56,7 +57,7 @@ test('resolveRuntimeSeoConfig produces non-indexable configuration for demo host
     origin: 'https://custom-demo.com',
     hostname: 'custom-demo.com',
     tenantName: 'Ember & Slice',
-    organizationId: DEMO_ORG_ID,
+    tenantSubdomain: 'demo',
   })
   assert.equal(demoOrgResult.indexable, false)
 
@@ -65,7 +66,7 @@ test('resolveRuntimeSeoConfig produces non-indexable configuration for demo host
     origin: 'https://pottery-house-krabi.com',
     hostname: 'pottery-house-krabi.com',
     tenantName: 'Pottery House Krabi',
-    organizationId: 'org-real',
+    tenantSubdomain: 'pottery-house-krabi',
   })
   assert.equal(realTenantResult.indexable, true)
   assert.equal(realTenantResult.name, 'Pottery House Krabi')
@@ -76,7 +77,7 @@ test('resolveRuntimeSeoConfig produces non-indexable configuration for demo host
     hostname: 'krabiclaw.com',
   })
   assert.equal(platformResult.indexable, true)
-  assert.equal(platformResult.name, 'Krabiclaw')
+  assert.equal(platformResult.name, 'KrabiClaw')
 })
 
 test('isTenantOnlySeoPath correctly isolates tenant-specific paths from platform', () => {
@@ -97,7 +98,6 @@ test('isPrivateSeoPath accurately identifies non-indexable application and admin
   assert.equal(isPrivateSeoPath('/api/health'), true)
   assert.equal(isPrivateSeoPath('/dashboard'), true)
   assert.equal(isPrivateSeoPath('/auth/login'), true)
-  assert.equal(isPrivateSeoPath('/tenant-setup-pending'), true)
 
   assert.equal(isPrivateSeoPath('/'), false)
   assert.equal(isPrivateSeoPath('/blog'), false)

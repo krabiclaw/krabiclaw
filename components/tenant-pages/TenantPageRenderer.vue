@@ -104,24 +104,13 @@
         </div>
       </template>
 
-      <template v-else-if="block.type === 'faq'">
-        <section v-if="faqItems(block).length" class="my-12">
-          <h2 v-if="text(block.data.title)" class="mb-6 text-2xl font-semibold">{{ text(block.data.title) }}</h2>
-          <div class="divide-y divide-default rounded-2xl border border-default">
-            <details v-for="(item, index) in faqItems(block)" :key="item.question || index" class="p-5">
-              <summary class="cursor-pointer font-semibold">{{ item.question }}</summary>
-              <div v-if="item.answer" class="prose mt-3 max-w-none whitespace-pre-wrap text-muted">{{ sanitize(item.answer) }}</div>
-            </details>
-          </div>
-        </section>
-      </template>
-
       <template v-else-if="block.type === 'how_to'">
-        <section v-if="howToSteps(block).length" class="my-12">
+        <section class="my-12">
           <h2 v-if="text(block.data.title)" class="mb-6 text-2xl font-semibold">{{ text(block.data.title) }}</h2>
+          <p v-if="text(block.data.description)" class="mb-6 text-muted">{{ text(block.data.description) }}</p>
           <ol class="list-decimal space-y-4 pl-6">
-            <li v-for="(step, index) in howToSteps(block)" :key="index">
-              <p v-if="step.name" class="font-semibold">{{ step.name }}</p>
+            <li v-for="(step, index) in (block.data.steps as TenantPageHowToStep[])" :key="index">
+              <p class="font-semibold">{{ step.name }}</p>
               <p v-if="step.text" class="text-muted">{{ step.text }}</p>
             </li>
           </ol>
@@ -162,13 +151,14 @@
 
       <template v-else-if="block.type === 'feature_grid' || block.type === 'testimonial_grid' || block.type === 'product_grid' || block.type === 'location_grid' || block.type === 'page_grid'">
         <section class="my-12">
-          <h2 v-if="text(block.data.title)" class="mb-6 text-2xl font-semibold">{{ text(block.data.title) }}</h2>
+          <h2 v-if="gridTitle(block)" class="mb-6 text-2xl font-semibold">{{ gridTitle(block) }}</h2>
           <div class="grid gap-5 md:grid-cols-2 lg:grid-cols-3">
             <article v-for="(item, index) in gridItems(block)" :key="item.id || item.title || index" class="rounded-2xl border border-default bg-default p-6 shadow-sm">
               <img v-if="gridItemImage(item)" :src="gridItemImage(item)!.url" :alt="gridItemImage(item)!.alt" class="mb-5 aspect-[4/3] w-full rounded-xl object-cover">
               <p v-if="item.value" class="text-3xl font-bold text-primary">{{ item.value }}</p>
               <h3 v-if="item.title" class="text-lg font-semibold">{{ item.title }}</h3>
-              <p v-if="item.description" class="mt-2 text-sm leading-6 text-muted">{{ item.description }}</p>
+              <span v-if="item.featured" class="mt-2 inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">{{ t('saya.posts.featured') }}</span>
+              <p v-if="item.description || item.address" class="mt-2 text-sm leading-6 text-muted">{{ item.description }}<br v-if="item.description && item.address">{{ item.address }}</p>
               <TenantPageButton v-if="item.url && itemLabel(item)" class="mt-4" :label="itemLabel(item)" :url="item.url" />
             </article>
           </div>
@@ -218,7 +208,7 @@
 
 <script setup lang="ts">
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
-import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
+import type { TenantPageBlock, TenantPageHowToStep } from '~/utils/tenant-page-blocks'
 import type { Component } from 'vue'
 import type { PublicTemplateSlug } from '~/utils/template-registry'
 import { tenantPageBlockPresentation } from '~/utils/tenant-page-presentation'
@@ -235,14 +225,18 @@ const props = withDefaults(defineProps<{ page: PublicTenantPage; template?: Publ
  * page for a template other than the host's — pages/contact/index.vue renders a
  * Saya section on a Blawby host — and the resolved template is the default.
  */
-const { template: resolvedTemplate } = usePublicTemplate()
-const template = computed<PublicTemplateSlug>(() => props.template ?? resolvedTemplate.value.slug)
+const { organization: tenantOrganization } = useTenantOrganization()
+const { template: resolvedTemplate } = tenantOrganization
+const template = computed<PublicTemplateSlug>(() => props.template ?? resolvedTemplate.slug)
 const platformHome = computed(() => template.value === 'platform' && props.page.path === '/')
 
 function presentationOf(block: TenantPageBlock): Component | null {
   return tenantPageBlockPresentation(template.value, block.type)
 }
-const sanitizer = useHtmlSanitizer()
+import { loadDomPurify } from '~/utils/dom-purify-loader'
+import { sanitizeHtmlForSsr } from '~/utils/markdown'
+
+const DOMPurify = import.meta.client ? await loadDomPurify() : { sanitize: sanitizeHtmlForSsr }
 const { t } = useI18n()
 /**
  * The page's blocks, in the order the page carries them — less the one the
@@ -261,14 +255,14 @@ const renderedBlocks = computed(() => {
  */
 const readingColumn = computed(() => template.value === 'saya' && !renderedBlocks.value.some(presentationOf))
 
-type GridItem = { id?: string; title?: string; description?: string; value?: string; media?: Array<{ slot?: string; public_url?: string | null; thumbnail_url?: string | null; alt_text?: string | null; kind?: string | null }>; label?: string; labelKey?: string; url?: string; amount?: string }
+type GridItem = { id?: string; title?: string; description?: string; address?: string; value?: string; featured?: boolean; media?: Array<{ slot?: string; public_url?: string | null; thumbnail_url?: string | null; alt_text?: string | null; kind?: string | null }>; label?: string; labelKey?: string; url?: string; amount?: string }
 
 function text(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
 function sanitize(value: string): string {
-  return sanitizer.sanitize(value)
+  return DOMPurify.sanitize(value)
 }
 
 /**
@@ -304,13 +298,22 @@ function asItems(value: unknown): GridItem[] {
     id: text(item.id) || undefined,
     title: text(item.title) || undefined,
     description: text(item.description) || undefined,
+    address: text(item.address) || undefined,
     value: text(item.value) || undefined,
+    featured: item.featured === true,
     media: Array.isArray(item.media) ? item.media as GridItem['media'] : [],
     label: text(item.label) || undefined,
     labelKey: text(item.labelKey) || undefined,
     url: text(item.url) || undefined,
     amount: item.amount == null ? undefined : String(item.amount),
   }))
+}
+
+function gridTitle(block: TenantPageBlock): string {
+  const title = text(block.data.title)
+  if (title || block.type !== 'product_grid') return title
+  const items = asItems(block.data.items)
+  return items.length && items.every(item => item.featured) ? t('saya.posts.featured') : ''
 }
 
 /**
@@ -374,17 +377,6 @@ function teamItems(block: TenantPageBlock) {
 
 function donationItems(block: TenantPageBlock): GridItem[] {
   return asItems(block.data.tiers)
-}
-
-function howToSteps(block: TenantPageBlock): Array<{ name: string; text: string }> {
-  return Array.isArray(block.data.steps)
-    ? block.data.steps.filter((step): step is Record<string, unknown> => Boolean(step && typeof step === 'object'))
-      .map(step => ({ name: text(step.name), text: text(step.text) })).filter(step => step.name || step.text)
-    : []
-}
-
-function faqItems(block: TenantPageBlock): Array<{ question: string; answer: string }> {
-  return asItems(block.data.items).map(item => ({ question: item.title || '', answer: item.description || '' })).filter(item => item.question)
 }
 
 function buttons(block: TenantPageBlock): Array<{ label: string; url: string }> {

@@ -1,12 +1,16 @@
 import { parsePostalAddress, type PostalAddress } from '~/utils/postal-address'
 import { parseOpeningHours, parseSpecialHours, type OpeningHours, type SpecialHours } from '~/shared/reservation-hours'
-import { organizationEventQuery } from "~/server/utils/organization-events";
-import { executeBatch, queryFirst, type BatchQuery } from "~/server/db";
+import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from "~/server/utils/organization-events";
+import { HTTPError } from 'nitro'
+import { executeBatch, queryAll, queryFirst, type BatchQuery } from "~/server/db";
 import { isValidTimezone, normalizeTimezone } from "~/utils/timezone";
 import type { CloudflareEnv } from "~/server/utils/auth";
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { prepareContentDocumentDeletion } from '~/server/utils/content/documents'
+import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
+import { capacityRefusalOf, executeWithinCapacity, reportBillingUsage } from '~/server/utils/billing'
+import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 
 type SetupEnv = CloudflareEnv;
 
@@ -37,15 +41,21 @@ export interface CreateLocationInput {
   price_level?: string | null;
   rating?: number | null;
   review_count?: number | null;
-  timezone?: string | null;
+  /** The location's IANA timezone. Required — a missing one is refused, never defaulted: every session here is offered in it. */
+  timezone: string | null;
   max_capacity?: number | null;
   seo_title?: string | null;
   seo_description?: string | null;
   canonical_url?: string | null;
+  assigned_member_id?: string | null;
+  assigned_team_id?: string | null;
 }
 
 export interface UpdateLocationInput extends Partial<CreateLocationInput> {
   status?: "active" | "inactive" | "sync_error";
+  /** Where the place is on the map, as its owner placed the pin. Both or neither; null clears both. */
+  latitude?: number | null;
+  longitude?: number | null;
 }
 
 export interface LocationRecord {
@@ -68,20 +78,26 @@ export interface LocationRecord {
   opening_hours?: string | null;
   special_hours?: string | null;
   price_level?: string | null;
-  timezone?: string | null;
+  timezone: string;
   max_capacity?: number | null;
   seo_title?: string | null;
   seo_description?: string | null;
   canonical_url?: string | null;
+  assigned_member_id?: string | null;
+  assigned_team_id?: string | null;
   created_at?: string;
   updated_at?: string;
 }
+
+/** `/locations/new` is the create level, so no location's address may be it. */
+const RESERVED_LOCATION_SLUG = "new";
 
 function toSlug(value: string) {
   const normalized = value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-|-$)/g, "");
+  if (normalized === RESERVED_LOCATION_SLUG) return `${normalized}-location`;
   if (normalized) return normalized;
 
   let hash = 0;
@@ -109,11 +125,18 @@ function isCheckConstraintError(error: unknown) {
 // The one read of a submitted address. A malformed one is the caller's to fix,
 // so it answers 400 on every surface instead of being stored for readers to
 // throw on.
-function readSubmittedAddress(value: unknown): { ok: true; address: PostalAddress | null } | { ok: false; status: 400; data: { error: string } } {
+function locationValidationFailure(error: unknown, field: string) {
+  if (!(error instanceof Error) || !error.message.trim()) {
+    throw new HTTPError({ statusCode: 500, statusMessage: 'Location validation did not provide an error message', data: { code: 'INVALID_LOCATION_ERROR', field } });
+  }
+  return { status: 400 as const, data: { error: error.message, code: 'INVALID_LOCATION_FIELD', field } };
+}
+
+function readSubmittedAddress(value: unknown): { ok: true; address: PostalAddress | null } | { ok: false; status: 400; data: { error: string; code: string; field: string } } {
   try {
     return { ok: true, address: parsePostalAddress(value) };
   } catch (cause) {
-    return { ok: false, status: 400, data: { error: `address is invalid: ${(cause as Error).message}` } };
+    return { ok: false, ...locationValidationFailure(cause, 'address') };
   }
 }
 
@@ -156,11 +179,13 @@ async function loadLocation(
   db: D1Database,
   organizationId: string,
   locationIdOrSlug: string,
+  byIdOnly = false,
 ) {
   const columns = `id, slug, title, phone, email, website_url, maps_url, google_review_url, google_place_id,
            rating, review_count, description, short_description, status,
            address, opening_hours, special_hours, categories, price_level,
            timezone, max_capacity, seo_title, seo_description, canonical_url,
+           assigned_member_id, assigned_team_id,
            created_at, updated_at`;
   // Check id first so a slug that happens to collide with another row's id can
   // never shadow the row actually addressed by that id.
@@ -169,7 +194,7 @@ async function loadLocation(
     `SELECT ${columns} FROM business_locations WHERE id = ? AND organization_id = ?  LIMIT 1`,
     [locationIdOrSlug, organizationId],
   );
-  if (byId) return byId;
+  if (byId || byIdOnly) return byId;
   return queryFirst<LocationRecord>(
     db,
     `SELECT ${columns} FROM business_locations WHERE slug = ? AND organization_id = ?  LIMIT 1`,
@@ -183,11 +208,40 @@ export async function createLocation(
   organizationId: string,
   input: CreateLocationInput,
   userId: string,
-  options: { refreshSocialCardAfterCreate?: boolean } = {},
+  options: { refreshSocialCardAfterCreate?: boolean; idempotencyKey?: string } = {},
 ) {
+  const key = options.idempotencyKey?.trim();
+  if (options.idempotencyKey !== undefined && (!key || key.length > 200)) {
+    return { status: 400, data: { error: 'idempotency_key must be 1 to 200 characters.', code: 'INVALID_LOCATION_FIELD', field: 'idempotency_key' } };
+  }
+  const dedupeKey = key ? creationDedupeKey('location', organizationId, key) : null;
+  const requestHash = dedupeKey ? await creationRequestHash(input) : null;
+  const replay = async () => {
+    if (!dedupeKey) return null;
+    const record = await readCreationRecord(db, dedupeKey);
+    if (!record) return null;
+    if (record.requestHash !== requestHash) throw new HTTPError({ statusCode: 409, statusMessage: 'This idempotency_key was already used for a different location', data: { code: 'IDEMPOTENCY_CONFLICT', field: 'idempotency_key' } });
+    const location = await loadLocation(db, organizationId, record.entityId, true);
+    if (!location) throw new HTTPError({ statusCode: 410, statusMessage: 'The location this idempotency_key created has been deleted; it is not created again', data: { code: 'LOCATION_DELETED', field: 'idempotency_key' } });
+    return location;
+  };
+  const complete = async (location: LocationRecord) => {
+    if (options.refreshSocialCardAfterCreate !== false) {
+      await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: location.id }, actorId: userId });
+    }
+    return { status: 201, data: { success: true, location } };
+  };
+  const earlier = await replay();
+  if (earlier) return complete(earlier);
+
+  const organization = await queryFirst<{ onboarding_status: string }>(db, 'SELECT onboarding_status FROM organization WHERE id = ?', [organizationId]);
+  if (!organization) return { status: 404, data: { error: 'Organization not found.', code: 'ORGANIZATION_NOT_FOUND', field: 'organization_id' } };
+  if (organization.onboarding_status !== 'active') {
+    return { status: 409, data: { error: 'Finish website setup before adding another location.', code: 'ONBOARDING_INCOMPLETE' } };
+  }
   const title = input.title.trim();
   if (!title) {
-    return { status: 400, data: { error: "Location title is required." } };
+    return { status: 400, data: { error: "Location title is required.", code: 'INVALID_LOCATION_FIELD', field: 'title' } };
   }
   const submittedAddress = readSubmittedAddress(input.address);
   if (!submittedAddress.ok) return submittedAddress;
@@ -197,7 +251,7 @@ export async function createLocation(
     input.rating !== null &&
     (input.rating < 0 || input.rating > 5)
   ) {
-    return { status: 400, data: { error: "rating must be between 0 and 5." } };
+    return { status: 400, data: { error: "rating must be between 0 and 5.", code: 'INVALID_LOCATION_FIELD', field: 'rating' } };
   }
   if (
     input.review_count !== undefined &&
@@ -209,6 +263,7 @@ export async function createLocation(
       data: {
         error:
           "review_count must be a whole number greater than or equal to 0.",
+        code: 'INVALID_LOCATION_FIELD', field: 'review_count',
       },
     };
   }
@@ -222,18 +277,16 @@ export async function createLocation(
       data: {
         error:
           "max_capacity must be a whole number greater than or equal to 0.",
+        code: 'INVALID_LOCATION_FIELD', field: 'max_capacity',
       },
     };
   }
 
-  const normalizedTimezone = input.timezone === undefined
-    ? undefined
-    : normalizeTimezone(input.timezone);
-
-  if (normalizedTimezone !== undefined && normalizedTimezone !== null && !isValidTimezone(normalizedTimezone)) {
+  const normalizedTimezone = normalizeTimezone(input.timezone);
+  if (!isValidTimezone(normalizedTimezone)) {
     return {
       status: 400,
-      data: { error: "timezone must be a valid IANA time zone identifier." },
+      data: { error: "timezone is required and must be a valid IANA time zone identifier.", code: 'INVALID_LOCATION_FIELD', field: 'timezone' },
     };
   }
 
@@ -241,19 +294,28 @@ export async function createLocation(
   let specialHours: string | null;
   try {
     openingHours = serializeOpeningHours(input.opening_hours);
+  } catch (error) {
+    return locationValidationFailure(error, 'opening_hours');
+  }
+  try {
     specialHours = serializeSpecialHours(input.special_hours);
   } catch (error) {
-    return {
-      status: 400,
-      data: { error: error instanceof Error ? error.message : "Invalid opening hours." },
-    };
+    return locationValidationFailure(error, 'special_hours');
+  }
+
+  for (const [key, table, column] of [['assigned_member_id', 'member', 'organizationId'], ['assigned_team_id', 'team', 'organizationId']] as const) {
+    if (!(key in input)) continue;
+    const value = input[key];
+    if (value !== null && value !== undefined && (typeof value !== 'string' || !await queryFirst(db, `SELECT 1 FROM ${table} WHERE ${column} = ? AND id = ?`, [organizationId, value]))) {
+      return { status: 422, data: { error: `${key} must be a ${table} of this organization, or null`, code: 'INVALID_LOCATION_FIELD', field: key } };
+    }
   }
 
   const baseSlug = toSlug((input.slug ?? title).trim());
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
 
-  let created: { id: string; location: Awaited<ReturnType<typeof loadLocation>> } | null = null;
+  let created: LocationRecord | null = null;
   for (let attempt = 0; attempt < MAX_SLUG_ATTEMPTS; attempt += 1) {
     const slug = attempt === 0 ? baseSlug : `${baseSlug}-${attempt + 1}`;
 
@@ -266,9 +328,11 @@ export async function createLocation(
             google_review_url, google_place_id, description, short_description, address, opening_hours, special_hours, rating, review_count,
             price_level,
             timezone, max_capacity, status,
-            seo_title, seo_description, canonical_url, created_at, updated_at
+            seo_title, seo_description, canonical_url,
+            assigned_member_id, assigned_team_id,
+            created_at, updated_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         params: [
           id,
@@ -289,11 +353,14 @@ export async function createLocation(
           input.rating ?? null,
           input.review_count ?? null,
           input.price_level ?? null,
-          normalizedTimezone ?? null,
+          normalizedTimezone,
           input.max_capacity ?? null,
+          'active',
           input.seo_title ?? null,
           input.seo_description ?? null,
           input.canonical_url ?? null,
+          input.assigned_member_id ?? null,
+          input.assigned_team_id ?? null,
           now,
           now,
         ],
@@ -307,34 +374,56 @@ export async function createLocation(
         entityId: id,
         metadata: {
           title,
+          ...(dedupeKey ? { request_hash: requestHash } : {}),
         },
+        ...(dedupeKey ? { dedupeKey } : {}),
       }));
+      statements.push(publicResourceCacheInvalidationQuery(organizationId, 'location_created'));
 
-      await executeBatch(db, statements);
-      created = { id, location: await loadLocation(db, organizationId, id) };
+      await executeWithinCapacity(env, db, organizationId, statements, { action: 'create it' });
+      created = await loadLocation(db, organizationId, id, true);
+      if (!created) throw new HTTPError({ statusCode: 500, statusMessage: 'Created location could not be read back', data: { code: 'LOCATION_NOT_READABLE', field: 'location.id' } });
       break;
     } catch (error) {
+      const refusal = capacityRefusalOf(error);
+      if (refusal) return refusal;
+      // The location insert can collide on its slug before the audit key is
+      // reached. Either collision may mean this same request just committed.
+      if (isSlugConflict(error) || isUniqueDedupeConflict(error)) {
+        const concurrent = await replay();
+        if (concurrent) return complete(concurrent);
+      }
       if (isSlugConflict(error)) continue;
       if (isCheckConstraintError(error)) {
-        return { status: 400, data: { error: (error as Error).message } };
+        return { status: 400, data: { error: (error as Error).message, code: 'LOCATION_CONSTRAINT_VIOLATION' } };
       }
       throw error;
     }
   }
 
-  if (created) {
-    if (options.refreshSocialCardAfterCreate !== false) {
-      await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: created.id }, actorId: userId })
-    }
-    return { status: 201, data: { success: true, location: created.location } };
-  }
+  if (created) return complete(created);
 
   return {
     status: 409,
     data: {
       error: `Unable to allocate a unique location slug after ${MAX_SLUG_ATTEMPTS} attempts.`,
+      code: 'LOCATION_SLUG_CONFLICT', field: 'slug',
     },
   };
+}
+
+/** A pin is a latitude and longitude set together, or both cleared; null when the input names a valid one or none. */
+export function coordinatesFailure(input: Pick<UpdateLocationInput, 'latitude' | 'longitude'>): { error: string; field: 'latitude' | 'longitude' } | null {
+  if ((input.latitude === undefined) !== (input.longitude === undefined) || (input.latitude === null) !== (input.longitude === null)) {
+    return { error: "latitude and longitude are set together.", field: input.latitude === undefined || input.latitude === null ? 'latitude' : 'longitude' };
+  }
+  for (const [field, limit] of [["latitude", 90], ["longitude", 180]] as const) {
+    const value = input[field];
+    if (value !== undefined && value !== null && (typeof value !== "number" || !Number.isFinite(value) || Math.abs(value) > limit)) {
+      return { error: `${field} must be a number from -${limit} to ${limit}.`, field };
+    }
+  }
+  return null;
 }
 
 export async function updateLocation(
@@ -343,13 +432,24 @@ export async function updateLocation(
   locationIdOrSlug: string,
   input: UpdateLocationInput,
   userId: string,
-  env?: CloudflareEnv,
+  env: CloudflareEnv,
+  writeGuard?: BatchQuery,
 ) {
   const existing = await loadLocation(db, organizationId, locationIdOrSlug);
   if (!existing) {
-    return { status: 404, data: { error: "Location not found." } };
+    return { status: 404, data: { error: "Location not found.", code: 'LOCATION_NOT_FOUND', field: 'location_id' } };
   }
   const locationId = existing.id;
+  const publishHomes = async (updatedAt: unknown) => {
+    const homes = await queryAll<{ product_id: string }>(db, 'SELECT product_id FROM product_stay_configs WHERE organization_id = ? AND location_id = ?', [organizationId, locationId]);
+    if (!homes.length) return;
+    if (typeof updatedAt !== 'string' || !updatedAt) throw new HTTPError({ statusCode: 500, message: 'The saved home location has no update timestamp', data: { code: 'LOCATION_NOT_READABLE', field: 'location.updated_at', committed: true, location_id: locationId } });
+    for (const home of homes) {
+      const input = { organizationId, productId: home.product_id, locationId, stayId: null };
+      await publishStayInvalidation(env, { ...input, type: 'stay.changed' }, { updated_at: updatedAt });
+      await publishStayInvalidation(env, { ...input, type: 'nights.changed' }, { updated_at: updatedAt });
+    }
+  };
   // What the location's card draws: its title, its description and the
   // locality in its address. Hours, phone and the rest cannot change it.
   const cardInputChanged = input.title !== undefined || input.seo_title !== undefined
@@ -357,11 +457,11 @@ export async function updateLocation(
     || input.description !== undefined || input.address !== undefined
 
   if (Object.keys(input).length === 0) {
-    return { status: 400, data: { error: "No update fields provided." } };
+    return { status: 400, data: { error: "No update fields provided.", code: 'EMPTY_LOCATION_UPDATE' } };
   }
 
   if (input.title !== undefined && !input.title.trim()) {
-    return { status: 400, data: { error: "title cannot be empty." } };
+    return { status: 400, data: { error: "title cannot be empty.", code: 'INVALID_LOCATION_FIELD', field: 'title' } };
   }
   const submittedAddress = input.address === undefined ? undefined : readSubmittedAddress(input.address);
   if (submittedAddress && !submittedAddress.ok) return submittedAddress;
@@ -371,7 +471,7 @@ export async function updateLocation(
     input.rating !== null &&
     (input.rating < 0 || input.rating > 5)
   ) {
-    return { status: 400, data: { error: "rating must be between 0 and 5." } };
+    return { status: 400, data: { error: "rating must be between 0 and 5.", code: 'INVALID_LOCATION_FIELD', field: 'rating' } };
   }
   if (
     input.review_count !== undefined &&
@@ -383,6 +483,7 @@ export async function updateLocation(
       data: {
         error:
           "review_count must be a whole number greater than or equal to 0.",
+        code: 'INVALID_LOCATION_FIELD', field: 'review_count',
       },
     };
   }
@@ -396,18 +497,29 @@ export async function updateLocation(
       data: {
         error:
           "max_capacity must be a whole number greater than or equal to 0.",
+        code: 'INVALID_LOCATION_FIELD', field: 'max_capacity',
       },
     };
   }
+  const coordinates = coordinatesFailure(input);
+  if (coordinates) return { status: 400, data: { ...coordinates, code: 'INVALID_LOCATION_FIELD' } };
   const normalizedTimezone = input.timezone === undefined
     ? undefined
     : normalizeTimezone(input.timezone);
 
-  if (normalizedTimezone !== undefined && normalizedTimezone !== null && !isValidTimezone(normalizedTimezone)) {
+  if (normalizedTimezone !== undefined && !isValidTimezone(normalizedTimezone)) {
     return {
       status: 400,
-      data: { error: "timezone must be a valid IANA time zone identifier." },
+      data: { error: "timezone must be a valid IANA time zone identifier; a location cannot be without one.", code: 'INVALID_LOCATION_FIELD', field: 'timezone' },
     };
+  }
+
+  for (const [key, table, column] of [['assigned_member_id', 'member', 'organizationId'], ['assigned_team_id', 'team', 'organizationId']] as const) {
+    if (!(key in input)) continue;
+    const value = input[key];
+    if (value !== null && value !== undefined && (typeof value !== 'string' || !await queryFirst(db, `SELECT 1 FROM ${table} WHERE ${column} = ? AND id = ?`, [organizationId, value]))) {
+      return { status: 422, data: { error: `${key} must be a ${table} of this organization, or null`, code: 'INVALID_LOCATION_FIELD', field: key } };
+    }
   }
 
   const now = new Date().toISOString();
@@ -440,10 +552,14 @@ export async function updateLocation(
     "google_place_id",
     "timezone",
     "max_capacity",
+    "latitude",
+    "longitude",
     "status",
     "seo_title",
     "seo_description",
     "canonical_url",
+    "assigned_member_id",
+    "assigned_team_id",
   ] as const;
 
   for (const field of simpleFields) {
@@ -466,13 +582,7 @@ export async function updateLocation(
       sets.push("opening_hours = ?");
       params.push(serializeOpeningHours(input.opening_hours));
     } catch (error) {
-      return {
-        status: 400,
-        data: {
-          error:
-            error instanceof Error ? error.message : "Invalid opening_hours.",
-        },
-      };
+      return locationValidationFailure(error, 'opening_hours');
     }
   }
   if (input.special_hours !== undefined) {
@@ -480,13 +590,7 @@ export async function updateLocation(
       sets.push("special_hours = ?");
       params.push(serializeSpecialHours(input.special_hours));
     } catch (error) {
-      return {
-        status: 400,
-        data: {
-          error:
-            error instanceof Error ? error.message : "Invalid special_hours.",
-        },
-      };
+      return locationValidationFailure(error, 'special_hours');
     }
   }
   if (input.rating !== undefined) {
@@ -525,13 +629,17 @@ export async function updateLocation(
       },
       onlyIfPreviousChangedOneRow: true,
     }));
+    // The site changed: recorded with the change, so its caches and search index follow it.
+    statements.push(publicResourceCacheInvalidationQuery(organizationId, 'location_updated'));
 
-    const results = await executeBatch(db, statements);
-    return (results[0]?.meta?.changes ?? 0) === 1;
+    // An inactive location is off the site and is not counted; making it
+    // active again is refused past the locations Basic includes.
+    const results = await executeWithinCapacity(env, db, organizationId, [...(writeGuard ? [writeGuard] : []), ...statements], { action: 'make it active' });
+    return (results[writeGuard ? 1 : 0]?.meta?.changes ?? 0) === 1;
   };
   const stale = {
     status: 409,
-    data: { error: "The location changed since it was read. Reload it and try again." },
+    data: { error: "The location changed since it was read. Reload it and try again.", code: 'LOCATION_VERSION_CONFLICT', field: 'expected_updated_at' },
   };
 
   if (slugBase && slugParamIndex !== null) {
@@ -548,19 +656,23 @@ export async function updateLocation(
           organizationId,
           locationId,
         );
+        if (!location) throw new HTTPError({ statusCode: 500, statusMessage: 'Updated location could not be read back', data: { code: 'LOCATION_NOT_READABLE', field: 'location.id' } });
         updated = { location };
         break;
       } catch (error) {
+        const refusal = capacityRefusalOf(error);
+        if (refusal) return refusal;
         if (isSlugConflict(error)) continue;
         if (isCheckConstraintError(error)) {
-          return { status: 400, data: { error: (error as Error).message } };
+          return { status: 400, data: { error: (error as Error).message, code: 'LOCATION_CONSTRAINT_VIOLATION' } };
         }
         throw error;
       }
     }
 
     if (updated) {
-      if (env && cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId })
+      if (cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId })
+      await publishHomes(updated.location?.updated_at);
       return { status: 200, data: { success: true, location: updated.location } };
     }
 
@@ -568,14 +680,23 @@ export async function updateLocation(
       status: 409,
       data: {
         error: `Unable to allocate a unique location slug after ${MAX_SLUG_ATTEMPTS} attempts.`,
+        code: 'LOCATION_SLUG_CONFLICT', field: 'slug',
       },
     };
   }
 
   params.push(locationId, organizationId);
-  if (!(await runUpdate(params))) return stale;
+  try {
+    if (!(await runUpdate(params))) return stale;
+  } catch (error) {
+    const refusal = capacityRefusalOf(error);
+    if (refusal) return refusal;
+    throw error;
+  }
   const location = await loadLocation(db, organizationId, locationId);
-  if (env && cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId })
+  if (!location) throw new HTTPError({ statusCode: 500, statusMessage: 'Updated location could not be read back', data: { code: 'LOCATION_NOT_READABLE', field: 'location.id' } });
+  if (cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId })
+  await publishHomes(location.updated_at);
   return { status: 200, data: { success: true, location } };
 }
 
@@ -590,8 +711,12 @@ export async function deleteLocation(
     return { status: 404, data: { error: "Location not found." } };
   }
   const locationId = existing.id;
+  const checkoutConflict = { status: 409, data: { error: "This location has an active checkout. Leave it in place until checkout finishes." } };
+  if (await queryFirst(db, "SELECT 1 FROM payment_checkout_holds WHERE organization_id=? AND location_id=? AND status='active' AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') LIMIT 1", [organizationId, locationId])) return checkoutConflict;
   const now = new Date().toISOString();
   const statements = [
+    { query: `UPDATE business_locations SET updated_at=NULL WHERE id=? AND organization_id=?
+      AND EXISTS (SELECT 1 FROM payment_checkout_holds WHERE organization_id=? AND location_id=? AND status='active' AND expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))`, params: [locationId, organizationId, organizationId, locationId] },
     ...prepareContentDocumentDeletion({ locationId, organizationId}),
     ...resourceLocalizationDeletionQueries('business_location', { query: 'SELECT id FROM business_locations WHERE id = ? AND organization_id = ?', params: [locationId, organizationId] }),
     // Deleting a location does NOT delete the products it offered: the
@@ -637,12 +762,18 @@ export async function deleteLocation(
     },
   ];
 
-  const batchResults = await executeBatch(db, statements);
+  let batchResults;
+  try { batchResults = await executeBatch(db, statements); }
+  catch (error) {
+    if (/NOT NULL constraint failed: business_locations\.updated_at/.test(error instanceof Error ? error.message : String(error))) return checkoutConflict;
+    throw error;
+  }
   const deleteResult = batchResults.at(-1);
 
   if (!deleteResult?.meta.changes) {
     return { status: 404, data: { error: "Location not found." } };
   }
+  await reportBillingUsage(env, db, organizationId);
 
   return {
     status: 200,

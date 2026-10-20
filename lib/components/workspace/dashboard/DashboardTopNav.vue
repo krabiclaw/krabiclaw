@@ -1,6 +1,6 @@
 <template>
   <header
-    class="fixed inset-x-0 top-0 z-30 h-(--kc-dashboard-top-nav) items-center gap-4 border-b border-default bg-default px-(--kc-nav-gutter)"
+    class="fixed inset-x-0 top-(--kc-dashboard-banner) z-30 h-(--kc-dashboard-top-nav) items-center gap-4 border-b border-default bg-default px-4 sm:px-6"
     :class="items.length
       ? 'hidden md:grid md:grid-cols-[1fr_auto_1fr]'
       : 'grid grid-cols-[1fr_auto]'"
@@ -9,12 +9,12 @@
     <NuxtLink :to="homeTo" class="group flex w-fit shrink-0 items-center gap-2.5 no-underline">
       <img
         src="/platform/krabiclaw-symbol.svg"
-        alt="Krabiclaw"
+        alt="KrabiClaw"
         width="36"
         height="36"
         class="size-8 rounded-[9px] transition-transform duration-200 group-hover:rotate-12"
       >
-      <span class="kc-wordmark hidden text-[19px] lg:inline">
+      <span class="kc-wordmark hidden text-xl lg:inline">
         <span class="kc-wordmark__krabi">krabi</span><span class="kc-wordmark__claw">claw</span>
       </span>
     </NuxtLink>

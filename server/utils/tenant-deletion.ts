@@ -29,11 +29,11 @@ async function ownedImageIds(db: DbClient, organizationId: string): Promise<stri
 }
 
 /**
- * Krabiclaw-specific cleanup Better Auth cannot perform.
+ * KrabiClaw-specific cleanup Better Auth cannot perform.
  *
  * The Better Auth organization lifecycle owns authorization, subscription
  * gating and the organization/member deletion itself. This function only
- * releases the Cloudflare resources D1 cannot cascade to. The organization's
+ * releases the Channex and Cloudflare resources D1 cannot cascade to. The organization's
  * rows, including its integration selections and imported content, go with the
  * organization through the schema's ON DELETE CASCADE. Provider credentials are
  * the user's Better Auth linked accounts and are not the organization's to
@@ -42,9 +42,14 @@ async function ownedImageIds(db: DbClient, organizationId: string): Promise<stri
 export async function cleanupOrganizationBeforeDelete(
   env: CloudflareEnv,
   organizationId: string,
+  userId: string,
 ): Promise<void> {
   const db = env.DB
   await retainPaymentsForTenantDeletion(db, organizationId)
+  // Its Airbnb channel, Channex properties and group go first: a failure there
+  // keeps the organization, so nothing in Channex outlives it unowned.
+  const { AirbnbConnection } = await import('~/server/integrations/channex/airbnb-connection')
+  await new AirbnbConnection(db, env, organizationId, userId).deleteForOrganization()
   await stageCalendarOrganizationCleanup(db, organizationId)
   await deleteOrganizationCustomDomains(env, db, organizationId)
 
@@ -59,30 +64,33 @@ export async function cleanupOrganizationBeforeDelete(
  */
 export type AbandonedDraftTenantOutcome =
   | { removed: 'organization' | 'nothing' }
-  | { refused: 'organization_is_live' | 'not_owner' | 'delete_incomplete' }
+  | { refused: 'organization_is_live' | 'not_owner' | 'delete_incomplete' | 'draft_changed' }
 
 /**
  * Abandoning an onboarding draft is an internal token-scoped cleanup rather
  * than the signed-in organization-delete product action. It still reuses the
- * same Krabiclaw resource cleanup before removing the Better Auth organization.
+ * same KrabiClaw resource cleanup before removing the Better Auth organization.
  */
 export async function deleteAbandonedDraftTenant(
   env: CloudflareEnv,
-  claim: { organizationId: string; subdomain: string; userId: string },
+  claim: { draftId: string; updatedAt: string; organizationId: string; subdomain: string; userId: string },
 ): Promise<AbandonedDraftTenantOutcome> {
   const db = env.DB
   const { organizationId, subdomain, userId } = claim
 
+  const draft = await queryFirst<{ id: string; subdomain: string | null; onboarding_status: string }>(db, 'SELECT id, subdomain, onboarding_status FROM organization WHERE id = ? LIMIT 1', [organizationId])
+  if (!draft) return { removed: 'nothing' }
+  if (draft.subdomain !== null && draft.subdomain !== subdomain) return { refused: 'draft_changed' }
+  if (draft.onboarding_status === 'active') return { refused: 'organization_is_live' }
+  if (!['pending', 'failed'].includes(draft.onboarding_status)) return { refused: 'draft_changed' }
   const membership = await resolveOrganizationMembership(env, { organizationId, userId })
   if (membership?.role !== 'owner') return { refused: 'not_owner' }
+  const abandoned = await queryFirst<{ id: string }>(db, "SELECT id FROM onboarding_drafts WHERE id = ? AND user_id = ? AND organization_id = ? AND subdomain_candidate = ? AND status = 'abandoned' AND updated_at = ?", [claim.draftId, userId, organizationId, subdomain, claim.updatedAt])
+  if (!abandoned) return { refused: 'draft_changed' }
 
-  const draft = await queryFirst<{ id: string; onboarding_status: string }>(db, `
-    SELECT id, onboarding_status FROM organization WHERE id = ? AND subdomain = ? LIMIT 1
-  `, [organizationId, subdomain])
-  if (!draft) return { removed: 'nothing' }
-  if (draft.onboarding_status === 'active') return { refused: 'organization_is_live' }
-
-  await cleanupOrganizationBeforeDelete(env, organizationId)
+  await cleanupOrganizationBeforeDelete(env, organizationId, userId)
+  const current = await queryFirst<{ id: string }>(db, "SELECT d.id FROM onboarding_drafts d JOIN organization o ON o.id = d.organization_id WHERE d.id = ? AND d.user_id = ? AND d.organization_id = ? AND d.status = 'abandoned' AND d.updated_at = ? AND o.onboarding_status IN ('pending', 'failed')", [claim.draftId, userId, organizationId, claim.updatedAt])
+  if (!current) return { refused: 'draft_changed' }
   const adapter = await organizationAdapter(env)
   await adapter.deleteOrganization(organizationId)
 

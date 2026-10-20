@@ -15,6 +15,13 @@ setup. `.env` is the single local configuration for Nuxt, Wrangler, setup script
 and E2E tests; `.env.example` is the maintained template. Both `yarn dev` and
 `yarn dev:worker` use port 3000 by default.
 
+The built local Worker must receive each tenant's `<subdomain>.localhost`
+hostname, including onboarding and editor preview iframes. Leave Wrangler's
+`dev.host` and `--host` unset: these override the forwarded hostname rather
+than choosing the local listening address. The `e2e` environment sets
+`routes = []` so Wrangler does not infer a production upstream hostname from
+inherited deployment routes. Use `--port` to choose another local port.
+
 `yarn dev` also starts a second local Worker, `krabiclaw-guest-inbox-hub`, from
 `server/cloudflare/dev/wrangler.toml`. Wrangler's platform proxy cannot host a
 Durable Object whose class lives in the proxied Worker, so under `nuxt dev` the
@@ -22,11 +29,31 @@ Durable Object whose class lives in the proxied Worker, so under `nuxt dev` the
 through Wrangler's dev registry instead. The built Worker (`yarn dev:worker`,
 staging, production) exports the class itself and never uses it.
 
+`build/guest-inbox-hub-dev.ts` starts that Worker once for the life of the
+`nuxt dev` process and stops it when Nuxt closes; a Nitro rebuild does not
+restart it. Wrangler's registry will not hand a name to a new instance while
+another instance touched it in the last 90 seconds, so a hub restarted per
+rebuild left every call going to the dead one for that long. After a server
+that was killed rather than stopped, the same 90 seconds apply once.
+
+Nitro's dev server runs the app in a worker thread and replaces that thread on
+every rebuild. `patches/env-runner-npm-*.patch` makes it shut the old thread
+down through its own close hooks rather than terminating it, so the Wrangler
+platform proxy that `server/plugins/00.cloudflare-dev-bindings.ts` starts in
+each thread is disposed with it. Without that, each rebuild left another
+Miniflare holding the local D1 file until queries failed with `SQLITE_BUSY`.
+
+The auxiliary Worker loads the same root `.env`, derives its database binding
+from the root Wrangler `dev` environment, and shares the root local persistence
+directory. Its broadcasts authorize connected members through Better Auth
+against the same local database as the application.
+
 That covers every server-side call to the hub, so opening a conversation with
 unread notifications works under `yarn dev`. The dashboard's live inbox socket
-does not: Nitro's dev server answers the WebSocket upgrade with a plain 200,
-so the browser client keeps reconnecting and the inbox refreshes on
-navigation only. Use `yarn dev:worker` to work on the realtime inbox.
+does not: Nitro's dev server answers the WebSocket upgrade with a plain 200.
+Under `nuxt dev` the dashboard therefore does not open the socket at all, shows
+no live-connection banner, and refreshes on navigation only. Use
+`yarn dev:worker` to work on the realtime inbox.
 
 If an older checkout has `.dev.vars` or `.dev.vars.<environment>`, merge its
 needed values into `.env`, resolve conflicting values explicitly, then remove
@@ -61,7 +88,8 @@ reconciliation reports `zaraz_absent` without calling Cloudflare. Declaring it
 absent while `CF_ZONE_ID` is set fails as a configuration error.
 
 `local:setup` is safe to repeat: it applies the migration chain, refreshes
-the demo, Kikuzuki, Pottery House, and NCLS fixtures, copies the shared review credential, and
+the demo, Kikuzuki, Pottery House, and NCLS fixtures, copies the shared review credential,
+gives every copied subscription a test-mode equivalent (`billing:test-mode`), and
 verifies the resulting D1 database. Do not replace its steps with direct
 Wrangler writes or a hand-edited local database.
 
@@ -102,7 +130,7 @@ first run — a card is rendered and uploaded per product, post and page. Reques
 process five owners at a time. Each generated or reused PNG is fetched and its
 1200×630 dimensions checked; every skipped or failed owner is reported. Re-running
 reuses matching cards. Use `--organization-id` to limit it to one organization;
-Krabiclaw's own site is an ordinary organization here.
+KrabiClaw's own site is an ordinary organization here.
 
 Approved `client:import --apply` runs this same generator for the imported site
 and then `client:verify`; failed generation or verification prevents handoff.
@@ -120,7 +148,11 @@ repair or add it to recurring schedules or every deployment. Staging deploys
 apply migrations; they do not refresh production data. A same-environment
 replacement names its previous database with `--source`, carries that source's
 keys, and follows the release contract. Replacement deltas require an explicit
-source; production loads always require one.
+source; production loads always require one. Follow a staging refresh with
+`corepack yarn billing:test-mode --staging`: the copy carries production's live-mode
+Stripe subscriptions, which staging's test-mode key cannot read, and that step points
+each one at a test-mode equivalent at the price Better Auth knows its plan by: an
+offered plan's current price, a retired plan's own contract price.
 
 Local setup copies production through `db:pull:local`.
 One SQL read captures the tables and rows from the same database revision.
@@ -153,6 +185,31 @@ suite; after `local:setup`, create it for manual use with the Worker running:
 ```sh
 corepack yarn local:actors
 ```
+
+### Native app development accounts on staging
+
+Debug builds of the native app sign in to KrabiClaw **staging** with email and
+password (`docs/shared-auth-contract.md` D9). `local:actors` only reaches a
+local Worker, so a platform admin creates these accounts once on staging
+through Better Auth's admin API, verified so they can sign in immediately. Use
+addresses at an alias the operator owns, and a password kept with the team's
+credentials, never in the repository:
+
+```sh
+STAGING=https://staging.krabiclaw.com
+curl -sS -c /tmp/staging-admin.jar -H "origin: $STAGING" -H 'content-type: application/json' \
+  -d '{"email":"<platform admin email>","password":"<platform admin password>"}' \
+  "$STAGING/api/auth/sign-in/email"
+curl -sS -b /tmp/staging-admin.jar -H "origin: $STAGING" -H 'content-type: application/json' \
+  -d '{"email":"<native-owner alias>","name":"Native Owner","password":"<shared dev password>","role":"user","data":{"emailVerified":true}}' \
+  "$STAGING/api/auth/admin/create-user"
+rm /tmp/staging-admin.jar
+```
+
+Repeat the second call for each role the app needs to exercise (an owner who
+creates a lodging organization, and a co-host and cleaner who join it through an
+invite link). Each answers `{"user":{…}}`; then sign in once from the app to
+confirm.
 
 `schema:local` applies new forward migrations when the schema changes. A rare
 replacement baseline, such as the v6 WNAM cutover, starts a new migration
@@ -191,14 +248,14 @@ carries one tenant segment, the organization's slug.
 | Tenant | Organization segment (`orgSlug`) |
 | --- | --- |
 | Ember & Slice | `ember-slice-demo` |
-| Pottery House | `pottery-house-krabi` |
-| Kikuzuki | `kikuzuki-krabi-thailand` |
+| Pottery House | `org-user-pottery-house` |
+| Kikuzuki | `org-bVY8SxxUuG6Ctk2CQnfCk8T2cPsj4jJX` |
 | NCLS | `north-carolina-legal-services` |
 
 For example, Kikuzuki starts at:
 
 ```text
-http://localhost:3000/dashboard/kikuzuki-krabi-thailand
+http://localhost:3000/dashboard/org-bVY8SxxUuG6Ctk2CQnfCk8T2cPsj4jJX
 ```
 
 The subdomain is the tenant's public address, not a dashboard segment: Kikuzuki

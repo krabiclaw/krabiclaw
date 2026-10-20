@@ -1,7 +1,7 @@
-// A booking has two ways in — its own screen under Today, and the day it is on
-// in the calendar — and Back is read from the route tree, not from history
+// A booking opens under Today or its calendar day; a home's occupied night
+// opens its stay directly under Calendar. Back is read from the route tree, not from history
 // (useRouteLevel). One page can only sit in one tree, so the booking tree is
-// mounted a second time under the calendar day: the same files, a second set
+// mounted beneath its calendar parents: the same files, another set
 // of records, the way the localized public aliases are.
 //
 // The root mount's exit and tab are decided here with the mounts, not in the
@@ -18,7 +18,8 @@ export interface PageNode {
 }
 
 const BOOKING_PATH = '/dashboard/:orgSlug()/bookings/:bookingType()/:bookingId()'
-const DAY_PATH = '/dashboard/:orgSlug()/calendar/:day()'
+const CALENDAR_PATH = '/dashboard/:orgSlug()/calendar'
+const DAY_PATH = `${CALENDAR_PATH}/:day()`
 // The account's own record lives under Past activity. Today opens it at
 // `/dashboard/account/bookings` with Back to Today, and its calendar day mounts
 // it a third time, as the business's does.
@@ -48,11 +49,17 @@ export function renamed(node: PageNode, from: string, to: string): PageNode {
 
 export function mountBookingRoutes(pages: PageNode[]): void {
   const booking = nodeAt(pages, BOOKING_PATH)
+  const calendar = nodeAt(pages, CALENDAR_PATH)
   const day = nodeAt(pages, DAY_PATH)
-  if (!booking || !day) throw new Error('The booking and calendar day pages were not both found; the calendar cannot open a booking')
+  if (!booking || !calendar || !day) throw new Error('The booking, calendar and calendar day pages were not all found; the calendar cannot open a booking')
   const clone = renamed(booking, 'dashboard-orgSlug-bookings', 'dashboard-orgSlug-calendar-day')
   clone.path = ':bookingType()/:bookingId()'
   day.children = [...(day.children ?? []), clone]
+  // A home's occupied night opens its stay directly: its parent is the nightly
+  // Calendar, rather than an agenda day whose state belongs to a location.
+  const night = renamed(booking, 'dashboard-orgSlug-bookings', 'dashboard-orgSlug-calendar-night')
+  night.path = ':bookingType(stay)/:bookingId()'
+  calendar.children = [...(calendar.children ?? []), night]
   booking.meta = { ...booking.meta, tab: 'today', back: 'dashboard-orgSlug' }
 
   const record = nodeAt(pages, ACCOUNT_RECORD_PATH)

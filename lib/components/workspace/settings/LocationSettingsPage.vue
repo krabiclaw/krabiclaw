@@ -50,7 +50,9 @@ export interface BusinessLocation {
   review_count: number | null
   status: string
   last_synced_at: string | null
-  timezone?: string | null
+  timezone: string
+  assigned_member_id: string | null
+  assigned_team_id: string | null
 }
 
 /**
@@ -59,8 +61,74 @@ export interface BusinessLocation {
  * rest are the gear's.
  */
 export const HUB_KEYS = ['name', 'description', 'hours', 'address', 'contact', 'reservations'] as const
-export const SETTINGS_KEYS = ['status', 'slug'] as const
+export const SETTINGS_KEYS = ['assignment', 'status'] as const
 export type LocationEditorKey = typeof HUB_KEYS[number] | typeof SETTINGS_KEYS[number]
+
+/** `/locations/new`: the location record before it exists. */
+export const NEW_LOCATION_SLUG = 'new'
+/** What creating a location will not go without: what names it, and the clock its sessions run on. */
+export const NEW_LOCATION_SECTIONS = ['name', 'hours'] as const
+export type NewLocationSection = typeof NEW_LOCATION_SECTIONS[number]
+
+function blankLocationDraft() {
+  return { title: '', hours: { timezone: '', hours: null, specialHours: null } as LocationHoursForm }
+}
+
+/**
+ * The new location's draft and its create walk (DESIGN.md, Creating). The draft
+ * outlives the walk between its sections, which remount the level, so it is
+ * `useState` keyed to the record. The commit creates the location and opens it.
+ */
+export function useNewLocation(organizationId: string, openKey: NewLocationSection | null) {
+  const route = useRoute()
+  const dashboardApi = useDashboardApi()
+  const dashboard = useDashboardOrganization()
+  const draft = useState(`location-draft-${organizationId}-${NEW_LOCATION_SLUG}`, blankLocationDraft)
+  const creating = ref(false)
+  const createError = ref<string | null>(null)
+  const isNew = computed(() => route.params.locationSlug === NEW_LOCATION_SLUG)
+  const recordPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/locations/${NEW_LOCATION_SLUG}`)
+
+  async function commit() {
+    creating.value = true
+    createError.value = null
+    try {
+      const response = await dashboardApi<{ success: true; location: { slug: string } }>('/api/dashboard/locations', {
+        method: 'POST',
+        body: {
+          title: draft.value.title.trim(),
+          timezone: draft.value.hours.timezone,
+          opening_hours: parseOpeningHours(draft.value.hours.hours),
+          special_hours: parseSpecialHours(draft.value.hours.specialHours),
+        },
+        validate: (value): value is { success: true; location: { slug: string } } =>
+          isRecord(value) && value.success === true && isRecord(value.location) && typeof value.location.slug === 'string',
+      }).catch((error: unknown) => {
+        createError.value = getErrorMessage(error, 'The location could not be added')
+        return null
+      })
+      if (!response) return
+      draft.value = blankLocationDraft()
+      await dashboard.refresh()
+      await navigateTo(`/dashboard/${String(route.params.orgSlug)}/locations/${response.location.slug}`, { replace: true })
+    } finally {
+      creating.value = false
+    }
+  }
+
+  const walk = useCreateWalk<NewLocationSection>({
+    recordPath,
+    isNew,
+    openKey: computed(() => openKey ?? NEW_LOCATION_SECTIONS[0]),
+    labels: { name: 'Name', hours: 'Hours' },
+    order: NEW_LOCATION_SECTIONS,
+    missing: key => key === 'name' ? !draft.value.title.trim() : !draft.value.hours.timezone,
+    noun: 'location',
+    saving: creating,
+    commit,
+  })
+  return { isNew, draft, creating, createError, ...walk }
+}
 
 /**
  * One location's editable state and the save for one of its concerns. The
@@ -81,6 +149,9 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   const scope = getCurrentScope()
   const settingsBase = computed(() => toValue(settingsPath))
   const route = useRoute()
+  // A leaf of the record that does not exist yet writes the draft and walks on.
+  const newLocation = useNewLocation(organizationId, key === 'name' || key === 'hours' ? key : null)
+  const isNew = newLocation.isNew
   const dashboardApi = useDashboardApi()
     const editorError = ref<string | null>(null)
   const dashboard = useDashboardOrganization()
@@ -99,6 +170,8 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       && (value.address === null || isRecord(value.address))
       && isNullableString(value.phone)
       && isNullableString(value.google_place_id)
+      && isNullableString(value.assigned_member_id)
+      && isNullableString(value.assigned_team_id)
   }
   const isLocationResponse = (value: unknown): value is { success: true; location: BusinessLocation } =>
     isRecord(value) && value.success === true && isBusinessLocation(value.location)
@@ -153,6 +226,8 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     short_description: '',
     description: '',
     status: 'active',
+    assigned_member_id: null as string | null,
+    assigned_team_id: null as string | null,
   })
   const organizationLocalizationSettingsPath = computed(() => `/dashboard/${route.params.orgSlug}/website/localization`)
   const locationLocalizationFields = computed(() => [
@@ -189,32 +264,42 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     detailsForm.postalCode = loc.address?.postalCode ?? ''
     detailsForm.short_description = loc.short_description ?? ''
     detailsForm.description = loc.description ?? ''
-    hoursForm.value = { timezone: loc.timezone ?? '', hours: parseOpeningHours(loc.opening_hours), specialHours: parseSpecialHours(loc.special_hours) }
+    hoursForm.value = { timezone: loc.timezone, hours: parseOpeningHours(loc.opening_hours), specialHours: parseSpecialHours(loc.special_hours) }
     detailsForm.status = loc.status
-    }
+    detailsForm.assigned_member_id = loc.assigned_member_id
+    detailsForm.assigned_team_id = loc.assigned_team_id
+  }
 
-  const slugSummary = computed(() => location.value?.slug?.trim() || 'Not set')
-  const statusSummary = computed(() => location.value?.status === 'active' ? 'Active' : 'Hidden from the public site')
+  const { data: schedulingMembers, error: schedulingMembersError } = await useMemberSchedulingList(() => organizationId)
+  const assignmentSummary = computed(() => {
+    if (!detailsForm.assigned_team_id && !detailsForm.assigned_member_id) return 'Administrators'
+    if (schedulingMembersError.value) return 'Team members could not be loaded'
+    if (!schedulingMembers.value) return 'Loading team members…'
+    if (detailsForm.assigned_team_id) return schedulingMembers.value.teams.find(t => t.id === detailsForm.assigned_team_id)?.name ?? 'Assigned team'
+    return schedulingMembers.value.members.find(m => m.id === detailsForm.assigned_member_id)?.name ?? 'Assigned member'
+  })
+
+  const statusSummary = computed(() => location.value?.status === 'active' ? 'Published' : 'Draft')
   const navigationGroups = computed(() => [{
     id: 'settings',
     items: [
+      { id: 'assignment', label: 'Team assignment', summary: assignmentSummary.value, to: `${settingsBase.value}/assignment` },
       { id: 'status', label: 'Status', summary: statusSummary.value, to: `${settingsBase.value}/status` },
-      { id: 'slug', label: 'Link', summary: slugSummary.value, to: `${settingsBase.value}/slug` },
-      { id: 'languages', label: 'Languages', summary: 'Translate the name, description and address', to: `${settingsBase.value}?editMode=translations` },
+      { id: 'languages', icon: 'i-lucide-languages', label: 'Languages', summary: 'Translate the name, description and address', to: `${settingsBase.value}?editMode=translations` },
     ],
   }])
 
   // Every write this screen can be in the middle of, including the one that
   // stops reservations: Save stayed live during that delete, and a save landing
   // on top of it recreated the policy it had just removed.
-  const saving = computed(() => detailsSaving.value || reservationSaving.value || closingReservations.value)
+  const saving = computed(() => detailsSaving.value || reservationSaving.value || closingReservations.value || newLocation.creating.value)
 
   function editorSignature(key: string | null): string {
     switch (key) {
       case 'name': return JSON.stringify(detailsForm.title)
-      case 'slug': return JSON.stringify(detailsForm.slug)
       case 'address': return JSON.stringify([detailsForm.addressLines, detailsForm.regionCode, detailsForm.locality, detailsForm.sublocality, detailsForm.administrativeArea, detailsForm.postalCode])
       case 'contact': return JSON.stringify([detailsForm.phone, detailsForm.email])
+      case 'assignment': return JSON.stringify([detailsForm.assigned_member_id, detailsForm.assigned_team_id])
       case 'status': return JSON.stringify(detailsForm.status)
       case 'hours': return JSON.stringify(hoursForm.value)
       case 'description': return JSON.stringify([detailsForm.short_description, detailsForm.description, detailsForm.price_level])
@@ -224,7 +309,6 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   }
   const validationMessage = computed(() => {
     if (key === 'name' && !detailsForm.title.trim()) return 'Enter a location name.'
-    if (key === 'slug' && !detailsForm.slug.trim()) return 'Enter a location slug.'
     if (key === 'contact') {
       if (detailsForm.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(detailsForm.email)) return 'Enter a valid email address.'
     }
@@ -238,9 +322,9 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     return null
   })
   const dirty = computed(() => editorSignature(key) !== originalSignature.value)
-  const saveDisabled = computed(() => {
-    return !dirty.value || validationMessage.value !== null
-  })
+  const saveDisabled = computed(() => isNew.value
+    ? newLocation.saveDisabled.value || validationMessage.value !== null
+    : !dirty.value || validationMessage.value !== null)
 
 
   function resetDraft() {
@@ -286,7 +370,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     try {
       await dashboardApi<{ success: true; config: LocationReservationConfig | null }>(
         `/api/editor/organizations/${organizationId}/locations/${requestedLocationId}/reservation-config`,
-        { method: 'PUT', body: reservationForm.value, validate: isReservationConfigResponse },
+        { method: 'PUT', body: { ...reservationForm.value, expected_updated_at: reservationConfig.value?.updated_at ?? null }, validate: isReservationConfigResponse },
       )
       if (locationId.value !== requestedLocationId) return
       await refreshLocationWorkspace()
@@ -327,10 +411,6 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       await patchLocation({ title: detailsForm.title.trim() })
       return
     }
-    if (key === 'slug') {
-      await patchLocation({ slug: detailsForm.slug.trim() })
-      return
-    }
     if (key === 'address') {
       await patchLocation({ address: addressFromForm() })
       return
@@ -339,6 +419,13 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
       await patchLocation({
         phone: detailsForm.phone.trim() || null,
         email: detailsForm.email.trim() || null,
+      })
+      return
+    }
+    if (key === 'assignment') {
+      await patchLocation({
+        assigned_member_id: detailsForm.assigned_member_id,
+        assigned_team_id: detailsForm.assigned_team_id,
       })
       return
     }
@@ -366,12 +453,13 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     reservationConfig: { success: true; config: LocationReservationConfig | null }
   }
 
-  const locationSettingsKey = computed(() => `dashboard-location-settings-${organizationId}-${locationId.value}`)
+  const locationSettingsKey = computed(() => `dashboard-location-settings-${organizationId}-${isNew.value ? NEW_LOCATION_SLUG : locationId.value}`)
   const {
     data: locationSettingsResource,
     error: locationSettingsError,
     refresh: refreshLocationWorkspace,
-  } = await useAsyncData<LocationSettingsResource>(locationSettingsKey, async () => {
+  } = await useAsyncData<LocationSettingsResource | null>(locationSettingsKey, async () => {
+    if (isNew.value) return null
     const requestedLocationId = locationId.value
     if (!requestedLocationId) throw createError({ statusCode: 400, statusMessage: 'Location is required' })
     const [locationResponse, reservationResponse] = await Promise.all([
@@ -400,14 +488,24 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
     fillDetailsForm(resource.location.location)
     originalSignature.value = editorSignature(key)
   }, { immediate: true })
-  if (scope) scope.run(seedDrafts)
-  else seedDrafts()
+  // The new record's forms are its draft: seeded from it, and written back as typed.
+  const bindNewDraft = () => {
+    detailsForm.title = newLocation.draft.value.title
+    hoursForm.value = structuredClone(toRaw(newLocation.draft.value.hours))
+    watch(() => detailsForm.title, value => { newLocation.draft.value.title = value }, { flush: 'sync' })
+    watch(hoursForm, value => { newLocation.draft.value.hours = structuredClone(toRaw(value)) }, { deep: true, flush: 'sync' })
+  }
+  const bind = isNew.value ? bindNewDraft : seedDrafts
+  if (scope) scope.run(bind)
+  else bind()
 
   return {
-    error, location, saving, saveDisabled, validationMessage, editorError, dirty,
+    error, location, saving, saveDisabled, validationMessage, dirty,
+    editorError: computed(() => isNew.value ? newLocation.createError.value : editorError.value),
+    saveLabel: newLocation.saveLabel,
     detailsForm, hoursForm, reservationForm, reservationConfigExists, closingReservations,
     navigationGroups, locationLocalizationFields, localizedLocationPath, organizationLocalizationSettingsPath,
-    revert: resetDraft, save: saveCurrentEditor, closeReservations,
+    revert: resetDraft, save: () => isNew.value ? newLocation.save() : saveCurrentEditor(), closeReservations,
   }
 }
 </script>
@@ -421,5 +519,5 @@ const dashboardLocation = useDashboardLocation()
 const organizationId = await useDashboardOrganizationId()
 const editor = await useLocationEditor(organizationId, dashboardLocation.currentLocationId, null, level.path)
 
-useSeoMeta({ title: 'Settings | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Settings | KrabiClaw', robots: 'noindex, nofollow' })
 </script>

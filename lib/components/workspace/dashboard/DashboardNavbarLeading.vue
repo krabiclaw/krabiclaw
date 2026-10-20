@@ -1,15 +1,16 @@
 <template>
+  <!-- Airbnb's Back: a round button on the gutter, the same as every action. -->
   <UButton
-    v-if="level.to.value"
+    v-if="destination"
     icon="i-lucide-arrow-left"
     aria-label="Back"
     color="neutral"
-    variant="ghost"
-    size="sm"
+    variant="soft"
     square
-    class="min-w-0 shrink-0"
+    class="size-10 shrink-0 justify-center rounded-full"
     data-testid="dashboard-navbar-back"
-    :to="level.to.value"
+    :to="destination"
+    :disabled="disabled"
   />
 </template>
 
@@ -19,4 +20,6 @@
 // never become its destination. A tab root has nothing above it and renders
 // nothing. A leaf has no Back — its Close is the leaf shell's.
 const level = useRouteLevel()
+const props = defineProps<{ to?: string; disabled?: boolean }>()
+const destination = computed(() => props.to ?? level.to.value)
 </script>

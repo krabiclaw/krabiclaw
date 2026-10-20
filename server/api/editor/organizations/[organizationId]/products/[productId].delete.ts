@@ -9,10 +9,10 @@ export default defineHandler(async (event) => {
   const productId = getRouterParam(event, 'productId')
   if (!organizationId || !productId) return jsonResponse({ error: 'Organization ID and product ID are required' }, { status: 400 })
   try {
-    const { db, organization } = await requireOrganizationAccess(event, organizationId)
+    const { db, organization, env } = await requireOrganizationAccess(event, organizationId)
     // A product id in the path is not authorized by the site in the path.
     await requireOrganizationProduct(db, { organizationId: organization.id, productId })
-    await deleteProduct(db, { organizationId: organization.id, productId })
+    await deleteProduct(db, { organizationId: organization.id, productId, env })
     return jsonResponse({ success: true, product_id: productId })
   } catch (error) {
     rethrowHttpError(error)

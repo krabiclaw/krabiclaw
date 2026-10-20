@@ -5,15 +5,14 @@
 <script setup lang="ts">
 import ProductCollectionPage from '~/components/products/ProductCollectionPage.vue'
 import { isCurrencyCode } from '~/shared/currencies'
-import { presentationForSurface } from '~/utils/product-presentation'
+import { presentationForSurface, productSurfaceOf } from '~/utils/product-presentation'
 
-const { isBlawby } = usePublicTemplate()
-if (isBlawby.value) throw createError({ statusCode: 404 })
+const { social_image: socialImage } = useTenantOrganization().organization
 const { t } = useI18n()
 const { products, collections, locations, config, organization, data: pagePayload } = await usePublicPageData({ lazy: false })
-// What the merchant sells over the counter. Anything a guest books a seat on
-// is an Experience and has its own surface, so it is not listed twice.
-const goods = computed(() => products.value.filter(product => product.kind === 'item' || product.kind === 'service'))
+// What the merchant sells over the counter. A dish, an Experience and a home
+// each have their own surface, so none is listed twice.
+const goods = computed(() => products.value.filter(product => productSurfaceOf(null, product) === 'products'))
 // A surface with nothing on it is not a page: a studio that sells no
 // merchandise has no /products, rather than an indexable empty one. The
 // navigation hides it for the same reason.
@@ -33,6 +32,5 @@ const brandName = String(organization.value?.name ?? '').trim()
 const collectionTitle = computed(() => t('saya.products.collection_title', { organization: brandName }))
 const productLocations = computed(() => locations.value.map(location => ({ id: String(location.id), slug: String(location.slug), title: String(location.title) })))
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
-useSocialMetadata(() => presentation && ({ socialImage: organizationSocialImage, path: presentation.collectionPath, title: collectionTitle.value, description: t('saya.products.meta_description', { organization: brandName }), brand: { organizationName: brandName } }))
+useSocialMetadata(() => presentation && ({ socialImage, path: presentation.collectionPath, title: collectionTitle.value, description: t('saya.products.meta_description', { organization: brandName }) }))
 </script>

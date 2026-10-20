@@ -4,7 +4,7 @@
 
     <template v-if="location">
       <!-- Sub-nav (Level 2) -->
-      <SayaSubNav 
+      <TenantSubNav 
         :location-slug="slug" 
         active="photos" 
       />
@@ -25,7 +25,7 @@
 
 
     <!-- Category filter tabs -->
-    <SayaFilterTabs
+    <TenantFilterTabs
       v-model="activeCategory"
       :tabs="cats"
     />
@@ -71,12 +71,10 @@
 
 <script setup lang="ts">
 const { localePath, t } = useI18n()
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const route = useRoute()
-const { organizationId, organization } = useTenantOrganization()
-if (!organizationId) throw createError({ statusCode: 404 })
-
+const { organization } = useTenantOrganization()
 const slug = computed(() => String(route.params.slug))
 const organizationName = computed(() => String((organization as ApiValue)?.name ?? '').trim())
 
@@ -85,6 +83,8 @@ const { location, media: photos } = await usePublicPageData({ lazy: false })
 // around a null location answered 200 with an empty shell — a soft 404 a
 // crawler indexes. The sibling menu and product indexes already refuse it.
 if (!location.value) throw createError({ statusCode: 404, statusMessage: 'Location not found' })
+// A section with nothing on it is not a page; the navigation hides it by the same flag.
+if (!location.value.sections.photos) throw createError({ statusCode: 404 })
 
 
 const photoCategoryKeys: Record<string, string> = {
@@ -159,9 +159,6 @@ useSocialMetadata(() => ({
     organization: organizationName.value,
   }),
   socialImage: location.value?.social_image ?? null,
-  brand: {
-    organizationName: organizationName.value,
-  },
   breadcrumbs: [
     { name: t('saya.header.locations'), url: '/locations' },
     { name: location.value?.title ?? slug.value, url: `/locations/${slug.value}` },

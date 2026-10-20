@@ -1,8 +1,11 @@
-import { resolvePublicTemplate } from '~/utils/template-registry'
+import { HTTPError } from 'nitro'
+import { organizationSupportsBlawbyTemplate, resolvePublicTemplate } from '~/utils/template-registry'
+import { getPublicCompliance, getPublicConsultationSettings } from '~/server/utils/professional-services'
 import { deleteConfig, getConfig, setConfig } from '~/server/utils/organization-config'
 import { createSystemSubdomain, isSystemSubdomainSpent } from '~/server/utils/domains'
 import { reconcileZarazAnalytics } from '~/server/utils/zaraz-analytics'
-import { isCurrencyCode } from '~/shared/currencies'
+import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
+import { isValidTimezone } from '~/utils/timezone'
 import { ORGANIZATION_FONT_PRESETS, isOrganizationFontPreset, resolveOrganizationFontPreset } from '~/shared/organization-fonts'
 import { purgeOrganizationCaches, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import type { UpdateOrganizationSettingsRequest } from '~/server/types/organization'
@@ -14,18 +17,12 @@ import { applySitePalettePatch, isPaletteTemplate, resolveSitePalette } from '~/
 import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION, parseLogoPresentation } from '~/shared/media-placement-contract'
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { organizationAdapter } from '~/server/utils/member-access'
-import type { CloudflareEnv } from '~/server/utils/auth'
+import { linkedAccountOwner, type CloudflareEnv } from '~/server/utils/auth'
+import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 
 type SetupEnv = Parameters<typeof createSystemSubdomain>[0]
 
 const MAX_SLUG_ATTEMPTS = 10
-
-export class OrganizationSettingsNotFoundError extends Error {
-  constructor() {
-    super('Organization not found')
-    this.name = 'OrganizationSettingsNotFoundError'
-  }
-}
 
 interface OrganizationSettingsRow {
   id: string
@@ -39,7 +36,8 @@ interface OrganizationSettingsRow {
 interface FullOrganizationRow extends OrganizationSettingsRow {
   public_url: string | null
   custom_domain_status: string | null
-  default_currency: string | null
+  default_currency: CurrencyCode
+  timezone: string
   brand_description: string | null
   announcement_json: string | null
   announcement_media_id: string | null
@@ -79,11 +77,12 @@ function buildSlug(value: string): string {
 
 export async function loadSettingsPayload(
   db: DbClient,
+  env: CloudflareEnv,
   organizationId: string,
 ) {
   const updatedOrganization = await queryFirst<FullOrganizationRow & { vertical: string; theme_id: string; locations_json: string }>(db, `
     SELECT organization.id, subdomain, organization.status,
-           (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url, COALESCE((SELECT status FROM organization_domains WHERE organization_id = organization.id AND type = 'custom' AND status NOT IN ('deleted', 'disabled') ORDER BY role = 'canonical' DESC, created_at, id LIMIT 1), 'none') AS custom_domain_status, default_currency,
+           (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = organization.id AND role = 'canonical' AND status = 'active') AS public_url, COALESCE((SELECT status FROM organization_domains WHERE organization_id = organization.id AND type = 'custom' AND status NOT IN ('deleted', 'disabled') ORDER BY role = 'canonical' DESC, created_at, id LIMIT 1), 'none') AS custom_domain_status, default_currency, timezone,
            name, brand_description,
            json_extract(organization.settings_json, '$.config.announcement') AS announcement_json,
            amp.asset_id AS announcement_media_id, ama.public_url AS announcement_public_url,
@@ -121,11 +120,14 @@ export async function loadSettingsPayload(
   `, [organizationId])
 
   if (!updatedOrganization) {
-    throw new OrganizationSettingsNotFoundError()
+    throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
   }
 
   const siteConfig = await getConfig(db, organizationId)
   const template = resolvePublicTemplate({ themeId: updatedOrganization.theme_id }).slug
+  const [compliance, consultation] = organizationSupportsBlawbyTemplate({ vertical: updatedOrganization.vertical, themeId: updatedOrganization.theme_id })
+    ? await Promise.all([getPublicCompliance(db, organizationId), getPublicConsultationSettings(db, organizationId)])
+    : [null, null]
   // Both logos with their presentation, through the canonical placement reader.
   const logos = (await readMediaPlacements(db, { organizationId, ownerType: 'organization', ownerIds: [organizationId] }))
     .get(organizationId)!.filter(item => (LOGO_SLOTS as readonly string[]).includes(item.slot))
@@ -136,11 +138,16 @@ export async function loadSettingsPayload(
     theme: template,
     status: updatedOrganization.status,
 
-    public_url: updatedOrganization.public_url,
+    public_url: updatedOrganization.public_url ? tenantOrganizationOrigin({
+      platformDomain: env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '',
+      freeOrganizationDomain: env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN ?? '',
+      subdomain: updatedOrganization.subdomain ?? '',
+      canonicalDomain: updatedOrganization.public_url,
+    }) : null,
     custom_domain_status: updatedOrganization.custom_domain_status,
     name: updatedOrganization.name,
     brand_description: updatedOrganization.brand_description,
-    announcement: updatedOrganization.announcement_json ? JSON.parse(updatedOrganization.announcement_json) : null,
+    announcement: updatedOrganization.announcement_json ? { format: 'modal', ...JSON.parse(updatedOrganization.announcement_json) } : null,
     media: [
       ...(updatedOrganization.announcement_media_id ? [{
         asset_id: updatedOrganization.announcement_media_id,
@@ -177,17 +184,22 @@ export async function loadSettingsPayload(
     seo_description: updatedOrganization.seo_description,
     canonical_url: updatedOrganization.canonical_url,
     // The website's booking switch exists only where consultation settings do.
-    consultation_mode: updatedOrganization.consultation_mode,
+    consultation_mode: consultation?.mode ?? updatedOrganization.consultation_mode,
+    ...(consultation ? { address_visibility: compliance?.address_visibility ?? 'hidden' } : {}),
     palette: isPaletteTemplate(template) ? resolveSitePalette(template, siteConfig.palette) : null,
     palette_source: isPaletteTemplate(template) ? (siteConfig.palette ? 'custom' : 'template') : null,
     font_preset: resolveOrganizationFontPreset(siteConfig.font_preset),
+    button_shape: siteConfig.button_shape ?? (template === 'blawby' ? 'rounded' : 'pill'),
+    button_casing: siteConfig.button_casing ?? (template === 'blawby' ? 'uppercase' : 'none'),
+    heading_casing: siteConfig.heading_casing ?? (template === 'blawby' ? 'uppercase' : 'none'),
     default_currency: updatedOrganization.default_currency,
+    timezone: updatedOrganization.timezone,
     press_email: siteConfig.press_email || '',
     partnerships_email: siteConfig.partnerships_email || '',
     catering_email: siteConfig.catering_email || '',
     careers_email: siteConfig.careers_email || '',
     google_analytics_measurement_id: siteConfig.google_analytics_measurement_id || '',
-    integrations: integrationsSummary(await listIntegrations(db, organizationId), JSON.parse(updatedOrganization.locations_json) as IntegrationLocation[]),
+    integrations: await integrationsSummary(db, env, organizationId, await listIntegrations(db, organizationId), JSON.parse(updatedOrganization.locations_json) as IntegrationLocation[]),
     created_at: updatedOrganization.created_at,
     updated_at: updatedOrganization.updated_at,
   }
@@ -213,16 +225,31 @@ interface IntegrationLocation {
  * leaves — names and ids, never a token. Google Maps is per location, so
  * its answer is the locations and which of them name a place.
  */
-function integrationsSummary(integrations: Awaited<ReturnType<typeof listIntegrations>>, locations: IntegrationLocation[]) {
-  const connected = (provider: typeof integrations[number]['provider']) => integrationSummary(integrations.find(integration => integration.provider === provider) ?? null)
+async function integrationsSummary(db: DbClient, env: CloudflareEnv, organizationId: string, integrations: Awaited<ReturnType<typeof listIntegrations>>, locations: IntegrationLocation[]) {
+  // Each connection names whose linked account it acts through, read from Better Auth.
+  const owners = new Map(await Promise.all([...new Set(integrations.map(integration => integration.account_id))].map(async id => [id, await linkedAccountOwner(env, id)] as const)))
+  const connected = (provider: typeof integrations[number]['provider']) => {
+    const summary = integrationSummary(integrations.find(integration => integration.provider === provider) ?? null)
+    return summary && { ...summary, connected_through: owners.get(summary.account_id) ?? null }
+  }
+  const channex = await queryFirst<{ status: string; connected_at: string | null }>(
+    db,
+    'SELECT status, connected_at FROM channex_connections WHERE organization_id = ?',
+    [organizationId],
+  )
   return {
     google_maps: locations.map(location => ({ ...location, address: formatPostalAddress(parsePostalAddress(location.address)) || null })),
-    google_calendar: (() => { const row = integrations.find(row => row.provider === 'google_calendar'); return row ? { account_id: row.account_id, calendar_name: row.target_name, status: row.status, connected_at: row.created_at } : null })(),
+    google_calendar: (() => { const row = integrations.find(row => row.provider === 'google_calendar'); return row ? { account_id: row.account_id, calendar_name: row.target_name, status: row.status, last_error: row.last_error, connected_at: row.created_at, connected_through: owners.get(row.account_id) ?? null } : null })(),
     google_analytics: connected('google_analytics'),
+    google_ads: connected('google_ads'),
     google_search_console: connected('google_search_console'),
     facebook: connected('facebook'),
     instagram: connected('instagram'),
     discord: connected('discord'),
+    airbnb: channex ? {
+      status: channex.status,
+      connected_at: channex.connected_at,
+    } : null,
   }
 }
 
@@ -275,9 +302,13 @@ async function attemptOrganizationUpdate(
 
   const settingsPatch: Record<string, unknown> = {}
   if (updates.font_preset !== undefined) settingsPatch.config = { font_preset: updates.font_preset }
+  if (updates.button_shape !== undefined) settingsPatch.config = { ...(settingsPatch.config as Record<string, unknown> | undefined), button_shape: updates.button_shape }
+  if (updates.button_casing !== undefined) settingsPatch.config = { ...(settingsPatch.config as Record<string, unknown> | undefined), button_casing: updates.button_casing }
+  if (updates.heading_casing !== undefined) settingsPatch.config = { ...(settingsPatch.config as Record<string, unknown> | undefined), heading_casing: updates.heading_casing }
   // Resolved to a whole palette by updateOrganizationSettingsFields; null removes
   // it (json_patch deletes a key patched with null), returning to the template's.
   if (updates.palette !== undefined) settingsPatch.config = { ...(settingsPatch.config as Record<string, unknown> | undefined), palette: updates.palette }
+  if (updates.address_visibility !== undefined) settingsPatch.compliance = { address_visibility: updates.address_visibility }
   if (updates.name !== undefined) {
     setParts.push('name = ?', 'subdomain = ?')
     params.push(updates.name, subdomain)
@@ -297,11 +328,15 @@ async function attemptOrganizationUpdate(
         cta_url: updates.announcement.cta_url?.trim() || null,
         dismissible: updates.announcement.dismissible ?? true,
         enabled: updates.announcement.enabled ?? true,
+        format: updates.announcement.format === 'banner' ? 'banner' : 'modal',
       },
     }
   }
   if (Object.keys(settingsPatch).length > 0) {
-    setParts.push('settings_json = json_patch(settings_json, json(?))')
+    // A newly created compliance object requires its two collection containers.
+    const settingsJson = updates.address_visibility === undefined ? 'settings_json'
+      : `CASE WHEN json_type(settings_json, '$.compliance') IS NULL THEN json_set(settings_json, '$.compliance', json('{"same_as":[],"contact_points":[]}')) ELSE settings_json END`
+    setParts.push(`settings_json = json_patch(${settingsJson}, json(?))`)
     params.push(JSON.stringify(settingsPatch))
   }
   if (updates.contact_email !== undefined) {
@@ -334,19 +369,26 @@ async function attemptOrganizationUpdate(
     setParts.push('default_currency = ?')
     params.push(currency)
   }
+  if (updates.timezone !== undefined) {
+    const timezone = typeof updates.timezone === 'string' ? updates.timezone.trim() : null
+    if (!isValidTimezone(timezone)) return { status: 400, data: { error: 'timezone must be an IANA time zone' } }
+    setParts.push('timezone = ?')
+    params.push(timezone)
+  }
   if (updates.status !== undefined) {
     // Draft and Live are the tenant's to move between. 'suspended' is the
     // platform's hold, so the tenant neither sets it nor clears it. The read
     // answers plainly; the guard on the UPDATE is what a suspension landing
     // between the two cannot outrun.
-    if (updates.status !== 'active' && updates.status !== 'inactive') {
+    const canonicalStatus = updates.status === 'published' ? 'active' : updates.status === 'draft' ? 'inactive' : updates.status
+    if (canonicalStatus !== 'active' && canonicalStatus !== 'inactive') {
       return { status: 400, data: { error: 'Website status must be active or inactive' } }
     }
     if (organization.status === 'suspended') {
       return { status: 409, data: { error: 'This website is suspended. Contact support to restore it.' } }
     }
     setParts.push('status = ?')
-    params.push(updates.status)
+    params.push(canonicalStatus)
     guards.push("status <> 'suspended'")
   }
   if (updates.seo_title !== undefined) {
@@ -362,7 +404,7 @@ async function attemptOrganizationUpdate(
     params.push(updates.canonical_url ?? null)
   }
   if (setParts.length === 0 && organizationMedia === undefined) {
-    const settings = await loadSettingsPayload(db, organizationId)
+    const settings = await loadSettingsPayload(db, env, organizationId)
     return {
       status: 200,
       data: {
@@ -410,10 +452,17 @@ async function attemptOrganizationUpdate(
   }
 
   // A status change adds or removes this site's indexed content. Typography,
-  // colors and announcements affect only its public resource and HTML caches.
-  if (updates.status !== undefined) {
+  // colors, recipe tokens and announcements affect only its public resource and HTML caches.
+  if (updates.status !== undefined || updates.address_visibility !== undefined) {
     await purgePublicResourceCacheNow(env, organizationId)
-  } else if (updates.font_preset !== undefined || updates.palette !== undefined || updates.announcement !== undefined) {
+  } else if (
+    updates.font_preset !== undefined ||
+    updates.palette !== undefined ||
+    updates.announcement !== undefined ||
+    updates.button_shape !== undefined ||
+    updates.button_casing !== undefined ||
+    updates.heading_casing !== undefined
+  ) {
     if (!env.ORGANIZATION_CACHE) throw new Error('ORGANIZATION_CACHE is not bound; site caches cannot be purged')
     await purgeOrganizationCaches(db, env.ORGANIZATION_CACHE, organizationId, env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)
   }
@@ -444,7 +493,7 @@ async function attemptOrganizationUpdate(
     await refreshSocialCard({ db, env, owner: { owner_type: 'organization', owner_id: organizationId }, actorId: userId })
   }
 
-  const settings = await loadSettingsPayload(db, organizationId)
+  const settings = await loadSettingsPayload(db, env, organizationId)
   return {
     status: 200,
     data: {
@@ -483,9 +532,23 @@ export async function updateOrganizationSettingsFields(
     }
   }
 
-  // Validate before any settings writes. Preset IDs are not CSS or font URLs.
+  if (updates.address_visibility !== undefined) {
+    if (updates.address_visibility !== 'visible' && updates.address_visibility !== 'hidden') return { status: 400, data: { error: 'address_visibility must be visible or hidden' } }
+    if (!organizationSupportsBlawbyTemplate({ vertical: organization.vertical, themeId: organization.theme_id })) return { status: 400, data: { error: 'Office address visibility is available for service websites' } }
+  }
+
   if (updates.font_preset !== undefined && !isOrganizationFontPreset(updates.font_preset)) {
     return { status: 400, data: { error: `font_preset must be one of: ${ORGANIZATION_FONT_PRESETS.join(', ')}` } }
+  }
+
+  if (updates.button_shape !== undefined && !['pill', 'rounded', 'sharp'].includes(updates.button_shape)) {
+    return { status: 400, data: { error: 'button_shape must be one of: pill, rounded, sharp' } }
+  }
+  if (updates.button_casing !== undefined && !['uppercase', 'none'].includes(updates.button_casing)) {
+    return { status: 400, data: { error: 'button_casing must be one of: uppercase, none' } }
+  }
+  if (updates.heading_casing !== undefined && !['uppercase', 'none'].includes(updates.heading_casing)) {
+    return { status: 400, data: { error: 'heading_casing must be one of: uppercase, none' } }
   }
 
   // A palette change resolves to the whole palette the site will render, so
@@ -506,12 +569,15 @@ export async function updateOrganizationSettingsFields(
   }
 
   if (updates.announcement !== undefined && updates.announcement !== null) {
-    const { headline, description, cta_label, cta_url, dismissible, enabled } = updates.announcement
+    const { headline, description, cta_label, cta_url, dismissible, enabled, format } = updates.announcement
     if (enabled !== undefined && typeof enabled !== 'boolean') {
       return { status: 400, data: { error: 'Announcement enabled must be a boolean' } }
     }
     if (dismissible !== undefined && typeof dismissible !== 'boolean') {
       return { status: 400, data: { error: 'Announcement dismissible must be a boolean' } }
+    }
+    if (format !== undefined && format !== null && format !== 'modal' && format !== 'banner') {
+      return { status: 400, data: { error: "Announcement format must be 'modal' or 'banner'" } }
     }
     // A disabled announcement may be saved with a blank headline — the owner is turning it off,
     // not necessarily deleting draft text they intend to re-enable later. It still has to be a

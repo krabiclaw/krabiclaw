@@ -1,5 +1,6 @@
-import type { DashboardInvalidation, GuestThreadInvalidation, NotificationInvalidation } from '~/shared/dashboard-invalidations'
+import type { DashboardInvalidation, GuestThreadInvalidation, NotificationInvalidation, StayInvalidation } from '~/shared/dashboard-invalidations'
 import { queryFirst, type DbClient } from '~/server/db'
+import { HTTPError } from 'nitro'
 
 export type GuestInboxEventType = GuestThreadInvalidation['type']
 
@@ -41,7 +42,7 @@ export async function publishDashboardInvalidation(
   event: DashboardInvalidation,
 ): Promise<void> {
   if (!env.GUEST_INBOX_HUBS) {
-    throw new Error('GUEST_INBOX_HUBS binding is not configured')
+    throw new HTTPError({ statusCode: 503, message: 'GUEST_INBOX_HUBS binding is not configured', data: { code: 'REALTIME_CONFIGURATION_REQUIRED', field: 'GUEST_INBOX_HUBS' } })
   }
 
   const hub = env.GUEST_INBOX_HUBS.get(env.GUEST_INBOX_HUBS.idFromName(event.organizationId))
@@ -61,7 +62,7 @@ export async function publishDashboardInvalidation(
   const response = await hub.fetch('https://guest-inbox.internal/broadcast', request)
   if (!response.ok) {
     console.error('dashboard_invalidation_transport_failed', { ...publication, status: response.status })
-    throw new Error(`Dashboard invalidation publication failed with HTTP ${response.status}`)
+    throw new HTTPError({ statusCode: 503, message: `Dashboard invalidation publication failed with HTTP ${response.status}`, data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', publicationStatus: response.status } })
   }
 }
 
@@ -74,4 +75,21 @@ export async function publishNotificationInvalidation(
     eventId: crypto.randomUUID(),
     occurredAt: new Date().toISOString(),
   })
+}
+
+export async function publishStayInvalidation(
+  env: GuestInboxPublicationEnv,
+  input: Omit<StayInvalidation, 'eventId' | 'occurredAt'>,
+  committed: { version: number } | { updated_at: string },
+): Promise<void> {
+  try {
+    await publishDashboardInvalidation(env, {
+      ...input,
+      eventId: crypto.randomUUID(),
+      occurredAt: new Date().toISOString(),
+    })
+  } catch (cause) {
+    throw new HTTPError({ statusCode: 503, message: 'The change was saved, but dashboard updates could not be published. Reload before retrying.',
+      data: { code: 'DASHBOARD_PUBLICATION_FAILED', field: 'realtime', committed: true, product_id: input.productId, stay_id: input.stayId, ...committed }, cause })
+  }
 }

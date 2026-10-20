@@ -6,7 +6,7 @@ customer behavior, rather than release bookkeeping, the approval signal.
 
 ## Release rule
 
-Krabiclaw uses a branch-driven flow: a
+KrabiClaw uses a branch-driven flow: a
 pull request deploys nothing, a push to `staging` deploys the staging Worker,
 and a push to `main` deploys production. Each environment receives one normal
 Cloudflare Worker deployment. Do not add candidate manifests, version-override
@@ -117,10 +117,8 @@ The representative client order is:
    reservations.
 2. Kikuzuki: home, menu and items, locations, and reservations.
 3. NCLS: home, services and details, pricing, articles, contact, and schedule.
-4. Krabiclaw's own site: home, documentation, blog, and the help form. It is an
+4. KrabiClaw's own site: home, documentation, blog, and the help form. It is an
    ordinary site on the platform template, so it is qualified like a tenant.
-
-Dashboard, CMS, ChowBot, and billing are outside the release-qualified scope.
 
 For a shared renderer, routing, theme, content-model, or destructive
 content-migration change, expand that representative set to every published
@@ -156,8 +154,12 @@ The replacement is prepared while the old Worker stays live. Use the existing
 delta, specifying the old database with `--source`. The script refuses
 unexpected source tables or columns, validates copied rows, checks foreign keys
 and target schema, and previews rows changed or deleted since the initial
-export. The delta inserts newly created rows only. Inspect changed and deleted
-keys before retiring the old database; carry important edits explicitly,
+export. The delta inserts newly created rows only. Remote `--delta-from` sends
+the whole payload to D1's normal query API as one atomic batch, retaining
+foreign-key deferral and keeping SQL out of process arguments. Bulk imports
+make D1 unavailable while they run. During replacement, use bulk import only
+for the initial load before the new database is bound. Inspect changed and
+deleted keys before retiring the old database; carry important edits explicitly,
 without overwriting new-database writes. There is no write freeze or
 maintenance response in the application.
 
@@ -218,6 +220,10 @@ Prepare the load before the binding repoint. Inspect changes and deletions since
 the initial load immediately before deployment; carry important edits explicitly
 and preserve writes to the new database. After each deployment, verify schema,
 foreign keys and customer journeys on the new binding before promoting further.
+The repoint changes every `DB` binding in `wrangler.toml`, including `env.dev`
+and `env.e2e`: local D1 state is keyed by database id, so an environment left on
+the old id opens an empty database and the E2E suite fails on the next pull
+request rather than on the repoint commit, whose push to staging skips E2E.
 
 The v11-to-v12 replacement drops `organization.feature_overrides` and
 `business_locations.feature_overrides` and their CHECK constraints (#1267):
@@ -268,6 +274,243 @@ node --experimental-strip-types scripts/pull-production-snapshot.ts --production
 node --experimental-strip-types scripts/pull-production-snapshot.ts --staging --source krabiclaw-staging-v12 --out staging-v13-final.sqlite --delta-from staging-v13-initial.sqlite
 node --experimental-strip-types scripts/pull-production-snapshot.ts --production --source krabiclaw-production-v12 --out production-v13-final.sqlite --delta-from production-v13-initial.sqlite
 ```
+
+The v13-to-v14 business-workflow replacement adds Better Auth's native `team`
+and `teamMember` tables, and native `invitation.teamId`. Product booking settings
+can select one member or one native team. `content_documents` gains generated
+`document_role` and a source-locale foreign key to the site's authored language;
+its children include blocks, placements and publication records.
+`organization_locales` gives that source language a unique owner per site.
+`reservations` stores the policy actually accepted, and Checkout holds distinguish
+booking and reservation allocations. These referenced-parent constraints use a
+replacement baseline, not a D1 parent-table rebuild. The complete applied v13
+SQL and Drizzle metadata remain unchanged in `migrations-history/v13/`.
+
+The transfer retains source identities, memberships, sessions, OAuth clients and
+signing keys from each environment's own v13 database. It keeps the site's actual
+source language and all booking commitments. Native teams start empty. New
+reservation duration/deposit fields, historical accepted reservation policies,
+and historical financial billing bases remain unknown until their canonical
+owner supplies the facts; today's settings are never backfilled as past terms.
+Oversized text rows are reconstructed from bounded SQL chunks during the same
+native D1 import, without truncation. The import-only helper table is removed
+before row-count, schema and foreign-key verification.
+
+Both v14 databases were created with `--location wnam` on 2026-10-08, and
+Cloudflare reported WNAM before binding or loading:
+
+- `krabiclaw-production-v14`: `dad88350-88f8-4036-8cf2-d73c458d6060`
+- `krabiclaw-staging-v14`: `2c172842-4e77-4cf3-b1c0-f1d1ec0d32ba`
+
+Apply the generated baseline with native `wrangler d1 migrations apply`, then
+use the existing transfer for each initial load and final delta. Keep the old
+Worker live until the normal staging/main release changes its binding. Review
+changed and deleted keys in the final manifests before carrying customer edits.
+
+```sh
+node --experimental-strip-types scripts/pull-production-snapshot.ts --staging --source krabiclaw-staging-v13 --out staging-v14-initial.sqlite
+node --experimental-strip-types scripts/pull-production-snapshot.ts --production --source krabiclaw-production-v13 --out production-v14-initial.sqlite
+node --experimental-strip-types scripts/pull-production-snapshot.ts --staging --source krabiclaw-staging-v13 --out staging-v14-final.sqlite --delta-from staging-v14-initial.sqlite
+node --experimental-strip-types scripts/pull-production-snapshot.ts --production --source krabiclaw-production-v13 --out production-v14-final.sqlite --delta-from production-v14-initial.sqlite
+```
+
+The v14-to-v15 replacement changes only
+`product_booking_configs_calendar_check`: a nonempty `calendar_group` may
+also group physical sessions. `product_availability_rules` and
+`product_sessions` reference that parent with cascading deletes, so the
+constraint must not be rebuilt in place. The complete applied v14 SQL and
+Drizzle metadata remain unchanged in `migrations-history/v14/`. The schema
+adds no tables or columns, and the transfer copies v14 rows without changing
+customer, identity, OAuth, signing-key, booking or payment values.
+
+Prepared in WNAM on 2026-10-08: production v15
+`9684d350-f15c-41bb-93c6-437651b72459` and staging v15
+`3809d51b-2153-4f5b-bcf3-265329492115`. Preparation does not switch a live
+Worker's binding.
+
+Prepare an empty WNAM database with the generated baseline and native migration
+ledger, then use the same preflight, initial-copy and final-delta procedure
+above with each environment's own v14 source. Review all changed and deleted
+keys before switching: the canonical delta carries new rows only, never
+updates or deletions. Keep the v14 database and its Worker version intact.
+Rebinding to v14 after v15 writes is not a data-preserving rollback; preserve
+and reconcile those writes before any such rebind. Older runtime code also
+must not serve physical calendar groups it cannot enforce.
+
+The v15-to-v16 epoch makes the clocks and currencies a business, location and
+online offering cannot run without strictly required, and replaces shared
+calendar groups with provider-owned working hours (the Calendly model):
+
+- `organization.default_currency` is NOT NULL and validated via `organization_default_currency_check`.
+- `organization.timezone` is a new NOT NULL column (`organization_timezone_check`), moved out of `settings_json.config.default_timezone` with no `'UTC'` fallback. Both are Better Auth required organization fields validated in `server/utils/auth.ts`.
+- `business_locations.timezone` is NOT NULL (`business_locations_timezone_check`).
+- `product_booking_configs.held_online` replaces `online_timezone`. Online offerings require `scheduling_mode='provider'` and an assigned member or team (`product_booking_configs_held_online_check`).
+- `calendar_group` is retired everywhere (`product_booking_configs`, `payment_checkout_holds`). Online offering bookable slots are persisted from provider working hours (`member_scheduling.windows_json`) in each provider's timezone. Archived epoch transfers invoke the same provider-hours generator before auditing and writing the payload; missing provider hours stop the transfer. The manifest inventories derived session IDs and source signatures so `--delta-from` retains their canonical occurrences and unchanged audit timestamps, reports actual source deletions, and inserts only new rows without overwriting replacement writes. Repeated generation preserves unchanged slot timestamps, bookings and active checkout holds.
+- `product_availability_rules.location_id` is NOT NULL; online weekly rule templates are deleted.
+- `product_sessions` enforces `product_sessions_online_provider_check` (`location_id IS NOT NULL OR assigned_member_id IS NOT NULL`). Existing online sessions take their provider's identity and `hours:<member>:<starts_at>` occurrence keys.
+
+The complete applied v15 SQL and Drizzle metadata remain unchanged in
+`migrations-history/v15/`.
+
+Prepared in WNAM on 2026-10-13: production v16
+`754caf79-1e59-4e5e-93d7-18449df90e3b` and staging v16
+`76622a9c-bb92-4c1d-ab2c-206ff2594600`.
+
+The v16-to-v17 epoch makes a place to stay a Product (#1381). It is additive
+except for one constraint, which is why it needs a replacement database:
+
+- `products_kind_check` admits `stay`. The constraint is on `products`, which
+  `product_variants`, `product_options`, `product_locations`,
+  `product_booking_configs`, `product_sessions`, `bookings`,
+  `collection_products`, `product_publications`, `content_documents` and
+  `reviews` reference (and now `product_stay_configs`), so the change is a
+  table rebuild.
+- `product_locations` gains the unique `(organization_id, product_id,
+  location_id)` index that `product_stay_configs` references.
+- New tables: `product_stay_configs`, `product_nights`, `stays`, `stay_nights`
+  and `stay_payments`. They start empty.
+- Existing rows transfer unchanged; no product changes kind. The transfer audits
+  `every_home_has_stay_settings`.
+
+The complete applied v16 chain (`0000_baseline` through
+`0007_payment_intents`) and its Drizzle metadata remain unchanged in
+`migrations-history/v16/`; an older export passes through its forward
+migrations before the copy.
+
+Prepared in WNAM on 2026-10-14: staging v17
+`a9c8e8f0-eb44-4058-b251-f629276de5b5`, built with `wrangler d1 migrations
+apply` and loaded from `krabiclaw-staging-v16` (87 tables, 78,725 rows;
+`foreign_key_check` empty); its final delta after the staging binding moved
+reported no new rows and nothing changed or deleted. Production v17
+`e81e48eb-8ac6-4c9e-af31-5cef2946c52d` was created in WNAM on 2026-10-15,
+built with the same baseline and loaded from `krabiclaw-production-v16`
+immediately before the staging-to-main promotion; the v16 databases stay
+untouched.
+
+```sh
+node --experimental-strip-types scripts/pull-production-snapshot.ts --staging --source krabiclaw-staging-v15 --out staging-v16-initial.sqlite
+node --experimental-strip-types scripts/pull-production-snapshot.ts --production --source krabiclaw-production-v15 --out production-v16-initial.sqlite
+node --experimental-strip-types scripts/pull-production-snapshot.ts --staging --source krabiclaw-staging-v15 --out staging-v16-final.sqlite --delta-from staging-v16-initial.sqlite
+node --experimental-strip-types scripts/pull-production-snapshot.ts --production --source krabiclaw-production-v15 --out production-v16-final.sqlite --delta-from production-v16-initial.sqlite
+```
+
+The v17-to-v18 epoch lets a guest conversation be held by phone alone (#1381
+step 4). It changes one constraint, which is why it needs a replacement
+database:
+
+- For stay conversations, `requests_guest_payload_check` requires the guest's
+  name and an email or phone, where v17 required an email. Other conversation
+  kinds still require email. Airbnb guests and host-entered stays often have
+  no email. The constraint is on `requests`, which `activity_entries`,
+  `bookings`, `reservations`, `stays` and the review and payment-hold tables
+  reference, so in place it is a table rebuild that would cascade-delete every
+  thread's timeline.
+- Nothing else changes. The v18 baseline also absorbs v17's forward chain
+  (Channex connections, channel mappings, the sync log, night pushes and
+  `stays.request_id`). Its only other difference from the applied v17 chain is
+  where `stays.request_id` sits among the columns, which the transfer copies by
+  name.
+- Existing rows transfer unchanged. A conversation with neither an email nor a
+  phone is still refused.
+
+Channel revisions and cancellations still apply when optional guest details
+are cleared. The conversation retains its recorded participant as history;
+email replies use the stay's current email and refuse when it is absent. A host
+edit cannot remove the last contact from an existing stay conversation.
+
+The complete applied v17 chain (`0000_baseline` through `0005_stay_threads`)
+and its Drizzle metadata remain unchanged in `migrations-history/v17/`. An older
+export passes through v17's forward migrations before the copy, after the stage
+gains the v17 baseline's tables it never had.
+
+Both v18 replacement databases were created with `--location wnam` on
+2026-10-16 (Asia/Bangkok), and Cloudflare reported WNAM before configuration
+or data loading:
+
+- `krabiclaw-staging-v18`: `872459c4-70e4-4d2a-907c-d5a2951efd9b`
+- `krabiclaw-production-v18`: `8d953c89-a6cd-4ade-b7c4-1eb6d372adbd`
+
+Build each with native `wrangler d1 migrations apply`, then load it from that
+environment's own v17 database using
+`scripts/pull-production-snapshot.ts --source krabiclaw-<environment>-v17`.
+Preparation and loading must finish before the deployment-triggering binding
+change merges: the old database has already recorded `0000_baseline.sql`, so
+D1 will skip the replacement baseline and the live schema-drift gate will
+refuse it. Phone-only conversations cannot run against v17's email CHECK.
+All four `DB` bindings, including `env.dev` and `env.e2e`, move to v18.
+
+Deploy staging first and qualify its customer journeys before promoting to
+production. Immediately after each binding moves, take the canonical final
+delta, inspect changed and deleted keys, and reconcile important edits without
+overwriting writes made to v18. Keep v17 intact until that review and the schema,
+foreign-key and customer-journey checks pass.
+
+The v18-to-v19 epoch admits channel-addressable Airbnb inquiries in the one
+guest inbox (#1381 step 4.2). `requests_guest_payload_check` now accepts an
+explicit channel participant with the provider's conversation title and nullable
+actual guest name, email and phone. A contact-backed payload keeps its existing
+requirements; an invalid present participant never becomes a contact payload.
+Because `requests` is referenced by the activity, booking, stay, review and
+payment tables, changing this CHECK requires another replacement database.
+
+The unchanged v18 migration SQL and metadata are archived in
+`migrations-history/v18/`. The v19 baseline adds `channel_threads`, which maps a
+provider conversation and optional booking to one local request and home, and
+admits Channex/Airbnb delivery receipts. No source conversation, activity entry,
+delivery receipt, authentication row or OAuth token is transformed. An inquiry
+adopts an existing stay conversation when one exists; two existing conversations
+produce an explicit association conflict instead of moving or deleting history.
+The `product_channel_mappings_stage_check` and enabled-stage CHECK also admit a
+Messages import stage after reservation loading. A failed message read remains
+visible at that stage and can be retried without repeating the reservation
+write or claiming the conversation history is complete.
+
+The same v19 baseline also carries the rest of #1381 step 4 as additive schema,
+so it needs no forward migration of its own: `device_tokens` (an APNs device of
+one Better Auth session, cascading with the session and user), the per-category
+push preference, private `product_stay_configs.check_in_instructions`,
+`message_templates`, `scheduled_guest_messages` and
+`stays.booking_received_at`. Copied v18 rows get no device, no template, no
+scheduled message, no instructions and a null `booking_received_at`: only a
+direct stay created after cutover is a newly received reservation, so a
+new-reservation schedule never messages a historical or imported stay. A saved
+v18 category preference predates push; the transfer gives it that category's
+product push default, the same value a person who never saved the category
+gets, and records the `notification_preferences_push_default` transform. A
+v18 chain is recognized from `migrations-history/v18/`.
+
+Prepare separate WNAM v19 databases from each environment's own v18 database
+using the canonical snapshot path above. Keep the replacements unbound until
+their schema, copy invariants, foreign keys and local source gates pass. Before
+and after cutover, inspect canonical delta changes/deletions and reconcile only
+reviewed source edits with guards that preserve replacement writes. Do not run
+the new Worker against a v18 binding: its migration ledger already contains the
+same baseline filename. Real Airbnb message/webhook/reply qualification against
+KrabiClaw remains required.
+
+Both v19 replacement databases were created with `--location wnam` on
+2026-10-16 (Asia/Bangkok), and Cloudflare reported WNAM before the baseline was
+applied:
+
+- `krabiclaw-staging-v19`: `036d7910-66a9-4343-9ae4-47398dd3c653`
+- `krabiclaw-production-v19`: `3baf9b09-2c05-4ed8-8944-cafe9e84c9e3`
+
+Staging v19 was loaded from `krabiclaw-staging-v18` before the binding change
+merged: 100 tables, 81,340 rows, `foreign_key_check` empty, one transform
+(`notification_preferences_push_default`, 2 rows).
+
+The staging binding uses v19. The top-level production binding, and the
+development and E2E bindings that share its local D1 id, stay on
+`krabiclaw-production-v18` until production v19 is loaded from it; local schema
+still comes from the v19 baseline in `migrations/`. All three move together in
+their own change immediately before promotion.
+
+Production v19 was loaded from `krabiclaw-production-v18` while unbound: 100
+tables, 100,371 rows, `foreign_key_check` empty, the native `0000_baseline.sql`
+ledger, one transform (`notification_preferences_push_default`, 4 rows). The
+top-level production, development and E2E bindings then moved to
+`krabiclaw-production-v19` together, immediately before promotion; take the
+production final delta from v18 right after the deployment.
 
 Before dropping or retiring a legacy table or writer:
 

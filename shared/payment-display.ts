@@ -7,24 +7,26 @@ export interface PaymentDisplay {
  currency:CurrencyCode
  captured_amount:number
  refunded_amount:number
+ /** The credit-card surcharge Stripe charged inside `captured_amount`. */
+ surcharge_amount:number
  state:string
  receipt_url:string|null
 }
-export interface PaymentRefundDisplay {id:string;amount:number;status:string;note:string|null}
+export interface PaymentRefundDisplay {id:string;amount:number|null;status:string;note:string|null}
 export interface PaymentOrderDisplay {
  lines:Array<{id:string;title:string;quantity:number;unit_amount:number;currency:CurrencyCode}>
 }
 export function paymentDisplay(value:unknown):PaymentDisplay {
- if(!value||typeof value!=='object'||!('id' in value)||typeof value.id!=='string'||!('currency' in value)||!isCurrencyCode(value.currency)||!('captured_amount' in value)||typeof value.captured_amount!=='number'||!Number.isSafeInteger(value.captured_amount)||value.captured_amount<0||!('refunded_amount' in value)||typeof value.refunded_amount!=='number'||!Number.isSafeInteger(value.refunded_amount)||value.refunded_amount<0||!('state' in value)||typeof value.state!=='string'||!('receipt_url' in value)||(value.receipt_url!==null&&typeof value.receipt_url!=='string'))throw new Error('Invalid payment detail')
- if(value.refunded_amount>value.captured_amount||!['pending','captured','failed','recovery','refunded'].includes(value.state))throw new Error('Invalid payment state')
- return {id:value.id,currency:value.currency,captured_amount:value.captured_amount,refunded_amount:value.refunded_amount,state:value.state,receipt_url:value.receipt_url}
+ if(!value||typeof value!=='object'||!('id' in value)||typeof value.id!=='string'||!('currency' in value)||!isCurrencyCode(value.currency)||!('captured_amount' in value)||typeof value.captured_amount!=='number'||!Number.isSafeInteger(value.captured_amount)||value.captured_amount<0||!('refunded_amount' in value)||typeof value.refunded_amount!=='number'||!Number.isSafeInteger(value.refunded_amount)||value.refunded_amount<0||!('surcharge_amount' in value)||typeof value.surcharge_amount!=='number'||!Number.isSafeInteger(value.surcharge_amount)||value.surcharge_amount<0||!('state' in value)||typeof value.state!=='string'||!('receipt_url' in value)||(value.receipt_url!==null&&typeof value.receipt_url!=='string'))throw new Error('Invalid payment detail')
+ if(value.refunded_amount>value.captured_amount||value.surcharge_amount>value.captured_amount||!['pending','captured','failed','recovery','refunded'].includes(value.state))throw new Error('Invalid payment state')
+ return {id:value.id,currency:value.currency,captured_amount:value.captured_amount,refunded_amount:value.refunded_amount,surcharge_amount:value.surcharge_amount,state:value.state,receipt_url:value.receipt_url}
 }
 export function paymentRefundsDisplay(value:unknown):PaymentRefundDisplay[] {
  if(!Array.isArray(value))throw new Error('Invalid payment refunds')
  return value.map((refund:unknown)=>{
-  if(!refund||typeof refund!=='object'||!('id' in refund)||typeof refund.id!=='string'||!('amount' in refund)||typeof refund.amount!=='number'||!Number.isSafeInteger(refund.amount)||refund.amount<0||!('status' in refund)||typeof refund.status!=='string')throw new Error('Invalid payment refund')
+  if(!refund||typeof refund!=='object'||!('id' in refund)||typeof refund.id!=='string'||!('amount' in refund)||!(refund.amount===null||(typeof refund.amount==='number'&&Number.isSafeInteger(refund.amount)&&refund.amount>0))||!('status' in refund)||typeof refund.status!=='string')throw new Error('Invalid payment refund')
   if(!['queued','creating','pending','requires_action','succeeded','failed','canceled'].includes(refund.status))throw new Error('Invalid payment refund state')
-  return {id:refund.id,amount:refund.amount,status:refund.status,note:'note' in refund&&typeof refund.note==='string'?refund.note:null}
+  return {id:refund.id,amount:refund.amount as number|null,status:refund.status,note:'note' in refund&&typeof refund.note==='string'?refund.note:null}
  })
 }
 export function paymentOrderDisplay(value:unknown):PaymentOrderDisplay|null {

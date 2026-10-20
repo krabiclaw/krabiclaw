@@ -5,7 +5,7 @@
       <!-- Wordmark. Docs and blog carry their own contextual word; there is no
            leading dot before it. -->
       <NuxtLink :to="section === 'docs' ? '/docs' : section === 'blog' ? '/blog' : '/'" class="group flex shrink-0 items-center gap-2.5 no-underline">
-        <img src="/platform/krabiclaw-symbol.svg" alt="Krabiclaw" width="34" height="34" class="size-8.5 rounded-lg transition-transform duration-200 group-hover:rotate-12" />
+        <img src="/platform/krabiclaw-symbol.svg" alt="KrabiClaw" width="34" height="34" class="size-8.5 rounded-lg transition-transform duration-200 group-hover:rotate-12" />
         <span class="kc-wordmark text-[19px] leading-none">
           <span class="kc-wordmark__krabi">krabi</span><span class="kc-wordmark__claw">claw</span><span v-if="sectionSuffix" class="kc-wordmark__suffix">{{ sectionSuffix }}</span><span v-else class="kc-wordmark__tld">.com</span>
         </span>
@@ -172,12 +172,10 @@ const props = withDefaults(defineProps<{ section?: 'platform' | 'docs' | 'blog' 
   section: 'platform',
 })
 
-// Route migration to /services and /mcp belongs to #939; the approved labels
-// point at the destinations that work today.
 const SOLUTION_ITEMS = [
   { label: 'Restaurants', to: '/restaurants' },
   { label: 'Experiences', to: '/experiences' },
-  { label: 'Professional Services', to: '/legal' },
+  { label: 'Law firms', to: '/legal' },
 ] as const
 
 const PRIMARY_ITEMS = [
@@ -218,7 +216,7 @@ const searchSurface = computed<PlatformSearchPaletteSurface>(() => (
 const searchLabel = computed(() => {
   if (props.section === 'docs') return 'Search docs, blog, help...'
   if (props.section === 'blog') return 'Search blog, docs, help...'
-  return 'Search Krabiclaw'
+  return 'Search KrabiClaw'
 })
 
 const isSolutionsActive = computed(() => SOLUTION_ITEMS.some(solution => isActiveRoute(solution.to)))

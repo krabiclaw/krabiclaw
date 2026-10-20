@@ -65,7 +65,7 @@ const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 const { localePath } = useI18n()
 function route(url: string) { return isInternalRoute(url) ? localePath(url) : url }
 
-/** Krabiclaw's verticals each carry their own accent; the page says which. */
+/** KrabiClaw's verticals each carry their own accent; the page says which. */
 const accent = computed<'primary' | 'teal' | 'navy'>(() => (
   props.page.path === '/experiences' ? 'teal' : props.page.path === '/legal' ? 'navy' : 'primary'))
 

@@ -217,12 +217,11 @@ export function usePostEditor(organizationId: string, locationId: Ref<string | n
     }
   }
 
-  /** Discord cannot be searched, so its unknown outcome is checked against the message id the owner found. */
-  async function reconcile(postId: string, publicationId: string, providerPostId?: string): Promise<boolean> {
+  async function reconcile(postId: string, publicationId: string): Promise<boolean> {
     error.value = null
     try {
       await dashboardApi(`/api/editor/organizations/${organizationId}/post-publications/${publicationId}/reconcile`, {
-        method: 'POST', body: providerPostId ? { provider_post_id: providerPostId } : {}, validate: (value): value is ApiRecord => isRecord(value),
+        method: 'POST', body: {}, validate: (value): value is ApiRecord => isRecord(value),
       })
       await reload(postId)
       return true

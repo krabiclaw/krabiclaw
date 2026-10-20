@@ -254,17 +254,31 @@ behavior.
 
 ## Pricing copy
 
-Use Stripe and Metronome's exact pricing terms, phrasing and breakdown wherever
-they apply. This governs public pages, SEO metadata, LLM-readable content,
+Use Stripe's exact pricing terms, phrasing and breakdown wherever they apply. This governs public pages, SEO metadata, LLM-readable content,
 customer-facing billing and documentation. Do not replace their wording with
 technical jargon or invent a different pricing tone. Add plain wording only for
 KrabiClaw's own subscription and fee.
 
-Read the current primary [Stripe pricing](https://stripe.com/pricing) and
-[Metronome pricing](https://metronome.com/pricing) before changing pricing copy.
-Preserve the actual amounts, charge basis, currency, billing interval and
-conditions. Public pages and their Markdown, SEO and LLM projections use the
+Read the current primary [Stripe pricing](https://stripe.com/pricing) before
+changing pricing copy. Preserve the actual amounts, charge basis, currency,
+billing interval and conditions. Every plan charge is on the business's one
+Stripe subscription; additional locations and fees are metered and billed at
+the end of each period (`docs/payments/payments.md`). Public pages and their Markdown, SEO and LLM projections use the
 same canonical published pricing content.
+
+## Vertical focus and domain boundaries
+
+The `service` vertical is specifically and canonically **Legal Services** (solo practitioners, attorneys, and law firms running the Blawby template, modeled on North Carolina Legal Services).
+
+Do not invent or abstract generic service models (e.g. spas, salons, cleaners, trades, or open-ended consulting platforms).
+
+- Offerings are **Practice Areas & Consultations**;
+- Practitioners and operators are **Attorneys / Legal Team**;
+- Counterparties and prospective clients are **Clients**;
+- The booking flow is a **Legal Consultation Request** (`CONSULTATION`);
+- Physical and remote contact points are **Offices** / **Practice Locations**.
+
+Any agent or LLM working on the `service` vertical or Blawby must use authentic legal practice domain concepts rather than abstracting to generic service entities.
 
 ## Dashboard CMS
 

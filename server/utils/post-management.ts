@@ -1,6 +1,7 @@
+import { getSourceLocale } from '~/server/utils/organization-locales'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { HTTPError } from 'nitro'
-import { createContentDocumentWithBlocks, prepareContentDocumentDeletion, updateContentDocument, type ContentDocumentChanges } from '~/server/utils/content/documents'
+import { createContentDocumentWithBlocks, documentOfRootSql, prepareContentDocumentDeletion, updateContentDocument, type ContentDocumentChanges } from '~/server/utils/content/documents'
 import { parsePostInput, PostValidationError, type PostCallToAction, type PostMediaRef, type PostMutation } from '~/shared/posts'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
@@ -16,6 +17,8 @@ import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-reso
 import { createPreviewToken, PREVIEW_TOKEN_QUERY, PREVIEW_TOKEN_TTL_MS, previewSecretOf } from '~/server/utils/preview-token'
 import { mcpPageInfo, type McpPageInfo } from '~/server/utils/mcp-pagination'
 import { d1JsonStringSet } from '~/server/db/d1-limits'
+import { publicTenantVisibilitySql } from '~/server/utils/public-base'
+import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 
 /**
  * A short post: the website document every surface reads and writes.
@@ -114,10 +117,18 @@ function absoluteUrl(origin: string | null, path: string) {
   return new URL(path, origin.endsWith('/') ? origin : `${origin}/`).toString()
 }
 
-async function resolveOrganizationPublicOrigin(db: DbClient, organizationId: string) {
-  const domain = await queryFirst<{ domain: string }>(db,
-    "SELECT domain FROM organization_domains WHERE organization_id = ? AND role = 'canonical' AND status = 'active'", [organizationId])
-  return domain ? `https://${domain.domain}` : null
+async function resolveOrganizationPostOrigins(db: DbClient, env: CloudflareEnv, organizationId: string) {
+  const domain = await queryFirst<{ domain: string; subdomain: string | null; is_public: number }>(db,
+    `SELECT d.domain, o.subdomain, (${publicTenantVisibilitySql('o', false)}) AS is_public
+     FROM organization_domains d JOIN organization o ON o.id = d.organization_id
+     WHERE d.organization_id = ? AND d.role = 'canonical' AND d.status = 'active' AND ${publicTenantVisibilitySql('o', true)}`, [organizationId])
+  const origin = domain ? tenantOrganizationOrigin({
+    platformDomain: env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '',
+    freeOrganizationDomain: env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN ?? '',
+    subdomain: domain.subdomain ?? '',
+    canonicalDomain: domain.domain,
+  }) : null
+  return { publicOrigin: domain?.is_public ? origin : null, previewOrigin: origin }
 }
 
 async function validatePostLocation(db: DbClient, organizationId: string, locationId: string | null) {
@@ -137,7 +148,7 @@ async function allocatePostSlug(db: DbClient, organizationId: string, postId: st
   for (let attempt = 0; attempt < MAX_SLUG_ATTEMPTS; attempt += 1) {
     const slug = attempt === 0 ? base : `${base}-${attempt + 1}`
     const existing = await queryFirst<{ id: string }>(db,
-      "SELECT id FROM content_documents WHERE kind = 'social_post' AND locale = 'en' AND organization_id = ? AND slug = ? AND id != ? LIMIT 1",
+      "SELECT id FROM content_documents WHERE kind = 'social_post' AND row_role = 'root' AND organization_id = ? AND slug = ? AND id != ? LIMIT 1",
       [organizationId, slug, postId])
     if (!existing) return slug
     if (requested) throw new PostValidationError(`slug ${slug} is already used by another post`)
@@ -199,17 +210,17 @@ async function loadPublicationRows(db: DbClient, organizationId: string, postIds
   return byPost
 }
 
-async function attachPostFields(db: DbClient, env: CloudflareEnv | null, rows: PostRow[]): Promise<Post[]> {
+async function attachPostFields(db: DbClient, env: CloudflareEnv, rows: PostRow[]): Promise<Post[]> {
   if (!rows.length) return []
   const organizationId = rows[0]!.organization_id
   const ids = rows.map(row => row.id)
-  const [origin, media, social, publications] = await Promise.all([
-    resolveOrganizationPublicOrigin(db, organizationId),
+  const [origins, media, social, publications] = await Promise.all([
+    resolveOrganizationPostOrigins(db, env, organizationId),
     loadPostMedia(db, organizationId, ids),
     loadPublicSocialMedia(db, organizationId, 'content_document', ids),
     loadPublicationRows(db, organizationId, ids),
   ])
-  const previewSecret = env ? previewSecretOf(env) : null
+  const previewSecret = previewSecretOf(env)
   if (rows.some(row => row.status === 'draft') && !previewSecret) throw new HTTPError({ statusCode: 500, statusMessage: 'Preview signing is not configured' })
   const previewToken = rows.some(row => row.status === 'draft') && previewSecret
     ? await createPreviewToken(previewSecret, organizationId, Date.now() + PREVIEW_TOKEN_TTL_MS)
@@ -221,8 +232,8 @@ async function attachPostFields(db: DbClient, env: CloudflareEnv | null, rows: P
       ...row,
       ...post,
       public_path: publicPath,
-      canonical_url: row.status === 'published' ? absoluteUrl(origin, publicPath) : null,
-      preview_url: row.status === 'draft' && previewToken ? absoluteUrl(origin, `${publicPath}?${PREVIEW_TOKEN_QUERY}=${encodeURIComponent(previewToken)}`) : null,
+      canonical_url: row.status === 'published' ? absoluteUrl(origins.publicOrigin, publicPath) : null,
+      preview_url: row.status === 'draft' && previewToken ? absoluteUrl(origins.previewOrigin, `${publicPath}?${PREVIEW_TOKEN_QUERY}=${encodeURIComponent(previewToken)}`) : null,
       social_image: social.get(row.id)?.social_image ?? null,
       publications: await Promise.all((publications.get(row.id) ?? []).map(async publication => ({
         id: publication.id, channel: publication.channel, target_id: publication.provider_target_id,
@@ -239,7 +250,7 @@ async function readPostRow(db: DbClient, organizationId: string, postId: string)
     WHERE p.kind = 'social_post' AND p.row_role = 'root' AND p.id = ? AND p.organization_id = ? LIMIT 1`, [postId, organizationId])
 }
 
-export async function getPost(db: DbClient, env: CloudflareEnv | null, organizationId: string, postId: string): Promise<Post | null> {
+export async function getPost(db: DbClient, env: CloudflareEnv, organizationId: string, postId: string): Promise<Post | null> {
   const row = await readPostRow(db, organizationId, postId)
   if (!row) return null
   return (await attachPostFields(db, env, [row]))[0]!
@@ -251,7 +262,7 @@ export async function getPost(db: DbClient, env: CloudflareEnv | null, organizat
  */
 export async function listPosts(
   db: DbClient,
-  env: CloudflareEnv | null,
+  env: CloudflareEnv,
   organizationId: string,
   filter: { status?: string | null; locationId?: string | null },
   window: { limit: number; offset: number },
@@ -356,7 +367,7 @@ export async function createPost(
     const slug = await allocatePostSlug(db, organizationId, id, data.slug ?? null, data.title ?? null, data.body ?? null)
     try {
       await createContentDocumentWithBlocks(db, {
-        id, rowRole: 'root', kind: 'social_post', locale: 'en', organizationId,
+        id, rowRole: 'root', kind: 'social_post', locale: await getSourceLocale(db, organizationId), organizationId,
         locationId: data.location_id ?? null, slug, title: data.title ?? null, summary: data.body ?? null,
         status: 'draft', visibility: data.visibility ?? 'listed', source: 'manual', createdBy, updatedBy: createdBy,
         metadata: data.call_to_action ? { call_to_action: data.call_to_action } : {},
@@ -507,28 +518,29 @@ interface PublicPostRow {
 
 async function projectPublicPosts(env: CloudflareEnv, db: DbClient, organizationId: string, rows: PublicPostRow[], locale: string): Promise<PublicSocialPost[]> {
   if (!rows.length) return []
+  const sourceLocale = await getSourceLocale(db, organizationId)
   const rootIds = rows.map(row => row.id)
-  const [origin, media, social, publications, localizations, facebook, instagram] = await Promise.all([
-    resolveOrganizationPublicOrigin(db, organizationId),
+  const [origins, media, social, publications, localizations, facebook, instagram] = await Promise.all([
+    resolveOrganizationPostOrigins(db, env, organizationId),
     loadPostMedia(db, organizationId, rootIds),
     loadPublicSocialMedia(db, organizationId, 'content_document', rows.map(row => row.representation_id)),
     // A Discord channel's messages are readable only by its members, so the public page names only Meta's public posts.
     queryAll<{ post_id: string; channel: 'facebook' | 'instagram'; provider_permalink: string | null; provider_target_id: string }>(db, `SELECT post_id, channel, provider_permalink, provider_target_id
       FROM post_publications WHERE organization_id = ? AND state = 'published' AND channel IN ('facebook', 'instagram') AND post_id IN (SELECT value FROM json_each(?)) ORDER BY channel`,
     [organizationId, d1JsonStringSet(rootIds)]),
-    locale === 'en' ? Promise.resolve([]) : loadExactPublicLocalizations(env, db, organizationId, locale),
+    locale === sourceLocale ? Promise.resolve(null) : loadExactPublicLocalizations(env, db, organizationId, locale),
     readIntegration(db, organizationId, 'facebook'),
     readIntegration(db, organizationId, 'instagram'),
   ])
   return rows.map((row) => {
     const rootAction = callToActionOf(row.root_metadata_json)
     const localizedLabel = row.representation_id === row.id ? null : callToActionOf(row.metadata_json)?.label ?? null
-    const path = (locale === 'en' ? '' : `/${locale}`) + postPublicPath(row.slug)
+    const path = (locale === sourceLocale ? '' : `/${locale}`) + postPublicPath(row.slug)
     return {
       id: row.id,
       slug: row.slug,
       path,
-      url: absoluteUrl(origin, path),
+      url: absoluteUrl(origins.publicOrigin, path),
       title: row.title?.trim() ? row.title : null,
       body: row.body?.trim() ? row.body : null,
       call_to_action: rootAction ? { label: localizedLabel ?? rootAction.label, url: rootAction.url } : null,
@@ -550,7 +562,7 @@ const PUBLIC_POST_SELECT = `SELECT root.id, p.id AS representation_id, COALESCE(
     root.metadata_json AS root_metadata_json, p.metadata_json, root.published_at, root.status, root.visibility,
     root.location_id, bl.title AS location_title, bl.slug AS location_slug
   FROM content_documents root
-  JOIN content_documents p ON COALESCE(p.root_id, p.id) = root.id AND p.locale = ?
+  JOIN content_documents p ON ${documentOfRootSql('p', 'root')} AND p.locale = ?
   LEFT JOIN business_locations bl ON bl.id = root.location_id AND bl.organization_id = root.organization_id AND bl.status = 'active'`
 
 /**
@@ -586,11 +598,12 @@ export async function getPublicSocialPost(
 ) {
   const organization = await queryFirst<{ id: string }>(db, "SELECT id FROM organization WHERE id = ? AND status = 'active' LIMIT 1", [organizationId])
   if (!organization) return null
+  const sourceLocale = await getSourceLocale(db, organizationId)
   const row = await queryFirst<PublicPostRow>(db, `${PUBLIC_POST_SELECT}
     WHERE root.kind = 'social_post' AND root.row_role = 'root' AND root.organization_id = ?
-      AND ${locale === 'en' ? 'root.slug = ?' : "p.row_role = 'representation' AND p.path = ?"}
+      AND ${locale === sourceLocale ? 'root.slug = ?' : "p.row_role = 'representation' AND p.path = ?"}
       ${previewAuthorized ? '' : "AND root.status = 'published'"} LIMIT 1`,
-  [locale, organizationId, locale === 'en' ? slug : postPublicPath(slug)])
+  [locale, organizationId, locale === sourceLocale ? slug : postPublicPath(slug)])
   if (!row) return null
   const [post] = await projectPublicPosts(env, db, organizationId, [row], locale)
   const source = await queryFirst<{ slug: string }>(db, 'SELECT slug FROM content_documents WHERE id = ?', [row.id])

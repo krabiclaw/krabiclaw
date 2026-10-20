@@ -5,13 +5,13 @@
       <div class="mb-12 grid grid-cols-2 gap-8 md:grid-cols-[1.4fr_repeat(4,1fr)] md:gap-10">
         <div class="col-span-2 md:col-span-1">
           <NuxtLink to="/" class="group inline-flex items-center gap-2.5 no-underline">
-            <img src="/platform/krabiclaw-symbol.svg" alt="Krabiclaw" width="34" height="34" class="size-8.5 rounded-lg transition-transform duration-200 group-hover:rotate-12" />
+            <img src="/platform/krabiclaw-symbol.svg" alt="KrabiClaw" width="34" height="34" class="size-8.5 rounded-lg transition-transform duration-200 group-hover:rotate-12" />
             <span class="kc-wordmark text-[19px] leading-none">
               <span class="kc-wordmark__krabi">krabi</span><span class="kc-wordmark__claw">claw</span><span class="kc-wordmark__tld">.com</span>
             </span>
           </NuxtLink>
           <p class="mt-3.5 max-w-75 text-[13px] leading-relaxed text-muted">
-            The AI-managed web operating layer for local and professional businesses. Empowering independent owners globally. 🦀
+            Websites for restaurants, experiences, and law firms. Manage yours with your AI assistant or the dashboard.
           </p>
         </div>
 
@@ -27,22 +27,21 @@
         </div>
       </div>
 
-      <SiteFooterBar name="Krabiclaw" class="border-t border-default pt-6 text-dimmed" />
+      <SiteFooterBar name="KrabiClaw" class="border-t border-default pt-6 text-dimmed" />
     </div>
   </footer>
 </template>
 
 <script setup lang="ts">
-// Approved shell terminology: `Professional Services` and `MCP`. #939 owns the
-// canonical /services and /mcp route migration; until then these point at the
-// destinations that work today.
+import { KRABICLAW_REPOSITORY_URL } from '~/shared/open-source'
+
 const COLUMNS = [
   {
     title: 'Solutions',
     links: [
       { label: 'Restaurants', to: '/restaurants' },
       { label: 'Experiences', to: '/experiences' },
-      { label: 'Professional Services', to: '/legal' },
+      { label: 'Law firms', to: '/legal' },
     ],
   },
   {
@@ -66,6 +65,7 @@ const COLUMNS = [
     links: [
       { label: 'Docs', to: '/docs' },
       { label: 'Help center', to: '/help' },
+      { label: 'GitHub', to: KRABICLAW_REPOSITORY_URL },
     ],
   },
 ] as const

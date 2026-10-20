@@ -1,21 +1,26 @@
 import assert from 'node:assert/strict'
+import { creationRequestHash } from '../../server/utils/organization-events.ts'
 import { createHmac } from 'node:crypto'
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api'
 import * as schema from '../../server/db/schema.ts'
 import { threadPayloadForGuest, requestInsertQueries, getGuestRequest } from '../../server/domain/requests.ts'
 import { upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
-import test from 'node:test'
+import test, { mock } from 'node:test'
 import { Miniflare } from 'miniflare'
 import { createDeliveryReceipt, getDeliveryById, isVisibleDeliveryFailure, listThreadDeliveries, recordDeliveryOutcome } from '../../server/domain/guest-threads/deliveries.ts'
 import { appendEntry } from '../../server/domain/guest-threads/entries.ts'
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { listGuestThreads, updateThreadProjectionIfLatestEntry } from '../../server/domain/guest-threads/repository.ts'
 import { requestBookingChange, respondToBookingChange } from '../../server/domain/guest-threads/booking-changes.ts'
-import { notifyContactSubmitted, notifyFinancialNotification } from '../../server/utils/notifications.ts'
+import { notifyContactSubmitted, notifyFinancialNotification, notifyStayCancelled } from '../../server/utils/notifications.ts'
+import { createProduct, getProduct, updateProduct } from '../../server/utils/product-management.ts'
+import { cancelStay, createStay, getStay } from '../../server/domain/stays.ts'
+import { organizationAdapter } from '../../server/utils/member-access.ts'
 import { createCanonicalNotification } from '../../server/utils/notification-center.ts'
 import { buildNotificationVisibilityFilter, type NotificationVisibilityPrincipal } from '../../server/utils/notification-access.ts'
 import { acknowledgeNotification } from '../../server/utils/notification-acknowledgement.ts'
 import { setNotificationPreference } from '../../server/domain/notification-preferences.ts'
+import { registerDevice } from '../../server/domain/devices.ts'
 import { guestPaymentMessage, ownerPaymentMessage } from '../../server/notifications/payment-events.ts'
 import { getResendClient, resendData } from '../../server/utils/resend.ts'
 import { getReviewBookingContext } from '../../server/utils/review-requests.ts'
@@ -40,7 +45,8 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
       NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' }
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     for (const statement of [
-      "INSERT INTO organization (id, name, slug, subdomain) VALUES ('org-proof', 'Proof', 'proof', 'proof')",
+      "INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES ('org-proof', 'Proof', 'proof', 'proof', 'USD', 'UTC')",
+      "INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('proof-en', 'org-proof', 'en', 1, 'published')",
       "INSERT INTO user (id, name, email) VALUES ('user-proof', 'Proof Owner', 'owner@proof.example')",
       "INSERT INTO member (id, organizationId, userId, role) VALUES ('member-proof','org-proof','user-proof','owner')",
     ]) await db.prepare(statement).run()
@@ -53,6 +59,46 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     assert.deepEqual((await db.prepare("SELECT d.purpose,d.status FROM guest_thread_deliveries d JOIN activity_entries e ON e.id=d.entry_id WHERE e.request_id='contact-proof' ORDER BY d.purpose").all()).results,
       [{ purpose: 'guest_acknowledgement', status: 'sent' }, { purpose: 'owner_alert', status: 'sent' }])
 
+    // Push is a channel of the same owner alert: one delivery per signed-in
+    // device, routed to that token's APNs environment, every outcome recorded.
+    await db.prepare("INSERT INTO session (id, expiresAt, token, userId) VALUES ('session-proof', unixepoch() + 3600, 'session-token-proof', 'user-proof')").run()
+    const deviceToken = 'ab'.repeat(32)
+    await registerDevice(db, { token: deviceToken, environment: 'sandbox', userId: 'user-proof', sessionId: 'session-proof' })
+    const notifyPushContact = async (contactEnv: typeof env, id: string) => {
+      const writes = requestInsertQueries({ id, kind: 'contact', organization_id: 'org-proof', location_id: null, user_id: null, review_id: null, conversation_state: 'needs_attention', resolved_at: null, payload: { guest: { name: 'Proof Guest', email: 'guest@proof.example', phone: null }, subject: null, message: 'Hello', consent_at: null, ip_hash: null }, created_at: now, updated_at: now })
+      await db.batch(writes.map(write => db.prepare(write.query).bind(...write.params)))
+      await notifyContactSubmitted(contactEnv, db, { organizationId: 'org-proof', organizationName: 'Proof', locationId: null, contactId: id, guestName: 'Proof Guest', email: 'guest@proof.example', subject: null, message: 'Hello' })
+    }
+    const pushDelivery = (id: string) => db.prepare("SELECT d.provider, d.status, d.error, d.provider_message_id FROM guest_thread_deliveries d JOIN activity_entries e ON e.id = d.entry_id WHERE e.request_id = ? AND d.channel = 'push'").bind(id).all().then(result => result.results)
+    // An owner alert that fails is recorded on its delivery and does not fail the guest's submission.
+    await notifyPushContact(env, 'push-unconfigured')
+    assert.deepEqual(await pushDelivery('push-unconfigured'), [{ provider: 'apns', status: 'failed', error: 'APNS_CONFIG_REQUIRED: APNS_KEY_ID is not configured for APNs delivery', provider_message_id: null }])
+    const signingKey = await crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify'])
+    const pem = `-----BEGIN PRIVATE KEY-----\n${Buffer.from(await crypto.subtle.exportKey('pkcs8', signingKey.privateKey)).toString('base64')}\n-----END PRIVATE KEY-----\n`
+    const apnsEnv = { ...env, APNS_KEY_ID: 'PROOFKEY01', APNS_TEAM_ID: 'PROOFTEAM1', APNS_BUNDLE_ID: 'com.krabiclaw.app', APNS_PRIVATE_KEY: pem }
+    const apnsRequests: Array<{ url: string; apnsId: string | null; topic: string | null }> = []
+    const apnsAnswers = [new Response(null, { status: 200 }), new Response('{"reason":"Unregistered","timestamp":1760000000000}', { status: 410 })]
+    const fetchMock = mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
+      const headers = new Headers(init.headers)
+      apnsRequests.push({ url, apnsId: headers.get('apns-id'), topic: headers.get('apns-topic') })
+      const answer = apnsAnswers.shift()
+      assert(answer, `unexpected request to ${url}`)
+      return answer
+    })
+    try {
+      await notifyPushContact(apnsEnv, 'push-delivered')
+      const [delivered] = await pushDelivery('push-delivered')
+      assert.deepEqual(apnsRequests[0], { url: `https://api.sandbox.push.apple.com/3/device/${deviceToken}`, apnsId: delivered?.provider_message_id, topic: 'com.krabiclaw.app' })
+      assert.deepEqual({ ...delivered, provider_message_id: typeof delivered?.provider_message_id }, { provider: 'apns', status: 'sent', error: null, provider_message_id: 'string' })
+      // Apple's 410 retires the token, and the delivery to that device still records the failure.
+      await notifyPushContact(apnsEnv, 'push-retired')
+      assert.deepEqual(await pushDelivery('push-retired'), [{ provider: 'apns', status: 'failed', error: 'APNs sandbox 410 Unregistered; device token removed', provider_message_id: null }])
+      assert.equal(await db.prepare('SELECT count(*) AS count FROM device_tokens').first('count'), 0)
+      assert.equal(apnsRequests.length, 2)
+    } finally {
+      fetchMock.mock.restore()
+    }
+
     await db.prepare("INSERT INTO business_locations (id,organization_id,slug,title,timezone,max_capacity,opening_hours) VALUES ('booking-location','org-proof','booking','Booking','Asia/Bangkok',10,?)")
       .bind(JSON.stringify({ periods: [{ open: { day: 1, hour: 16, minute: 0 }, close: { day: 1, hour: 22, minute: 0 } }] })).run()
     const booking = requestInsertQueries({ id: 'change-proof', kind: 'reservation', organization_id: 'org-proof', location_id: 'booking-location',
@@ -61,9 +107,9 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
     await db.batch(booking.map(write => db.prepare(write.query).bind(...write.params)))
     // The seats live on the reservation, not the thread: a change proposal is
     // read from and applied to this row.
-    await upsertLocationReservationConfig(db, { organizationId: 'org-proof', locationId: 'booking-location', patch: { slot_capacity: 10 }, actorId: 'user-proof' })
-    await db.prepare(`INSERT INTO reservations (id,organization_id,location_id,request_id,timezone,starts_at,ends_at,party_size,status)
-      VALUES ('reservation-change-proof','org-proof','booking-location','change-proof','Asia/Bangkok','2099-01-05T09:00:00.000Z','2099-01-05T11:00:00.000Z',1,'confirmed')`).run()
+    await upsertLocationReservationConfig(db, { organizationId: 'org-proof', locationId: 'booking-location', patch: { slot_capacity: 10, duration_minutes: 120 }, actorId: 'user-proof' })
+    await db.prepare(`INSERT INTO reservations (id,organization_id,location_id,request_id,timezone,starts_at,ends_at,party_size,status,policy_json)
+      VALUES ('reservation-change-proof','org-proof','booking-location','change-proof','Asia/Bangkok','2099-01-05T09:00:00.000Z','2099-01-05T11:00:00.000Z',1,'confirmed',?)`).bind(JSON.stringify({reschedule_allowed:true,reschedule_cutoff_minutes:0,free_cancellation_until_minutes:0})).run()
     const propose = async (key: string, partySize: number) => {
       const current = await getGuestRequest(db, 'change-proof')
       assert(current)
@@ -141,6 +187,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
       actorUserId: 'user-proof',
       channel: 'email',
       body: 'A delayed reply',
+      payloadJson: { request_hash: await creationRequestHash({body:'A delayed reply',photos:[]}) },
       eventName: 'thread.member_reply',
       dedupeKey: `guest-thread-operation:contact-proof:${delayedOperationKey}`,
     })
@@ -173,6 +220,7 @@ test('a guest-thread email is sent once per event: replays send nothing, a faile
       actorUserId: 'user-proof',
       channel: 'email',
       body: 'A failed reply',
+      payloadJson: { request_hash: await creationRequestHash({body:'A failed reply',photos:[]}) },
       eventName: 'thread.member_reply',
       dedupeKey: `guest-thread-operation:contact-proof:${failedOperationKey}`,
     })
@@ -215,9 +263,10 @@ test('a replayed status email sends its recorded content and refuses a supersede
     const db = await runtime.getD1Database('DB')
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     for (const statement of [
-      "INSERT INTO organization (id, name, slug, subdomain) VALUES ('org-status', 'Proof', 'proof', 'proof')",
+      "INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES ('org-status', 'Proof', 'proof', 'proof', 'USD', 'UTC')",
+      "INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('status-en', 'org-status', 'en', 1, 'published')",
       "INSERT INTO user (id, name, email) VALUES ('user-status', 'Proof Owner', 'owner@proof.example')",
-      "INSERT INTO business_locations (id, organization_id, slug, title) VALUES ('location-status', 'org-status', 'proof', 'Proof')",
+      "INSERT INTO business_locations (id, organization_id, slug, title, timezone) VALUES ('location-status', 'org-status', 'proof', 'Proof', 'UTC')",
     ]) await db.prepare(statement).run()
     const now = new Date().toISOString()
     const opening = requestInsertQueries({ id: 'booking-status', kind: 'reservation', organization_id: 'org-status', location_id: 'location-status', user_id: null, review_id: null, conversation_state: 'needs_attention', resolved_at: null, payload: threadPayloadForGuest({ name: 'Guest', email: 'guest@provider-proof.com', phone: '123' }), created_at: now, updated_at: now })
@@ -229,20 +278,32 @@ test('a replayed status email sends its recorded content and refuses a supersede
 
     const input = {
       threadId: 'booking-status', actorUserId: 'user-status',
-      env: { EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', NUXT_PUBLIC_PLATFORM_DOMAIN: 'proof.example' },
+      env: { EMAIL_DELIVERY_MODE: 'provider', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>', NUXT_PUBLIC_PLATFORM_DOMAIN: 'proof.example' },
     }
     const cancel = { ...input, action: 'cancel', idempotencyKey: 'cancel-status' }
-    assert.deepEqual(await executeGuestThreadOperation(db, cancel), { ok: false, status: 502, reason: 'delivery_failed', message: '503 application_error: Internal server error. We are unable to process your request right now, please try again later.' })
+    assert.deepEqual(await executeGuestThreadOperation(db, cancel), {
+      ok: false, status: 502, reason: 'delivery_failed', code: 'DELIVERY_FAILED', field: 'delivery',
+      message: 'Booking is cancelled, but the guest email failed. Retry with the same idempotency key.',
+      mutation_applied: true, operation_completed: false, request_id: 'booking-status', retry_with_same_idempotency_key: true,
+      record: {
+        kind: 'reservation', id: 'reservation-status', status: 'cancelled', party_size: 2,
+        starts_at: '2098-10-01T11:00:00.000Z', ends_at: '2098-10-01T13:00:00.000Z', timezone: 'Asia/Bangkok',
+        location_id: 'location-status', product_id: null, product_name: null, assigned_member_id: null, check_in_date: null, check_out_date: null,
+        organization_id: 'org-status', user_id: null,
+      },
+    })
     assert.equal(await db.prepare("SELECT status FROM reservations WHERE id='reservation-status'").first('status'), 'cancelled')
     assert.equal(requests.length, 1)
     const deliveryId = 'guest-thread-email:booking-status:cancel-status'
     assert.equal((await getDeliveryById(db, deliveryId))!.status, 'failed')
     const original = requests[0]!
-    // The recorded body is now rendered inside the shared email shell, so the
-    // sent copy contains it rather than being it.
-    assert.ok(original.text.includes('Your reservation for Oct 1, 2098, 6:00 PM for 2 guests has been cancelled.'))
-    assert.ok(original.html.includes('Your reservation for Oct 1, 2098, 6:00 PM for 2 guests has been cancelled.'))
-    // Replaying the cancel sends the recorded email again, unchanged.
+    const guestBody = 'Proof · Oct 1, 2098, 6:00 PM GMT+7 · 2 guests'
+    assert.equal(original.subject, 'Reservation Cancelled — Proof')
+    assert.ok(original.text.includes(guestBody), original.text)
+    assert.ok(original.html.includes(guestBody), original.html)
+    // A later display edit cannot change the copy already recorded for this
+    // cancellation. Retrying sends the exact first email again.
+    await db.prepare("UPDATE organization SET name='Changed after cancellation' WHERE id='org-status'").run()
     assert.equal((await executeGuestThreadOperation(db, cancel)).status, 502)
     assert.deepEqual(requests[1], original)
 
@@ -263,8 +324,97 @@ test('a replayed status email sends its recorded content and refuses a supersede
     assert.equal((await getDeliveryById(db, deliveryId))!.status, 'failed')
     const entry = await db.prepare('SELECT body, payload_json FROM activity_entries WHERE id = ?')
       .bind((await getDeliveryById(db, deliveryId))!.entry_id).first<{ body: string; payload_json: string }>()
-    assert.ok(original.text.includes(entry!.body))
+    assert.equal(entry!.body, guestBody)
     assert.equal(JSON.parse(entry!.payload_json).subject, original.subject)
+  } finally {
+    await runtime.dispose()
+  }
+})
+
+test('a failed stay cancellation email retries its recorded content after display edits and sends once', async (t) => {
+  const runtime = new Miniflare({ workers: [{ config: {
+    name: 'stay-cancellation-delivery-proof', compatibilityDate: '2024-11-01',
+    manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
+    exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
+    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stay-cancellation-delivery-proof', exportName: 'Hub' } },
+  } }] })
+  const requests: Array<{ body: { subject: string; text: string; html: string }; idempotencyKey: string | null }> = []
+  let reject = true
+  t.mock.method(globalThis, 'fetch', async (url: string, init: RequestInit) => {
+    assert.equal(url, 'https://api.resend.com/emails')
+    requests.push({ body: JSON.parse(String(init.body)), idempotencyKey: new Headers(init.headers).get('idempotency-key') })
+    return reject
+      ? Response.json({ name: 'application_error', message: 'Cancellation delivery rejected' }, { status: 503 })
+      : Response.json({ id: 'stay-cancellation-delivered' })
+  })
+  try {
+    const db = await runtime.getD1Database('DB')
+    const env = { ...await runtime.getBindings<CloudflareEnv>(), BETTER_AUTH_SECRET: 'local-proof-secret-long-enough-for-auth', BETTER_AUTH_URL: 'https://proof.example',
+      NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example', EMAIL_REPLY_SECRET: 'local-reply-proof', EMAIL_DELIVERY_MODE: 'provider', WHATSAPP_DELIVERY_MODE: 'log_only',
+      STRIPE_SECRET_KEY: 'sk_test_local_d1_no_stripe_requests', RESEND_API_KEY: 'controlled-provider-only', EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>' }
+    await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
+    for (const statement of [
+      "INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone, vertical, theme_id) VALUES ('org-stay-cancel', 'Original Retreat', 'stay-cancel', 'stay-cancel', 'USD', 'Asia/Bangkok', 'lodging', 'saya-theme-v1')",
+      "INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('stay-cancel-en', 'org-stay-cancel', 'en', 1, 'published')",
+      "INSERT INTO user (id, name, email) VALUES ('owner-stay-cancel', 'Owner', 'owner@proof.example')",
+      "INSERT INTO member (id, organizationId, userId, role) VALUES ('member-stay-cancel', 'org-stay-cancel', 'owner-stay-cancel', 'owner')",
+      "INSERT INTO business_locations (id, organization_id, slug, title, timezone, status) VALUES ('location-stay-cancel', 'org-stay-cancel', 'retreat', 'Retreat', 'Asia/Bangkok', 'active')",
+    ]) await db.prepare(statement).run()
+    const access = { organizationId: 'org-stay-cancel', actorId: 'owner-stay-cancel', manage: true }
+    const home = await createProduct(db, { env, organizationId: access.organizationId, actor: { actorId: access.actorId }, product: {
+      kind: 'stay', name: 'Original Cabin', variants: [{ name: 'Original Cabin', prices: [{ unit_amount: 15000, currency: 'USD' }] }],
+      stay: { location_id: 'location-stay-cancel', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 2, assigned_member_id: null, assigned_team_id: null },
+    } })
+    const stay = await createStay(db, env, access, { product_id: home.id, idempotency_key: 'stay-cancellation-email', check_in_date: '2098-10-01', check_out_date: '2098-10-03',
+      adults: 2, guest_name: 'Ana', guest_email: 'guest@provider-proof.com', total_minor: 30000 })
+    await cancelStay(db, env, access, stay.id, { expected_version: stay.version })
+    assert.equal((await getStay(db, access, stay.id)).status, 'cancelled')
+    await assert.rejects(notifyStayCancelled(env, db, access.organizationId, stay.id, 'host', 0), (error: AggregateError) => {
+      assert(error instanceof AggregateError)
+      assert.match(error.message, /sendEmailNotification/u)
+      assert.equal(error.errors.length, 1)
+      assert.match(error.errors[0].message, /RESEND_REJECTED: .*Cancellation delivery rejected/u)
+      return true
+    })
+    assert.equal(requests.length, 1)
+    const original = requests[0]!
+    assert.match(original.body.subject, /Original Cabin/u)
+    for (const body of [original.body.text, original.body.html]) {
+      assert.match(body, /Original Retreat/u)
+      assert.match(body, /Original Cabin/u)
+      assert.match(body, /2098/u)
+    }
+    const entry = await db.prepare('SELECT * FROM activity_entries WHERE dedupe_key = ?').bind(`stay-cancellation:${stay.id}`).first<{ id: string; body: string; payload_json: string; event_name: string }>()
+    assert(entry)
+    assert.equal(entry.event_name, 'stay.host_cancelled')
+    assert.equal(entry.body, original.body.text)
+    const recorded = JSON.parse(entry.payload_json)
+    assert.equal(recorded.subject, original.body.subject)
+    assert.deepEqual({ to: recorded.email.to, fromName: recorded.email.fromName, html: recorded.email.html, text: recorded.email.text }, {
+      to: 'guest@provider-proof.com', fromName: 'Original Retreat', html: original.body.html, text: original.body.text,
+    })
+    const receipts = await db.prepare('SELECT id FROM guest_thread_deliveries WHERE entry_id = ?').bind(entry.id).all<{ id: string }>()
+    assert.equal(receipts.results.length, 1)
+    const deliveryId = receipts.results[0]!.id
+    assert.equal(original.idempotencyKey, deliveryId)
+    assert.equal((await getDeliveryById(db, deliveryId))!.status, 'failed')
+    assert.match((await getDeliveryById(db, deliveryId))!.error!, /Cancellation delivery rejected/u)
+
+    await updateProduct(db, { env, organizationId: access.organizationId, productId: home.id, actor: { actorId: access.actorId }, patch: { name: 'Renamed Cabin' } })
+    await (await organizationAdapter(env)).updateOrganization(access.organizationId, { name: 'Renamed Retreat' })
+    assert.equal((await getProduct(db, access.organizationId, home.id)).name, 'Renamed Cabin')
+    assert.equal(await db.prepare('SELECT name FROM organization WHERE id = ?').bind(access.organizationId).first('name'), 'Renamed Retreat')
+    reject = false
+    await notifyStayCancelled(env, db, access.organizationId, stay.id, 'host', 0)
+    assert.deepEqual(requests, [original, original])
+    const settled = await getDeliveryById(db, deliveryId)
+    assert.deepEqual({ status: settled!.status, error: settled!.error, providerMessageId: settled!.provider_message_id }, { status: 'sent', error: null, providerMessageId: 'stay-cancellation-delivered' })
+    await notifyStayCancelled(env, db, access.organizationId, stay.id, 'host', 0)
+    assert.equal(requests.length, 2)
+    assert.deepEqual(await db.prepare('SELECT * FROM activity_entries WHERE dedupe_key = ?').bind(`stay-cancellation:${stay.id}`).first(), entry)
+    assert.equal(await db.prepare("SELECT count(*) AS count FROM activity_entries WHERE request_id = ? AND event_name = 'stay.host_cancelled'").bind(stay.request_id).first('count'), 1)
+    assert.equal(await db.prepare('SELECT count(*) AS count FROM guest_thread_deliveries WHERE entry_id = ?').bind(entry.id).first('count'), 1)
+    assert.equal((await getStay(db, access, stay.id)).version, stay.version + 1)
   } finally {
     await runtime.dispose()
   }
@@ -291,7 +441,8 @@ test('a booking move into a full session leaves the original booking exactly as 
     const later = at(60)
     const laterEnd = at(60, 1)
     for (const statement of [
-      "INSERT INTO organization (id, name, slug, subdomain) VALUES ('org-move', 'Move', 'move', 'move')",
+      "INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES ('org-move', 'Move', 'move', 'move', 'USD', 'UTC')",
+      "INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('move-en', 'org-move', 'en', 1, 'published')",
       "INSERT INTO user (id, name, email) VALUES ('user-move', 'Owner', 'owner@move.example')",
       "INSERT INTO member (id, organizationId, userId, role) VALUES ('member-move','org-move','user-move','owner')",
       "INSERT INTO business_locations (id,organization_id,slug,title,timezone) VALUES ('loc-move','org-move','move','Move','Asia/Bangkok')",
@@ -360,7 +511,7 @@ test('a review request reads the visit from the record that holds it', async () 
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     const now = new Date().toISOString()
     for (const statement of [
-      "INSERT INTO organization (id, name, slug, subdomain) VALUES ('org-review', 'Kikuzuki', 'review', 'review')",
+      "INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES ('org-review', 'Kikuzuki', 'review', 'review', 'USD', 'UTC')",
       "INSERT INTO organization_domains (id, organization_id, domain, role, status, type) VALUES ('domain-review','org-review','review.example','canonical','active','custom')",
       "INSERT INTO business_locations (id,organization_id,slug,title,timezone,max_capacity) VALUES ('loc-review','org-review','main','Main Room','Asia/Bangkok',40)",
       // The guest is an anonymous Better Auth user; what they typed is on the thread.
@@ -417,8 +568,8 @@ test('financial notification replay preserves per-recipient receipts and isolate
       EMAIL_DELIVERY_MODE: 'log_only', WHATSAPP_DELIVERY_MODE: 'log_only' }
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     await db.batch([
-      "INSERT INTO organization (id,name,slug) VALUES ('merchant','Merchant','merchant')",
-      "INSERT INTO organization (id,name,slug) VALUES ('other-merchant','Other','other-merchant')",
+      "INSERT INTO organization (id,name,slug, default_currency, timezone) VALUES ('merchant','Merchant','merchant', 'USD', 'UTC')",
+      "INSERT INTO organization (id,name,slug, default_currency, timezone) VALUES ('other-merchant','Other','other-merchant', 'USD', 'UTC')",
       ...['owner-a', 'owner-b', 'owner-off', 'buyer', 'other-user', 'staff'].map(id => `INSERT INTO user (id,name,email,emailVerified) VALUES ('${id}','${id}','${id}@proof.example',1)`),
       "INSERT INTO member (id,organizationId,userId,role) VALUES ('member-a','merchant','owner-a','owner')",
       "INSERT INTO member (id,organizationId,userId,role) VALUES ('member-b','merchant','owner-b','admin')",
@@ -429,8 +580,8 @@ test('financial notification replay preserves per-recipient receipts and isolate
     assert.equal(await db.prepare('SELECT count(*) n FROM user').first('n'), 6)
     assert.deepEqual((await db.prepare("SELECT userId,role FROM member WHERE organizationId='merchant' ORDER BY userId").all()).results,
       [{ userId: 'owner-a', role: 'owner' }, { userId: 'owner-b', role: 'admin' }, { userId: 'owner-off', role: 'owner' }, { userId: 'staff', role: 'member' }])
-    await setNotificationPreference(db, env, 'owner-off', 'organization_and_billing', { email: false, whatsapp: false })
-    assert.deepEqual(await db.prepare("SELECT email_enabled,whatsapp_enabled FROM user_notification_preferences WHERE user_id='owner-off' AND category='organization_and_billing'").first(), { email_enabled: 0, whatsapp_enabled: 0 })
+    await setNotificationPreference(db, env, 'owner-off', 'organization_and_billing', { email: false, whatsapp: false, push: false })
+    assert.deepEqual(await db.prepare("SELECT email_enabled,whatsapp_enabled,push_enabled FROM user_notification_preferences WHERE user_id='owner-off' AND category='organization_and_billing'").first(), { email_enabled: 0, whatsapp_enabled: 0, push_enabled: 0 })
     assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE kind='notification'").first('n'), 0)
 
     const eventKey = 'financial-proof:capture'
@@ -519,6 +670,7 @@ test('native Resend test transport persists one delivered financial email throug
   skip: process.env.PAYMENTS_NATIVE_RESEND_TEST !== '1',
 }, async (t) => {
   assert.ok(process.env.RESEND_API_KEY?.trim(), 'explicit native qualification requires the configured Resend credential')
+  assert.ok(process.env.EMAIL_FROM?.trim(), 'explicit native qualification requires the configured sender')
   const runtime = new Miniflare({ workers: [{ config: {
     name: 'native-financial-email-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export default { fetch() { return new Response("ok") } }' } } },
@@ -532,7 +684,7 @@ test('native Resend test transport persists one delivered financial email throug
     assert.equal(await db.prepare('SELECT count(*) n FROM guest_thread_deliveries').first('n'), 0)
     const env = { ...await runtime.getBindings<CloudflareEnv>(), NUXT_PUBLIC_PLATFORM_DOMAIN: 'https://proof.example',
       EMAIL_DELIVERY_MODE: 'provider', WHATSAPP_DELIVERY_MODE: 'log_only', RESEND_API_KEY: process.env.RESEND_API_KEY,
-      ...(process.env.EMAIL_FROM ? { EMAIL_FROM: process.env.EMAIL_FROM } : {}) }
+      EMAIL_FROM: process.env.EMAIL_FROM }
     const input = { organizationId: null, eventKey: `native-resend-transport:${crypto.randomUUID()}`,
       guest: { userId: 'native-recipient', email: 'delivered@resend.dev', message: guestPaymentMessage({ kind: 'payment_captured', organizationName: 'Sandbox transport qualification', amount: 10000, currency: 'USD' }) } }
     await notifyFinancialNotification(env, db, input)

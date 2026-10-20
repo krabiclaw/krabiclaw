@@ -1,4 +1,4 @@
-import { errorChainForTelemetry } from "~/server/utils/error-telemetry";
+import { errorChainForTelemetry } from "~/shared/error-telemetry";
 import { HTTPError } from 'nitro';
 import type { H3Event } from 'nitro';
 import { queryFirst } from "~/server/db";
@@ -12,21 +12,11 @@ import {
   type McpLocationSummary,
   type McpOrganizationSummary,
 } from "~/server/utils/mcp-context";
-import { sniffMediaMimeType, VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_IMAGE_BYTES, R2_IMAGE_MIME_TYPES, RESOLVED_MEDIA_IMAGE_TYPES } from "~/server/utils/media-mime";
+import { sniffMediaMimeType, VIDEO_MIME_TYPES, MAX_VIDEO_BYTES, MAX_IMAGE_BYTES, RESOLVED_MEDIA_IMAGE_TYPES } from "~/server/utils/media-mime";
 import { assertMarkdownSize, decodeMarkdownText, resolveMarkdownMimeType } from "~/server/utils/markdown-document";
-import { assertCloudflareImagesConfigured } from "~/server/utils/cloudflare-images";
 import { findOrganizationById } from '~/server/utils/member-access'
-
-/**
- * Resolves the upload provider for an image based on content type and Cloudflare Images config.
- * Returns "cloudflare_r2" for R2-compatible formats (e.g., AVIF), otherwise undefined (requires Cloudflare Images).
- * Throws if Cloudflare Images is required but not configured.
- */
-export function resolveImageUploadProvider(contentType: string, env: ApiRecord): "cloudflare_r2" | "cloudflare_images" | undefined {
-  const provider = R2_IMAGE_MIME_TYPES.has(contentType) ? "cloudflare_r2" : undefined;
-  if (!provider) assertCloudflareImagesConfigured(env);
-  return provider as "cloudflare_r2" | "cloudflare_images" | undefined;
-}
+import { publicTenantVisibilitySql } from '~/server/utils/public-base'
+import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 
 export async function requireActiveImageAsset(
   db: D1Database,
@@ -115,7 +105,7 @@ export function toolFileReference(value: unknown, key: string): ToolFileReferenc
   if (typeof value === "string" && value.trim()) {
     throw mcpProtocolError(
       MCP_ERROR.invalidParams,
-      `${key} must be sent as a ChatGPT file argument so the host rewrites the local path into an authorized file reference before Krabiclaw receives it.`,
+      `${key} must be sent as a ChatGPT file argument so the host rewrites the local path into an authorized file reference before KrabiClaw receives it.`,
     );
   }
 
@@ -150,19 +140,41 @@ export function toolFileReference(value: unknown, key: string): ToolFileReferenc
   };
 }
 
-async function fetchToolFile(file: ToolFileReference, timeoutMs: number): Promise<Response> {
-  const safeDownloadUrl = assertSafeDownloadUrl(file.download_url, `Attachment ${file.file_id}`);
-  try {
-    return await fetch(safeDownloadUrl, {
-      redirect: "manual",
-      signal: AbortSignal.timeout(timeoutMs),
-    });
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : "unknown network error";
-    throw mcpProtocolError(
-      MCP_ERROR.invalidParams,
-      `Failed to download attachment ${file.file_id}: ${reason}`,
-    );
+const MAX_ATTACHMENT_REDIRECTS = 5;
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
+
+// Redirects are followed by hand so every hop passes the same address checks
+// as the URL the client supplied; fetch's own following would skip them.
+async function fetchToolFile(file: ToolFileReference): Promise<Response> {
+  const label = `Attachment ${file.file_id}`;
+  let url = assertSafeDownloadUrl(file.download_url, label);
+  for (let redirects = 0; ; redirects += 1) {
+    let response: Response;
+    try {
+      response = await fetch(url, { redirect: "manual" });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : "unknown network error";
+      throw mcpProtocolError(
+        MCP_ERROR.invalidParams,
+        `Failed to download attachment ${file.file_id}: ${reason}`,
+      );
+    }
+    if (!REDIRECT_STATUSES.has(response.status)) return response;
+    await response.body?.cancel();
+    const location = response.headers.get("location");
+    if (!location) {
+      throw mcpProtocolError(
+        MCP_ERROR.invalidParams,
+        `Failed to download attachment ${file.file_id}: ${response.status} without a Location header`,
+      );
+    }
+    if (redirects >= MAX_ATTACHMENT_REDIRECTS) {
+      throw mcpProtocolError(
+        MCP_ERROR.invalidParams,
+        `Failed to download attachment ${file.file_id}: more than ${MAX_ATTACHMENT_REDIRECTS} redirects`,
+      );
+    }
+    url = assertSafeDownloadUrl(new URL(location, url).toString(), `${label} redirect`);
   }
 }
 
@@ -249,7 +261,7 @@ export async function resolveUserUploadedMediaFile(
   let byteLength: number | undefined;
   let status = 'success';
   try {
-    const response = await fetchToolFile(file, 30_000);
+    const response = await fetchToolFile(file);
     if (!response.ok) {
       throw new HTTPError({
         statusCode: 400,
@@ -426,7 +438,7 @@ export async function mutationContextPayload(
            o.name,
            o.subdomain,
            (SELECT domain FROM organization_domains WHERE organization_id = o.id AND role = 'canonical' AND status = 'active' AND type = 'custom') AS custom_domain,
-           (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = o.id AND role = 'canonical' AND status = 'active') AS public_url,
+           (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = o.id AND role = 'canonical' AND status = 'active' AND ${publicTenantVisibilitySql('o', false)}) AS public_url,
            location.id AS location_id,
            location.slug AS location_slug,
            location.title AS location_title
@@ -448,7 +460,12 @@ export async function mutationContextPayload(
     organization_name: organization.name,
     organization_slug: organization.slug,
     organization_subdomain: context.subdomain,
-    organization_public_url: resolveOrganizationPublicOrigin(context),
+    organization_public_url: context.public_url ? tenantOrganizationOrigin({
+      platformDomain: mcpContext.env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '',
+      freeOrganizationDomain: mcpContext.env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN ?? '',
+      subdomain: context.subdomain ?? '',
+      canonicalDomain: context.public_url,
+    }) : null,
     location_id: context.location_id,
     location_slug: context.location_slug,
     location_title: context.location_title,
@@ -463,6 +480,7 @@ export function toolRequiresArgument(
 }
 
 export function rethrowWorkspaceError(error: unknown): never {
+  if (error && typeof error === 'object' && 'statusCode' in error) throw error;
   if (error instanceof Error && error.message) {
     throw mcpProtocolError(MCP_ERROR.invalidParams, error.message);
   }
@@ -478,14 +496,21 @@ export async function normalizeWorkspaceArguments(
 ) {
   const args = { ...rawArguments };
 
-  if (["get_workspace_context", "set_workspace_context", "list_organizations"].includes(toolName)) {
-    return args;
-  }
-
   const properties =
     schema.properties && typeof schema.properties === "object"
       ? (schema.properties as Record<string, unknown>)
       : {};
+  for (const key of ['organization_id', 'location_id']) {
+    if (!(key in properties) || !Object.hasOwn(args, key)) continue
+    const type = (properties[key] as { type?: unknown }).type
+    if (args[key] === null && Array.isArray(type) && type.includes('null')) continue
+    if (typeof args[key] !== 'string' || !args[key].trim()) {
+      throw mcpProtocolError(MCP_ERROR.invalidParams, `Invalid ${key}`, { status: 400, invalid_fields: [key] })
+    }
+    args[key] = args[key].trim()
+  }
+
+  if (["get_workspace_context", "set_workspace_context", "list_organizations"].includes(toolName)) return args;
   const supportsOrganization = "organization_id" in properties;
   const supportsLocation = "location_id" in properties;
   const locationSchema = properties.location_id as { type?: unknown } | undefined;
@@ -541,43 +566,6 @@ export function humanizeEntitlement(entitlement: string) {
     .join(" ");
 }
 
-export function validateRequiredArguments(
-  schema: Record<string, unknown>,
-  args: Record<string, unknown>,
-) {
-  const required = Array.isArray(schema.required) ? schema.required : [];
-  const properties =
-    schema.properties && typeof schema.properties === "object"
-      ? (schema.properties as Record<string, unknown>)
-      : {};
-  for (const key of required) {
-    const propertySchema =
-      properties[key] && typeof properties[key] === "object"
-        ? (properties[key] as Record<string, unknown>)
-        : null;
-    const allowsNull = propertyAllowsNull(propertySchema);
-    if (
-      !(key in args) ||
-      args[key] === undefined ||
-      (args[key] === null && !allowsNull) ||
-      args[key] === ""
-    ) {
-      throw mcpProtocolError(
-        MCP_ERROR.invalidParams,
-        `Missing required argument: ${key}`,
-      );
-    }
-  }
-}
-
-export function propertyAllowsNull(schema: Record<string, unknown> | null) {
-  if (!schema) return false;
-  const type = schema.type;
-  if (type === "null") return true;
-  if (Array.isArray(type)) return type.includes("null");
-  return false;
-}
-
 export function requiredString(source: Record<string, unknown>, key: string) {
   const value = source[key];
   if (typeof value !== "string" || !value.trim()) {
@@ -619,6 +607,7 @@ export function objectRecord(value: unknown, key: string) {
 }
 
 export function rethrowAsInvalidParams(error: unknown): never {
+  if (error && typeof error === 'object' && 'statusCode' in error) throw error;
   if (!(error instanceof Error)) throw error;
   const message = error.message;
   if (
@@ -727,21 +716,6 @@ export function assertDomainSuccess(result: {
     data: result.data,
   });
 }
-
-export function normalizeOrganizationCreationData(data: Record<string, unknown>) {
-  const organizationId = typeof data.organizationId === "string" ? data.organizationId : "";
-  if (!organizationId.trim()) {
-    throw mcpProtocolError(
-      MCP_ERROR.invalidParams,
-      "Critical identifier organizationId is empty or missing in site creation response",
-    );
-  }
-  return {
-    ...data,
-    organizationId,
-  };
-}
-
 
 export const NOT_HANDLED = Symbol('mcp-executor-not-handled')
 

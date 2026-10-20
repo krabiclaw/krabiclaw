@@ -37,7 +37,7 @@ export const MCP_PROMPTS: McpPromptDefinition[] = [
   },
   {
     name: "triage_inbox",
-    description: "Summarize contact messages, table reservations and reviews awaiting a reply.",
+    description: "Summarize guest conversations, pending bookings and reviews awaiting a reply.",
     arguments: [],
   },
   {
@@ -52,7 +52,7 @@ export const MCP_PROMPTS: McpPromptDefinition[] = [
   },
   {
     name: "finish_my_organization_setup",
-    description: "Check what's still missing from the site and guide the user through finishing setup, one step at a time.",
+    description: "Identify missing business facts and finish the requested site setup.",
     arguments: [],
   },
   {
@@ -62,7 +62,7 @@ export const MCP_PROMPTS: McpPromptDefinition[] = [
   },
   {
     name: "make_my_organization_look_better",
-    description: "General visual/content review of the site with concrete suggestions the user can approve one at a time.",
+    description: "Review the website and recommend concrete visual and content improvements.",
     arguments: [],
   },
   {
@@ -72,33 +72,40 @@ export const MCP_PROMPTS: McpPromptDefinition[] = [
   },
 ];
 
-function requireArg(args: Record<string, string>, name: string): string {
-  const value = args[name];
-  if (!value || !value.trim()) {
-    throw mcpProtocolError(MCP_ERROR.invalidParams, `Argument "${name}" is required for this prompt.`);
+// Prompt prose uses the same operation-name convention as the tool registry.
+// Include previous names when checking a release so a removed operation prefix
+// cannot hide a stale reference. Arguments are rendered as placeholders by the
+// catalog check; user-supplied text is never inspected by this function at runtime.
+export function referencedMcpTools(text: string, toolNames: string[], previousToolNames: string[] = []): string[] {
+  const current = new Set(toolNames);
+  const operations = new Set([...toolNames, ...previousToolNames].map(name => name.split('_')[0]));
+  const references = new Set<string>();
+  for (const [name] of text.matchAll(/\b[a-z][a-z0-9]*(?:_[a-z0-9]+)+\b/g)) {
+    if (!operations.has(name.split('_')[0])) continue;
+    if (!current.has(name)) throw new Error(`Unknown MCP tool reference: ${name}`);
+    references.add(name);
   }
-  return value.trim();
+  return [...references].sort();
 }
 
 export function renderMcpPrompt(name: string, args: Record<string, string>): { description: string; text: string } {
   switch (name) {
     case "set_up_products": {
-      const itemsDescription = requireArg(args, "items_description");
+      const itemsDescription = args.items_description!;
       return {
         description: "Build out Products from a description",
         text: [
-          "Call get_workspace_context and list_locations, then use the explicit location_id selected by the user.",
-          "Call every list_location_products page before deciding whether this is a create or reconciliation.",
-          "Call list_collections for that site. Match the user's section names to collection records, call create_collection for any new section, and use set_collection_products with every Product ID in the intended order — membership and position live on the membership row, so the same Product can sit in several collections at once. Use reorder_collections with every collection ID for section order.",
-          `Parse the following into individual Products with an explicit kind (dish for food or drinks, experience for classes or activities, service for appointments, item for physical goods), name and description where given. What is bought is a variant, and a price belongs to a variant: give each Product at least one variant carrying a price with an integer unit_amount in the site's default currency unless a currency is stated. A Product the user prices in words rather than numbers — \"market price\", \"seasonal\", \"ask your server\" — is not priceless: give its variant no price and set details.pricing_note to the wording they used, which is what the page shows where an amount would be. The two are mutually exclusive and a Product carrying both is rejected, so never add a number alongside the note. A Product whose price is simply missing, unclear, or not mentioned is neither: it is a question for the user — never invent an amount, and never reach for details.pricing_note to cover a price nobody stated. Then call batch_create_products for entirely new Products or reconcile_products for mixed create/update work, and set_product_publication plus set_product_location to say where each one is sold: ${itemsDescription}`,
-          "If the user has photos or videos, offer to attach them after creation. Use set_media with { owner_type: 'product', owner_id: <exact Product id>, slot: 'image' } for the explicit primary and attach_media with slot 'gallery' for detail-gallery assets.",
-          "Report the Products that were created or updated.",
-        ].join(" "),
+          `Update the catalog from: ${itemsDescription}`,
+          'Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs.',
+          'For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order.',
+          'For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries.',
+          'Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion.',
+        ].join(' '),
       };
     }
     case "create_and_publish_post": {
-      const body = requireArg(args, "body");
-      const destinations = requireArg(args, "destinations");
+      const body = args.body!;
+      const destinations = args.destinations!;
       return {
         description: "Create and publish a post",
         text: [
@@ -111,97 +118,63 @@ export function renderMcpPrompt(name: string, args: Record<string, string>): { d
       };
     }
     case "set_up_bookable_product": {
-      const description = requireArg(args, "description");
+      const description = args.description!;
       return {
         description: "Create a new bookable Product",
         text: [
-          `Based on this description, call create_product with a sensible name, description, and at least one variant carrying its price: ${description}`,
-          "After creation, use set_product_booking_config for Product duration/capacity and replace_product_weekly_schedule for the selected location’s weekday/time slots. Read the generated availability before claiming it is bookable.",
-          "Publish it with set_product_publication and say where it is offered with set_product_location only once the user has approved making it public.",
-          "If the user has media ready, call attach_media once per asset after creation with placement { owner_type: 'product', owner_id: <exact Product id>, slot: 'gallery' }, then use reorder_media only if the requested order differs.",
-          "Report back what was created, its current status, and the live URL when one is available.",
-        ].join(" "),
+          `Create a bookable offering from: ${description}`,
+          'Use get_workspace_context, list_locations and list_products to resolve the business, existing offerings and explicit location or online scope. Ask for missing price, duration, capacity, actual start times, confirmation and payment choices.',
+          'Use create_product with booking setup and one idempotency key. Preserve the supplied facts and attach supplied media to the returned product ID.',
+          'Use get_product to read booking_readiness and list_product_booking_sessions with a concrete date range to verify actual availability. Use save_media_attachment for supplied files or attach_media for existing assets. Open the returned public URL before reporting completion.',
+        ].join(' '),
       };
     }
     case "triage_inbox": {
       return {
-        description: "Summarize what's new across contact messages, reservations, and unreplied reviews",
+        description: "Summarize guest conversations, pending bookings, and unreplied reviews",
         text: [
-          "Call list_contact_inquiries for site-level contact messages, and list_reservation_inquiries with location_id when the site has multiple locations.",
-          "Call list_locations, then list_location_reviews for each location, and pull out any review that has no owner reply yet.",
-          "Summarize what's new, grouped by type (messages, reservations, reviews needing a reply), oldest first.",
-          "Seats booked on a bookable Product are not on this connection: read and answer those in the dashboard inbox, and say so rather than reaching for a tool that does not exist.",
-          "Reviews and imported Google Q&A are managed in Google. Authored Q&A can be changed with the dedicated Q&A tools.",
-          "There is no tool on this connection to reply to or change the status of contact or reservation submissions — for those, tell the user what's waiting and point them to the dashboard inbox and reservations pages to respond. Do not attempt to call a tool that doesn't exist for this.",
-        ].join(" "),
+          'Use get_workspace_context to resolve the requested business. Read all relevant list_guest_conversations pages and get_guest_conversation for full contact messages, table reservation and product booking details, proposals and delivery receipts.',
+          'Summarize unanswered messages and pending bookings. Use reply_to_guest with a stable idempotency_key only for the message or photo the user requests. Use get_product_booking before confirm_product_booking, reject_product_booking, cancel_product_booking or request_product_booking_change; use cancel_table_reservation or request_table_reservation_change for an explicitly requested table reservation action.',
+          'Booking changes email a proposal and leave the existing allocation unchanged until guest acceptance. Financial actions requiring the dashboard remain incomplete; report the returned handoff instead of claiming completion.',
+          'Use list_locations and list_location_reviews to read reviews separately; provider reviews and imported Google Q&A remain managed in Google.',
+          'Report failed deliveries and actions awaiting guest acceptance accurately.',
+        ].join(' '),
       };
     }
     case "improve_my_homepage": {
       return {
-        description: "Review the homepage and suggest top improvements",
-        text: [
-          "Call get_workspace_context to confirm the active site, then call list_site_pages and resolve the page whose path is \"/\", call get_site_page with that variant id to see the current homepage content, and get_organization_media_assets to see what photos are already available.",
-          "Look at the main photo at the top of the page (the hero/cover photo), the headline and call-to-action button text, and the story section photo and text.",
-          "Suggest 2-3 concrete, highest-impact changes — for example a stronger call-to-action, a better main photo, or a punchier headline. Explain each suggestion in plain language, not in terms of field names.",
-          "Ask the user which suggestion to act on first rather than changing everything at once. After confirmation, use set_media for a single hero/image placement, or attach_media/remove_media/reorder_media for a gallery. Apply copy/text suggestions with update_site_page without resubmitting media arrays.",
-        ].join(" "),
+        description: "Review the homepage",
+        text: "Use get_workspace_context, list_site_pages and get_site_page to read the selected business's homepage, and get_organization_media_assets for its media. Open its public preview and recommend the most useful improvements in plain language. Apply requested copy changes with update_site_page; use set_media for one image or attach_media, remove_media and reorder_media for a gallery. Read back the page and public result.",
       };
     }
     case "add_photos_to_organization": {
       return {
-        description: "Add the user's own photos to the right places on the site",
-        text: [
-          "If the user hasn't already attached photos in this conversation, ask them to attach the photos they want to add directly in ChatGPT.",
-          "For each attached photo, inspect it visually first, then ask the user (or infer from context) where it should go: the homepage main photo, a specific location's main photo, the about/story section, a Product, or a post.",
-          "Confirm the target site and placement with the user before uploading anything.",
-          "After confirmation, call save_media_attachment exactly once for each confirmed attachment with file set to its resolved ChatGPT file reference. Upload every confirmed photo before reporting any of them as placed. Use set_media with asset_id for a single cover/hero/logo placement; use attach_media once per new asset for a gallery or document list, and reorder_media only when needed. Always use the exact owner id returned by a read tool. Never switch to a bare file_id or invent a download URL.",
-          "Reply confirming exactly where each photo was placed.",
-        ].join(" "),
+        description: "Place supplied photos",
+        text: "Inspect the supplied photos and use get_workspace_context plus the relevant get_site_page, get_location, get_product or get_post read to resolve the intended owner and placement. Ask only about an ambiguous destination. Use save_media_attachment with a stable idempotency_key and the intended placement for each attachment; retries reuse that key. For an existing asset use set_media or attach_media. Read back the owner and open the public result before reporting placement.",
       };
     }
     case "finish_my_organization_setup": {
       return {
-        description: "Check what's missing and guide the user through finishing setup",
-        text: [
-          "Call get_workspace_context first. If there is no active site yet, call list_organizations and help the user pick or create one before continuing.",
-          "Check what's in place: call get_organization_media_assets (kind=\"image\") to see available photos, call list_site_pages and get_site_page for the variants whose paths are \"/\" and \"/about\", call list_locations, then call every list_location_products page for each relevant location.",
-          "Identify the single most important missing piece — a main photo, Products, the about/story text, or a first post — and ask the user if they want to work on that now.",
-          "Guide them through completing just that one thing at a time. Don't ask for everything up front.",
-        ].join(" "),
+        description: "Finish business setup",
+        text: "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result.",
       };
     }
     case "make_organization_more_bookable": {
       return {
-        description: "Review CTAs, contact info, and booking setup, and suggest changes to get more bookings",
-        text: [
-          "Call get_workspace_context, then call list_site_pages and get_site_page for the variant whose path is \"/\" to check the call-to-action button text, and list_locations to check whether contact info and hours are filled in.",
-          "If the business takes reservations or bookings, check list_location_products for the explicit location to make sure Products have clear prices and descriptions.",
-          "Suggest concrete changes that make it easier for a visitor to take action — a clearer call-to-action, visible contact info, or more complete Product listings. Explain suggestions in plain language.",
-          "Apply changes only after the user approves each one.",
-        ].join(" "),
+        description: "Review guest booking",
+        text: "Use get_workspace_context, list_products, get_product and list_product_booking_sessions to read the public offering, booking readiness and actual availability. Use list_locations, get_location and get_reservation_policy for location hours and table reservation setup. Identify what prevents guests from booking and ask for missing business facts. Use update_product with booking setup, set_product_booking_config, replace_product_weekly_schedule or update_reservation_policy for the changes the user requests. Read back readiness, available times and the public result.",
       };
     }
     case "make_my_organization_look_better": {
       return {
-        description: "General visual and content review with concrete suggestions",
-        text: [
-          "Call get_workspace_context, then call list_site_pages and get_site_page for the variant whose path is \"/\", plus get_organization_media_assets, to see current photos and text.",
-          "Review the main photo, headline, story section, and overall completeness. Note anything that looks unfinished, generic, or low-quality (e.g. a missing or blurry main photo, thin story text, no Products).",
-          "Suggest specific, actionable improvements in plain language — avoid internal field names. Offer to act on one at a time, starting with whichever has the biggest visual impact (usually the main photo).",
-          "Only make changes the user has explicitly approved.",
-        ].join(" "),
+        description: "Review the website",
+        text: "Use get_workspace_context, list_site_pages, get_site_page, get_organization_media_assets and list_products to read the actual public pages, media and catalog. Recommend specific improvements in plain language. Apply the requested copy with update_site_page or update_product, and media with set_media or attach_media. Read back the changed record and verify the public result.",
       };
     }
     case "grow_my_bookings": {
       return {
-        description: "Combine traffic, listing completeness, and booking demand into one concrete next move",
-        text: [
-          "Call get_workspace_context, then get_organization_analytics for the last 30 days to see traffic, top pages, and whether traffic is up or down versus the prior period.",
-          "Call list_locations and every relevant list_location_products page to check whether Products have clear pricing, descriptions, and availability. Call list_reservation_inquiries to see current demand and whether anything is sitting unanswered.",
-          "Cross-reference the three: if traffic is healthy but the listing is thin or reservations are sitting unanswered, say so explicitly — don't treat these as separate topics.",
-          "Suggest exactly one highest-impact next move, not a list — for example answering waiting reservations, completing a thin listing, or publishing a post about a specific under-booked Product. Explain it in plain language tied to what you actually found in the data.",
-          "Ask the user to confirm before doing anything. If they approve a post, use create_post; if they approve a listing fix, use update_product or set_media as appropriate. Do not change pricing or availability without explicit approval.",
-        ].join(" "),
+        description: "Review booking demand",
+        text: "Use get_workspace_context and get_organization_analytics to read recent traffic. Use list_products, get_product and list_product_booking_sessions for bookable offerings and availability, and list_guest_conversations plus get_guest_conversation for current guest demand. Recommend the most useful action supported by those records. Use reply_to_guest, update_product or create_post and publish_post for the action the user requests, then read back its actual outcome and report any incomplete delivery or dashboard handoff.",
       };
     }
     default:

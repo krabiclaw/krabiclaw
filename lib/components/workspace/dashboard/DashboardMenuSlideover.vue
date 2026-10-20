@@ -4,7 +4,6 @@
     title="Menu"
     :ui="{
       body: 'overflow-y-auto',
-      header: 'px-(--kc-nav-gutter) sm:px-(--kc-nav-gutter)',
       // Nuxt UI floats the close button with `absolute end-4`, which would leave
       // the bell stranded next to the title while the menu page renders it on
       // the right. Returning close to the flow lets both sit together, bell then

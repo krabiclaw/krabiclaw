@@ -48,9 +48,11 @@ export function parsePostalAddress(value: unknown): PostalAddress | null {
   if (!Array.isArray(record.addressLines) || !record.addressLines.every(line => typeof line === 'string')) {
     throw new TypeError('A postal address carries addressLines as strings')
   }
+  const addressLines = record.addressLines.filter(line => line.trim().length > 0)
+  if (!addressLines.length) throw new TypeError('addressLines must contain at least one nonblank address line')
   const address: PostalAddress = {
     regionCode: record.regionCode,
-    addressLines: record.addressLines.filter(line => line.trim().length > 0),
+    addressLines,
   }
   for (const field of OPTIONAL_TEXT) {
     const part = record[field]
@@ -64,8 +66,10 @@ export function parsePostalAddress(value: unknown): PostalAddress | null {
 /** The address on one line, the way a guest reads it. */
 export function formatPostalAddress(address: PostalAddress | null): string {
   if (!address) return ''
-  return [...address.addressLines, address.sublocality, address.locality, address.administrativeArea, address.postalCode]
-    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+  const areaLine = [address.locality, address.administrativeArea].filter(Boolean).join(', ')
+  const areaParts = address.addressLines.includes(areaLine) ? [] : [address.locality, address.administrativeArea]
+  return [...new Set([...address.addressLines, address.sublocality, ...areaParts, address.postalCode]
+    .filter((part): part is string => typeof part === 'string' && part.trim().length > 0))]
     .join(', ')
 }
 
@@ -78,9 +82,8 @@ export function addressPlaceName(address: PostalAddress | null): string {
 }
 
 /**
- * The owner's own answers on the onboarding location step. The step is not
- * complete without a street, a city and a country, so every required part of
- * the address is present by the time this runs.
+ * The owner's location answers. An area can describe the location when the
+ * owner supplies no street; the country remains its own regionCode.
  */
 export interface PostalAddressAnswers {
   streetAddress: string | null
@@ -98,8 +101,11 @@ export function postalAddressFromAnswers(answers: PostalAddressAnswers): PostalA
   const addressLines = [answers.streetAddress, answers.addressLine2]
     .map(line => line?.trim() ?? '')
     .filter(Boolean)
-  // A street with no country is not an address. Both callers gate on the
-  // country before they get here, so there is nothing to answer with but null.
+  if (!addressLines.length) {
+    const areaLine = [answers.city, answers.region].map(part => part?.trim() ?? '').filter(Boolean).join(', ')
+    if (areaLine) addressLines.push(areaLine)
+  }
+  // A country alone, or an address without its country, is still incomplete.
   if (!addressLines.length || !answers.country?.trim()) return null
   const address: PostalAddress = { regionCode: answers.country.trim(), addressLines }
   if (answers.city?.trim()) address.locality = answers.city.trim()
@@ -118,7 +124,9 @@ export function postalAddressFromAnswers(answers: PostalAddressAnswers): PostalA
 export function schemaPostalAddress(address: PostalAddress | null): Record<string, string> | undefined {
   if (!address) return undefined
   const node: Record<string, string> = { '@type': 'PostalAddress', addressCountry: address.regionCode }
-  const street = address.addressLines.filter(line => line.trim()).join(', ')
+  const areaLine = [address.locality, address.administrativeArea].filter(Boolean).join(', ')
+  const areaParts = new Set([address.sublocality, address.locality, address.administrativeArea, address.postalCode, areaLine])
+  const street = address.addressLines.filter(line => line.trim() && !areaParts.has(line)).join(', ')
   if (street) node.streetAddress = street
   if (address.locality) node.addressLocality = address.locality
   if (address.administrativeArea) node.addressRegion = address.administrativeArea

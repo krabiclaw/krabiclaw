@@ -5,6 +5,7 @@
       <UButton icon="i-lucide-plus" color="neutral" variant="soft" square class="rounded-full" aria-label="Invite a team member" :to="`${level.path.value}/invite`" />
     </template>
     <OrganizationMembersList />
+    <UButton class="mt-8" color="neutral" variant="link" :to="`${level.path.value}/groups`">Booking teams</UButton>
   </DashboardIndexPanel>
 </template>
 
@@ -15,5 +16,5 @@ definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
 
 const level = useRouteLevel()
 
-useSeoMeta({ title: 'Team | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Team | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>

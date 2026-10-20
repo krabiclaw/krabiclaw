@@ -1,7 +1,7 @@
 import { HTTPError, type H3Event } from 'nitro'
 import { getQuery } from 'nitro/h3'
-import { isOrganizationWideRole } from '~/server/utils/member-access'
-import { getDashboardContext } from '~/server/utils/dashboard-context'
+import { assignedBookingSql, isOrganizationWideRole } from '~/server/utils/member-access'
+import { getDashboardMemberContext } from '~/server/utils/dashboard-context'
 import { hasPlatformEventPermission } from '~/server/utils/platform-admin-users'
 
 export interface NotificationVisibilityPrincipal {
@@ -31,6 +31,11 @@ export function buildNotificationVisibilityFilter(principal: NotificationVisibil
     if (isOrganizationWideRole(principal.organization.role)) {
       visibilityClauses.push(`(n.scope_kind = 'organization' AND n.organization_id = ?)`)
       params.push(principal.organization.id)
+    } else if (principal.organization.role === 'member') {
+      visibilityClauses.push(`(n.scope_kind = 'organization' AND n.organization_id = ? AND n.target_user_id = ?
+        AND EXISTS (SELECT 1 FROM activity_entries source JOIN bookings b ON b.request_id = source.request_id
+          WHERE source.id = n.parent_id AND b.organization_id = n.organization_id AND (${assignedBookingSql('b')})))`)
+      params.push(principal.organization.id, principal.userId, principal.userId)
     }
   }
 
@@ -43,7 +48,7 @@ export function buildNotificationVisibilityFilter(principal: NotificationVisibil
 }
 
 export async function getNotificationAccess(event: H3Event) {
-  const context = await getDashboardContext(event, { requireOrganization: false })
+  const context = await getDashboardMemberContext(event, { requireOrganization: false })
   const scope = getQuery(event).scope
   if (scope !== undefined && scope !== 'personal') throw new HTTPError({ statusCode: 400, statusMessage: 'Invalid notification scope' })
   const personal = scope === 'personal'

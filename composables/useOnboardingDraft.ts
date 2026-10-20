@@ -1,4 +1,4 @@
-import { applicationFetch, dashboardFetch, useDashboardRouteScope } from '~/composables/dashboardFetch'
+import { applicationFetch } from '~/composables/dashboardFetch'
 import { isRecord } from '~/utils/api-clients'
 import { parseOpeningHours, parseSpecialHours, type OpeningHours } from '~/shared/reservation-hours'
 import { parsePhone } from '~/utils/phone'
@@ -6,6 +6,7 @@ import { useOnboardingState, type OnboardingPlacePreview } from '~/composables/u
 import { formatPostalAddress, postalAddressFromAnswers } from '~/utils/postal-address'
 import { isOrganizationFontPreset } from '~/shared/organization-fonts'
 import { LOGO_SHAPES, type LogoShape } from '~/shared/media-placement-contract'
+import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
 
 /**
  * Every server call the flow makes, and the shapes they answer with. The step
@@ -13,7 +14,6 @@ import { LOGO_SHAPES, type LogoShape } from '~/shared/media-placement-contract'
  */
 export function useOnboardingDraft() {
   const state = useOnboardingState()
-  const routeScope = useDashboardRouteScope()
   const busy = ref(false)
   const error = ref<string | null>(null)
   const { trackOrganizationCreated } = useAnalytics()
@@ -36,20 +36,6 @@ export function useOnboardingDraft() {
     }
   }
 
-  /**
-   * POST /api/dashboard/locations is route-scoped: it resolves the site
-   * from the `org` and `site` query the dashboard transport sends, and refuses
-   * the request without them. The unscoped transport is for the new-site flow,
-   * which has no organization yet.
-   */
-  function locationsAddFetch<T>(options: Parameters<typeof dashboardFetch<T>>[2]) {
-    const scope = routeScope.value
-    if (!scope) {
-      throw new Error('Adding a location needs a /dashboard/{orgSlug} route.')
-    }
-    return dashboardFetch<T>('/api/dashboard/locations', scope, options)
-  }
-
   function serializeDetails() {
     const details = state.value.details
     return {
@@ -65,6 +51,7 @@ export function useOnboardingDraft() {
       specialHours: parseSpecialHours(state.value.hours.specialHours),
       timezone: state.value.hours.timezone.trim() || null,
       currency: details.currency ?? null,
+      sourceLocale: details.sourceLocale,
     }
   }
 
@@ -103,6 +90,8 @@ export function useOnboardingDraft() {
       const res = await applicationFetch<Record<string, unknown>>('/api/dashboard/onboarding/drafts/active', {
         method: 'POST',
         body: {
+          draftId: state.value.draftId ?? undefined,
+          expectedUpdatedAt: state.value.draftRevision,
           sourceType: state.value.source ?? 'manual',
           placeId: state.value.placeId,
           name: state.value.details.name.trim(),
@@ -113,12 +102,13 @@ export function useOnboardingDraft() {
         },
         validate: (value): value is Record<string, unknown> => isRecord(value),
       })
-      if (res.success !== true || typeof res.draftId !== 'string' || typeof res.organizationId !== 'string'
+      if (res.success !== true || typeof res.draftId !== 'string' || typeof res.updatedAt !== 'string' || typeof res.organizationId !== 'string'
         || typeof res.previewToken !== 'string' || typeof res.draftName !== 'string'
         || typeof res.subdomainCandidate !== 'string') {
         throw new Error(typeof res.error === 'string' ? res.error : 'Could not save your answers. Please try again.')
       }
       state.value.draftId = res.draftId
+      state.value.draftRevision = res.updatedAt
       state.value.preview = {
         draftId: res.draftId, organizationId: res.organizationId, previewToken: res.previewToken,
         draftName: res.draftName, subdomainCandidate: res.subdomainCandidate,
@@ -170,7 +160,7 @@ export function useOnboardingDraft() {
     try {
       const res = await applicationFetch<Record<string, unknown>>(
         `/api/dashboard/onboarding/drafts/${draftId}/activate`,
-        { method: 'POST', validate: (value): value is Record<string, unknown> => isRecord(value) },
+        { method: 'POST', body: { expectedUpdatedAt: state.value.draftRevision }, validate: (value): value is Record<string, unknown> => isRecord(value) },
       )
       if (res.success !== true) {
         throw new Error(typeof res.error === 'string' ? res.error : 'Failed to create your organization. Please try again.')
@@ -181,40 +171,6 @@ export function useOnboardingDraft() {
         locationSlug: typeof res.locationSlug === 'string' ? res.locationSlug : null,
       }
       if (typeof res.organizationId === 'string') trackOrganizationCreated(res.organizationId)
-      return true
-    } catch (cause) {
-      error.value = cause instanceof Error ? cause.message : 'Something went wrong. Please try again.'
-      return false
-    } finally {
-      busy.value = false
-    }
-  }
-
-  /**
-   * Add the collected location to the site the dashboard route is already on.
-   * There is no draft in this flow: nothing is saved until this one call, which
-   * both creates the location and (on the Google path) imports its reviews.
-   */
-  async function addLocation(): Promise<boolean> {
-    busy.value = true
-    error.value = null
-    try {
-      const placeId = state.value.source === 'google_places' ? state.value.placeId : null
-      const res = await locationsAddFetch<Record<string, unknown>>({
-        method: 'POST',
-        body: placeId
-          ? { placeId, details: serializeDetails() }
-          : { name: state.value.details.name.trim(), details: serializeDetails() },
-        validate: (value): value is Record<string, unknown> => isRecord(value),
-      })
-      if (res.success !== true) {
-        throw new Error(typeof res.error === 'string' ? res.error : 'Could not add your location. Please try again.')
-      }
-      state.value.created = {
-        orgSlug: typeof res.orgSlug === 'string' ? res.orgSlug : null,
-        organizationSlug: typeof res.organizationSlug === 'string' ? res.organizationSlug : null,
-        locationSlug: typeof res.locationSlug === 'string' ? res.locationSlug : null,
-      }
       return true
     } catch (cause) {
       error.value = cause instanceof Error ? cause.message : 'Something went wrong. Please try again.'
@@ -283,13 +239,20 @@ export function useOnboardingDraft() {
     }
   }
 
+  function restoredImage(value: unknown): typeof state.value.brand.logoImage {
+    if (value === null) return null
+    if (!isRecord(value) || typeof value.draftAssetId !== 'string' || typeof value.cloudflareImageId !== 'string' || typeof value.publicUrl !== 'string') throw new Error('Saved website image is unavailable')
+    return value as NonNullable<typeof state.value.brand.logoImage>
+  }
+
   /** Read the unfinished draft back into the flow. Returns false when there is none. */
   async function restore(): Promise<boolean> {
     const res = await applicationFetch<Record<string, unknown>>('/api/dashboard/onboarding/drafts/active', {
       validate: (value): value is Record<string, unknown> => isRecord(value),
     })
     const draft = isRecord(res.draft) ? res.draft : null
-    if (!draft || typeof draft.draftId !== 'string') return false
+    if (!draft) return false
+    if (typeof draft.draftId !== 'string' || typeof draft.updatedAt !== 'string') throw new Error('Saved website draft identity and revision are unavailable')
     const details = isRecord(draft.details) ? draft.details : {}
     const config = isRecord(draft.config) ? draft.config : {}
     const text = (value: unknown) => typeof value === 'string' ? value : ''
@@ -300,10 +263,16 @@ export function useOnboardingDraft() {
     const openingHours = parseOpeningHours(details.openingHours as OpeningHours)
     const specialHours = parseSpecialHours(details.specialHours)
 
+    const logoImage = restoredImage(draft.logoImage)
+    const heroImage = restoredImage(draft.heroImage)
+
     state.value.draftId = draft.draftId
-    state.value.vertical = draft.vertical === 'experience' || draft.vertical === 'service' ? draft.vertical : 'restaurant'
+    state.value.draftRevision = draft.updatedAt
+    if (!ALL_VERTICALS.includes(draft.vertical as OrganizationVertical)) throw new Error(`Saved website draft has an unknown business type: ${String(draft.vertical)}`)
+    state.value.vertical = draft.vertical as OrganizationVertical
     state.value.source = draft.sourceType === 'google_places' ? 'google_places' : 'manual'
     state.value.placeId = typeof draft.placeId === 'string' && draft.placeId ? draft.placeId : null
+    state.value.details.sourceLocale = typeof details.sourceLocale === 'string' ? details.sourceLocale : null
     state.value.details.name = text(details.name)
     state.value.details.city = text(details.city)
     state.value.details.streetAddress = text(details.streetAddress)
@@ -321,6 +290,10 @@ export function useOnboardingDraft() {
     state.value.brand.paletteStarter = text(config.palette_starter) || null
     state.value.brand.fontPreset = isOrganizationFontPreset(config.font_preset) ? config.font_preset : null
     state.value.brand.logoShape = (LOGO_SHAPES as readonly unknown[]).includes(config.logo_shape) ? config.logo_shape as LogoShape : null
+    state.value.brand.logoImage = logoImage
+    state.value.brand.heroImage = heroImage
+    state.value.brand.logoPreviewUrl = logoImage?.publicUrl ?? ''
+    state.value.brand.heroPreviewUrl = heroImage?.publicUrl ?? ''
     state.value.brand.logoNote = text(config.draft_logo_note)
     state.value.brand.heroPhotoNote = text(config.draft_hero_photo_note)
     state.value.brand.heroHeadline = text(config.draft_hero_headline)
@@ -347,5 +320,5 @@ export function useOnboardingDraft() {
     return true
   }
 
-  return { busy, error, save, seedFromPlace, activate, addLocation, restore, activeDraftOrganizationId, discard, addressSummary }
+  return { busy, error, save, seedFromPlace, activate, restore, activeDraftOrganizationId, discard, addressSummary }
 }

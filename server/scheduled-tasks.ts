@@ -20,22 +20,29 @@ export type ScheduledTaskName =
   | 'sessions-materialize'
   | 'stripe-ga4-intent-retention'
   | 'article-broadcast-send'
-  | 'payments-reconcile'
+  | 'stripe-fee-report-request'
+  | 'marketing-ad-spend-daily'
+  | 'channex-revision-feed'
+  | 'scheduled-guest-messages'
+  | 'stay-checkout-holds'
 
 type TaskLoader = () => Promise<{ default: ScheduledTaskDefinition }>
 
 /** The single source of truth for cron-to-task dispatch in Nitro's scheduled hook. */
 export const SCHEDULED_TASKS: Readonly<Record<string, readonly ScheduledTaskName[]>> = {
-  '*/5 * * * *': ['google-calendar-sync', 'social-card-backfill', 'sessions-materialize', 'article-broadcast-send'],
+  '*/5 * * * *': ['google-calendar-sync', 'social-card-backfill', 'article-broadcast-send', 'scheduled-guest-messages', 'stay-checkout-holds'],
   '*/2 * * * *': ['public-resource-cache-invalidation'],
-  '*/10 * * * *': ['domain-reconciliation', 'zaraz-analytics-reconciliation'],
-  '0 3 * * *': ['domain-reconciliation-daily', 'analytics-aggregate-daily', 'stripe-ga4-intent-retention'],
+  '*/10 * * * *': ['domain-reconciliation', 'zaraz-analytics-reconciliation', 'channex-revision-feed'],
+  '0 3 * * *': ['domain-reconciliation-daily', 'analytics-aggregate-daily', 'stripe-ga4-intent-retention', 'stripe-fee-report-request', 'marketing-ad-spend-daily'],
   '0 0 * * SUN': ['google-places-sync'],
-  '0 * * * *': ['review-request-automation', 'social-card-cleanup', 'payments-reconcile'],
+  '0 * * * *': ['review-request-automation', 'social-card-cleanup', 'sessions-materialize'],
 }
 
 const TASK_LOADERS: Readonly<Record<ScheduledTaskName, TaskLoader>> = {
   'google-calendar-sync': async () => import('./tasks/google-calendar-sync'),
+  'channex-revision-feed': async () => import('./tasks/channex-revision-feed'),
+  'scheduled-guest-messages': async () => import('./tasks/scheduled-guest-messages'),
+  'stay-checkout-holds': async () => import('./tasks/stay-checkout-holds'),
   'social-card-backfill': async () => import('./tasks/social-card-backfill'),
   'social-card-cleanup': async () => import('./tasks/social-card-cleanup'),
   'public-resource-cache-invalidation': async () => import('./tasks/public-resource-cache-invalidation'),
@@ -47,8 +54,9 @@ const TASK_LOADERS: Readonly<Record<ScheduledTaskName, TaskLoader>> = {
   'sessions-materialize': async () => import('./tasks/sessions-materialize'),
   'google-places-sync': async () => import('./tasks/google-places-sync'),
   'review-request-automation': async () => import('./tasks/review-request-automation'),
-  'payments-reconcile': async () => import('./tasks/payments-reconcile'),
+  'stripe-fee-report-request': async () => import('./tasks/stripe-fee-report-request'),
   'article-broadcast-send': async () => import('./tasks/article-broadcast-send'),
+  'marketing-ad-spend-daily': async () => import('./tasks/marketing-ad-spend-daily'),
 }
 
 export function getScheduledTaskNames(cron: string): readonly ScheduledTaskName[] {

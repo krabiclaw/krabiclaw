@@ -1,48 +1,13 @@
-import { parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours'
 // POST /api/dashboard/locations
-// Add a new physical location to the current org's site: either the Google
-// place the owner picked (`placeId`) or a manually named one (`name`).
-// Requires an existing site — this is the multi-location flow, not onboarding.
+// The location record's create walk commits here: what names it and the clock
+// its sessions run on. Everything else is a section of the location once it
+// exists. Requires an existing site — onboarding creates the first location.
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { getAuthSession } from '~/server/utils/auth'
 import { getDashboardContext } from '~/server/utils/dashboard-context'
-import { getPlaceDetails, googleReviewUpserts } from '~/server/utils/google-places'
-import { createLocation } from '~/server/utils/location-management'
+import { createLocation, type CreateLocationInput, type LocationRecord } from '~/server/utils/location-management'
 import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
-import { executeBatch, queryFirst, type DbClient } from '~/server/db'
-import { postalAddressFromAnswers } from '~/utils/postal-address'
 import { assertOrganizationWideAccess, memberAccessPrincipal } from '~/server/utils/member-access'
-
-type SetupEnv = Parameters<typeof createLocation>[0]
-
-/** The address the collected answers make, the same mapping onboarding uses. */
-function detailsAddress(details: Record<string, unknown> | null | undefined) {
-  const text = (value: unknown) => typeof value === 'string' ? value : null
-  return postalAddressFromAnswers({
-    streetAddress: text(details?.streetAddress),
-    addressLine2: text(details?.addressLine2),
-    city: text(details?.city),
-    region: text(details?.region),
-    postalCode: text(details?.postalCode),
-    country: text(details?.country),
-  })
-}
-
-
-function slugify(name: string) {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'location'
-}
-
-
-async function uniqueLocationSlug(db: DbClient, organizationId: string, base: string): Promise<string> {
-  for (let i = 0; i < 20; i++) {
-    const slug = i === 0 ? base : `${base}-${i + 1}`
-    const existing = await queryFirst<{ id: string }>(
-      db, 'SELECT id FROM business_locations WHERE organization_id = ? AND slug = ? LIMIT 1', [organizationId, slug], )
-    if (!existing) return slug
-  }
-  return `${base}-${crypto.randomUUID().slice(0, 8)}`
-}
 
 export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
@@ -53,76 +18,22 @@ export default defineHandler(async (event) => {
   if (!session?.user?.id) return jsonResponse({ error: 'Authentication required' }, { status: 401 })
 
   const { organization } = await getDashboardContext(event)
-  const organizationId = organization.id
   await assertOrganizationWideAccess(db, memberAccessPrincipal(organization, { env, event }))
 
-  const body = await readBody(event) as {
-    placeId?: unknown
-    name?: unknown
-    details?: Record<string, unknown> | null
-  }
-  const placeId = typeof body?.placeId === 'string' ? body.placeId.trim() : ''
-  const name = typeof body?.name === 'string' ? body.name.trim() : ''
-  const details = body.details && typeof body.details === 'object' ? body.details : null
+  const body = await readBody(event) as { title?: unknown; timezone?: unknown; opening_hours?: unknown; special_hours?: unknown } | null
+  const title = typeof body?.title === 'string' ? body.title : ''
+  const timezone = typeof body?.timezone === 'string' ? body.timezone : null
+  const result = await createLocation(env, db, organization.id, {
+    title,
+    timezone,
+    // Read as the client sent them; createLocation parses both and refuses what does not parse.
+    opening_hours: body?.opening_hours as CreateLocationInput['opening_hours'],
+    special_hours: body?.special_hours as CreateLocationInput['special_hours'],
+  }, session.user.id)
+  if (result.status !== 201) return jsonResponse(result.data, { status: result.status })
 
-  if (Boolean(placeId) === Boolean(name)) {
-    return jsonResponse({ error: 'Exactly one of placeId or name is required' }, { status: 400 })
-  }
-
-  // Manual path: business name only, no Google Places lookup required.
-  if (name) {
-    const baseSlug = slugify(name).slice(0, 50)
-    const slug = await uniqueLocationSlug(db, organizationId, baseSlug)
-
-    const result = await createLocation(
-      env as SetupEnv, db, organizationId, {
-        title: typeof details?.name === 'string' && details.name.trim() ? details.name.trim() : name, slug, address: detailsAddress(details), phone: typeof details?.phone === 'string' && details.phone.trim() ? details.phone.trim() : null, website_url: typeof details?.websiteUrl === 'string' && details.websiteUrl.trim() ? details.websiteUrl.trim() : null, opening_hours: parseOpeningHours(details?.openingHours ?? null), special_hours: parseSpecialHours(details?.specialHours ?? null), timezone: typeof details?.timezone === 'string' && details.timezone.trim() ? details.timezone.trim() : null, }, session.user.id, )
-
-    if (result.status !== 200 && result.status !== 201) {
-      return jsonResponse({ error: (result.data as { error?: string }).error ?? 'Could not add location.' }, { status: result.status })
-    }
-    await purgePublicResourceCacheNow(env, organizationId)
-
-    return jsonResponse({ success: true, locationSlug: slug, orgSlug: organization.slug })
-  }
-
-  const apiKey = env.GOOGLE_PLACES_API_KEY as string | undefined
-  if (!apiKey) return jsonResponse({ error: 'Google Places API key not configured' }, { status: 503 })
-
-  let place
-  try {
-    place = await getPlaceDetails(apiKey, placeId)
-  } catch (err) {
-    return jsonResponse({
-      error: err instanceof Error ? err.message : 'Could not fetch place details. Try again.', }, { status: 502 })
-  }
-
-  const baseSlug = slugify(place.name).slice(0, 50)
-  const slug = await uniqueLocationSlug(db, organizationId, baseSlug)
-
-  const result = await createLocation(
-    env as SetupEnv, db, organizationId, {
-      title: typeof details?.name === 'string' && details.name.trim() ? details.name.trim() : place.name, slug, phone: typeof details?.phone === 'string' && details.phone.trim()
-        ? details.phone.trim()
-        : place.phone ?? null, maps_url: place.mapsUrl ?? null, google_place_id: place.placeId, website_url: typeof details?.websiteUrl === 'string' && details.websiteUrl.trim()
-        ? details.websiteUrl.trim()
-        : place.websiteUrl ?? null, address: detailsAddress(details) ?? place.address, opening_hours: parseOpeningHours(details && 'openingHours' in details ? details.openingHours : place.openingHours), special_hours: parseSpecialHours(details?.specialHours ?? null), rating: place.rating ?? null, review_count: place.ratingCount ?? null, timezone: typeof details?.timezone === 'string' && details.timezone.trim()
-        ? details.timezone.trim()
-        : place.timezone, }, session.user.id, )
-
-  if (result.status !== 200 && result.status !== 201) {
-    return jsonResponse({ error: (result.data as { error?: string }).error ?? 'Could not add location.' }, { status: result.status })
-  }
-  // Upsert reviews for the new location
-  const locationId = (result.data as { location?: { id: string } }).location?.id
-  if (locationId) {
-    const now = new Date().toISOString()
-    await executeBatch(db, googleReviewUpserts({ organizationId, locationId }, place.reviews, now))
-  }
-  await purgePublicResourceCacheNow(env, organizationId)
-
-  return jsonResponse({
-    success: true, organizationId, locationSlug: slug, orgSlug: organization.slug, })
+  await purgePublicResourceCacheNow(env, organization.id)
+  return jsonResponse({ success: true, location: (result.data as { location: LocationRecord }).location }, { status: 201 })
 })
 import { defineHandler } from 'nitro';
 import { readBody } from 'nitro/h3';

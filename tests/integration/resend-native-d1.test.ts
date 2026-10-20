@@ -16,6 +16,7 @@ const TOPIC = 'topic-product-news'
 const PROVIDER_ENV = {
   EMAIL_DELIVERY_MODE: 'provider',
   RESEND_API_KEY: 're_controlled_fake_resend',
+  EMAIL_FROM: 'KrabiClaw <hello@krabiclaw.com>',
   RESEND_PRODUCT_NEWS_SEGMENT_ID: SEGMENT,
   RESEND_PRODUCT_NEWS_TOPIC_ID: TOPIC,
   NUXT_PUBLIC_PLATFORM_DOMAIN: 'proof.example',
@@ -176,29 +177,36 @@ test('transactional email goes through resend.emails.send with the existing resu
     headers: { 'List-Unsubscribe': '<https://proof.example/api/public/notifications/unsubscribe?token=t>', 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
   })
 
-  // log_only and the RFC 2606 domains never reach Resend.
+  // log_only and the RFC 2606 domains never reach Resend; provider mode refuses
+  // a reserved address with a coded failure rather than reporting it sent.
   const logOnly = await sendEmail({ ...PROVIDER_ENV, EMAIL_DELIVERY_MODE: 'log_only' }, input)
   assert.equal(logOnly.status, 'sent')
   assert.match((logOnly as { messageId: string }).messageId, /^log-only:email:/)
-  assert.equal((await sendEmail({ ...PROVIDER_ENV }, { ...input, to: 'fixture@example.test' })).status, 'sent')
+  assert.deepEqual(await sendEmail({ ...PROVIDER_ENV }, { ...input, to: 'fixture@example.test' }),
+    { status: 'failed', code: 'RESERVED_TEST_EMAIL_DOMAIN', error: 'RESERVED_TEST_EMAIL_DOMAIN: the recipient is on a reserved test domain that cannot receive mail' })
+  // The sender and the delivery mode are required configuration, never defaulted.
+  const { EMAIL_FROM: _from, ...withoutSender } = PROVIDER_ENV
+  assert.deepEqual(await sendEmail(withoutSender, input), { status: 'failed', code: 'EMAIL_FROM_REQUIRED', error: 'EMAIL_FROM_REQUIRED: EMAIL_FROM is not configured' })
+  await assert.rejects(sendEmail({ ...PROVIDER_ENV, EMAIL_DELIVERY_MODE: undefined }, input), { status: 503, data: { code: 'EMAIL_DELIVERY_MODE_REQUIRED', field: 'EMAIL_DELIVERY_MODE' } })
+  await assert.rejects(sendEmail({ ...PROVIDER_ENV, EMAIL_DELIVERY_MODE: 'log-only' }, input), { status: 503, data: { code: 'INVALID_EMAIL_DELIVERY_MODE', field: 'EMAIL_DELIVERY_MODE' } })
   assert.equal(resend.calls.length, 1)
 
   // A rejection Resend answered and a request it never answered both fail, with the reason.
   resend.failNext('POST /emails')
   const rejected = await sendEmail({ ...PROVIDER_ENV }, input)
   assert.equal(rejected.status, 'failed')
-  assert.match((rejected as { error: string }).error, /^500 internal_server_error: injected failure/)
+  assert.match((rejected as { error: string }).error, /^RESEND_REJECTED: 500 internal_server_error: injected failure/)
   t.mock.method(globalThis, 'fetch', async () => { throw new TypeError('network down') })
   const unanswered = await sendEmail({ ...PROVIDER_ENV }, input)
   assert.equal(unanswered.status, 'failed')
-  assert.match((unanswered as { error: string }).error, /^no response /)
+  assert.match((unanswered as { error: string }).error, /^RESEND_REJECTED: no response /)
 })
 
 test('Resend delivery events move a guest-thread delivery forward only and publish when it moves', async (t) => {
   fakeResend(t)
   const { runtime, db, hubs } = await runtimeWithSchema()
   try {
-    await db.prepare("INSERT INTO organization (id, name, slug, subdomain) VALUES ('org-proof', 'Proof', 'proof', 'proof')").run()
+    await db.prepare("INSERT INTO organization (id, name, slug, subdomain, default_currency, timezone) VALUES ('org-proof', 'Proof', 'proof', 'proof', 'USD', 'UTC')").run()
     const now = new Date().toISOString()
     const opening = requestInsertQueries({ id: 'thread-proof', kind: 'contact', organization_id: 'org-proof', location_id: null, user_id: null, review_id: null, conversation_state: 'needs_attention', resolved_at: null, payload: { guest: { name: 'Guest', email: 'guest@provider-proof.com', phone: null }, subject: null, message: 'Hello', consent_at: null, ip_hash: null }, created_at: now, updated_at: now })
     await db.batch(opening.map(write => db.prepare(write.query).bind(...write.params)))
@@ -255,8 +263,8 @@ async function seedUsers(db: D1Database) {
     "INSERT INTO user (id, name, email, emailVerified, banned) VALUES ('user-banned', 'Banned', 'banned@provider-proof.com', 1, 1)",
     "INSERT INTO user (id, name, email, emailVerified, isAnonymous) VALUES ('user-anonymous', 'Anonymous', 'anonymous@provider-proof.com', 1, 1)",
     "INSERT INTO user (id, name, email, emailVerified) VALUES ('user-fixture', 'Fixture', 'fixture@example.test', 1)",
-    "INSERT INTO user_notification_preferences (user_id, category, email_enabled, whatsapp_enabled) VALUES ('user-off', 'product_news', 0, 0)",
-    "INSERT INTO user_notification_preferences (user_id, category, email_enabled, whatsapp_enabled) VALUES ('user-on', 'guest_messages', 0, 1)",
+    "INSERT INTO user_notification_preferences (user_id, category, email_enabled, whatsapp_enabled, push_enabled) VALUES ('user-off', 'product_news', 0, 0, 0)",
+    "INSERT INTO user_notification_preferences (user_id, category, email_enabled, whatsapp_enabled, push_enabled) VALUES ('user-on', 'guest_messages', 0, 1, 1)",
   ]) await db.prepare(statement).run()
 }
 
@@ -294,7 +302,7 @@ test('Product News reconciliation projects eligible users onto the Segment and T
 
     // A failed Resend operation is reported, not skipped over.
     resend.failNext('PATCH /contacts/on@provider-proof.com/topics')
-    await db.prepare("INSERT INTO user_notification_preferences (user_id, category, email_enabled, whatsapp_enabled) VALUES ('user-on', 'product_news', 0, 0)").run()
+    await db.prepare("INSERT INTO user_notification_preferences (user_id, category, email_enabled, whatsapp_enabled, push_enabled) VALUES ('user-on', 'product_news', 0, 0, 0)").run()
     const failing = await reconcileProductNewsContacts(db, PROVIDER_ENV)
     assert.equal(failing.failures.length, 1)
     assert.match(failing.failures[0]!.error, /contacts\.topics\.update failed \(500 internal_server_error\)/)
@@ -318,17 +326,17 @@ test('Product News opt-in, opt-out and provider unsubscribes follow the exact su
     const on = () => resend.contacts.get('on@provider-proof.com')!
 
     // Explicit opt-out: Topic off, Segment and global subscription untouched.
-    await setNotificationPreference(db, PROVIDER_ENV, 'user-on', 'product_news', { email: false, whatsapp: false })
+    await setNotificationPreference(db, PROVIDER_ENV, 'user-on', 'product_news', { email: false, whatsapp: false, push: false })
     assert.deepEqual([on().topics.get(TOPIC), on().segments.has(SEGMENT), on().unsubscribed], ['opt_out', true, false])
 
     // Resend-side global unsubscribe: background reconciliation never lifts it.
     on().unsubscribed = true
-    await setNotificationPreference(db, PROVIDER_ENV, 'user-on', 'product_news', { email: false, whatsapp: false })
+    await setNotificationPreference(db, PROVIDER_ENV, 'user-on', 'product_news', { email: false, whatsapp: false, push: false })
     await reconcileProductNewsContacts(db, PROVIDER_ENV)
     assert.equal(on().unsubscribed, true)
 
     // Explicit opt-in is the one action that re-subscribes globally.
-    await setNotificationPreference(db, PROVIDER_ENV, 'user-on', 'product_news', { email: true, whatsapp: false })
+    await setNotificationPreference(db, PROVIDER_ENV, 'user-on', 'product_news', { email: true, whatsapp: false, push: false })
     assert.deepEqual([on().unsubscribed, on().topics.get(TOPIC), on().segments.has(SEGMENT)], [false, 'opt_in', true])
 
     // contact.updated with nothing Product News related changes nothing.
@@ -342,11 +350,11 @@ test('Product News opt-in, opt-out and provider unsubscribes follow the exact su
     let preferences = await getNotificationPreferences(db, 'user-on')
     assert.equal(preferences.product_news.email, false)
     // Other categories and WhatsApp are left exactly as they were.
-    assert.deepEqual(preferences.guest_messages, { email: false, whatsapp: true })
+    assert.deepEqual(preferences.guest_messages, { email: false, whatsapp: true, push: true })
     assert.equal(resend.writes().length, writes)
 
     // Global unsubscribe through Resend: local off, not echoed back.
-    await setNotificationPreference(db, PROVIDER_ENV, 'user-on', 'product_news', { email: true, whatsapp: false })
+    await setNotificationPreference(db, PROVIDER_ENV, 'user-on', 'product_news', { email: true, whatsapp: false, push: false })
     const writesAfterOptIn = resend.writes().length
     on().unsubscribed = true
     assert.equal(await reconcileProductNewsFromProvider(db, PROVIDER_ENV, 'ON@provider-proof.com'), 'opted_out_globally')
@@ -357,7 +365,7 @@ test('Product News opt-in, opt-out and provider unsubscribes follow the exact su
     assert.equal(await reconcileProductNewsFromProvider(db, PROVIDER_ENV, 'nobody@provider-proof.com'), 'no_user')
 
     // A reconciliation that finds a Resend Topic opt-out keeps it.
-    await setNotificationPreference(db, PROVIDER_ENV, 'user-on', 'product_news', { email: true, whatsapp: false })
+    await setNotificationPreference(db, PROVIDER_ENV, 'user-on', 'product_news', { email: true, whatsapp: false, push: false })
     on().topics.set(TOPIC, 'opt_out')
     const drift = await reconcileProductNewsContacts(db, PROVIDER_ENV)
     assert.equal(drift.counts.local_opted_out, 1)
@@ -382,7 +390,7 @@ test('an article is announced once as a native Broadcast whose id is stored befo
     await seedUsers(db)
     const published = new Date(Date.now() - 60_000).toISOString()
     for (const statement of [
-      "INSERT INTO organization (id, name, slug, subdomain, theme_id, status) VALUES ('org-platform', 'KrabiClaw', 'krabiclaw', 'krabiclaw', 'krabiclaw-theme-v1', 'active')",
+      "INSERT INTO organization (id, name, slug, subdomain, theme_id, status, default_currency, timezone) VALUES ('org-platform', 'KrabiClaw', 'krabiclaw', 'krabiclaw', 'krabiclaw-theme-v1', 'active', 'USD', 'UTC')",
       "INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('locale-platform-en', 'org-platform', 'en', 1, 'published')",
       `INSERT INTO content_documents (id, organization_id, kind, row_role, locale, title, slug, summary, status, visibility, published_at, first_published_at, metadata_json)
        VALUES ('article-proof', 'org-platform', 'article', 'root', 'en', 'Proof article', 'proof-article', 'Why proof matters', 'published', 'listed', '${published}', '${published}', '{"collection":"blog"}')`,
@@ -402,7 +410,7 @@ test('an article is announced once as a native Broadcast whose id is stored befo
     const creates = resend.calls.filter(call => call.method === 'POST' && call.path === '/broadcasts')
     assert.equal(creates.length, 1)
     const draft = creates[0]!.body as Record<string, string>
-    assert.deepEqual([draft.segment_id, draft.topic_id, draft.subject, draft.from, draft.send], [SEGMENT, TOPIC, 'Proof article', 'Krabiclaw <hello@krabiclaw.com>', undefined])
+    assert.deepEqual([draft.segment_id, draft.topic_id, draft.subject, draft.from, draft.send], [SEGMENT, TOPIC, 'Proof article', 'KrabiClaw <hello@krabiclaw.com>', undefined])
     assert.ok(draft.html.includes('{{{RESEND_UNSUBSCRIBE_URL}}}'))
     // The article's own text is the email, read in the order it was written,
     // with the repeated title dropped and the site link made absolute.

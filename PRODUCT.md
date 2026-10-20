@@ -1,6 +1,6 @@
-# Krabiclaw
+# KrabiClaw
 
-Krabiclaw helps local and professional-service businesses build and manage a
+KrabiClaw helps local and professional-service businesses build and manage a
 website through the dashboard and the ChatGPT app. Restaurant, experience and
 service businesses share one tenant backend for locations, products, content,
 media and guest activity. Public sites render on the server and use the template
@@ -19,9 +19,9 @@ assignment until an explicit reassignment. Approved member profiles introduce
 the person guests will meet on the service page.
 
 Google Calendar is optional. Connecting the business creates or reuses its
-Krabiclaw calendar and projects upcoming pending and confirmed bookings and
+KrabiClaw calendar and projects upcoming pending and confirmed bookings and
 reservations. Connecting a member's personal account can exclude busy times from
-new availability. Google event edits do not reschedule Krabiclaw bookings, and
+new availability. Google event edits do not reschedule KrabiClaw bookings, and
 personal event titles and descriptions are not imported.
 
 Google Cloud Console reports branding and data access verified as of 2026-10-04.
@@ -31,10 +31,64 @@ Calendar qualification and scope boundaries are recorded in
 Online payments are delivered by the separate Payments change; Calendar does
 not establish Checkout, refund or buyer-account availability.
 
+## Guest inbox
+
+Contact messages, table reservations, product bookings and stays share one guest
+inbox. A direct stay opens a conversation when the guest has a name and an email
+or phone. An imported Airbnb conversation can be addressed through its channel
+while the guest's contact details are withheld; the provider's conversation title
+is a label, not a verified guest name. A later booking joins that same
+conversation without discarding its recorded history.
+
+Direct replies use email and mapped Airbnb replies use the channel. Delivery
+receipts distinguish provider acceptance from delivery or reading. An attempt
+whose outcome is unknown remains visible and requires review before sending
+again. Provider messages are shown with their recorded time and exact source
+timestamp when that timestamp has no established timezone.
+
+A workspace can save guest replies. A saved reply can also be
+scheduled for named homes: five minutes after a new direct reservation is
+received, or at a local time a number of days before or after check-in or
+check-out in the home's own timezone. Airbnb stays receive check-in and
+check-out messages only, because KrabiClaw cannot tell an imported historical
+reservation from a new one. A scheduled message goes through the
+conversation's own address and records the same delivery receipt as a reply;
+one that fails or whose outcome is unknown stays visible with its reason and is
+never resent automatically. Each home holds a private arrival guide — check-in
+method and instructions, wifi, directions, house manual and checkout
+instructions — that the host chooses when to share.
+
+Workspace members can receive owner notifications as push notifications on the
+KrabiClaw iPhone app, per notification category, alongside email and WhatsApp.
+A push that Apple refuses is recorded as failed.
+
+## Team conversations
+
+Members of one workspace message each other in team conversations, optionally
+about one stay, with text and photos. Only the members in a conversation can
+read it; leaving the workspace ends a person's place in it, while what they
+wrote remains. Each member has their own unread state. A new message is pushed
+to the other members' phones unless they switched team messages off; team
+messages have no email or WhatsApp channel. Owners and admins choose which
+homes a member looks after; each home has one assigned member. A member who
+leaves, is removed or becomes an owner or admin looks after none.
+
+Owners and admins add people with a single-use invite link that lasts seven
+days. Whoever opens it sees the workspace and the role on KrabiClaw's invite
+page, signs in or creates an account, and joins; the iPhone app accepts the
+same link. A used, expired or withdrawn link says so.
+
 ## Plans
 
-Runtime identities are `free`, `growth` and `commerce`; one organization subscription covers
-its sites. Customer display names, Stripe product IDs, price IDs and lookup keys
+New subscriptions use `growth` ($49/month) and `business` ($149/month); `free` is
+Basic with no subscription. Business includes Growth, online payments, direct stay
+booking and managed advertising. Growth and Business include 2 locations, then $49
+per additional location per month, billed at the end of the period; every active
+location counts, including a home's, and a home itself is not billed. Basic
+includes 2 locations. The iOS app is included with every account at no
+charge. Commerce ($89), Marketing ($99) and Business subscriptions on the earlier
+$99 price remain existing contracts with their original prices and entitlements. One organization
+subscription covers its sites. Customer display names, Stripe product IDs, price IDs and lookup keys
 are separate concepts. Renaming a plan label does not authorize an ID migration.
 
 | Field | Canonical source |
@@ -42,20 +96,14 @@ are separate concepts. Renaming a plan label does not authorize an ID migration.
 | Paid plan name, description, image, marketing bullets | Stripe Product: `name`, `description`, `images`, `marketing_features` |
 | Paid amount, currency and cadence | Stripe recurring Prices, validated by the application catalog contract |
 | Paid display metadata | Stripe Product metadata read by `server/utils/billing-plans.ts` |
-| Basic presentation and CTAs | `server/utils/billing-plans.ts`; the free plan has no Stripe subscription product |
+| Starter presentation and CTAs | `server/utils/billing-plans.ts`; Starter has no Stripe subscription product |
 | Runtime entitlement policy | `server/utils/billing-entitlements.ts` |
 | Current organization access | Better Auth subscription rows read by `server/utils/billing-access.ts`, then the actual operation gate |
-| Basic/Growth/Commerce comparison rows | `shared/pricing-comparison.ts`, reading the runtime entitlement policy |
+| Public plan comparison rows | `shared/pricing-comparison.ts`, reading the runtime entitlement policy |
 
 Paid billing surfaces consume `/api/billing/plans`. Entitlements grant capability,
 not presentation copy. An active/trialing subscription must satisfy the canonical
 billing projection; a declaration is not proof that a send or write enforces it.
-
-Commerce enables online payments; Basic and Growth retain bookings without
-online payment. Payments also requires the merchant's Stripe setup and the
-relevant product booking/payment configuration. The production pricing page
-and Payments help category were read in Chrome on 2026-10-07; this was a
-read-only availability/copy check, not a new transaction qualification.
 
 ## Decisions still open
 

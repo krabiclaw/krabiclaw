@@ -58,18 +58,19 @@ function mirrorConversion(payload: ConversionPayload, eventId: string, value?: C
   window.zaraz?.track(projection.name, projection.params)
 }
 
-export function useOrganizationConversionTracking(consultationSource?: MaybeRefOrGetter<PublicConsultationSettings>) {
-  const { organizationId } = useTenantOrganization()
+export function useOrganizationConversionTracking(consultationSource?: MaybeRefOrGetter<PublicConsultationSettings | null | undefined>) {
   const nuxtApp = useNuxtApp()
+  // A preview records nothing; the pageview collector does not run for it either.
+  const { previewAuthorized } = useTenantOrganization()
 
   /**
    * Captures the interaction now and resolves with its native event id once the native record has
-   * accepted it, or null when there is none (no tenant, or the collection failed, which is reported
+   * accepted it, or null when there is none (the collection failed, which is reported
    * through the application's error hook). Google Analytics is only ever a projection of a recorded
    * native event, so every GA send waits on this result. The visitor's own action never does.
    */
   function recordNative(payload: ConversionPayload, variantId?: string | null): Promise<string | null> {
-    if (!import.meta.client || !organizationId) return Promise.resolve(null)
+    if (!import.meta.client || previewAuthorized) return Promise.resolve(null)
     // The interaction is captured now: its identity, moment and page are fixed here. Only its delivery
     // waits for the pageview it happened on to be recorded, so the server can attach that visit's
     // page, language and attribution.

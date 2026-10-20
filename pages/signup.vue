@@ -48,14 +48,13 @@ import { buildPostLoginUrl, validatedInternalPath } from '~/shared/auth/return-t
 
 definePageMeta({ layout: 'access', auth: false })
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
+const { social_image: organizationSocialImage } = useTenantOrganization().organization
 useSocialMetadata({
-  template: 'platform',
   schema: false,
   path: '/signup',
   socialImage: organizationSocialImage,
   title: 'Create your account',
-  description: 'Create a free Krabiclaw account and build your business site through ChatGPT.',
+  description: 'Create a free KrabiClaw account and build your business site through ChatGPT.',
   discoverability: 'private',
 })
 

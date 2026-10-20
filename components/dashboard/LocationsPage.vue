@@ -12,17 +12,12 @@
       />
     </template>
     <UAlert v-if="locationsError" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Could not load locations" :description="getErrorMessage(locationsError, 'Locations could not be loaded')" />
-    <div v-else-if="!locations.length" class="rounded-2xl border border-default bg-elevated px-6 py-20 text-center">
-      <UIcon name="i-lucide-map-pin" class="mx-auto size-6 text-muted" />
-      <h2 class="mt-5 text-base font-semibold text-highlighted">No {{ locationsLabel.toLowerCase() }} yet</h2>
-      <UButton
-        v-if="organizationPaths"
-        :label="`Add your first ${locationNoun}`"
-        icon="i-lucide-plus"
-        class="mt-6"
-        :to="organizationPaths.newLocation"
-      />
-    </div>
+    <UEmpty
+      v-else-if="!locations.length"
+      icon="i-lucide-map-pin"
+      :title="`No ${locationsLabel.toLowerCase()} yet`"
+      :actions="organizationPaths ? [{ label: `Add your first ${locationNoun}`, icon: 'i-lucide-plus', to: organizationPaths.newLocation }] : undefined"
+    />
 
     <DashboardOrganizationLocationSelector
       v-else
@@ -42,7 +37,7 @@ import { normalizeVertical, type OrganizationVertical } from '~/utils/vertical-c
 
 const route = useRoute()
 const dashboard = useDashboardOrganization()
-const { organizationPaths } = useDashboardOrganizationLinks()
+const { organizationPaths } = dashboard
 
 const organization = computed(() => dashboard.organization.value)
 
@@ -77,5 +72,5 @@ const tiles = computed<OrganizationLocationSelectorItem[]>(() => locations.value
   }
 }))
 
-useSeoMeta({ title: () => `${locationsLabel.value} | Krabiclaw`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${locationsLabel.value} | KrabiClaw`, robots: 'noindex, nofollow' })
 </script>

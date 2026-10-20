@@ -3,7 +3,6 @@
   <DashboardListEditor
     v-model:editing="editing"
     title="Sections"
-    :description="description"
     :items="listItems"
     :error="loadError"
     :read-only="readOnly"
@@ -42,6 +41,7 @@
 // because order, Add and reorder each belong to exactly one scope. A section is
 // the menu's word for a collection; this list never calls it anything else.
 import DashboardListEditor from '~/components/dashboard/DashboardListEditor.vue'
+import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import DashboardMediaThumb from '~/components/dashboard/DashboardMediaThumb.vue'
 import type { Collection, Product } from '~/server/types/products'
 import type { ResolvedMediaAsset } from '~/server/utils/media-asset-manager'
@@ -55,7 +55,6 @@ const organizationId = await useDashboardOrganizationId()
 const props = defineProps<{
   /** The location these sections belong to, or null for the ones every location shares. */
   scope: string | null
-  description?: string
   /** Read beside an editable scope; reordered and added to only where it is that scope. */
   readOnly?: boolean
 }>()
@@ -63,8 +62,8 @@ const props = defineProps<{
 const locationId = useLocationScope()
 const menuPath = computed(() => `/dashboard/${String(route.params.orgSlug)}/products/menu`)
 
-// The cover is the first Product in the collection that has a photo, which is
-// how the collection reads on the public site too.
+// The cover is the section's own photo; until it has one, the first item in it
+// with a photo stands for it.
 interface CollectionRow extends Collection {
   product_count: number
   cover: ResolvedMediaAsset | null
@@ -72,7 +71,9 @@ interface CollectionRow extends Collection {
   products: Product[]
 }
 
-const catalog = useProductCatalog(organizationId, locationId)
+// Section membership and classification are independent of a location filter.
+const catalog = useProductCatalog(organizationId, ref(null))
+await catalog.load
 
 // The count and cover are what make a collection legible at a glance, and they
 // are the only reason this level reads Items at all.
@@ -90,7 +91,7 @@ const catalogRows = computed<CollectionRow[]>(() => {
   }
   return catalog.collections.value.filter(row => row.location_id === props.scope).map((row) => {
     const products = members.get(row.id) ?? []
-    return { ...row, product_count: products.length, cover: covers.get(row.id) ?? null, products }
+    return { ...row, product_count: products.length, cover: row.image ?? covers.get(row.id) ?? null, products }
   })
 })
 
@@ -101,6 +102,7 @@ const localOrder = ref<CollectionRow[] | null>(null)
 const collections = computed<CollectionRow[]>(() => localOrder.value ?? catalogRows.value)
 const editing = ref(false)
 const removingId = ref<string | null>(null)
+const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 const deleteError = ref<string | null>(null)
 const orderError = ref<string | null>(null)
 
@@ -113,8 +115,8 @@ const orderError = ref<string | null>(null)
 const isMenuSection = (row: CollectionRow) => !row.products.length || row.products.some(product => product.kind === 'dish')
 const sections = computed(() => collections.value.filter(isMenuSection))
 
-// A section opens in its own location's scope; a shared one in the menu's current one.
-const listItems = computed(() => sections.value.map(row => ({ id: row.id, title: row.name, to: router.resolve({ path: `${menuPath.value}/${row.id}`, query: { location_id: props.scope ?? route.query.location_id } }).fullPath, row })))
+// A section opens in its own scope. Shared membership has no location filter.
+const listItems = computed(() => sections.value.map(row => ({ id: row.id, title: row.name, to: router.resolve({ path: `${menuPath.value}/${row.id}`, query: { location_id: row.location_id ?? undefined } }).fullPath, row })))
 const loadError = computed(() => (catalog.error.value ? getErrorMessage(catalog.error.value, 'Failed to load sections') : null))
 
 const load = catalog.refresh
@@ -131,10 +133,11 @@ function openNew() {
 async function removeCollection(item: { row: CollectionRow }) {
   const count = item.row.product_count
   // Deleting a section never deletes what was in it; the items stay in the catalog.
-  const warning = count
-    ? `Delete the section "${item.row.name}"? Its ${count === 1 ? 'item stays' : `${count} items stay`} in your catalog.`
-    : `Delete the section "${item.row.name}"?`
-  if (!confirm(warning)) return
+  if (!await confirmDialog.open({
+    title: `Delete ${item.row.name}`,
+    description: count ? `Its ${count === 1 ? 'item stays' : `${count} items stay`} in your catalog.` : 'The section is empty.',
+    confirmLabel: 'Delete section', cancelLabel: 'Keep section',
+  })) return
   removingId.value = item.row.id
   deleteError.value = null
   try {
@@ -177,16 +180,26 @@ async function commitOrder() {
   // The whole intended order for this scope — the site's own collections, or
   // one location's — which is the only order there is: the endpoint takes it
   // complete and rejects a partial one.
+  const scope = props.scope
   const order = collections.value.map(row => row.id)
-  localOrder.value = null
   orderError.value = null
   try {
+    await load()
+    if (catalog.error.value) throw catalog.error.value
+    const current = catalog.collections.value.filter(collection => collection.location_id === scope).map(collection => collection.id)
+    if (JSON.stringify([...current].sort()) !== JSON.stringify([...order].sort())) throw new Error('The sections changed. Review the current list before reordering it.')
     await dashboardApi(`/api/editor/organizations/${organizationId}/collections/order`, {
       method: 'PUT',
-      body: { collection_ids: order, location_id: props.scope },
+      body: { collection_ids: order, location_id: scope },
       validate: isRecord,
     })
+    await load()
+    if (catalog.error.value) throw catalog.error.value
+    if (props.scope === scope) localOrder.value = null
+    const persisted = catalog.collections.value.filter(collection => collection.location_id === scope).map(collection => collection.id)
+    if (JSON.stringify(persisted) !== JSON.stringify(order)) throw new Error('Section order changed. Review the current order before editing again.')
   } catch (error) {
+    if (props.scope === scope) localOrder.value = null
     orderError.value = getErrorMessage(error, 'Failed to save the new order')
     await load()
   }
@@ -197,10 +210,7 @@ watch(editing, (value, previous) => {
 })
 
 // Resets this list's own edit state when the catalog underneath it changes.
-// It does not refetch: the catalog is one keyed `useAsyncData` whose key holds
-// the location, so it reloads itself. Calling `refresh` here as well turned
-// `pending` true for every level sharing that key, and the server rendered the
-// catalog column as skeletons while the payload beside it already held the rows.
+// The full catalog stays shared; changing the displayed scope resets its draft.
 watch(locationId, () => {
   orderDirty.value = false
   localOrder.value = null

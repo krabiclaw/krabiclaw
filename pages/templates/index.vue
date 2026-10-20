@@ -1,97 +1,42 @@
 <template>
-  <div>
-    <!-- ── Page hero ─────────────────────────────────────────────────── -->
-    <section class="relative overflow-hidden py-16 lg:py-20">
-      <!-- Ambient gradient orbs -->
-      <div class="pointer-events-none absolute inset-0 -z-10">
-        <div class="absolute -top-20 right-1/4 w-[500px] h-[500px] rounded-full opacity-20 blur-3xl" style="background: radial-gradient(circle, var(--kc-coral-200) 0%, transparent 70%);"></div>
-        <div class="absolute -bottom-10 left-1/3 w-[400px] h-[400px] rounded-full opacity-15 blur-3xl" style="background: radial-gradient(circle, var(--kc-teal-100) 0%, transparent 70%);"></div>
+  <div class="templates-page">
+    <section class="templates-intro">
+      <div class="templates-intro__heading">
+        <p class="templates-eyebrow">Website templates</p>
+        <h1>Your business.<br>Its own kind of beautiful.</h1>
       </div>
-
-      <div class="mx-auto max-w-6xl px-4 sm:px-6 text-center">
-        <span class="inline-flex items-center gap-2 text-[11px] font-bold tracking-[0.3em] uppercase text-(--kc-teal-600) bg-(--kc-teal-100) px-3.5 py-1.5 rounded-full border border-(--kc-teal)/20 mb-5">
-          <span class="w-1.5 h-1.5 rounded-full bg-(--kc-teal) shrink-0" />
-          Templates
-        </span>
-        <h1 class="text-[clamp(32px,5vw,56px)] font-extrabold tracking-tight leading-[1.05] mb-4 m-0">
-          <span class="text-default">Beautiful templates,</span><br>
-          <span style="background: linear-gradient(135deg, var(--kc-coral) 0%, var(--kc-teal) 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;">ready to launch.</span>
-        </h1>
-        <p class="text-lg text-muted max-w-xl mx-auto">
-          Pick the template built for your business, connect ChatGPT, go live.
-        </p>
+      <div class="templates-intro__copy">
+        <p>A table worth booking. An experience worth finding. A lawyer you can trust. Start with a website that understands your business.</p>
+        <PlatformAccountCta label="Start free" size="xl" class="template-start" />
+        <p class="templates-note">Both templates are included on every plan.</p>
       </div>
     </section>
 
-    <!-- ── Template cards ───────────────────────────────────────────── -->
-    <section class="mx-auto max-w-6xl px-4 pb-20 sm:px-6">
-      <div class="grid gap-6 sm:grid-cols-2">
-        <NuxtLink
-          v-for="template in templates"
-          :key="template.slug"
-          :to="`/templates/${template.slug}`"
-          class="group relative flex flex-col overflow-hidden rounded-2xl border border-default no-underline transition hover:border-(--kc-coral)/30 hover:shadow-lg"
-          style="background: var(--ui-bg-elevated);"
-        >
-          <!-- Top gradient strip -->
-          <div class="h-1 shrink-0" style="background: linear-gradient(90deg, var(--kc-coral) 0%, var(--kc-teal) 100%);"></div>
-
-          <div class="relative flex aspect-[16/9] items-center justify-center overflow-hidden" style="background: linear-gradient(135deg, var(--ui-bg-muted) 0%, var(--ui-bg-elevated) 100%);">
-            <img
-              v-if="template.previewImageUrl"
-              :src="template.previewImageUrl"
-              :alt="`${template.displayName} template preview`"
-              loading="lazy"
-              class="absolute inset-0 size-full object-cover object-top transition-transform duration-300 group-hover:scale-105"
-            />
-            <template v-else>
-              <div class="absolute inset-0 opacity-0 transition-opacity group-hover:opacity-100" style="background: linear-gradient(135deg, var(--kc-coral-50) 0%, var(--kc-teal-100)/30 100%);"></div>
-              <div
-                class="relative flex h-16 w-16 items-center justify-center rounded-2xl text-2xl font-bold text-white"
-                style="background: linear-gradient(135deg, var(--kc-navy) 0%, var(--kc-navy-700) 100%); box-shadow: 0 8px 24px rgba(31,37,71,0.2);"
-              >
-                {{ template.displayName.charAt(0) }}
-              </div>
-            </template>
-          </div>
-
-          <div class="flex flex-1 flex-col gap-4 p-6">
-            <div>
-              <div class="flex items-center gap-2">
-                <h2 class="text-xl font-bold text-default">{{ template.displayName }}</h2>
-                <span
-                  v-if="template.status === 'coming_soon'"
-                  class="rounded-full bg-elevated px-2.5 py-0.5 text-xs font-medium text-muted"
-                >
-                  Coming soon
-                </span>
-                <span v-else class="rounded-full bg-primary/10 px-2.5 py-0.5 text-xs font-medium text-primary">
-                  {{ template.priceLabel }}
-                </span>
-              </div>
-              <p class="mt-1 text-sm font-medium text-muted">{{ template.tagline }}</p>
-            </div>
-
-            <p class="text-sm leading-relaxed text-muted">{{ template.summary }}</p>
-
-            <div class="flex flex-wrap gap-1.5">
-              <span
-                v-for="vertical in template.supportedVerticals"
-                :key="vertical"
-                class="rounded-full border border-default px-2.5 py-0.5 text-xs font-medium text-default"
-              >
-                {{ vertical }}
-              </span>
-            </div>
-
-            <div class="mt-auto flex items-center gap-3 pt-2">
-              <span class="inline-flex items-center gap-1.5 text-sm font-semibold text-primary">
-                View details
-                <PlatformIcon name="arrow-right" class="size-4 transition group-hover:translate-x-0.5" />
-              </span>
-            </div>
-          </div>
+    <section class="templates-collection" aria-label="Choose a website template">
+      <article v-for="(template, index) in templates" :key="template.slug" class="template-row" :class="`template-row--${template.slug}`">
+        <div class="template-row__copy">
+          <p class="templates-eyebrow">0{{ index + 1 }} / {{ template.supportedVerticals.join(' & ') }}</p>
+          <h2>{{ template.displayName }}</h2>
+          <p class="template-row__tagline">{{ template.tagline }}</p>
+          <p class="template-row__summary">{{ template.summary }}</p>
+          <NuxtLink :to="`/templates/${template.slug}`" class="templates-link">Explore {{ template.displayName }} <span aria-hidden="true">↗</span></NuxtLink>
+        </div>
+        <NuxtLink :to="`/templates/${template.slug}`" class="template-row__visual" :aria-label="`Explore the ${template.displayName} website template`">
+          <img :src="template.previewImageUrl" width="2048" :height="template.slug === 'saya' ? 1340 : 1466" :alt="template.slug === 'saya' ? 'Kikuzuki restaurant website, built with Saya' : 'North Carolina Legal Services website, built with Blawby'" loading="lazy" decoding="async" class="template-row__desktop">
+          <img v-if="template.slug === 'saya'" src="/images/products/pottery-phone.png" width="946" height="1884" alt="Pottery House Krabi experience website on a phone, built with Saya" loading="lazy" decoding="async" class="template-row__phone">
         </NuxtLink>
+      </article>
+    </section>
+
+    <section class="templates-more">
+      <div>
+        <p class="templates-eyebrow">A familiar way to make it yours</p>
+        <h2>Your website.<br>Your AI assistant.</h2>
+      </div>
+      <div class="templates-more__copy">
+        <p>Choose your template, add your story, and keep it current from the dashboard or a connected AI assistant. KrabiClaw works with ChatGPT, Claude, and other compatible MCP clients.</p>
+        <NuxtLink to="/plugin" class="templates-link">Explore AI connections <span aria-hidden="true">↗</span></NuxtLink>
+        <NuxtLink to="/pricing" class="templates-more__pricing">Compare plans and what’s included →</NuxtLink>
       </div>
     </section>
   </div>
@@ -105,16 +50,16 @@ definePageMeta({ layout: 'platform' })
 const templates = listPublishedTemplateMarketing()
 
 const config = useRuntimeConfig()
-const organizationUrl = config.public.platformUrl
+const organizationUrl = config.public.siteUrl
 
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
+const { social_image: organizationSocialImage, template: organizationTemplate } = useTenantOrganization().organization
+if (organizationTemplate.slug !== 'platform') throw createError({ statusCode: 404, statusMessage: 'Page not found', fatal: true })
 useSocialMetadata({
-  template: 'platform',
   path: '/templates',
   socialImage: organizationSocialImage,
   title: 'Templates',
-  description: 'Browse Krabiclaw templates — Saya for restaurants and experiences, Blawby for professional services. Pick a template, connect ChatGPT, go live.',
+  description: 'Website templates for restaurants, experiences, and law firms. Explore Saya and Blawby, see real customer websites, and start free with KrabiClaw.',
   schemaPageType: 'CollectionPage',
   breadcrumbs: [
     { name: 'Home', url: '/' },
@@ -124,7 +69,7 @@ useSocialMetadata({
     {
       '@type': 'ItemList',
       '@id': `${organizationUrl}/templates#themes`,
-      name: 'Krabiclaw Templates',
+      name: 'KrabiClaw Templates',
       itemListElement: templates.map((template, index) => ({
         '@type': 'ListItem',
         position: index + 1,
@@ -147,3 +92,45 @@ useSocialMetadata({
   ],
 })
 </script>
+
+<style scoped>
+.templates-page { background: #f6f4ef; color: #171920; }
+.templates-intro, .templates-collection, .templates-more { width: min(86%, 86rem); margin: auto; }
+.templates-intro { display: grid; grid-template-columns: 1.35fr 1fr; gap: 4rem; align-items: end; padding: clamp(5rem, 9vw, 9rem) 0 clamp(4rem, 7vw, 7rem); }
+.templates-eyebrow { margin: 0 0 1.75rem; color: #945448; font-size: .75rem; font-weight: 600; letter-spacing: .15em; text-transform: uppercase; }
+.templates-intro h1 { max-width: 12ch; margin: 0; font-size: clamp(3.2rem, 6.6vw, 6.6rem); font-weight: 400; line-height: 1.02; letter-spacing: -.055em; text-wrap: balance; }
+.templates-intro__copy { max-width: 28rem; padding-bottom: .25rem; }
+.templates-intro__copy > p:first-child, .templates-more__copy > p { margin: 0 0 2rem; color: #61636a; font-size: clamp(1.1rem, 1.7vw, 1.5rem); line-height: 1.55; }
+.templates-intro :deep(.template-start) { background: #171b31; color: #fff; border-radius: 999px; padding: 1rem 1.75rem; }
+.templates-note { color: #75757a; font-size: .85rem; margin: 1rem 0 0; }
+.template-row { display: grid; grid-template-columns: .8fr 1.2fr; align-items: center; gap: 5rem; padding: 5rem 0 7rem; border-top: 1px solid #d4d1c9; }
+.template-row__copy h2 { margin: 0; font-size: clamp(2.5rem, 4vw, 4rem); font-weight: 400; line-height: 1.05; letter-spacing: -.04em; }
+.template-row__tagline { margin: 1.25rem 0; font-size: clamp(1.6rem, 2.7vw, 2.6rem); line-height: 1.15; letter-spacing: -.035em; white-space: pre-line; }
+.template-row__summary { margin: 0; max-width: 28rem; color: #61636a; font-size: 1.1rem; line-height: 1.65; }
+.templates-link { display: inline-flex; gap: 1.5rem; align-items: center; padding: .5rem 0; margin-top: 1.5rem; border-bottom: 1px solid currentColor; color: #944537; font-weight: 500; text-decoration: none; }
+.templates-link:hover { color: #5e3027; }
+.template-row__visual { position: relative; display: block; min-width: 0; padding: 2.5rem 2.5rem 3rem 1rem; background: #e4e5e5; }
+.template-row__desktop { display: block; width: 100%; height: auto; box-shadow: 0 1rem 2rem #1719201c; }
+.template-row--saya .template-row__visual { padding-right: 5rem; padding-bottom: 5rem; background: #dfdace; }
+.template-row__phone { position: absolute; right: -.6rem; bottom: -1.25rem; width: 28%; height: auto; box-shadow: 0 1rem 2rem #17192024; }
+.template-row--blawby { grid-template-columns: 1.2fr .8fr; }
+.template-row--blawby .template-row__visual { grid-column: 1; grid-row: 1; padding: 2.5rem 1rem 2.5rem 2.5rem; background: #d7dce4; }
+.template-row--blawby .template-row__copy { grid-column: 2; grid-row: 1; }
+.templates-more { display: grid; grid-template-columns: 1fr 1fr; gap: 5rem; border-top: 1px solid #d4d1c9; padding: clamp(4rem, 7vw, 7rem) 0; }
+.templates-more h2 { margin: 0; font-size: clamp(2.6rem, 4.6vw, 4.6rem); font-weight: 400; line-height: 1.05; letter-spacing: -.045em; }
+.templates-more__copy { max-width: 32rem; align-self: end; }
+.templates-more__copy > p { margin-bottom: 0; }
+.templates-more__pricing { display: block; width: fit-content; margin-top: 2rem; color: #61636a; font-size: .95rem; text-decoration: none; }
+.templates-more__pricing:hover { text-decoration: underline; }
+@media (max-width: 767px) {
+  .templates-intro, .template-row, .template-row--blawby, .templates-more { grid-template-columns: 1fr; gap: 2.5rem; }
+  .templates-intro { padding-top: 4rem; }
+  .templates-intro h1 { max-width: 13ch; }
+  .template-row { padding: 3.5rem 0 5rem; }
+  .template-row__visual { padding: 1.5rem; }
+  .template-row--saya .template-row__visual { padding: 1.5rem 3rem 3.5rem 1rem; }
+  .template-row--blawby .template-row__copy, .template-row--blawby .template-row__visual { grid-column: auto; grid-row: auto; }
+  .template-row--blawby .template-row__visual { padding: 1.5rem; }
+  .templates-more { padding: 4rem 0; }
+}
+</style>

@@ -70,7 +70,7 @@ export default defineHandler(async (event) => {
     let uploaded: Awaited<ReturnType<typeof uploadResolvedMediaToAssetStore>>
     if (imagePart instanceof File) {
       if (Number(existingMedia?.images ?? 0) >= 5) return jsonResponse({ error: 'You can upload up to 5 photos.' }, { status: 400 })
-      if (imagePart.size > MAX_IMAGE_BYTES) return jsonResponse({ error: 'Photos must be 20 MB or smaller.' }, { status: 413 })
+      if (imagePart.size > MAX_IMAGE_BYTES) return jsonResponse({ error: 'Photos must be 10 MB or smaller.' }, { status: 413 })
       const imageData = new Uint8Array(await imagePart.arrayBuffer())
       const imageContentType = sniffMediaMimeType(imageData)
       if (!RESOLVED_MEDIA_IMAGE_TYPES.has(imageContentType)) return jsonResponse({ error: 'Unsupported photo file type' }, { status: 415 })

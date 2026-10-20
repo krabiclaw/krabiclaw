@@ -11,6 +11,10 @@ try {
   if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') throw error
 }
 
+const liveGooglePlaces = process.env.E2E_GOOGLE_PLACES === 'true'
+if (!liveGooglePlaces) process.env.GOOGLE_PLACES_API_KEY = ''
+else if (!process.env.GOOGLE_PLACES_API_KEY?.trim()) throw new Error('E2E_GOOGLE_PLACES requires GOOGLE_PLACES_API_KEY')
+
 const previewUrl = process.env.PLAYWRIGHT_PREVIEW_URL
 const port = Number(process.env.PLAYWRIGHT_PORT ?? 3000)
 const baseURL = previewUrl || `http://localhost:${port}`
@@ -40,11 +44,12 @@ const localWorkerEnvironment = [
   'EMAIL_DELIVERY_MODE=log_only',
   'WHATSAPP_DELIVERY_MODE=log_only',
   'ZARAZ_ANALYTICS=absent',
+  `MEDIA_BASE_URL=http://localhost:${port}/__media`,
   `EMAIL_REPLY_SECRET=${process.env.EMAIL_REPLY_SECRET}`,
   `BETTER_AUTH_URL=http://localhost:${port}`,
   `NUXT_PUBLIC_PLATFORM_DOMAIN=http://localhost:${port}`,
   `NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN=http://localhost:${port}`,
-  'NUXT_PUBLIC_APP_NAME=Krabiclaw',
+  'NUXT_PUBLIC_APP_NAME=KrabiClaw',
   `NUXT_PUBLIC_SITE_URL=http://localhost:${port}`,
   `NUXT_PUBLIC_HELP_URL=http://localhost:${port}/help`,
 ].join(' ')
@@ -54,9 +59,9 @@ const localWorkerCommand = [
   'corepack yarn wrangler dev .output/server/index.mjs --env e2e',
   '--assets .output/public',
   `--port ${port}`,
-  `--host localhost:${port}`,
   '--var E2E_ALLOW_DEV_ROUTES:true',
   `--var E2E_DEV_ROUTE_SECRET:${localDevRouteSecret}`,
+  ...(!liveGooglePlaces ? ['--var GOOGLE_PLACES_API_KEY:'] : []),
 ].join(' ')
 
 export default defineConfig({
@@ -102,5 +107,8 @@ export default defineConfig({
     stdout: captureServerLogs ? 'pipe' : 'ignore',
     stderr: captureServerLogs ? 'pipe' : 'ignore'
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }]
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    { name: 'webkit-mobile-layout', use: { ...devices['Desktop Safari'], viewport: { width: 390, height: 844 } }, testMatch: '**/dashboard-layout.spec.ts', grep: /mobile scroll/ },
+  ]
 })

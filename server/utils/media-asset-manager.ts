@@ -123,10 +123,12 @@ export interface MediaPlacementInsertInput {
 
 const OWNER_TABLES = {
   organization: 'organization', business_location: 'business_locations', product: 'products',
+  collection: 'collections',
   content_document: 'content_documents', review: 'reviews',
   review_request: 'review_requests',
   content_block: 'content_blocks',
   activity_entry: 'activity_entries',
+  team_message: 'team_messages',
 } as const satisfies Record<MediaPlacementOwnerType, string>
 
 export function mediaPlacementOwnerQuery(input: {
@@ -159,7 +161,7 @@ export function mediaPlacementOwnerQuery(input: {
   }
   const table = OWNER_TABLES[input.ownerType]
   const location = input.ownerType === 'business_location' ? 'id'
-    : ['review', 'review_request'].includes(input.ownerType) ? 'location_id' : 'NULL'
+    : ['review', 'review_request', 'collection'].includes(input.ownerType) ? 'location_id' : 'NULL'
   return {
     query: `SELECT ${location} AS location_id FROM ${table} WHERE id = ? AND ${input.ownerType === 'organization' ? 'id' : 'organization_id'} = ?`, params,
   }
@@ -186,16 +188,17 @@ export function buildMediaPlacementInsertQuery(input: MediaPlacementInsertInput)
   }
 }
 
-// Not exported: a bare "delete everything, insert the given array" is only
-// ever safe for a single-value slot (cardinality <= 1, so there is nothing
+// A bare "delete everything, insert the given array" is only ever safe for a single-value slot (cardinality <= 1, so there is nothing
 // to resurrect) or for seeding an ordered collection at true creation time
 // (nothing existed before, so nothing can be stale). Any update path on an
 // existing ordered collection must go through attachMediaPlacement /
 // removeMediaPlacement / reorderMediaPlacements in media-placement.ts
 // instead — a client holding a stale read of the list otherwise silently
 // resurrects assets someone else already removed. See setSingleMediaPlacement
-// and insertInitialMediaPlacements below for the two sanctioned callers.
-function buildMediaPlacementReplacementQueries(input: {
+// and insertInitialMediaPlacements below, and arrangeProductPhotos in
+// media-placement.ts, which guards the membership it read in the same batch,
+// for the sanctioned callers.
+export function buildMediaPlacementReplacementQueries(input: {
   organizationId: string
   placement: { owner_type: string; owner_id: string; slot: string }
   media: Array<{ asset_id: string; presentation?: LogoPresentation | null }>
@@ -459,16 +462,18 @@ export function buildMediaAssetInsertQuery(data: CreateInput, now = new Date().t
   }
 }
 
-export async function createMediaAsset(db: DbClient, data: CreateInput): Promise<void> {
+export async function createMediaAsset(db: DbClient, data: CreateInput, creation?: { dedupeKey: string; requestHash: string }, writeGuard?: BatchQuery): Promise<void> {
   const query = buildMediaAssetInsertQuery(data)
-  await executeBatch(db, [query, organizationEventQuery({
+  await executeBatch(db, [...(writeGuard ? [writeGuard] : []), query, organizationEventQuery({
     organizationId: data.organization_id,
     locationId: null,
     actorId: data.created_by_user_id ?? null,
     eventType: 'media.uploaded',
     entityType: 'media_asset',
     entityId: data.id,
+    ...(creation ? { dedupeKey: creation.dedupeKey } : {}),
     metadata: {
+      ...(creation ? { request_hash: creation.requestHash } : {}),
       kind: data.kind,
       provider: data.provider,
       source: data.source,
@@ -493,8 +498,8 @@ export async function listMediaAssets(
   const conditions = [`ma.organization_id = ?`, `ma.status = 'active'`, `ma.generation_key IS NULL`]
   const params: SqlBindValue[] = [organizationId]
   // A photo sent in a conversation is the conversation's, not the website's.
-  if (opts.ownerType !== 'activity_entry') {
-    conditions.push(`NOT EXISTS (SELECT 1 FROM media_placements sent WHERE sent.asset_id = ma.id AND sent.organization_id = ma.organization_id AND sent.owner_type = 'activity_entry')`)
+  if (opts.ownerType !== 'activity_entry' && opts.ownerType !== 'team_message') {
+    conditions.push(`NOT EXISTS (SELECT 1 FROM media_placements sent WHERE sent.asset_id = ma.id AND sent.organization_id = ma.organization_id AND sent.owner_type IN ('activity_entry', 'team_message'))`)
   }
   if (opts.kind) { conditions.push(`ma.kind = ?`); params.push(opts.kind) }
   if (opts.search) { conditions.push(`ma.file_name LIKE ? ESCAPE '\\'`); params.push(`%${opts.search.replace(/[\\%_]/g, '\\$&')}%`) }
@@ -568,14 +573,16 @@ function publicationPinGuardQuery(organizationId: string, assetId: string): Batc
 
 async function assertNotPinnedByPublication(db: DbClient, organizationId: string, assetId: string) {
   const pinned = await queryFirst<{ id: string; channel: string }>(db, `${PINNING_PUBLICATION} LIMIT 1`, [organizationId, assetId])
-  if (pinned) throw new HTTPError({ statusCode: 409, statusMessage: `Media asset ${assetId} is part of the unresolved ${pinned.channel} publication ${pinned.id}; resolve it first` })
+  if (pinned) throw new HTTPError({ statusCode: 409, statusMessage: `Media asset ${assetId} is part of the unresolved ${pinned.channel} publication ${pinned.id}; resolve it first`, data: { code: 'MEDIA_PINNED_BY_PUBLICATION', field: 'asset_id' } })
 }
 
 export async function updateMediaAssetMetadata(
   db: DbClient,
   id: string,
   organizationId: string,
-  updates: { alt_text?: string | null; category?: MediaAsset['category'] }
+  updates: { alt_text?: string | null; category?: MediaAsset['category'] },
+  /** Update it only while it is still placed on this owner, in one of these slots. */
+  placedOn?: { owner_type: string; owner_id: string; slots: string[] },
 ): Promise<boolean> {
   await assertNotPinnedByPublication(db, organizationId, id)
   const sets: string[] = ['updated_at = ?']
@@ -591,9 +598,13 @@ export async function updateMediaAssetMetadata(
   if (sets.length === 1) return false
 
   params.push(id, organizationId)
+  const placement = placedOn
+    ? ` AND EXISTS (SELECT 1 FROM media_placements WHERE organization_id = media_assets.organization_id AND asset_id = media_assets.id AND owner_type = ? AND owner_id = ? AND status = 'active' AND slot IN (SELECT value FROM json_each(?)))`
+    : ''
+  if (placedOn) params.push(placedOn.owner_type, placedOn.owner_id, d1JsonStringSet(placedOn.slots))
   const [, result] = await executeBatch(db, [
     publicationPinGuardQuery(organizationId, id),
-    { query: `UPDATE media_assets SET ${sets.join(', ')} WHERE id = ? AND organization_id = ?`, params },
+    { query: `UPDATE media_assets SET ${sets.join(', ')} WHERE id = ? AND organization_id = ?${placement}`, params },
     publicResourceCacheInvalidationQuery(organizationId, 'media-update'),
   ])
   return Number(result?.meta?.changes ?? 0) > 0

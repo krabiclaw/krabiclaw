@@ -2,7 +2,7 @@
   <!-- A row of Website settings, so it closes back to it like its siblings; adding a domain is its own action, not a Save. -->
   <DashboardLeafPanel id="organization-domains" title="Domains" :footer="false">
     <template #right>
-      <UButton icon="i-lucide-plus" size="sm" @click="openAddModal">Add domain</UButton>
+      <UButton icon="i-lucide-plus" @click="openAddModal">Add domain</UButton>
     </template>
 
     <div class="space-y-4">
@@ -162,10 +162,12 @@
 </template>
 
 <script setup lang="ts">
+import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import SettingRow from '~/components/dashboard/SettingRow.vue'
 import { formatTimestamp } from '~/utils/timezone'
 const dashboardApi = useDashboardApi()
 definePageMeta({ layout: 'dashboard' })
+const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 
 
 type DomainStatus = 'pending' | 'verifying' | 'active' | 'blocked' | 'failed' | 'disabled' | 'deleted'
@@ -377,7 +379,7 @@ function statusColor(status: DomainStatus) {
 
 function primaryAction(group: DomainGroup) {
   if (group.status === 'active' && group.role === 'canonical') return null
-  if (group.status === 'active') return { label: 'Make primary', icon: 'i-lucide-star', color: 'primary' as const, variant: 'soft' as const }
+  if (group.status === 'active') return { label: 'Make primary', icon: 'i-lucide-star', color: 'neutral' as const, variant: 'soft' as const }
   if (group.status === 'pending') return { label: 'Configure', icon: 'i-lucide-list-checks', color: 'neutral' as const, variant: 'soft' as const }
   if (group.status === 'verifying') return { label: 'Check now', icon: 'i-lucide-refresh-cw', color: 'neutral' as const, variant: 'soft' as const }
   if (group.status === 'failed') return { label: 'Retry', icon: 'i-lucide-rotate-cw', color: 'error' as const, variant: 'soft' as const }
@@ -435,7 +437,7 @@ async function makePrimary(group: DomainGroup) {
 
 async function deleteGroup(group: DomainGroup) {
   if (!organizationId.value || !group.primary_domain_id || deletingGroupId.value) return
-  if (!confirm(`Remove ${group.domain} from this organization?`)) return
+  if (!await confirmDialog.open({ title: `Remove ${group.domain}`, description: 'The domain stops serving this site.', confirmLabel: 'Remove domain', cancelLabel: 'Keep domain' })) return
   deletingGroupId.value = group.id
   actionError.value = null
   try {
@@ -481,5 +483,5 @@ const { data: domainGroups, error: domainsError, refresh: loadDomains } = await 
 )
 const loadError = computed(() => domainsError.value ? getErrorMessage(domainsError.value, 'Failed to load domains') : null)
 
-useSeoMeta({ title: 'Domains | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Domains | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>

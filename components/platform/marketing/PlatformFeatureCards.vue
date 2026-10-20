@@ -1,6 +1,6 @@
 <template>
   <!--
-    A grid whose rows are Krabiclaw's plans is the plans section. `source` is a
+    A grid whose rows are KrabiClaw's plans is the plans section. `source` is a
     declared field on this block and the component reads it, the same way a
     Saya grid reads its own: the map keys presentation on the template and the
     block type, and what the block says about its own rows stays the block's.
@@ -10,8 +10,9 @@
   <section v-else-if="page.recipe === 'products'" class="kc-product-more" data-parity-section="product-more">
     <div class="kc-product-more__inner">
       <h2 v-if="title">{{ title }}</h2>
-      <div class="kc-product-more__columns">
+      <div class="kc-product-more__columns" :style="{ '--kc-columns': String(Math.min(items.length, 3)) }">
         <div v-for="item in items" :key="item.title">
+          <Icon v-if="item.icon.startsWith('simple-icons:')" :name="item.icon" class="kc-product-more__mark" aria-hidden="true" />
           <h3>{{ item.title }}</h3>
           <p>{{ item.description }}</p>
           <NuxtLink v-if="item.url && item.linkLabel" :to="route(item.url)" class="kc-product-link">{{ item.linkLabel }} <span aria-hidden="true">↗</span></NuxtLink>
@@ -161,7 +162,7 @@ export interface PlatformFeatureCard {
 }
 
 /**
- * A grid of features, in the three shapes Krabiclaw's pages draw it: the
+ * A grid of features, in the three shapes KrabiClaw's pages draw it: the
  * homepage band, the Features page's detailed cards, and the vertical pages'
  * plain grid.
  */
@@ -170,7 +171,7 @@ const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 import PlatformPlansSection from '~/components/platform/marketing/PlatformPlansSection.vue'
 import PlatformPricingComparison from '~/components/platform/marketing/PlatformPricingComparison.vue'
 
-/** Krabiclaw's own plans, read from billing rather than written into a page. */
+/** KrabiClaw's own plans, read from billing rather than written into a page. */
 const isComparison = computed(() => blockText(props.block.data.source) === 'billing_features')
 const isPlans = computed(() => blockText(props.block.data.source) === 'billing_plans')
 const eyebrow = computed(() => blockTextOrNull(props.block.data.eyebrow))

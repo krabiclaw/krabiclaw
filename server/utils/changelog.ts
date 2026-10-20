@@ -1,3 +1,5 @@
+import { KRABICLAW_REPOSITORY } from '../../shared/open-source.ts'
+
 export const DEFAULT_CHANGELOG_LIMIT = 50
 export const MAX_CHANGELOG_LIMIT = 100
 
@@ -48,11 +50,8 @@ export class ChangelogFetchError extends Error {
 
 interface GetRecentChangesOptions {
   githubToken: string
-  repoOwner?: string
-  repoName?: string
   limit?: number
   fetchImpl?: typeof fetch
-  timeoutMs?: number
 }
 
 export function validateChangelogLimit(limit: unknown): number {
@@ -114,69 +113,53 @@ export async function getRecentChanges(options: GetRecentChangesOptions): Promis
   const githubToken = options.githubToken.trim()
   if (!githubToken) throw new ChangelogFetchError('GITHUB_TOKEN not configured')
 
-  const repoOwner = options.repoOwner?.trim() || 'paulchrisluke'
-  const repoName = options.repoName?.trim() || 'krabiclaw'
   const fetchImpl = options.fetchImpl ?? fetch
-  const timeoutMs = options.timeoutMs ?? 10_000
   const allMergedPullRequests: GitHubPullRequest[] = []
   const perPage = 100
   let page = 1
 
   while (true) {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), timeoutMs)
-
-    try {
-      const response = await fetchImpl(
-        `https://api.github.com/repos/${encodeURIComponent(repoOwner)}/${encodeURIComponent(repoName)}/pulls?state=closed&sort=updated&direction=desc&per_page=${perPage}&page=${page}`,
-        {
-          signal: controller.signal,
-          headers: {
-            Authorization: `Bearer ${githubToken}`,
-            Accept: 'application/vnd.github+json',
-            'X-GitHub-Api-Version': '2022-11-28',
-          },
+    const response = await fetchImpl(
+      `https://api.github.com/repos/${KRABICLAW_REPOSITORY}/pulls?state=closed&sort=updated&direction=desc&per_page=${perPage}&page=${page}`,
+      {
+        headers: {
+          Authorization: `Bearer ${githubToken}`,
+          Accept: 'application/vnd.github+json',
+          'X-GitHub-Api-Version': '2022-11-28',
         },
-      )
+      },
+    )
 
-      if (!response.ok) {
-        throw new ChangelogFetchError(`GitHub API error: ${response.status}`)
-      }
-
-      const pullRequests = (await response.json()) as GitHubPullRequest[]
-      if (pullRequests.length === 0) break
-      allMergedPullRequests.push(...pullRequests.filter(pullRequest => pullRequest.merged_at !== null))
-
-      if (pullRequests.length < perPage) break
-
-      // GitHub only lets this endpoint sort closed PRs by updated_at, not merged_at.
-      // A merge updates the PR, so merged_at cannot be later than updated_at. Once
-      // the oldest updated_at on this page is at or before our current merged_at
-      // cutoff, every later page is provably unable to contain a newer merge. Until
-      // then, keep paging even if we already collected `limit` merged PRs.
-      if (allMergedPullRequests.length >= limit) {
-        const mergedAtCutoff = [...allMergedPullRequests]
-          .sort((a, b) => new Date(b.merged_at!).getTime() - new Date(a.merged_at!).getTime())
-          .at(limit - 1)?.merged_at
-        const oldestUpdatedAt = pullRequests.at(-1)?.updated_at
-        if (
-          mergedAtCutoff
-          && oldestUpdatedAt
-          && new Date(oldestUpdatedAt).getTime() <= new Date(mergedAtCutoff).getTime()
-        ) {
-          break
-        }
-      }
-
-      page += 1
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        throw new ChangelogFetchError('GitHub API request timed out', 504)
-      }
-      throw error
-    } finally {
-      clearTimeout(timeout)
+    if (!response.ok) {
+      throw new ChangelogFetchError(`GitHub API error: ${response.status}`)
     }
+
+    const pullRequests = (await response.json()) as GitHubPullRequest[]
+    if (pullRequests.length === 0) break
+    allMergedPullRequests.push(...pullRequests.filter(pullRequest => pullRequest.merged_at !== null))
+
+    if (pullRequests.length < perPage) break
+
+    // GitHub only lets this endpoint sort closed PRs by updated_at, not merged_at.
+    // A merge updates the PR, so merged_at cannot be later than updated_at. Once
+    // the oldest updated_at on this page is at or before our current merged_at
+    // cutoff, every later page is provably unable to contain a newer merge. Until
+    // then, keep paging even if we already collected `limit` merged PRs.
+    if (allMergedPullRequests.length >= limit) {
+      const mergedAtCutoff = [...allMergedPullRequests]
+        .sort((a, b) => new Date(b.merged_at!).getTime() - new Date(a.merged_at!).getTime())
+        .at(limit - 1)?.merged_at
+      const oldestUpdatedAt = pullRequests.at(-1)?.updated_at
+      if (
+        mergedAtCutoff
+        && oldestUpdatedAt
+        && new Date(oldestUpdatedAt).getTime() <= new Date(mergedAtCutoff).getTime()
+      ) {
+        break
+      }
+    }
+
+    page += 1
   }
 
   const mergedPullRequests = allMergedPullRequests

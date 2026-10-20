@@ -14,9 +14,9 @@ const editor=createMemberAvailabilityEditor(props.organizationId,props.memberId,
 provide(memberAvailabilityKey,editor)
 const to=(segment:string)=>router.resolve({path:`${level.path.value}/${segment}`,query:route.query}).fullPath
 const groups=computed<EditorNavigationGroup[]>(()=>[
- {id:'availability',items:[{id:'hours',label:'Hours',summary:editor.record.value?.timezone??'Set your timezone',to:to('hours')},{id:'time-off',label:'Time off',summary:`${editor.record.value?.time_off.length??0} dates`,to:to('time-off')}]},
- {id:'profile',items:[{id:'profile',label:'Public profile',summary:editor.record.value?.public_approved?'Published':'Not published',to:to('profile')}]},
- ...(props.self?[{id:'connect',label:'Connect calendars',items:[{id:'google-calendar',label:'Google Calendar',summary:editor.record.value?.calendar_account_id?'Connected':'Not connected',lead:{icon:'i-simple-icons-google'},to:to('google-calendar')}]}]:[]),
+ {id:'availability',items:[{ id: 'hours', icon: 'i-lucide-clock', label:'Hours',summary:editor.record.value?.timezone??'Set your timezone',to:to('hours')},{ id: 'time-off', icon: 'i-lucide-calendar-off', label:'Time off',summary:`${editor.record.value?.time_off.length??0} dates`,to:to('time-off')}]},
+ {id:'profile',items:[{ id: 'profile', icon: 'i-lucide-contact-round', label:'Public profile',summary:editor.record.value?.public_approved?'Published':'Not published',to:to('profile')}]},
+ ...(props.self?[{id:'connect',label:'Connect calendars',items:[{id:'google-calendar',label:'Google Calendar',summary:editor.record.value?.calendar_account_id?'Connected':'Not connected',lead:{icon:'i-logos-google-calendar'},to:to('google-calendar')}]}]:[]),
 ])
 await editor.load()
 </script>

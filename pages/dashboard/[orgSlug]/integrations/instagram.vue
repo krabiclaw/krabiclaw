@@ -3,6 +3,7 @@
     id="integration-instagram"
     icon="i-skill-icons-instagram"
     title="Instagram"
+    :lead="integrationDefinition('instagram').purpose"
     :saving="saving"
     :disabled="!accountId || !account"
     :error="error || integrations.failure.value || loadFailure || connectionProblem"
@@ -10,21 +11,22 @@
     save-label="Connect this account"
     @save="select"
   >
-    <IntegrationConnection
-      logo="i-skill-icons-instagram"
-      :connection="instagram && { name: `@${instagram.target_name}`, connectedAt: instagram.connected_at }"
+    <IntegrationLeaf
+      integration="instagram"
+      :connection="instagram && { name: `@${instagram.target_name}`, connectedAt: instagram.connected_at, through: instagram.connected_through, status: instagram.status, lastError: instagram.last_error }"
       :disconnecting="disconnecting"
       @disconnect="disconnect"
     >
       <p v-if="account" class="font-semibold">@{{ account.name }}</p>
       <UButton v-else icon="i-lucide-instagram" size="xl" block :loading="linking" @click="connect()">Connect Instagram</UButton>
-    </IntegrationConnection>
+    </IntegrationLeaf>
   </DashboardLeafPanel>
 </template>
 
 <script setup lang="ts">
 import { authClient } from '~/lib/auth-client'
-import IntegrationConnection from '~/components/dashboard/IntegrationConnection.vue'
+import IntegrationLeaf from '~/components/dashboard/IntegrationLeaf.vue'
+import { integrationDefinition } from '~/shared/integrations'
 import { integrationsKey } from '../integrations.vue'
 
 definePageMeta({ layout: 'dashboard' })

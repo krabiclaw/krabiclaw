@@ -16,9 +16,17 @@ export const jsonResponse = (body: ApiValue, init: ResponseInit = {}) => {
 }
 
 export async function readRequiredBody<T>(event: H3Event): Promise<T> {
-  const body = await readBody<T>(event)
+  let body: unknown
+  try {
+    body = await readBody(event)
+  } catch (error) {
+    if (HTTPError.isError(error) && error.status === 400) {
+      throw new HTTPError({ statusCode: 400, message: error.message, data: { code: 'INVALID_BODY', field: 'body' }, cause: error })
+    }
+    throw error
+  }
   if (body === undefined) {
-    throw new HTTPError({ statusCode: 400, statusMessage: 'Request body is required' })
+    throw new HTTPError({ statusCode: 400, statusMessage: 'Request body is required', data: { code: 'INVALID_BODY', field: 'body' } })
   }
   return body as T
 }
@@ -36,7 +44,7 @@ function matchesStrictBodyField(value: unknown, type: StrictBodyFieldType): bool
 export async function readStrictBody<T>(event: H3Event, fields: Readonly<Record<string, StrictBodyFieldType>>): Promise<T> {
   const body = await readRequiredBody<Record<string, unknown>>(event)
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
-    throw new HTTPError({ statusCode: 400, statusMessage: 'Request body must be an object' })
+    throw new HTTPError({ statusCode: 400, statusMessage: 'Request body must be an object', data: { code: 'INVALID_BODY', field: 'body' } })
   }
   const allowed = new Set(Object.keys(fields))
   const unknown = Object.keys(body).filter(key => !allowed.has(key)).sort()
@@ -44,11 +52,12 @@ export async function readStrictBody<T>(event: H3Event, fields: Readonly<Record<
     throw new HTTPError({
       statusCode: 400,
       statusMessage: `Unknown request field${unknown.length > 1 ? 's' : ''}: ${unknown.join(', ')}`,
+      data: { code: 'INVALID_BODY', fields: unknown },
     })
   }
   for (const [field, value] of Object.entries(body)) {
     if (!matchesStrictBodyField(value, fields[field]!)) {
-      throw new HTTPError({ statusCode: 400, statusMessage: `Invalid type for request field: ${field}` })
+      throw new HTTPError({ statusCode: 400, statusMessage: `Invalid type for request field: ${field}`, data: { code: 'INVALID_BODY_FIELD', field } })
     }
   }
   return body as T

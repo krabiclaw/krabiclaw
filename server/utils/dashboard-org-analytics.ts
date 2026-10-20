@@ -5,21 +5,11 @@ import { getDashboardContext } from '~/server/utils/dashboard-context'
 import { assertRoleAllows } from '~/server/utils/member-access'
 import { getAnalyticsReport } from '~/server/utils/analytics-report'
 import { AnalyticsQueryError, queryOrganizationAnalytics, type AnalyticsQueryInput } from '~/server/utils/analytics-query'
-import { loadOnboardingChecklist } from '~/server/utils/onboarding-checklist'
 import { queryAll, type DbClient } from '~/server/db'
 
 import { organizationAnalyticsSchema, type OrganizationAnalyticsReport } from '~/shared/analytics-report'
 
 type OrganizationReviewsSummary = OrganizationAnalyticsReport['reviews']
-type OrganizationSetupProgress = OrganizationAnalyticsReport['setup']
-
-const SETUP_ITEM_LABELS: Record<string, string> = {
-  business_info: 'Business details',
-  hero_image: 'Hero image',
-  core_offering: 'Products or services',
-  story: 'Your story',
-  post: 'A first post',
-}
 
 /**
  * Approved reviews across the sites in scope.
@@ -51,34 +41,18 @@ async function loadReviewsSummary(db: DbClient, organizationIds: readonly string
       ? Math.round((rows.reduce((sum, row) => sum + row.rating, 0) / rows.length) * 100) / 100
       : null,
     distribution,
-    recent: rows.slice(0, 8).map(row => ({
+    recent: rows.slice(0, 8).map(row => {
+      // Every review writer (direct, review request, Google) requires its author.
+      if (!row.author_name?.trim()) throw new HTTPError({ statusCode: 500, message: `Review ${row.id} has no author`, data: { code: 'INVALID_REVIEW', field: 'author_name', review_id: row.id } })
+      return {
       id: row.id,
-      author: row.author_name ?? 'Guest',
+      author: row.author_name,
       rating: row.rating,
       title: row.title,
       content: row.content,
       createdAt: row.created_at,
-    })),
-  }
-}
-
-/** The tenant's setup progress. A checklist belongs to one tenant. */
-async function loadSetupProgress(
-  event: H3Event,
-  organization: { id: string; label: string },
-): Promise<OrganizationSetupProgress> {
-  const checklist = await loadOnboardingChecklist(event, organization.id)
-  const items = Object.entries(checklist.items).map(([id, done]) => ({
-    id,
-    label: SETUP_ITEM_LABELS[id] ?? id,
-    done: Boolean(done),
-  }))
-  return {
-    organizationId: organization.id,
-    label: organization.label,
-    completed: items.filter(item => item.done).length,
-    total: items.length,
-    items,
+      }
+    }),
   }
 }
 
@@ -105,17 +79,16 @@ export async function loadDashboardOrganizationAnalytics(
 
   await assertRoleAllows({ organizationId: organization.id, role: organization.role, permissions: { analytics: ['read'] } })
 
-  const [report, reviews, setup] = await Promise.all([
+  const [report, reviews] = await Promise.all([
     getAnalyticsReport(db, {
       organizationId: organization.id,
       startDate: query.startDate,
       endDate: query.endDate,
     }),
     loadReviewsSummary(db, [organization.id]),
-    loadSetupProgress(event, { id: organization.id, label: organization.name }),
   ])
 
-  return organizationAnalyticsSchema.parse({ organizationId: organization.id, report, reviews, setup })
+  return organizationAnalyticsSchema.parse({ organizationId: organization.id, report, reviews })
 }
 
 /**

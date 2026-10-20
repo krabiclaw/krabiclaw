@@ -91,16 +91,15 @@ export function useRouteLevel() {
   })
 
   /**
-   * How much is open below this level. Two levels are on screen at once — this
-   * one and its child — so anything deeper belongs to a descendant and this
-   * level renders nothing but the route beneath it. That is what stops three
-   * columns appearing and squeezing the leaf into a third of the width.
+   * How much is open below this level. Two levels are on screen at once unless
+   * the immediate child declares that it needs the frame. Anything deeper also
+   * belongs to a descendant, so this level renders only the route beneath it.
    */
   const mode = computed<RouteLevelMode>(() => {
     if (index.value === -1) return 'yield'
     const below = levels.value.length - 1 - index.value
     if (below === 0) return 'index'
-    if (below === 1) return 'pair'
+    if (below === 1) return levels.value[index.value + 1]?.meta.dashboardFrame === true ? 'yield' : 'pair'
     return 'yield'
   })
 

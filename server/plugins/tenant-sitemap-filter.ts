@@ -25,14 +25,14 @@ function pathFromLoc(input: unknown) {
 async function publishedTenantSitemapScope(db: DbClient | undefined, organizationId: string | undefined) {
   const paths = new Set<string>(), locales = new Set<string>()
   if (!db || !organizationId) return { paths, locales }
-  const rows = await queryAll<{ path: string | null; locale: string }>(db, `
-    SELECT l.locale, CASE WHEN l.locale = 'en' THEN d.path WHEN d.path = '/' THEN '/' || l.locale ELSE '/' || l.locale || d.path END AS path
-      FROM organization_locales l LEFT JOIN content_documents d ON d.organization_id = l.organization_id AND d.organization_id = l.organization_id AND d.locale = l.locale
+  const rows = await queryAll<{ path: string | null; locale: string; is_source: number }>(db, `
+    SELECT l.locale, l.is_source, CASE WHEN l.is_source = 1 THEN d.path WHEN d.path = '/' THEN '/' || l.locale ELSE '/' || l.locale || d.path END AS path
+      FROM organization_locales l LEFT JOIN content_documents d ON d.organization_id = l.organization_id AND d.locale = l.locale
         AND d.kind = 'page' AND d.row_role IN ('root','representation')
      WHERE l.organization_id = ? AND l.status = 'published'
   `, [organizationId])
   for (const row of rows) {
-    locales.add(row.locale)
+    if (!row.is_source) locales.add(row.locale)
     if (row.path) paths.add(row.path === '/' ? '/' : row.path.replace(/\/$/, ''))
   }
   return { paths, locales }
@@ -48,7 +48,7 @@ function isAllowedTenantPath(event: H3Event, path: string, scope: { paths: Set<s
   const normalized = path === '/' ? '/' : path.replace(/\/$/, '')
   if (scope.paths.has(normalized)) return true
   const locale = normalized.split('/')[1] ?? ''
-  const route = locale !== 'en' && scope.locales.has(locale) ? normalized.slice(locale.length + 1) || '/' : normalized
+  const route = scope.locales.has(locale) ? normalized.slice(locale.length + 1) || '/' : normalized
   return exactPaths.has(route) || template.sitemap.dynamicPrefixes.some(prefix => route.startsWith(prefix))
 }
 

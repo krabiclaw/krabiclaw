@@ -1,12 +1,11 @@
-
-import {
-} from "~/server/utils/whatsapp";
+import { HTTPError } from 'nitro'
 import type { CloudflareEnv } from "~/server/utils/auth";
 import { queryAll, queryFirst } from "~/server/db";
 import { d1JsonStringSet } from '~/server/db/d1-limits'
-import { reorderQa, updateQa } from "~/server/utils/location-qa";
 import { listUserOrganizations, resolveOrganizationMembership } from '~/server/utils/member-access'
 import { localPartsAt } from '~/utils/timezone'
+import { publicTenantVisibilitySql } from '~/server/utils/public-base'
+import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 
 export async function listOrganizationsForUser(
   db: D1Database,
@@ -16,13 +15,19 @@ export async function listOrganizationsForUser(
   const orgIds = (await listUserOrganizations(env, userId)).map(organization => organization.id)
   if (!orgIds.length) return [];
 
-  return await queryAll<Record<string, unknown>>(db, `
+  const organizations = await queryAll<Record<string, unknown> & { id: string; subdomain: string | null; public_url: string | null }>(db, `
     SELECT s.id, s.theme_id, s.name, s.slug, s.subdomain,
-           (SELECT domain FROM organization_domains WHERE organization_id = s.id AND role = 'canonical' AND status = 'active' AND type = 'custom') AS custom_domain, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = s.id AND role = 'canonical' AND status = 'active') AS public_url, s.status, s."createdAt" AS created_at, s.updated_at, s.onboarding_status
+           (SELECT domain FROM organization_domains WHERE organization_id = s.id AND role = 'canonical' AND status = 'active' AND type = 'custom') AS custom_domain, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = s.id AND role = 'canonical' AND status = 'active' AND ${publicTenantVisibilitySql('s', false)}) AS public_url, s.status, s."createdAt" AS created_at, s.updated_at, s.onboarding_status
     FROM organization s
     WHERE s.id IN (SELECT value FROM json_each(?))
     ORDER BY s."createdAt" DESC
   `, [d1JsonStringSet(orgIds)]);
+  return organizations.map(organization => ({ ...organization, public_url: organization.public_url ? tenantOrganizationOrigin({
+    platformDomain: env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '',
+    freeOrganizationDomain: env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN ?? '',
+    subdomain: organization.subdomain ?? '',
+    canonicalDomain: organization.public_url,
+  }) : null }))
 }
 
 export async function getOrganizationForMcp(
@@ -31,17 +36,22 @@ export async function getOrganizationForMcp(
   organizationId: string,
   userId: string,
 ) {
-  const organization = await queryFirst<Record<string, unknown>>(db, `
+  const organization = await queryFirst<Record<string, unknown> & { subdomain: string | null; public_url: string | null }>(db, `
       SELECT s.id, s.name, s.theme_id, s.slug, s.subdomain,
-             (SELECT domain FROM organization_domains WHERE organization_id = s.id AND role = 'canonical' AND status = 'active' AND type = 'custom') AS custom_domain, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = s.id AND role = 'canonical' AND status = 'active') AS public_url, s.status, s.updated_at, s.onboarding_status
+             (SELECT domain FROM organization_domains WHERE organization_id = s.id AND role = 'canonical' AND status = 'active' AND type = 'custom') AS custom_domain, (SELECT 'https://' || domain FROM organization_domains WHERE organization_id = s.id AND role = 'canonical' AND status = 'active' AND ${publicTenantVisibilitySql('s', false)}) AS public_url, s.status, s.updated_at, s.onboarding_status
       FROM organization s
       WHERE s.id = ?
       LIMIT 1
     `, [organizationId]);
 
   const membership = await resolveOrganizationMembership(env, { organizationId, userId })
-  if (!organization || !membership) throw new Error("Organization not found or access denied");
-  return organization;
+  if (!organization || !membership) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found or access denied' });
+  return { ...organization, public_url: organization.public_url ? tenantOrganizationOrigin({
+    platformDomain: env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '',
+    freeOrganizationDomain: env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN ?? '',
+    subdomain: organization.subdomain ?? '',
+    canonicalDomain: organization.public_url,
+  }) : null };
 }
 
 
@@ -70,6 +80,7 @@ export async function listReservationSubmissions(
   db: D1Database,
   organizationId: string,
   opts: { locationId?: string | null; sinceDays?: number | null } = {},
+  window?: { limit: number; offset: number },
 ) {
   const params: (string | number)[] = [organizationId]
   let where = `rs.kind = 'reservation' AND rs.organization_id = ?`
@@ -82,14 +93,14 @@ export async function listReservationSubmissions(
     params.push(`-${opts.sinceDays} days`)
   }
   const rows = await queryAll<Record<string, unknown> & { starts_at: string; timezone: string }>(db, `
-    SELECT rs.id, rs.organization_id, res.location_id, rs.user_id, res.status, res.starts_at, res.timezone, CAST(res.party_size AS TEXT) || CASE json_extract(rs.payload_json, '$.party_size_is_minimum') WHEN 1 THEN '+' ELSE '' END AS guests, json_extract(rs.payload_json, '$.guest.name') AS name, json_extract(rs.payload_json, '$.guest.email') AS email, json_extract(rs.payload_json, '$.guest.phone') AS phone, json_extract(rs.payload_json, '$.notes') AS requests, rs.created_at, rs.updated_at, bl.title AS location_title
+    SELECT rs.id AS request_id, res.id AS operational_reservation_id, rs.id, rs.organization_id, res.location_id, rs.user_id, res.status, res.starts_at, res.timezone, CAST(res.party_size AS TEXT) || CASE json_extract(rs.payload_json, '$.party_size_is_minimum') WHEN 1 THEN '+' ELSE '' END AS guests, json_extract(rs.payload_json, '$.guest.name') AS name, json_extract(rs.payload_json, '$.guest.email') AS email, json_extract(rs.payload_json, '$.guest.phone') AS phone, json_extract(rs.payload_json, '$.notes') AS requests, rs.created_at, rs.updated_at, bl.title AS location_title
     FROM requests rs
     JOIN reservations res ON res.request_id = rs.id
     LEFT JOIN business_locations bl ON bl.id = res.location_id
     WHERE ${where}
-    ORDER BY rs.created_at DESC
-    LIMIT 200
-  `, params);
+    ORDER BY rs.created_at DESC, rs.id DESC
+    ${window ? 'LIMIT ? OFFSET ?' : ''}
+  `, [...params, ...(window ? [window.limit, window.offset] : [])]);
   // The tool states a date and a time, as the schema declares and as an
   // assistant reads them back to the owner. The row holds one instant and the
   // zone it belongs to, so both are read off it here rather than stored twice.
@@ -156,25 +167,6 @@ export async function getReservationSubmissionsByStatus(
   return byStatus
 }
 
-export async function updateLocationQa(
-  db: D1Database,
-  organizationId: string,
-  locationId: string,
-  qaId: string,
-  updates: Record<string, unknown>,
-) {
-  return updateQa(db, { organizationId, locationId }, qaId, updates)
-}
-
-export async function reorderLocationQa(
-  db: D1Database,
-  organizationId: string,
-  locationId: string,
-  updates: Array<{ id: string; sort_order: number }>,
-) {
-  return reorderQa(db, { organizationId, locationId }, updates)
-}
-
 export async function listLocationReviews(
   db: D1Database,
   organizationId: string,
@@ -191,7 +183,3 @@ export async function listLocationReviews(
   const { attachReviewMedia } = await import('~/server/utils/organization-reviews')
   return await attachReviewMedia(db, organizationId, rows)
 }
-export function buildTenantPageReplacementConfirmationToken(expectedUpdatedAt: string, removedBlockIds: readonly string[]) {
-  return `tenant-page-replacement:${expectedUpdatedAt}:${[...removedBlockIds].sort().join(',')}`
-}
-

@@ -10,7 +10,7 @@
 
     <template v-else-if="location">
       <!-- Sub-nav (Level 2) -->
-      <SayaSubNav
+      <TenantSubNav
         :location-slug="slug"
         active="overview"
       />
@@ -38,7 +38,7 @@
           class="absolute inset-0 flex items-center justify-center bg-[linear-gradient(135deg,var(--ui-primary)_0%,color-mix(in_srgb,var(--ui-primary)_60%,black)_100%)]"
           aria-hidden="true"
         >
-          <SayaIcon :name="locationHeroIcon" class="size-24 text-white/25" />
+          <TenantIcon :name="locationHeroIcon" class="size-24 text-white/25" />
         </div>
         <div class="absolute inset-0" style="background: linear-gradient(to top, rgba(0,0,0,0.72) 0%, rgba(0,0,0,0.2) 50%, rgba(0,0,0,0.3) 100%)" />
         <div class="relative flex min-h-160 items-end">
@@ -78,14 +78,14 @@
               <span v-else>{{ t('saya.location.contact_us_for_hours') }}</span>
             </div>
             <div class="mt-10 flex flex-wrap gap-3">
-              <SayaButton
+              <TenantButton
                 v-if="primaryCtaPath"
                 :to="localePath(primaryCtaPath)"
                 size="lg"
                 class="bg-white! text-black! hover:bg-zinc-100!"
               >
                 {{ primaryCtaLabel }}
-              </SayaButton>
+              </TenantButton>
               <NuxtLink
                 v-if="secondaryCtaPath"
                 :to="localePath(secondaryCtaPath)"
@@ -141,6 +141,8 @@
         </div>
       </section>
 
+      <TenantPageRenderer v-if="locationPageContent" :page="locationPageContent" />
+
       <!-- Parking & additional notes -->
       <section v-if="sanitizedParkingInfo || sanitizedExtraNotes" class="border-b border-default">
         <div class="mx-auto grid max-w-7xl gap-12 px-4 py-14 sm:px-6 lg:grid-cols-2 lg:px-8">
@@ -157,13 +159,14 @@
         </div>
       </section>
 
-      <LazySayaFeaturedContent
-        v-if="productPresentation && collectionProductItems.length"
+      <LazyTenantFeaturedContent
+        v-for="group in collectionProductGroups"
+        :key="group.surface"
         :data="{
-          items: collectionProductItems,
-          kicker: productPresentation.locationCollectionSegment === 'menu' ? t('saya.footer.menu') : productPresentation.collectionLabel,
-          heading: `${productPresentation.locationCollectionSegment === 'menu' ? t('saya.footer.menu') : productPresentation.collectionLabel} · ${location.title}`,
-          linkTarget: productCollectionPath ? localePath(productCollectionPath) : null
+          items: group.items,
+          kicker: group.label,
+          heading: `${group.label} · ${location.title}`,
+          linkTarget: group.path
         }"
       />
 
@@ -171,7 +174,7 @@
       <template v-if="locationPosts.length">
         <SocialPosts :posts="locationPosts" />
         <div class="pb-20 text-center">
-          <SayaButton :to="localePath(`/locations/${slug}/posts`)" variant="outline">{{ t('saya.posts.view_all') }}</SayaButton>
+          <TenantButton :to="localePath(`/locations/${slug}/posts`)" variant="outline">{{ t('saya.posts.view_all') }}</TenantButton>
         </div>
       </template>
 
@@ -181,13 +184,13 @@
           <div class="mb-16 max-w-2xl">
             <p class="saya-kicker mb-6">{{ t('saya.reviews.subtitle') }}</p>
             <h2 class="saya-display-md flex items-center gap-3 text-default">
-              <SayaIcon name="star" solid class="size-8 text-primary" aria-hidden="true" />
+              <TenantIcon name="star" solid class="size-8 text-primary" aria-hidden="true" />
               {{ location.rating ? Number(location.rating).toFixed(1) : '—' }}
               <span v-if="location.review_count" class="text-muted">· {{ t('saya.reviews_page.based_on', { count: location.review_count }) }}</span>
             </h2>
           </div>
           <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-            <SayaReviewCard
+            <TenantReviewCard
               v-for="review in reviewsPreview"
               :key="review.id"
              
@@ -216,7 +219,7 @@
             <NuxtLink
               v-for="loc in otherLocations"
               :key="loc.id"
-              :to="localePath(`/locations/${loc.slug}`)"
+              :to="localePath(publicLocationPath(loc))"
               class="block overflow-hidden border border-inverted/10 bg-inverted/5 no-underline transition hover:border-inverted/20"
             >
               <div class="aspect-video overflow-hidden bg-inverted/10">
@@ -248,9 +251,9 @@
         <div class="flex flex-wrap items-center justify-between gap-8">
           <h2 class="saya-display-md saya-italic text-default">{{ t('saya.location.see_you_soon') }}</h2>
           <div class="flex flex-wrap gap-3">
-            <SayaButton v-if="primaryCtaPath" :to="localePath(primaryCtaPath)" size="lg">
+            <TenantButton v-if="primaryCtaPath" :to="localePath(primaryCtaPath)" size="lg">
               {{ primaryCtaLabel }}
-            </SayaButton>
+            </TenantButton>
             <NuxtLink
               :to="localePath(`/locations/${slug}/contact`)"
               class="inline-flex items-center rounded-full border border-default px-6 py-2.5 text-xs font-medium uppercase tracking-widest text-default transition hover:bg-muted"
@@ -265,9 +268,9 @@
 
     <!-- Not found -->
     <div v-else class="mx-auto max-w-xl px-4 py-24 text-center">
-      <SayaIcon name="map-pin" class="mx-auto mb-4 size-12 text-muted" />
+      <TenantIcon name="map-pin" class="mx-auto mb-4 size-12 text-muted" />
       <h1 class="saya-display-sm text-default">{{ t('saya.location.not_found') }}</h1>
-      <SayaButton :to="localePath('/locations')" class="mt-8">{{ t('saya.location.view_all_locations') }}</SayaButton>
+      <TenantButton :to="localePath('/locations')" class="mt-8">{{ t('saya.location.view_all_locations') }}</TenantButton>
     </div>
   </div>
 </template>
@@ -277,24 +280,24 @@ import SocialPosts from '~/components/social/SocialPosts.vue'
 import { formatOpeningHours, getIsOpenNow, getActiveSpecialClosure, formatClosureMessage } from '~/utils/formatters'
 import { getTodayHoursLabel, schemaOpeningHours } from '~/shared/reservation-hours'
 import { formatProductMoney } from '~/utils/product-money'
-import { productLocationCollectionPath, resolveProductPresentation } from '~/utils/product-presentation'
+import { catalogSurfaces, countCatalog, locationSurfacePath, presentationForProduct, productCtaKey, productSurfaceOf, publicLocationPath } from '~/utils/product-presentation'
 import { selectPrice, type Price } from '~/shared/prices'
 import { isCurrencyCode } from '~/shared/currencies'
 import type { Product } from '~/server/types/products'
 import { resolveSocialImageUrl } from '~/utils/social-metadata'
 import { addressPlaceName, formatPostalAddress, schemaPostalAddress, type PostalAddress } from '~/utils/postal-address'
+import { loadDomPurify } from '~/utils/dom-purify-loader'
+import { sanitizeHtmlForSsr } from '~/utils/markdown'
 
-const DOMPurify = useHtmlSanitizer()
+const DOMPurify = import.meta.client ? await loadDomPurify() : { sanitize: sanitizeHtmlForSsr }
 
 const { resolveMedia } = useMedia()
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const route = useRoute()
-const { organizationId, organization } = useTenantOrganization()
+const { organization } = useTenantOrganization()
 const { locale, localePath, t } = useI18n()
 const locationIndexCopy = computed(() => getVerticalCopy((organization as ApiValue)?.vertical, locale.value))
-if (!organizationId) throw createError({ statusCode: 404 })
-
 const slug = computed(() => String(route.params.slug))
 const organizationName = computed(() => String((organization as ApiValue)?.name ?? '').trim())
 
@@ -306,6 +309,7 @@ const {
   products,
   collections,
   locationReviews,
+  tenantPage,
   pending,
   config: pageConfig,
 } = await usePublicPageData()
@@ -313,14 +317,16 @@ const {
 // around a null location answered 200 with an empty shell — a soft 404 a
 // crawler indexes. The sibling menu and product indexes already refuse it.
 if (!location.value) throw createError({ statusCode: 404, statusMessage: 'Location not found' })
+// A location that is one home is that home: its page is the listing.
+if (location.value.home_slug) await navigateTo(localePath(publicLocationPath(location.value)), { redirectCode: 301 })
 const { posts: locationPosts } = await useSocialPostFeed(() => ({ locationId: location.value!.id }), { limit: 3 })
 
-const productPresentation = computed(() => resolveProductPresentation((organization as ApiValue)?.vertical as string | null | undefined))
 const locationProducts = computed(() => products.value.filter(product =>
   product.locations.some(entry => entry.location_id === location.value?.id && entry.published && entry.active)))
+const productSurfaces = computed(() => catalogSurfaces((organization as ApiValue)?.vertical, countCatalog(locationProducts.value)))
 const productCollectionPath = computed(() => {
-  if (!productPresentation.value || !location.value) return null
-  return productLocationCollectionPath((organization as ApiValue)?.vertical as string, location.value.slug)
+  if (!location.value) return null
+  return locationSurfacePath(location.value.slug, productSurfaces.value[0]!)
 })
 const locationMedia = (location: ApiRecord) => Array.isArray(location.media)
   ? (location.media as ApiRecord[]).find(item => item.slot === 'hero') ?? null
@@ -330,7 +336,17 @@ const primaryCtaLabel = computed(() => locationIndexCopy.value.reserveCta)
 
 const secondaryCtaPath = computed(() => (locationProducts.value.length > 0 ? productCollectionPath.value : null))
 
-const secondaryCtaLabel = computed(() => (locationProducts.value.length > 0 ? locationIndexCopy.value.viewMenuCta : null))
+const secondaryCtaLabel = computed(() => locationProducts.value.length > 0
+  ? productSurfaces.value[0] === 'experiences' ? t('saya.menu_page.view_experiences')
+    : productSurfaces.value[0] === 'menu' ? t('saya.hero.view_menu') : t('saya.footer.products')
+  : null)
+
+const locationPageContent = computed(() => {
+  const page = tenantPage.value
+  if (!page) return null
+  const blocks = page.blocks.filter(block => block.type !== 'hero' && !['parking.info', 'extra.notes'].includes(String(block.data.field ?? '')))
+  return blocks.length ? { ...page, blocks } : null
+})
 
 
 // Contact details are location-owned; missing or placeholder values stay absent.
@@ -341,8 +357,7 @@ const displayPhone = computed(() => {
 const dialablePhone = computed(() => displayPhone.value?.replace(/[^\d+]/g, '') ?? '')
 const displayEmail = computed(() => {
   const e = location.value?.email
-  if (e && !e.includes('example.com') && !e.includes('krabiclaw.com')) return e
-  return null
+  return e || null
 })
 
 // Other locations for the "Sister rooms" rail
@@ -405,14 +420,10 @@ function offerFor(product: Product): Price | null {
  * The teaser strip: the top of what the merchant put in this location's
  * collections, in the order they put it.
  *
- * There is no `featured` flag and no separate featured ranking. Those were a
- * second ordering to keep in step with the real one, and they disagreed. The
- * merchant orders their collections and the products inside them; this shows
- * the front of that order.
+ * Each product kind keeps its own surface and uses the merchant's order.
  */
-const collectionProductItems = computed(() => {
-  const presentation = productPresentation.value
-  if (!presentation || !location.value) return []
+const collectionProductGroups = computed(() => {
+  if (!location.value) return []
   const here = new Set(locationProducts.value.map(product => product.id))
   const ordered = collections.value
     .filter(collection => collection.location_id === null || collection.location_id === location.value!.id)
@@ -428,12 +439,16 @@ const collectionProductItems = computed(() => {
         .map(id => ({ id, collectionName: collection.name }))
     })
   const seen = new Set<string>()
-  return ordered
+  const entries = ordered
     .filter(entry => here.has(entry.id) && !seen.has(entry.id) && seen.add(entry.id))
-    .slice(0, 4)
-    .flatMap((entry) => {
+  return productSurfaces.value.flatMap(surface => {
+    const items = entries.filter(entry => {
+      const product = locationProducts.value.find(row => row.id === entry.id)
+      return product && productSurfaceOf((organization as ApiValue)?.vertical, product) === surface
+    }).slice(0, 4).flatMap((entry) => {
       const product = locationProducts.value.find(row => row.id === entry.id)
       if (!product) return []
+      const presentation = presentationForProduct((organization as ApiValue)?.vertical, product)
       const offer = offerFor(product)
       return [{
         name: product.name,
@@ -447,9 +462,12 @@ const collectionProductItems = computed(() => {
         image: resolveSocialImageUrl(product.image),
         alt: product.image?.alt_text || product.name,
         href: localePath(presentation.productPath(slug.value, product.slug)),
+        ctaText: t(productCtaKey(product.kind)),
         unavailable: !product.active || offer === null,
       }]
     })
+    return items.length ? [{ surface, items, label: t(`saya.footer.${surface}`), path: locationSurfacePath(location.value!.slug, surface) }] : []
+  })
 })
 
 const contentHero = computed(() => getContentHero({ title: '', subtitle: '', image: '', video: '' }))
@@ -490,9 +508,6 @@ useSocialMetadata(() => ({
   title: location.value?.seo_title || location.value?.title || '',
   description: location.value?.seo_description || '',
   socialImage: locationSocialCard.value,
-  brand: {
-    organizationName: organizationName.value,
-  },
   breadcrumbs: [
     { name: t('saya.header.locations'), url: '/locations' },
     { name: location.value?.title ?? slug.value, url: `/locations/${slug.value}` },

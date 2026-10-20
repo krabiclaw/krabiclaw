@@ -9,9 +9,8 @@ const step = (id: string) => {
   return found
 }
 
-// The wizard's answers as a fresh flow holds them, with only the fields these
-// assertions read. The flow's own emptyState is not exported; what matters here
-// is that no step treats an unanswered country or currency as an answer.
+// The wizard's authored answers, with only the fields these assertions read.
+// An address may be partial; the currency still needs an explicit answer.
 const answers = (over: Partial<OnboardingFlowState['details']> = {}) => ({
   details: {
     name: 'Cozy Cafe', city: 'Krabi', streetAddress: '123 Main Street', addressLine2: '',
@@ -50,16 +49,14 @@ test('every proposed currency is one the platform supports', () => {
   }
 })
 
-// The reported bug: a Krabi restaurant reached the end of onboarding priced in
-// USD. The country field was never touched, so the flow's own default stood in
-// for an answer and the currency followed it.
-test('the location step is not complete until the country is answered', () => {
+test('the optional location step accepts authored partial addresses', () => {
   const location = step('location')
-  assert.equal(location.complete(answers({ country: '' })), false)
-  assert.equal(location.complete(answers({ country: 'TH' })), true)
-  // Street and city still matter; country is an addition, not a replacement.
-  assert.equal(location.complete(answers({ country: 'TH', city: '' })), false)
-  assert.equal(location.complete(answers({ country: 'TH', streetAddress: '' })), false)
+  assert.equal(location.optional, true)
+  const noAddress = { country: '', city: '', streetAddress: '' }
+  assert.equal(location.complete(answers(noAddress)), false)
+  for (const authored of [{ country: 'TH' }, { city: 'Krabi' }, { streetAddress: '123 Main Street' }]) {
+    assert.equal(location.complete(answers({ ...noAddress, ...authored })), true)
+  }
 })
 
 test('the currency step is not complete until the currency is answered', () => {
@@ -78,7 +75,3 @@ test('the currency step is asked before anything is priced', () => {
   assert.ok(order.indexOf('currency') < order.indexOf('review'))
 })
 
-test('adding a location to an existing site does not ask for a currency', () => {
-  // That site already has one, and a location does not carry its own.
-  assert.equal(step('currency').flows.includes('add-location'), false)
-})

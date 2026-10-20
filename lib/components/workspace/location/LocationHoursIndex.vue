@@ -33,10 +33,10 @@ const to = (segment: string) => router.resolve({ path: `${level.path.value}/${se
 const groups = computed<EditorNavigationGroup[]>(() => {
   const form = props.editor.hoursForm.value
   return [
-    { id: 'timezone', items: [{ id: 'timezone', label: 'Timezone', summary: form.timezone ? timezoneLabel(form.timezone) : undefined, to: to('timezone') }] },
+    { id: 'timezone', items: [{ id: 'timezone', icon: 'i-lucide-globe-2', label: 'Timezone', summary: form.timezone ? timezoneLabel(form.timezone) : undefined, to: to('timezone') }] },
     { id: 'week', label: 'Regular opening hours', items: WEEK_ROWS.map(day => ({ id: day.slug, label: day.label, summary: dayHoursSummary(form.hours, day.value), to: to(day.slug) })) },
     ...(props.exceptions
-      ? [{ id: 'exceptions', items: [{ id: 'exceptions', label: 'Closures and date exceptions', to: to('exceptions') }] }]
+      ? [{ id: 'exceptions', items: [{ id: 'exceptions', icon: 'i-lucide-calendar-off', label: 'Closures and date exceptions', to: to('exceptions') }] }]
       : []),
   ]
 })

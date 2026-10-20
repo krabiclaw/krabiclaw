@@ -47,6 +47,7 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
     toolName: 'create_product',
     args: { kind: 'dish',
       organization_id: organizationId,
+      idempotency_key: `pricing-salmon-${runId}`,
       name: `MCP Pricing Salmon Roll ${runId}`,
       description: 'Fresh salmon with rice', unit_label: 'portion', metadata: { kitchen: 'sushi' },
       options: [{ name: 'Portion', values: [{ value: 'Six pieces' }, { value: 'Twelve pieces' }] }],
@@ -62,10 +63,17 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
   expect(created.variants.map(variant => variant.sku).sort()).toEqual([smallSku, largeSku].sort())
   expect(created.variants.flatMap(variant => variant.prices).map(price => price.unit_amount).sort()).toEqual([400, 500, 900])
 
+  const beforeResponse = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${created.id}`)
+  expect(beforeResponse.status()).toBe(200)
+  const before = (await beforeResponse.json() as { product: Product }).product
+  expect(before.id).toBe(created.id)
+
   // The ChatGPT-style price edit names only the variant, price and new amount.
   // Read the persisted outcome through the dashboard API, which does not use
   // the MCP result that performed the write.
-  const small = created.variants.find(variant => variant.name === 'Six pieces')!
+  // Compare the same independent projection before and after; dashboard prices
+  // include audit fields the public MCP result intentionally does not expose.
+  const small = before.variants.find(variant => variant.name === 'Six pieces')!
   const smallPrice = small.prices.find(price => price.currency === 'USD')!
   const edit = await mcpRequest(request, baseURL!, {
     method: 'tools/call', toolName: 'update_product',
@@ -77,9 +85,9 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
   expect(readback.status()).toBe(200)
   const edited = (await readback.json() as { product: Product }).product
   expect(edited.variants).toHaveLength(2)
-  expect(edited.options).toEqual(created.options)
-  expect([edited.description, edited.unit_label, edited.metadata]).toEqual([created.description, created.unit_label, created.metadata])
-  expect(edited.variants.find(variant => variant.name === 'Twelve pieces')).toEqual(created.variants.find(variant => variant.name === 'Twelve pieces'))
+  expect(edited.options).toEqual(before.options)
+  expect([edited.description, edited.unit_label, edited.metadata]).toEqual([before.description, before.unit_label, before.metadata])
+  expect(edited.variants.find(variant => variant.name === 'Twelve pieces')).toEqual(before.variants.find(variant => variant.name === 'Twelve pieces'))
   const editedSmall = edited.variants.find(variant => variant.id === small.id)!
   expect({ ...editedSmall, prices: small.prices }).toEqual(small)
   expect(editedSmall.prices.find(price => price.currency === 'GBP')).toEqual(small.prices.find(price => price.currency === 'GBP'))
@@ -102,7 +110,7 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
   const unpriced = await mcpRequest(request, baseURL!, {
     method: 'tools/call',
     toolName: 'create_product',
-    args: { kind: 'dish', organization_id: organizationId, name: `MCP Pricing Chef's Choice ${runId}`, variants: [{ name: 'Standard' }] },
+    args: { kind: 'dish', organization_id: organizationId, idempotency_key: `pricing-unpriced-${runId}`, name: `MCP Pricing Chef's Choice ${runId}`, variants: [{ name: 'Standard' }] },
   })
   expect(unpriced.status()).toBe(200)
   const unpricedProduct = mcpData<{ product: Product }>(await unpriced.json()).product
@@ -116,6 +124,7 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
     toolName: 'create_product',
     args: { kind: 'dish',
       organization_id: organizationId,
+      idempotency_key: `pricing-ambiguous-${runId}`,
       name: `MCP Pricing Ambiguous Roll ${runId}`,
       variants: [{ name: 'Standard', prices: [
         { unit_amount: 500, currency: 'USD' },
@@ -137,6 +146,7 @@ test('deployed MCP transport prices variants, and refuses to invent a missing am
   const invalidDetailsBody = await invalidDetails.json() as { result?: { isError?: boolean; content?: Array<{ text?: string }> } }
   expect(invalidDetailsBody.result?.isError, JSON.stringify(invalidDetailsBody)).toBe(true)
   expect(invalidDetailsBody.result?.content?.map(part => part.text).join(' ')).toMatch(/care_instructions.*dish/)
-  const unchanged = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_product', args: { organization_id: organizationId, product_id: created.id } })
-  expect(mcpData<{ product: { details: object } }>(await unchanged.json()).product.details).toEqual({})
+  const unchanged = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${created.id}`)
+  expect(unchanged.status()).toBe(200)
+  expect((await unchanged.json() as { product: Product }).product.details).toEqual(edited.details)
 })

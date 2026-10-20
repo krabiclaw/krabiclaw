@@ -11,7 +11,7 @@ import { organizationPublicUrl } from '~/server/utils/domains'
 /**
  * What the Search Console leaf shows: the property chosen, the Better Auth
  * account it was connected through, the properties an account already owns,
- * and this site's own public URL — the one Krabiclaw can verify
+ * and this site's own public URL — the one KrabiClaw can verify
  * automatically, which is offered even when the account does not own it yet.
  *
  * Which account is the caller's to say (`account_id`); without one, the
@@ -23,7 +23,7 @@ export default defineHandler(async (event) => {
 
   const { env, db, session, organization } = await requireOrganizationAccess(event, organizationId)
   const searchConsole = integrationSummary(await readIntegration(env.DB, organization.id, 'google_search_console'))
-  const siteUrl = await organizationPublicUrl(db, organization.id)
+  const siteUrl = await organizationPublicUrl(env, db, organization.id)
   const accountId = event.url.searchParams.get('account_id') || searchConsole?.account_id || null
   if (!accountId) {
     return jsonResponse({ success: true, account_id: null, searchConsole, siteUrl, properties: [], error: null })

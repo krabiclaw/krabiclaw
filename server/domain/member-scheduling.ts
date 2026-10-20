@@ -5,6 +5,7 @@ import { linkedAccountAccessToken, requireIntegrationAccount, type CloudflareEnv
 import { addLocalDays, localDateAt, localDateTimeToInstant, isValidTimezone, isValidInstant } from '~/utils/timezone'
 import { BUSY_FRESHNESS_MS, MEMBER_BUSY_SCOPES, type WorkingHours, type SchedulingInterval } from '~/shared/member-scheduling'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
+import { getOrganizationTeamsData } from '~/server/utils/dashboard-members'
 
 export interface SchedulingActor { env: CloudflareEnv; userId: string; organizationId: string }
 export interface MemberScheduling {
@@ -82,7 +83,7 @@ export async function readMemberScheduling(db: DbClient, organizationId: string,
 export async function writeMemberScheduling(actor: SchedulingActor, memberId: string, input: {timezone: string; weekly: WorkingHours[]; time_off: SchedulingInterval[]; expected_updated_at: string | null; public_name?: string | null; public_photo_url?: string | null; public_bio?: string | null; public_approved?: boolean}) {
  if(!input || typeof input!=='object' || typeof input.timezone!=='string' || (input.expected_updated_at!==null && typeof input.expected_updated_at!=='string'))throw new HTTPError({statusCode:400,message:'Complete schedule and current revision required'})
  if(input.public_approved!==undefined && typeof input.public_approved!=='boolean')throw new HTTPError({statusCode:400,message:'Approval must be boolean'})
- await requireSchedulingAccess(actor,memberId)
+ const member = await requireSchedulingAccess(actor,memberId)
  const db=actor.env.DB
  const current=await readMemberScheduling(db,actor.organizationId,memberId)
  if ((current?.updated_at??null)!==input.expected_updated_at) throw new HTTPError({statusCode:409,message:'Member settings changed; reload before saving'})
@@ -99,6 +100,8 @@ export async function writeMemberScheduling(actor: SchedulingActor, memberId: st
  ON CONFLICT(member_id) DO UPDATE SET timezone=excluded.timezone,weekly_json=excluded.weekly_json,time_off_json=excluded.time_off_json,windows_json=excluded.windows_json,windows_until=excluded.windows_until,public_name=excluded.public_name,public_photo_url=excluded.public_photo_url,public_bio=excluded.public_bio,public_approved=excluded.public_approved,updated_at=excluded.updated_at,updated_by=excluded.updated_by
  WHERE member_scheduling.organization_id=excluded.organization_id AND member_scheduling.updated_at IS ?`,params:[memberId,actor.organizationId,input.timezone,JSON.stringify(input.weekly),JSON.stringify(timeOff),JSON.stringify(windows.intervals),windows.until,input.public_name===undefined?current?.public_name??null:input.public_name,input.public_photo_url===undefined?current?.public_photo_url??null:input.public_photo_url,input.public_bio===undefined?current?.public_bio??null:input.public_bio,Number(approved),crypto.randomUUID(),now,actor.userId,memberId,actor.organizationId,input.expected_updated_at]}, publicResourceCacheInvalidationQuery(actor.organizationId,'member-profile')],{operation:'Save member schedule'})
  if(!result[0]?.meta.changes) throw new HTTPError({statusCode:409,message:'Member settings changed; reload before saving'})
+ const { materializeMemberSessions } = await import('~/server/utils/availability')
+ await materializeMemberSessions(db, { organizationId: actor.organizationId, userId: member.userId, actorId: actor.userId })
  return readMemberScheduling(db,actor.organizationId,memberId)
 }
 export async function refreshWorkingWindows(db: DbClient) {
@@ -120,7 +123,7 @@ export async function refreshMemberBusy(db: DbClient, env: CloudflareEnv, member
  const row=await queryFirst<MemberScheduling>(db,'SELECT * FROM member_scheduling WHERE member_id=?',[memberId])
  if(!row?.calendar_account_id || !JSON.parse(row.calendar_ids_json).length)return
  if(!force && row.busy_checked_at && Date.now()-Date.parse(row.busy_checked_at)<BUSY_FRESHNESS_MS/2)return row.busy_error?{error:row.busy_error}:undefined
- const now=new Date().toISOString(), until=new Date(Date.now()+94*86400000).toISOString()
+ const now=new Date().toISOString(), until=new Date(Date.parse(now)+94*86400000).toISOString()
  try {
   const member=await queryFirst<{userId:string}>(db,'SELECT userId FROM member WHERE id=? AND organizationId=?',[memberId,row.organization_id])
   if(!member) throw new Error('Member is no longer connected')
@@ -134,7 +137,7 @@ export async function refreshMemberBusy(db: DbClient, env: CloudflareEnv, member
   // Commit coverage only after every contiguous window succeeds.
   for(let from=Date.parse(now);from<Date.parse(until);from+=30*86400000) {
    const timeMax=new Date(Math.min(from+30*86400000,Date.parse(until))).toISOString()
-   const response=await fetch('https://www.googleapis.com/calendar/v3/freeBusy',{method:'POST',headers:{Authorization:`Bearer ${token.accessToken}`,'content-type':'application/json'},signal:AbortSignal.timeout(10000),body:JSON.stringify({timeMin:new Date(from).toISOString(),timeMax,items:ids.map(id=>({id}))})})
+   const response=await fetch('https://www.googleapis.com/calendar/v3/freeBusy',{method:'POST',headers:{Authorization:`Bearer ${token.accessToken}`,'content-type':'application/json'},body:JSON.stringify({timeMin:new Date(from).toISOString(),timeMax,items:ids.map(id=>({id}))})})
    if(!response.ok) {
     const failure=await response.json().catch((cause:unknown)=>{
      throw new Error(`Google busy-calendar check failed (${response.status}): Invalid error response${cause instanceof Error?` (${cause.message})`:''}`)
@@ -153,8 +156,11 @@ export async function refreshMemberBusy(db: DbClient, env: CloudflareEnv, member
  }
 }
 export async function refreshProductBusy(db: DbClient,env:CloudflareEnv,organizationId:string,productId:string) {
- const members=await queryAll<{id:string}>(db,`SELECT assigned_member_id id FROM product_booking_configs WHERE organization_id=? AND product_id=? AND scheduling_mode='provider' AND assigned_member_id IS NOT NULL UNION SELECT assigned_member_id FROM product_sessions WHERE organization_id=? AND product_id=? AND assigned_member_id IS NOT NULL AND ends_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')`,[organizationId,productId,organizationId,productId])
- for(const member of members) await refreshMemberBusy(db,env,member.id)
+ const members=await queryAll<{id:string}>(db,`SELECT assigned_member_id id FROM product_booking_configs WHERE organization_id=? AND product_id=? AND scheduling_mode='provider' AND assigned_member_id IS NOT NULL UNION SELECT m.id FROM product_booking_configs c JOIN team t ON t.id=c.assigned_team_id AND t.organizationId=c.organization_id JOIN teamMember tm ON tm.teamId=t.id JOIN member m ON m.userId=tm.userId AND m.organizationId=t.organizationId WHERE c.organization_id=? AND c.product_id=? AND c.scheduling_mode='provider' UNION SELECT assigned_member_id FROM product_sessions WHERE organization_id=? AND product_id=? AND assigned_member_id IS NOT NULL AND ends_at>strftime('%Y-%m-%dT%H:%M:%fZ','now')`,[organizationId,productId,organizationId,productId,organizationId,productId])
+ for(const member of members) {
+  const refreshed=await refreshMemberBusy(db,env,member.id)
+  if(refreshed?.error)throw new HTTPError({statusCode:502,message:refreshed.error,data:{code:'MEMBER_CALENDAR_REFRESH_FAILED'}})
+ }
 }
 export async function memberSchedulingList(actor: SchedulingActor) {
  const membership=await resolveOrganizationMembership(actor.env,{organizationId:actor.organizationId,userId:actor.userId})
@@ -162,7 +168,7 @@ export async function memberSchedulingList(actor: SchedulingActor) {
  const {roleAllows}=await import('~/server/utils/member-access')
  const admin=await roleAllows({...membership,permissions:{members:['read']}})
  const members=await queryAll<{id:string;name:string;image:string|null;is_self:number}>(actor.env.DB,`SELECT m.id,u.name,u.image,m.userId=? AS is_self FROM member m JOIN user u ON u.id=m.userId WHERE m.organizationId=? AND (?=1 OR m.userId=?)`,[actor.userId,actor.organizationId,Number(admin),actor.userId])
- return Promise.all(members.map(async ({is_self,...member})=>({...member,self:Boolean(is_self),scheduling:await readMemberScheduling(actor.env.DB,actor.organizationId,member.id)})))
+ return { members: await Promise.all(members.map(async ({is_self,...member})=>({...member,self:Boolean(is_self),scheduling:await readMemberScheduling(actor.env.DB,actor.organizationId,member.id)}))), teams: admin ? await getOrganizationTeamsData(actor.env, actor.organizationId) : [] }
 }
 export async function connectPersonalCalendar(actor:SchedulingActor, memberId:string, accountId:string) {
  const member=await requireSchedulingAccess(actor,memberId)
@@ -171,7 +177,7 @@ export async function connectPersonalCalendar(actor:SchedulingActor, memberId:st
  const token=await linkedAccountAccessToken(actor.env,accountId)
  let next:string|undefined
  for(let page=0;page<4;page++) {
-  const response=await fetch(`https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250&fields=items(id,primary),nextPageToken${next?`&pageToken=${encodeURIComponent(next)}`:''}`,{headers:{Authorization:`Bearer ${token.accessToken}`},signal:AbortSignal.timeout(10000)})
+  const response=await fetch(`https://www.googleapis.com/calendar/v3/users/me/calendarList?maxResults=250&fields=items(id,primary),nextPageToken${next?`&pageToken=${encodeURIComponent(next)}`:''}`,{headers:{Authorization:`Bearer ${token.accessToken}`}})
   if(!response.ok)throw new HTTPError({statusCode:502,message:'Your personal calendar could not be connected. Try again.'})
   const data=await response.json() as {items?:{id:string;primary?:boolean}[];nextPageToken?:string}
   const primary=data.items?.find(calendar=>calendar.primary)

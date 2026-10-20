@@ -10,17 +10,28 @@
        auto-fill, not auto-fit: auto-fit collapses the tracks it has no items
        for, so an organization with one site rendered that site across the whole
        row instead of in a card the size of every other card. -->
-  <div class="grid grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-6">
+  <div
+    class="grid"
+    :class="rowsOnMobile ? 'grid-cols-1 lg:grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] lg:gap-6' : 'grid-cols-[repeat(auto-fill,minmax(min(100%,18rem),1fr))] gap-6'"
+  >
     <!-- The status pill and the overflow menu are siblings of the link, not
          children of it: a menu trigger nested inside an anchor navigates on
          click instead of opening, so the tile would swallow its own action. -->
-    <div v-for="item in items" :key="item.id" class="relative min-w-0">
+    <div
+      v-for="item in items"
+      :key="item.id"
+      class="relative min-w-0"
+      :class="rowsOnMobile ? 'border-b border-default last:border-b-0 lg:border-b-0' : undefined"
+    >
       <NuxtLink
         :to="item.to"
         :aria-label="item.label"
+        :aria-current="item.id === activeItem ? 'page' : undefined"
+        :data-testid="`selector-item-${item.id}`"
         class="group block min-w-0"
+        :class="item.id === activeItem ? 'bg-elevated shadow-[inset_3px_0_0_var(--ui-primary)]' : undefined"
       >
-        <div>
+        <div :class="rowsOnMobile ? ['flex items-center gap-3 py-5 lg:block lg:p-0', item.actions?.length ? 'pr-16' : 'pr-6'] : undefined">
           <!--
             A photograph fills the tile and is cropped to it. A logo is centred at
             its own size instead, because cropping a mark is how a wordmark loses
@@ -28,7 +39,10 @@
           -->
           <div
             v-if="item.imageUrl"
-            class="aspect-[20/19] w-full overflow-hidden rounded-2xl bg-elevated shadow-sm transition duration-300 group-hover:-translate-y-0.5 group-hover:shadow-lg"
+            class="overflow-hidden bg-elevated transition duration-300"
+            :class="rowsOnMobile ? 'size-15 shrink-0 rounded-xl lg:aspect-[20/19] lg:h-auto lg:w-full lg:rounded-2xl lg:shadow-sm lg:group-hover:-translate-y-0.5 lg:group-hover:shadow-lg' : 'aspect-[20/19] w-full rounded-2xl shadow-sm group-hover:-translate-y-0.5 group-hover:shadow-lg'"
+            :data-testid="`selector-image-${item.id}`"
+            :data-selector-image="item.id"
           >
             <img
               :src="item.imageUrl"
@@ -45,24 +59,38 @@
                social card versus a photo the tenant uploads. -->
           <div
             v-else
-            class="flex aspect-[20/19] w-full flex-col items-center justify-center gap-1 rounded-2xl bg-elevated px-4 text-center shadow-sm"
+            class="flex flex-col items-center justify-center gap-1 bg-elevated text-center"
+            :class="rowsOnMobile ? ['size-15 shrink-0 overflow-hidden rounded-xl px-1 lg:aspect-[20/19] lg:h-auto lg:w-full lg:rounded-2xl lg:px-4 lg:shadow-sm', item.fallbackIcon ? '' : 'border border-dashed border-default lg:border-0'] : 'aspect-[20/19] w-full rounded-2xl px-4 shadow-sm'"
             data-testid="selector-missing-social-image"
+            :data-selector-image="item.id"
           >
-            <UIcon name="i-lucide-image-off" class="size-6 text-error" />
-            <p class="text-sm font-medium text-highlighted">{{ missingImageLabel }} for {{ item.label }}</p>
-            <p class="text-xs text-muted">{{ missingImageHint }}</p>
+            <UIcon
+              :name="item.fallbackIcon ?? 'i-lucide-image-off'"
+              :class="[rowsOnMobile ? 'size-4 lg:size-6' : 'size-6', item.fallbackIcon || rowsOnMobile ? 'text-muted' : 'text-error']"
+            />
+            <p v-if="!item.fallbackIcon" :class="rowsOnMobile ? 'text-xs text-muted lg:text-sm lg:font-medium lg:text-highlighted' : 'text-sm font-medium text-highlighted'">
+              {{ item.missingImageLabel ?? missingImageLabel }}<span :class="rowsOnMobile ? 'hidden lg:inline' : undefined"> for {{ item.label }}</span>
+            </p>
+            <p v-if="!item.fallbackIcon" class="text-xs text-muted" :class="rowsOnMobile ? 'hidden lg:block' : undefined">{{ missingImageHint }}</p>
           </div>
-          <div class="px-1 pt-4">
-            <h2 class="text-base font-semibold text-highlighted">{{ item.label }}</h2>
+          <div :class="rowsOnMobile ? 'min-w-0 flex-1 lg:px-1 lg:pt-4' : 'px-1 pt-4'">
+            <component :is="`h${labelHeadingLevel}`" class="text-base font-semibold text-highlighted" :class="rowsOnMobile ? 'break-words' : undefined">{{ item.label }}</component>
             <!-- Sites are identified by vertical and domain, locations by address
                  alone. The separator belongs to the eyebrow rather than sitting
                  between the two unconditionally, so a card with one line does not
                  render a leading dot. -->
-            <p class="mt-1 text-sm text-muted">
+            <template v-if="rowsOnMobile">
+              <p v-if="item.parentOrganizationName || item.eyebrow" class="mt-1 break-words text-sm text-muted">
+                <template v-if="item.parentOrganizationName">{{ item.parentOrganizationName }}<span v-if="item.eyebrow" aria-hidden="true"> · </span></template>{{ item.eyebrow }}
+              </p>
+              <p v-if="item.summary" class="mt-1 break-words text-sm text-muted">{{ item.summary }}</p>
+            </template>
+            <p v-else class="mt-1 text-sm text-muted">
               <template v-if="item.parentOrganizationName">{{ item.parentOrganizationName }}<span aria-hidden="true"> · </span></template>
               <template v-if="item.eyebrow">{{ item.eyebrow }}<span aria-hidden="true"> · </span></template>{{ item.summary }}
             </p>
           </div>
+          <UIcon v-if="rowsOnMobile" name="i-lucide-chevron-right" class="absolute right-0 top-1/2 size-4 -translate-y-1/2 text-muted lg:hidden" />
         </div>
       </NuxtLink>
 
@@ -74,7 +102,8 @@
         :label="item.status.label"
         :color="item.status.color"
         variant="solid"
-        class="pointer-events-none absolute left-3 top-3"
+        class="pointer-events-none absolute"
+        :class="rowsOnMobile ? 'left-0 top-4 max-w-15 text-xs lg:left-3 lg:top-3 lg:max-w-none lg:text-xs' : 'left-3 top-3'"
         data-testid="selector-status-badge"
       />
 
@@ -89,7 +118,8 @@
           variant="subtle"
           size="sm"
           square
-          class="absolute right-3 top-3"
+          class="absolute"
+          :class="rowsOnMobile ? 'right-7 top-1/2 -translate-y-1/2 lg:right-3 lg:top-3 lg:translate-y-0' : 'right-3 top-3'"
           :aria-label="`${item.label} actions`"
           :data-testid="`selector-actions-${item.id}`"
         />
@@ -107,6 +137,10 @@ export interface OrganizationLocationSelectorItem {
   imageUrl: string | null
   /** 'contain' centres a logo at its own size; the default crops a photograph. */
   imageFit?: 'cover' | 'contain'
+  /** A section's own icon when it has no authored image. Products leave this unset. */
+  fallbackIcon?: string
+  /** Overrides the shared missing-image label for this record. */
+  missingImageLabel?: string
   eyebrow: string
   summary: string
   to: string
@@ -120,11 +154,20 @@ export interface OrganizationLocationSelectorItem {
 
 withDefaults(defineProps<{
   items: OrganizationLocationSelectorItem[]
+  /** Catalog uses horizontal thumbnail rows below the desktop breakpoint. */
+  rowsOnMobile?: boolean
+  /** Keeps the record heading beneath the caller's section heading. */
+  labelHeadingLevel?: 2 | 3
+  /** The record already open in the adjacent editor pane. */
+  activeItem?: string | null
   /** Names what is missing, e.g. "No social image" or "No photo". */
   missingImageLabel?: string
   /** Says why it is missing and what fixes it. */
   missingImageHint?: string
 }>(), {
+  rowsOnMobile: false,
+  labelHeadingLevel: 2,
+  activeItem: null,
   missingImageLabel: 'No social image',
   missingImageHint: 'Its social card has not been generated.',
 })

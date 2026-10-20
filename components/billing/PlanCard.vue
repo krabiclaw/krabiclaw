@@ -30,21 +30,21 @@
     </div>
 
     <!-- Header -->
-    <div class="kc-plan-header mb-6 flex items-start justify-between gap-3 relative z-10">
-      <div>
+    <div class="kc-plan-header mb-6 relative z-10">
+      <div class="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
         <h3 class="text-2xl font-black tracking-tight mb-1.5" :class="isHighlighted ? 'text-white' : 'text-default'">
           {{ plan.name }}
         </h3>
-        <p class="text-xs leading-relaxed" :class="isHighlighted ? 'text-white/60' : 'text-muted'">
-          {{ plan.tagline }}
-        </p>
+        <span
+          v-if="plan.badge"
+          class="shrink-0 px-3.5 py-1 text-[11px] font-black tracking-widest uppercase rounded-full text-white bg-gradient-to-r from-primary to-(--kc-coral) shadow-md"
+        >
+          {{ plan.badge }}
+        </span>
       </div>
-      <span
-        v-if="plan.badge"
-        class="shrink-0 px-3.5 py-1 text-[11px] font-black tracking-widest uppercase rounded-full text-white bg-gradient-to-r from-primary to-(--kc-coral) shadow-md"
-      >
-        {{ plan.badge }}
-      </span>
+      <p class="text-xs leading-relaxed" :class="isHighlighted ? 'text-white/60' : 'text-muted'">
+        {{ plan.tagline }}
+      </p>
     </div>
 
     <!-- Price -->
@@ -63,6 +63,9 @@
             {{ billingPeriodLabel }}
           </span>
         </div>
+        <p data-plan-locations class="text-xs font-semibold mt-2" :class="isHighlighted ? 'text-white/70' : 'text-muted'">
+          {{ locationsNote }}
+        </p>
         <p v-if="annual && savingsNote" class="text-xs font-semibold mt-2.5 flex items-center gap-1.5" :class="isHighlighted ? 'text-emerald-400' : 'text-emerald-600'">
           <PlatformIcon name="sparkles" class="size-3.5 shrink-0" />
           {{ savingsNote }}
@@ -115,6 +118,7 @@
 <script setup lang="ts">
 import { useEventListener } from '@vueuse/core'
 import type { Plan } from '~/composables/usePlans'
+import { additionalLocationPrice, INCLUDED_LOCATIONS } from '~/shared/billing-model'
 
 const props = defineProps<{
   plan: Plan
@@ -156,6 +160,13 @@ const currentPrice = computed(() => displayPrice(props.plan, props.annual ?? fal
 
 const billingPeriodLabel = computed(() => props.photo && props.plan.id === 'free' ? 'No subscription' : (props.annual ?? false) ? '/year' : '/mo')
 
+// Stripe's own phrasing: the included allowance, then the charge per additional unit.
+const locationsNote = computed(() => {
+  const price = props.plan.prices.find(p => p.interval === ((props.annual ?? false) ? 'year' : 'month'))
+  if (!price) return `${INCLUDED_LOCATIONS} locations included`
+  return `${INCLUDED_LOCATIONS} locations included, then ${additionalLocationPrice()}`
+})
+
 const savingsNote = computed(() => {
   if (!props.annual) return null
   const monthly = monthlyPrice(props.plan)
@@ -170,15 +181,14 @@ const savingsNote = computed(() => {
 </script>
 
 <style scoped>
-.kc-photo-plan { border-radius: 14px; padding: clamp(1.5rem, 3vw, 2.5rem); transform: none; background: #fff; color: #222840; box-shadow: none; border: 0; perspective: 1600px; transform-style: preserve-3d; overflow: visible; backdrop-filter: none; }
+.kc-photo-plan { min-width: 0; border-radius: 14px; padding: clamp(1.5rem, 3vw, 2.5rem); transform: none; scale: 1; background: #fff; color: #222840; box-shadow: none; border: 0; perspective: 1600px; transform-style: preserve-3d; overflow: visible; backdrop-filter: none; }
 .kc-photo-plan :deep(h3), .kc-photo-plan :deep(.text-default), .kc-photo-plan :deep(.text-white) { color: #222840; }
 .kc-photo-plan :deep(.text-white\/60), .kc-photo-plan :deep(.text-white\/50), .kc-photo-plan :deep(.text-white\/80), .kc-photo-plan :deep(.text-muted) { color: #5a6072; }
 .kc-photo-plan__front { display: none; position: absolute; inset: 0; z-index: 20; border-radius: inherit; overflow: hidden; pointer-events: none; backface-visibility: hidden; }
 .kc-photo-plan__front img { width: 100%; height: 100%; object-fit: cover; }
 .kc-photo-plan .kc-plan-details { min-height: 0; }
 .kc-photo-plan .kc-plan-header { display: block; margin-bottom: 1.25rem; }
-.kc-photo-plan .kc-plan-header > span { position: absolute; top: 0; right: 0; }
-.kc-photo-plan h3 { font-size: 1.9rem; padding-right: 6rem; }
+.kc-photo-plan h3 { font-size: 1.9rem; }
 .kc-photo-plan .kc-plan-price { font-size: 3rem; line-height: 1.1; font-weight: 600; }
 .kc-photo-plan ul { margin: 1rem 0; }
 .kc-photo-plan ul > li + li { margin-top: .7rem; }

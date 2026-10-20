@@ -1,7 +1,7 @@
 <template>
   <div class="rounded-xl overflow-hidden" data-media-gallery>
     <div v-if="items.length === 0" class="flex aspect-4/3 items-center justify-center bg-muted">
-      <SayaIcon :name="emptyIcon" class="size-16 text-dimmed" />
+      <TenantIcon :name="emptyIcon" class="size-16 text-dimmed" />
     </div>
 
     <button
@@ -43,22 +43,100 @@
         aria-hidden="true"
       >
         <span class="flex size-14 items-center justify-center rounded-full bg-black/45 backdrop-blur-sm">
-          <SayaIcon name="play" class="ml-0.5 size-6" />
+          <TenantIcon name="play" class="ml-0.5 size-6" />
         </span>
       </span>
     </button>
 
-    <div v-else>
+    <div v-else class="relative">
+      <!-- 5+ items: Airbnb 5-photo mosaic on md+, hero image on mobile -->
+      <div v-if="items.length >= 5" class="relative">
+        <!-- Mobile view (< md): single hero photo -->
+        <button
+          type="button"
+          class="relative block aspect-4/3 w-full overflow-hidden border-0 bg-transparent p-0 text-left md:hidden"
+          :aria-label="items[0]?.kind === 'video' ? `Play video, ${title}` : `Open media, ${title}`"
+          @click="openLightbox(0)"
+        >
+          <img
+            :src="items[0]?.url"
+            :alt="items[0]?.alt ?? ''"
+            class="h-full w-full object-cover"
+          />
+        </button>
+
+        <!-- Desktop view (md+): 5-photo mosaic -->
+        <div class="hidden md:grid md:grid-cols-4 md:grid-rows-2 gap-2 h-[420px] lg:h-[480px]">
+          <button
+            v-for="(item, index) in visibleItems"
+            :key="`${item.url}-${index}`"
+            type="button"
+            class="group relative h-full w-full overflow-hidden border-0 bg-transparent p-0 text-left focus:outline-none"
+            :class="index === 0 ? 'col-span-2 row-span-2' : 'col-span-1 row-span-1'"
+            :aria-label="item.kind === 'video' ? `Play video, ${title}` : `Open media, ${title}`"
+            @click="openLightbox(index)"
+          >
+            <video
+              v-if="item.kind === 'video' && item.url"
+              :ref="el => setVideoRef(el, index)"
+              :src="item.url"
+              :poster="item.poster || undefined"
+              preload="metadata"
+              muted
+              loop
+              playsinline
+              class="h-full w-full object-cover"
+              @loadeddata="handleVideoLoaded(index)"
+              @playing="markVideoPlaying(index)"
+              @pause="markVideoPaused(index)"
+              @waiting="markVideoWaiting(index)"
+            />
+            <img
+              v-else
+              :src="item.url"
+              :alt="item.alt ?? ''"
+              class="h-full w-full object-cover transition duration-300 group-hover:brightness-95 group-hover:scale-[1.02]"
+            />
+            <span
+              v-if="item.kind === 'video' && !isVideoReady(index)"
+              class="pointer-events-none absolute inset-0 animate-pulse bg-muted"
+              aria-hidden="true"
+            />
+            <span
+              v-if="item.kind === 'video' && !isVideoPlaying(index)"
+              class="pointer-events-none absolute inset-0 flex items-center justify-center bg-black/10 text-white"
+              aria-hidden="true"
+            >
+              <span class="flex size-12 items-center justify-center rounded-full bg-black/45 backdrop-blur-sm">
+                <TenantIcon name="play" class="ml-0.5 size-5" />
+              </span>
+            </span>
+          </button>
+        </div>
+
+        <!-- Floating Airbnb-style "Show all photos" button -->
+        <button
+          type="button"
+          class="absolute bottom-4 right-4 z-10 inline-flex items-center gap-2 rounded-lg border border-black/80 bg-white/95 px-3.5 py-1.5 text-xs font-semibold text-gray-900 shadow-sm backdrop-blur-sm transition hover:bg-white hover:scale-[1.02] active:scale-[0.98]"
+          @click="openLightbox(0)"
+        >
+          <TenantIcon name="squares-2x2" class="size-3.5" />
+          Show all {{ items.length }} photos
+        </button>
+      </div>
+
+      <!-- 2 to 4 items -->
       <div
-        class="grid gap-1 h-[360px] sm:h-[440px] lg:h-[520px]"
-        :class="items.length === 2 ? 'grid-cols-2' : items.length === 3 ? 'grid-cols-2 grid-rows-2' : 'grid-cols-2 grid-rows-3'"
+        v-else
+        class="relative grid gap-2 h-[360px] sm:h-[440px] lg:h-[480px]"
+        :class="items.length === 2 ? 'grid-cols-2' : items.length === 3 ? 'grid-cols-2 grid-rows-2' : 'grid-cols-2 grid-rows-2'"
       >
         <button
           v-for="(item, index) in visibleItems"
           :key="`${item.url}-${index}`"
           type="button"
-          class="relative h-full w-full overflow-hidden border-0 bg-transparent p-0 text-left"
-          :class="index === 0 ? items.length === 3 ? 'row-span-2' : items.length >= 4 ? 'row-span-3' : '' : ''"
+          class="group relative h-full w-full overflow-hidden border-0 bg-transparent p-0 text-left focus:outline-none"
+          :class="items.length === 3 && index === 0 ? 'row-span-2' : ''"
           :aria-label="item.kind === 'video' ? `Play video, ${title}` : `Open media, ${title}`"
           @click="openLightbox(index)"
         >
@@ -81,7 +159,7 @@
             v-else
             :src="item.url"
             :alt="item.alt ?? ''"
-            class="h-full w-full object-cover transition-transform duration-300 hover:scale-[1.02]"
+            class="h-full w-full object-cover transition duration-300 group-hover:brightness-95 group-hover:scale-[1.02]"
           />
           <span
             v-if="item.kind === 'video' && !isVideoReady(index)"
@@ -94,16 +172,19 @@
             aria-hidden="true"
           >
             <span class="flex size-12 items-center justify-center rounded-full bg-black/45 backdrop-blur-sm">
-              <SayaIcon name="play" class="ml-0.5 size-5" />
+              <TenantIcon name="play" class="ml-0.5 size-5" />
             </span>
           </span>
-          <span
-            v-if="index === 3 && items.length > 4"
-            class="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-black/50 text-white text-sm font-semibold backdrop-blur-[2px] hover:bg-black/60 transition-colors"
-          >
-            <SayaIcon name="squares-2x2" class="size-5" />
-            Show all {{ items.length }} media
-          </span>
+        </button>
+
+        <button
+          v-if="items.length > 1"
+          type="button"
+          class="absolute bottom-4 right-4 z-10 inline-flex items-center gap-2 rounded-lg border border-black/80 bg-white/95 px-3.5 py-1.5 text-xs font-semibold text-gray-900 shadow-sm backdrop-blur-sm transition hover:bg-white hover:scale-[1.02] active:scale-[0.98]"
+          @click="openLightbox(0)"
+        >
+          <TenantIcon name="squares-2x2" class="size-3.5" />
+          Show all {{ items.length }} photos
         </button>
       </div>
     </div>
@@ -117,7 +198,7 @@
 </template>
 
 <script setup lang="ts">
-import type { SayaIconName } from '~/components/saya/SayaIcon.vue'
+import type { TenantIconName } from '~/components/tenant/TenantIcon.vue'
 interface GalleryItem {
   url: string
   kind?: 'image' | 'video' | 'file'
@@ -130,7 +211,7 @@ interface GalleryItem {
 const props = withDefaults(defineProps<{
   items: GalleryItem[]
   title: string
-  emptyIcon?: SayaIconName
+  emptyIcon?: TenantIconName
 }>(), {
   emptyIcon: 'sparkles',
 })
@@ -147,7 +228,7 @@ const items = computed(() => {
     return true
   })
 })
-const visibleItems = computed(() => items.value.slice(0, 4))
+const visibleItems = computed(() => items.value.slice(0, items.value.length >= 5 ? 5 : items.value.length))
 const lightboxOpen = ref(false)
 const lightboxIndex = ref(0)
 const videoRefs = ref<Record<number, HTMLVideoElement>>({})

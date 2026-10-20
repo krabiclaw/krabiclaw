@@ -1,5 +1,5 @@
 <template>
-  <section class="space-y-6">
+  <section>
     <!-- The same rule as DashboardListEditor: the panel's navbar carries the grid's controls. -->
     <header>
       <Teleport :to="actionsTarget ? `#${actionsTarget}` : undefined" :disabled="!actionsTarget" defer>
@@ -7,59 +7,59 @@
           <slot name="actions" />
           <UButton
             v-if="items.length"
-            label="Manage"
+            :label="manageLabel ?? 'Manage'"
             color="neutral"
             variant="soft"
-            size="sm"
             data-testid="grid-editor-manage"
             @click="openSelection"
           />
-          <UButton
-            icon="i-lucide-plus"
-            :aria-label="addLabel"
-            color="neutral"
-            variant="soft"
-            size="sm"
-            square
-            data-testid="grid-editor-add"
-            @click="$emit('add')"
-          />
+          <slot name="add-action">
+            <UButton
+              icon="i-lucide-plus"
+              :aria-label="addLabel"
+              color="neutral"
+              variant="soft"
+              square
+              data-testid="grid-editor-add"
+              @click="$emit('add')"
+            />
+          </slot>
         </div>
       </Teleport>
 
-      <p v-if="description" class="text-sm text-muted">{{ description }}</p>
     </header>
 
-    <slot name="filters" />
+    <div v-if="$slots.filters" class="mb-8">
+      <slot name="filters" />
+    </div>
 
     <UAlert
-      v-if="error"
+      v-if="error && !selecting"
       color="error"
       variant="soft"
       :title="`${title || 'This list'} could not be loaded`"
       :description="error"
     />
 
-    <div
-      v-else-if="!items.length"
-      class="rounded-xl border border-dashed border-default px-6 py-16 text-center"
-      data-testid="grid-editor-empty"
-    >
-      <UIcon :name="emptyIcon" class="mx-auto size-10 text-muted" />
-      <p class="mt-4 text-sm font-medium text-highlighted">{{ emptyTitle }}</p>
-    </div>
+    <UEmpty v-if="!error && !items.length" :icon="emptyIcon" :title="emptyTitle" data-testid="grid-editor-empty" />
 
-    <div v-else :class="gridClass">
-      <button
+    <div v-if="items.length" :class="gridClass">
+      <div
         v-for="item in items"
         :key="item.id"
-        type="button"
-        class="group relative aspect-square overflow-hidden rounded-lg border-2 border-transparent text-left"
-        :aria-label="`Open ${item.title}`"
-        @click="$emit('open', item)"
+        class="relative"
       >
-        <slot name="tile" :item="item" />
-      </button>
+        <ULink
+          raw
+          :to="item.to"
+          class="group relative block aspect-square overflow-hidden rounded-lg border-2 border-transparent text-left"
+          :aria-label="`Open ${item.title}`"
+          @click="!item.to && $emit('open', item)"
+        >
+          <slot name="tile" :item="item" />
+        </ULink>
+        <slot name="tile-actions" :item="item" />
+      </div>
     </div>
 
     <!--
@@ -73,7 +73,7 @@
       class="fixed inset-0 z-50 flex flex-col bg-default"
       data-testid="grid-editor-takeover"
     >
-      <header class="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-default px-4 py-3">
+      <header class="grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 border-b border-default py-3" :class="dashboardGutterClass">
         <!--
           One bar, two sets of controls. With nothing picked it is a way out; with
           a selection it becomes what you can do to it. A second bar sliding in
@@ -88,7 +88,7 @@
             <slot name="bulk-actions" :ids="selectedIds" />
             <UButton
               icon="i-lucide-trash-2"
-              :aria-label="`Delete ${selectedIds.length} selected`"
+              :aria-label="removeLabel ?? `Delete ${selectedIds.length} selected`"
               color="error"
               variant="ghost"
               size="sm"
@@ -118,7 +118,15 @@
         </template>
       </header>
 
-      <div class="min-h-0 flex-1 overflow-y-auto p-4">
+      <div class="min-h-0 flex-1 overflow-y-auto py-4" :class="dashboardGutterClass">
+        <UAlert
+          v-if="error"
+          color="error"
+          variant="soft"
+          :title="`${title || 'This list'} could not be loaded`"
+          :description="error"
+          class="mb-4"
+        />
         <div :class="gridClass">
           <button
             v-for="item in items"
@@ -149,20 +157,23 @@
 // Generic for the same reason the list editor is: a page hangs its own record on
 // the item and reads it off the `#tile` slot, instead of looking it back up by id
 // for every field the tile renders.
-import { dashboardPanelActionsKey } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
+import { dashboardGutterClass, dashboardPanelActionsKey } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
 // The navbar slot of the index panel this grid is mounted in, if any.
 const actionsTarget = inject(dashboardPanelActionsKey, null)
 
 const props = defineProps<{
   items: T[]
   title: string
-  description?: string
   emptyTitle: string
   emptyIcon: string
   /** Names the add control for screen readers, e.g. "Add photos". */
   addLabel: string
   /** Bar title while selecting, e.g. "Select photos". */
   selectionTitle: string
+  /** Names the selection action when the domain has a more specific term. */
+  manageLabel?: string
+  /** Names removal when it detaches a placement rather than deleting an asset. */
+  removeLabel?: string
   error?: string | null
   /** Tailwind grid classes, so a page can size its own tiles. */
   gridClass?: string
@@ -201,9 +212,13 @@ watch(selecting, (open) => {
 </script>
 
 <script lang="ts">
+import type { RouteLocationRaw } from 'vue-router'
+
 export interface GridEditorItem {
   id: string
   /** Names the tile in its open and select labels. */
   title: string
+  /** An item's editor route; absent when opening is handled by the page. */
+  to?: RouteLocationRaw
 }
 </script>

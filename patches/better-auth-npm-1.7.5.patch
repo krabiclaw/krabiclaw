@@ -1,0 +1,13 @@
+diff --git a/dist/api/index.d.mts b/dist/api/index.d.mts
+index 3f5412c0a86a2cc8858dd5e80ceadb4c856dbc82..58920e060d657e0f49ca2c98067ea3dfbceba63b 100644
+--- a/dist/api/index.d.mts
++++ b/dist/api/index.d.mts
+@@ -32,7 +32,7 @@ import * as _$zod_v4_core0 from "zod/v4/core";
+ 
+ //#region src/api/index.d.ts
+ declare function checkEndpointConflicts(options: BetterAuthOptions, logger: InternalLogger): void;
+-declare function getEndpoints<Option extends BetterAuthOptions>(ctx: Awaitable<AuthContext>, options: Option): {
++declare function getEndpoints<Option extends BetterAuthOptions>(ctx: Awaitable<AuthContext<Option>>, options: Option): {
+   api: OverrideMerge<{
+     readonly ok: _$better_call0.StrictEndpoint<"/ok", {
+       method: "GET";

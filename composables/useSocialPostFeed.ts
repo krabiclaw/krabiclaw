@@ -17,8 +17,7 @@ const isFeedResponse = (value: unknown): value is { success: true } & Feed =>
  */
 export async function useSocialPostFeed(scope: () => { locationId?: string | null }, options: { limit?: number } = {}) {
   const { locale } = useI18n()
-  const { organizationId } = useTenantOrganization()
-  if (!organizationId) throw createError({ statusCode: 404 })
+  const { id: organizationId } = useTenantOrganization().organization
   const requestEvent = useRequestEvent()
   const limit = options.limit ?? 12
   const request = (cursor: string | null) => ({

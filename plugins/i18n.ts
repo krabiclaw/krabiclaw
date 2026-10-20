@@ -41,6 +41,5 @@ export default defineNuxtPlugin((nuxtApp) => {
   }, { immediate: true })
 
   nuxtApp.vueApp.use(i18n)
-  nuxtApp.provide('appLocale', i18n.global.locale)
-  nuxtApp.provide('setAppLocale', setAppLocale)
+  return { provide: { appLocale: i18n.global.locale, setAppLocale } }
 })

@@ -11,5 +11,5 @@ export default defineHandler(async (event) => {
   const db = env.db
   if (!db) return jsonResponse({ error: 'Database not available' }, { status: 500 })
 
-  return jsonResponse(await getPublicConfig(db, organizationId))
+  return jsonResponse(await getPublicConfig(db, organizationId, { previewAuthorized: event.context.previewAuthorized === true }))
 })

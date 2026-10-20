@@ -1,6 +1,6 @@
 <template>
-  <NuxtLayout :name="isBlawby ? 'blawby' : 'saya'">
-    <BlawbyContact v-if="isBlawby" />
+  <NuxtLayout :name="template.layout">
+    <TenantContact v-if="template.slug === 'blawby'" />
 
     <!-- Brand contact page (tenant sites only — the platform marketing contact page was retired in favor of /help) -->
     <div v-else>
@@ -36,7 +36,7 @@
               </div>
 
               <div class="grid gap-6 sm:grid-cols-2">
-                <SayaFormField
+                <TenantFormField
                   v-slot="{ id, describedBy, invalid }"
                   :label="t('saya.contact_page.your_name')"
                   name="name"
@@ -44,8 +44,8 @@
                   :error="tenantFieldError('name')"
                 >
                   <input :id="id" v-model="tenantForm.name" type="text" :class="inputClass" :aria-describedby="describedBy" :aria-invalid="invalid" />
-                </SayaFormField>
-                <SayaFormField
+                </TenantFormField>
+                <TenantFormField
                   v-slot="{ id, describedBy, invalid }"
                   :label="t('saya.contact_page.email')"
                   name="email"
@@ -53,10 +53,10 @@
                   :error="tenantFieldError('email')"
                 >
                   <input :id="id" v-model="tenantForm.email" type="email" :class="inputClass" :aria-describedby="describedBy" :aria-invalid="invalid" />
-                </SayaFormField>
+                </TenantFormField>
               </div>
 
-              <SayaFormField :label="t('saya.contact_page.what_about')" name="subject">
+              <TenantFormField :label="t('saya.contact_page.what_about')" name="subject">
                 <div class="mt-2 flex flex-wrap gap-2">
                   <button
                     v-for="opt in subjectOptions"
@@ -73,9 +73,9 @@
                     {{ opt.label }}
                   </button>
                 </div>
-              </SayaFormField>
+              </TenantFormField>
 
-              <SayaFormField
+              <TenantFormField
                 v-slot="{ id, describedBy, invalid }"
                 :label="t('saya.contact_page.your_message')"
                 name="message"
@@ -83,11 +83,11 @@
                 :error="tenantFieldError('message')"
               >
                 <textarea :id="id" v-model="tenantForm.message" rows="6" :class="inputClass" :aria-describedby="describedBy" :aria-invalid="invalid" />
-              </SayaFormField>
+              </TenantFormField>
 
-              <SayaButton type="submit" :loading="tenantSubmitting" :disabled="isDraftPreview">
+              <TenantButton type="submit" :loading="tenantSubmitting" :disabled="isDraftPreview">
                 {{ t('saya.contact_page.send_message') }}
-              </SayaButton>
+              </TenantButton>
             </form>
           </section>
 
@@ -146,7 +146,7 @@
                     class="h-full w-full border-0"
                     style="filter:grayscale(0.12)"
                     loading="lazy"
-                    referrerpolicy="no-referrer-when-downgrade"
+                    referrerpolicy="strict-origin-when-cross-origin"
                     sandbox="allow-scripts allow-same-origin"
                   />
                   <div v-else class="flex h-full w-full items-center justify-center">
@@ -191,13 +191,14 @@
 
                   <div class="flex flex-wrap items-center gap-3">
                     <NuxtLink
+                      v-if="!loc.home_slug"
                       :to="localePath(`/locations/${loc.slug}/contact`)"
                       class="inline-flex items-center rounded-full bg-inverted px-5 py-2.5 text-[11px] font-medium uppercase tracking-widest text-inverted no-underline transition hover:opacity-80"
                     >
                       {{ t('saya.contact_page.plan_visit') }}
                     </NuxtLink>
                     <NuxtLink
-                      :to="localePath(`/locations/${loc.slug}`)"
+                      :to="localePath(publicLocationPath(loc))"
                       class="inline-flex items-center rounded-full border border-default px-5 py-2.5 text-[11px] font-medium uppercase tracking-widest text-default no-underline transition hover:bg-muted"
                     >
                       {{ t('saya.contact_page.directions') }}
@@ -232,21 +233,23 @@ import type { SubmissionMeasurement } from '~/composables/useOrganizationConvers
 
 definePageMeta({ layout: false })
 
-const { isPlatform, organizationId, previewAuthorized, organization } = useTenantOrganization()
-const { isBlawby } = usePublicTemplate()
-if (isPlatform || !organizationId) throw createError({ statusCode: 404 })
+const { previewAuthorized, organization } = useTenantOrganization()
+const { template, id: organizationId } = organization
+const isPlatform = organization.template.slug === 'platform'
+if (isPlatform) throw createError({ statusCode: 404 })
 
 const { locale, localePath, t } = useI18n()
-const vertCopy = computed(() => getVerticalCopy(organization?.vertical, locale.value))
+const vertCopy = computed(() => getVerticalCopy(organization.vertical, locale.value))
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 
 // Plain-Tailwind form styling — replaces UInput/UTextarea's default look
 // now that this page no longer depends on Nuxt UI (see SayaFormField.vue).
 import { FORM_INPUT_CLASS } from '~/utils/form-constants'
 import { addressPlaceName, formatPostalAddress, type PostalAddress } from '~/utils/postal-address'
+import { publicLocationPath } from '~/utils/product-presentation'
 const inputClass = FORM_INPUT_CLASS
 
-const businessName = computed(() => organization?.name?.trim() ?? '')
+const businessName = organization.name
 // A preview is the real site, so the form is real too — but an owner looking
 // at an unlaunched site should not be able to file a guest thread against it.
 const isDraftPreview = computed(() => previewAuthorized)
@@ -255,8 +258,8 @@ const isDraftPreview = computed(() => previewAuthorized)
 const { locations, config: siteConfig, tenantPage } = await usePublicPageData()
 const contactHero = computed(() => tenantPage.value?.blocks.find(block => block.type === 'hero') ?? null)
 const contactHeroEyebrow = computed(() => String(contactHero.value?.data.eyebrow || ''))
-const contactHeroTitle = computed(() => String(contactHero.value?.data.title ?? ''))
-const contactHeroSummary = computed(() => String(contactHero.value?.data.subtitle ?? ''))
+const contactHeroTitle = computed(() => String(contactHero.value?.data.title || tenantPage.value?.title || t('saya.contact_page.headline') || ''))
+const contactHeroSummary = computed(() => String(contactHero.value?.data.subtitle || contactHero.value?.data.description || tenantPage.value?.summary || ''))
 const contactAdditionalPage = computed(() => tenantPage.value
   ? { ...tenantPage.value, blocks: tenantPage.value.blocks.filter(block => block.type !== 'hero') }
   : null)
@@ -348,7 +351,7 @@ const handleTenantContact = async () => {
   try {
     submitted = await publicApiMutation<{ success: true; measurement?: SubmissionMeasurement }>(`/api/public/contact`, {
       method: 'POST',
-      body: { ...tenantForm.value, page_event_id: await pageEventId() },
+      body: { ...tenantForm.value, locale: locale.value, page_event_id: await pageEventId() },
       validate: (value): value is { success: true; measurement?: SubmissionMeasurement } => isRecord(value) && value.success === true,
     })
   } catch {
@@ -364,16 +367,12 @@ const handleTenantContact = async () => {
 
 // ── SEO ──────────────────────────────────────────────────
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
 useSocialMetadata(() => ({
   path: '/contact',
-  socialImage: organizationSocialImage,
-  title: tenantPage.value?.title || businessName.value,
+  socialImage: organization.social_image,
+  title: tenantPage.value?.title || businessName,
   description: tenantPage.value?.summary || '',
   schemaPageType: 'ContactPage',
-  brand: {
-    organizationName: businessName.value,
-  },
   breadcrumbs: [
     { name: tenantPage.value?.title || 'Contact', url: '/contact' },
   ],

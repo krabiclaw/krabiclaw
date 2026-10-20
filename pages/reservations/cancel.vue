@@ -5,5 +5,5 @@
 <script setup lang="ts">
 import GuestCancelPage from '~/components/booking/GuestCancelPage.vue'
 
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 </script>

@@ -1,6 +1,6 @@
 <template>
   <div class="grid md:grid-cols-2 gap-8 mb-24 max-w-5xl mx-auto" data-parity-section="comparison">
-    <!-- The way it is done without Krabiclaw. -->
+    <!-- The way it is done without KrabiClaw. -->
     <div class="rounded-3xl border border-default/60 bg-elevated/30 p-8 flex flex-col justify-between">
       <div>
         <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-wider bg-red-500/10 text-red-500 mb-6 border border-red-500/20">
@@ -17,7 +17,7 @@
       </div>
     </div>
 
-    <!-- The Krabiclaw way, in the vertical's accent. -->
+    <!-- The KrabiClaw way, in the vertical's accent. -->
     <div class="rounded-3xl bg-elevated/80 p-8 flex flex-col justify-between relative shadow-xl" :class="accentClasses.card">
       <div class="absolute top-0 right-0 w-32 h-32 rounded-bl-full pointer-events-none" :class="accentClasses.wash"></div>
       <div>
@@ -58,7 +58,7 @@ export interface PlatformComparisonColumn {
  */
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 
-/** Krabiclaw's verticals each carry their own accent; the page says which. */
+/** KrabiClaw's verticals each carry their own accent; the page says which. */
 const accent = computed<'primary' | 'teal' | 'navy'>(() => (
   props.page.path === '/experiences' ? 'teal' : props.page.path === '/legal' ? 'navy' : 'primary'))
 

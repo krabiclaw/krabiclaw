@@ -30,13 +30,13 @@ import { PUBLIC_SUPPORT_FAQ_ENTRIES } from '~/utils/public-support'
 definePageMeta({ layout: 'standalone' })
 
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
+const { social_image: organizationSocialImage, template: organizationTemplate } = useTenantOrganization().organization
+if (organizationTemplate.slug !== 'platform') throw createError({ statusCode: 404, statusMessage: 'Page not found', fatal: true })
 useSocialMetadata({
-  template: 'platform',
   path: '/help',
   socialImage: organizationSocialImage,
   title: 'Support',
-  description: 'Get help with Krabiclaw, browse docs and product updates, or open a support request through ChowBot support.',
+  description: 'Get help with KrabiClaw, browse docs and product updates, or open a support request through ChowBot support.',
   breadcrumbs: [
     { name: 'Home', url: '/' },
     { name: 'Support', url: '/help' },

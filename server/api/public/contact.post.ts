@@ -8,8 +8,9 @@ import { DEFAULT_EMAIL_DAILY_LIMIT as EMAIL_DAILY_LIMIT, DEFAULT_IP_HOURLY_LIMIT
 import { resolveContactSubmissionAssignment } from '~/server/utils/contact-assignment'
 import { measurementOutcome, readPageEventId, recordOrganizationConversionEvent } from '~/server/utils/organization-conversions'
 import { ensureInteractionUser } from '~/server/utils/auth'
+import { assertExactCanonicalLocale, assertPublicOrganizationLanguageEntitlement, getPersistedSourceLocale } from '~/server/utils/localization'
 import { defineHandler } from 'nitro'
-import { getRouterParam, readBody } from 'nitro/h3'
+import { readBody } from 'nitro/h3'
 
 const VALID_SUBJECTS = ['general', 'press', 'partnerships', 'catering', 'careers']
 
@@ -30,7 +31,7 @@ export default defineHandler(async (event) => {
   const email   = cleanString(body.email, 200)
   const message = cleanString(body.message, 2000)
   const subject = cleanString(body.subject, 30)
-  // Free-text context the Krabiclaw help form and ChowBot escalations attach.
+  // Free-text context the KrabiClaw help form and ChowBot escalations attach.
   const topic = cleanString(body.topic, 200)
   const source = cleanString(body.source, 100)
   const routeContext = cleanString(body.route_context, 500)
@@ -60,6 +61,9 @@ export default defineHandler(async (event) => {
   const organization = await queryFirst<{ id: string; name?: string | null; vertical?: string | null; theme_id?: string | null }>(
     db, 'SELECT id, name, vertical, theme_id FROM organization WHERE id = ? AND status = ? LIMIT 1', [organizationId, 'active'], )
   if (!organization) return jsonResponse({ error: 'Organization not found' }, { status: 404 })
+  const sourceLocale = await getPersistedSourceLocale(db, organizationId)
+  const locale = body.locale === undefined ? sourceLocale.locale : assertExactCanonicalLocale(body.locale)
+  const language = await assertPublicOrganizationLanguageEntitlement(env, db, organizationId, locale)
   const requiresConsent = organizationSupportsBlawbyTemplate({ themeId: organization.theme_id, vertical: organization.vertical })
   const consentAcknowledged = body.consent === true
   if (requiresConsent && !consentAcknowledged) {
@@ -96,7 +100,7 @@ export default defineHandler(async (event) => {
   const now = new Date().toISOString()
   await executeBatch(db, requestInsertQueries({ id, kind: 'contact', organization_id: organization.id, location_id: assignedLocationId,
     user_id: userId, review_id: null, conversation_state: 'needs_attention', resolved_at: null,
-    payload: { guest: { name, email, phone: null }, subject: subject || topic || null, message, consent_at: consentAt, ip_hash: ipHash,
+    payload: { guest: { name, email, phone: null, locale: language.locale }, subject: subject || topic || null, message, consent_at: consentAt, ip_hash: ipHash,
       source: source || null, route_context: routeContext || null, suggested_summary: suggestedSummary || null, agent_metadata: agentMetadata }, created_at: now, updated_at: now }))
   await publishGuestInboxThreadEvent(env, db, { threadId: id, type: 'thread.created' })
 
@@ -106,8 +110,9 @@ export default defineHandler(async (event) => {
   // record as well.
   const followUps = await Promise.allSettled([
     notifyContactSubmitted(env, db, {
-      organizationId: organization.id, locationId: assignedLocationId, organizationName: organization.name, contactId: id, guestName: name, email, subject: subject || topic || null, message, consentAcknowledged, }),
-    recordOrganizationConversionEvent(db, event.req, {
+      organizationId: organization.id, locale: language.locale, locationId: assignedLocationId, organizationName: organization.name, contactId: id, guestName: name, email, subject: subject || topic || null, message, consentAcknowledged, }),
+    // A preview is the host looking at their own site, not a guest's conversion.
+    event.context.previewAuthorized === true ? Promise.resolve({ recorded: false, reason: 'preview' }) : recordOrganizationConversionEvent(db, event.req, {
     organizationId: organization.id,
     eventName: 'contact_submit',
     stage: 'submitted',

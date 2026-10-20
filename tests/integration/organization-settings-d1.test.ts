@@ -18,11 +18,10 @@ test('organization settings and workspace patches preserve independent owners an
     const db = await miniflare.getD1Database('DB')
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
-    await db.prepare("INSERT INTO organization(id,name,slug,subdomain) VALUES('org','Org','org','org')").run()
+    await db.prepare("INSERT INTO organization(id,name,slug,subdomain, default_currency, timezone) VALUES('org','Org','org','org', 'USD', 'UTC')").run()
     await db.prepare("INSERT INTO user(id,name,email) VALUES('user','User','user@example.test')").run()
-    await Promise.all([setConfig(db, 'org', 'press_email', 'press@example.test'), setConfig(db, 'org', 'default_timezone', 'Asia/Bangkok')])
+    await setConfig(db, 'org', 'press_email', 'press@example.test')
     assert.equal((await getConfig(db, 'org')).press_email, 'press@example.test')
-    assert.equal((await getConfig(db, 'org')).default_timezone, 'Asia/Bangkok')
     // The measurement id is the Analytics integration's, and choosing a GA4
     // property is the only thing that writes it — so it is readable here and
     // there is no settings key that sets it.

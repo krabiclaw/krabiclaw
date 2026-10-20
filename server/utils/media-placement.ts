@@ -7,13 +7,14 @@ import {
   hydrateMediaAssetRefs,
   MAX_ORDERED_MEDIA_ASSETS,
   buildSingleMediaPlacementQueries,
+  buildMediaPlacementReplacementQueries,
   mediaPlacementOwnerQuery,
   isSingleMediaPlacement,
   readMediaPlacements,
   type MediaAssetRefInput,
   type StoredMediaPlacementItem,
 } from '~/server/utils/media-asset-manager'
-import { isEditableMediaPlacement, isEditableMediaPlacementOwnerType, type EditableMediaPlacementOwnerType, type LogoPresentation, type MediaPlacementOwnerType } from '~/shared/media-placement-contract'
+import { isEditableMediaPlacement, isEditableMediaPlacementOwnerType, uniqueMediaAssets, type EditableMediaPlacementOwnerType, type LogoPresentation, type MediaPlacementOwnerType } from '~/shared/media-placement-contract'
 import { refreshSocialCard, socialCardRefreshOwnersForPlacement } from '~/server/utils/social-card'
 import { postMediaMutationQueries } from '~/server/utils/post-management'
 
@@ -195,14 +196,7 @@ async function refreshSocialCardForPlacement(db: DbClient, input: {
   for (const owner of owners) await refreshSocialCard({ db, env: input.env, owner })
 }
 
-// Attaches one asset to an ordered collection. Appends at the end (its
-// position within the current live count, computed atomically inside the
-// INSERT itself — not from any earlier read) unless the collection is
-// already at MAX_ORDERED_MEDIA_ASSETS, in which case the INSERT's WHERE
-// clause makes it a no-op and this throws. A duplicate attach attempt hits
-// the DB's own unique(owner_type, owner_id, slot, asset_id) constraint and
-// is reported as a 409, not silently ignored — callers that want idempotent
-// "make sure this is attached" behavior should treat 409 as success.
+// Append a new asset atomically; an existing membership remains in its current position.
 export async function attachMediaPlacement(db: DbClient, input: {
   organizationId: string
   env: CloudflareEnv
@@ -224,6 +218,11 @@ export async function attachMediaPlacement(db: DbClient, input: {
     fieldName: 'asset_id',
   })
   if (!asset) throw new HTTPError({ statusCode: 400, statusMessage: 'asset_id is required' })
+  const current = await canonicalPlacementState(db, input)
+  if (current.asset_ids.includes(input.assetId)) {
+    await refreshSocialCardForPlacement(db, input)
+    return canonicalPlacementState(db, input)
+  }
   const now = new Date().toISOString()
   const scopeParams = [input.organizationId, input.placement.owner_type, input.placement.owner_id, input.placement.slot]
   const owner = mediaPlacementOwnerQuery({ ...input, ownerType: input.placement.owner_type, ownerId: input.placement.owner_id })
@@ -249,12 +248,19 @@ export async function attachMediaPlacement(db: DbClient, input: {
     }])
   } catch (error) {
     if (isUniqueConstraintError(error)) {
-      throw new HTTPError({ statusCode: 409, statusMessage: 'Media asset is already attached to this placement' })
+      const saved = await canonicalPlacementState(db, input)
+      if (saved.asset_ids.includes(input.assetId)) {
+        await refreshSocialCardForPlacement(db, input)
+        return canonicalPlacementState(db, input)
+      }
     }
     throw error
   }
   if (Number(results[postQueries.length]?.meta?.changes ?? 0) === 0) {
-    throw new HTTPError({ statusCode: 422, statusMessage: `The owner no longer accepts media or has reached ${MAX_ORDERED_MEDIA_ASSETS} assets` })
+    const saved = await canonicalPlacementState(db, input)
+    if (!saved.asset_ids.includes(input.assetId)) {
+      throw new HTTPError({ statusCode: 422, statusMessage: `The owner no longer accepts media or has reached ${MAX_ORDERED_MEDIA_ASSETS} assets` })
+    }
   }
   await refreshSocialCardForPlacement(db, input)
   return canonicalPlacementState(db, input)
@@ -386,6 +392,86 @@ export async function reorderMediaPlacements(db: DbClient, input: {
   }
   await refreshSocialCardForPlacement(db, input)
   return canonicalPlacementState(db, input)
+}
+
+/**
+ * A product's photos as one ordered list: its `image` (the cover every
+ * surface shows first) followed by its `gallery` in order. A product with no
+ * cover but a gallery lists the gallery alone. An asset reused across the two
+ * slots appears once, in its first position.
+ */
+export async function readProductPhotos(db: DbClient, input: { organizationId: string; productIds: string[] }): Promise<Map<string, MediaPlacementItem[]>> {
+  const placements = await getMediaPlacements(db, { organizationId: input.organizationId, ownerType: 'product', ownerIds: input.productIds })
+  return new Map([...placements].map(([productId, items]) => [productId, uniqueMediaAssets([
+    ...items.filter(item => item.slot === 'image'),
+    ...items.filter(item => item.slot === 'gallery'),
+  ])]))
+}
+
+/**
+ * Write a product's photos as one ordered list: the first becomes its `image`
+ * and the rest its `gallery`, in one batch. `from` is the list the caller read
+ * and changed; when the product's photos are no longer that list, or change
+ * before the batch commits, the write is refused with PHOTOS_CHANGED.
+ */
+export async function arrangeProductPhotos(db: DbClient, input: {
+  organizationId: string
+  env: CloudflareEnv
+  principal: MemberAccessPrincipal
+  productId: string
+  from: readonly string[]
+  to: readonly string[]
+}): Promise<void> {
+  const cover: MediaPlacementKey = { owner_type: 'product', owner_id: input.productId, slot: 'image' }
+  const gallery: MediaPlacementKey = { ...cover, slot: 'gallery' }
+  await authorizePlacementWrite(db, { ...input, placement: cover })
+  if (input.to.length > MAX_ORDERED_MEDIA_ASSETS) {
+    throw new HTTPError({ statusCode: 422, statusMessage: `A product holds at most ${MAX_ORDERED_MEDIA_ASSETS} photos`, data: { code: 'PHOTO_LIMIT', field: 'photos' } })
+  }
+  const placements = ((await getMediaPlacements(db, { organizationId: input.organizationId, ownerType: 'product', ownerIds: [input.productId] })).get(input.productId) ?? [])
+    .filter(item => item.slot === 'image' || item.slot === 'gallery')
+  const current = uniqueMediaAssets([
+    ...placements.filter(item => item.slot === 'image'),
+    ...placements.filter(item => item.slot === 'gallery'),
+  ])
+  const changed = () => new HTTPError({ statusCode: 409, statusMessage: 'The photos changed while saving; reload them and try again', data: { code: 'PHOTOS_CHANGED', field: 'photos' } })
+  if (current.length !== input.from.length || current.some((item, index) => item.asset_id !== input.from[index])) throw changed()
+  const media = await hydrateMediaAssetRefs(db, {
+    organizationId: input.organizationId,
+    refs: input.to.map(asset_id => ({ asset_id })),
+    allowedKinds: allowedKindsFor(cover),
+    fieldName: 'photos',
+  })
+  // The batch fails on the sort-order check unless the photos are still the
+  // rows read above, slot for slot and position for position; an asset
+  // deleted meanwhile fails its foreign key. Either is a change since the read.
+  const expected = d1JsonStringSet(placements.map(item => `${item.slot}:${item.sort_order}:${item.asset_id}`))
+  // Every active placement of an active asset, including reuse across slots.
+  const placed = `SELECT mp.slot || ':' || mp.sort_order || ':' || mp.asset_id AS entry FROM media_placements mp
+    JOIN media_assets ma ON ma.id = mp.asset_id AND ma.organization_id = mp.organization_id AND ma.status = 'active'
+    WHERE mp.organization_id = ? AND mp.owner_type = 'product' AND mp.owner_id = ? AND mp.slot IN ('image', 'gallery') AND mp.status = 'active'`
+  const now = new Date().toISOString()
+  try {
+    await executeBatch(db, [
+      {
+        query: `INSERT INTO media_placements (id, organization_id, owner_type, owner_id, slot, asset_id, sort_order, status, created_at, updated_at)
+          SELECT ?, ?, 'product', ?, 'gallery', ?, -1, 'active', ?, ?
+           WHERE EXISTS (${placed} EXCEPT SELECT value FROM json_each(?))
+              OR EXISTS (SELECT value FROM json_each(?) EXCEPT ${placed})`,
+        params: [
+          crypto.randomUUID(), input.organizationId, input.productId, '__photos_guard__', now, now,
+          input.organizationId, input.productId, expected,
+          expected, input.organizationId, input.productId,
+        ],
+      },
+      ...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId, placement: cover, media: media.slice(0, 1), now }),
+      ...buildMediaPlacementReplacementQueries({ organizationId: input.organizationId, placement: gallery, media: media.slice(1), now }),
+    ], { operation: 'Arrange product photos' })
+  } catch (error) {
+    if (/CHECK constraint failed|FOREIGN KEY constraint failed/i.test(error instanceof Error ? error.message : String(error))) throw changed()
+    throw error
+  }
+  await refreshSocialCardForPlacement(db, { env: input.env, placement: cover })
 }
 
 function buildMembershipGuardQuery(input: {

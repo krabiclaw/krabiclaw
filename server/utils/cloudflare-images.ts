@@ -55,7 +55,6 @@ export async function requestImageUpload(env: CloudflareImagesEnv): Promise<{ im
     method: 'POST',
     headers: authHeader(env),
     body: formData,
-    signal: AbortSignal.timeout(30_000),
   })
   if (!res.ok) throw new Error(`CF Images direct_upload error ${res.status}: ${await res.text()}`)
   const data = await res.json() as CloudflareImagesResponse
@@ -72,39 +71,38 @@ export async function uploadImageBuffer(
   env: CloudflareImagesEnv,
   buffer: ArrayBuffer | Uint8Array<ArrayBuffer>,
   filename: string,
-  contentType = 'image/png'
+  contentType = 'image/png',
+  imageId: string = `image-${crypto.randomUUID()}`,
 ): Promise<{ imageId: string; publicUrl: string; thumbnailUrl: string }> {
   assertCloudflareImagesConfigured(env)
   const form = new FormData()
   form.append('file', new Blob([buffer], { type: contentType }), filename)
-  const signal = AbortSignal.timeout(30_000)
-
-  let res: Response
+  const digest = await crypto.subtle.digest('SHA-256', buffer)
+  const contentHash = [...new Uint8Array(digest)].map(byte => byte.toString(16).padStart(2,'0')).join('')
+  form.append('id', imageId)
+  form.append('metadata', JSON.stringify({content_sha256:contentHash}))
   try {
-    res = await fetch(`${apiBase(env)}/v1`, {
+    const res = await fetch(`${apiBase(env)}/v1`, {
       method: 'POST',
       headers: authHeader(env),
       body: form,
-      signal,
     })
+    if (!res.ok) throw new Error(`CF Images upload error ${res.status}: ${await res.text()}`)
+    const data = await res.json() as CloudflareImagesResponse
+    if (data.result?.id !== imageId) throw new Error(`CF Images upload did not return image ${imageId}`)
   } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    throw new Error(`CF Images upload request failed for account ${accountId(env) || 'missing'}: ${message}`, { cause: error })
-  }
-  if (!res.ok) {
-    const body = await res.text()
-    console.error(`[CF Images] upload error ${res.status}: ${body}`)
-    throw new Error(`CF Images upload error ${res.status}: ${body}`)
-  }
-  const data = await res.json() as CloudflareImagesResponse
-  const id = typeof data?.result?.id === 'string' ? data.result.id : ''
-  if (!id) {
-    throw new Error(`CF Images upload malformed response ${res.status}: ${JSON.stringify(data)}`)
+    let uploaded: Awaited<ReturnType<typeof getUploadedImage>>
+    try {
+      uploaded = await getUploadedImage(env, imageId)
+    } catch (readError) {
+      throw new AggregateError([error,readError], `The upload result for image ${imageId} could not be read`, {cause:readError})
+    }
+    if (!uploaded || uploaded.draft || uploaded.metadata?.content_sha256 !== contentHash) throw error
   }
   return {
-    imageId: id,
-    publicUrl: buildImageUrl(env, id, 'public'),
-    thumbnailUrl: buildImageUrl(env, id, 'thumbnail'),
+    imageId,
+    publicUrl: buildImageUrl(env, imageId, 'public'),
+    thumbnailUrl: buildImageUrl(env, imageId, 'thumbnail'),
   }
 }
 
@@ -116,8 +114,7 @@ export async function deleteImage(env: CloudflareImagesEnv, imageId: string): Pr
     res = await fetch(`${apiBase(env)}/v1/${imageId}`, {
       method: 'DELETE',
       headers: authHeader(env),
-      signal: AbortSignal.timeout(30_000),
-    })
+      })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error'
     throw new Error(`CF Images delete request failed for ${imageId}: ${message}`, { cause: error })
@@ -134,16 +131,20 @@ export async function deleteImage(env: CloudflareImagesEnv, imageId: string): Pr
  * The stored filename of an image, from Cloudflare rather than from anything a
  * client sent. Null when the image is gone.
  */
-export async function getImageFilename(env: CloudflareImagesEnv, imageId: string): Promise<string | null> {
+async function getUploadedImage(env: CloudflareImagesEnv, imageId: string) {
   assertCloudflareImagesConfigured(env)
   const res = await fetch(`${apiBase(env)}/v1/${imageId}`, {
     headers: authHeader(env),
-    signal: AbortSignal.timeout(30_000),
   })
   if (res.status === 404) return null
   if (!res.ok) throw new Error(`CF Images lookup error ${res.status}: ${await res.text()}`)
-  const data = await res.json() as { result?: { filename?: string } }
-  return typeof data?.result?.filename === 'string' ? data.result.filename : null
+  const data = await res.json() as { result?: { id?:string; filename?:string; metadata?:Record<string,unknown>; draft?:boolean } }
+  if (data.result?.id !== imageId || typeof data.result.filename !== 'string') throw new Error(`CF Images lookup did not return image ${imageId}`)
+  return data.result
+}
+
+export async function getImageFilename(env: CloudflareImagesEnv, imageId: string): Promise<string | null> {
+  return (await getUploadedImage(env,imageId))?.filename ?? null
 }
 
 /**

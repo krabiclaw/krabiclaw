@@ -3,6 +3,8 @@ export const MEDIA_PLACEMENT_SLOTS = {
   organization: ['logo', 'logo_dark', 'favicon', 'social_share', 'social_card', 'compliance_document', 'announcement'],
   business_location: ['hero', 'gallery', 'social_card'],
   product: ['image', 'gallery', 'social_card'],
+  // A menu section's own picture: the intro over its dishes on the site and its tile in Catalog.
+  collection: ['image'],
   content_document: ['cover', 'gallery', 'social_card'],
   content_block: [
     'media', 'gallery', 'background', 'featured', 'decoration',
@@ -17,12 +19,14 @@ export const MEDIA_PLACEMENT_SLOTS = {
   review_request: ['gallery'],
   // The photos a message in a guest thread carries, in the order they were sent.
   activity_entry: ['attachments'],
+  // The photos a message in a team conversation carries, in the order they were sent.
+  team_message: ['attachments'],
 } as const
 
 export type MediaPlacementOwnerType = keyof typeof MEDIA_PLACEMENT_SLOTS
 
 export const EDITABLE_MEDIA_PLACEMENT_OWNERS = [
-  'organization', 'business_location', 'product', 'content_document',
+  'organization', 'business_location', 'product', 'collection', 'content_document',
   'content_block', 'review_request',
 ] as const satisfies readonly MediaPlacementOwnerType[]
 
@@ -36,7 +40,7 @@ export function isEditableMediaPlacementOwnerType(value: string): value is Edita
   return EDITABLE_MEDIA_PLACEMENT_OWNERS.some(ownerType => ownerType === value)
 }
 
-const INDEXED_SLOTS = [
+export const INDEXED_MEDIA_PLACEMENT_SLOTS = [
   { ownerType: 'content_block', runtime: /^items\.\d+\.image$/, sqlGlob: 'items.[0-9]*.image' },
   // A showcase statement's three pictures.
   { ownerType: 'content_block', runtime: /^items\.\d+\.left$/, sqlGlob: 'items.[0-9]*.left' },
@@ -50,7 +54,7 @@ const INDEXED_SLOTS = [
 const ORDERED_PLACEMENTS = new Set([
   'business_location:gallery', 'product:gallery', 'content_document:gallery',
   'content_block:gallery', 'review:gallery', 'review_request:gallery',
-  'organization:compliance_document', 'activity_entry:attachments',
+  'organization:compliance_document', 'activity_entry:attachments', 'team_message:attachments',
 ])
 
 /**
@@ -88,7 +92,7 @@ export function isSupportedMediaPlacement(placement: { owner_type: string; slot:
     ? MEDIA_PLACEMENT_SLOTS[placement.owner_type]
     : undefined
   return slots?.some(slot => slot === placement.slot) === true
-    || INDEXED_SLOTS.some(pattern => pattern.ownerType === placement.owner_type && pattern.runtime.test(placement.slot))
+    || INDEXED_MEDIA_PLACEMENT_SLOTS.some(pattern => pattern.ownerType === placement.owner_type && pattern.runtime.test(placement.slot))
 }
 
 export function isEditableMediaPlacement(placement: { owner_type: string; slot: string }) {
@@ -99,6 +103,16 @@ export function isEditableMediaPlacement(placement: { owner_type: string; slot: 
 
 export function isSingleMediaPlacement(placement: { owner_type: string; slot: string }) {
   return isSupportedMediaPlacement(placement) && !ORDERED_PLACEMENTS.has(`${placement.owner_type}:${placement.slot}`)
+}
+
+/** Each asset once, with its first placement determining its order and presentation. */
+export function uniqueMediaAssets<T extends { asset_id: string }>(media: readonly T[]): T[] {
+  const seen = new Set<string>()
+  return media.filter((item) => {
+    if (seen.has(item.asset_id)) return false
+    seen.add(item.asset_id)
+    return true
+  })
 }
 
 /**

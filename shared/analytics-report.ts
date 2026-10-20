@@ -47,6 +47,14 @@ export const analyticsReportSchema = z.object({
   cities: z.array(z.object({ city: text, region: nullableText, countryCode: text, views: count })),
   referrers: z.array(z.object({ source: text, views: count, percentOfTotal: z.number() })),
   devices: z.array(z.object({ type: text, views: count, percentOfTotal: z.number() })),
+  adSpend: z.object({
+    totalSpendMicros: count,
+    clicks: count,
+    impressions: count,
+    conversions: count,
+    costPerClickMicros: count,
+    error: nullableText.optional(),
+  }).optional(),
 })
 
 export const organizationAnalyticsSchema = z.object({
@@ -56,10 +64,6 @@ export const organizationAnalyticsSchema = z.object({
     total: count, average: z.number().nullable(),
     distribution: z.array(z.object({ rating: z.number(), count })),
     recent: z.array(z.object({ id: text, author: text, rating: z.number(), title: nullableText, content: nullableText, createdAt: text })),
-  }),
-  setup: z.object({
-    organizationId: text, label: text, completed: count, total: count,
-    items: z.array(z.object({ id: text, label: text, done: z.boolean() })),
   }),
 })
 

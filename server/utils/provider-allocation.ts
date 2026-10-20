@@ -2,12 +2,12 @@ import { BUSY_FRESHNESS_MS } from '~/shared/member-scheduling'
 
 /** Session commitment wins over the current offering assignment. */
 export function sessionMemberSql(s: string): string {
-  return `COALESCE(CASE WHEN ${s}.assigned_member_id IS NOT NULL AND (EXISTS(SELECT 1 FROM bookings committed WHERE committed.product_session_id=${s}.id AND committed.organization_id=${s}.organization_id AND committed.status IN ('pending','confirmed')) OR EXISTS(SELECT 1 FROM payment_checkout_holds committed WHERE committed.session_id=${s}.id AND committed.organization_id=${s}.organization_id AND committed.status='active' AND committed.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))) THEN ${s}.assigned_member_id END, (SELECT c.assigned_member_id FROM product_booking_configs c WHERE c.organization_id=${s}.organization_id AND c.product_id=${s}.product_id AND c.scheduling_mode='provider'))`
+  return `COALESCE(CASE WHEN ${s}.assigned_member_id IS NOT NULL AND (EXISTS(SELECT 1 FROM bookings committed WHERE committed.product_session_id=${s}.id AND committed.organization_id=${s}.organization_id AND committed.status IN ('pending','confirmed')) OR EXISTS(SELECT 1 FROM payment_checkout_holds committed WHERE committed.session_id=${s}.id AND committed.organization_id=${s}.organization_id AND committed.status='active' AND committed.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now'))) THEN ${s}.assigned_member_id END, (SELECT CASE WHEN c.assigned_team_id IS NULL THEN CASE WHEN ${s}.assigned_member_id IS NULL OR ${s}.assigned_member_id=c.assigned_member_id THEN c.assigned_member_id END ELSE (SELECT m.id FROM member m JOIN teamMember tm ON tm.userId=m.userId JOIN team t ON t.id=tm.teamId AND t.organizationId=m.organizationId WHERE t.id=c.assigned_team_id AND m.organizationId=c.organization_id AND m.id=${s}.assigned_member_id) END FROM product_booking_configs c WHERE c.organization_id=${s}.organization_id AND c.product_id=${s}.product_id AND c.scheduling_mode='provider'))`
 }
 
 /** One occupancy per distinct Session. Group attendees share capacity. */
 export function providerUnavailableSql(s: string, replacingBooking = 'NULL', convertingPayment = 'NULL', member = sessionMemberSql(s)): string {
-  return `(${member} IS NOT NULL AND (
+  return `(((EXISTS(SELECT 1 FROM product_booking_configs c WHERE c.organization_id=${s}.organization_id AND c.product_id=${s}.product_id AND c.scheduling_mode='provider') OR ${s}.assigned_member_id IS NOT NULL) AND ${member} IS NULL) OR (${member} IS NOT NULL AND (
     NOT EXISTS (SELECT 1 FROM member_scheduling ms JOIN member m ON m.id=ms.member_id AND m.organizationId=ms.organization_id
       WHERE ms.member_id=${member} AND ms.organization_id=${s}.organization_id
       AND ms.windows_until>=${s}.ends_at
@@ -23,5 +23,5 @@ export function providerUnavailableSql(s: string, replacingBooking = 'NULL', con
     OR EXISTS (SELECT 1 FROM payment_checkout_holds h WHERE h.organization_id=${s}.organization_id AND h.assigned_member_id=${member}
       AND h.status='active' AND h.expires_at>strftime('%Y-%m-%dT%H:%M:%fZ','now') AND h.payment_id IS NOT ${convertingPayment}
       AND h.session_id<>${s}.id AND h.starts_at<${s}.ends_at AND h.ends_at>${s}.starts_at)
-  ))`
+  )))`
 }

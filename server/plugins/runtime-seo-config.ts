@@ -8,7 +8,7 @@ export default definePlugin((nitroApp) => {
     const requestURL = event.url
     if (isPrivateSeoPath(requestURL.pathname)) return
 
-    const organization = event.context.organization as { name?: string | null } | undefined
+    const organization = event.context.organization as { name?: string | null; subdomain?: string } | undefined
 
     siteConfig.push({
       _context: 'runtime-tenant',
@@ -17,7 +17,7 @@ export default definePlugin((nitroApp) => {
         origin: requestURL.origin,
         hostname: requestURL.hostname,
         tenantName: organization?.name,
-        organizationId: event.context.organizationId as string | undefined,
+        tenantSubdomain: organization?.subdomain,
       }),
     })
   })

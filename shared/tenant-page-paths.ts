@@ -53,6 +53,7 @@ export function templatePageDocumentPaths(template: PublicTemplateDefinition): s
 
 export function templateRendersPageDocumentAt(template: PublicTemplateDefinition, path: string): boolean {
   return templatePageDocumentPaths(template).includes(path)
+    || (template.pageDocuments.patterns ?? []).some(pattern => patternMatchesPath({ pattern, subtree: false }, path))
     || template.pageDocuments.prefixes.some(prefix => path.startsWith(prefix))
 }
 

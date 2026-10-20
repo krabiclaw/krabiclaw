@@ -31,7 +31,7 @@ async function expectLocalizedMenu(page: Page) {
   await expect(page.getByRole('navigation', { name: 'การนำทางหลัก' }).getByRole('link', { name: 'เมนู', exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'จองโต๊ะ' }).first()).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Kikuzuki กระบี่ ประเทศไทย' })).toBeVisible()
-  await expect(page.getByRole('button', { name: 'ซูชิ', exact: true }).first()).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Kikuzuki โรบาตายากิและอิซากายะญี่ปุ่น · ซูชิ', exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'ซูชิทูน่า' }).first()).toBeVisible()
   await expect(page.getByRole('combobox', { name: 'ภาษา', exact: true })).toHaveValue('th')
   await expect(page.locator('body')).not.toContainText('Tuna Sushi')

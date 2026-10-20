@@ -6,7 +6,7 @@
   -->
   <div class="space-y-8">
     <section>
-      <h2 class="px-1 text-sm font-semibold text-muted">Team</h2>
+      <h2 class="text-sm font-semibold text-muted">Team</h2>
       <UAlert
         v-if="loadError"
         class="mt-3"
@@ -20,10 +20,10 @@
         <li v-for="member in members" :key="member.id" class="border-b border-default py-6 last:border-b-0">
           <div class="flex items-center justify-between gap-4">
             <div class="flex min-w-0 items-center gap-3">
-              <UAvatar :src="member.image || undefined" :alt="member.name || member.email" icon="i-lucide-user" size="lg" />
+              <UAvatar :src="member.user.image || undefined" :alt="member.user.name || member.user.email" icon="i-lucide-user" size="lg" />
               <div class="min-w-0">
-                <p class="truncate text-base text-highlighted">{{ member.name || member.email }}</p>
-                <p class="truncate text-sm text-muted">{{ member.email }}</p>
+                <p class="truncate text-base text-highlighted">{{ member.user.name || member.user.email }}</p>
+                <p class="truncate text-sm text-muted">{{ member.user.email }}</p>
                 <!-- Your own row opens your availability, where you connect your Google Calendar; anyone else's is the admin view. -->
                 <UButton color="neutral" variant="link" :to="memberAvailabilityPath(member)">Profile, hours &amp; Calendar</UButton>
               </div>
@@ -32,11 +32,11 @@
               <USelect
                 v-if="canEditMemberRole(member)"
                 :model-value="member.role"
-                :items="roleOptionsFor(member)"
+                :items="roleOptions"
                 variant="soft"
                 size="sm"
                 :ui="{ base: 'rounded-full capitalize' }"
-                :aria-label="`Role for ${member.name || member.email}`"
+                :aria-label="`Role for ${member.user.name || member.user.email}`"
                 :loading="roleUpdatingId === member.id"
                 @update:model-value="value => onRoleSelected(member, String(value))"
               />
@@ -48,7 +48,7 @@
                 variant="ghost"
                 size="sm"
                 :loading="removingMemberId === member.id"
-                :aria-label="`Remove ${member.name || member.email}`"
+                :aria-label="`Remove ${member.user.name || member.user.email}`"
                 @click="removeMember(member.id)"
               />
             </div>
@@ -67,7 +67,7 @@
     </section>
 
     <section>
-      <h2 class="px-1 text-sm font-semibold text-muted">Pending Invitations</h2>
+      <h2 class="text-sm font-semibold text-muted">Pending Invitations</h2>
       <ul v-if="invitations.length">
         <li v-for="invitation in invitations" :key="invitation.id" class="flex items-center justify-between gap-4 border-b border-default py-6 last:border-b-0">
           <div class="min-w-0">
@@ -75,9 +75,13 @@
             <p class="truncate text-sm text-muted">
               Expires {{ formatDate(invitation.expiresAt) }}
             </p>
+            <p class="text-sm" :class="invitation.delivery?.status === 'failed' ? 'text-error' : 'text-muted'">
+              {{ invitation.delivery?.error || (invitation.delivery ? `Email: ${invitation.delivery.provider === 'log_only' ? 'recorded locally' : invitation.delivery.status}` : 'Email delivery is unconfirmed') }}
+            </p>
           </div>
           <div class="flex shrink-0 items-center gap-2">
             <UBadge v-if="invitation.role" :label="invitation.role" color="neutral" variant="soft" size="lg" class="rounded-full capitalize" />
+            <UButton v-if="currentUserRole === 'owner' || currentUserRole === 'admin'" color="neutral" variant="ghost" :loading="resendingInviteId === invitation.id" @click="resendInvitation(invitation)">Resend</UButton>
             <UButton
               icon="i-lucide-x"
               color="neutral"
@@ -101,48 +105,18 @@ import { formatTimestamp } from '~/utils/timezone'
 
 import { authClient } from '~/lib/auth-client'
 import { getErrorMessage } from '~/utils/errors'
-import { organizationMembersKey } from '~/utils/organization-members'
+import { isOrganizationMembersData, organizationMembersKey, type OrganizationMembersData } from '~/utils/organization-members'
 
-const dashboardApi = useDashboardApi()
-
-interface MemberRow {
-  id: string
-  role: string
-  createdAt: string
-  userId: string
-  name: string | null
-  email: string
-  image: string | null
-}
-
-interface InvitationRow {
-  id: string
-  email: string
-  role: string | null
-  status: string
-  expiresAt: string
-  createdAt: string
-}
-
-const isMembersResponse = (
-  value: unknown,
-): value is { members: MemberRow[]; invitations: InvitationRow[] } =>
-  isRecord(value)
-  && Array.isArray(value.members)
-  && value.members.every(member => isRecord(member) && typeof member.id === 'string')
-  && Array.isArray(value.invitations)
-  && value.invitations.every(invitation => isRecord(invitation) && typeof invitation.id === 'string')
+type MemberRow = OrganizationMembersData['members'][number]
+type InvitationRow = OrganizationMembersData['invitations'][number]
 
 const route = useRoute()
-const dashboard = useDashboardOrganization()
-const membersKey = computed(() => organizationMembersKey(String(route.params.orgSlug ?? '')))
+const dashboardApi = useDashboardApi()
 
+const dashboard = useDashboardOrganization()
 const { data, error: loadError, refresh } = await useAsyncData(
-  membersKey,
-  () => dashboardApi<{ members: MemberRow[]; invitations: InvitationRow[] }>(
-    '/api/dashboard/members',
-    { validate: isMembersResponse },
-  ),
+  () => organizationMembersKey(String(route.params.orgSlug)),
+  () => dashboardApi('/api/dashboard/members', { validate: isOrganizationMembersData }),
 )
 
 const members = computed(() => data.value?.members ?? [])
@@ -150,10 +124,7 @@ const invitations = computed(() => data.value?.invitations ?? [])
 
 const session = authClient.useSession()
 const currentUser = computed(() => session.value.data?.user ?? null)
-const currentUserRole = computed(() => {
-  const match = members.value.find(member => member.userId === currentUser.value?.id)
-  return match?.role ?? null
-})
+const currentUserRole = computed(() => dashboard.organization.value?.role)
 const isOwner = computed(() => currentUserRole.value === 'owner')
 
 function memberAvailabilityPath(member: MemberRow) {
@@ -174,10 +145,6 @@ const roleOptions = computed(() => (
   isOwner.value ? [...BASE_ROLE_OPTIONS, { label: 'Owner', value: 'owner' }] : BASE_ROLE_OPTIONS
 ))
 
-function roleOptionsFor(member: MemberRow) {
-  return isOwner.value || member.role !== 'owner' ? roleOptions.value : BASE_ROLE_OPTIONS
-}
-
 function canEditMemberRole(member: MemberRow): boolean {
   if (currentUserRole.value !== 'owner' && currentUserRole.value !== 'admin') return false
   // Only an owner may touch another owner's role.
@@ -187,6 +154,7 @@ function canEditMemberRole(member: MemberRow): boolean {
 
 const removingMemberId = ref<string | null>(null)
 const cancellingInviteId = ref<string | null>(null)
+const resendingInviteId = ref<string | null>(null)
 const memberError = ref<string | null>(null)
 const pendingInvitationError = ref<string | null>(null)
 
@@ -206,16 +174,26 @@ async function submitRoleChange(member: MemberRow, role: string) {
   roleUpdateError.value = null
   roleUpdateErrorMemberId.value = null
   try {
-    await dashboardApi(`/api/dashboard/organizations/members/${member.id}/role`, {
-      method: 'POST',
-      body: { role },
-      validate: (value): value is { success: true } => isRecord(value) && value.success === true,
-    })
+    const organizationId = dashboard.organization.value?.id
+    if (!organizationId) throw new Error('Organization context is unavailable')
+    const result = await authClient.organization.updateMemberRole({ organizationId, memberId: member.id, role })
+    if (result.error) throw new Error(result.error.message)
+    if (member.userId === currentUser.value?.id) {
+      await dashboard.refresh()
+      if (dashboard.error.value) throw dashboard.error.value
+      if (dashboard.organization.value?.role !== role) throw new Error('Your role change could not be verified')
+      const permission = await authClient.organization.hasPermission({ organizationId, permissions: { members: ['read'] } })
+      if (permission.error) throw new Error(permission.error.message)
+      if (!permission.data.success) {
+        await navigateTo(memberAvailabilityPath(member))
+        return
+      }
+    }
     await refresh()
+    if (loadError.value) throw loadError.value
+    if (data.value?.members.find(saved => saved.id === member.id)?.role !== role) throw new Error('The member role change could not be verified')
   } catch (err: unknown) {
-    roleUpdateError.value = err instanceof ApiClientError && typeof err.data.error === 'string'
-      ? err.data.error
-      : err instanceof Error ? err.message : 'Failed to update member role.'
+    roleUpdateError.value = getErrorMessage(err, 'Failed to update member role.')
     roleUpdateErrorMemberId.value = member.id
   } finally {
     roleUpdatingId.value = null
@@ -239,6 +217,22 @@ async function cancelInvitation(invitationId: string) {
     pendingInvitationError.value = err instanceof Error ? err.message : 'Failed to cancel invitation.'
   } finally {
     cancellingInviteId.value = null
+  }
+}
+
+async function resendInvitation(invitation: InvitationRow) {
+  resendingInviteId.value = invitation.id
+  pendingInvitationError.value = null
+  try {
+    const organizationId = dashboard.organization.value?.id
+    if (!organizationId || !['admin','owner','member'].includes(invitation.role ?? '')) throw new Error('Invitation details are unavailable')
+    const result = await authClient.organization.inviteMember({ organizationId, email: invitation.email, role: invitation.role as 'admin' | 'owner' | 'member', resend: true })
+    if (result.error) throw new Error(result.error.message || 'Failed to resend invitation')
+    await refresh()
+  } catch (error) {
+    pendingInvitationError.value = getErrorMessage(error, 'Failed to resend invitation')
+  } finally {
+    resendingInviteId.value = null
   }
 }
 

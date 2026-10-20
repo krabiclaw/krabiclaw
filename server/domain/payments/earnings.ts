@@ -1,9 +1,8 @@
 import type Stripe from 'stripe'
 import { HTTPError } from 'nitro'
-import { queryAll, type DbClient } from '~/server/db'
+import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { loadOwnerPictures } from '~/server/notifications/hero'
-import { getStripeConnectedAccount, stripeLivemodeFromKey } from '~/server/utils/stripe-connect'
-import { createStripeClient } from '~/server/utils/stripe-client'
+import { getStripeConnectedAccount, paymentsStripe } from '~/server/utils/stripe-connect'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { authorizePayments, type FinancialPrincipal, type Payment } from './index'
 
@@ -55,7 +54,8 @@ export async function paymentPictures(db: DbClient, organizationId: string, paym
 
 export interface MonthEarnings { month: string; paid: number; refunded: number }
 export interface EarningsPerformance {
-  currency: string | null
+  /** What was earned in; with nothing earned yet, the currency the business sells in. */
+  currency: string
   /** Twelve months of the year, every month present. */
   months: MonthEarnings[]
   /** The selected month by what was sold, largest first. */
@@ -66,7 +66,7 @@ export interface EarningsPerformance {
 export async function paymentPerformance(db: DbClient, principal: FinancialPrincipal, year: number, month: string): Promise<EarningsPerformance> {
   await authorizePayments(principal, 'read')
   if (!Number.isInteger(year) || year < 2000 || year > 2100) throw new HTTPError({ statusCode: 400, statusMessage: 'Valid year is required' })
-  if (!/^\d{4}-\d{2}$/.test(month)) throw new HTTPError({ statusCode: 400, statusMessage: 'Valid month is required' })
+  if (!/^\d{4}-\d{2}$/.test(month) || !month.startsWith(`${year}-`)) throw new HTTPError({ statusCode: 400, statusMessage: 'Valid month within the requested year is required' })
   const rows = await queryAll<{ month: string; currency: string; paid: number; refunded: number }>(db, `SELECT strftime('%Y-%m', created_at) AS month, currency, SUM(captured_amount) AS paid, SUM(refunded_amount) AS refunded FROM payments WHERE organization_id = ? AND created_at >= ? AND created_at < ? GROUP BY 1, 2 ORDER BY 1`, [principal.organizationId, `${year}-01-01T00:00:00.000Z`, `${year + 1}-01-01T00:00:00.000Z`])
   const currencies = [...new Set(rows.map(row => row.currency))]
   if (currencies.length > 1) throw new HTTPError({ statusCode: 409, statusMessage: 'Earnings in more than one currency cannot be charted together' })
@@ -87,7 +87,9 @@ export async function paymentPerformance(db: DbClient, principal: FinancialPrinc
     entry.count += 1
     byTitle.set(picture.title, entry)
   }
-  return { currency: currencies[0] ?? null, months, items: [...byTitle.values()].sort((a, b) => b.paid - a.paid) }
+  const currency = currencies[0] ?? (await queryFirst<{ default_currency: string }>(db, 'SELECT default_currency FROM organization WHERE id = ?', [principal.organizationId]))?.default_currency
+  if (!currency) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
+  return { currency, months, items: [...byTitle.values()].sort((a, b) => b.paid - a.paid) }
 }
 
 export interface PayoutItem { paymentId: string; title: string; imageUrl: string | null; amount: number; currency: string; startsAt: string | null; endsAt: string | null; timeZone: string | null; subjectTitle: string | null }
@@ -104,9 +106,7 @@ export interface PayoutDetail {
 export async function connectedStripe(db: DbClient, env: CloudflareEnv, organizationId: string) {
   const account = await getStripeConnectedAccount(db, organizationId)
   if (!account?.stripeAccountId) throw new HTTPError({ statusCode: 404, statusMessage: 'Stripe account not connected' })
-  if (!env.STRIPE_SECRET_KEY) throw new HTTPError({ statusCode: 503, statusMessage: 'Stripe is not configured' })
-  if (account.livemode !== stripeLivemodeFromKey(env.STRIPE_SECRET_KEY)) throw new HTTPError({ statusCode: 409, statusMessage: 'Connected Stripe account mode does not match configuration' })
-  return { stripe: createStripeClient(env.STRIPE_SECRET_KEY, 'payments'), options: { stripeAccount: account.stripeAccountId } }
+  return { stripe: paymentsStripe(env, account.livemode), options: { stripeAccount: account.stripeAccountId } }
 }
 
 /**
@@ -165,8 +165,8 @@ export async function paymentTransactions(db: DbClient, principal: FinancialPrin
   const [pictures, buyers, bookings, orders] = ids.length
     ? await Promise.all([
         paymentPictures(db, principal.organizationId, page.payments),
-        queryAll<{ id: string; name: string | null }>(db, `SELECT p.id, COALESCE(u.name, json_extract(r.payload_json, '$.guest.name')) AS name FROM payments p LEFT JOIN user u ON u.id = p.buyer_user_id LEFT JOIN payment_checkout_holds h ON h.payment_id = p.id LEFT JOIN requests r ON r.id = h.request_id WHERE p.id IN (SELECT value FROM json_each(?))`, [json]),
-        queryAll<{ payment_id: string; request_id: string | null }>(db, `SELECT p.id AS payment_id, b.request_id FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?))`, [json]),
+        queryAll<{ id: string; name: string | null }>(db, `SELECT p.id, COALESCE(json_extract(r.payload_json, '$.guest.name'), u.name) AS name FROM payments p LEFT JOIN user u ON u.id = p.buyer_user_id LEFT JOIN payment_checkout_holds h ON h.payment_id = p.id LEFT JOIN requests r ON r.id = h.request_id WHERE p.id IN (SELECT value FROM json_each(?))`, [json]),
+        queryAll<{ payment_id: string; request_id: string | null }>(db, `SELECT p.id AS payment_id, b.request_id FROM payments p JOIN bookings b ON b.id = p.subject_id AND b.organization_id = p.organization_id WHERE p.subject_type = 'booking' AND p.id IN (SELECT value FROM json_each(?)) UNION ALL SELECT p.id, r.request_id FROM payments p JOIN reservations r ON r.id = p.subject_id AND r.organization_id = p.organization_id WHERE p.subject_type = 'reservation' AND p.id IN (SELECT value FROM json_each(?))`, [json,json]),
         queryAll<{ payment_id: string }>(db, `SELECT payment_id FROM payment_orders WHERE payment_id IN (SELECT value FROM json_each(?))`, [json]),
       ])
     : [new Map<string, PaymentPicture>(), [], [], []]
@@ -176,7 +176,7 @@ export async function paymentTransactions(db: DbClient, principal: FinancialPrin
     payments: page.payments.map((payment) => {
       const picture = pictures.get(payment.id)!
       const request = bookings.find(row => row.payment_id === payment.id)?.request_id
-      const to = request ? `${base}/booking/${encodeURIComponent(request)}` : `${base}/${orders.some(row => row.payment_id === payment.id) ? 'order' : 'payment'}/${encodeURIComponent(payment.id)}`
+      const to = request ? `${base}/${payment.subject_type}/${encodeURIComponent(request)}` : `${base}/${orders.some(row => row.payment_id === payment.id) ? 'order' : 'payment'}/${encodeURIComponent(payment.id)}`
       return {
         id: payment.id, created_at: payment.created_at, currency: payment.currency, amount: payment.amount, captured_amount: payment.captured_amount, refunded_amount: payment.refunded_amount, state: payment.state,
         title: picture.title, image_url: picture.imageUrl, buyer_name: buyers.find(row => row.id === payment.id)?.name ?? null,

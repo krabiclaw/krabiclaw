@@ -1,3 +1,5 @@
+import { assertExactCanonicalLocale } from '~/server/utils/localization'
+import { getSourceLocale } from '~/server/utils/organization-locales'
 import { defineHandler } from 'nitro';
 import { getQuery, getRouterParam } from 'nitro/h3';
 import { apiErrorResponse, cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
@@ -15,7 +17,7 @@ export default defineHandler(async (event) => {
   if (!db) return apiErrorResponse(event, 503, 'DATABASE_UNAVAILABLE', 'Public post data is temporarily unavailable')
 
   const query = getQuery(event)
-  const locale = typeof query.locale === 'string' ? query.locale : 'en'
+  const locale = query.locale === undefined ? await getSourceLocale(db, organizationId) : assertExactCanonicalLocale(query.locale)
   const previewAuthorized = await resolvePreviewAuthorization(event, organizationId, previewSecretOf(env))
   const post = await getPublicSocialPost(env, db, organizationId, slug, locale, previewAuthorized)
   if (!post) return apiErrorResponse(event, 404, 'POST_NOT_FOUND', 'Post not found')

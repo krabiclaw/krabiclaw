@@ -130,7 +130,7 @@ async function main() {
       expected_updated_at: toolData(postPublish.body)?.updated_at,
       targets: [{ channel: 'organization' }, { channel: 'facebook', target_id: 'no-page-connected', connection_revision: 'none' }],
     })
-    expectSuccess('publish_post answers when facebook is not connected', facebookPublish)
+    expectValue('publish_post reports incomplete publication when facebook is not connected', facebookPublish.status === 200 && facebookPublish.body?.result?.isError === true, facebookPublish.body)
     const outcomes = toolData(facebookPublish.body)?.outcomes ?? []
     expectValue(
       'publish_post keeps the website receipt and skips facebook with the problem get_social_connections named',

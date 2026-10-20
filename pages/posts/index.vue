@@ -26,21 +26,22 @@
 import SocialPosts from '~/components/social/SocialPosts.vue'
 definePageMeta({ middleware: 'template-layout' })
 
-const { organizationId, organization, isPlatform } = useTenantOrganization()
-if (!organizationId) throw createError({ statusCode: 404 })
+const { organization } = useTenantOrganization()
+const isPlatform = organization.template.slug === 'platform'
 const { t, localePath } = useI18n()
 
-const { locations } = await usePublicPageData()
+const { locations, sections } = await usePublicPageData()
+// A section with nothing on it is not a page; the navigation hides it by the same flag.
+if (sections.value?.posts === false) throw createError({ statusCode: 404 })
 const feed = await useSocialPostFeed(() => ({ locationId: null }))
-const organizationName = computed(() => organization?.name?.trim() ?? '')
+const organizationName = organization.name
 
 useSocialMetadata(() => ({
   path: '/posts',
-  // Krabiclaw's own pages carry the product name through their template.
-  title: isPlatform ? t('social_posts.title') : `${t('social_posts.title')} | ${organizationName.value}`,
-  description: t('social_posts.meta_description', { organization: organizationName.value }),
-  brand: { organizationName: organizationName.value },
-  socialImage: organization?.social_image ?? null,
+  // KrabiClaw's own pages carry the product name through their template.
+  title: isPlatform ? t('social_posts.title') : `${t('social_posts.title')} | ${organizationName}`,
+  description: t('social_posts.meta_description', { organization: organizationName }),
+  socialImage: organization.social_image,
   breadcrumbs: [
     { name: t('social_posts.title'), url: '/posts' },
   ],

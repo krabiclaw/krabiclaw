@@ -14,7 +14,7 @@ import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cach
  *
  * A property the account already owns is simply selected — Google has already
  * been satisfied about it, and asking it to verify again would be theatre.
- * This site's own URL takes the automated route instead: Krabiclaw asks Google
+ * This site's own URL takes the automated route instead: KrabiClaw asks Google
  * for the META token, serves it, and has Google come and look. The tenant
  * never sees a token, which is the whole point of deleting the field that used
  * to make them paste one.
@@ -45,11 +45,11 @@ export default defineHandler(async (event) => {
       return jsonResponse({ success: true, site_url: requested, verified: true })
     }
 
-    // Only a URL Krabiclaw actually serves can be verified by serving a tag.
-    const ownUrl = await organizationPublicUrl(db, organization.id)
+    // Only a URL KrabiClaw actually serves can be verified by serving a tag.
+    const ownUrl = await organizationPublicUrl(env, db, organization.id)
     if (!ownUrl || requested !== ownUrl) {
       return jsonResponse({
-        error: 'Krabiclaw can only verify this website\'s own address. Add the property in Search Console first, then choose it here.',
+        error: 'KrabiClaw can only verify this website\'s own address. Add the property in Search Console first, then choose it here.',
       }, { status: 400 })
     }
 

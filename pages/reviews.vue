@@ -30,7 +30,7 @@
           :to="localePath(`/locations/${loc.slug}/reviews`)"
           class="inline-flex items-center gap-2 rounded-full border border-default px-5 py-2.5 text-sm text-muted no-underline transition hover:bg-muted hover:text-default"
         >
-          <SayaIcon name="map-pin" class="size-3.5 opacity-70" />
+          <TenantIcon name="map-pin" class="size-3.5 opacity-70" />
           {{ loc.title }}
         </NuxtLink>
       </div>
@@ -38,7 +38,7 @@
 
     <section class="mx-auto max-w-7xl px-4 pb-16 sm:px-6 lg:px-8">
       <div v-if="visibleReviews.length" class="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-        <SayaReviewCard
+        <TenantReviewCard
           v-for="review in visibleReviews"
           :key="review.id"
           :review="review"
@@ -64,13 +64,14 @@
 </template>
 
 <script setup>
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
-const { organizationId, organization } = useTenantOrganization()
-if (!organizationId) throw createError({ statusCode: 404 })
+const { organization } = useTenantOrganization()
 const { localePath, t } = useI18n()
 
-const { googleMaps, locations } = await usePublicPageData()
+const { googleMaps, locations, sections } = await usePublicPageData()
+// A section with nothing on it is not a page; the navigation hides it by the same flag.
+if (sections.value?.reviews === false) throw createError({ statusCode: 404 })
 const allReviews = computed(() => googleMaps.value?.reviews ?? [])
 
 const googleReviewSummary = computed(() => {
@@ -93,16 +94,13 @@ const hasMore = computed(() => visibleCount.value < allReviews.value.length)
 const remaining = computed(() => allReviews.value.length - visibleCount.value)
 function loadMore() { visibleCount.value += PAGE_SIZE }
 
-const organizationName = computed(() => organization?.name?.trim() || googleMaps.value?.business?.title?.trim() || '')
+const organizationName = organization.name
 
 useSocialMetadata(() => ({
   path: '/reviews',
-  title: `${t('saya.footer.reviews')} | ${organizationName.value}`,
-  description: t('saya.reviews_page.meta_description', { organization: organizationName.value }),
+  title: `${t('saya.footer.reviews')} | ${organizationName}`,
+  description: t('saya.reviews_page.meta_description', { organization: organizationName }),
   label: t('saya.footer.reviews'),
-  brand: {
-    organizationName: organizationName.value,
-  },
   breadcrumbs: [
     { name: t('saya.footer.reviews'), url: '/reviews' },
   ],
@@ -110,8 +108,8 @@ useSocialMetadata(() => ({
 
 useSchemaOrg([
   computed(() => ({
-    '@type': getBusinessSchemaTypes(organization?.vertical),
-    name: organizationName.value,
+    '@type': getBusinessSchemaTypes(organization.vertical),
+    name: organizationName,
     ...(googleReviewSummary.value ? {
       aggregateRating: {
         '@type': 'AggregateRating',

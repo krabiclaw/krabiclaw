@@ -27,14 +27,13 @@ import { buildPostLoginUrl, validatedInternalPath } from '~/shared/auth/return-t
 
 definePageMeta({ layout: 'access', auth: false })
 // A page about the business: its image is the organization's.
-const organizationSocialImage = useTenantOrganization().organization?.social_image ?? null
+const { social_image: organizationSocialImage } = useTenantOrganization().organization
 useSocialMetadata({
-  template: 'platform',
   schema: false,
   path: '/login',
   socialImage: organizationSocialImage,
   title: 'Sign in',
-  description: 'Sign in to your Krabiclaw account to manage your site, bookings and content.',
+  description: 'Sign in to your KrabiClaw account to manage your site, bookings and content.',
   discoverability: 'private',
 })
 

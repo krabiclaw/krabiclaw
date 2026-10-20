@@ -8,84 +8,62 @@ import {
 } from '~/utils/public-resource-contracts'
 
 export const useOrganizationShellState = () => {
-  const { isPlatform, organizationId } = useTenantOrganization();
-  const requestEvent = useRequestEvent();
-  const { locale } = useI18n();
-  const isSyntheticServerAssetFetch = import.meta.server
-    && !requestEvent?.req.runtime?.cloudflare?.env
-    && (
-      requestEvent?.path?.startsWith('/_i18n/')
-      || requestEvent?.path?.startsWith('/_nuxt/')
-      || requestEvent?.path?.startsWith('/api/_nuxt_icon/')
-      || requestEvent?.path?.startsWith('/__nuxt_error')
-    );
-
+  const { id: organizationId } = useTenantOrganization().organization
+  const { locale } = useI18n()
 
   const params = computed<PublicPageRequest>(() => ({
     page: null,
     location: null,
-    experience: null,
     datasets: [],
     blogSlug: null,
     locale: locale.value,
   }));
 
   const key = computed(() => usePublicResourceKey('shell', organizationId, params.value));
-  const url = computed(() => buildPublicPageUrl(organizationId, params.value, 'shell'));
+  const url = computed(() => buildPublicPageUrl(params.value, 'shell'));
 
-  let data: Ref<OrganizationShellPayload | undefined>
-  let error: Ref<Error | null>
-  let pending: Ref<boolean>
-  let refresh: () => Promise<unknown>
-  let ready: Promise<unknown>
-  if (isSyntheticServerAssetFetch || isPlatform || !organizationId) {
-    data = ref<OrganizationShellPayload>()
-    error = ref<Error | null>(null)
-    pending = ref(false)
-    refresh = async () => {}
-    ready = Promise.resolve()
-  } else {
-    const asyncData = useAsyncData<OrganizationShellPayload>(
-          key,
-          (_nuxtApp, { signal }) => loadPublicResourcePayload<OrganizationShellPayload>({
-              organizationId,
-              resourceKind: 'shell',
-              url: url.value,
-              key: key.value,
-              query: {
-                locale: params.value.locale ?? undefined,
-              },
-              validate: isPublicShellPayload,
-              failureMessage: 'Public shell failed',
-              signal,
-            }),
-          {
-            server: true,
-            dedupe: 'cancel',
-            // Reuse what SSR already resolved. Without this the shell can be
-            // fetched a second time during hydration, and that fetch carries
-            // different authorization than the server render did (the preview
-            // cookie is a third-party cookie inside the onboarding preview
-            // frame), which renders a different shell than the one being
-            // hydrated. The page loader does the same for the same reason.
-            getCachedData(cacheKey) {
-              return useNuxtApp().payload.data[cacheKey] as OrganizationShellPayload | undefined
-            },
-          },
-        );
-    data = asyncData.data
-    error = asyncData.error as Ref<Error | null>
-    pending = asyncData.pending
-    refresh = asyncData.refresh
-    ready = import.meta.server ? asyncData : Promise.resolve()
-  }
+  const asyncData = useAsyncData<OrganizationShellPayload>(
+    key,
+    (_nuxtApp, { signal }) => loadPublicResourcePayload<OrganizationShellPayload>({
+      organizationId,
+      resourceKind: 'shell',
+      url: url.value,
+      key: key.value,
+      query: {
+        locale: params.value.locale ?? undefined,
+      },
+      validate: isPublicShellPayload,
+      failureMessage: 'Public shell failed',
+      signal,
+    }),
+    {
+      server: true,
+      dedupe: 'cancel',
+      // Reuse what SSR already resolved. Without this the shell can be
+      // fetched a second time during hydration, and that fetch carries
+      // different authorization than the server render did (the preview
+      // cookie is a third-party cookie inside the onboarding preview
+      // frame), which renders a different shell than the one being
+      // hydrated. The page loader does the same for the same reason.
+      getCachedData(cacheKey) {
+        return useNuxtApp().payload.data[cacheKey] as OrganizationShellPayload | undefined
+      },
+    },
+  );
+  const { data, error, pending, refresh } = asyncData
+  const ready = import.meta.server ? asyncData : Promise.resolve()
 
   const locations = computed(() => data.value?.locations ?? []);
   const config = computed(() => (data.value?.config ?? {}) as Record<string, string>);
   const shellOrganization = computed(() => data.value?.organization ?? null);
   const googleMaps = computed(() => data.value?.googleMaps ?? null);
-  const hasProducts = computed(() => data.value?.hasProducts ?? false);
-  const hasBookableProducts = computed(() => data.value?.hasBookableProducts ?? false);
+  // Before the shell loads no section is known to have anything on it.
+  const sections = computed(() => data.value?.sections ?? null);
+  const consultation = computed(() => data.value?.consultation ?? null);
+  const canSchedule = computed(() => data.value?.canSchedule ?? false);
+  const compliance = computed(() => data.value?.compliance ?? null);
+  const pageLinks = computed(() => data.value?.pageLinks ?? []);
+  const searchConsoleVerification = computed(() => data.value?.searchConsoleVerification ?? null);
   const platformMessages = useState<Record<string, string> | null>('platform-locale-messages', () => null)
   watch(
     () => data.value?.platformMessages,
@@ -97,8 +75,12 @@ export const useOrganizationShellState = () => {
     config,
     organization: shellOrganization,
     googleMaps,
-    hasProducts,
-    hasBookableProducts,
+    sections,
+    consultation,
+    canSchedule,
+    compliance,
+    pageLinks,
+    searchConsoleVerification,
     data,
     pending,
     error,

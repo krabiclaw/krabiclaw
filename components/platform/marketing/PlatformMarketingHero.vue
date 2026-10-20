@@ -1,11 +1,25 @@
 <template>
-  <PlatformCoastalScene v-if="page.recipe === 'products'" :block="block" :page="page" />
+  <section v-if="page.path === '/plugin'" class="kc-mcp-hero" data-parity-section="hero">
+    <div class="kc-mcp-hero__copy">
+      <p v-if="eyebrow" class="kc-mcp-hero__eyebrow">{{ eyebrow }}</p>
+      <h1>{{ title }}</h1>
+      <p v-if="subtitle" class="kc-mcp-hero__subtitle">{{ subtitle }}</p>
+      <div class="kc-mcp-hero__actions">
+        <PlatformAccountCta v-if="ctaLabel && ctaUrl" :label="ctaLabel" :to="ctaUrl" size="xl" class="kc-mcp-hero__start" />
+        <NuxtLink v-if="secondaryLabel && secondaryUrl" :to="secondaryUrl" class="kc-mcp-hero__link">{{ secondaryLabel }} <span aria-hidden="true">↗</span></NuxtLink>
+      </div>
+    </div>
+    <figure v-if="pluginImage && mediaStillUrl(pluginImage)" class="kc-mcp-hero__art">
+      <img :src="mediaStillUrl(pluginImage)!" :alt="pluginImage.alt_text || ''" :width="pluginImage.width ?? undefined" :height="pluginImage.height ?? undefined" fetchpriority="high" decoding="async">
+    </figure>
+  </section>
+  <PlatformCoastalScene v-else-if="page.recipe === 'products'" :block="block" :page="page" />
   <template v-else-if="page.path === '/'">
     <section
       ref="homeHero"
       class="kc-parallax-hero"
       data-parity-section="hero"
-      aria-label="Krabiclaw"
+      aria-label="KrabiClaw"
     >
       <div class="kc-parallax-hero__art" aria-hidden="true">
         <picture
@@ -72,8 +86,8 @@
           <p v-if="subtitle" class="kc-parallax-intro__subtitle">{{ subtitle }}</p>
 
           <!-- One action: sign up when signed out, the dashboard when signed in. -->
-          <div v-if="ctaLabel && ctaUrl" ref="heroActions" class="kc-parallax-intro__actions" :inert="heroActionCovered" :style="{ pointerEvents: heroActionCovered ? 'none' : undefined }">
-            <PlatformAccountCta :label="ctaLabel" :to="ctaUrl" variant="gradient" size="xl" />
+          <div v-if="ctaLabel && ctaUrl" class="kc-parallax-intro__actions">
+            <PlatformAccountCta :label="ctaLabel" :to="ctaUrl" size="xl" />
           </div>
         </div>
       </div>
@@ -96,18 +110,6 @@
     <h1>{{ title }}</h1>
     <p v-if="subtitle">{{ subtitle }}</p>
   </section>
-
-  <!-- The plugin header: the app icon beside the title, the account CTA at the end of the row. -->
-  <div v-else-if="page.path === '/plugin'" class="flex flex-col gap-6 md:flex-row md:items-center md:justify-between" data-parity-section="hero">
-    <div class="flex items-center gap-6">
-      <img src="/platform/apple-touch-icon.png" alt="Krabiclaw app icon" class="size-24 rounded-[28px] border border-default shadow-lg">
-      <div>
-        <h1 class="m-0 text-3xl font-extrabold tracking-tight text-default md:text-4xl">{{ title }}</h1>
-        <p v-if="subtitle" class="mt-2 text-lg text-muted">{{ subtitle }}</p>
-      </div>
-    </div>
-    <PlatformAccountCta v-if="ctaLabel" :label="ctaLabel" :to="ctaUrl || '/signup'" size="xl" />
-  </div>
 
   <!--
     The vertical pages and Features: centered, an icon pill, a two-line headline
@@ -141,21 +143,14 @@ import PlatformCoastalScene from '~/components/platform/marketing/PlatformCoasta
 import type { PlatformIconName } from '~/components/platform/PlatformIcon.vue'
 import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { TenantPageBlock } from '~/utils/tenant-page-blocks'
-import { blockStrings, blockText, blockTextOrNull } from '~/utils/tenant-page-block-data'
+import { blockStrings, blockText, blockTextOrNull, blockMedia } from '~/utils/tenant-page-block-data'
+import { mediaStillUrl } from '~/shared/media-placement-contract'
 
 /**
- * The hero of one of Krabiclaw's own marketing pages.
- *
- * Six pages, five shapes: the homepage's parallax artwork and intro, the
- * About header, the Pricing header with its pinging pill, the plugin header
- * with the app icon, and the centered hero the vertical pages and Features
- * share. Each shape is the markup the page rendered before it was a document,
- * chosen by the page path the way BlawbyPageHero chooses its own.
- *
- * `title` may carry "\n" where the original forced a line break, and
- * `accent` names the part of it rendered in the gradient. The vertical
- * accent decides which gradient that is. On the home shape,
- * `rotating_accents` closes the headline with one phrase at a time.
+ * Each marketing page renders its authored headline and media in its own
+ * presentation. The MCP page’s split composition takes precedence over the
+ * shared products recipe. Homepage artwork and parallax keep their own path.
+ * `title` preserves authored line breaks; `accent` marks a highlighted line.
  */
 const props = defineProps<{ block: TenantPageBlock; page: PublicTenantPage }>()
 
@@ -177,7 +172,7 @@ type ParallaxLayer = {
  * Each plane requires its exact breakpoint slots (parallax_sky_xxs, _xs,
  * _sm, _md, _lg). These placements keep the
  * original art-directed mobile/tablet/desktop compositions editable through
- * Krabiclaw's normal media tools instead of baking image URLs into the frontend.
+ * KrabiClaw's normal media tools instead of baking image URLs into the frontend.
  */
 const PARALLAX_BREAKPOINTS: ParallaxBreakpoint[] = ['xxs', 'xs', 'sm', 'md', 'lg']
 
@@ -241,73 +236,6 @@ const transitionImage = computed(() => {
 })
 
 const homeHero = ref<HTMLElement | null>(null)
-const heroActions = ref<HTMLElement | null>(null)
-const heroActionCovered = ref(true)
-const heroAlphaMasks = new Map<string, { width: number, height: number, pixels: Uint8ClampedArray } | null>()
-
-async function loadHeroAlphaMasks() {
-  if (!homeHero.value) return
-  const images = Array.from(homeHero.value.querySelectorAll<HTMLImageElement>('picture img')).slice(1)
-  await Promise.all(images.map(async (image) => {
-    let source = image.currentSrc
-    if (source && heroAlphaMasks.has(source)) return
-    try {
-      await image.decode()
-      source = image.currentSrc
-      if (heroAlphaMasks.has(source)) return
-      // Reserve this source before fetching so resize cannot fetch it twice.
-      heroAlphaMasks.set(source, null)
-      const response = await fetch(source)
-      if (!response.ok) throw new Error('Artwork unavailable')
-      const bitmap = await createImageBitmap(await response.blob())
-      const canvas = document.createElement('canvas')
-      canvas.width = bitmap.width
-      canvas.height = bitmap.height
-      const context = canvas.getContext('2d', { willReadFrequently: true })!
-      context.drawImage(bitmap, 0, 0)
-      heroAlphaMasks.set(source, { width: canvas.width, height: canvas.height, pixels: context.getImageData(0, 0, canvas.width, canvas.height).data })
-      bitmap.close()
-    }
-    catch {
-      // Unknown pixels keep the CTA inert; a later resize can reload them.
-      heroAlphaMasks.delete(source)
-    }
-  }))
-  updateHeroActionCoverage()
-}
-
-function updateHeroActionCoverage() {
-  const hero = homeHero.value
-  const action = heroActions.value
-  if (!hero || !action) return
-  const target = action.getBoundingClientRect()
-  const clip = hero.getBoundingClientRect()
-  let covered = target.top < clip.top || target.bottom > clip.bottom
-  for (const image of Array.from(hero.querySelectorAll<HTMLImageElement>('picture img')).slice(1)) {
-    const mask = heroAlphaMasks.get(image.currentSrc)
-    // Keep interaction disabled until each covering plane's pixels are known.
-    if (!mask) {
-      covered = true
-      continue
-    }
-    const bounds = image.getBoundingClientRect()
-    const foreground = image.parentElement?.classList.contains('kc-parallax-hero__foreground')
-    const scale = (foreground ? Math.max : Math.min)(bounds.width / mask.width, bounds.height / mask.height)
-    const left = bounds.left + (bounds.width - mask.width * scale) / 2
-    for (let y = Math.max(target.top, bounds.top); !covered && y < Math.min(target.bottom, bounds.bottom); y++) {
-      const sourceY = Math.floor((y - bounds.top) / scale)
-      if (sourceY < 0 || sourceY >= mask.height) continue
-      for (let x = target.left; x < target.right; x++) {
-        const sourceX = Math.floor((x - left) / scale)
-        if (sourceX >= 0 && sourceX < mask.width && mask.pixels[(sourceY * mask.width + sourceX) * 4 + 3]! > 0) {
-          covered = true
-          break
-        }
-      }
-    }
-  }
-  heroActionCovered.value = covered
-}
 let homeHeroFrame: number | null = null
 let homeHeroScrollListener: (() => void) | null = null
 
@@ -316,7 +244,6 @@ function renderHomeParallax() {
   if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
     homeHero.value.style.setProperty('--kc-parallax-offset', String(Math.max(0, window.scrollY)) + 'px')
   }
-  updateHeroActionCoverage()
 }
 
 function scheduleHomeParallax() {
@@ -329,20 +256,14 @@ function scheduleHomeParallax() {
 
 onMounted(() => {
   if (props.page.path !== '/') return
+  // When CSS scroll-driven animations are supported, the compositor handles parallax natively without JS scroll listeners.
+  if (typeof CSS !== 'undefined' && CSS.supports && CSS.supports('(animation-timeline: view()) and (animation-range: entry)')) {
+    return
+  }
   renderHomeParallax()
   homeHeroScrollListener = scheduleHomeParallax
   window.addEventListener('scroll', homeHeroScrollListener, { passive: true })
 })
-
-onMounted(() => {
-  if (props.page.path !== '/') return
-  void loadHeroAlphaMasks()
-  window.addEventListener('resize', refreshHeroActionCoverage)
-})
-
-function refreshHeroActionCoverage() {
-  void loadHeroAlphaMasks()
-}
 
 const ROTATION_INTERVAL_MS = 2600
 const rotatingIndex = ref(0)
@@ -356,12 +277,12 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  window.removeEventListener('resize', refreshHeroActionCoverage)
   if (rotationTimer !== null) clearInterval(rotationTimer)
   if (homeHeroScrollListener) window.removeEventListener('scroll', homeHeroScrollListener)
   if (homeHeroFrame !== null) window.cancelAnimationFrame(homeHeroFrame)
 })
 
+const pluginImage = computed(() => blockMedia(props.block, 'media')[0])
 const eyebrow = computed(() => blockTextOrNull(props.block.data.eyebrow))
 const eyebrowIcon = computed(() => blockTextOrNull(props.block.data.eyebrow_icon) as PlatformIconName | null)
 const title = computed(() => blockText(props.block.data.title))
@@ -652,15 +573,74 @@ const gradientClass = computed(() => GRADIENT_CLASS[props.page.path] ?? GRADIENT
   }
 }
 
+@keyframes kc-parallax-layer-exit {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(0, calc(100% * var(--kc-layer-compensation)), 0);
+  }
+}
+
+@keyframes kc-parallax-mark-exit {
+  from {
+    transform: translate3d(-50%, 0, 0);
+  }
+  to {
+    transform: translate3d(-50%, calc(1600px / var(--kc-scene-ratio)), 0);
+  }
+}
+
+@keyframes kc-hero-copy-fade {
+  0%, 55% {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  80%, 100% {
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+@supports ((animation-timeline: view()) and (animation-range: entry)) {
+  .kc-parallax-hero {
+    view-timeline: --kc-hero-timeline block;
+  }
+
+  .kc-parallax-hero__layer {
+    animation: kc-parallax-layer-exit linear both;
+    animation-timeline: --kc-hero-timeline;
+    animation-range: exit 0% exit 100%;
+  }
+
+  .kc-parallax-hero__mark {
+    animation: kc-parallax-mark-exit linear both;
+    animation-timeline: --kc-hero-timeline;
+    animation-range: exit 0% exit 100%;
+  }
+
+  .kc-parallax-hero__copy {
+    animation: kc-hero-copy-fade linear both;
+    animation-timeline: --kc-hero-timeline;
+    animation-range: exit 0% exit 100%;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .kc-parallax-hero__layer {
+    animation: none;
     transform: none;
     will-change: auto;
   }
 
   .kc-parallax-hero__mark {
+    animation: none;
     transform: translateX(-50%);
     will-change: auto;
+  }
+
+  .kc-parallax-hero__copy {
+    animation: none;
   }
 }
 .kc-parallax-hero__foreground::after {
@@ -680,4 +660,21 @@ const gradientClass = computed(() => GRADIENT_CLASS[props.page.path] ?? GRADIENT
 .kc-pricing-hero { background: #171b31; color: white; text-align: center; padding: 5rem 1.5rem 3rem; }
 .kc-pricing-hero h1 { font-size: clamp(2.3rem, 5vw, 4rem); line-height: 1.1; letter-spacing: -.04em; margin: 0; font-weight: 400; }
 .kc-pricing-hero p { max-width: 42rem; margin: 1.5rem auto 0; color: #bbc0cf; line-height: 1.6; }
+</style>
+
+<style scoped>
+.kc-mcp-hero { display: grid; grid-template-columns: 1.05fr 1fr; align-items: center; gap: clamp(2.5rem, 6vw, 6rem); padding: clamp(4rem, 7vw, 7rem) max(7%, calc((100% - 86rem) / 2)); background: #f0ece3; color: #171b31; }
+.kc-mcp-hero__eyebrow { margin: 0 0 1.5rem; color: #945448; font-size: .75rem; font-weight: 600; text-transform: uppercase; letter-spacing: .15em; }
+.kc-mcp-hero h1 { margin: 0; max-width: 12ch; font-size: clamp(3.4rem, 6.5vw, 6.5rem); line-height: 1.02; font-weight: 400; letter-spacing: -.055em; white-space: pre-line; text-wrap: balance; }
+.kc-mcp-hero__subtitle { max-width: 32rem; margin: 2rem 0; color: #62646c; font-size: clamp(1.1rem, 1.65vw, 1.5rem); line-height: 1.6; }
+.kc-mcp-hero__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 1rem 1.75rem; }
+.kc-mcp-hero :deep(.kc-mcp-hero__start) { background: #171b31; color: #fff; border-radius: 999px; padding: 1rem 1.75rem; }
+.kc-mcp-hero__link { display: inline-flex; align-items: center; gap: .75rem; padding: .4rem 0; border-bottom: 1px solid currentColor; color: #944537; font-size: .95rem; font-weight: 500; text-decoration: none; }
+.kc-mcp-hero__link:hover { opacity: .75; }
+.kc-mcp-hero__art { min-width: 0; margin: 0; }
+.kc-mcp-hero__art img { display: block; width: 100%; height: auto; }
+@media (max-width: 767px) {
+  .kc-mcp-hero { grid-template-columns: 1fr; gap: 3rem; padding-top: 4rem; }
+  .kc-mcp-hero h1 { font-size: clamp(3.2rem, 11vw, 5rem); }
+}
 </style>

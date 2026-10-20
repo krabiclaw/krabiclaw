@@ -16,7 +16,7 @@ Audited the actual local Worker in the browser on 2026-10-01 after merging stagi
 | Logo / home | `/` | Existing homepage |
 | Shared navigation/footer | `/restaurants`, `/legal`, `/pricing`, `/plugin`, `/about`, `/blog`, `/docs`, `/help`, `/policies/privacy`, `/policies/terms`, `/products` | Published destination headings verified |
 | Legacy Features | `/features?source=legacy` | Redirects to `/products?source=legacy`; canonical remains `https://krabiclaw.com/products` |
-| Instagram | `https://www.instagram.com/krabiclaw/` | Krabiclaw profile title and handle verified |
+| Instagram | `https://www.instagram.com/krabiclaw/` | KrabiClaw profile title and handle verified |
 | Facebook | `https://www.facebook.com/1205835975938850` | Facebook login wall preserving the profile destination; profile identity could not be verified without signing in |
 
 The four misleading section destinations were corrected to the existing published guides above. No speculative `/products/:slug` links or detailed product copy were added. The repository already routes future detail documents through its canonical catch-all and the reusable Products recipe; this change does not publish detail documents. An absent future detail page is therefore absent authored content, rather than a separate missing page component.

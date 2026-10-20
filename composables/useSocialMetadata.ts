@@ -1,20 +1,15 @@
 import { computed, toValue, type MaybeRefOrGetter } from 'vue'
-import { resolveSeoUrl } from '~/composables/useSeoUrls'
-import { useSchemaOrg } from '~/composables/useSchemaOrg'
+import { defineHowTo, useSchemaOrg } from '#imports'
+import { videoObjectNodes } from '~/shared/youtube-video'
 import {
   composeSocialMetadata,
-  type SocialBrand,
+  resolveSeoUrl,
   type SocialPageMetadataInput,
-  type SocialPageType,
-  type SocialTemplate,
 } from '~/utils/social-metadata'
-import { resolvePublicTemplate } from '~/utils/template-registry'
 import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
-import { isDemoHost, isDemoOrg } from '~/shared/demo'
-import {
-  buildProfessionalServiceGraph,
-  type ProfessionalServiceSchemaInput,
-} from '~/utils/professional-service-schema'
+import type { TenantPageHowToData } from '~/utils/tenant-page-blocks'
+import { markdownToPlainText } from '~/utils/markdown'
+import { isDemoHost, isDemoOrganization } from '~/shared/demo'
 
 export interface PageBreadcrumb {
   name: string
@@ -23,7 +18,7 @@ export interface PageBreadcrumb {
 
 export interface PageFaqItem {
   question: string
-  answer: string
+  answer?: string | null
 }
 
 export type SchemaPageType =
@@ -34,9 +29,12 @@ export type SchemaPageType =
   | 'ItemPage'
   | 'SoftwareApplication'
 
-export type PageProfessionalServiceInput = Omit<ProfessionalServiceSchemaInput, 'origin' | 'pageUrl' | 'pageTitle'> & {
-  pageUrl?: string
-  pageTitle?: string
+export interface PageProfessionalServiceInput {
+  recipe: string | null
+  offering?: {
+    name: string
+    description?: string | null
+  }
 }
 
 export type PageSocialMetadataInput = Omit<SocialPageMetadataInput, 'template' | 'canonicalUrl' | 'brand'> & {
@@ -52,29 +50,29 @@ export type PageSocialMetadataInput = Omit<SocialPageMetadataInput, 'template' |
    * Supply it already localized.
    */
   canonicalPath?: string
-  template?: SocialTemplate
-  brand?: SocialBrand
   breadcrumbs?: PageBreadcrumb[]
   schemaPageType?: SchemaPageType
   schemaNodes?: ApiRecord[]
   faqItems?: PageFaqItem[]
+  contentBlocks?: ReadonlyArray<{ id: string; type: string; data: Record<string, unknown> }>
+  article?: {
+    type: 'BlogPosting' | 'TechArticle' | 'Article'
+    authorType?: 'Person' | 'Organization'
+    dateModified?: string | null
+    imageUrl?: string | null
+    imageWidth?: number | null
+    imageHeight?: number | null
+    articleSection?: string | null
+    keywords?: string | null
+    inLanguage: string
+  }
   softwareApplication?: {
     applicationCategory?: string
     operatingSystem?: string
     offers?: ApiRecord
   }
   professionalService?: PageProfessionalServiceInput
-  isHomepage?: boolean
-  socialType?: SocialPageType
   schema?: boolean
-}
-
-const PLATFORM_NAME = 'Krabiclaw'
-const PLATFORM_DESCRIPTION = 'The AI-powered website builder for local businesses. Build your web presence through conversation with ChatGPT.'
-
-function requireMetadata<T>(resolved: T | null): T {
-  if (!resolved) throw new Error('useSocialMetadata: no page metadata to read')
-  return resolved
 }
 
 /**
@@ -87,39 +85,37 @@ function requireMetadata<T>(resolved: T | null): T {
 export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInput | null>) {
   const config = useRuntimeConfig()
   const requestURL = useRequestURL()
-  const tenant = useTenantOrganization()
+  const { organization, previewAuthorized } = useTenantOrganization()
+  const shell = organization.template.slug === 'platform' ? null : useOrganizationShellState()
   const publicLocale = useState<string>('public-locale', () => 'en')
   const localeRepresentations = useState<PublicLocaleRepresentation[]>('public-locale-representations', () => [])
 
   const normalized = computed(() => {
     const value = toValue(input)
     if (!value) return null
-    const template = value.template ?? resolvePublicTemplate({ themeId: tenant.themeId }).slug
+    const template = organization.template.slug
     const origin = template === 'platform'
-      ? config.public.platformUrl
+      ? config.public.siteUrl
       : requestURL.origin
-    const exactRepresentation = localeRepresentations.value.find(item => item.locale === publicLocale.value)
-    if (publicLocale.value !== 'en' && !exactRepresentation) {
+    const privatePage = value.discoverability === 'private'
+    const exactRepresentation = privatePage ? undefined : localeRepresentations.value.find(item => item.locale === publicLocale.value)
+    if (!privatePage && publicLocale.value !== 'en' && !exactRepresentation) {
       throw createError({ statusCode: 404, statusMessage: 'Localized route representation was not found' })
     }
     const canonicalUrl = resolveSeoUrl(value.canonicalPath ?? exactRepresentation?.route_path ?? value.path, origin)
-    const brand = value.brand ?? (template === 'platform'
-      ? {
-          organizationName: PLATFORM_NAME,
-        }
-      : { organizationName: '' })
+    const brand = { organizationName: organization.name }
     const socialInput: SocialPageMetadataInput = {
       ...value,
       template,
       brand,
-      pageType: value.socialType || value.pageType || 'website',
+      pageType: value.pageType || 'website',
       canonicalUrl,
       // A preview is the owner looking at their own unpublished work on the
       // real host, and the demo showcase site is not a real business.
       // Whatever the page would otherwise say about itself, nothing
       // reached this way is Google's to keep — and deciding it here means no
       // page can be added that forgets to.
-      discoverability: tenant.previewAuthorized || isDemoHost(requestURL.hostname) || isDemoOrg(tenant.organizationId)
+      discoverability: previewAuthorized || isDemoHost(requestURL.hostname) || isDemoOrganization(organization)
         ? 'private'
         : value.discoverability,
     }
@@ -133,7 +129,7 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
   useHead(() => {
     const resolved = normalized.value
     if (!resolved) return {}
-    const alternateLinks: Array<{ rel: 'alternate'; hreflang: string; href: string }> = localeRepresentations.value.map(representation => ({
+    const alternateLinks: Array<{ rel: 'alternate'; hreflang: string; href: string }> = (resolved.value.discoverability === 'private' ? [] : localeRepresentations.value).map(representation => ({
       rel: 'alternate',
       hreflang: representation.locale,
       href: resolveSeoUrl(representation.route_path, resolved.origin),
@@ -173,125 +169,221 @@ export function useSocialMetadata(input: MaybeRefOrGetter<PageSocialMetadataInpu
   })
 
   useSchemaOrg(computed(() => {
-    if (!normalized.value) return null
+    if (!normalized.value) return []
     const { value, origin, template, tags } = normalized.value
-    const isArticleCollection = value.schemaPageType === 'CollectionPage' && value.schemaNodes?.some(node => node['@type'] === 'ItemList')
-    const shouldEmitSchema = value.schema !== false && (
+    if (value.schema === false || value.discoverability === 'private') return []
+    const blocks = (value.contentBlocks ?? []).filter(block =>
+      block.data.status !== 'inactive' && block.data.render_enabled !== false && block.data.schema_enabled !== false,
+    )
+    const videos = videoObjectNodes(blocks, tags.canonicalUrl)
+    const shouldEmitSchema = (
       template === 'platform'
-      || isArticleCollection
       || value.schema === true
       || Boolean(value.breadcrumbs?.length)
       || Boolean(value.faqItems?.length)
       || Boolean(value.schemaNodes?.length)
+      || blocks.some(block => block.type === 'how_to' || block.type === 'faq')
+      || Boolean(videos.length)
+      || Boolean(value.article)
       || Boolean(value.softwareApplication)
       || Boolean(value.professionalService)
     )
-    if (!shouldEmitSchema) return null
+    if (!shouldEmitSchema) return []
 
-    if (value.professionalService) {
-      if (!value.professionalService.org?.name) return null
-      const serviceGraph = buildProfessionalServiceGraph({
-        ...value.professionalService,
-        origin,
-        pageUrl: value.professionalService.pageUrl ?? tags.canonicalUrl,
-        pageTitle: value.professionalService.pageTitle ?? value.title,
-        pageDescription: value.professionalService.pageDescription ?? value.description,
-        breadcrumbs: value.professionalService.breadcrumbs ?? value.breadcrumbs,
-        faqs: value.professionalService.faqs ?? value.faqItems,
-        imageUrl: value.professionalService.imageUrl ?? (value.socialImage ? resolveSeoUrl(value.socialImage.url, origin) : undefined),
-      })
-      return serviceGraph as unknown as ApiRecord
-    }
     const organizationRoot = resolveSeoUrl('/', origin).replace(/\/$/, '')
     const websiteId = `${organizationRoot}/#website`
     const organizationId = `${organizationRoot}/#organization`
     const url = tags.canonicalUrl
     const webpageId = `${url}#webpage`
-    const breadcrumbId = `${url}#breadcrumb`
-    const graph: ApiRecord[] = []
-    const publisherName = template === 'platform' ? PLATFORM_NAME : tenant.organization?.name?.trim()
-    if (!publisherName) throw new Error('Structured schema requires the organization or platform name')
-    const publisherDescription = template === 'platform' ? PLATFORM_DESCRIPTION : tenant.organization?.brand_description || undefined
-    const publisherLogo = template === 'platform' ? `${organizationRoot}/krabi-claw-logo.png` : tenant.organization?.media?.find(item => item.slot === 'logo')?.public_url
-
-    graph.push({
+    const logo = organization.logos.find(item => item.slot === 'logo')?.url
+    const organizationNode: ApiRecord = {
       '@type': 'Organization',
       '@id': organizationId,
-      name: publisherName,
+      name: organization.name,
       url: organizationRoot,
-      logo: publisherLogo ? resolveSeoUrl(publisherLogo, origin) : undefined,
-      description: publisherDescription,
-    })
-    graph.push({
-      '@type': 'WebSite',
-      '@id': websiteId,
-      url: organizationRoot,
-      name: publisherName,
-      description: publisherDescription,
-      publisher: { '@id': organizationId },
-    })
-
+      logo: logo ? resolveSeoUrl(logo, origin) : undefined,
+      description: organization.brand_description,
+    }
+    const recipe = value.professionalService?.recipe
     const webpageNode: ApiRecord = {
-      '@type': value.schemaPageType || 'WebPage',
+      '@type': value.schemaPageType ?? (recipe === 'about' ? 'AboutPage' : recipe === 'contact' ? 'ContactPage' : recipe === 'services' || recipe === 'blog-index' ? 'CollectionPage' : 'WebPage'),
       '@id': webpageId,
       url,
       name: value.title,
-      description: value.description || undefined,
+      description: value.description,
       isPartOf: { '@id': websiteId },
+      primaryImageOfPage: value.socialImage ? resolveSeoUrl(value.socialImage.url, origin) : undefined,
     }
-    const breadcrumbItems = (value.breadcrumbs ?? [])
-      .filter(item => item?.name && item?.url)
-      .map((item, index) => ({
-        '@type': 'ListItem',
-        position: index + 1,
-        name: item.name,
-        item: resolveSeoUrl(item.url, origin),
-      }))
-    if (breadcrumbItems.length) webpageNode.breadcrumb = { '@id': breadcrumbId }
-
-    if (value.schemaPageType === 'SoftwareApplication' && value.softwareApplication) {
-      webpageNode.applicationCategory = value.softwareApplication.applicationCategory
-      webpageNode.operatingSystem = value.softwareApplication.operatingSystem
-      if (value.softwareApplication.offers) webpageNode.offers = value.softwareApplication.offers
-    }
-
-    const hasPart: Array<{ '@id': string }> = []
-    if (value.faqItems?.length) {
-      const faqId = `${url}#faq`
-      hasPart.push({ '@id': faqId })
+    const graph: ApiRecord[] = [organizationNode, {
+      '@type': 'WebSite',
+      '@id': websiteId,
+      url: organizationRoot,
+      name: organization.name,
+      description: organization.brand_description,
+      publisher: { '@id': organizationId },
+    }, webpageNode]
+    if (value.breadcrumbs?.length) {
+      const breadcrumbId = `${url}#breadcrumb`
+      webpageNode.breadcrumb = { '@id': breadcrumbId }
       graph.push({
-        '@type': 'FAQPage',
-        '@id': faqId,
-        mainEntity: value.faqItems
-          .filter(item => item.question?.trim() && item.answer?.trim())
-          .map(item => ({
-            '@type': 'Question',
-            name: item.question.trim(),
-            acceptedAnswer: { '@type': 'Answer', text: item.answer.trim() },
-          })),
+        '@type': 'BreadcrumbList',
+        '@id': breadcrumbId,
+        itemListElement: value.breadcrumbs.map((item, index) => ({
+          '@type': 'ListItem',
+          position: index + 1,
+          name: item.name,
+          item: resolveSeoUrl(item.url, origin),
+        })),
       })
     }
-    if (value.schemaNodes?.length) {
-      for (const node of value.schemaNodes) {
-        if (node?.['@id']) {
-          if (value.schemaPageType === 'CollectionPage' && node['@type'] === 'ItemList') webpageNode.mainEntity = { '@id': node['@id'] }
-          else hasPart.push({ '@id': node['@id'] })
+
+    if (value.professionalService) {
+      const compliance = shell?.compliance.value
+      organizationNode['@type'] = ['Organization', compliance?.entity_type ?? 'ProfessionalService']
+      if (compliance) {
+        Object.assign(organizationNode, {
+          areaServed: compliance.service_area_type && compliance.service_area
+            ? { '@type': compliance.service_area_type, name: compliance.service_area }
+            : compliance.service_area,
+          nonprofitStatus: compliance.nonprofit_status,
+          sameAs: compliance.same_as,
+          founder: compliance.founder_name ? { '@type': 'Person', name: compliance.founder_name } : undefined,
+          foundingDate: compliance.founding_date,
+          contactPoint: compliance.contact_points.filter(point => point.telephone || point.email || point.url).map(point => ({
+            '@type': 'ContactPoint',
+            contactType: point.contact_type,
+            telephone: point.telephone,
+            email: point.email,
+            areaServed: point.area_served,
+            availableLanguage: point.available_language,
+            url: point.url,
+          })),
+        })
+      }
+      if (recipe === 'home' || recipe === 'contact') webpageNode.mainEntity = { '@id': organizationId }
+      if (recipe === 'service-detail' && value.professionalService?.offering) {
+        const offering = value.professionalService.offering
+        const serviceId = `${url}#service`
+        graph.push({
+          '@type': 'Service',
+          '@id': serviceId,
+          name: offering.name,
+          description: offering.description,
+          url,
+          provider: { '@id': organizationId },
+        })
+        webpageNode.mainEntity = { '@id': serviceId }
+      }
+      const items = blocks.filter(block => block.type === 'page_grid').flatMap(block =>
+        block.data.items as Array<{ title: string; description?: string | null; url?: string | null }>,
+      )
+      if (items.length) {
+        const itemListId = `${url}#itemlist`
+        graph.push({
+          '@type': 'ItemList',
+          '@id': itemListId,
+          itemListElement: items.map((item, index) => ({
+            '@type': 'ListItem',
+            position: index + 1,
+            name: item.title,
+            description: item.description,
+            url: item.url ? resolveSeoUrl(item.url, origin) : undefined,
+          })),
+        })
+        if (recipe === 'services' || recipe === 'blog-index') webpageNode.mainEntity = { '@id': itemListId }
+        else webpageNode.hasPart = [{ '@id': itemListId }]
+      }
+      if (recipe === 'donate') {
+        const actions = blocks.filter(block => block.type === 'donation_choices' && block.data.destination).map(block => ({
+          '@type': 'DonateAction',
+          target: resolveSeoUrl(block.data.destination as string, origin),
+          recipient: { '@id': organizationId },
+        }))
+        if (actions.length) webpageNode.potentialAction = actions
+      }
+      if (recipe === 'schedule' && shell?.canSchedule.value && shell.consultation.value) {
+        const consultation = shell.consultation.value
+        webpageNode.potentialAction = {
+          '@type': 'ScheduleAction',
+          target: consultation.mode === 'external_url' ? consultation.external_url : url,
         }
       }
-      graph.push(...value.schemaNodes)
     }
-    if (hasPart.length) webpageNode.hasPart = hasPart.length === 1 ? hasPart[0] : hasPart
-    graph.push(webpageNode)
-    if (breadcrumbItems.length) {
-      graph.push({ '@type': 'BreadcrumbList', '@id': breadcrumbId, itemListElement: breadcrumbItems })
-    }
-    return { '@context': 'https://schema.org', '@graph': graph }
-  }))
 
-  return {
-    // Only a caller that passed a page has metadata to read back. Reading
-    // these without one is a bug in the caller, not an absent value.
-    canonicalUrl: computed(() => requireMetadata(normalized.value).tags.canonicalUrl),
-    ogImageUrl: computed(() => requireMetadata(normalized.value).tags.ogImage),
-  }
+    if (value.schemaPageType === 'SoftwareApplication' && value.softwareApplication) {
+      Object.assign(webpageNode, value.softwareApplication)
+    }
+    if (value.article) {
+      const articleId = `${url}#article`
+      const imageUrl = value.article.imageUrl ? resolveSeoUrl(value.article.imageUrl, origin) : undefined
+      const image = imageUrl && value.article.imageWidth && value.article.imageHeight
+        ? { '@type': 'ImageObject', url: imageUrl, width: value.article.imageWidth, height: value.article.imageHeight }
+        : imageUrl
+      webpageNode.mainEntity = { '@id': articleId }
+      if (image) webpageNode.primaryImageOfPage = image
+      graph.push({
+        '@type': value.article.type,
+        '@id': articleId,
+        headline: value.title,
+        description: value.description,
+        url,
+        mainEntityOfPage: { '@id': webpageId },
+        publisher: { '@id': organizationId },
+        isPartOf: { '@id': websiteId },
+        inLanguage: value.article.inLanguage,
+        image,
+        author: value.author ? { '@type': value.article.authorType ?? 'Person', name: value.author } : undefined,
+        datePublished: value.publishedAt,
+        dateModified: value.article.dateModified,
+        articleSection: value.article.articleSection,
+        keywords: value.article.keywords,
+      })
+    }
+
+    const parts: ApiRecord[] = [...(value.schemaNodes ?? []), ...videos]
+    const faqs = [
+      ...(value.faqItems ?? []),
+      ...blocks.filter(block => block.type === 'faq').flatMap(block =>
+        (block.data.items as Array<{ title: string; description?: string | null }>).map(item => ({ question: item.title, answer: item.description })),
+      ),
+    ].filter((item): item is { question: string; answer: string } => Boolean(item.question.trim() && item.answer?.trim()))
+    if (faqs.length) {
+      parts.push({
+        '@type': 'FAQPage',
+        '@id': `${url}#faq`,
+        mainEntity: faqs.map(item => ({
+          '@type': 'Question',
+          name: item.question,
+          acceptedAnswer: { '@type': 'Answer', text: markdownToPlainText(item.answer) },
+        })),
+      })
+    }
+    for (const block of blocks.filter(block => block.type === 'how_to')) {
+      const howTo = block.data as TenantPageHowToData
+      parts.push({
+        ...defineHowTo(),
+        '@id': `${url}#howto-${block.id}`,
+        name: howTo.title?.trim() || undefined,
+        description: howTo.description,
+        step: howTo.steps.map((step, index) => ({
+          '@type': 'HowToStep',
+          position: index + 1,
+          name: step.name,
+          text: step.text,
+        })),
+        totalTime: howTo.estimated_time,
+        tool: howTo.tool_items?.map(name => ({ '@type': 'HowToTool', name })),
+        supply: howTo.supply_items?.map(name => ({ '@type': 'HowToSupply', name })),
+      })
+    }
+    const hasPart = webpageNode.hasPart ? [webpageNode.hasPart].flat() as ApiRecord[] : []
+    for (const node of parts) {
+      if (!node['@id']) throw new Error('Supplementary schema requires a stable ID')
+      if (value.schemaPageType === 'CollectionPage' && node['@type'] === 'ItemList') webpageNode.mainEntity = { '@id': node['@id'] }
+      else hasPart.push({ '@id': node['@id'] })
+    }
+    if (hasPart.length) webpageNode.hasPart = hasPart
+    graph.push(...parts)
+    return graph
+  }))
 }

@@ -2,7 +2,7 @@
   <DashboardLeafPanel
     id="organization-members-invite"
     title="Invite a team member"
-    save-label="Send invite"
+    :save-label="savedInvitation ? 'Resend invite' : 'Send invite'"
     :saving="inviting"
     :disabled="!inviteForm.email.trim()"
     :error="inviteError ?? ''"
@@ -22,13 +22,14 @@
 
 <script setup lang="ts">
 import { authClient } from '~/lib/auth-client'
-import { organizationMembersKey } from '~/utils/organization-members'
+import { isOrganizationMembersData, organizationMembersKey } from '~/utils/organization-members'
 
 definePageMeta({ layout: 'dashboard' })
 
 const route = useRoute()
 const level = useRouteLevel()
 const dashboard = useDashboardOrganization()
+const dashboardApi = useDashboardApi()
 
 const isOwner = computed(() => dashboard.organization.value?.role === 'owner')
 const BASE_ROLE_OPTIONS = [
@@ -41,10 +42,13 @@ const roleOptions = computed(() => (isOwner.value ? [...BASE_ROLE_OPTIONS, { lab
 const inviteForm = reactive({ email: '', role: 'admin' })
 const inviting = ref(false)
 const inviteError = ref<string | null>(null)
+const savedInvitation = ref<string | null>(null)
+watch(() => [inviteForm.email,inviteForm.role], () => { savedInvitation.value = null })
 
 function resetInvite() {
   Object.assign(inviteForm, { email: '', role: 'admin' })
   inviteError.value = null
+  savedInvitation.value = null
 }
 
 async function sendInvite() {
@@ -57,10 +61,16 @@ async function sendInvite() {
       email: inviteForm.email,
       role: inviteForm.role as 'admin' | 'owner' | 'member',
       organizationId,
+      resend: Boolean(savedInvitation.value),
     })
     if (result.error) throw new Error(result.error.message || 'Failed to send invite.')
-    resetInvite()
+    if (!result.data) throw new Error('The invitation could not be read back')
+    savedInvitation.value = result.data.id
+    const members = await dashboardApi('/api/dashboard/members', {validate:isOrganizationMembersData})
+    const delivery = members.invitations.find(invitation => invitation.id === result.data!.id)?.delivery
     await refreshNuxtData(organizationMembersKey(String(route.params.orgSlug ?? '')))
+    if (!delivery || ['pending','failed'].includes(delivery.status)) throw new Error(delivery?.error || 'Invitation is saved, but email delivery is unconfirmed. You can resend it.')
+    resetInvite()
     await navigateTo(level.to.value ?? '/dashboard')
   } catch (error) {
     inviteError.value = error instanceof Error ? error.message : 'Failed to send invite.'

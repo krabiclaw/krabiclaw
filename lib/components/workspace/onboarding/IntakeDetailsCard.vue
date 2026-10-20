@@ -110,7 +110,6 @@
 
       <div v-if="actionLabel" class="grid gap-3">
         <UButton
-          color="primary"
           block
           :loading="loading"
           :disabled="disabled || !canSubmit"
@@ -228,9 +227,9 @@ function syncPhoneValue(value?: string | number) {
     phone.value = next
   }
   phoneTouched.value = true
-  form.value.phone = phone.value.trim() && parsedPhone.value.valid && parsedPhone.value.e164
+  form.value.phone = parsedPhone.value.valid && parsedPhone.value.e164
     ? parsedPhone.value.e164
-    : ''
+    : phone.value.trim()
 }
 
 // A stored E.164 value (imported from Google, or carried between steps) is shown

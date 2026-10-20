@@ -1,5 +1,6 @@
 import { HTTPError } from 'nitro'
 import { platformLocale } from '~/shared/platform-locales'
+import { parseSiteProductPath } from '~/utils/product-presentation'
 import { executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { getOrganizationEntitlements, isSubscriptionStateInvalid } from '~/server/utils/billing-access'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -23,9 +24,10 @@ import {
   type LocalizedResourceType,
   type LocalizedValues,
 } from '~/server/utils/localization-registry'
-import { assertProductKind, type ProductKind } from '~/shared/product-details'
+import { assertProductKind, validateProductDetails, type ProductKind } from '~/shared/product-details'
 import type { PublicLocaleRepresentation } from '~/utils/public-resource-contracts'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
+import { resolvePublicTemplate } from '~/utils/template-registry'
 
 
 export interface OrganizationLocaleRecord {
@@ -72,7 +74,7 @@ interface ResourceLocalizationRow extends Omit<ResourceLocalizationRecord, 'valu
 }
 
 interface EntitlementRow {
-  locale_status: string | null
+  locale_status: OrganizationLocaleRecord['status'] | null
 }
 
 export function canonicalizeLocale(value: unknown): string {
@@ -110,7 +112,7 @@ export async function getPersistedSourceLocale(
      ORDER BY id
   `, [organizationId])
   const source = rows.length === 1 ? rows[0] : undefined
-  if (!source || source.locale !== 'en' || source.status !== 'published' || !platformLocale(source.locale)) {
+  if (!source || source.status !== 'published' || !platformLocale(source.locale)) {
     throw new HTTPError({
       statusCode: 500,
       statusMessage: 'Organization source locale integrity check failed',
@@ -137,7 +139,7 @@ export async function listOrganizationLocaleRecords(
 
 function billingUrl(organizationSlug: string | null): string | null {
   if (!organizationSlug) return null
-  return `/dashboard/${encodeURIComponent(organizationSlug)}/website/localization`
+  return `/dashboard/${encodeURIComponent(organizationSlug)}/payments?tab=plan`
 }
 
 export async function assertOrganizationLanguageEntitlement(
@@ -147,13 +149,13 @@ export async function assertOrganizationLanguageEntitlement(
   localeInput: unknown,
   // Authoring needs the language to exist; the public site needs it published.
   // One question, one query, and the caller says which answer it needs.
-  requires: 'exists' | 'published' = 'exists',
-): Promise<{ locale: string; source: boolean; platform_messages: Record<string, string> | null }> {
+  requires: 'plan' | 'exists' | 'published' = 'exists',
+): Promise<{ locale: string; source: boolean; status: OrganizationLocaleRecord['status'] | null; platform_messages: Record<string, string> | null }> {
   const locale = assertExactCanonicalLocale(localeInput)
   const catalog = platformLocale(locale)
   if (!catalog) localizationError(403, 'PLATFORM_LOCALE_UNAVAILABLE', 'The platform locale is unavailable', { locale })
   const source = await getPersistedSourceLocale(db, organizationId)
-  if (locale === source.locale) return { locale, source: true, platform_messages: { ...catalog.messages } }
+  if (locale === source.locale) return { locale, source: true, status: source.status, platform_messages: { ...catalog.messages } }
   const row = await queryFirst<EntitlementRow & { organization_slug: string | null }>(db, `
     SELECT sl.status AS locale_status, o.slug AS organization_slug
       FROM organization o
@@ -167,15 +169,23 @@ export async function assertOrganizationLanguageEntitlement(
   // `published` here made translate-before-publish impossible, which is why a
   // language went public with nothing in it. The public gate below is what
   // still insists on `published`.
-  const satisfied = requires === 'published' ? row.locale_status === 'published' : Boolean(row.locale_status)
-  if (typeof entitlements.additional_languages !== 'number' || entitlements.additional_languages <= 0 || !satisfied) {
-    localizationError(402, 'LANGUAGE_ENTITLEMENT_REQUIRED', `A ${requires === 'published' ? 'published ' : ''}language and an eligible paid plan are required`, {
+  const satisfied = requires === 'plan' || (requires === 'published' ? row.locale_status === 'published' : Boolean(row.locale_status))
+  if (entitlements.additional_languages !== true) {
+    localizationError(402, 'LANGUAGE_ENTITLEMENT_REQUIRED', 'Publishing additional languages requires Growth or Business.', {
       organization_id: organizationId,
       locale,
-      billing_url: billingUrl(row.organization_slug),
+      dashboard_url: billingUrl(row.organization_slug),
     })
   }
-  return { locale, source: false, platform_messages: { ...catalog.messages } }
+  if (!satisfied) {
+    localizationError(409, requires === 'published' ? 'LANGUAGE_NOT_PUBLISHED' : 'LANGUAGE_NOT_ENABLED',
+      requires === 'published' ? 'This website language is not published.' : 'Add this website language before authoring its translations.', {
+      organization_id: organizationId,
+      locale,
+      dashboard_url: row.organization_slug ? `/dashboard/${encodeURIComponent(row.organization_slug)}/website/localization` : null,
+    })
+  }
+  return { locale, source: false, status: row.locale_status, platform_messages: { ...catalog.messages } }
 }
 
 export async function assertPublicOrganizationLanguageEntitlement(
@@ -203,6 +213,8 @@ export async function assertPublicOrganizationLanguageEntitlement(
       isSubscriptionStateInvalid(error)
       || status === 402
       || code === 'LANGUAGE_ENTITLEMENT_REQUIRED'
+      || code === 'LANGUAGE_NOT_ENABLED'
+      || code === 'LANGUAGE_NOT_PUBLISHED'
       || code === 'PLATFORM_LOCALE_UNAVAILABLE'
     ) {
       throw new HTTPError({ statusCode: 404, statusMessage: 'Localized route was not found' })
@@ -271,8 +283,8 @@ export async function getOrganizationVertical(db: DbClient, organizationId: stri
 function canonicalResourceQuery(resourceType: LocalizedResourceType, scope: 'one' | 'all'): string {
   const { table, tenantScope } = RESOURCE_LOCALIZATION_REGISTRY[resourceType]
   const one = scope === 'one'
-  if (tenantScope === 'self') return `SELECT id FROM ${table} WHERE id = ?${one ? ' AND id = ?' : ''}`
-  return `SELECT id${resourceType === 'product' ? ', kind' : ''} FROM ${table} WHERE organization_id = ?${one ? ' AND id = ?' : ''}`
+  if (tenantScope === 'self') return `SELECT id, theme_id, vertical FROM ${table} WHERE id = ?${one ? ' AND id = ?' : ''}`
+  return `SELECT id${resourceType === 'product' ? ', kind' : resourceType === 'business_location' ? ', slug' : ''} FROM ${table} WHERE organization_id = ?${one ? ' AND id = ?' : ''}`
 }
 
 async function assertCanonicalResourceExists(
@@ -330,7 +342,7 @@ export async function getLocalizationForAuthoring(
 ) {
   if (resourceType !== 'content_document') return getResourceLocalization(env, db, organizationId, resourceType, resourceId, localeInput)
   const { locale, source } = await assertOrganizationLanguageEntitlement(env, db, organizationId, localeInput)
-  if (source) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'English source content is edited through its document')
+  if (source) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'Source content is edited through its document')
   const document = await getContentRepresentation(db, { rootId: resourceId, locale })
   if (!document || document.organization_id !== organizationId || document.organization_id !== organizationId) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Document representation was not found')
   const copy = await queryFirst<{ title: string | null; summary: string | null; slug: string | null; path: string | null;
@@ -362,6 +374,22 @@ export async function resolveLocalizedPublicRoute(
     localizationError(500, 'PLATFORM_LOCALE_UNAVAILABLE', 'Published platform locale messages are unavailable', { locale })
   }
   const { listPublicLocaleRepresentations, listPublicResourceLocaleRepresentations } = await import('~/server/utils/public-locale-representations')
+
+  const siteProduct = parseSiteProductPath(routePath.slice(locale.length + 1))
+  if (siteProduct) {
+    // Site-wide experiences and homes use the same published offer as their public page.
+    const { loadPublicSiteProductDetail } = await import('~/server/utils/public-products')
+    const detail = await loadPublicSiteProductDetail(env, db, organizationId, siteProduct.surface, false, siteProduct.slug, locale)
+    if (!detail) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Localized route was not found', { locale, route_path: routePath })
+    const localization = await getResourceLocalization(env, db, organizationId, 'product', detail.product.id, locale)
+    return {
+      locale,
+      route_path: routePath,
+      platform_messages: entitlement.platform_messages,
+      locale_representations: detail.localeRepresentations,
+      representation: { kind: 'resource', resource_type: 'product', resource_id: detail.product.id, localization },
+    }
+  }
 
   // A Product is addressed through a location that offers it, so its localized
   // route is read the way its English route is: by its segments. Nothing is
@@ -505,12 +533,13 @@ export async function putResourceLocalization(
   },
 ): Promise<ResourceLocalizationRecord> {
   const resourceType = parseLocalizedResourceType(input.resourceType)
-  const { locale, source } = await assertOrganizationLanguageEntitlement(env, db, input.organizationId, input.locale)
+  const { locale, source, status } = await assertOrganizationLanguageEntitlement(env, db, input.organizationId, input.locale)
   if (source) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'English source content must be edited through its canonical resource')
-  await assertCanonicalResourceExists(db, input.organizationId, resourceType, input.resourceId)
-  const canonical = resourceType === 'product' ? await queryFirst<{ kind: string }>(db, canonicalResourceQuery(resourceType, 'one'), [input.organizationId, input.resourceId]) : null
-  const values = validateLocalizedValues(resourceType, input.values, canonical ? assertProductKind(canonical.kind) : undefined)
-  const routePath = validateLocalizedRoutePath(resourceType, locale, input.routePath)
+  const canonical = await queryFirst<{ id: string; kind?: string; slug?: string; theme_id?: string; vertical?: string }>(db, canonicalResourceQuery(resourceType, 'one'), [input.organizationId, input.resourceId])
+  if (!canonical) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Canonical resource was not found', { resource_type: resourceType, resource_id: input.resourceId })
+  const values = validateLocalizedValues(resourceType, input.values, resourceType === 'product' ? assertProductKind(canonical.kind) : undefined,
+    status === 'published' && resourceType === 'organization' ? { publishedTemplate: resolvePublicTemplate({ themeId: canonical.theme_id, vertical: canonical.vertical }).slug } : undefined)
+  const routePath = validateLocalizedRoutePath(resourceType, locale, input.routePath, canonical.slug)
   const existing = await queryFirst<{ id: string; route_path: string | null; created_at: string; created_by_user_id: string }>(db, `
     SELECT id, route_path, created_at, created_by_user_id
       FROM resource_localizations
@@ -557,13 +586,17 @@ export async function putLocalizationForAuthoring(env: CloudflareEnv, db: D1Data
 ) {
   if (input.resourceType !== 'content_document') return putResourceLocalization(env, db, input)
   const { locale, source } = await assertOrganizationLanguageEntitlement(env, db, input.organizationId, input.locale)
-  if (source) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'English source content is edited through its document')
+  if (source) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'Source content is edited through its document')
   const root = await getContentDocumentById(db, input.resourceId)
   if (!root || root.row_role !== 'root' || root.organization_id !== input.organizationId || root.organization_id !== input.organizationId) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Source document was not found')
-  if (root.kind === 'qa') localizationError(403, 'LOCALIZATION_READ_ONLY', 'Q&A is read-only')
+  if (root.kind === 'qa') {
+    const authored = await queryFirst(db, "SELECT id FROM content_documents WHERE id = ? AND organization_id = ? AND row_role = 'root' AND source = 'manual'", [root.id, input.organizationId])
+    if (!authored) localizationError(403, 'LOCALIZATION_READ_ONLY', 'Only authored Q&A can be translated')
+    if (input.routePath != null || (Array.isArray(input.contentBlocks) && input.contentBlocks.length)) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'Q&A translations contain a question and answer, without a route or content blocks')
+  }
   if (!input.values || typeof input.values !== 'object' || Array.isArray(input.values)) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'values must be an object')
   const copy = input.values as Record<string, unknown>
-  const textFields = ['title', 'summary', 'slug', 'seo_keywords'] as const
+  const textFields = root.kind === 'qa' ? ['title', 'summary'] as const : ['title', 'summary', 'slug', 'seo_keywords'] as const
   if (Object.keys(copy).some(key => key !== 'metadata' && !textFields.some(field => field === key))) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'Unknown translated document field')
   // A key a translation leaves out is removed, not stored as JSON null: a
   // social post's translation carries a call to action label or none.
@@ -574,6 +607,7 @@ export async function putLocalizationForAuthoring(env: CloudflareEnv, db: D1Data
     if (typeof copy[field] !== 'string') localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', field + ' must be a string')
     changes[field] = copy[field]
   }
+  if (root.kind === 'qa' && !changes.title?.trim()) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'Translated question is required')
   if (copy.metadata !== undefined) {
     if (!copy.metadata || typeof copy.metadata !== 'object' || Array.isArray(copy.metadata)) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'metadata must be an object')
     const metadata = copy.metadata as Record<string, unknown>
@@ -588,10 +622,19 @@ export async function putLocalizationForAuthoring(env: CloudflareEnv, db: D1Data
   }
   const provided = new Set(Object.keys(changes.metadata ?? {}))
   const removeMetadata = clearedMetadata.filter(key => !provided.has(key))
-  if (typeof input.routePath !== 'string' || !input.routePath.startsWith('/' + locale + '/') || /[?#]/.test(input.routePath) || input.routePath.includes('//')) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'route_path must be a canonical localized path')
-  changes.path = input.routePath.slice(locale.length + 1)
-  if (root.kind !== 'page') changes.slug = input.routePath.split('/').at(-1)!
+  if (root.kind !== 'qa') {
+    if (typeof input.routePath !== 'string' || !input.routePath.startsWith('/' + locale + '/') || /[?#]/.test(input.routePath) || input.routePath.includes('//')) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'route_path must be a canonical localized path')
+    changes.path = input.routePath.slice(locale.length + 1)
+    if (root.kind !== 'page') changes.slug = input.routePath.split('/').at(-1)!
+  }
   const existing = await getContentRepresentation(db, { rootId: root.id, locale })
+  if (root.kind === 'page') {
+    const [{ assertTenantPagePathAvailable }, { loadOrganizationTemplate }] = await Promise.all([
+      import('~/server/utils/content/pages'), import('~/server/utils/content/publishing'),
+    ])
+    const { template } = await loadOrganizationTemplate(db, input.organizationId)
+    await assertTenantPagePathAvailable(db, { organizationId: input.organizationId, locale, path: changes.path!, template, excludeVariantId: existing?.id })
+  }
   const blocks = input.contentBlocks
   if (blocks !== undefined && !Array.isArray(blocks)) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'content_blocks must be an array')
   if ((root.kind === 'article' || root.kind === 'page') && !existing && (!Array.isArray(blocks) || !blocks.length)) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'Translated content blocks are required')
@@ -646,18 +689,28 @@ export async function deleteLocalization(
     if (source) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'English source content cannot be deleted through localization')
     const document = await getContentRepresentation(db, { rootId: input.resourceId, locale })
     if (!document || document.organization_id !== input.organizationId) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Document representation was not found')
-    if (document.kind === 'qa') localizationError(403, 'LOCALIZATION_READ_ONLY', 'Q&A is read-only')
+    if (document.kind === 'qa') {
+      const authored = await queryFirst(db, "SELECT id FROM content_documents WHERE id = ? AND organization_id = ? AND row_role = 'root' AND source = 'manual'", [input.resourceId, input.organizationId])
+      if (!authored) localizationError(403, 'LOCALIZATION_READ_ONLY', 'Only authored Q&A translations can be deleted')
+    }
     await executeBatch(db, [...prepareContentDocumentDeletion({ documentId: document.id, organizationId: input.organizationId }), publicResourceCacheInvalidationQuery(input.organizationId, 'document-localization-delete')])
     return { deleted: true, resource_type: 'content_document', resource_id: input.resourceId, locale }
   }
   const resourceType = parseLocalizedResourceType(input.resourceType)
-  const { locale, source } = await assertOrganizationLanguageEntitlement(env, db, input.organizationId, input.locale)
+  const { locale, source, status } = await assertOrganizationLanguageEntitlement(env, db, input.organizationId, input.locale)
   if (source) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'English source content cannot be deleted through localization')
   const row = await queryFirst<{ id: string }>(db, `
     SELECT id FROM resource_localizations
      WHERE organization_id = ?  AND resource_type = ? AND resource_id = ? AND locale = ? LIMIT 1
   `, [input.organizationId, resourceType, input.resourceId, locale])
   if (!row) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Localized representation was not found', { resource_type: resourceType, resource_id: input.resourceId, locale })
+  if (status === 'published' && resourceType === 'organization') {
+    const canonical = await queryFirst<{ theme_id: string; vertical: string }>(db, canonicalResourceQuery(resourceType, 'one'), [input.organizationId, input.resourceId])
+    if (!canonical) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Canonical organization was not found', { organization_id: input.organizationId })
+    if (resolvePublicTemplate({ themeId: canonical.theme_id, vertical: canonical.vertical }).slug === 'blawby') {
+      localizationError(409, 'LOCALIZATION_VALIDATION_FAILED', 'Disable the language before deleting its organization translation', { locale })
+    }
+  }
   const statements = resourceLocalizationDeletionQueries(resourceType, {
     query: 'SELECT resource_id FROM resource_localizations WHERE id = ?', params: [row.id],
   }, locale)
@@ -681,24 +734,23 @@ export async function getProductCatalogLocalization(
 ) {
   const { locale, source } = await assertOrganizationLanguageEntitlement(env, db, organizationId, localeInput)
   if (source) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'Product catalog localization requires a secondary locale')
-  // Products belong to the organization and reach this site through a
-  // publication; collections are the site's own merchandising. Both are listed
-  // in the order the public pages render them, so a translator works down the
-  // page rather than down a join.
   const [rows, collectionRows] = await Promise.all([queryAll<{
     id: string
+    kind: string
     name: string
     description: string
+    marketing_features: string
+    unit_label: string | null
+    details_json: string
     localization_id: string | null
     values_json: string | null
     route_path: string | null
   }>(db, `
-    SELECT p.id, p.name, p.description,
+    SELECT p.id, p.kind, p.name, p.description, p.marketing_features, p.unit_label, p.details_json,
            rl.id AS localization_id, rl.values_json, rl.route_path
       FROM products p
-      JOIN product_publications pub ON pub.product_id = p.id AND pub.organization_id = p.organization_id 
       LEFT JOIN resource_localizations rl
-        ON rl.organization_id = p.organization_id AND rl.organization_id = pub.organization_id
+        ON rl.organization_id = p.organization_id
        AND rl.resource_type = 'product' AND rl.resource_id = p.id AND rl.locale = ?
      WHERE p.organization_id = ?
      ORDER BY p.name, p.id
@@ -706,10 +758,11 @@ export async function getProductCatalogLocalization(
     id: string
     location_id: string | null
     name: string
+    description: string | null
     localization_id: string | null
     values_json: string | null
   }>(db, `
-    SELECT c.id, c.location_id, c.name, rl.id AS localization_id, rl.values_json
+    SELECT c.id, c.location_id, c.name, c.description, rl.id AS localization_id, rl.values_json
       FROM collections c
       LEFT JOIN resource_localizations rl
         ON rl.organization_id = c.organization_id AND rl.organization_id = c.organization_id
@@ -722,12 +775,14 @@ export async function getProductCatalogLocalization(
     collections: collectionRows.map(row => ({
       id: row.id,
       location_id: row.location_id,
-      source: { name: row.name },
+      source: { name: row.name, description: row.description },
       localization: row.localization_id ? { values: JSON.parse(row.values_json!) } : null,
     })),
     products: rows.map(row => ({
       id: row.id,
-      source: { name: row.name, description: row.description },
+      kind: assertProductKind(row.kind),
+      source: { name: row.name, description: row.description, marketing_features: JSON.parse(row.marketing_features) as string[], unit_label: row.unit_label,
+        details: validateProductDetails(assertProductKind(row.kind), JSON.parse(row.details_json)) },
       localization: row.localization_id
         ? { values: JSON.parse(row.values_json!), route_path: row.route_path }
         : null,
@@ -747,13 +802,13 @@ export async function replaceResourceLocalizations(
   },
 ) {
   const resourceType = parseLocalizedResourceType(input.resourceType)
-  const { locale, source } = await assertOrganizationLanguageEntitlement(env, db, input.organizationId, input.locale)
+  const { locale, source, status } = await assertOrganizationLanguageEntitlement(env, db, input.organizationId, input.locale)
   if (source) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'Localization requires a secondary locale')
   if (!Array.isArray(input.items) || input.items.length < 1 || input.items.length > 250) {
     localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'items must contain 1 to 250 localizations')
   }
-  const canonical = await queryAll<{ id: string; kind?: ProductKind }>(db, canonicalResourceQuery(resourceType, 'all'), [input.organizationId])
-  const kinds = new Map(canonical.map(row => [row.id, row.kind]))
+  const canonical = await queryAll<{ id: string; kind?: ProductKind; slug?: string; theme_id?: string; vertical?: string }>(db, canonicalResourceQuery(resourceType, 'all'), [input.organizationId])
+  const canonicalById = new Map(canonical.map(row => [row.id, row]))
   const parsed = input.items.map((value, index) => {
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
       localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', `items[${index}] must be an object`, { index })
@@ -771,14 +826,17 @@ export async function replaceResourceLocalizations(
   })
   const ids = parsed.map(item => item.resourceId)
   if (new Set(ids).size !== ids.length) localizationError(422, 'LOCALIZATION_VALIDATION_FAILED', 'Resource IDs must be unique')
-  const found = new Set(canonical.map(row => row.id))
-  const missing = ids.filter(id => !found.has(id))
+  const missing = ids.filter(id => !canonicalById.has(id))
   if (missing.length) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'One or more canonical resources were not found', { resource_type: resourceType, resource_ids: missing })
-  const validated = parsed.map(item => ({
-    resourceId: item.resourceId,
-    values: validateLocalizedValues(resourceType, item.values, kinds.get(item.resourceId)),
-    routePath: validateLocalizedRoutePath(resourceType, locale, item.routePath),
-  }))
+  const validated = parsed.map((item) => {
+    const resource = canonicalById.get(item.resourceId)!
+    return {
+      resourceId: item.resourceId,
+      values: validateLocalizedValues(resourceType, item.values, resource.kind,
+        status === 'published' && resourceType === 'organization' ? { publishedTemplate: resolvePublicTemplate({ themeId: resource.theme_id, vertical: resource.vertical }).slug } : undefined),
+      routePath: validateLocalizedRoutePath(resourceType, locale, item.routePath, resource.slug),
+    }
+  })
   const existing = await queryAll<PriorLocalization & { resource_id: string }>(db, `
     SELECT id, resource_id, route_path, created_at, created_by_user_id
       FROM resource_localizations

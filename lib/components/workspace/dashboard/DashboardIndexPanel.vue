@@ -1,38 +1,50 @@
 <template>
   <UDashboardPanel
     :id="id"
-    :class="level.mode.value === 'yield' ? 'hidden' : pair ? 'hidden lg:flex' : undefined"
+    data-dashboard-index
+    :class="level.mode.value === 'yield' ? 'hidden' : undefined"
     :data-yield="level.mode.value === 'yield' ? '' : undefined"
-    :default-size="pair ? 50 : undefined"
-    :ui="ui"
+    :default-size="pair ? (pairedSize ?? 50) : undefined"
+    :ui="panelUi"
   >
     <template #header>
-      <UDashboardNavbar :title="title" :toggle="false" :ui="navbarUi">
-        <template #leading>
-          <DashboardNavbarLeading />
-        </template>
-        <!-- A control that names what the whole level is showing — Today's range — belongs beside the title, not in the body. -->
-        <template v-if="$slots.center" #default>
+      <!--
+        One row heads every level, as Airbnb's do: Back when there is somewhere
+        to go back to, the title, and what you can do to the level on the right.
+        On a phone a pushed level's title starts the next line, under Back; from
+        lg Back sits beside it. A control that names what the whole level shows —
+        Today's range — takes the title's place, and the title is announced only.
+      -->
+      <div class="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-4 pb-2 pt-4 sm:pt-6" :class="dashboardGutterClass">
+        <slot name="leading"><DashboardNavbarLeading /></slot>
+        <div v-if="$slots.center" class="flex min-w-0 flex-1 items-center">
+          <h1 class="sr-only">{{ title }}</h1>
           <slot name="center" />
-        </template>
-        <!-- The list's controls land here (dashboardPanelActionsKey), after whatever the page itself puts on the right. -->
-        <template #right>
+        </div>
+        <div v-else class="min-w-0 flex-1" :class="level.to.value ? 'max-lg:order-last max-lg:basis-full' : undefined">
+          <h1 :class="dashboardTitleClass">{{ title }}</h1>
+          <p v-if="lead" class="mt-2 text-base text-muted">{{ lead }}</p>
+        </div>
+        <!-- Every action is the same round 40px button, whatever size a page asked for. A list editor's controls land in the span (dashboardPanelActionsKey). -->
+        <div class="ms-auto flex shrink-0 items-center gap-2 [&_[data-slot=base]]:h-10 [&_[data-slot=base]]:min-w-10 [&_[data-slot=base]]:justify-center [&_[data-slot=base]]:rounded-full">
           <slot name="right" />
-          <span :id="actionsId" class="flex items-center gap-1.5 empty:hidden" />
-        </template>
-      </UDashboardNavbar>
+          <span :id="actionsId" class="flex items-center gap-2 empty:hidden" />
+        </div>
+      </div>
     </template>
 
     <template #body>
       <!-- Alone it uses the frame, as Airbnb's listing grid does; beside a child it is a column. -->
-      <div class="mx-auto w-full" :class="[pair ? 'max-w-2xl' : undefined, fill ? 'flex min-h-0 flex-1 flex-col' : undefined]">
+      <div class="w-full" :class="[width, fill ? 'flex min-h-0 flex-1 flex-col' : undefined]">
         <slot />
       </div>
     </template>
 
     <!-- A list whose order is itself a draft — sections, links — commits from here. -->
     <template v-if="$slots.footer" #footer>
-      <slot name="footer" />
+      <div class="shrink-0" :class="[dashboardGutterClass, footerClass ?? 'border-t border-default py-3']">
+        <slot name="footer" />
+      </div>
     </template>
   </UDashboardPanel>
 
@@ -52,28 +64,61 @@
   arrival: an index of deterministic settings or fields names its first one, the
   way a listing editor lands on its first section; a list of records names none.
   Below the pane width the index is the screen and nothing is chosen for the
-  tenant. `replace`, so Back still leaves the index. A level in a mode named by
+  tenant — except a record being made (`create`), which opens its first step at
+  every width. `replace`, so Back still leaves the index. A level in a mode named by
   its URL's `editMode`, such as its translations, is that mode's screen, and
   choosing a child would leave the mode; it opens one when the mode closes.
 */
 import type { RouteLocationRaw } from 'vue-router'
-import { dashboardPanelActionsKey } from './dashboardPanelContext'
+import { dashboardColumnWidths, dashboardPanelActionsKey, dashboardLeafParentKey, dashboardGutterClass, dashboardTitleClass, type DashboardColumn } from './dashboardPanelContext'
 
 const props = defineProps<{
   id: string
   title: string
   autoOpen?: RouteLocationRaw | null
-  ui?: { root?: string; body?: string }
-  /** For a level whose navbar carries its own control, such as Today's range. */
-  navbarUi?: Record<string, string>
-  /** The level is exactly the panel's height and scrolls inside itself: a conversation with its composer at the foot. */
+  /**
+   * A record being made: its first step, opened on arrival at every width, as
+   * Airbnb's flows open on their first question. Dismissing a step leaves the
+   * making for where Back goes; the list behind it is never a stop.
+   */
+  create?: RouteLocationRaw | null
+  /** The level is exactly the panel's height and scrolls inside itself, padding its own rows with the gutter: a conversation with its composer at the foot. */
   fill?: boolean
+  /** The level is a column at every width rather than the frame: a menu, a statement, a calendar. */
+  column?: DashboardColumn
+  /** Native DashboardPanel percentage when this index sits beside its child. */
+  pairedSize?: number
+  /** The record's persistent action may float over its scrollable summaries. */
+  footerClass?: string
+  /** The level's one muted sentence under its title, as a leaf's `lead`. */
+  lead?: string
 }>()
 
 const level = useRouteLevel()
+// A level that scrolls itself pads its own rows, so the body gives up its padding.
+const panelUi = computed((): { body?: string } => {
+  const fill: boolean = props.fill
+  return { body: fill ? 'p-0 sm:p-0 gap-0' : undefined }
+})
 const pair = computed(() => level.mode.value === 'pair')
+// Beside a child every index is a leaf-wide column; alone it is its own column, or the frame.
+const width = computed((): string | undefined => {
+  const column: DashboardColumn | undefined = props.column
+  if (pair.value) return dashboardColumnWidths.leaf
+  return column ? dashboardColumnWidths[column] : undefined
+})
 // Read through the instance: vue-tsc cannot type `props.id` here (TS2590), and the id is a plain string.
 const instance = getCurrentInstance()
+provide(dashboardLeafParentKey, {
+  focus: () => {
+    const heading = document.getElementById(`dashboard-panel-${String(instance?.props.id ?? '')}`)?.querySelector<HTMLElement>('h1')
+    if (heading) {
+      heading.tabIndex = -1
+      heading.focus({ preventScroll: true })
+    }
+  },
+  exit: () => (instance?.props.create ? level.to.value : null),
+})
 // Not prefixed `dashboard-panel-`: that prefix names panes, and this is a slot inside one.
 const actionsId = computed(() => `${String(instance?.props.id ?? '')}-list-actions`)
 provide(dashboardPanelActionsKey, actionsId)
@@ -89,17 +134,22 @@ if (!scope) throw createError({ statusCode: 500, statusMessage: 'Dashboard pane 
 onNuxtReady(() => {
   if (!scope.active) return
   scope.run(() => {
-    watch((): [RouteLocationRaw | null | undefined, boolean, RouteLevelMode, unknown] => [props.autoOpen, pane.value, level.mode.value, route.query.editMode], ([target, wide, mode, editMode]) => {
-      if (!target || !wide || mode !== 'index' || editMode) return
+    // A record being made opens its step at every width; any other index chooses only beside its child.
+    watch((): [RouteLocationRaw | null | undefined, boolean, RouteLevelMode, unknown, string] => [props.create ?? (pane.value ? props.autoOpen : null), pane.value, level.mode.value, route.query.editMode, route.fullPath], ([target, , mode, editMode]) => {
+      if (!target || mode !== 'index' || editMode) return
       // Only an arrival opens a child: the router is at this index's own URL.
       // An index on its way out still reads the route it rendered for, which
       // may be its bare URL; opening from there pulled the tenant back into the
       // screen they had just left.
-      if (router.currentRoute.value.path !== level.path.value) return
+      // A query change can select another tab or scope at this same path;
+      // wait for Nuxt's rendered route before opening that context's rows.
+      if (router.currentRoute.value.path !== level.path.value || router.currentRoute.value.fullPath !== route.fullPath) return
       // An index whose rows are still loading offers itself as the first row; its own URL opens nothing.
       if (router.resolve(target).path === level.path.value) return
       void navigateTo(target, { replace: true })
-    }, { immediate: true })
+    // The parent derives autoOpen from this route's tab and scope. Wait for
+    // those props to render before choosing a row from the arriving index.
+    }, { immediate: true, flush: 'post' })
   })
 })
 </script>

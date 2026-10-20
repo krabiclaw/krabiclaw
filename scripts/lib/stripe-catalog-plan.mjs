@@ -7,30 +7,35 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { basename, dirname } from 'node:path'
-import { NEW_SALE_PAID_PLAN_IDS, PAID_PLAN_PRICES } from '../../shared/billing-model.ts'
+import { BILLING_METER_KEYS, BILLING_METERS, INCLUDED_LOCATIONS, NEW_SALE_PAID_PLAN_IDS, PAID_PLAN_PRICES, PAYMENTS_FEE, SERVICE_PRICES, additionalLocationPrice } from '../../shared/billing-model.ts'
 
-export const CATALOG_PLAN_SCHEMA_VERSION = 10
+export const CATALOG_PLAN_SCHEMA_VERSION = 14
 export const CATALOG_APPLY_JOURNAL_SCHEMA_VERSION = 1
 export const CATALOG_APPLY_JOURNAL_KIND = 'stripe-catalog-apply-journal'
 export const CATALOG_PLAN_KIND = 'stripe-catalog-plan'
-export const OFFERED_PLAN_IDS = Object.freeze([...NEW_SALE_PAID_PLAN_IDS, 'site_language'])
-export const RETIRED_PLAN_IDS = Object.freeze(['managed', 'seo_accelerator'])
+export const OFFERED_PLAN_IDS = Object.freeze([...NEW_SALE_PAID_PLAN_IDS, ...BILLING_METER_KEYS, 'site_language', 'strategy'])
+export const RETIRED_PLAN_IDS = Object.freeze(['commerce', 'marketing', 'managed', 'seo_accelerator'])
 export const RETIRED_ADDON_TYPES = Object.freeze(['translation', 'seasonal', 'gbp_setup'])
-export const CATALOG_PLAN_SCOPES = Object.freeze(['full', 'retirement-only'])
+// Products no longer sold that carry a family rather than a plan: rental units are not billed.
+export const RETIRED_PRODUCT_FAMILIES = Object.freeze(['rental_units'])
+export const CATALOG_PLAN_SCOPES = Object.freeze(['full', 'offers-only', 'retirement-only'])
 export const STRIPE_CATALOG_REQUEST_TIMEOUT_MS = 10_000
 const SUPPORTED_OPERATION_TYPES = new Set([
   'archive_product',
   'clear_product_default_price',
   'upload_product_image',
   'create_product',
+  'create_meter',
   'create_price',
   'deactivate_price',
   'update_product',
 ])
+const CLOSED_SUBSCRIPTION_STATUSES = new Set(['canceled', 'incomplete_expired'])
 const DESTRUCTIVE_OPERATION_TYPES = new Set(['archive_product', 'clear_product_default_price', 'deactivate_price'])
 const CANONICAL_PRODUCT_METADATA_KEYS = Object.freeze([
   'plan_id',
   'product_family',
+  'service',
   'highlighted',
   'badge',
   'monthly_price_id',
@@ -50,7 +55,8 @@ export const PLAN_DEFINITIONS = Object.freeze([
     badge: 'Most Popular',
     imagePath: 'scripts/assets/stripe/growth.jpg',
     features: [
-      'Business websites for restaurants, experiences and professional services',
+      'Business websites for restaurants, experiences and law firms',
+      `${INCLUDED_LOCATIONS} locations included, then ${additionalLocationPrice()}`,
       'Your own domain (yourbusiness.com)',
       'Update supported content, menus and photos through ChatGPT',
       'Bookings, consultation requests and ticketed experiences',
@@ -60,19 +66,36 @@ export const PLAN_DEFINITIONS = Object.freeze([
     ],
   },
   {
-    name: 'Commerce',
-    description: 'Everything in Growth, plus online payments for bookings and one-time orders.',
-    planId: 'commerce',
-    amountCents: PAID_PLAN_PRICES.commerce.monthly,
+    name: 'Business',
+    description: 'Everything in Growth, plus online payments, direct stay booking and Google Ads campaigns run from your dashboard and ChatGPT.',
+    planId: 'business',
+    amountCents: PAID_PLAN_PRICES.business.monthly,
     highlighted: false,
     features: [
       'Everything in Growth',
-      'Stripe Checkout for paid bookings and one-time orders',
+      'Direct stay booking with online payment',
+      'The KrabiClaw iOS app at no extra cost for your whole team',
+      'Online payments for paid bookings and one-time orders',
       'Buyer receipts and purchase history',
       'Refund, dispute and payout management',
-      '1.4% of payment volume, plus Stripe fees.',
+      `${PAYMENTS_FEE}.`,
+      'Create, clone, pause and budget Google Ads search campaigns',
+      'One launch across Google Ads, Instagram, Facebook, Discord and your site',
+      'Ad spend, clicks, impressions and conversions in your analytics',
+      '10% of monthly ad spend for campaigns we manage.',
     ],
   },
+  // What a plan subscription bills by its Stripe meter, each a product of its own family.
+  ...BILLING_METER_KEYS.map(key => ({
+    name: BILLING_METERS[key].name,
+    description: BILLING_METERS[key].description,
+    planId: key,
+    productFamily: key,
+    unitLabel: BILLING_METERS[key].unitLabel,
+    meter: BILLING_METERS[key],
+    highlighted: false,
+    features: [],
+  })),
   {
     name: 'Site Language',
     description: 'One manually localized language for one Growth site.',
@@ -80,6 +103,16 @@ export const PLAN_DEFINITIONS = Object.freeze([
     productFamily: 'site_language',
     amountCents: 500,
     annualAmountCents: 6000,
+    highlighted: false,
+    features: [],
+  },
+  {
+    // A service KrabiClaw's people perform, added to a business's plan subscription as its own item.
+    name: 'SEO and marketing strategy',
+    description: 'Julia leads your SEO strategy, hand-writes ranking blog posts, meets with you weekly and is on chat with you.',
+    planId: 'strategy',
+    productFamily: 'services',
+    amountCents: SERVICE_PRICES.strategy.monthly,
     highlighted: false,
     features: [],
   },
@@ -123,7 +156,7 @@ export function assertCatalogModeKey(key, requiredMode = 'test') {
 function normalizeCatalogPlanScope(value = 'full') {
   const scope = String(value ?? '').trim().toLowerCase() || 'full'
   if (!CATALOG_PLAN_SCOPES.includes(scope)) {
-    throw new Error(`Unsupported Stripe catalog plan scope ${scope}. Expected full or retirement-only.`)
+    throw new Error(`Unsupported Stripe catalog plan scope ${scope}. Expected full, offers-only or retirement-only.`)
   }
   return scope
 }
@@ -152,6 +185,7 @@ function normalizeProduct(product) {
       ? product.default_price
       : product.default_price?.id ?? null,
     images: Array.isArray(product.images) ? [...product.images] : [],
+    unit_label: product.unit_label ?? null,
   }
 }
 
@@ -163,12 +197,27 @@ function normalizePrice(price) {
     type: price.type ?? null,
     currency: price.currency ?? null,
     unit_amount: price.unit_amount ?? null,
+    // The SDK reads a decimal amount as a Decimal and a webhook as a string with
+    // trailing zeros; either is compared as the number it is.
+    unit_amount_decimal: price.unit_amount_decimal === null || price.unit_amount_decimal === undefined ? null : String(Number(String(price.unit_amount_decimal))),
+    billing_scheme: price.billing_scheme ?? null,
+    tiers_mode: price.tiers_mode ?? null,
+    // In the create shape: the last bound is 'inf', and a charge Stripe reports
+    // as null was never set, so it is absent rather than zero.
+    tiers: Array.isArray(price.tiers)
+      ? price.tiers.map(tier => ({
+          up_to: tier.up_to ?? 'inf',
+          ...(tier.flat_amount === null || tier.flat_amount === undefined ? {} : { flat_amount: tier.flat_amount }),
+          ...(tier.unit_amount === null || tier.unit_amount === undefined ? {} : { unit_amount: tier.unit_amount }),
+        }))
+      : null,
     lookup_key: typeof price.lookup_key === 'string' ? price.lookup_key : null,
     metadata: normalizeMetadata(price.metadata),
     recurring: price.recurring
       ? {
           interval: price.recurring.interval ?? null,
           interval_count: price.recurring.interval_count ?? null,
+          ...(price.recurring.usage_type === 'metered' ? { usage_type: 'metered', meter: price.recurring.meter ?? null } : {}),
         }
       : null,
   }
@@ -181,17 +230,31 @@ async function listAll(list, params) {
     const page = await list({ ...params, ...(startingAfter ? { starting_after: startingAfter } : {}) })
     rows.push(...(page.data ?? []))
     if (!page.has_more || page.data?.length === 0) break
-    startingAfter = page.data[page.data.length - 1]?.id
-    if (!startingAfter) throw new Error('Stripe list response reported more rows without a final id.')
+    const nextCursor = page.data[page.data.length - 1]?.id
+    if (!nextCursor || nextCursor === startingAfter) throw new Error('Stripe list response reported more rows without an advancing cursor.')
+    startingAfter = nextCursor
   }
   return rows
 }
 
+function normalizeMeter(meter) {
+  return {
+    id: String(meter.id),
+    status: meter.status ?? null,
+    display_name: meter.display_name ?? null,
+    event_name: meter.event_name ?? null,
+    formula: meter.default_aggregation?.formula ?? null,
+    customer_payload_key: meter.customer_mapping?.event_payload_key ?? null,
+    value_payload_key: meter.value_settings?.event_payload_key ?? null,
+  }
+}
+
 export async function readCatalogSnapshot(readAdapter, { accountMode = 'unknown' } = {}) {
-  const [account, activeProducts, inactiveProducts] = await Promise.all([
+  const [account, activeProducts, inactiveProducts, meters] = await Promise.all([
     readAdapter.account.retrieve(),
     listAll(readAdapter.products.list.bind(readAdapter.products), { active: true, limit: 100 }),
     listAll(readAdapter.products.list.bind(readAdapter.products), { active: false, limit: 100 }),
+    listAll(readAdapter.meters.list.bind(readAdapter.meters), { limit: 100 }),
   ])
   const accountId = typeof account?.id === 'string' ? account.id.trim() : ''
   if (!/^acct_[A-Za-z0-9]+$/.test(accountId)) {
@@ -210,14 +273,53 @@ export async function readCatalogSnapshot(readAdapter, { accountMode = 'unknown'
     for (const active of [true, false]) {
       rows.push(...await listAll(
         readAdapter.prices.list.bind(readAdapter.prices),
-        { product: product.id, active, limit: 100 },
+        { product: product.id, active, limit: 100, expand: ['data.tiers'] },
       ))
     }
     pricesByProduct[product.id] = [...new Map(rows.map(price => [price.id, price])).values()]
       .map(normalizePrice)
       .sort((a, b) => a.id.localeCompare(b.id))
   }
-  return { accountId, accountMode, products, pricesByProduct }
+  // Catalog archival must preserve every existing contract, including plans
+  // no longer sold. Keep their prices, quantities and renewal terms signed.
+  const planProductIds = new Set(products
+    .filter(product => [...NEW_SALE_PAID_PLAN_IDS, ...RETIRED_PLAN_IDS].includes(productPlanId(product)))
+    .map(product => product.id))
+  const subscriptions = []
+  if (planProductIds.size > 0) {
+    for (const subscription of await listAll(readAdapter.subscriptions.list.bind(readAdapter.subscriptions), { status: 'all', limit: 100 })) {
+      if (CLOSED_SUBSCRIPTION_STATUSES.has(subscription.status)) continue
+      const items = subscription.items?.data ?? []
+      if (subscription.items?.has_more) throw new Error(`Stripe subscription ${subscription.id} has more items than one page.`)
+      if (!items.some(item => planProductIds.has(typeof item.price?.product === 'string' ? item.price.product : item.price?.product?.id))) continue
+      subscriptions.push(normalizeSubscription(subscription))
+    }
+  }
+  subscriptions.sort((a, b) => a.id.localeCompare(b.id))
+  return { accountId, accountMode, products, pricesByProduct, subscriptions, meters: meters.map(normalizeMeter).sort((a, b) => a.id.localeCompare(b.id)) }
+}
+
+function normalizeSubscription(subscription) {
+  return {
+    id: String(subscription.id),
+    status: subscription.status ?? null,
+    schedule: typeof subscription.schedule === 'string' ? subscription.schedule : subscription.schedule?.id ?? null,
+    billing_cycle_anchor: subscription.billing_cycle_anchor ?? null,
+    cancel_at: subscription.cancel_at ?? null,
+    cancel_at_period_end: subscription.cancel_at_period_end ?? null,
+    collection_method: subscription.collection_method ?? null,
+    trial_start: subscription.trial_start ?? null,
+    trial_end: subscription.trial_end ?? null,
+    items: (subscription.items?.data ?? [])
+      .map(item => ({
+        id: String(item.id),
+        price: item.price?.id ?? null,
+        quantity: item.quantity ?? null,
+        current_period_start: item.current_period_start ?? null,
+        current_period_end: item.current_period_end ?? null,
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+  }
 }
 
 export async function createCatalogPlan({
@@ -228,11 +330,10 @@ export async function createCatalogPlan({
   canonicalProductIds,
   canonicalProducts,
   scope = 'full',
-  retirementOnly = false,
 }) {
   const snapshot = await readCatalogSnapshot(readAdapter, { accountMode })
   const describedImages = imageFiles ?? await filesAdapter?.describeImageFiles?.() ?? {}
-  const planningScope = normalizeCatalogPlanScope(retirementOnly ? 'retirement-only' : scope)
+  const planningScope = normalizeCatalogPlanScope(scope)
   return buildCatalogPlan({
     snapshot,
     imageFiles: describedImages,
@@ -249,6 +350,7 @@ function canonicalProductMetadata(definition, priceRef, annualPriceRef, imageSha
   }
   if (definition.productFamily) metadata.product_family = definition.productFamily
   else metadata.plan_id = definition.planId
+  if (definition.productFamily === 'services') metadata.service = definition.planId
   if (definition.badge) metadata.badge = definition.badge
   if (annualPriceRef) metadata.annual_price_id = annualPriceRef
   if (existingMetadata.seat_price_id) metadata.seat_price_id = String(existingMetadata.seat_price_id)
@@ -278,6 +380,8 @@ function productPatch(
     marketing_features: definition.features.map(name => ({ name })),
     metadata,
     default_price: priceRef,
+    // A plan is billed once, so it has no unit; a metered price names what it counts.
+    unit_label: definition.unitLabel ?? '',
   }
   if (imageRef) patch.images = [imageRef]
   return patch
@@ -293,6 +397,7 @@ function canonicalProductState(product) {
       .filter(key => metadata[key] !== undefined && metadata[key] !== '')
       .map(key => [key, metadata[key]])),
     default_price: product.default_price ?? null,
+    unit_label: product.unit_label ?? null,
   }
 }
 
@@ -303,6 +408,7 @@ function desiredCanonicalProductState(definition, priceRef, annualPriceRef, imag
     marketing_features: definition.features.map(name => ({ name })),
     metadata: canonicalProductMetadata(definition, priceRef, annualPriceRef, imageSha256, existingMetadata),
     default_price: priceRef,
+    unit_label: definition.unitLabel ?? null,
   })
 }
 
@@ -311,67 +417,70 @@ function existingProductNeedsUpdate(existing, definition, priceRef, annualPriceR
     !== stableJson(desiredCanonicalProductState(definition, priceRef, annualPriceRef, imageSha256, existing.metadata))
 }
 
-function canonicalPriceCandidates(prices, interval, seatPriceId) {
-  return prices.filter(price =>
-    price.active !== false
-    && price.id !== seatPriceId
-    && price.recurring?.interval === interval
-    && price.recurring.interval_count === 1
-    && typeof price.unit_amount === 'number'
-    && price.unit_amount > 0
-    && typeof price.currency === 'string'
-    && price.currency.length > 0,
-  )
+/**
+ * The exact price an offered definition sells at one interval. A plan, a
+ * service and Site Language are flat unit prices; a metered definition is the
+ * monthly price on its meter (`meter` is its id, or the reference to the meter
+ * this plan creates): graduated tiers after an included count, or a decimal
+ * amount per reported cent.
+ */
+export function desiredPriceParams(definition, interval, meter) {
+  if (definition.meter) {
+    const recurring = { interval: 'month', interval_count: 1, usage_type: 'metered', meter }
+    return definition.meter.tiers
+      ? { currency: 'usd', recurring, billing_scheme: 'tiered', tiers_mode: 'graduated', tiers: definition.meter.tiers.map(tier => ({ ...tier })) }
+      : { currency: 'usd', recurring, billing_scheme: 'per_unit', unit_amount_decimal: definition.meter.unitAmountDecimal }
+  }
+  const amount = interval === 'year' ? definition.annualAmountCents : definition.amountCents
+  return { currency: 'usd', recurring: { interval, interval_count: 1 }, billing_scheme: 'per_unit', unit_amount: amount }
 }
 
-function resolveCanonicalPrice(product, prices, interval, seatPriceId) {
-  const candidates = canonicalPriceCandidates(prices, interval, seatPriceId)
+/** The meter a metered definition reports to, as Stripe creates it. */
+function desiredMeterParams(definition) {
+  return {
+    display_name: definition.name,
+    event_name: definition.meter.eventName,
+    default_aggregation: { formula: definition.meter.formula },
+    customer_mapping: { type: 'by_id', event_payload_key: 'stripe_customer_id' },
+    value_settings: { event_payload_key: 'value' },
+  }
+}
+
+/** The active meter with this definition's event name, which must aggregate the way the definition bills. */
+function canonicalMeter(snapshot, definition) {
+  const matching = (snapshot.meters ?? []).filter(meter => meter.status === 'active' && meter.event_name === definition.meter.eventName)
+  if (matching.length > 1) throw new Error(`Stripe has ${matching.length} active meters for ${definition.meter.eventName}.`)
+  const meter = matching[0] ?? null
+  if (meter && (meter.formula !== definition.meter.formula || meter.customer_payload_key !== 'stripe_customer_id' || meter.value_payload_key !== 'value')) {
+    throw new Error(`Stripe meter ${meter.id} for ${definition.meter.eventName} must aggregate with ${definition.meter.formula} on stripe_customer_id and value; deactivate it before planning.`)
+  }
+  return meter
+}
+
+function isRecurringBasePrice(price, seatPriceId) {
+  return price.active !== false
+    && price.id !== seatPriceId
+    && (price.recurring?.interval === 'month' || price.recurring?.interval === 'year')
+}
+
+/**
+ * The one active price matching the definition at this interval, or null when
+ * it has to be created. A price at another amount or scheme is not canonical:
+ * it is archived for new sales while existing subscriptions retain it.
+ */
+function resolveCanonicalPrice(product, prices, definition, interval, seatPriceId, meter) {
+  if (definition.meter && typeof meter !== 'string') return null
+  const desired = desiredPriceParams(definition, interval, meter)
+  const candidates = prices.filter(price => isRecurringBasePrice(price, seatPriceId) && matchesPriceParams(price, desired))
   if (candidates.length === 0) return null
   const intervalLabel = interval === 'year' ? 'annual' : interval
-
-  const metadataKey = interval === 'month' ? 'monthly_price_id' : 'annual_price_id'
-  const metadataPriceId = product.metadata?.[metadataKey]?.trim()
-  if (metadataPriceId) {
-    const selected = candidates.find(price => price.id === metadataPriceId)
-    if (!selected) {
-      throw new Error(`Stripe product ${product.id} has an invalid ${metadataKey} canonical price`)
-    }
-    return selected
-  }
-
-  const lookupKeyCandidates = candidates.filter(price => {
-    const lookupKey = price.lookup_key?.toLowerCase() ?? ''
-    return interval === 'month'
-      ? lookupKey.includes('month')
-      : lookupKey.includes('annual') || lookupKey.includes('year')
-  })
-  if (lookupKeyCandidates.length > 1) {
-    throw new Error(`Stripe product ${product.id} has multiple ${intervalLabel} prices marked by lookup_key`)
-  }
-  if (lookupKeyCandidates.length === 1) return lookupKeyCandidates[0]
+  const metadataPriceId = product.metadata?.[interval === 'month' ? 'monthly_price_id' : 'annual_price_id']?.trim()
+  const selected = candidates.find(price => price.id === metadataPriceId)
+  if (selected) return selected
   if (candidates.length !== 1) {
-    throw new Error(`Stripe product ${product.id} must have exactly one canonical ${intervalLabel} price`)
+    throw new Error(`Stripe product ${product.id} has ${candidates.length} identical ${intervalLabel} prices; archive the duplicates before planning.`)
   }
   return candidates[0]
-}
-
-function assertFixedMonthlyAmount(product, price, amountCents) {
-  if (price && (price.currency?.toLowerCase() !== 'usd' || price.unit_amount !== amountCents)) {
-    throw new Error(`Stripe product ${product.id} canonical monthly price ${price.id} must be usd ${amountCents} cents`)
-  }
-}
-
-function assertAnnualCurrency(product, monthly, annual) {
-  if (annual && monthly && annual.currency?.toLowerCase() !== monthly.currency?.toLowerCase()) {
-    throw new Error(`Stripe product ${product.id} has monthly and annual prices in different currencies`)
-  }
-}
-
-function assertFixedAnnualAmount(planId, annual) {
-  const amount = PAID_PLAN_PRICES[planId]?.annual
-  if (annual && (amount === undefined || annual.currency?.toLowerCase() !== 'usd' || annual.unit_amount !== amount)) {
-    throw new Error(amount === undefined ? `${planId} has no authorized annual price` : `${planId} annual price must be exactly USD ${amount} cents`)
-  }
 }
 
 function imageOperation(definition, imageFiles, existing) {
@@ -407,7 +516,10 @@ function productCatalogId(product) {
   const family = typeof product?.metadata?.product_family === 'string'
     ? product.metadata.product_family.trim().toLowerCase()
     : ''
-  return family === 'site_language' ? family : ''
+  if (family === 'site_language' || BILLING_METER_KEYS.includes(family)) return family
+  // A service product is named by its `service` key; the family only groups them.
+  if (family === 'services') return typeof product?.metadata?.service === 'string' ? product.metadata.service.trim() : ''
+  return ''
 }
 
 function retiredCatalogFamily(product) {
@@ -417,6 +529,8 @@ function retiredCatalogFamily(product) {
     ? product.metadata.addon_type.trim().toLowerCase()
     : ''
   if (RETIRED_ADDON_TYPES.includes(addonType)) return `addon:${addonType}`
+  const family = typeof product?.metadata?.product_family === 'string' ? product.metadata.product_family.trim().toLowerCase() : ''
+  if (RETIRED_PRODUCT_FAMILIES.includes(family)) return `family:${family}`
   return null
 }
 
@@ -476,54 +590,47 @@ function resolveCanonicalProducts(snapshot, canonicalProductIds) {
   }
 }
 
-function assertRetirementOnlyGrowthSafety(snapshot, productsByPlan) {
-  const growthProducts = productsByPlan.get('growth') ?? []
-  if (growthProducts.length !== 1) {
-    const ids = growthProducts.map(product => product.id).join(', ') || 'none'
-    throw new Error(`Retirement-only catalog planning requires exactly one active canonical Growth product; found ${growthProducts.length} (${ids}).`)
-  }
-  const growth = growthProducts[0]
-  const prices = [...(snapshot.pricesByProduct[growth.id] ?? [])].sort((a, b) => a.id.localeCompare(b.id))
-  const seatPriceId = growth.metadata?.seat_price_id?.trim()
-  const monthly = resolveCanonicalPrice(growth, prices, 'month', seatPriceId)
-  if (!monthly) {
-    throw new Error(`Retirement-only catalog planning requires one active canonical Growth monthly price on ${growth.id}.`)
-  }
-  assertFixedMonthlyAmount(growth, monthly, PAID_PLAN_PRICES.growth.monthly)
-  const annual = resolveCanonicalPrice(growth, prices, 'year', seatPriceId)
-  assertAnnualCurrency(growth, monthly, annual)
-  assertFixedAnnualAmount('growth', annual)
-  return growth
-}
-
-export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductIds, canonicalProducts, scope = 'full', retirementOnly = false }) {
-  const planningScope = normalizeCatalogPlanScope(retirementOnly ? 'retirement-only' : scope)
-  if (planningScope === 'retirement-only') {
-    // Retirement-only planning must not let a canonical override hide an
-    // ambiguous Growth catalog.  Validate the live active set before the
-    // general resolver (which otherwise accepts an explicit duplicate
-    // override) so every retirement plan proves one and only one Growth
-    // product is present.
-    const activeGrowthProducts = snapshot.products
-      .filter(product => product.active !== false && productPlanId(product) === 'growth')
-      .sort((a, b) => a.id.localeCompare(b.id))
-    if (activeGrowthProducts.length !== 1) {
-      const ids = activeGrowthProducts.map(product => product.id).join(', ') || 'none'
-      throw new Error(`Retirement-only catalog planning requires exactly one active canonical Growth product; found ${activeGrowthProducts.length} (${ids}).`)
+function assertRetirementOnlyOfferSafety(snapshot, productsByPlan) {
+  for (const definition of PLAN_DEFINITIONS.filter(candidate => NEW_SALE_PAID_PLAN_IDS.includes(candidate.planId))) {
+    const products = productsByPlan.get(definition.planId) ?? []
+    if (products.length !== 1) {
+      const ids = products.map(product => product.id).join(', ') || 'none'
+      throw new Error(`Retirement-only catalog planning requires exactly one active canonical ${definition.name} product; found ${products.length} (${ids}).`)
+    }
+    const product = products[0]
+    const prices = [...(snapshot.pricesByProduct[product.id] ?? [])].sort((a, b) => a.id.localeCompare(b.id))
+    const seatPriceId = product.metadata?.seat_price_id?.trim()
+    if (!resolveCanonicalPrice(product, prices, definition, 'month', seatPriceId)) {
+      throw new Error(`Retirement-only catalog planning requires the canonical ${definition.name} monthly price on ${product.id}.`)
+    }
+    if (definition.annualAmountCents && !resolveCanonicalPrice(product, prices, definition, 'year', seatPriceId)) {
+      throw new Error(`Retirement-only catalog planning requires the canonical ${definition.name} annual price on ${product.id}.`)
     }
   }
+}
+
+export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductIds, canonicalProducts, scope = 'full' }) {
+  const planningScope = normalizeCatalogPlanScope(scope)
   const { canonicalIds, productsByPlan } = resolveCanonicalProducts(
     snapshot,
     canonicalProductIds ?? canonicalProducts,
   )
-  if (planningScope === 'retirement-only') assertRetirementOnlyGrowthSafety(snapshot, productsByPlan)
+  if (planningScope === 'retirement-only') assertRetirementOnlyOfferSafety(snapshot, productsByPlan)
   const canonicalOperations = []
   const destructiveOperations = []
 
   // Keep offered-product creation/reconciliation ahead of every destructive
   // operation. The operator can therefore revalidate the canonical Growth
   // product, prices, and image before retiring duplicates or old products.
+  const meterRefs = {}
+  if (planningScope !== 'retirement-only') for (const definition of PLAN_DEFINITIONS.filter(candidate => candidate.meter)) {
+    const meter = canonicalMeter(snapshot, definition)
+    meterRefs[definition.planId] = meter ? meter.id : { ref: { kind: 'meter', planId: definition.planId } }
+    if (!meter) canonicalOperations.push({ type: 'create_meter', planId: definition.planId, params: desiredMeterParams(definition) })
+  }
+
   if (planningScope !== 'retirement-only') for (const definition of PLAN_DEFINITIONS) {
+    const meterRef = meterRefs[definition.planId]
     const products = productsByPlan.get(definition.planId) ?? []
     const canonicalProductId = canonicalIds[definition.planId]
     const existing = canonicalProductId
@@ -543,15 +650,8 @@ export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductId
       ? [...(snapshot.pricesByProduct[existing.id] ?? [])].sort((a, b) => a.id.localeCompare(b.id))
       : []
     const seatPriceId = existing?.metadata?.seat_price_id?.trim()
-    const resolvedMonthly = existing ? resolveCanonicalPrice(existing, prices, 'month', seatPriceId) : null
-    assertFixedMonthlyAmount(existing ?? { id: definition.planId }, resolvedMonthly, definition.amountCents)
-    const canonical = resolvedMonthly
-    const annual = existing ? resolveCanonicalPrice(existing, prices, 'year', seatPriceId) : null
-    assertAnnualCurrency(existing ?? { id: definition.planId }, canonical, annual)
-    if (NEW_SALE_PAID_PLAN_IDS.includes(definition.planId)) assertFixedAnnualAmount(definition.planId, annual)
-    if (definition.annualAmountCents && annual && (annual.currency?.toLowerCase() !== 'usd' || annual.unit_amount !== definition.annualAmountCents)) {
-      throw new Error(`Stripe product ${existing?.id ?? definition.planId} canonical annual price ${annual.id} must be usd ${definition.annualAmountCents} cents`)
-    }
+    const canonical = existing ? resolveCanonicalPrice(existing, prices, definition, 'month', seatPriceId, meterRef) : null
+    const annual = existing && definition.annualAmountCents ? resolveCanonicalPrice(existing, prices, definition, 'year', seatPriceId) : null
     const priceRef = canonical
       ? canonical.id
       : { ref: { kind: 'price', planId: definition.planId } }
@@ -571,7 +671,7 @@ export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductId
           marketing_features: definition.features.map(name => ({ name })),
           metadata: {
             ...(definition.productFamily
-              ? { product_family: definition.productFamily }
+              ? { product_family: definition.productFamily, ...(definition.productFamily === 'services' ? { service: definition.planId } : {}) }
               : { plan_id: definition.planId }),
             highlighted: definition.highlighted ? 'true' : 'false',
             ...(definition.badge ? { badge: definition.badge } : {}),
@@ -585,11 +685,7 @@ export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductId
         type: 'create_price',
         planId: definition.planId,
         product: productRef,
-        params: {
-          currency: 'usd',
-          unit_amount: definition.amountCents,
-          recurring: { interval: 'month', interval_count: 1 },
-        },
+        params: desiredPriceParams(definition, 'month', meterRef),
       })
     }
 
@@ -600,25 +696,14 @@ export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductId
         planId: `${definition.planId}_annual`,
         catalogProductId: definition.planId,
         product: productRef,
-        params: {
-          currency: 'usd',
-          unit_amount: definition.annualAmountCents,
-          recurring: { interval: 'year', interval_count: 1 },
-        },
+        params: desiredPriceParams(definition, 'year'),
       })
     }
 
     if (image) canonicalOperations.push(image)
 
     for (const price of prices) {
-      const baseInterval = price.recurring?.interval === 'month' || price.recurring?.interval === 'year'
-      if (
-        price.id === seatPriceId
-        || price.id === canonical?.id
-        || price.id === annual?.id
-        || !baseInterval
-        || !canonicalPriceCandidates(prices, price.recurring?.interval, seatPriceId).some(candidate => candidate.id === price.id)
-      ) continue
+      if (!isRecurringBasePrice(price, seatPriceId) || price.id === canonical?.id || price.id === annual?.id) continue
       destructiveOperations.push({ type: 'deactivate_price', productId: existing?.id, priceId: price.id, expected: price })
     }
 
@@ -698,7 +783,9 @@ export function buildCatalogPlan({ snapshot, imageFiles = {}, canonicalProductId
     }
   }
 
-  const operations = [...canonicalOperations, ...destructiveOperations]
+  const operations = planningScope === 'offers-only'
+    ? canonicalOperations
+    : [...canonicalOperations, ...destructiveOperations]
 
   const plan = {
     schemaVersion: CATALOG_PLAN_SCHEMA_VERSION,
@@ -751,6 +838,7 @@ function resolveReference(value, context) {
   if (value.ref?.kind === 'product') return context.products[value.ref.planId]?.id ?? context.products[value.ref.planId]
   if (value.ref?.kind === 'price') return context.prices[value.ref.planId]?.id ?? context.prices[value.ref.planId]
   if (value.ref?.kind === 'file') return context.files[value.ref.planId]
+  if (value.ref?.kind === 'meter') return context.meters[value.ref.planId]?.id ?? context.meters[value.ref.planId]
   return Object.fromEntries(Object.entries(value).map(([key, nested]) => [key, resolveReference(nested, context)]))
 }
 
@@ -811,6 +899,7 @@ function sanitizeError(error) {
   return sanitizeEvidence({
     name: error?.name ?? 'Error',
     message: error?.message ?? String(error),
+    detail: error?.detail?.message,
     code: error?.code,
     status: error?.status,
   })
@@ -910,10 +999,13 @@ function mutationEvidence(result, fallback = {}) {
 }
 
 function contextFromJournal(journal) {
-  const context = { products: {}, prices: {}, files: {} }
+  const context = { products: {}, prices: {}, files: {}, meters: {} }
   for (const entry of journal.operations) {
     if (entry.status !== 'applied') continue
     const evidence = entry.evidence ?? {}
+    if (entry.type === 'create_meter' && entry.identity.planId && evidence.id) {
+      context.meters[entry.identity.planId] = { id: evidence.id }
+    }
     if (entry.type === 'create_product' && entry.identity.planId && evidence.id) {
       context.products[entry.identity.planId] = { id: evidence.id }
     }
@@ -961,6 +1053,10 @@ function matchesProductPatch(product, patch) {
       }
       continue
     }
+    if (key === 'unit_label') {
+      if ((product.unit_label ?? '') !== (expected ?? '')) return false
+      continue
+    }
     if (key === 'marketing_features') {
       if (!valuesEqual(normalizeMarketingFeatures(product.marketing_features), normalizeMarketingFeatures(expected))) return false
       continue
@@ -1003,13 +1099,11 @@ function operationAlreadyApplied(snapshot, operation, context, entry) {
       ? findCurrentProduct(snapshot, knownId)
       : snapshot.products.find(candidate =>
           candidate.active !== false
-          && (
-            candidate.metadata?.plan_id === operation.params?.metadata?.plan_id
-            || candidate.metadata?.product_family === operation.params?.metadata?.product_family
-          ),
+          && productCatalogId(candidate) === operation.planId,
         )
     return Boolean(product && product.active !== false && matchesProductPatch(product, operation.params))
   }
+  if (operation.type === 'create_meter') return Boolean(appliedMeter(snapshot, operation))
   if (operation.type === 'create_price') {
     const productId = resolveProductId(operation, context)
     if (!productId) return false
@@ -1017,7 +1111,7 @@ function operationAlreadyApplied(snapshot, operation, context, entry) {
     const candidates = (snapshot.pricesByProduct[productId] ?? [])
       .filter(price => price.active !== false)
       .filter(price => knownId ? price.id === knownId : true)
-    return candidates.some(price => matchesPriceParams(price, { ...operation.params, product: productId }))
+    return candidates.some(price => matchesPriceParams(price, { ...resolveReference(operation.params, context), product: productId }))
   }
   if (operation.type === 'update_product') {
     const productId = resolveProductId(operation, context)
@@ -1030,7 +1124,16 @@ function operationAlreadyApplied(snapshot, operation, context, entry) {
   return operation.type === 'upload_product_image' && entry.status === 'applied' && Boolean(entry.evidence?.url)
 }
 
+function appliedMeter(snapshot, operation) {
+  return (snapshot.meters ?? []).find(meter => meter.status === 'active' && meter.event_name === operation.params.event_name
+    && meter.formula === operation.params.default_aggregation.formula) ?? null
+}
+
 function inferredAppliedEvidence(snapshot, operation, context, entry) {
+  if (operation.type === 'create_meter') {
+    const meter = appliedMeter(snapshot, operation)
+    return meter ? { id: meter.id } : {}
+  }
   if (operation.type === 'archive_product') return { id: operation.productId }
   if (operation.type === 'clear_product_default_price') {
     return { id: operation.productId, defaultPriceId: operation.defaultPriceId }
@@ -1042,10 +1145,7 @@ function inferredAppliedEvidence(snapshot, operation, context, entry) {
       ? findCurrentProduct(snapshot, knownId)
       : snapshot.products.find(candidate =>
           candidate.active !== false
-          && (
-            candidate.metadata?.plan_id === operation.params?.metadata?.plan_id
-            || candidate.metadata?.product_family === operation.params?.metadata?.product_family
-          )
+          && productCatalogId(candidate) === operation.planId
           && matchesProductPatch(candidate, operation.params),
         )
     return product?.id ? { id: product.id } : {}
@@ -1056,7 +1156,7 @@ function inferredAppliedEvidence(snapshot, operation, context, entry) {
     const prices = productId ? snapshot.pricesByProduct[productId] ?? [] : []
     const price = prices
       .filter(candidate => candidate.active !== false)
-      .find(candidate => (knownId ? candidate.id === knownId : true) && matchesPriceParams(candidate, { ...operation.params, product: productId }))
+      .find(candidate => (knownId ? candidate.id === knownId : true) && matchesPriceParams(candidate, { ...resolveReference(operation.params, context), product: productId }))
     return price?.id ? { id: price.id, product: productId } : {}
   }
   if (operation.type === 'update_product') {
@@ -1112,10 +1212,7 @@ function assertOperationPrecondition(snapshot, plan, operation, context, entry) 
     return { alreadyApplied: false }
   }
   if (operation.type === 'create_product') {
-    // create_product's own params never carry metadata (a later update_product
-    // sets it once the product/price IDs exist), so identity must resolve
-    // through productCatalogId's plan_id/product_family reader against the
-    // operation's planId, not operation.params.metadata.
+    // Resolve product identity consistently through plan_id/product_family.
     const duplicate = snapshot.products.find(candidate =>
       candidate.active !== false
       && productCatalogId(candidate) !== ''
@@ -1124,9 +1221,15 @@ function assertOperationPrecondition(snapshot, plan, operation, context, entry) 
     if (duplicate) throw new Error(`Provider precondition failed: active canonical product ${duplicate.id} does not match the signed create operation.`)
     return { alreadyApplied: false }
   }
+  if (operation.type === 'create_meter') {
+    const duplicate = (snapshot.meters ?? []).find(meter => meter.status === 'active' && meter.event_name === operation.params.event_name)
+    if (duplicate) throw new Error(`Provider precondition failed: active meter ${duplicate.id} does not match the signed create operation.`)
+    return { alreadyApplied: false }
+  }
   if (operation.type === 'create_price') {
     const productId = resolveProductId(operation, context)
     if (!productId) throw new Error(`Unable to resolve product for ${operation.planId} price creation.`)
+    if (operation.params.recurring?.meter && typeof resolveReference(operation.params, context).recurring.meter !== 'string') throw new Error(`Unable to resolve meter for ${operation.planId} price creation.`)
     assertSignedProductPrecondition(snapshot, plan, productId, operation.catalogProductId ?? operation.planId)
     return { alreadyApplied: false }
   }
@@ -1147,7 +1250,7 @@ function assertOperationPrecondition(snapshot, plan, operation, context, entry) 
 }
 
 async function assertCanonicalReadiness(plan, snapshot, filesAdapter) {
-  assertCatalogAccountBinding(plan, snapshot)
+  assertCatalogSnapshotBoundary(plan, snapshot)
   const remainingPlan = buildCatalogPlan({
     snapshot,
     imageFiles: imageFilesFromPlan(plan),
@@ -1170,9 +1273,12 @@ async function assertCanonicalReadiness(plan, snapshot, filesAdapter) {
   return remainingPlan
 }
 
-function assertCatalogAccountBinding(plan, snapshot) {
+function assertCatalogSnapshotBoundary(plan, snapshot) {
   if (snapshot.accountId !== plan.accountId) {
     throw new Error(`Stripe catalog plan belongs to account ${plan.accountId}, not ${snapshot.accountId}.`)
+  }
+  if (!valuesEqual(snapshot.subscriptions, plan.providerSnapshot.subscriptions)) {
+    throw new Error('Provider subscription contracts changed since catalog review; prices, quantities and renewal terms must remain unchanged.')
   }
 }
 
@@ -1190,7 +1296,6 @@ export class CatalogApplyIncompleteError extends Error {
 export async function applyCatalogPlan({
   plan,
   confirmedSha256,
-  key,
   readAdapter,
   mutationAdapter,
   filesAdapter,
@@ -1201,7 +1306,8 @@ export async function applyCatalogPlan({
     throw new Error('Stripe catalog apply requires an explicit journal path.')
   }
   assertCatalogPlanSchema(plan)
-  assertCatalogModeKey(key, requiredMode)
+  if (typeof readAdapter?.assertMode !== 'function') throw new Error('Stripe catalog apply requires an authenticated provider mode guard.')
+  await readAdapter.assertMode(requiredMode)
   const hash = assertPlanIntegrity(plan, confirmedSha256)
   if (plan.accountMode !== requiredMode) throw new Error(`Stripe catalog apply requires a ${requiredMode}-mode plan.`)
   if (!Array.isArray(plan.operations)) throw new Error('Stripe catalog plan operations must be an array.')
@@ -1218,7 +1324,7 @@ export async function applyCatalogPlan({
   }
 
   const initialSnapshot = await readCatalogSnapshot(readAdapter, { accountMode: plan.accountMode })
-  assertCatalogAccountBinding(plan, initialSnapshot)
+  assertCatalogSnapshotBoundary(plan, initialSnapshot)
   let journal
   const journalExists = existsSync(journalPath)
   if (journalExists) {
@@ -1257,10 +1363,16 @@ export async function applyCatalogPlan({
       context.products[operation.planId] = { id: result.id }
       return mutationEvidence(result)
     }
+    if (operation.type === 'create_meter') {
+      const result = await mutationAdapter.meters.create(operation.params, requestOptions)
+      if (!result?.id) throw new Error(`Stripe meter creation for ${operation.planId} did not return an ID.`)
+      context.meters[operation.planId] = { id: result.id }
+      return mutationEvidence(result)
+    }
     if (operation.type === 'create_price') {
       const product = resolveProductId(operation, context)
       if (!product) throw new Error(`Unable to resolve product for ${operation.planId} price creation.`)
-      const result = await mutationAdapter.prices.create({ ...operation.params, product }, requestOptions)
+      const result = await mutationAdapter.prices.create({ ...resolveReference(operation.params, context), product }, requestOptions)
       if (!result?.id) throw new Error(`Stripe price creation for ${operation.planId} did not return an ID.`)
       context.prices[operation.planId] = { id: result.id }
       return mutationEvidence(result, { product })
@@ -1286,7 +1398,7 @@ export async function applyCatalogPlan({
     let snapshot
     try {
       snapshot = await readCatalogSnapshot(readAdapter, { accountMode: plan.accountMode })
-      assertCatalogAccountBinding(plan, snapshot)
+      assertCatalogSnapshotBoundary(plan, snapshot)
       const precondition = assertOperationPrecondition(snapshot, plan, operation, context, entry)
       if (precondition.alreadyApplied) {
         entry.status = 'applied'
@@ -1294,6 +1406,7 @@ export async function applyCatalogPlan({
         entry.evidence = mutationEvidence(null, inferredAppliedEvidence(snapshot, operation, context, entry))
         if (operation.type === 'create_product' && entry.evidence.id) context.products[operation.planId] = { id: entry.evidence.id }
         if (operation.type === 'create_price' && entry.evidence.id) context.prices[operation.planId] = { id: entry.evidence.id }
+        if (operation.type === 'create_meter' && entry.evidence.id) context.meters[operation.planId] = { id: entry.evidence.id }
         persistApplyJournal(journalPath, journal)
         continue
       }
@@ -1328,16 +1441,16 @@ export async function applyCatalogPlan({
   let remainingPlan
   try {
     finalSnapshot = await readCatalogSnapshot(readAdapter, { accountMode: plan.accountMode })
-    assertCatalogAccountBinding(plan, finalSnapshot)
+    assertCatalogSnapshotBoundary(plan, finalSnapshot)
     remainingPlan = buildCatalogPlan({
       snapshot: finalSnapshot,
       imageFiles: imageFilesFromPlan(plan),
       canonicalProductIds: plan.canonicalProductIds,
       scope: plan.scope,
     })
-  } catch (_error) {
+  } catch (error) {
     journal.status = 'incomplete'
-    journal.nextSafeAction = 'Review final provider drift and regenerate a new plan; this journal cannot claim completion.'
+    journal.nextSafeAction = `Review final provider drift (${sanitizeError(error).message}) and regenerate a new plan; this journal cannot claim completion.`
     persistApplyJournal(journalPath, journal)
     throw new CatalogApplyIncompleteError(
       `Stripe catalog apply could not prove zero remaining operations; status=incomplete.`,

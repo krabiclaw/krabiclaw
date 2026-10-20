@@ -8,6 +8,8 @@ import { buildPlatformKnowledgeDocuments, buildTenantBlogDocuments } from '../..
 import { listSocialCardOwners } from '../../server/utils/social-card.ts'
 import { getPublishedBlogPost, listPublishedArticles } from '../../server/utils/content/publishing.ts'
 import type { CloudflareEnv } from '../../server/utils/auth.ts'
+import { createDb } from '../../server/db/index.ts'
+import { recordTenantPageview, resolvePublicPageIdentity } from '../../server/utils/pageview-tracking.ts'
 
 test('public discovery resolves translations through current publication owners', { timeout: 60_000 }, async () => {
   const runtime = new Miniflare({ workers: [{ config: {
@@ -22,8 +24,8 @@ test('public discovery resolves translations through current publication owners'
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
     for (const id of ['platform', 'tenant', 'other']) {
-      // Krabiclaw's own organization is the one running the platform template.
-      await db.prepare('INSERT INTO organization (id,name,slug,subdomain,theme_id,vertical) VALUES (?,?,?,?,?,?)')
+      // KrabiClaw's own organization is the one running the platform template.
+      await db.prepare(`INSERT INTO organization (id,name,slug,subdomain,theme_id,vertical, default_currency, timezone) VALUES (?,?,?,?,?,?, 'USD', 'UTC')`)
         .bind(id, id, id, id, id === 'platform' ? 'krabiclaw-theme-v1' : 'saya-theme-v1', id === 'platform' ? 'service' : 'restaurant').run()
       for (const locale of ['en', 'th']) await db.prepare('INSERT INTO organization_locales (id,organization_id,locale,is_source,status) VALUES (?,?,?,?,?)')
         .bind(id + locale, id, locale, Number(locale === 'en'), 'published').run()
@@ -66,6 +68,28 @@ test('public discovery resolves translations through current publication owners'
     assert.equal(await getPublishedBlogPost(db, 'platform', 'blog', 'guide', 'en', env), null)
     // A translated list is readable only where the language is published on a Growth site.
     await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, periodEnd) VALUES ('sub-tenant','growth','tenant','active',4102444800)").run()
+    // Complete built-in routes derive their localized paths; authored pages still
+    // require a published representation. The collector stores the actual visit.
+    const identityInput = { organizationId: 'tenant', requestedLocale: null, themeId: 'saya-theme-v1', vertical: 'restaurant' }
+    for (const path of ['/th/menu', '/th/experiences', '/th/contact', '/th/reservations']) {
+      const identity = await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, pagePath: path })
+      assert(identity, path)
+      assert.deepEqual(identity, { publicPath: path, sourcePath: path.slice(3), locale: 'th',
+        locationId: null, pageId: null, documentId: null, pageType: null, recipe: null, productId: null })
+      const eventId = crypto.randomUUID()
+      await recordTenantPageview(db, { eventId, organizationId: 'tenant', pagePath: identity.publicPath,
+        sourcePath: identity.sourcePath, locale: identity.locale, referrerHost: null, attribution: {}, internalHosts: [],
+        userAgent: 'Desktop', ipHash: 'proof', sessionId: 'localized-visit', visitorId: 'localized-visitor',
+        country: null, region: null, city: null, locationId: identity.locationId, pageId: identity.pageId,
+        documentId: identity.documentId, pageType: identity.pageType, recipe: identity.recipe, productId: identity.productId,
+        now: '2026-10-13T00:00:00.000Z' })
+      assert.deepEqual(await db.prepare("SELECT page_path, payload_json ->> '$.source_path' AS source_path, payload_json ->> '$.locale' AS locale FROM analytics_events WHERE id = ?").bind(eventId).first(),
+        { page_path: path, source_path: path.slice(3), locale: 'th' })
+    }
+    for (const path of ['/th', '/th/about', '/fr/menu', '/th/experiences/missing', '/th/unpublished']) {
+      assert.equal(await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, pagePath: path }), null, path)
+    }
+    assert.equal(await resolvePublicPageIdentity(env, createDb(db), { ...identityInput, organizationId: 'other', pagePath: '/th/menu' }), null)
     const translated = await listPublishedArticles(db, env, 'tenant', 'blog', 'th')
     assert.deepEqual(translated.map(row => [row.id, row.title, row.excerpt, row.slug]), [
       ['tenant-story', 'Translated story', 'Translated summary', 'translated'],

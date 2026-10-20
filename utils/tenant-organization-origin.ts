@@ -16,13 +16,15 @@ export function tenantOrganizationOrigin(input: {
   platformDomain: string
   freeOrganizationDomain: string
   subdomain: string
+  canonicalDomain?: string | null
 }): string {
   const subdomain = input.subdomain.trim().toLowerCase()
-  if (!subdomain) return ''
-
   const freeOrganizationHost = input.freeOrganizationDomain.replace(/^https?:\/\//, '').replace(/\/.*$/, '')
-  if (!freeOrganizationHost) return ''
   const protocol = input.freeOrganizationDomain.startsWith('http://') ? 'http:' : 'https:'
+  const canonicalHost = normalizeHost(input.canonicalDomain)
+  if (canonicalHost && canonicalHost === normalizeHost(input.freeOrganizationDomain)) {
+    return input.platformDomain.replace(/\/$/, '')
+  }
 
   // Deployed staging: a first-level alias off the production root.
   // normalizeHost first: environmentTenantAliasHostname takes a hostname, and
@@ -30,5 +32,8 @@ export function tenantOrganizationOrigin(input: {
   const alias = environmentTenantAliasHostname(normalizeHost(input.platformDomain), subdomain)
   if (alias) return `${protocol}//${alias}`
 
+  if (canonicalHost) return `https://${canonicalHost}`
+  if (!freeOrganizationHost) return ''
+  if (!subdomain) return ''
   return `${protocol}//${subdomain}.${freeOrganizationHost}`
 }

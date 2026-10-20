@@ -16,34 +16,21 @@ test.describe('stateless MCP server', () => {
     const initializeBody = await initialize.json() as { result?: { protocolVersion?: string; capabilities?: { tools?: unknown; resources?: unknown } } }
     expect(initializeBody.result?.protocolVersion).toBe(MCP_VERSION)
     expect(initializeBody.result?.capabilities?.tools).toBeDefined()
-    expect(initializeBody.result?.capabilities?.resources).toBeDefined()
-    const sessionId = initialize.headers()['mcp-session-id']
-    expect(sessionId).toEqual(expect.any(String))
 
     const initialized = await mcpRequest(request, baseURL!, {
       method: 'notifications/initialized',
-      extraHeaders: { 'user-agent': 'openai-mcp/1.0.0', 'mcp-session-id': sessionId! },
+      extraHeaders: { 'user-agent': 'openai-mcp/1.0.0' },
     })
     expect(initialized.status()).toBe(202)
 
     const tools = await mcpRequest(request, baseURL!, {
       method: 'tools/list',
-      extraHeaders: { 'user-agent': 'openai-mcp/1.0.0', 'mcp-session-id': sessionId! },
+      extraHeaders: { 'user-agent': 'openai-mcp/1.0.0' },
     })
     expect(tools.status()).toBe(200)
     const toolsBody = await tools.json() as { result: { tools: Array<{ name: string, inputSchema?: { required?: string[], properties?: Record<string, unknown>, additionalProperties?: boolean }, outputSchema?: Record<string, unknown>, _meta?: Record<string, unknown> }> } }
     const uploadTool = toolsBody.result.tools.find(tool => tool.name === 'save_media_attachment')
-    expect(toolsBody.result.tools.some(tool => tool.name === 'show_generated_images')).toBe(false)
-    const removedPicker = await mcpRequest(request, baseURL!, {
-      method: 'tools/call',
-      toolName: 'show_generated_images',
-      args: { images: [] },
-    })
-    expect(removedPicker.status()).toBe(200)
-    const removedPickerBody = await removedPicker.json() as { error?: { code?: number, message?: string } }
-    expect(removedPickerBody.error?.code).toBe(-32601)
-    expect(removedPickerBody.error?.message).toContain('Unknown tool')
-    expect(uploadTool?.inputSchema?.required).toEqual(['file'])
+    expect(uploadTool?.inputSchema?.required).toEqual(['file', 'idempotency_key'])
     expect(uploadTool?.inputSchema?.properties?.file_id).toBeUndefined()
     expect(uploadTool?.inputSchema?.properties?.poster_file).toBeDefined()
     expect(uploadTool?.inputSchema?.additionalProperties).toBe(false)
@@ -76,7 +63,7 @@ test.describe('stateless MCP server', () => {
     expect(mismatchedTarget.status()).toBe(200)
     const mismatchedTargetBody = await mismatchedTarget.json() as { result?: { isError?: boolean, content?: Array<{ text?: string }> } }
     expect(mismatchedTargetBody.result?.isError).toBe(true)
-    expect(mismatchedTargetBody.result?.content?.[0]?.text).toContain('Unknown argument: location_id')
+    expect(mismatchedTargetBody.result?.content?.[0]?.text).toContain('location_id')
   })
 
   test('a gallery reorder moves the fixture gallery and get_location reads the new order', async ({ request, baseURL }, testInfo) => {

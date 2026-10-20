@@ -2,7 +2,7 @@ import type { H3Event } from 'nitro'
 import { cloudflareEnv } from '~/server/utils/api-response'
 import {
   dashboardOrgQueryParam,
-  getDashboardContext,
+  getDashboardMemberContext,
   listDashboardLocations,
   loadDashboardOrganizationCard,
 } from '~/server/utils/dashboard-context'
@@ -21,7 +21,7 @@ export async function loadDashboardContext(
 ) {
   const contextStartedAt = performance.now()
   const env = cloudflareEnv(event)
-  const { db, organization } = await getDashboardContext(event, {
+  const { db, organization } = await getDashboardMemberContext(event, {
     organizationSlug: scope.orgSlug,
   })
   recordRequestPhase(event, 'context', contextStartedAt)

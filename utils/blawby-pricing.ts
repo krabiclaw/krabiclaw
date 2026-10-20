@@ -4,6 +4,21 @@ export interface BlawbyRateResult {
   standardRate: number
 }
 
+export const PRICING_CALCULATOR_SCHEMA = {
+  type: 'object',
+  properties: {
+    note: { type: 'string' },
+    rows: {
+      type: 'array',
+      items: {
+        type: 'array',
+        description: 'Household size, 250% income limit, 350% income limit, 400% income limit, in that order.',
+        items: { type: ['number', 'string', 'null'] },
+      },
+    },
+  },
+} as const
+
 export function parsePricingAmount(value: unknown) {
   const amount = Number(String(value ?? '').replace(/[^0-9.]/g, ''))
   return Number.isFinite(amount) ? amount : 0

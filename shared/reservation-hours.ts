@@ -1,4 +1,4 @@
-import { assertCalendarDate, addLocalDays, localNow, formatTime, MINUTE_TIME_PATTERN, calendarDateSchema as dateSchema, minuteTimeSchema as timeSchema } from '../utils/timezone.ts'
+import { isValidTimezone, localDateAt, localPartsAt, assertCalendarDate, addLocalDays, localNow, formatTime, MINUTE_TIME_PATTERN, calendarDateSchema as dateSchema, minuteTimeSchema as timeSchema } from '../utils/timezone.ts'
 export const WEEKDAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'] as const
 export type Weekday = (typeof WEEKDAYS)[number]
 export type WeekPoint = { day: number; hour: number; minute: number }
@@ -240,4 +240,18 @@ export function normalizeGoogleOpeningHours(periods: unknown): OpeningHours {
     const p = value as Record<string, unknown>
     return { open: endpoint(p.open), ...(p.close === undefined ? {} : { close: endpoint(p.close) }) }
   }) })
+}
+
+export function locationAllowsBooking(session: { starts_at: string; ends_at: string }, location: { timezone: string | null; status: string; opening_hours: string | null; special_hours: string | null }): boolean {
+  if (location.status !== 'active' || !location.timezone || !isValidTimezone(location.timezone)) return false
+  const starts = new Date(session.starts_at), ends = new Date(session.ends_at)
+  const date = localDateAt(starts, location.timezone)
+  const endDate = localDateAt(ends, location.timezone)
+  const intervals = getDateIntervals(parseOpeningHours(location.opening_hours ? JSON.parse(location.opening_hours) : null), parseSpecialHours(location.special_hours ? JSON.parse(location.special_hours) : null), date)
+  // Unknown opening hours do not override an explicitly scheduled session.
+  if (intervals === null) return true
+  const start = localPartsAt(starts, location.timezone), end = localPartsAt(ends, location.timezone)
+  const firstMinute = start.hour * 60 + start.minute
+  const lastMinute = end.hour * 60 + end.minute + (Date.parse(`${endDate}T00:00:00Z`) - Date.parse(`${date}T00:00:00Z`)) / 60000
+  return intervals.some(interval => firstMinute >= interval.start && lastMinute <= interval.end)
 }

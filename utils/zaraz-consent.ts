@@ -7,7 +7,7 @@ export const ZARAZ_ANALYTICS_PURPOSE_ID = 'kc_analytics'
 export const ZARAZ_CONSENT_COOKIE_NAME = 'kc_analytics_consent'
 
 // The one optional tool Zaraz loads is Google Analytics; this purpose is its
-// only switch. Krabiclaw's first-party measurement (/api/analytics/track) is
+// only switch. KrabiClaw's first-party measurement (/api/analytics/track) is
 // not a Zaraz tool and does not read this consent.
 export const ZARAZ_ANALYTICS_PURPOSE = {
   name: 'Google Analytics',

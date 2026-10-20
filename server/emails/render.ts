@@ -49,6 +49,7 @@ export const NotificationEmail = defineComponent({
       const message = props.message
       const hero = message.hero
       return h(EmailFrame, {
+        locale: message.locale,
         preheader: message.preheader,
         organizationName: message.organizationName ?? null,
         organizationLogoUrl: message.organizationLogoUrl ?? null,

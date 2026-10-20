@@ -1,6 +1,6 @@
 // PATCH /api/editor/organizations/[organizationId]/locations/[locationId]/qa/[qaId]
 import { jsonResponse } from '~/server/utils/api-response'
-import { updateLocationQa } from '~/server/utils/mcp-workflows'
+import { updateQa } from '~/server/utils/location-qa'
 import { requireLocationAccess } from '~/server/utils/location-access'
 
 export default defineHandler(async (event) => {
@@ -24,7 +24,7 @@ export default defineHandler(async (event) => {
     sort_order?: unknown
   }
 
-  const result = await updateLocationQa(db, organization.id, locationId, qaId, body)
+  const result = await updateQa(db, { organizationId: organization.id, locationId }, qaId, body)
   return jsonResponse(result)
 })
 import { defineHandler } from 'nitro';

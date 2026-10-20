@@ -1,3 +1,4 @@
+import { HTTPError } from 'nitro'
 import { ARTICLE_COLLECTIONS, collectionArticlePath, isArticleCollection } from '~/utils/article-collections'
 import { tenantBlogPostPath } from '~/utils/tenant-blog-route'
 import { PLATFORM_TEMPLATE } from '~/utils/template-registry'
@@ -6,6 +7,7 @@ import { bytesToHex } from '@noble/hashes/utils.js'
 import { queryAll, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { getPlatformOrganization } from '~/server/utils/platform-organization'
+import { resolveMcpDocumentationBlocks } from '~/server/utils/mcp-documentation'
 import {
   PLATFORM_KNOWLEDGE_FAQ_ENTRIES,
   PLATFORM_KNOWLEDGE_PAGE_ENTRIES,
@@ -112,10 +114,10 @@ async function loadContentBodies(db: DbClient, platformOrganizationId: string, p
       AND (cd.organization_id = ?) = ?${organizationId ? ' AND cd.organization_id = ?' : ''}
     ORDER BY cd.id, cb.position
   `, [platformOrganizationId, platform ? 1 : 0, ...(organizationId ? [organizationId] : [])])
-  return renderBodiesByDocument(rows)
+  return await renderBodiesByDocument(db, rows)
 }
 
-function renderBodiesByDocument(rows: ContentBlockBodyRow[] | null | undefined) {
+async function renderBodiesByDocument(db: DbClient, rows: ContentBlockBodyRow[] | null | undefined) {
   const blocks = new Map<string, Array<{ type: string; position: number; level: number | null; data: Record<string, unknown>; media: [] }>>()
   for (const row of rows ?? []) {
     const key = row.id
@@ -123,7 +125,9 @@ function renderBodiesByDocument(rows: ContentBlockBodyRow[] | null | undefined) 
     items.push({ type: row.type, position: row.position, level: row.level, data: JSON.parse(row.data_json) as Record<string, unknown>, media: [] })
     blocks.set(key, items)
   }
-  return new Map([...blocks].map(([key, items]) => [key, renderContentBlocksForLlm(items)]))
+  return new Map(await Promise.all([...blocks].map(async ([key, items]) => [key,
+    renderContentBlocksForLlm(await resolveMcpDocumentationBlocks(db, key, items)),
+  ] as const)))
 }
 
 function platformKnowledgeInstanceId(env: CloudflareEnv) {
@@ -348,11 +352,29 @@ function platformKnowledgeInstanceConfig(): Omit<AiSearchConfig, 'metadata'> {
 // pair turned every real failure — a rate limit, a bad field — into "instance already
 // exists" thrown from the create, which is what made issue #917 undiagnosable. `id` is not
 // an updatable field and is already carried by the instance handle, so it is not sent.
+//
+// AI Search restarts a full resync on every configuration update, cancelling the
+// one before it. Updating on every pass of a multi-pass rebuild therefore kept
+// the queue from ever draining (2026-10-14: 271 items queued, some since August,
+// and a sync that never reached zero pending). The configuration is written only
+// when a value the code asserts differs from what the instance reports.
 export async function ensurePlatformKnowledgeInstance(env: CloudflareEnv) {
   // The same transient connectivity failures withRetries absorbs per item hit
   // this call first: production reindexes on 2026-09-23 and 2026-09-24 died
   // here with `unable_to_connect_to_ai_search` before uploading anything.
-  await withRetries(() => searchNamespace(env).get(platformKnowledgeInstanceId(env)).update(platformKnowledgeInstanceConfig()))
+  const instance = searchNamespace(env).get(platformKnowledgeInstanceId(env))
+  const config = platformKnowledgeInstanceConfig()
+  const current = await withRetries(() => instance.info())
+  if (!assertedConfigMatches(config, current)) await withRetries(() => instance.update(config))
+}
+
+/** Every value `asserted` names is present and equal in `actual`; values only the instance sets are ignored. */
+function assertedConfigMatches(asserted: unknown, actual: unknown): boolean {
+  if (Array.isArray(asserted)) return Array.isArray(actual) && asserted.length === actual.length && asserted.every((value, index) => assertedConfigMatches(value, actual[index]))
+  if (asserted && typeof asserted === 'object') {
+    return Boolean(actual) && typeof actual === 'object' && Object.entries(asserted).every(([key, value]) => assertedConfigMatches(value, (actual as Record<string, unknown>)[key]))
+  }
+  return asserted === actual
 }
 
 export async function listAllItems(env: CloudflareEnv) {
@@ -549,7 +571,7 @@ export async function buildWorkspaceDocuments(db: DbClient, organizationId?: str
       WHERE ma.status = 'active'${organizationWhere}
     `, organizationParams),
   ])
-  const bodies = renderBodiesByDocument(blockRows)
+  const bodies = await renderBodiesByDocument(db, blockRows)
   const records: PlatformKnowledgeDocument[] = []
 
   for (const row of locations ?? []) {
@@ -605,14 +627,18 @@ export async function buildWorkspaceDocuments(db: DbClient, organizationId?: str
   for (const row of threads ?? []) {
     const organization = byOrganization.get(row.organization_id)
     if (!organization) continue
-    const payload = JSON.parse(row.payload_json) as { guest?: { name?: string; email?: string }; message?: string; notes?: string | null }
-    const guest = payload.guest ?? {}
+    const payload = JSON.parse(row.payload_json) as { participant?: { kind: 'channel'; title: string }; guest: { name: string | null; email: string | null }; message?: string; notes?: string | null }
+    const guest = payload.guest
+    // requests_guest_payload_check: a contact-backed conversation has its guest's
+    // name; a channel conversation is labelled by its provider title.
+    const label = payload.participant ? payload.participant.title : guest.name
+    if (!label?.trim()) throw new HTTPError({ statusCode: 500, message: `Conversation ${row.id} has no participant label`, data: { code: 'REQUEST_PARTICIPANT_INVALID', field: 'guest.name', request_id: row.id } })
     const words = row.kind === 'contact' ? payload.message ?? '' : payload.notes ?? ''
     const about = row.product_name ?? row.location_title ?? ''
     records.push(doc(organization, 'thread', row.id, {
-      title: guest.name?.trim() || guest.email || 'Guest', path: `${base(organization)}/messages/${row.id}`, snippet: words || about,
+      title: label.trim(), path: `${base(organization)}/messages/${row.id}`, snippet: words || about,
       // Name and email find the thread; the phone number stays out of the index.
-      section: 'Messages', icon: 'message-circle', body: joinWords(guest.name, guest.email, row.kind, about, words),
+      section: 'Messages', icon: 'message-circle', body: joinWords(label, guest.name, guest.email, row.kind, about, words),
     }))
   }
 

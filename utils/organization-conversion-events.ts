@@ -101,9 +101,8 @@ export const CONVERSION_EVENT_CATALOG = {
   booking_change_accepted: { kind: 'conversion', producer: 'server', origin: 'public', stages: ['completed'], entityType: 'request', valueBasis: null, conversionType: 'booking', ga4: null, ga4Sender: 'measurement_protocol', outcome: false, properties: ['member_id'] },
   booking_change_declined: { kind: 'conversion', producer: 'server', origin: 'public', stages: ['completed'], entityType: 'request', valueBasis: null, conversionType: 'booking', ga4: null, ga4Sender: 'measurement_protocol', outcome: false, properties: ['member_id'] },
   // The platform's side of Payments, measured on the platform organization: the volume each business
-  // reports to Metronome, and the fee invoices it pays. `tenant_organization_id` is the business.
+  // reports to its Stripe meter. `tenant_organization_id` is the business.
   payments_volume_billed: { kind: 'interaction', producer: 'server', origin: 'authenticated', stages: ['occurred'], entityType: 'payment', valueBasis: null, conversionType: null, ga4: null, ga4Sender: 'measurement_protocol', outcome: false, properties: ['tenant_organization_id', 'volume_minor', 'currency'] },
-  payments_fee_invoice_paid: { kind: 'conversion', producer: 'server', origin: 'authenticated', stages: ['completed'], entityType: 'invoice', valueBasis: 'purchase', conversionType: null, ga4: null, ga4Sender: 'measurement_protocol', outcome: false, properties: ['tenant_organization_id'] },
 } as const satisfies Record<string, ConversionEventDefinition>
 
 export type OrganizationConversionEventName = keyof typeof CONVERSION_EVENT_CATALOG

@@ -5,11 +5,11 @@
     <div v-if="clientName" class="flex items-center justify-center gap-3 mb-8">
       <div class="w-9 h-9 rounded-xl overflow-hidden bg-elevated border border-default flex items-center justify-center shrink-0">
         <img v-if="clientIcon" :src="clientIcon" :alt="clientName" class="w-full h-full object-cover" />
-        <SayaIcon v-else name="link" class="w-4 h-4 text-muted" />
+        <TenantIcon v-else name="link" class="w-4 h-4 text-muted" />
       </div>
-      <SayaIcon name="arrow-right-left" class="w-4 h-4 text-dimmed" />
+      <TenantIcon name="arrow-right-left" class="w-4 h-4 text-dimmed" />
       <div class="w-9 h-9 rounded-xl overflow-hidden bg-elevated border border-default flex items-center justify-center shrink-0">
-        <img src="/platform/apple-touch-icon.png" alt="Krabiclaw" class="w-full h-full object-cover" />
+        <img src="/platform/apple-touch-icon.png" alt="KrabiClaw" class="w-full h-full object-cover" />
       </div>
     </div>
 
@@ -21,7 +21,7 @@
           </h1>
           <p class="text-sm text-muted mt-1">
             <span v-if="clientName">
-              <span class="font-semibold text-default">{{ clientName }}</span> is requesting access to Krabiclaw
+              <span class="font-semibold text-default">{{ clientName }}</span> is requesting access to KrabiClaw
             </span>
             <span v-else>Sign in to grant access to an external application.</span>
           </p>
@@ -44,7 +44,7 @@
               <p class="text-sm font-semibold text-default truncate">{{ existingSession.name || 'Your account' }}</p>
               <p class="text-xs text-muted truncate">{{ existingSession.email }}</p>
             </div>
-            <SayaIcon name="check-circle" class="w-4 h-4 text-green-500 shrink-0" />
+            <TenantIcon name="check-circle" class="w-4 h-4 text-green-500 shrink-0" />
           </div>
 
           <UButton block size="lg" :loading="loading" :disabled="switching" @click="continueWithSession">

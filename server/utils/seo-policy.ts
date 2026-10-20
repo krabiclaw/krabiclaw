@@ -1,11 +1,11 @@
 import { TENANT_TYPES, type TenantType } from '../../utils/tenant-routing.ts'
 import { TENANT_NON_INDEXABLE_EXACT_PATHS } from '../../utils/template-registry.ts'
 import { isEnvironmentTenantAliasHost } from './tenant-hosts.ts'
-import { isDemoHost, isDemoOrg } from '../../shared/demo.ts'
+import { isDemoHost, isDemoOrganization } from '../../shared/demo.ts'
 
 /**
  * The platform routes that hold no page document: each renders its own data.
- * Krabiclaw's editorial marketing pages are not here —
+ * KrabiClaw's editorial marketing pages are not here —
  * they are published page documents, and the sitemap reads them from
  * content_documents so there is one inventory rather than two (#903).
  */
@@ -34,13 +34,10 @@ export const PRIVATE_EXACT_ROUTES = new Set([
   '/login',
   '/reset-password',
   '/signup',
-  '/tenant-404',
-  '/tenant-setup-incomplete',
-  '/tenant-setup-pending',
 ])
 
 // Paths that only a customer site answers. `/experiences` is not among them:
-// on Krabiclaw's own host it is the published marketing page that sells the
+// on KrabiClaw's own host it is the published marketing page that sells the
 // booking product (#903). Its subtree stays tenant-only — an individual
 // experience belongs to a customer's catalog.
 export const TENANT_ONLY_EXACT_ROUTES = new Set([
@@ -51,6 +48,7 @@ export const TENANT_ONLY_EXACT_ROUTES = new Set([
   '/qa',
   '/reservations',
   '/reviews',
+  '/stays',
 ])
 
 export const TENANT_ONLY_ROUTE_PREFIXES = [
@@ -60,10 +58,12 @@ export const TENANT_ONLY_ROUTE_PREFIXES = [
   '/locations/',
   '/menu/',
   '/order/',
+  '/pay/',
   '/photos/',
   '/qa/',
   '/reservations/',
   '/reviews/',
+  '/stays/',
 ] as const
 
 export interface RuntimeSeoConfig {
@@ -96,9 +96,9 @@ export function resolveRuntimeSeoConfig(input: {
   origin: string
   hostname: string
   tenantName?: string | null
-  organizationId?: string | null
+  tenantSubdomain?: string | null
 }): RuntimeSeoConfig {
-  const indexable = !isNonIndexableHost(input.hostname) && !isDemoOrg(input.organizationId)
+  const indexable = !isNonIndexableHost(input.hostname) && !isDemoOrganization({ subdomain: input.tenantSubdomain })
 
   if (!indexable) {
     return {
@@ -118,7 +118,7 @@ export function resolveRuntimeSeoConfig(input: {
 
   if (input.tenantType === TENANT_TYPES.PLATFORM) {
     return {
-      name: 'Krabiclaw',
+      name: 'KrabiClaw',
       url: input.origin,
       indexable: true,
     }

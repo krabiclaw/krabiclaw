@@ -5,6 +5,7 @@ import type { VerifiedMetaRequest } from './meta-graph'
 import { deleteIntegration, integrationsThroughAccount } from './organization-integrations'
 import { publicResourceCacheInvalidationQuery } from './public-resource-cache'
 import { reconcileZarazAnalytics } from './zaraz-analytics'
+import { requireRecordedManagedSpend } from '~/server/domain/payments/ad-spend'
 
 /**
  * Removing an organization's integration, and what Meta's callbacks ask for.
@@ -22,6 +23,7 @@ import { reconcileZarazAnalytics } from './zaraz-analytics'
 export type IntegrationProduct =
   | 'google-analytics'
   | 'google-search-console'
+  | 'google-ads'
   | 'facebook'
   | 'instagram'
   | 'discord'
@@ -35,6 +37,7 @@ export interface ReleaseIntegrationResult {
 const PROVIDER: Record<IntegrationProduct, IntegrationProvider> = {
   'google-analytics': 'google_analytics',
   'google-search-console': 'google_search_console',
+  'google-ads': 'google_ads',
   'facebook': 'facebook',
   'instagram': 'instagram',
   'discord': 'discord',
@@ -45,6 +48,7 @@ export async function releaseIntegration(
   organizationId: string,
   product: IntegrationProduct,
 ): Promise<ReleaseIntegrationResult> {
+  if (product === 'google-ads') await requireRecordedManagedSpend(env.DB, env, organizationId)
   const released = await deleteIntegration(env.DB, organizationId, PROVIDER[product])
 
   // Zaraz serves the measurement id of connected sites, so losing Analytics

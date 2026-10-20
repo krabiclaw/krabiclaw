@@ -1,7 +1,8 @@
 <template>
   <DashboardLeafPanel
     id="organization-qa-visibility"
-    title="Visibility"
+    title="Status"
+    lead="A published question appears on your site. A draft question is hidden."
     :saving="editor.saving.value"
     :disabled="editor.saveDisabled.value"
     :save-label="editor.saveLabel.value"

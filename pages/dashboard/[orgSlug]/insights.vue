@@ -1,6 +1,6 @@
 <template>
   <DashboardIndexPanel id="organization-insights" title="Insights">
-    <div class="mx-auto w-full max-w-5xl space-y-6 pb-10">
+    <div class="space-y-6 pb-10">
       <UAlert
         v-if="loadError"
         color="error"
@@ -9,20 +9,32 @@
         :description="loadError"
         :actions="[{ label: 'Try again', onClick: () => refresh() }]"
       />
-      <UTabs
+      <DashboardFilterPills
+        id="insights-channel"
         v-model="tab"
+        label="Analytics view"
         :items="tabItems"
-        :content="false"
-        class="w-full"
+        role="tablist"
+        class="mb-8"
       />
 
-      <div v-if="tab === 'views' || tab === 'instagram'" class="flex justify-end">
-        <div class="inline-flex gap-0.5 rounded-lg bg-elevated p-0.5" role="group" aria-label="Date range">
-          <button v-for="days in [7, 30]" :key="days" type="button"
-            :aria-pressed="activeDays === days" :disabled="loading || !analytics"
-            class="rounded-md px-3 py-1 text-sm transition-colors disabled:opacity-50"
-            :class="activeDays === days ? 'bg-accented text-highlighted' : 'text-muted hover:text-highlighted'"
-            @click="applyPreset(days)">{{ days }}d</button>
+      <div v-if="tab === 'views' || tab === 'instagram' || tab === 'ads'" class="flex flex-wrap items-center justify-end gap-4">
+        <p v-if="tab === 'views' && analytics" class="mr-auto text-sm text-muted" data-testid="insights-period">
+          <time :datetime="analytics.period.startDate">{{ formatDate(analytics.period.startDate) }}</time> – <time :datetime="analytics.period.endDate">{{ formatDate(analytics.period.endDate) }}</time>
+        </p>
+        <div class="flex items-center gap-2" role="group" aria-label="Date range">
+          <UButton
+            v-for="days in [7, 30]"
+            :key="days"
+            :label="`${days}d`"
+            color="neutral"
+            :variant="activeDays === days ? 'solid' : 'outline'"
+            class="h-10 rounded-full px-4 text-sm font-normal"
+            :aria-pressed="activeDays === days"
+            :disabled="loading || !analytics"
+            :data-testid="`insights-range-${days}d`"
+            @click="applyPreset(days)"
+          />
         </div>
       </div>
 
@@ -303,34 +315,6 @@
         </div>
       </div>
 
-      <div v-else-if="tab === 'opportunities' && setup && !loadError" class="space-y-6">
-        <div class="space-y-6">
-          <section v-if="setup" class="border-b border-default pb-8 last:border-b-0">
-            <header class="mb-4">
-              <div class="flex items-baseline justify-between gap-3">
-                <h2 class="min-w-0 truncate font-semibold text-highlighted">{{ setup.label }}</h2>
-                <span class="shrink-0 text-sm tabular-nums text-muted">{{ setup.completed }}/{{ setup.total }}</span>
-              </div>
-            </header>
-            <span class="mb-4 block h-2 overflow-hidden rounded-full bg-elevated">
-              <span
-                class="block h-full rounded-full bg-primary"
-                :style="{ width: `${setup.total ? (setup.completed / setup.total) * 100 : 0}%` }"
-              />
-            </span>
-            <ul class="space-y-2">
-              <li v-for="item in setup.items" :key="item.id" class="flex items-center gap-2 text-sm">
-                <UIcon
-                  :name="item.done ? 'i-lucide-circle-check' : 'i-lucide-circle-dashed'"
-                  class="size-4 shrink-0"
-                  :class="item.done ? 'text-success' : 'text-muted'"
-                />
-                <span :class="item.done ? 'text-muted line-through' : 'text-highlighted'">{{ item.label }}</span>
-              </li>
-            </ul>
-          </section>
-        </div>
-      </div>
 
       <div v-else-if="tab === 'instagram'" class="space-y-8">
         <UAlert
@@ -383,6 +367,59 @@
         </template>
       </div>
 
+      <div v-else-if="tab === 'ads'" class="space-y-8">
+        <UAlert
+          v-if="adsError"
+          color="error"
+          variant="soft"
+          title="Google Ads could not be loaded"
+          :description="adsError.message"
+          :actions="[{ label: 'Try again', onClick: () => refreshAds() }]"
+        />
+        <div v-else-if="adsLoading && !ads" class="space-y-4" role="status" aria-label="Loading Google Ads">
+          <USkeleton class="h-28 w-full rounded-2xl" />
+        </div>
+        <UAlert
+          v-else-if="ads && ads.status !== 'connected'"
+          color="neutral"
+          variant="soft"
+          :description="ads.message"
+          :actions="[{ label: 'Google Ads settings', to: `/dashboard/${scope?.orgSlug}/integrations/google-ads` }]"
+        />
+        <template v-else-if="ads && ads.status === 'connected'">
+          <p class="text-sm text-muted">{{ ads.customer.name }} · {{ formatDate(ads.period.startDate) }} – {{ formatDate(ads.period.endDate) }} · In {{ ads.customer.currency }}, as Google reports it.</p>
+          <section class="border-b border-default pb-8">
+            <div class="grid grid-cols-2 gap-x-6 gap-y-6 sm:grid-cols-3">
+              <div v-for="metric in adsMetricCards" :key="metric.label">
+                <p class="text-sm text-muted">{{ metric.label }}</p>
+                <p class="mt-2 text-3xl font-semibold tabular-nums tracking-tight text-highlighted">{{ metric.value }}</p>
+              </div>
+            </div>
+          </section>
+          <!-- The service, offered where its evidence is; it starts in Payments → Plan. -->
+          <section v-if="!ads.managed" class="rounded-2xl p-6 ring ring-default" data-testid="insights-managed-ads">
+            <h2 class="text-xl font-semibold text-highlighted">Get more from this budget</h2>
+            <p class="mt-2 text-base text-muted">Chris hand-manages your campaigns against these numbers — budgets, creative direction and conversion rate — with a weekly meeting, for 10% of ad spend billed with your KrabiClaw fees.</p>
+            <UButton class="mt-4" label="See managed ads" :to="`/dashboard/${scope?.orgSlug}/payments/managed-ads`" />
+          </section>
+          <section>
+            <header class="mb-4"><h2 class="font-semibold text-highlighted">Campaigns by spend</h2></header>
+            <p v-if="!ads.campaigns.length" class="text-sm text-muted">No campaigns in this account.</p>
+            <table v-else class="w-full text-left text-sm">
+              <thead class="text-xs text-muted"><tr><th class="pb-3 font-medium">Campaign</th><th class="pb-3 text-right font-medium">Spend</th><th class="pb-3 pl-4 text-right font-medium">Clicks</th><th class="pb-3 pl-4 text-right font-medium">Conversions</th></tr></thead>
+              <tbody class="divide-y divide-default">
+                <tr v-for="campaign in ads.campaigns" :key="campaign.id">
+                  <td class="py-3 pr-4"><p class="font-medium text-highlighted">{{ campaign.name }}</p><p class="mt-1 text-xs text-muted">{{ campaign.status === 'ENABLED' ? 'Running' : campaign.status === 'PAUSED' ? 'Paused' : campaign.status }}</p></td>
+                  <td class="py-3 text-right tabular-nums text-highlighted">{{ formatMicros(campaign.costMicros, ads.customer.currency) }}</td>
+                  <td class="py-3 pl-4 text-right tabular-nums text-highlighted">{{ formatCount(campaign.clicks) }}</td>
+                  <td class="py-3 pl-4 text-right tabular-nums text-highlighted">{{ formatCount(Math.round(campaign.conversions)) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
+        </template>
+      </div>
+
       <ActivityFeed v-else-if="tab === 'activity'" />
     </div>
   </DashboardIndexPanel>
@@ -399,15 +436,16 @@ import DashboardAnalyticsRow from '~/lib/components/workspace/dashboard/Analytic
 import { localDateAt, addLocalDays, formatCalendarDate } from '~/utils/timezone'
 import { organizationAnalyticsSchema, type AnalyticsReport, type OrganizationAnalyticsReport } from '~/shared/analytics-report'
 import { instagramInsightsSchema, type InstagramInsights } from '~/shared/instagram-insights'
+import { googleAdsInsightsSchema, type GoogleAdsInsights } from '~/shared/google-ads-insights'
 import { currencyFractionDigits, isCurrencyCode } from '~/shared/currencies'
 
 const route = useRoute()
 const scope = useDashboardRouteScope()
 
-// Reviews and Opportunities read what we actually hold. There is no Superhost
+// Reviews reads what we actually hold. There is no Superhost
 // equivalent, and a review carries one overall rating rather than per-category
 // scores, so neither is invented here.
-const TAB_VALUES = ['views', 'instagram', 'reviews', 'opportunities', 'activity'] as const
+const TAB_VALUES = ['views', 'instagram', 'ads', 'reviews', 'activity'] as const
 type InsightsTab = typeof TAB_VALUES[number]
 const isTab = (value: unknown): value is InsightsTab => TAB_VALUES.some(candidate => candidate === value)
 const tab = ref<InsightsTab>(isTab(route.query.tab) ? route.query.tab : 'views')
@@ -423,16 +461,20 @@ watch(tab, (next) => {
 const tabItems = [
   { label: 'Views', value: 'views' as const },
   { label: 'Instagram', value: 'instagram' as const },
+  { label: 'Google Ads', value: 'ads' as const },
   { label: 'Reviews', value: 'reviews' as const },
-  { label: 'Opportunities', value: 'opportunities' as const },
   // Activity is a report like the others, not a screen of its own: it reads
   // what happened and edits nothing, so it belongs beside Views and Reviews
   // rather than on an orphan route nothing linked to.
   { label: 'Activity', value: 'activity' as const },
 ]
 
-const activeDays = ref(30)
-const requestedRange = ref<{ startDate?: string; endDate?: string }>({})
+// The report's dates are URL state: a Today card, reload and Back all reopen
+// the same period. Range validation remains the analytics API's operation.
+const requestedRange = computed(() => ({
+  startDate: route.query.startDate === undefined ? undefined : String(route.query.startDate ?? ''),
+  endDate: route.query.endDate === undefined ? undefined : String(route.query.endDate ?? ''),
+}))
 const isNumberField = (row: unknown, ...fields: string[]): boolean =>
   isRecord(row) && fields.every(field => typeof row[field] === 'number')
 
@@ -453,6 +495,11 @@ const { data: insightsResource, pending: loading, error: resourceError, refresh 
   }),
 )
 const analytics = computed<AnalyticsReport | null>(() => insightsResource.value?.report ?? null)
+const activeDays = computed(() => {
+  const period = analytics.value?.period
+  if (!period || period.endDate !== localDateAt(new Date(), period.timezone)) return null
+  return Math.round((Date.parse(`${period.endDate}T00:00:00Z`) - Date.parse(`${period.startDate}T00:00:00Z`)) / 86_400_000) + 1
+})
 
 // Instagram's own numbers, read live for the same range when its tab is open; never added to website traffic.
 const { data: instagram, pending: instagramLoading, error: instagramError, refresh: refreshInstagram, execute: loadInstagram } = await useAsyncData(
@@ -468,6 +515,38 @@ const { data: instagram, pending: instagramLoading, error: instagramError, refre
   { lazy: true, immediate: false },
 )
 watch(() => tab.value === 'instagram' ? `${scope.value?.orgSlug}:${requestedRange.value.startDate ?? ''}:${requestedRange.value.endDate ?? ''}` : null, (key) => { if (key) void loadInstagram() }, { immediate: true })
+// Google Ads' own numbers for the same range when its tab is open; spend is Google's, never added to revenue.
+const { data: ads, pending: adsLoading, error: adsError, refresh: refreshAds, execute: loadAds } = await useAsyncData(
+  () => `dashboard-org-ads:${scope.value?.orgSlug}:${requestedRange.value.startDate ?? ''}:${requestedRange.value.endDate ?? ''}`,
+  () => dashboardApi<GoogleAdsInsights>('/api/dashboard/google-ads-insights', {
+    query: requestedRange.value,
+    validate: (value): value is GoogleAdsInsights => {
+      const result = googleAdsInsightsSchema.safeParse(value)
+      if (!result.success) throw new ApiClientError('Invalid Google Ads insights response', 502, 'INVALID_GOOGLE_ADS_INSIGHTS_RESPONSE', null)
+      return true
+    },
+  }),
+  { lazy: true, immediate: false },
+)
+watch(() => tab.value === 'ads' ? `${scope.value?.orgSlug}:${requestedRange.value.startDate ?? ''}:${requestedRange.value.endDate ?? ''}` : null, (key) => { if (key) void loadAds() }, { immediate: true })
+// Google reports money in millionths of the account's currency unit.
+function formatMicros(micros: number, currency: string): string {
+  return new Intl.NumberFormat(undefined, { style: 'currency', currency, maximumFractionDigits: 2 }).format(micros / 1_000_000)
+}
+const adsMetricCards = computed(() => {
+  const report = ads.value
+  if (!report || report.status !== 'connected') return []
+  const { totals, customer } = report
+  const costPerConversion = totals.conversions > 0 ? totals.costMicros / totals.conversions : null
+  return [
+    { label: 'Spend', value: formatMicros(totals.costMicros, customer.currency) },
+    { label: 'Clicks', value: formatCount(totals.clicks) },
+    { label: 'Impressions', value: formatCount(totals.impressions) },
+    { label: 'Conversions', value: formatCount(Math.round(totals.conversions)) },
+    { label: 'Avg. cost per click', value: formatMicros(totals.averageCpcMicros, customer.currency) },
+    { label: 'Cost per conversion', value: costPerConversion === null ? '—' : formatMicros(costPerConversion, customer.currency) },
+  ]
+})
 const INSTAGRAM_ACCOUNT_FIELDS = [
   { key: 'views', label: 'Views' }, { key: 'reach', label: 'Accounts reached' }, { key: 'accounts_engaged', label: 'Accounts engaged' },
   { key: 'total_interactions', label: 'Interactions' }, { key: 'likes', label: 'Likes' }, { key: 'comments', label: 'Comments' },
@@ -481,7 +560,6 @@ const instagramMetricCards = computed(() => instagram.value?.status === 'connect
   ? INSTAGRAM_ACCOUNT_FIELDS.map(field => ({ label: field.label, value: (instagram.value as Extract<InstagramInsights, { status: 'connected' }>).account[field.key] }))
   : [])
 const reviews = computed(() => insightsResource.value?.reviews)
-const setup = computed(() => insightsResource.value?.setup)
 const loadError = computed(() => resourceError.value?.message ?? null)
 // The same native query MCP exposes (query_organization_analytics), asked for the pageviews of the
 // selected range grouped by language. Every group is reachable: "Show more" follows the cursor.
@@ -542,11 +620,10 @@ const metricCards = computed(() => {
   ]
 })
 
-function applyPreset(days: number) {
+async function applyPreset(days: number) {
   if (!analytics.value || activeDays.value === days) return
-  activeDays.value = days
   const endDate = localDateAt(new Date(), analytics.value.period.timezone)
-  requestedRange.value = { startDate: addLocalDays(endDate, 1 - days), endDate }
+  await navigateTo({ query: { ...route.query, startDate: addLocalDays(endDate, 1 - days), endDate } })
 }
 
 function formatMoney(minor: number, currency: string): string {
@@ -608,5 +685,5 @@ function percentOfViews(views: number): number {
   return total > 0 ? Math.round((views / total) * 100) : 0
 }
 
-useSeoMeta({ title: 'Insights | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Insights | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>

@@ -1,13 +1,17 @@
 <template>
   <DashboardIndexPanel id="organization-qa" title="Reviews and Q&A">
-    <UTabs v-model="tab" :items="tabs" class="w-full">
-      <template #qa>
-        <QaList class="mt-4" />
-      </template>
-      <template #reviews>
-        <TestimonialList class="mt-4" />
-      </template>
-    </UTabs>
+    <div>
+      <DashboardFilterPills
+        id="qa-tab"
+        v-model="tab"
+        label="Reviews and Q&A"
+        :items="tabs"
+        role="tablist"
+        class="mb-8"
+      />
+      <QaList v-if="tab === 'qa'" />
+      <TestimonialList v-else />
+    </div>
   </DashboardIndexPanel>
 </template>
 
@@ -24,8 +28,8 @@ const route = useRoute()
 // One surface for the trust content a guest reads: the questions a tenant
 // answers and the reviews they import or enter. Two tables, one card.
 const tabs = [
-  { label: 'Q&A', slot: 'qa' as const, value: 'qa' },
-  { label: 'Reviews', slot: 'reviews' as const, value: 'reviews' },
+  { label: 'Q&A', value: 'qa' },
+  { label: 'Reviews', value: 'reviews' },
 ]
 // The open tab lives in the URL. A review is a level below this one, so while
 // one is open the tab is Reviews, and Back from it — which leads here, with no
@@ -33,9 +37,9 @@ const tabs = [
 const router = useRouter()
 const level = useRouteLevel()
 const reviewsTab = useState(`qa-reviews-tab-${String(route.params.orgSlug)}-${String(route.query.location_id ?? '')}`, () => false)
-const tab = computed({
+const tab = computed<string>({
   get: () => (route.query.tab === 'reviews' || route.params.reviewId ? 'reviews' : 'qa'),
-  set: (value: string | number) => {
+  set: (value: string) => {
     reviewsTab.value = value === 'reviews'
     void router.replace({ query: { ...route.query, tab: value === 'reviews' ? 'reviews' : undefined } })
   },
@@ -46,5 +50,5 @@ watch([() => route.params.reviewId, () => route.params.qaId, level.mode], ([revi
   else if (mode === 'index' && reviewsTab.value && route.query.tab === undefined) void router.replace({ query: { ...route.query, tab: 'reviews' } })
 }, { immediate: true })
 
-useSeoMeta({ title: 'Reviews and Q&A | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Reviews and Q&A | KrabiClaw', robots: 'noindex, nofollow' })
 </script>

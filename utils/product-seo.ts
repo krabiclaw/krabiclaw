@@ -1,7 +1,7 @@
-import type { Product } from '~/server/types/products'
+import type { Product, PublicProduct } from '~/server/types/products'
 import { isExperience } from '~/utils/product-presentation'
 import { formatProductMoney } from '~/utils/product-money'
-import { selectPrice, type PriceSelection } from '~/shared/prices'
+import { selectPrice, type Price, type PriceSelection } from '~/shared/prices'
 import { DESCRIPTION_MAX_LENGTH, truncateForSeo } from '~/utils/social-metadata'
 
 /**
@@ -19,7 +19,7 @@ import { DESCRIPTION_MAX_LENGTH, truncateForSeo } from '~/utils/social-metadata'
  * catalogue as it is) but they canonicalise to the collection index instead of
  * competing with it as a standalone result.
  */
-export function isOfferedProduct(product: Product, selection: PriceSelection): boolean {
+export function isOfferedProduct(product: PublicProduct, selection: PriceSelection): boolean {
   return product.variants.some(variant => selectPrice(variant.prices, selection) !== null)
 }
 
@@ -27,6 +27,10 @@ export interface ProductCollectionSibling {
   id: string
   name: string
   slug: string
+  /** Its picture, as a card shows it. */
+  image_url: string | null
+  /** The lowest price on offer where the page is read. */
+  price: Price | null
 }
 
 /** Links per product page. Bounded so a 60-item collection does not turn every
@@ -45,8 +49,8 @@ export const COLLECTION_SIBLING_LIMIT = 8
  * a visitor sees here matches the menu they just came from.
  */
 export function selectProductCollectionSiblings(
-  products: readonly Product[],
-  product: Product,
+  products: readonly PublicProduct[],
+  product: PublicProduct,
   collectionId: string,
   selection: PriceSelection,
   limit: number = COLLECTION_SIBLING_LIMIT,
@@ -62,7 +66,10 @@ export function selectProductCollectionSiblings(
   const rotated = index === -1
     ? inCollection
     : [...inCollection.slice(index + 1), ...inCollection.slice(0, index)]
-  return rotated.slice(0, limit).map(({ id, name, slug }) => ({ id, name, slug }))
+  return rotated.slice(0, limit).map(({ id, name, slug, image, variants }) => ({
+    id, name, slug, image_url: (image?.kind === 'video' ? image.thumbnail_url : image?.public_url) ?? null,
+    price: variants.map(variant => selectPrice(variant.prices, selection)).filter((price): price is Price => price !== null).sort((left, right) => left.unit_amount - right.unit_amount)[0] ?? null,
+  }))
 }
 
 /** Everything the composed description reads. All of it is product data. */
@@ -155,7 +162,7 @@ export const DIETARY_SCHEMA_MAP: Record<string, string> = {
   GF: 'https://schema.org/GlutenFreeDiet',
 }
 
-export function extractDietarySchemaUrls(product: Product): string[] {
+export function extractDietarySchemaUrls(product: PublicProduct): string[] {
   const notes = product.details['dietary_notes']
   if (!Array.isArray(notes)) return []
   return notes

@@ -14,11 +14,11 @@ const base = `/dashboard/${route.params.orgSlug}/bookings`
 if (!paymentId) showError(createError({ statusCode: 404, statusMessage: 'Transaction not found' }))
 else {
   try {
-    const detail = await api<{ booking_request_id: string | null; order: unknown }>('/api/dashboard/payments', {
+    const detail = await api<{ visit: { kind: 'booking' | 'reservation'; request_id: string } | null; order: unknown }>('/api/dashboard/payments', {
       query: { payment_id: paymentId },
-      validate: (value: unknown): value is { booking_request_id: string | null; order: unknown } => isRecord(value) && 'order' in value && (value.booking_request_id === null || typeof value.booking_request_id === 'string'),
+      validate: (value: unknown): value is { visit: { kind: 'booking' | 'reservation'; request_id: string } | null; order: unknown } => isRecord(value) && 'order' in value && (value.visit === null || isRecord(value.visit) && (value.visit.kind === 'booking' || value.visit.kind === 'reservation') && typeof value.visit.request_id === 'string'),
     })
-    await navigateTo(detail.booking_request_id ? `${base}/booking/${encodeURIComponent(detail.booking_request_id)}` : `${base}/${detail.order ? 'order' : 'payment'}/${encodeURIComponent(paymentId)}`, { replace: true })
+    await navigateTo(detail.visit ? `${base}/${detail.visit.kind}/${encodeURIComponent(detail.visit.request_id)}` : `${base}/${detail.order ? 'order' : 'payment'}/${encodeURIComponent(paymentId)}`, { replace: true })
   } catch (cause) {
     const status = isRecord(cause) && typeof cause.statusCode === 'number' ? cause.statusCode : 500
     showError(createError({ statusCode: status, statusMessage: getErrorMessage(cause, 'Transaction could not be loaded') }))

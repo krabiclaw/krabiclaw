@@ -28,7 +28,7 @@
             <div class="flex items-center justify-between gap-4"><dt class="flex items-center gap-2 text-sm text-muted"><span class="size-2 rounded-full bg-primary" aria-hidden="true" />Paid</dt><dd class="text-sm font-medium text-highlighted">{{ money(selected.paid - selected.refunded) }}</dd></div>
             <div class="flex items-center justify-between gap-4"><dt class="flex items-center gap-2 text-sm text-muted"><span class="size-2 rounded-full ring-2 ring-inset ring-primary" aria-hidden="true" />Refunded</dt><dd class="text-sm font-medium text-highlighted">{{ money(selected.refunded) }}</dd></div>
           </dl>
-          <div class="mt-4 flex items-center justify-between gap-4 border-t border-default pt-4"><p class="text-sm font-semibold text-highlighted">Total ({{ data.currency ?? 'USD' }})</p><p class="text-sm font-semibold text-highlighted">{{ money(selected.paid - selected.refunded) }}</p></div>
+          <div class="mt-4 flex items-center justify-between gap-4 border-t border-default pt-4"><p class="text-sm font-semibold text-highlighted">Total ({{ data.currency }})</p><p class="text-sm font-semibold text-highlighted">{{ money(selected.paid - selected.refunded) }}</p></div>
         </div>
         <NuxtLink :to="{ path: `/dashboard/${route.params.orgSlug}/earnings/transactions`, query: { from: `${month}-01`, through: lastDayOf(month) } }" class="flex items-center justify-between gap-4 border-t border-default px-6 py-4">
           <span class="text-sm font-semibold text-highlighted">Paid breakdown</span>
@@ -86,7 +86,7 @@
       <section v-if="data" class="mt-10">
         <h2 class="text-xl font-semibold text-highlighted">Monthly earnings</h2>
         <table class="mt-4 w-full text-left text-sm">
-          <thead class="text-muted"><tr><th class="pb-3 font-medium">Date</th><th class="pb-3 text-right font-medium">Paid</th><th class="pb-3 text-right font-medium">Refunded</th><th class="pb-3 text-right font-medium">Total ({{ data.currency ?? 'USD' }})</th></tr></thead>
+          <thead class="text-muted"><tr><th class="pb-3 font-medium">Date</th><th class="pb-3 text-right font-medium">Paid</th><th class="pb-3 text-right font-medium">Refunded</th><th class="pb-3 text-right font-medium">Total ({{ data.currency }})</th></tr></thead>
           <tbody class="divide-y divide-default border-y border-default">
             <tr v-for="row in data.months" :key="row.month" :class="row.month === month ? 'bg-elevated/50' : ''">
               <td class="py-3 text-highlighted"><button type="button" class="hover:underline" @click="month = row.month">{{ formatCalendarDate(`${row.month}-01`, 'en', { month: 'long', year: 'numeric' }) }}</button></td>
@@ -108,7 +108,7 @@ import { isEarningsPerformance, type EarningsPerformance } from '~/shared/earnin
 import { formatCalendarDate } from '~/utils/timezone'
 
 definePageMeta({ layout: 'dashboard' })
-useSeoMeta({ title: 'Performance | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Performance | KrabiClaw', robots: 'noindex, nofollow' })
 
 const route = useRoute()
 const router = useRouter()
@@ -159,7 +159,7 @@ const [{ data, error }, { data: conversion, error: conversionError }] = await Pr
   },
   { watch: [month] },
 )])
-const money = (amount: number) => paymentMoney(amount, data.value?.currency ?? 'USD')
+const money = (amount: number) => paymentMoney(amount, data.value!.currency)
 const selected = computed(() => data.value?.months.find(row => row.month === month.value) ?? { month: month.value, paid: 0, refunded: 0 })
 const monthTitle = computed(() => formatCalendarDate(`${month.value}-01`, 'en', { month: 'long', year: 'numeric' }))
 const monthTotal = computed(() => data.value?.items.reduce((sum, item) => sum + item.paid, 0) ?? 0)

@@ -1,3 +1,4 @@
+import { getSourceLocale } from '~/server/utils/organization-locales'
 import { blogEditorPath } from '~/server/utils/dashboard-links'
 import { HTTPError } from 'nitro';
 
@@ -8,14 +9,13 @@ import {
   formatBlockOutline,
   prepareContentDocumentDeletion,
   getContentBlocksForDocument,
-  getContentOutline,
-  getContentDocumentById,
   listBlocksForDocument,
   updateContentDocument,
   type ContentDocumentChanges,
   renderContentBlocksToMarkdown,
   type ContentBlockInput,
   type ContentDocumentRow,
+  documentOfRootSql,
 } from '~/server/utils/content/documents'
 import {
   loadExactPublicLocalizations,
@@ -46,6 +46,7 @@ import { createPreviewToken, PREVIEW_TOKEN_QUERY, PREVIEW_TOKEN_TTL_MS } from '~
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { getPublishedTenantPage } from '~/server/utils/content/pages'
 import { ARTICLE_CATEGORY_SELECT, articleCategoryJoinSql, articleCategoryMembershipQuery, attachArticleCategory, localizeArticleCategories } from '~/server/utils/content/article-categories'
+import { renderContentBlocksForLlm } from '~/server/utils/platform-llm'
 
 const BLOG_TITLE_MAX = 200
 const BLOG_EXCERPT_MAX = 500
@@ -326,7 +327,7 @@ async function contentReviewUrls(
   env?: CloudflareEnv,
 ) {
   const id = String(record.id ?? '')
-  // Every site's articles, Krabiclaw's included, are edited in the shared dashboard CMS.
+  // Every site's articles, KrabiClaw's included, are edited in the shared dashboard CMS.
   const adminEditUrl = context ? blogEditorPath(context.orgSlug, id) : null
   const isPublished = typeof record.status === 'string' ? record.status === 'published' : Boolean(record.published_at)
 
@@ -392,14 +393,14 @@ const ARTICLE_ORDER_SQL = (alias: string) => `${alias}.sort_order, ${alias}.publ
  */
 export async function listPublishedArticles(db: DbClient, env: CloudflareEnv, organizationId: string, collection: ArticleCollection, locale: string) {
   // A language the site has not published is not readable, here or anywhere public.
-  if (locale !== 'en') await assertPublicOrganizationLanguageEntitlement(env, db, organizationId, locale)
+  await assertPublicOrganizationLanguageEntitlement(env, db, organizationId, locale)
   const sql = `
     SELECT
       root.id, p.title, p.slug, p.summary AS excerpt, (root.metadata_json ->> '$.collection') AS collection,
       ${ARTICLE_CATEGORY_SELECT}, p.seo_keywords,
       root.published_at, p.updated_at, root.sort_order, ${COVER_SELECT}
     FROM content_documents root
-    JOIN content_documents p ON COALESCE(p.root_id, p.id) = root.id AND p.locale = ?
+    JOIN content_documents p ON ${documentOfRootSql('p', 'root')} AND p.locale = ?
     ${coverJoinSql('p')}
     ${articleCategoryJoinSql('root')}
     WHERE root.kind = 'article' AND root.row_role = 'root' AND root.status = 'published' AND root.organization_id = ? AND root.visibility = 'listed'
@@ -566,21 +567,20 @@ async function getPublicOrganizationBlogPost(db: DbClient, organizationId: strin
 
   if (!post) return null
 
-  const contentDocument = await getContentDocumentById(db, String(post.id))
-  if (!contentDocument) throw new HTTPError({ statusCode: 500, statusMessage: 'Blog content document is missing' })
-  const [loadedBlocks, rawBlocks, organization] = await Promise.all([
+  const [loadedBlocks, organization] = await Promise.all([
     getContentBlocksForDocument(db, String(post.id)),
-    listBlocksForDocument(db, contentDocument.id),
     loadOrganizationTemplate(db, organizationId),
   ])
+  if (!loadedBlocks) throw new HTTPError({ statusCode: 500, statusMessage: 'Blog content document is missing' })
   const articlePath = tenantBlogPostPath(organization.template, slug, collection)
-  const contentBlocks = loadedBlocks ? await attachPageQa(db, organizationId, articlePath, loadedBlocks) : loadedBlocks
+  const contentBlocks = await attachPageQa(db, organizationId, articlePath, loadedBlocks)
   const socialMedia = (await loadPublicSocialMedia(db, organizationId, 'content_document', [String(post.id)])).get(String(post.id))
   const { author_id: authorId, ...postRecord } = post
   const authors = await findAuthUsersByIds(env, [authorId as string | null])
   const author = typeof authorId === 'string' ? authors.get(authorId) ?? null : null
   return {
-    ...attachArticleCategory(attachCoverMedia({ ...postRecord, content_blocks: contentBlocks ?? [], body: renderContentBlocksToMarkdown(rawBlocks) })),
+    ...attachArticleCategory(attachCoverMedia({ ...postRecord, content_blocks: contentBlocks,
+      body: renderContentBlocksForLlm(contentBlocks) })),
     media: socialMedia?.media ?? [],
     social_image: socialMedia?.social_image ?? null,
     author: author ? { id: author.id, name: author.name, image: author.image } : null,
@@ -605,7 +605,7 @@ export async function getPublishedBlogPost(
   if (!active) return null
   const { template } = await loadOrganizationTemplate(db, organizationId)
   const pathOf = (articleSlug: string) => tenantBlogPostPath(template, articleSlug, collection)
-  if (locale === 'en') {
+  if (locale === await getSourceLocale(db, organizationId)) {
     const post = await getPublicOrganizationBlogPost(db, organizationId, collection, slug, env, previewAuthorized)
     if (!post || typeof post.id !== 'string') return post
     return {
@@ -632,16 +632,18 @@ export async function getPublishedBlogPost(
   if (!row) return null
   const canonical = await getPublicOrganizationBlogPost(db, organizationId, collection, row.source_slug, env, previewAuthorized)
   if (!canonical) return null
-  const [outlineBlocks, rawBlocks, social] = await Promise.all([
-    getContentOutline(db, row.id), listBlocksForDocument(db, row.id),
+  const [outlineBlocks, social] = await Promise.all([
+    getContentBlocksForDocument(db, row.id),
     loadPublicSocialMedia(db, organizationId, 'content_document', [row.id]),
   ])
-  const contentBlocks = await attachPageQa(db, organizationId, pathOf(row.source_slug), outlineBlocks, locale)
+  if (!outlineBlocks) throw new HTTPError({ statusCode: 500, statusMessage: 'Documentation content document is missing' })
+  const contentBlocks = (await attachPageQa(db, organizationId, pathOf(row.source_slug), outlineBlocks, locale))
+    .map(block => ({ ...block, media: projectLocalizedMediaAlt(block.media.map(item => ({ ...item, alt_text: item.alt_text ?? null })), localizations) }))
   return { ...canonical, id: row.id, title: row.title, excerpt: row.summary, slug,
     seo_keywords: row.seo_keywords,
     category: (await localizeArticleCategories(env, db, organizationId, locale, [canonical]))[0]!.category,
-    updated_at: row.updated_at, body: renderContentBlocksToMarkdown(rawBlocks),
-    content_blocks: contentBlocks.map(block => ({ ...block, media: projectLocalizedMediaAlt(block.media.map(item => ({ ...item, alt_text: item.alt_text ?? null })), localizations) })),
+    updated_at: row.updated_at, body: renderContentBlocksForLlm(contentBlocks),
+    content_blocks: contentBlocks,
     media: projectLocalizedMediaAlt(social.get(row.id)?.media ?? [], localizations),
     social_image: social.get(row.id)?.social_image ?? null,
     localeRepresentations: await listPublicLocaleRepresentations(env, db, { organizationId,
@@ -699,7 +701,7 @@ export async function createBlogPost(
     const slug = attempt === 0 ? slugBase : `${slugBase}-${randomSlugSuffix()}`
     try {
       await createContentDocumentWithBlocks(db, {
-        id, rowRole: 'root', locale: 'en', kind: 'article', organizationId,
+        id, rowRole: 'root', locale: await getSourceLocale(db, organizationId), kind: 'article', organizationId,
         title: article.title, slug, summary: article.excerpt ?? null, status: 'draft', visibility: article.visibility ?? 'listed',
         authorId, seoKeywords: article.seo_keywords,
         metadata: { collection, slug_manually_overridden: customSlug ? 1 : 0 },
@@ -812,8 +814,8 @@ export async function updateBlogPost(
     title: input.title ?? current.title, currentSlug: current.slug, manuallyOverridden: Boolean(current.slug_manually_overridden) })
   const requestedSlug = input.slug !== undefined || input.reset_slug_override ? slugMutation.slug : changes.slug
   if (requestedSlug && requestedSlug !== current.slug) {
-    const redirect = await queryFirst<{ id: string }>(db, `SELECT id FROM organization_redirects WHERE organization_id = ? AND locale = 'en' AND from_path IN (?, ?, ?) LIMIT 1`,
-      [organizationId, `/blog/${requestedSlug}`, `/article/${requestedSlug}`, `/${requestedSlug}`])
+    const redirect = await queryFirst<{ id: string }>(db, `SELECT id FROM organization_redirects WHERE organization_id = ? AND locale = (SELECT locale FROM organization_locales WHERE organization_id = ? AND is_source = 1) AND from_path IN (?, ?, ?) LIMIT 1`,
+      [organizationId, organizationId, `/blog/${requestedSlug}`, `/article/${requestedSlug}`, `/${requestedSlug}`])
     if (redirect) badRequest('Slug collides with redirect history')
     changes.slug = requestedSlug
     if (input.slug !== undefined || input.reset_slug_override) metadata.slug_manually_overridden = slugMutation.manuallyOverridden ? 1 : 0
@@ -874,8 +876,8 @@ async function createBlogRedirect(db: D1Database, postId: string, organizationId
   // organization, so the redirect cannot be written against another tenant's.
   await execute(db, `INSERT INTO organization_redirects
     (id, organization_id, locale, owner_type, owner_id, from_path, to_path, status_code, behavior, reason, source, created_at, updated_at)
-    VALUES (?, ?, 'en', ?, ?, ?, ?, 301, 'redirect', ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 301, 'redirect', ?, ?, ?, ?)
     ON CONFLICT(organization_id, locale, from_path) DO UPDATE SET owner_type = excluded.owner_type, owner_id = excluded.owner_id,
       to_path = excluded.to_path, status_code = 301, behavior = 'redirect', reason = excluded.reason, source = excluded.source, updated_at = excluded.updated_at`,
-  [crypto.randomUUID(), post.organization_id, 'content_document', postId, oldPath, newPath, 'blog_slug_change', 'blog', now, now])
+  [crypto.randomUUID(), post.organization_id, await getSourceLocale(db, post.organization_id), 'content_document', postId, oldPath, newPath, 'blog_slug_change', 'blog', now, now])
 }

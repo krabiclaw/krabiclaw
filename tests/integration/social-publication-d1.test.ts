@@ -35,7 +35,7 @@ const IG = '17841401765050246'
 const OTHER_PAGE = '1205835975938851'
 const OTHER_IG = '17841401765050247'
 
-type Fault = { match: (request: SeenRequest) => boolean; kind: 'timeout' | 'reject' | 'missing'; times: number }
+type Fault = { match: (request: SeenRequest) => boolean; kind: 'dropped' | 'reject' | 'missing'; times: number }
 interface SeenRequest { method: string; host: string; path: string; query: URLSearchParams; body: Record<string, string>; headers: Record<string, string> }
 
 class FakeMeta {
@@ -68,7 +68,7 @@ class FakeMeta {
     const fault = this.faults.find(candidate => candidate.times > 0 && candidate.match(request))
     if (fault) {
       fault.times -= 1
-      if (fault.kind === 'timeout') throw new DOMException('The operation timed out', 'TimeoutError')
+      if (fault.kind === 'dropped') throw new TypeError('Network connection lost')
       if (fault.kind === 'missing') return json({ error: { message: 'Unsupported get request. Object does not exist', code: 100, error_subcode: 33, fbtrace_id: 'trace-missing' } }, 400)
       return json({ error: { message: 'Invalid parameter', code: 100, fbtrace_id: 'trace-reject' } }, 400)
     }
@@ -206,7 +206,7 @@ async function setUp() {
   const later = Math.floor(Date.now() / 1000) + 60 * 24 * 60 * 60
   const run = (sql: string) => db.prepare(sql).run()
   for (const organization of ['org-a', 'org-b']) {
-    await run(`INSERT INTO organization (id, name, slug, subdomain) VALUES ('${organization}', '${organization}', '${organization}', '${organization}')`)
+    await run(`INSERT INTO organization (id, name, slug, subdomain, status, onboarding_status, default_currency, timezone) VALUES ('${organization}', '${organization}', '${organization}', '${organization}', 'active', 'active', 'USD', 'UTC')`)
     await run(`INSERT INTO organization_domains (id, organization_id, domain, type, role, status) VALUES ('domain-${organization}', '${organization}', '${organization}.krabiclaw.test', 'subdomain', 'canonical', 'active')`)
     await run(`INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('${organization}-en', '${organization}', 'en', 1, 'published')`)
     await run(`INSERT INTO subscription (id, plan, referenceId, status) VALUES ('sub-${organization}', 'growth', '${organization}', 'active')`)
@@ -335,9 +335,9 @@ test('publication: one result, one external post per target, and no blind resend
     assert.equal(retried.outcomes[0]!.status, 'published')
     await publishedOnMeta(third.post.id, 'facebook')
 
-    // The final call timed out before Facebook applied it: unknown, never sent again; its photos stay saved.
+    // The final call's connection dropped before Facebook answered: unknown, never sent again; its photos stay saved.
     const fourth = await create('key-4', { body: 'Lost feed', media: [{ asset_id: 'a2', slot: 'cover' }] })
-    meta.fault('timeout', request => request.path.endsWith(`${PAGE}/feed`))
+    meta.fault('dropped', request => request.path.endsWith(`${PAGE}/feed`))
     const lost = await publishPost(env, 'org-a', fourth.post.id, { expectedUpdatedAt: fourth.post.updated_at, targets: [targets.facebook()] }, 'owner')
     assert.deepEqual([lost.ok, lost.outcomes[0]!.status, lost.outcomes[0]!.code], [false, 'unknown', 'final_unconfirmed'])
     const pinned = (await getPost(db, env, 'org-a', fourth.post.id))!
@@ -350,7 +350,7 @@ test('publication: one result, one external post per target, and no blind resend
     // The final call took effect but its answer was lost: unknown until reconciliation is told the post it became, which it reads on the Page.
     const fifth = await create('key-5', { body: 'Answer lost' })
     let createdId: string | null = null
-    meta.fault('timeout', request => {
+    meta.fault('dropped', request => {
       if (request.method !== 'POST' || !request.path.endsWith(`${PAGE}/feed`)) return false
       createdId = `${PAGE}_answer-lost`
       meta.fbPosts.set(createdId, { published: true, message: request.body.message, link: request.body.link, attached: [] })
@@ -660,7 +660,7 @@ for (const method of ['GET', 'DELETE']) {
 test('Instagram insights read the connected account and its posts for the organization range, and name every state without a report', async () => {
   const { runtime, env, meta, run, restore } = await setUp()
   try {
-    await run(`UPDATE organization SET settings_json = '{"config":{"default_timezone":"Asia/Bangkok"}}' WHERE id IN ('org-a', 'org-b')`)
+    await run(`UPDATE organization SET timezone = 'Asia/Bangkok' WHERE id IN ('org-a', 'org-b')`)
     const range = { startDate: '2026-09-28', endDate: '2026-09-30' }
     assert.equal((await loadInstagramInsights(env, 'org-a', range)).status, 'permission_missing')
     assert.equal(meta.requests.length, 0)
@@ -793,7 +793,7 @@ test('Facebook video: a Reel is published by finishing its upload session, any o
 
     // A Reel upload Facebook does not answer is a failure that says so; the retry runs its own session, and the abandoned one was never public.
     const retried = await create('key-fb-reel-retry', { body: 'Second reel', media: [{ asset_id: 'reel', slot: 'cover' }] })
-    meta.fault('timeout', request => request.host === 'rupload.facebook.com')
+    meta.fault('dropped', request => request.host === 'rupload.facebook.com')
     const unanswered = await publishPost(env, 'org-a', retried.post.id, { expectedUpdatedAt: retried.post.updated_at, targets: [targets.facebook()] }, 'owner')
     assert.deepEqual([unanswered.outcomes[0]!.status, unanswered.outcomes[0]!.code], ['failed', 'provider_unreachable'])
     assert.equal((await publication(retried.post.id))!.state, 'failed')

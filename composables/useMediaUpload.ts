@@ -68,7 +68,6 @@ export function useMediaUpload(organizationApiBase: string) {
           filename: file.name,
           category: options.category || undefined,
         },
-        timeout: MEDIA_UPLOAD_TIMEOUT_MS,
         validate: (value): value is {
           asset_id: string
           kind: 'image' | 'video'

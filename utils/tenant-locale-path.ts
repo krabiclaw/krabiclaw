@@ -34,8 +34,8 @@ export function splitLocalePrefix(path: string): TenantLocalePath {
   return { localeSegment, sourcePath, publicPath: path }
 }
 
-export function formatTenantLocalePath(path: string, locale: string): string {
-  if (!path.startsWith('/') || path.startsWith('//') || locale === 'en') return path
+export function formatTenantLocalePath(path: string, locale: string, sourceLocale: string): string {
+  if (!path.startsWith('/') || path.startsWith('//') || locale === sourceLocale) return path
   if (path === `/${locale}` || path.startsWith(`/${locale}/`)) return path
   if (path === '/') return `/${locale}`
   return `/${locale}${path}`

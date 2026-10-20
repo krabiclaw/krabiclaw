@@ -1,5 +1,5 @@
 // The site font presets: a design choice of heading and body families, kept in
-// assets/css/font-presets.css. Thai and Japanese text renders in any preset
+// assets/css/font-presets.css. Thai, Vietnamese and Japanese text renders in any preset
 // through the script fallbacks every stack ends with (assets/css/base.css).
 export const ORGANIZATION_FONT_OPTIONS = [
   { value: 'default', label: 'Default' },

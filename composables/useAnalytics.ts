@@ -79,12 +79,6 @@ export const getBillingAnalyticsContext = (): BillingAnalyticsContext => {
 }
 
 
-export class ErrorEventNotRecorded extends Error {
-  constructor(cause: unknown) {
-    super(`Error event was not recorded: ${cause instanceof Error ? cause.message : String(cause)}`, { cause })
-  }
-}
-
 async function postAuthenticatedInteraction(payload: Record<string, unknown>): Promise<void> {
   const response = await fetch('/api/analytics/interactions', {
     method: 'POST',
@@ -97,7 +91,8 @@ async function postAuthenticatedInteraction(payload: Record<string, unknown>): P
 }
 
 export const useAnalytics = () => {
-  const { isPlatform } = useTenantOrganization()
+  const { template } = useTenantOrganization().organization
+  const isPlatform = template.slug === 'platform'
   const nuxtApp = useNuxtApp()
 
   const trackEvent = (eventName: AnalyticsEventName, input: AnalyticsEventInput = {}) => {
@@ -111,12 +106,10 @@ export const useAnalytics = () => {
     const native = Promise.race([pageEventIdFor(path), whenLeaving()]).then(pageEventId => postAuthenticatedInteraction({ event_id: eventId, occurred_at: occurredAt, event_name: eventName, organization_id: organizationId, page_event_id: pageEventId, properties: kept }))
     // The Google Analytics copy is a projection of the native event: it is sent only after the native
     // record accepted it, with the same id. A collection failure is reported through the application's
-    // error hook, which records an error event. When that error event is the one that failed, it stays
-    // an unhandled rejection for the browser to report; the error tracker does not record it again.
+    // error hook into operational logs, independently of product analytics.
     void native.then(
       () => window.zaraz?.track(eventName, { event_id: eventId, ...kept, ...(organizationId ? { organization_id: organizationId } : {}), device_language: navigator.language, is_prod: import.meta.env.PROD }),
       (error) => {
-        if (eventName === 'error_encountered') throw new ErrorEventNotRecorded(error)
         return nuxtApp.callHook('vue:error', error, null, 'analytics-interaction')
       },
     )
@@ -138,9 +131,6 @@ export const useAnalytics = () => {
   const trackVideoUploaded = (organizationId: string, fileSize: number, provider: string) => trackEvent('video_uploaded', { organization_id: organizationId, file_size: fileSize, provider, media_type: 'video' })
   const trackMediaLibraryViewed = (organizationId: string) => trackEvent('media_library_viewed', { organization_id: organizationId })
   const trackDashboardVisited = (section: string, organizationId?: string) => trackEvent('dashboard_visited', { dashboard_section: section, organization_id: organizationId })
-  // The message is never collected: only the kind of error and where it was seen.
-  const trackError = (errorType: string, _errorMessage: string, context?: string) => trackEvent('error_encountered', { error_type: errorType, error_context: context })
-
   return {
     trackEvent,
     trackOrganizationCreated,
@@ -156,6 +146,5 @@ export const useAnalytics = () => {
     trackVideoUploaded,
     trackMediaLibraryViewed,
     trackDashboardVisited,
-    trackError,
   }
 }

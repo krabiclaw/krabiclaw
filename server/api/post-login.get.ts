@@ -3,10 +3,11 @@ import { HTTPError, defineHandler  } from 'nitro';
 // GET /api/post-login — server-side redirect after OAuth / sign-in.
 import { getQuery, redirect } from 'nitro/h3';
 import { cloudflareEnv } from '~/server/utils/api-response'
-import { createAuth, getAuthSession } from '~/server/utils/auth'
+import { getAuthSession } from '~/server/utils/auth'
 import { resolvePostLoginRoute } from '~/server/utils/post-login-routing'
+import { activateSessionOrganization } from '~/server/utils/session-organization'
 import { isNewSalePlan } from '~/shared/billing-model'
-import { buildLoginUrl, buildPostLoginUrl, validatedInternalPath } from '~/shared/auth/return-target'
+import { buildLoginUrl, buildPostLoginUrl, isDashboardAppPath, resolveDashboardAppTarget, validatedInternalPath } from '~/shared/auth/return-target'
 
 export default defineHandler(async (event) => {
   const env = cloudflareEnv(event)
@@ -17,10 +18,14 @@ export default defineHandler(async (event) => {
     throw new HTTPError({ statusCode: 400, message: 'Unknown checkout plan' })
   }
   const session = await getAuthSession(event, env)
-  if (!session?.user?.id) return redirect(plan ? buildLoginUrl({ redirect: buildPostLoginUrl({ plan }) }) : '/login', 302)
-
   const redirectTarget = validatedInternalPath(getQuery(event).redirect)
-  if (redirectTarget) return redirect(redirectTarget, 302)
+
+  if (!session?.user?.id) {
+    const returnTarget = redirectTarget ?? (plan ? buildPostLoginUrl({ plan }) : undefined)
+    return redirect(buildLoginUrl(returnTarget ? { redirect: returnTarget } : {}), 302)
+  }
+
+  if (redirectTarget && !isDashboardAppPath(redirectTarget)) return redirect(redirectTarget, 302)
 
   if (!db) {
     throw new HTTPError({ statusCode: 503, message: 'Database not available' })
@@ -37,35 +42,36 @@ export default defineHandler(async (event) => {
     // holds the authenticated request headers, and routing first would leave
     // the session with no active organization for the account pages to read.
     if (route.kind === 'activate') {
-      // `createAuth` caches its instance as `unknown` and casts it back to the
-      // bare `betterAuth` type, which erases every plugin endpoint from `api`.
-      // The route exists — organization() is registered — so the shape is named
-      // here rather than restructuring the auth builder inside a routing change.
-      const auth = createAuth(env) as unknown as {
-        api: { setActiveOrganization: (input: { body: { organizationId: string }, headers: Headers }) => Promise<unknown> }
-      }
-      // Routing without activating is the failure #905 names, so a refusal
-      // stops here rather than entering an organization the session is not in.
-      const activated = await auth.api.setActiveOrganization({
-        body: { organizationId: route.organizationId },
-        headers: event.req.headers,
-      })
-      if (!activated) {
-        throw new HTTPError({ statusCode: 502, message: 'Could not activate the organization for this session' })
-      }
+      await activateSessionOrganization(event, env, route.organizationId)
     }
 
-    if (plan) {
+    if (plan && !redirectTarget) {
       if (route.kind === 'onboard') {
         throw new HTTPError({ statusCode: 409, message: 'An organization is required before choosing a billing plan' })
       }
       // The chooser carries the plan and returns through here, so the billing
       // destination is decided in exactly one place.
       if (route.kind === 'choose') {
-        return redirect(`${route.destination}?plan=${encodeURIComponent(plan)}`, 302)
+        const chooseParams = new URLSearchParams()
+        chooseParams.set('plan', plan)
+        return redirect(`${route.destination}?${chooseParams}`, 302)
       }
       return redirect(`${route.destination}/payments?tab=plan&plan=${encodeURIComponent(plan)}`, 302)
     }
+
+    if (route.kind === 'onboard') {
+      return redirect(route.destination, 302)
+    }
+
+    if (route.kind === 'choose') {
+      const chooseRedirect = redirectTarget ? `?redirect=${encodeURIComponent(redirectTarget)}` : ''
+      return redirect(`${route.destination}${chooseRedirect}`, 302)
+    }
+
+    if (redirectTarget && isDashboardAppPath(redirectTarget)) {
+      return redirect(resolveDashboardAppTarget(route.destination, redirectTarget), 302)
+    }
+
     return redirect(route.destination, 302)
   } catch (error) {
     if (error instanceof HTTPError) throw error

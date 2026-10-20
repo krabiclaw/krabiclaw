@@ -1,5 +1,5 @@
 <template>
-  <ProductDetailPage :organization-id="organizationId" :vertical="detail.vertical" :product="detail.product" :location="detail.location" :reviews="detail.reviews" :booking="detail.booking" :sessions="detail.sessions" :collection-name="detail.collectionName" :collection-siblings="detail.collectionSiblings" :currency="detail.currency" :presentation="presentation" />
+  <ProductDetailPage :organization-id="organizationId" :vertical="detail.vertical" :product="detail.product" :location="detail.location" :reviews="detail.reviews" :booking="detail.booking" :sessions="detail.sessions" :collection-name="detail.collectionName" :collection-siblings="detail.collectionSiblings" :currency="detail.currency" :presentation="presentation" :stay-checkout-available="detail.stayCheckoutAvailable" />
 </template>
 
 <script setup lang="ts">
@@ -7,7 +7,7 @@ import ProductDetailPage from '~/components/products/ProductDetailPage.vue'
 import { presentationForSurface } from '~/utils/product-presentation'
 import { composeProductSeoDescription } from '~/utils/product-seo'
 
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 const resolved = await usePublicProductDetail('products')
 const organizationId = resolved.organizationId
 const detail = computed(() => {
@@ -34,7 +34,6 @@ useSocialMetadata(() => ({
     priceSelection: priceSelection.value,
   }, t),
   socialImage: detail.value.product.social_image,
-  brand: { organizationName: detail.value.brandName },
   breadcrumbs: [
     { name: 'Locations', url: '/locations' },
     { name: detail.value.location.title, url: `/locations/${detail.value.location.slug}` },

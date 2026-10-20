@@ -3,6 +3,7 @@ import {
   NOTIFICATION_CATEGORIES,
   NOTIFICATION_CATEGORY_DEFAULTS,
   isMandatoryEmailCategory,
+  isPushOnlyCategory,
   type NotificationCategory,
   type NotificationCategorySetting,
   type NotificationChannel,
@@ -13,6 +14,7 @@ interface PreferenceRow {
   category: string
   email_enabled: number
   whatsapp_enabled: number
+  push_enabled: number
 }
 
 export type NotificationPreferences = Record<NotificationCategory, NotificationCategorySetting>
@@ -42,7 +44,7 @@ export async function getNotificationPreferences(db: DbClient, userId: string): 
   const preferences = defaults()
   const rows = await queryAll<PreferenceRow>(
     db,
-    'SELECT category, email_enabled, whatsapp_enabled FROM user_notification_preferences WHERE user_id = ?',
+    'SELECT category, email_enabled, whatsapp_enabled, push_enabled FROM user_notification_preferences WHERE user_id = ?',
     [userId],
   )
   for (const row of rows) {
@@ -51,6 +53,7 @@ export async function getNotificationPreferences(db: DbClient, userId: string): 
     preferences[category] = {
       email: Boolean(row.email_enabled),
       whatsapp: Boolean(row.whatsapp_enabled),
+      push: Boolean(row.push_enabled),
     }
   }
   return preferences
@@ -73,15 +76,19 @@ export async function setNotificationPreference(
   if (isMandatoryEmailCategory(category) && !setting.email) {
     throw new Error(`${category} email cannot be disabled`)
   }
+  if (isPushOnlyCategory(category) && (setting.email || setting.whatsapp)) {
+    throw new Error(`${category} is delivered by push only`)
+  }
   await execute(
     db,
-    `INSERT INTO user_notification_preferences (user_id, category, email_enabled, whatsapp_enabled, updated_at)
-     VALUES (?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    `INSERT INTO user_notification_preferences (user_id, category, email_enabled, whatsapp_enabled, push_enabled, updated_at)
+     VALUES (?, ?, ?, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
      ON CONFLICT (user_id, category) DO UPDATE SET
        email_enabled = excluded.email_enabled,
        whatsapp_enabled = excluded.whatsapp_enabled,
+       push_enabled = excluded.push_enabled,
        updated_at = excluded.updated_at`,
-    [userId, category, setting.email ? 1 : 0, setting.whatsapp ? 1 : 0],
+    [userId, category, setting.email ? 1 : 0, setting.whatsapp ? 1 : 0, setting.push ? 1 : 0],
   )
   if (category === 'product_news') {
     await syncProductNewsContact(db, env, userId, setting.email ? 'user_opt_in' : 'user_opt_out')
@@ -91,10 +98,11 @@ export async function setNotificationPreference(
 /**
  * Turns one category's email off without reading the row first.
  *
- * An unsubscribe silences the email and leaves WhatsApp alone, but doing that
- * as read-then-write would let a settings save between the two be overwritten
- * by whatever the read saw. On conflict only email_enabled moves; a person with
- * no row yet gets one carrying the category's default WhatsApp setting.
+ * An unsubscribe silences the email and leaves WhatsApp and push alone, but
+ * doing that as read-then-write would let a settings save between the two be
+ * overwritten by whatever the read saw. On conflict only email_enabled moves; a
+ * person with no row yet gets one carrying the category's default WhatsApp and
+ * push settings.
  */
 export async function disableCategoryEmail(
   db: DbClient,
@@ -107,12 +115,12 @@ export async function disableCategoryEmail(
   }
   await execute(
     db,
-    `INSERT INTO user_notification_preferences (user_id, category, email_enabled, whatsapp_enabled, updated_at)
-     VALUES (?, ?, 0, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+    `INSERT INTO user_notification_preferences (user_id, category, email_enabled, whatsapp_enabled, push_enabled, updated_at)
+     VALUES (?, ?, 0, ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
      ON CONFLICT (user_id, category) DO UPDATE SET
        email_enabled = 0,
        updated_at = excluded.updated_at`,
-    [userId, category, NOTIFICATION_CATEGORY_DEFAULTS[category].whatsapp ? 1 : 0],
+    [userId, category, NOTIFICATION_CATEGORY_DEFAULTS[category].whatsapp ? 1 : 0, NOTIFICATION_CATEGORY_DEFAULTS[category].push ? 1 : 0],
   )
   if (category === 'product_news' && change.origin === 'user') {
     await syncProductNewsContact(db, change.env, userId, 'user_opt_out')
@@ -135,11 +143,11 @@ export async function wantsNotification(
   if (channel === 'email' && isMandatoryEmailCategory(category)) return true
   const row = await queryFirst<PreferenceRow>(
     db,
-    'SELECT category, email_enabled, whatsapp_enabled FROM user_notification_preferences WHERE user_id = ? AND category = ?',
+    'SELECT category, email_enabled, whatsapp_enabled, push_enabled FROM user_notification_preferences WHERE user_id = ? AND category = ?',
     [userId, category],
   )
   if (!row) return NOTIFICATION_CATEGORY_DEFAULTS[category][channel]
-  return channel === 'email' ? Boolean(row.email_enabled) : Boolean(row.whatsapp_enabled)
+  return Boolean({ email: row.email_enabled, whatsapp: row.whatsapp_enabled, push: row.push_enabled }[channel])
 }
 
 /**

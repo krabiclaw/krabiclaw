@@ -4,20 +4,40 @@
     page shows it, each stating what it holds now. Every card is a level below
     this one; the gear opens the settings that a guest never sees.
   -->
-  <DashboardIndexPanel id="location-index" :title="location?.title || 'Location'" :auto-open="cards[0]?.to ?? null">
-    <template #right>
+  <DashboardIndexPanel id="location-index" :title="isNew ? newLocation.title.value : location?.title || 'Location'" :auto-open="atLimit ? null : cards[0]?.to ?? null" :create="atLimit ? null : newLocation.firstStep.value">
+    <template v-if="!isNew" #right>
       <UButton
         :to="`${level.path.value}/settings`"
         icon="i-lucide-settings"
         color="neutral"
-        variant="ghost"
+        variant="soft"
         square
         aria-label="Location settings"
       />
     </template>
 
+    <!--
+      The location before it exists: the sections creating it will not go
+      without, walked in order. Basic includes its locations and no more; a paid
+      plan bills each one past those at the end of the period.
+    -->
+    <template v-if="isNew">
+      <div v-if="atLimit" data-location-limit class="space-y-4">
+        <h2 class="text-xl font-bold leading-snug text-highlighted">Choose a plan for more locations</h2>
+        <p class="text-base text-muted">
+          Basic includes {{ INCLUDED_LOCATIONS }} locations. Growth and Business include {{ INCLUDED_LOCATIONS }},
+          then {{ additionalLocationPrice() }}.
+        </p>
+        <UButton label="Choose a plan" :to="`/dashboard/${route.params.orgSlug}/payments?tab=plan`" />
+      </div>
+      <template v-else>
+        <UAlert v-if="newLocation.createError.value" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="newLocation.createError.value" />
+        <EditorNavigationList :groups="navigationGroups" :active-item="level.child.value" />
+      </template>
+    </template>
+
     <UAlert
-      v-if="overviewError"
+      v-else-if="overviewError"
       color="error"
       variant="soft"
       icon="i-lucide-triangle-alert"
@@ -38,6 +58,9 @@ import { normalizeVertical, type OrganizationVertical } from '~/utils/vertical-c
 import { catalogLabel, catalogSummary, type CatalogCounts } from '~/utils/product-presentation'
 import { formatPostalAddress } from '~/utils/postal-address'
 import type { LocationReservationConfig } from '~/server/utils/reservations'
+import { NEW_LOCATION_SECTIONS, useNewLocation } from '~/lib/components/workspace/settings/LocationSettingsPage.vue'
+import { additionalLocationPrice, INCLUDED_LOCATIONS, isKnownRecurringPlan } from '~/shared/billing-model'
+import { timezoneLabel } from '~/utils/timezone'
 
 // A location is a tile on Locations, a row on Menu; Locations is its pane and its Back.
 definePageMeta({ layout: 'dashboard' })
@@ -53,7 +76,7 @@ interface LocationOverview {
   address: PostalAddress | null
   rating: number | null
   google_place_id: string | null
-  timezone?: string | null
+  timezone: string
   opening_hours?: OpeningHours
 }
 
@@ -80,6 +103,30 @@ const level = useRouteLevel()
 const locationPath = level.path
 
 const organizationId = await useDashboardOrganizationId()
+const route = useRoute()
+const newLocation = useNewLocation(organizationId, null)
+const isNew = newLocation.isNew
+
+// Only the walk's own sections live under `new`; the rest belong to a location that exists.
+watchEffect(() => {
+  const child = level.child.value
+  if (isNew.value && child && !(NEW_LOCATION_SECTIONS as readonly string[]).includes(child)) {
+    showError(createError({ statusCode: 404, statusMessage: 'Page not found' }))
+  }
+})
+
+// The plan and its locations in use, read when a location is about to be added.
+type LocationBilling = { plan: string; usage: { locations: number } }
+const isLocationBilling = (value: unknown): value is { success: true; billing: LocationBilling } =>
+  isRecord(value) && value.success === true && isRecord(value.billing) && typeof value.billing.plan === 'string'
+  && isRecord(value.billing.usage) && Number.isSafeInteger(value.billing.usage.locations)
+const { data: billingResponse, error: billingError } = await useAsyncData(
+  computed(() => `location-new-billing:${organizationId}:${isNew.value}`),
+  async () => isNew.value ? await dashboardApi('/api/billing/status', { validate: isLocationBilling }) : null,
+)
+if (billingError.value) throw billingError.value
+const atLimit = computed(() => isNew.value && !!billingResponse.value && !isKnownRecurringPlan(billingResponse.value.billing.plan)
+  && billingResponse.value.billing.usage.locations >= INCLUDED_LOCATIONS)
 
 const locationId = computed(() => dashboardLocation.currentLocationId.value)
 
@@ -134,10 +181,10 @@ function trustSummary(qa: number, reviews: number, organizationQa: number): stri
   return parts.length ? parts.join(' · ') : 'Answer your first question'
 }
 
-interface HubCard { id: string; title: string; description: string; to: string; image?: string }
+interface HubCard { id: string; title: string; description: string; to: string; image?: string; icon?: string }
 
 const router = useRouter()
-const { organizationPaths: organizationLinks } = useDashboardOrganizationLinks()
+const organizationLinks = dashboard.organizationPaths
 /** One of the organization's managers, scoped to this location by its id. */
 function scopedToLocation(path: string | undefined): string {
   if (!path || !locationId.value) return locationPath.value
@@ -145,6 +192,13 @@ function scopedToLocation(path: string | undefined): string {
 }
 
 const cards = computed<HubCard[]>(() => {
+  if (isNew.value) {
+    const draft = newLocation.draft.value
+    return [
+      { id: 'name', title: 'Name', description: draft.title.trim() || 'Not named yet', to: `${locationPath.value}/name` },
+      { id: 'hours', icon: 'i-lucide-clock', title: 'Hours', description: draft.hours.timezone ? timezoneLabel(draft.hours.timezone) : 'Choose the time zone', to: `${locationPath.value}/hours` },
+    ]
+  }
   const resource = overview.value
   if (!resource) return []
   const loc = resource.location.location
@@ -155,20 +209,21 @@ const cards = computed<HubCard[]>(() => {
     { id: 'photos', title: 'Photos', description: countSummary(counts.photos, 'photo', 'Add photos'), to: `${locationPath.value}/photos`, image: locationImage.value || undefined, visible: hasFeature('photos') },
     { id: 'name', title: 'Name', description: loc.title, to: `${locationPath.value}/name`, visible: true },
     { id: 'description', title: 'Description', description: loc.short_description?.trim() || loc.description?.trim() || 'Describe this location', to: `${locationPath.value}/description`, visible: true },
-    { id: 'hours', title: 'Hours', description: currentOpeningState.value, to: `${locationPath.value}/hours`, visible: true },
-    { id: 'address', title: 'Address', description: addressSummary.value, to: `${locationPath.value}/address`, visible: true },
-    { id: 'contact', title: 'Contact', description: contact || 'Add a phone or email', to: `${locationPath.value}/contact`, visible: true },
+    { id: 'hours', icon: 'i-lucide-clock', title: 'Hours', description: currentOpeningState.value, to: `${locationPath.value}/hours`, visible: true },
+    { id: 'address', icon: 'i-lucide-map-pin', title: 'Address', description: addressSummary.value, to: `${locationPath.value}/address`, visible: true },
+    { id: 'contact', icon: 'i-lucide-contact-round', title: 'Contact', description: contact || 'Add a phone or email', to: `${locationPath.value}/contact`, visible: true },
     // What this location offers, its posts and its Q&A each have one manager,
     // shared with the whole organization; these rows open it scoped to here.
     // Built only when this site carries a catalogue at all: a vertical with no
     // product presentation has no word for one, and asking for it throws.
     ...(hasFeature('products')
-      ? [{ id: 'products', title: catalogLabelText(resource.catalog), description: catalogSummaryText(resource.catalog), to: scopedToLocation(organizationLinks.value?.catalog), visible: true }]
+      ? [{ id: 'products', icon: 'i-lucide-store', title: catalogLabelText(resource.catalog), description: catalogSummaryText(resource.catalog), to: scopedToLocation(organizationLinks.value?.catalog), visible: true }]
       : []),
-    { id: 'posts', title: 'Posts', description: countSummary(counts.posts, 'published post', 'Write your first post'), to: scopedToLocation(organizationLinks.value?.posts), visible: hasFeature('posts') },
-    { id: 'qa', title: 'Reviews and Q&A', description: trustSummary(counts.qa, counts.reviews, counts.organizationQa), to: scopedToLocation(organizationLinks.value?.qa), visible: hasFeature('qa') },
+    { id: 'posts', icon: 'i-lucide-megaphone', title: 'Posts', description: countSummary(counts.posts, 'published post', 'Write your first post'), to: scopedToLocation(organizationLinks.value?.posts), visible: hasFeature('posts') },
+    { id: 'qa', icon: 'i-lucide-message-circle-question', title: 'Reviews and Q&A', description: trustSummary(counts.qa, counts.reviews, counts.organizationQa), to: scopedToLocation(organizationLinks.value?.qa), visible: hasFeature('qa') },
     {
       id: 'reservations',
+      icon: 'i-lucide-calendar-check',
       title: 'Reservations',
       description: !policy ? 'Not taking reservations' : policy.slot_capacity === null ? 'Open, no seat limit' : `Open, ${policy.slot_capacity} guests per slot`,
       to: `${locationPath.value}/reservations`,
@@ -183,6 +238,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => [{
   items: cards.value.map(card => ({
     id: card.id,
     label: card.title,
+    icon: card.icon,
     summary: card.description,
     to: card.to,
     image: card.image ?? null,
@@ -197,7 +253,8 @@ const isOverviewResponse = (value: unknown): value is LocationOverviewResource =
   && isRecord(value.counts) && typeof value.counts.photos === 'number'
 
 const overviewKey = computed(() => `dashboard-location-overview:${organizationId}:${locationId.value}`)
-const { data: overview, error: overviewError } = await useAsyncData<LocationOverviewResource>(overviewKey, async () => {
+const { data: overview, error: overviewError } = await useAsyncData<LocationOverviewResource | null>(overviewKey, async () => {
+  if (isNew.value) return null
   const requestedLocationId = locationId.value
   if (!requestedLocationId) throw createError({ statusCode: 404, statusMessage: 'Location not found' })
   const shouldIncludeProducts = includeProducts.value
@@ -207,5 +264,5 @@ const { data: overview, error: overviewError } = await useAsyncData<LocationOver
   )
 })
 
-useSeoMeta({ title: () => `${location.value?.title || 'Location'} | Krabiclaw`, robots: 'noindex, nofollow' })
+useSeoMeta({ title: () => `${isNew.value ? newLocation.title.value : location.value?.title || 'Location'} | KrabiClaw`, robots: 'noindex, nofollow' })
 </script>

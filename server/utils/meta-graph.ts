@@ -51,11 +51,9 @@ export class MetaDeadline {
   private readonly endsAt: number
   constructor(budgetMs: number) { this.endsAt = Date.now() + budgetMs }
   remaining(): number { return this.endsAt - Date.now() }
-  /** The timeout for one request: at most `perRequestMs`, never past the deadline. */
-  requestTimeout(perRequestMs = 10_000): number {
-    const remaining = this.remaining()
-    if (remaining <= 250) throw new MetaGraphError('transport', 'The operation ran out of time before this request could be sent')
-    return Math.min(perRequestMs, remaining)
+  /** Refuses to start a request the operation no longer has time for. */
+  assertTimeLeft(): void {
+    if (this.remaining() <= 250) throw new MetaGraphError('transport', 'The operation ran out of time before this request could be sent')
   }
 }
 
@@ -63,17 +61,14 @@ function redact(text: string): string {
   return text.replace(/access_token=[^&\s"]+/g, 'access_token=[redacted]')
 }
 
-export async function metaGraphRequest<T>(url: string, init: RequestInit & { deadline?: MetaDeadline; timeoutMs?: number } = {}): Promise<T> {
-  const { deadline, timeoutMs, ...request } = init
-  const timeout = deadline ? deadline.requestTimeout(timeoutMs) : timeoutMs ?? 10_000
+export async function metaGraphRequest<T>(url: string, init: RequestInit & { deadline?: MetaDeadline } = {}): Promise<T> {
+  const { deadline, ...request } = init
+  deadline?.assertTimeLeft()
   let response: Response
   try {
-    response = await fetch(url, { ...request, signal: AbortSignal.timeout(timeout) })
+    response = await fetch(url, request)
   } catch (error) {
-    const name = error instanceof Error ? error.name : ''
-    throw new MetaGraphError('transport', name === 'TimeoutError' || name === 'AbortError'
-      ? `Meta did not answer within ${timeout}ms`
-      : `Meta could not be reached: ${error instanceof Error ? error.message : String(error)}`, undefined, { cause: error })
+    throw new MetaGraphError('transport', `Meta could not be reached: ${error instanceof Error ? error.message : String(error)}`, undefined, { cause: error })
   }
   const text = await response.text()
   let body: unknown

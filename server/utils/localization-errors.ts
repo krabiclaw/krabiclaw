@@ -5,6 +5,8 @@ export type LocalizationErrorCode =
   | 'LOCALE_NOT_CANONICAL'
   | 'PLATFORM_LOCALE_UNAVAILABLE'
   | 'LANGUAGE_ENTITLEMENT_REQUIRED'
+  | 'LANGUAGE_NOT_ENABLED'
+  | 'LANGUAGE_NOT_PUBLISHED'
   | 'LOCALIZATION_NOT_FOUND'
   | 'LOCALIZATION_VALIDATION_FAILED'
   | 'LOCALIZATION_READ_ONLY'
@@ -22,4 +24,3 @@ export function localizationError(
 ): never {
   throw new HTTPError({ statusCode, statusMessage, data: { code, ...details } })
 }
-

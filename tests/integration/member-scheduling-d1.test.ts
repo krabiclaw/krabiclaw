@@ -17,7 +17,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
  const db=await runtime.getD1Database('DB')
  try {
   await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}),await generateSQLiteDrizzleJson(schema))).map(sql=>db.prepare(sql)))
-  await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at) VALUES('org','Org','org','org','{"config":{"default_timezone":"UTC"}}','theme','USD','active','complete','flat','experience','2026-10-01T00:00:00.000Z')`).run()
+  await db.prepare(`INSERT INTO organization(id,name,slug,subdomain,settings_json,theme_id,default_currency,status,onboarding_status,url_structure,vertical,updated_at, timezone) VALUES('org','Org','org','org','{}','theme','USD','active','complete','flat','experience','2026-10-01T00:00:00.000Z', 'UTC')`).run()
   for(const id of ['owner','one','two','outsider'])await db.prepare('INSERT INTO user(id,name,email,emailVerified)VALUES(?,?,?,1)').bind(id,id,`${id}@example.test`).run()
   for(const [id,role]of [['owner','owner'],['one','member'],['two','member']])await db.prepare("INSERT INTO member(id,organizationId,userId,role)VALUES(?,'org',?,?)").bind(`member-${id}`,id,role).run()
   const env={DB:db,STRIPE_SECRET_KEY:'sk_test_local_d1_no_stripe_requests',BETTER_AUTH_URL:'https://proof.example',BETTER_AUTH_SECRET:'local-proof-secret-long-enough-for-auth',NUXT_PUBLIC_PLATFORM_DOMAIN:'https://krabiclaw.test',GOOGLE_CLIENT_ID:'test-google-client',GOOGLE_CLIENT_SECRET:'test-google-secret'} as CloudflareEnv
@@ -36,7 +36,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
   const changed=await writeMemberScheduling(own,'member-one',{...hours,expected_updated_at:approved!.updated_at,public_name:'Changed public name'})
   assert.equal(changed?.public_approved,0,'self-edited content loses prior approval')
   await writeMemberScheduling({...own,userId:'two'},'member-two',{...hours,timezone:'UTC'})
-  await db.prepare("INSERT INTO account(id,accountId,providerId,userId,scope)VALUES('busy-linked','google-subject','google','one',?)").bind(MEMBER_BUSY_SCOPES.join(' ')).run()
+  await db.prepare("INSERT INTO account(id,accountId,providerId,userId,scope)VALUES('busy-linked','google-subject','google','one',?)").bind(MEMBER_BUSY_SCOPES.join(',')).run()
   const raced = await Promise.allSettled([
    selectBusyCalendars(own,'member-one',{account_id:'busy-linked',calendar_ids:['same-calendar']}),
    storeCalendarSelection(db,'org',{account_id:'busy-linked',calendar_id:'same-calendar',calendar_name:'Synthetic calendar'}),
@@ -95,8 +95,8 @@ test('member self-service uses Better Auth permissions, public approval is admin
   for(const [id,member]of [['one','member-one'],['two','member-two']]) {
    await db.prepare("INSERT INTO products(kind,id,organization_id,name,slug,created_by,updated_by)VALUES('service',?,'org',?,?,'owner','owner')").bind(id,id,id).run()
    await db.prepare("INSERT INTO product_variants(id,organization_id,product_id,name,created_by,updated_by)VALUES(?,'org',?,'Standard','owner','owner')").bind(`variant-${id}`,id).run()
-   await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,scheduling_mode,assigned_member_id,duration_minutes,default_capacity,created_by,updated_by)VALUES(?,'org','provider',?,60,1,'owner','owner')").bind(id,member).run()
-   await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES(?,'org',?,'UTC',?,?,1,'owner','owner')").bind(`session-${id}`,id,start,end).run()
+   await db.prepare("INSERT INTO product_booking_configs(product_id,organization_id,scheduling_mode,assigned_member_id,duration_minutes,default_capacity,held_online,created_by,updated_by)VALUES(?,'org','provider',?,60,1,1,'owner','owner')").bind(id,member).run()
+   await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES(?,'org',?,?,'UTC',?,?,1,'owner','owner')").bind(`session-${id}`,id,member,start,end).run()
   }
   await db.prepare("UPDATE member_scheduling SET calendar_account_id='missing-account',calendar_ids_json='[\"busy-calendar\"]',busy_checked_at=?,busy_from=?,busy_until=?,busy_error=NULL WHERE member_id='member-one'").bind(new Date().toISOString(),new Date().toISOString(),`${day}T20:00:00.000Z`).run()
   const failed=await refreshMemberBusy(db,env,'member-one',true)
@@ -115,7 +115,7 @@ test('member self-service uses Better Auth permissions, public approval is admin
   await selectBusyCalendars(own,'member-one',{account_id:null,calendar_ids:[]})
   assert.equal((await readMemberScheduling(db,'org','member-one'))?.calendar_conflict_count,0)
   const following=new Date(Date.parse(start)+86400000).toISOString(),followingEnd=new Date(Date.parse(end)+86400000).toISOString()
-  await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES('group','org','two','UTC',?,?,3,'owner','owner')").bind(following,followingEnd).run()
+  await db.prepare("INSERT INTO product_sessions(id,organization_id,product_id,assigned_member_id,timezone,starts_at,ends_at,capacity,created_by,updated_by)VALUES('group','org','two','member-two','UTC',?,?,3,'owner','owner')").bind(following,followingEnd).run()
   const group=await Promise.all([1,2].map(()=>claimSessionCapacity(db,{organizationId:'org',productId:'two',sessionId:'group',productVariantId:'variant-two',partySize:1})))
   const revision=await db.prepare('SELECT updated_at FROM bookings WHERE id=?').bind(group[0].bookingId).first<string>('updated_at')
   await assert.rejects(()=>reassignBookingProvider(own,{booking_id:group[0].bookingId,member_id:'member-one',expected_updated_at:revision!,idempotency_key:'self-reassignment'}))
@@ -134,6 +134,13 @@ test('member self-service uses Better Auth permissions, public approval is admin
   const occupiedRevision=await db.prepare('SELECT updated_at FROM bookings WHERE id=?').bind(healthy.bookingId).first<string>('updated_at')
   await assert.rejects(()=>reassignBookingProvider(owner,{booking_id:healthy.bookingId,member_id:'member-one',expected_updated_at:occupiedRevision!,idempotency_key:'overlap-refused'}),/isn’t free at this time/)
   assert.equal(await db.prepare('SELECT assigned_member_id FROM bookings WHERE id=?').bind(healthy.bookingId).first('assigned_member_id'),'member-two')
+  const movedRevision=await db.prepare('SELECT updated_at FROM bookings WHERE id=?').bind(group[0].bookingId).first<string>('updated_at')
+  assert.deepEqual(await reassignBookingProvider(owner,{...move,member_id:'member-two',expected_updated_at:movedRevision!,idempotency_key:'later-reassignment'}),{session_id:'group',assigned_member_id:'member-two'})
+  await assert.rejects(()=>reassignBookingProvider(owner,move),error=>error instanceof Error && 'statusCode' in error && error.statusCode===409 && /superseded/.test(error.message))
+  const currentAssignments=await db.prepare("SELECT id,assigned_member_id FROM bookings WHERE product_session_id='group' ORDER BY id").all<{id:string;assigned_member_id:string}>()
+  assert.deepEqual(currentAssignments.results.map(row=>row.id).sort(),group.map(row=>row.bookingId).sort())
+  assert(currentAssignments.results.every(row=>row.assigned_member_id==='member-two'),'an older replay does not restore its superseded assignment')
+  assert.equal(await db.prepare("SELECT count(*) n FROM activity_entries WHERE event_name='booking.reassign' AND scope_kind='organization'").first('n'),2)
 
  }finally{await runtime.dispose()}
 })

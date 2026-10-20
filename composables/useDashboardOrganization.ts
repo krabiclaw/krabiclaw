@@ -1,4 +1,6 @@
-import type { DashboardRequestScope } from '~/composables/dashboardFetch'
+import { dashboardFetch, type DashboardRequestScope } from '~/composables/dashboardFetch'
+import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
+import { organizationRoles } from '~/utils/organization-access'
 
 /**
  * The tenant, as the dashboard reads it.
@@ -14,14 +16,14 @@ export interface DashboardOrganization {
   slug: string
   role: string
   theme_id: string
-  vertical: 'restaurant' | 'experience' | 'service' | null
+  vertical: OrganizationVertical | null
   subdomain: string | null
   custom_domain: string | null
   public_url: string | null
   status: string
   onboarding_status: string
   effective_plan: string
-  default_currency: string | null
+  default_currency: string
   media: Array<{ asset_id: string; slot: string; public_url: string | null; thumbnail_url: string | null; kind: string | null }>
 }
 
@@ -30,6 +32,7 @@ export interface DashboardLocation {
   slug: string
   title: string
   status: string
+  timezone: string
   city: string | null
   address: PostalAddress | null
   media: Array<{ asset_id: string; slot: string; public_url: string | null; thumbnail_url: string | null; kind: string | null }>
@@ -65,11 +68,12 @@ const isDashboardOrganization = (value: unknown): value is DashboardOrganization
   && typeof value.slug === 'string'
   && typeof value.role === 'string'
   && typeof value.theme_id === 'string'
+  && (value.vertical === null || ALL_VERTICALS.some(vertical => vertical === value.vertical))
   && (value.subdomain === null || typeof value.subdomain === 'string')
   && (value.public_url === null || typeof value.public_url === 'string')
   && typeof value.status === 'string'
   && typeof value.onboarding_status === 'string'
-  && (value.default_currency === null || typeof value.default_currency === 'string')
+  && typeof value.default_currency === 'string'
   && isMediaList(value.media)
 
 const isDashboardLocation = (value: unknown): value is DashboardLocation =>
@@ -78,6 +82,7 @@ const isDashboardLocation = (value: unknown): value is DashboardLocation =>
   && typeof value.slug === 'string'
   && typeof value.title === 'string'
   && typeof value.status === 'string'
+  && typeof value.timezone === 'string'
   && isSocialImage(value.social_image)
   && (value.picture_url === null || typeof value.picture_url === 'string')
   && isMediaList(value.media)
@@ -126,23 +131,7 @@ function dashboardContextKey(scope: DashboardRequestScope | null) {
 export function useDashboardContext(scope: DashboardRequestScope) {
   return useAsyncData<DashboardContextResponse>(
     dashboardContextKey(scope),
-    async (_nuxtApp, { signal }) => {
-      const response = await $fetch<unknown>('/api/dashboard/context', {
-        query: buildDashboardRequestQuery(scope),
-        signal,
-      })
-
-      if (!isDashboardContextResponse(response)) {
-        throw new ApiClientError(
-          'Dashboard context response did not match its contract',
-          502,
-          'INVALID_API_RESPONSE',
-          null,
-        )
-      }
-
-      return response
-    },
+    async (_nuxtApp, { signal }) => dashboardFetch('/api/dashboard/context', scope, { signal, validate: isDashboardContextResponse }),
     { dedupe: 'defer' },
   )
 }
@@ -165,6 +154,25 @@ export function useDashboardOrganization() {
   const organization = computed(() => state.value?.organization ?? null)
   const organizationId = computed(() => organization.value?.id ?? null)
   const locations = computed(() => state.value?.locations ?? [])
+  /** Whether the signed-in member's role may change the plan, by the same rule the billing endpoints enforce. */
+  const canUpdateBilling = computed(() => {
+    const role = organization.value?.role
+    return !!role && role in organizationRoles && organizationRoles[role as keyof typeof organizationRoles].authorize({ billing: ['update'] }).success
+  })
+
+  const organizationPaths = computed(() => {
+    const organizationSlug = scope.value?.orgSlug
+    if (!organizationSlug) return null
+    const base = `/dashboard/${encodeURIComponent(organizationSlug)}`
+    return {
+      catalog: `${base}/products`,
+      newLocation: `${base}/locations/new`,
+      posts: `${base}/website/posts`,
+      pages: `${base}/website/pages`,
+      blog: `${base}/website/blog`,
+      qa: `${base}/website/qa`,
+    }
+  })
 
   return {
     state,
@@ -174,6 +182,8 @@ export function useDashboardOrganization() {
     organization,
     organizationId,
     locations,
+    canUpdateBilling,
+    organizationPaths,
     /** Re-runs the context request. For an explicit reload after a mutation. */
     refresh: () => refreshNuxtData(contextKey.value),
   }

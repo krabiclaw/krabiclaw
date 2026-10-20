@@ -1,7 +1,7 @@
 <template>
   <div class="min-h-screen bg-default text-default">
     <template v-if="isMenu">
-      <SayaSubNav
+      <TenantSubNav
         v-if="currentLocation"
         :location-slug="currentLocation.slug"
         active="menu"
@@ -29,7 +29,7 @@
             :to="localePath(productLocationCollectionPath(vertical, location.slug))"
             class="inline-flex items-center gap-2 rounded-full border border-default px-5 py-2.5 text-sm text-muted no-underline transition hover:bg-muted hover:text-default"
           >
-            <SayaIcon name="map-pin" class="size-3.5 opacity-70" />
+            <TenantIcon name="map-pin" class="size-3.5 opacity-70" />
             {{ location.title }}
           </NuxtLink>
         </div>
@@ -37,24 +37,24 @@
     </template>
 
     <template v-else>
-      <SayaSubNav
-        v-if="currentLocation"
+      <TenantSubNav
+        v-if="currentLocation && subNavTab"
         :location-slug="currentLocation.slug"
-        :active="presentation.locationCollectionSegment"
+        :active="subNavTab"
       />
       <header class="mx-auto max-w-7xl px-4 pb-10 pt-16 sm:px-6 lg:px-8">
         <div class="max-w-2xl">
           <p v-if="collectionLabel" class="saya-kicker mb-4">{{ collectionLabel }}</p>
           <h1 class="saya-display-md text-default">{{ title }}</h1>
         </div>
-        <div v-if="locations.length > 1 && !locationId" class="mt-8 flex flex-wrap gap-3">
+        <div v-if="locations.length > 1 && !locationId && !isStays" class="mt-8 flex flex-wrap gap-3">
           <NuxtLink
             v-for="location in locations"
             :key="location.id"
             :to="localePath(`/locations/${encodeURIComponent(location.slug)}/${presentation.locationCollectionSegment}`)"
             class="inline-flex items-center gap-2 rounded-full border border-default px-5 py-2.5 text-sm text-muted no-underline transition hover:bg-muted hover:text-default"
           >
-            <SayaIcon name="map-pin" class="size-3.5 opacity-70" />
+            <TenantIcon name="map-pin" class="size-3.5 opacity-70" />
             {{ location.title }}
           </NuxtLink>
         </div>
@@ -71,7 +71,7 @@
     </div>
 
     <div v-else-if="isMenu">
-      <SayaFilterTabs
+      <TenantFilterTabs
         v-model="activeCategory"
         :tabs="categoryTabs"
         :enable-scroll-detection="true"
@@ -82,12 +82,16 @@
         <section
           v-for="group in groups"
           :id="`cat-${group.id}`"
-          :key="group.category"
+          :key="group.id"
           class="mb-24"
           :style="{ scrollMarginTop: `${categoryNavHeight}px` }"
         >
           <div class="mb-8 border-b border-default pb-6">
+            <!-- A section's own picture introduces it. -->
+            <img v-if="mediaStillUrl(group.image)" :src="mediaStillUrl(group.image)!" :alt="group.image!.alt_text || group.category" class="mb-8 aspect-[16/9] w-full rounded-lg object-cover" loading="lazy" decoding="async">
+            <p v-if="showLocations && group.location_id" class="saya-kicker mb-2">{{ locationTitle(group.location_id) }}</p>
             <h2 class="saya-display saya-italic text-5xl text-default">{{ group.category }}</h2>
+            <p v-if="group.description" class="mt-4 text-sm leading-relaxed text-muted">{{ group.description }}</p>
           </div>
 
           <div class="flex flex-col gap-7">
@@ -101,9 +105,9 @@
                 :to="productHref(product, group.location_id)!"
                 class="shrink-0"
               >
-                <SayaMenuItemPreview :item="previewItem(product)" />
+                <TenantMenuItemPreview :item="previewItem(product)" />
               </NuxtLink>
-              <SayaMenuItemPreview
+              <TenantMenuItemPreview
                 v-else-if="product.image"
                 :item="previewItem(product)"
                 disabled
@@ -120,7 +124,10 @@
                       {{ product.name }}
                     </NuxtLink>
                     <span v-else class="text-default opacity-50">{{ product.name }}</span>
-                    <SayaBadgeUnavailable
+                    <span v-if="product.details.featured === true" class="inline-flex shrink-0 items-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                      {{ t('saya.posts.featured') }}
+                    </span>
+                    <TenantBadgeUnavailable
                       v-if="!isAvailable(product, group.location_id)"
                       :text="t('saya.menu_page.unavailable')"
                     />
@@ -143,6 +150,13 @@
                 <p v-if="product.description" class="mt-1.5 max-w-xl text-sm leading-relaxed text-muted">
                   {{ product.description }}
                 </p>
+                <ProductVariantPrices
+                  v-if="product.variants.filter(variant => variant.active).length > 1 || new Set(product.variants.filter(variant => variant.active).flatMap(variant => variant.prices.filter(price => price.active).map(price => price.currency))).size > 1"
+                  :product="product"
+                  :location-ids="priceScopes(product, group.location_id)"
+                  :currency="currency"
+                  class="mt-2 text-sm"
+                />
               </div>
             </article>
           </div>
@@ -160,8 +174,10 @@
     <div v-else class="mx-auto max-w-7xl px-4 pb-24 sm:px-6 lg:px-8">
       <section v-for="group in groups" :key="group.id" class="mb-20">
         <div class="mb-8 border-b border-default pb-6">
+          <img v-if="mediaStillUrl(group.image)" :src="mediaStillUrl(group.image)!" :alt="group.image!.alt_text || group.category" class="mb-8 aspect-[16/9] w-full rounded-lg object-cover" loading="lazy" decoding="async">
           <p v-if="showLocations && group.location_id" class="saya-kicker mb-2">{{ locationTitle(group.location_id) }}</p>
           <h2 class="saya-display saya-italic text-5xl">{{ group.category }}</h2>
+          <p v-if="group.description" class="mt-4 text-sm leading-relaxed text-muted">{{ group.description }}</p>
         </div>
         <div class="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
           <article v-for="product in group.products" :key="product.id">
@@ -179,14 +195,14 @@
                     aria-hidden="true"
                   >
                     <span class="flex size-12 items-center justify-center rounded-full bg-black/55 text-white">
-                      <SayaIcon name="play" class="ml-0.5 size-5" />
+                      <TenantIcon name="play" class="ml-0.5 size-5" />
                     </span>
                   </span>
                 </template>
                 <div v-else class="flex h-full items-center justify-center">
-                  <SayaIcon name="sparkles" class="size-12 text-dimmed" />
+                  <TenantIcon name="sparkles" class="size-12 text-dimmed" />
                 </div>
-                <SayaBadgeUnavailable
+                <TenantBadgeUnavailable
                   v-if="!isAvailable(product, group.location_id)"
                   overlay
                   :text="t('saya.menu_page.unavailable')"
@@ -194,27 +210,31 @@
               </div>
               <div class="mt-5">
                 <h3 class="text-lg font-semibold transition-colors group-hover:text-primary">{{ product.name }}</h3>
-                <p v-if="showLocations && productLocationId(product, group.location_id)" class="mt-1 text-xs font-medium uppercase tracking-wide text-muted">{{ locationTitle(productLocationId(product, group.location_id)!) }}</p>
+                <p v-if="product.stay && placeName(product.stay.location_id)" class="mt-1 text-xs font-medium uppercase tracking-wide text-muted">{{ placeName(product.stay.location_id) }}</p>
+                <p v-else-if="!product.stay && showLocations && productLocationId(product, group.location_id)" class="mt-1 text-xs font-medium uppercase tracking-wide text-muted">{{ locationTitle(productLocationId(product, group.location_id)!) }}</p>
                 <p v-if="product.description" class="mt-1 line-clamp-2 text-sm leading-6 text-muted">{{ product.description }}</p>
 
                 <div class="mt-4 flex flex-wrap gap-x-5 gap-y-1.5 text-xs text-muted">
                   <span v-if="priceLabel(product, group.location_id)" class="flex items-center gap-1">
-                    <SayaIcon name="banknotes" class="size-3.5" />
-                    {{ priceLabel(product, group.location_id) }}
+                    <TenantIcon name="banknotes" class="size-3.5" />
+                    {{ product.stay ? t('stay.price_per_night', { price: priceLabel(product, group.location_id) }) : priceLabel(product, group.location_id) }}
                   </span>
+                  <template v-if="product.stay">
+                    <span v-for="spec in staySpecLabels(product.stay, t)" :key="spec">{{ spec }}</span>
+                  </template>
                   <span v-if="product.booking?.duration_minutes" class="flex items-center gap-1">
-                    <SayaIcon name="clock" class="size-3.5" />
+                    <TenantIcon name="clock" class="size-3.5" />
                     {{ durationLabel(product.booking.duration_minutes) }}
                   </span>
                   <span v-if="product.booking?.default_capacity" class="flex items-center gap-1">
-                    <SayaIcon name="user-group" class="size-3.5" />
+                    <TenantIcon name="user-group" class="size-3.5" />
                     {{ product.booking.default_capacity }} {{ verticalCopy.guestsMaxLabel }}
                   </span>
                 </div>
 
                 <div v-if="productHref(product, group.location_id)" class="mt-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-primary">
-                  {{ verticalCopy.viewExperienceCta }}
-                  <SayaIcon name="arrow-right" class="size-3.5 transition-transform group-hover:translate-x-1" />
+                  {{ product.stay ? t(productCtaKey(product.kind)) : verticalCopy.viewExperienceCta }}
+                  <TenantIcon name="arrow-right" class="size-3.5 transition-transform group-hover:translate-x-1" />
                 </div>
               </div>
             </component>
@@ -227,17 +247,20 @@
 
 <script setup lang="ts">
 import type { Collection, Product, ProductPresentation } from '~/server/types/products'
-import { useSchemaOrg } from '~/composables/useSchemaOrg'
+import { useSchemaOrg } from '#imports'
 import type { CurrencyCode } from '~/shared/currencies'
-import { formatProductMoney } from '~/utils/product-money'
-import { minorAmountToMajor, selectPrice, type Price } from '~/shared/prices'
+import { formatProductMoney, formatProductPriceRange, summarizeProductPrices } from '~/utils/product-money'
+import { minorAmountToMajor, type Price } from '~/shared/prices'
 import { PRICING_NOTE_HANDLE } from '~/shared/product-details'
-import { groupProductsByCollection, productLocationCollectionPath } from '~/utils/product-presentation'
+import { groupProductsByCollection, productCtaKey, productLocationCollectionPath, staySpecLabels } from '~/utils/product-presentation'
+import { addressPlaceName, type PostalAddress } from '~/utils/postal-address'
+import { mediaStillUrl } from '~/shared/media-placement-contract'
 import { extractDietarySchemaUrls } from '~/utils/product-seo'
 import { getVerticalCopy } from '~/utils/vertical-copy'
-import { resolveSeoUrl } from '~/composables/useSeoUrls'
+import { resolveSeoUrl } from '~/utils/social-metadata'
+import ProductVariantPrices from '~/components/products/ProductVariantPrices.vue'
 
-interface LocationSummary { id: string; slug: string; title: string }
+interface LocationSummary { id: string; slug: string; title: string; address?: PostalAddress | null }
 
 // Resolved once: a dynamic `:is` given the string 'NuxtLink' renders a literal
 // <NuxtLink> element that no browser follows, so the card looked linked in the
@@ -262,8 +285,15 @@ const verticalCopy = computed(() => getVerticalCopy(props.vertical, locale.value
 const { formatDate } = useLocaleDate()
 const isMenu = computed(() => props.presentation.structuredDataType === 'MenuItem')
 const isExperiences = computed(() => props.presentation.locationCollectionSegment === 'experiences')
+// Homes have no per-branch index: each is its own page, named by its own slug.
+const isStays = computed(() => props.presentation.locationCollectionSegment === 'stays')
+const subNavTab = computed(() => {
+  const segment = props.presentation.locationCollectionSegment
+  return segment === 'stays' ? null : segment
+})
 const collectionLabel = computed(() => {
   if (isMenu.value) return t('saya.footer.menu')
+  if (isStays.value) return t('saya.footer.stays')
   return isExperiences.value ? t('saya.footer.experiences') : t('saya.footer.products')
 })
 const emptyCollectionMessage = computed(() => (isExperiences.value
@@ -301,6 +331,8 @@ const locationSlug = (id: string) => {
   if (!location) throw new Error(`Product location is missing: ${id}`)
   return location.slug
 }
+/** Where a home is, as a guest reads it: the town in its location's address. */
+const placeName = (id: string) => addressPlaceName(locationMap.value.get(id)?.address ?? null)
 const locationTitle = (id: string) => {
   const location = locationMap.value.get(id)
   if (!location) throw new Error(`Product location is missing: ${id}`)
@@ -323,7 +355,7 @@ const isAvailable = (product: Product, collectionLocationId: string | null = nul
   const offeredHere = id
     ? product.locations.some(entry => entry.location_id === id && entry.active)
     : product.locations.some(entry => entry.active && entry.published && locationMap.value.has(entry.location_id))
-  if (!offeredHere) return false
+  if (!offeredHere && !product.booking?.held_online && !product.order_url) return false
   // On sale means the merchant is selling it here. A product priced in words —
   // "Market price" — is on sale; an amount is what online checkout needs, and
   // that is a different question.
@@ -333,23 +365,29 @@ const isAvailable = (product: Product, collectionLocationId: string | null = nul
 
 const productHref = (product: Product, collectionLocationId: string | null = null): string | null => {
   const id = productLocationId(product, collectionLocationId)
+  if (product.kind === 'experience') return localePath(props.presentation.productPath('', product.slug)) + (id ? `?location_id=${encodeURIComponent(id)}` : '')
+  if (product.kind === 'stay') return localePath(props.presentation.productPath('', product.slug))
+  if (product.page?.path) return localePath(product.page.path)
   return id ? localePath(props.presentation.productPath(locationSlug(id), product.slug)) : null
 }
 
 /**
  * The offer this page shows, resolved once through the one selection contract.
  *
- * A product with several variants shows its lowest applicable offer as a
- * "from" price — an explicit choice made here, not a fallback: every variant's
- * own price is on the product's own page.
+ * A product with several applicable prices shows their actual range.
  */
-const priceFor = (product: Product, collectionLocationId: string | null = null): Price | null => {
-  const selection = { currency: props.currency, location_id: productLocationId(product, collectionLocationId), at: new Date().toISOString() }
-  // Only variants a customer can choose: a disabled variant's price would
-  // otherwise undercut the one actually on offer.
-  const offers = product.variants.filter(variant => variant.active !== false).flatMap(variant => selectPrice(variant.prices, selection) ?? [])
-  return offers.reduce<Price | null>((lowest, offer) => (!lowest || offer.unit_amount < lowest.unit_amount ? offer : lowest), null)
+const priceScopes = (product: Product, collectionLocationId: string | null = null) => {
+  const locationId = productLocationId(product, collectionLocationId)
+  return locationId ? [locationId] : [
+    ...product.locations.filter(location => location.published && locationMap.value.has(location.location_id)).map(location => location.location_id),
+    ...(product.booking?.held_online || product.order_url ? [null] : []),
+  ]
 }
+const pricesFor = (product: Product, collectionLocationId: string | null = null) => {
+  const at = new Date().toISOString()
+  return summarizeProductPrices(product.variants, priceScopes(product, collectionLocationId).map(location_id => ({ currency: props.currency, location_id, at })))
+}
+const priceFor = (product: Product, collectionLocationId: string | null = null): Price | null => pricesFor(product, collectionLocationId).lowest
 /**
  * What this card says about price.
  *
@@ -358,18 +396,24 @@ const priceFor = (product: Product, collectionLocationId: string | null = null):
  * missing amount never becomes zero, "Free" or "Market price" here.
  */
 const priceLabel = (product: Product, collectionLocationId: string | null = null): string | null => {
-  const amount = formatProductMoney(priceFor(product, collectionLocationId))
+  const amount = formatProductPriceRange(pricesFor(product, collectionLocationId), locale.value)
   if (amount) return amount
   const note = product.details[PRICING_NOTE_HANDLE]
   return typeof note === 'string' && note.trim() ? note : null
 }
 // One section per collection, in the merchant's order — see
 // groupProductsByCollection for what membership does and does not imply.
-const groups = computed(() => groupProductsByCollection(props.products, props.collections)
-  .map(group => ({ id: group.id, category: group.name, sort_order: group.sort_order, location_id: group.location_id, products: group.products })))
+const groups = computed(() => {
+  const grouped = groupProductsByCollection(props.products, props.collections)
+    .map(group => ({ id: group.id, category: group.name, description: group.description, image: group.image, sort_order: group.sort_order, location_id: group.location_id, products: group.products }))
+  const included = new Set(grouped.flatMap(group => group.products.map(product => product.id)))
+  const ungrouped = props.products.filter(product => !included.has(product.id))
+  if (ungrouped.length) grouped.push({ id: 'catalog', category: props.presentation.collectionLabel, description: null, image: null, sort_order: grouped.length, location_id: null, products: ungrouped })
+  return grouped
+})
 const categoryTabs = computed(() => groups.value.map(group => ({
   key: group.id,
-  label: group.category,
+  label: showLocations.value && group.location_id ? `${locationTitle(group.location_id)} · ${group.category}` : group.category,
   sectionId: `cat-${group.id}`,
 })))
 const userSelectedCategory = ref('')
@@ -436,8 +480,11 @@ function compareAtPrice(product: Product, collectionLocationId: string | null = 
 }
 
 function offerFor(product: Product, collectionLocationId: string | null = null) {
-  const price = priceFor(product, collectionLocationId)
-  return price ? { '@type': 'Offer', price: minorAmountToMajor(price.unit_amount, price.currency), priceCurrency: price.currency } : undefined
+  const { lowest, highest, count } = pricesFor(product, collectionLocationId)
+  if (!lowest || !highest) return undefined
+  return lowest.unit_amount === highest.unit_amount
+    ? { '@type': 'Offer', price: minorAmountToMajor(lowest.unit_amount, lowest.currency), priceCurrency: lowest.currency }
+    : { '@type': 'AggregateOffer', lowPrice: minorAmountToMajor(lowest.unit_amount, lowest.currency), highPrice: minorAmountToMajor(highest.unit_amount, highest.currency), priceCurrency: lowest.currency, offerCount: count }
 }
 
 useSchemaOrg(computed(() => props.presentation.structuredDataType === 'MenuItem'
@@ -447,6 +494,8 @@ useSchemaOrg(computed(() => props.presentation.structuredDataType === 'MenuItem'
       hasMenuSection: groups.value.map(group => ({
         '@type': 'MenuSection',
         name: group.category,
+        description: group.description ?? undefined,
+        image: mediaStillUrl(group.image) ? resolveSeoUrl(mediaStillUrl(group.image)!, requestURL.origin) : undefined,
         hasMenuItem: group.products.map(product => {
           const dietUrls = extractDietarySchemaUrls(product)
           return {

@@ -12,11 +12,11 @@ import { AUTHORIZATION_WINDOW_SECONDS, type Payment } from '~/server/domain/paym
 interface PaymentSubject { productId: string | null; variantId: string | null; memberId: string | null }
 
 async function paymentSubject(db: DbClient, payment: Payment): Promise<PaymentSubject> {
-  const snapshot = JSON.parse(payment.price_snapshot_json) as { product_id?: unknown; variant_id?: unknown }
+  const snapshot = JSON.parse(payment.price_snapshot_json) as { product_id?: unknown; variant_id?: unknown; stay?: { product_id?: unknown } }
   const held = await queryFirst<{ member_id: string | null }>(db, `SELECT COALESCE(b.assigned_member_id, h.assigned_member_id) member_id
     FROM payment_checkout_holds h LEFT JOIN bookings b ON b.id=h.converted_booking_id WHERE h.payment_id=?`, [payment.id])
   return {
-    productId: typeof snapshot.product_id === 'string' ? snapshot.product_id : null,
+    productId: typeof snapshot.product_id === 'string' ? snapshot.product_id : typeof snapshot.stay?.product_id === 'string' ? snapshot.stay.product_id : null,
     variantId: typeof snapshot.variant_id === 'string' ? snapshot.variant_id : null,
     memberId: held?.member_id ?? null,
   }
@@ -31,15 +31,6 @@ export async function recordCheckoutStarted(db: DbClient, payment: Payment, save
     entityType: 'payment', entityId: payment.id,
     value: { basis: 'quoted', amount_minor: payment.amount, currency: payment.currency },
     properties: { member_id: subject.memberId, saved_cards_offered: savedCardsOffered },
-  })
-}
-
-export async function recordCheckoutExpired(db: DbClient, payment: Payment) {
-  const subject = await paymentSubject(db, payment)
-  await recordOrganizationConversionEvent(db, null, {
-    organizationId: payment.organization_id, eventName: 'payment_checkout_expired', stage: 'occurred', surface: 'stripe',
-    locationId: payment.location_id, productId: subject.productId, variantId: subject.variantId,
-    entityType: 'payment', entityId: payment.id, properties: { member_id: subject.memberId },
   })
 }
 
@@ -122,7 +113,7 @@ export async function recordBookingChangeAnswer(db: DbClient, input: { organizat
   })
 }
 
-/** A business's captured volume, reported to Metronome for its Payments fee, on the platform's analytics. */
+/** A business’s captured volume, reported to its Stripe meter for its Payments fee, on the platform’s analytics. */
 export async function recordPaymentsVolumeBilled(db: DbClient, input: { organizationId: string; paymentId: string; volumeMinor: number; currency: string }) {
   await recordOrganizationConversionEvent(db, null, {
     organizationId: (await getPlatformOrganization(db)).id, eventName: 'payments_volume_billed', stage: 'occurred', surface: 'stripe',
@@ -131,12 +122,3 @@ export async function recordPaymentsVolumeBilled(db: DbClient, input: { organiza
   })
 }
 
-/** A Payments fee invoice a business paid, on the platform's analytics. */
-export async function recordPaymentsFeeInvoicePaid(db: DbClient, input: { organizationId: string; invoiceId: string; amountPaid: number; currency: string }) {
-  await recordOrganizationConversionEvent(db, null, {
-    organizationId: (await getPlatformOrganization(db)).id, eventName: 'payments_fee_invoice_paid', stage: 'completed', surface: 'stripe',
-    entityType: 'invoice', entityId: input.invoiceId,
-    value: { basis: 'purchase', amount_minor: input.amountPaid, collected_minor: input.amountPaid, currency: input.currency, transaction_id: input.invoiceId },
-    properties: { tenant_organization_id: input.organizationId },
-  })
-}

@@ -5,11 +5,15 @@ import { executeBatch, queryAll, queryFirst } from '~/server/db'
 import { resolvePublishedTenantPageIdentity as resolveCanonicalTenantPageIdentity } from '~/server/utils/content/pages'
 import { observeAttribution, resolveAttributionTouch, type AttributionParams, type ObservedAttribution } from '~/utils/analytics-attribution'
 import { resolveTenantLocalePath } from '~/utils/tenant-locale-path'
+import { parseSiteProductPath } from '~/utils/product-presentation'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { findPublishedProductAtRoute, getOrganizationVertical, parseProductRouteSegments, resolveLocalizedPublicRoute } from '~/server/utils/localization'
 import { getSourceLocale } from '~/server/utils/organization-locales'
 import { publicTemplateRegistry, resolvePublicTemplate } from '~/utils/template-registry'
 import type { PublicTemplateDefinition } from '~/utils/template-registry'
+import { templateRendersPageDocumentAt } from '~/shared/tenant-page-paths'
+import { listPublicLocaleRepresentations } from '~/server/utils/public-locale-representations'
+import { isLocalizedPublicAliasPath } from '~/shared/public-locale-routes'
 export { isTrackablePath, PAGEVIEW_SKIP_PREFIXES } from '~/utils/pageview-path'
 
 export const VISITOR_COOKIE = 'kc_visitor_id'
@@ -106,6 +110,21 @@ export async function resolvePublicPageIdentity(env: CloudflareEnv, db: AppDb, i
 
   if (routing.localeSegment) {
     if (input.requestedLocale && input.requestedLocale !== routing.localeSegment) return null
+    const template = resolvePublicTemplate({ themeId: input.themeId, vertical: input.vertical })
+    const derivesLocaleRoute = isLocalizedPublicAliasPath(routing.sourcePath)
+      && (template.sitemap.exactPaths.includes(routing.sourcePath)
+      || template.nonIndexableExactPaths.includes(routing.sourcePath))
+      && (!templateRendersPageDocumentAt(template, routing.sourcePath)
+        || template.pageDocuments.optionalLocalizedPaths.includes(routing.sourcePath))
+    if (derivesLocaleRoute) {
+      const representations = await listPublicLocaleRepresentations(env, db, {
+        organizationId, sourcePath: routing.sourcePath, publishedLocaleRoute: true,
+      })
+      if (!representations.some(item => item.locale === routing.localeSegment && item.route_path === pagePath)) return null
+      const page = await resolveCanonicalTenantPageIdentity(db, organizationId, routing.sourcePath, routing.localeSegment)
+      return { ...base, locale: routing.localeSegment, pageId: page?.page_id ?? null,
+        documentId: page?.id ?? null, pageType: page?.page_type ?? null, recipe: page?.recipe ?? null, productId: null }
+    }
     let route: Awaited<ReturnType<typeof resolveLocalizedPublicRoute>>
     try {
       route = await resolveLocalizedPublicRoute(env, db, organizationId, pagePath)
@@ -129,17 +148,10 @@ export async function resolvePublicPageIdentity(env: CloudflareEnv, db: AppDb, i
   const page = await resolveCanonicalTenantPageIdentity(db, organizationId, routing.sourcePath, sourceLocale)
   if (page) return { ...base, locale: sourceLocale, pageId: page.page_id, pageType: page.page_type, recipe: page.recipe, documentId: null, productId: null }
 
-  const experienceSlug = /^\/experiences\/([^/]+)$/.exec(routing.sourcePath)?.[1]
-  if (experienceSlug) {
-    let slug: string
-    try {
-      slug = decodeURIComponent(experienceSlug)
-    } catch (error) {
-      if (error instanceof URIError) return null
-      throw error
-    }
-    const { loadPublicExperienceDetail } = await import('~/server/utils/public-products')
-    const detail = await loadPublicExperienceDetail(env, db, organizationId, false, slug, sourceLocale)
+  const siteProduct = parseSiteProductPath(routing.sourcePath)
+  if (siteProduct) {
+    const { loadPublicSiteProductDetail } = await import('~/server/utils/public-products')
+    const detail = await loadPublicSiteProductDetail(env, db, organizationId, siteProduct.surface, false, siteProduct.slug, sourceLocale)
     if (!detail) return null
     return { ...base, locale: sourceLocale, locationId: detail.location?.id ?? null, pageId: null, pageType: 'product', recipe: null, documentId: null, productId: detail.product.id }
   }

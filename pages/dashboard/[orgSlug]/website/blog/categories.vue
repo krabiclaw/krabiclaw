@@ -9,7 +9,6 @@
       <DashboardListEditor
         v-model:editing="editing"
         title="Categories"
-        description="Readers browse articles by category, in this order, with subcategories under their parent. Every published article is in one."
         :items="listItems"
         :error="loadError"
         empty-title="No categories yet"
@@ -22,7 +21,7 @@
         @move="moveCategory"
       >
         <template #filters>
-          <UTabs v-model="collection" :items="collectionTabs" :content="false" aria-label="Collection" />
+          <DashboardFilterPills id="category-collection" v-model="collection" label="Collection" :items="collectionTabs" />
         </template>
         <template #item="{ item }">
           <!-- A subcategory sits indented under its parent, the way the site's sidebar reads it. -->
@@ -53,6 +52,7 @@
 </template>
 
 <script setup lang="ts">
+import DashboardConfirmDialog from '~/components/dashboard/DashboardConfirmDialog.vue'
 import DashboardListEditor from '~/components/dashboard/DashboardListEditor.vue'
 import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import { isCategoryResponse, isCategoriesResponse, type DashboardArticleCategory } from '~/composables/useArticleCategories'
@@ -60,6 +60,7 @@ import { ARTICLE_COLLECTIONS, ARTICLE_COLLECTION_SLUGS, type ArticleCollection }
 import { getErrorMessage } from '~/utils/errors'
 
 definePageMeta({ layout: 'dashboard' })
+const confirmDialog = useOverlay().create(DashboardConfirmDialog)
 useSeoMeta({ title: 'Categories | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 
 const dashboardApi = useDashboardApi()
@@ -126,7 +127,7 @@ async function createCategory() {
 
 // A category that still has articles is refused by the server with how many; the owner moves them first.
 async function removeCategory(item: { row: DashboardArticleCategory }) {
-  if (!confirm(`Delete "${item.row.name}"?`)) return
+  if (!await confirmDialog.open({ title: `Delete ${item.row.name}`, description: 'Articles must be moved out of a category before it can be deleted.', confirmLabel: 'Delete category', cancelLabel: 'Keep category' })) return
   removingId.value = item.row.id
   actionError.value = null
   try {

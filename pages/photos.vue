@@ -18,7 +18,7 @@
             :to="localePath(`/locations/${loc.slug}/photos`)"
             class="inline-flex items-center gap-2 rounded-full border border-default px-5 py-2.5 text-sm text-muted no-underline transition hover:bg-muted hover:text-default"
           >
-            <SayaIcon name="map-pin" class="size-3.5 opacity-70" />
+            <TenantIcon name="map-pin" class="size-3.5 opacity-70" />
             {{ loc.title }}
           </NuxtLink>
         </div>
@@ -32,7 +32,7 @@
 
       <template v-else>
         <!-- Category filter tabs -->
-        <SayaFilterTabs v-model="activeCategory" :tabs="cats" />
+        <TenantFilterTabs v-model="activeCategory" :tabs="cats" />
 
         <!-- Gallery -->
         <div class="mx-auto max-w-7xl px-4 pt-12 pb-24 sm:px-6 lg:px-8">
@@ -66,14 +66,14 @@
 </template>
 
 <script setup>
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const { localePath, t } = useI18n()
-const { organizationId, organization } = useTenantOrganization()
-if (!organizationId) throw createError({ statusCode: 404 })
-
-const { locations, media: photos, pending } = await usePublicPageData()
-const organizationName = computed(() => organization?.name?.trim() ?? '')
+const { organization } = useTenantOrganization()
+const { locations, media: photos, pending, sections } = await usePublicPageData()
+// A section with nothing on it is not a page; the navigation hides it by the same flag.
+if (sections.value?.photos === false) throw createError({ statusCode: 404 })
+const organizationName = organization.name
 
 const locationsById = computed(() => Object.fromEntries(locations.value.map(l => [l.id, l])))
 function locationTitle(photo) {
@@ -138,15 +138,12 @@ const lightboxItems = computed(() =>
 
 useSocialMetadata(() => ({
   path: '/photos',
-  title: `${t('saya.subnav.photos')} | ${organizationName.value}`,
+  title: `${t('saya.subnav.photos')} | ${organizationName}`,
   description: t('saya.photos.meta_description', {
     count: photos.value.length,
-    location: organizationName.value,
-    organization: organizationName.value,
+    location: organizationName,
+    organization: organizationName,
   }),
-  brand: {
-    organizationName: organizationName.value,
-  },
   breadcrumbs: [
     { name: t('saya.subnav.photos'), url: '/photos' },
   ],

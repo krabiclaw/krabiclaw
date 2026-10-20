@@ -24,11 +24,9 @@ let claimedPageRoutes: ClaimedRoute[] = []
 const claimedRoutesModulePath = resolve(import.meta.dirname, '.nuxt-generated/claimed-public-routes.mjs')
 
 // nuxt/icon's serverBundle bundles a named collection in full — no usage-based
-// tree-shaking. lucide is the app's sole icon pack (it's also what Nuxt UI's
-// own internal defaults are hardcoded to), so only one collection ships.
-// simple-icons/logos brand marks are owned locally in
-// build/icon-data/custom-icons.json instead of depending on @iconify-json
-// packages at build time (see that file for how to regenerate it).
+// tree-shaking. Lucide supplies general UI glyphs; the small local collections
+// supply provider logos and original domain pictograms. The client bundle
+// includes their data at build time, with no icon API or Worker collection.
 const requireFromConfig = createRequire(import.meta.url)
 const customIconData = requireFromConfig('./build/icon-data/custom-icons.json')
 function pickIcons(collection: string, names: string[]) {
@@ -81,35 +79,15 @@ export default defineNuxtConfig({
     '@nuxtjs/sitemap',
     'nuxt-schema-org',
     '@nuxt/ui',
+    './build/guest-inbox-hub-dev',
   ],
 
   ui: {
     colorMode: false,
-  },
-
-  // @nuxt/fonts (installed by @nuxt/ui) resolves every family a stylesheet names,
-  // downloads the faces at build time and serves them from /_fonts. Each surface
-  // sheet carries only its own @font-face rules; a browser fetches a face only
-  // when rendered text uses it, so the site-font catalog in
-  // assets/css/font-presets.css costs nothing until a site selects one, and the
-  // Thai fallback nothing until a page has Thai text.
-  fonts: {
-    priority: ['google'],
-    throwOnError: true,
-    defaults: {
-      weights: [400, 500, 600, 700],
-      styles: ['normal'],
-      subsets: ['latin', 'thai'],
-    },
-    families: [
-      { name: 'Jost', weights: ['100 900'] },
-      { name: 'Instrument Serif', weights: [400], styles: ['normal', 'italic'] },
-      { name: 'Marcellus', weights: [400] },
-      // Japanese fallbacks: the CJK slices carry no subset name, so naming none
-      // keeps them and drops the Latin ones the site font already covers.
-      { name: 'Noto Sans JP', weights: [400, 700], subsets: ['japanese'] },
-      { name: 'Noto Serif JP', weights: [400, 700], subsets: ['japanese'] },
-    ],
+    // Font faces are the @fontsource packages' own rules, imported by the
+    // stylesheets that use them (assets/css/font-presets.css), so a build
+    // fetches nothing from a font service.
+    fonts: false,
   },
 
   app: {
@@ -153,6 +131,13 @@ export default defineNuxtConfig({
 
   compatibilityDate: '2024-11-01',
 
+  // Each layout links its surface stylesheet (/_nuxt/surfaces/*.css), preloaded
+  // by server/plugins/public-resource-hints.ts and cached across pages. Inlining
+  // it as well put the whole stylesheet into every HTML response a second time.
+  features: {
+    inlineStyles: false,
+  },
+
   experimental: {
     // Nuxt 5 consumes this runtime option before the current schema exposes it.
     // @ts-expect-error Nuxt 5 native Nitro mode is required for this Worker.
@@ -173,18 +158,11 @@ export default defineNuxtConfig({
   icon: {
     provider: 'none',
     fallbackToApi: false,
-    // Nuxt UI's own internal default icons (UChatPromptSubmit's arrowUp, etc.)
-    // are resolved from appConfig.ui.icons dynamically, not as static name=""
-    // literals, so Nuxt Icon can't inline them at build time — they're
-    // resolved at request time via a self-fetch to /api/_nuxt_icon/lucide.json
-    // (same internal-self-fetch category as isInternalSelfFetch() in
-    // server/utils/api-response.ts). The default 1500ms fetchTimeout is too
-    // tight for that round-trip in local dev; bump it so it resolves instead
-    // of silently failing to render.
-    fetchTimeout: 5000,
     serverBundle: false,
     clientBundle: {
-      scan: true,
+      scan: {
+        globInclude: ['**/*.{vue,jsx,tsx,md,mdc,mdx}', '{composables,shared,utils}/**/*.ts', 'app.config.ts', 'server/utils/dashboard-today.ts'],
+      },
       icons: [
         'lucide:menu',
         'lucide:panel-left-close',
@@ -192,9 +170,10 @@ export default defineNuxtConfig({
       ],
     },
     customCollections: [
-      pickIcons('simple-icons', ['claude', 'facebook', 'google', 'googlemaps', 'instagram', 'modelcontextprotocol', 'openai', 'whatsapp']),
-      pickIcons('logos', ['discord-icon', 'facebook', 'google-analytics', 'google-icon', 'google-maps', 'google-search-console', 'whatsapp-icon']),
+      pickIcons('simple-icons', ['afterpay', 'airbnb', 'claude', 'facebook', 'google', 'googlemaps', 'instagram', 'klarna', 'modelcontextprotocol', 'openai', 'whatsapp']),
+      pickIcons('logos', ['amex', 'apple-pay', 'discord-icon', 'discover', 'facebook', 'google-ads', 'google-analytics', 'google-calendar', 'google-icon', 'google-maps', 'google-pay', 'google-search-console', 'mastercard', 'visa', 'whatsapp-icon']),
       pickIcons('skill-icons', ['instagram']),
+      customIconData.krabi,
     ],
   },
   runtimeConfig: {
@@ -202,7 +181,7 @@ export default defineNuxtConfig({
       platformDomain: process.env.NUXT_PUBLIC_PLATFORM_DOMAIN || '',
       freeOrganizationDomain: process.env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN || '',
       appName: process.env.NUXT_PUBLIC_APP_NAME || '',
-      platformUrl: process.env.NUXT_PUBLIC_SITE_URL || '',
+      siteUrl: process.env.NUXT_PUBLIC_SITE_URL || '',
       helpUrl: process.env.NUXT_PUBLIC_HELP_URL || 'https://krabiclaw.com/help',
       stripePublishableKey: process.env.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY || '',
 
@@ -248,6 +227,9 @@ export default defineNuxtConfig({
       claimedPageRoutes = claimedRoutesFromPages(pages)
     },
     'nitro:config'(nitroConfig) {
+      if (typeof nitroConfig.errorHandler !== 'string') throw new Error('Nuxt must provide one native error handler')
+      nitroConfig.alias = { ...nitroConfig.alias, '#nuxt-native-error-handler': nitroConfig.errorHandler }
+      nitroConfig.errorHandler = resolve(import.meta.dirname, 'server/error-handler.ts')
       nitroConfig.handlers = nitroConfig.handlers?.filter(
         handler => handler.route !== '/api/_nuxt_icon/:collection',
       )
@@ -280,13 +262,14 @@ export default defineNuxtConfig({
 
   site: {
     url: 'https://krabiclaw.com',
-    name: 'Krabiclaw - AI Website Builder',
+    name: 'KrabiClaw - AI Website Builder',
     description: 'Beautiful websites powered by AI. Build your business website in minutes with our SaaS platform.',
     defaultLocale: 'en',
   },
 
   schemaOrg: {
     defaults: false,
+    reactive: true,
   },
 
   // Crawler guidance. @nuxtjs/robots owns /robots.txt and the X-Robots-Tag
@@ -313,6 +296,7 @@ export default defineNuxtConfig({
           '/oauth',
           '/transfer',
           '/accept-invitation',
+          '/invite/',
           '/contact/confirmed',
           '/forgot-password',
           '/login',
@@ -321,8 +305,6 @@ export default defineNuxtConfig({
           '/reset-password',
           '/signup',
           '/tenant-404',
-          '/tenant-setup-incomplete',
-          '/tenant-setup-pending',
         ],
       },
     ],
@@ -351,12 +333,8 @@ export default defineNuxtConfig({
       pathPrefix: false,
     },
     {
-      path: '~/components/blawby',
+      path: '~/components/tenant',
       pathPrefix: false,
-    },
-    {
-      path: '~/components/saya',
-      prefix: 'Saya',
     },
     {
       path: '~/components/platform',
@@ -440,14 +418,9 @@ export default defineNuxtConfig({
 
     // Auth/API/dashboard — never cache
     '/api/**':       { headers: { 'cache-control': 'no-store' } },
-    // The CMS is client rendered. It sits behind authentication, so there is no
-    // SEO to serve; its data is all organization-scoped and cannot be cached;
-    // and every navigation after the first is client side anyway. Rendering it
-    // on the server bought none of that and cost a second runtime for session
-    // and auth state to work in -- which on Cloudflare meant a nested Worker
-    // self-fetch with no bindings and a bespoke session provider to work around
-    // it. Nitro still serves `/server/api/**`; only the Vue pages move.
-    '/dashboard/**': { ssr: false, headers: { 'cache-control': 'no-store' } },
+    // Native client-only components own the CMS rendering boundary; Nuxt still
+    // renders the app shell and transports the host's public identity normally.
+    '/dashboard/**': { headers: { 'cache-control': 'no-store' } },
     '/auth/**':      { headers: { 'cache-control': 'no-store' } },
     '/signup':       { headers: { 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'" } },
     '/login':        { headers: { 'cache-control': 'no-store', 'x-frame-options': 'DENY', 'content-security-policy': "frame-ancestors 'none'" } },

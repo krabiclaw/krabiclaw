@@ -1,8 +1,11 @@
 import { HTTPError } from 'nitro'
+import { paymentsUsage } from '~/server/domain/payments/usage'
 import type Stripe from 'stripe'
 import { execute, queryFirst, type DbClient } from '~/server/db'
-import { getConfig } from '~/server/utils/organization-config'
-import { organizationLogo } from '~/server/notifications/hero'
+import type { CloudflareEnv } from '~/server/utils/auth'
+import { hasOrganizationEntitlement } from '~/server/utils/billing'
+import { createStripeClient } from '~/server/utils/stripe-client'
+import { isDemoOrganization } from '~/shared/demo'
 
 export type StripeConnectStatus =
   | 'creating'
@@ -13,6 +16,7 @@ export type StripeConnectStatus =
   | 'ready'
 
 export type StripeCapabilityStatus = 'active' | 'pending' | 'restricted' | 'unsupported'
+export type StripeCapabilityResolution = 'contact_stripe' | 'no_resolution' | 'provide_info'
 
 export interface StripeConnectRequirement {
   awaitingActionFrom: 'stripe' | 'user'
@@ -25,11 +29,13 @@ export interface StripeConnectedAccount {
   id: string
   organizationId: string
   stripeAccountId: string | null
-  /** The account's country as Stripe reports it; null until the owner chooses it in Stripe's onboarding. */
+  /** The account's country as Stripe reports it; null before account creation. */
   country: string | null
   livemode: boolean
   status: StripeConnectStatus
   cardPaymentsStatus: StripeCapabilityStatus | null
+  /** Pass on credit card fees: the surcharge rate in basis points, bounded by Stripe's maximum per card; null is off. */
+  surchargeBasisPoints: number | null
   requirements: StripeConnectRequirement[]
   stripeRefreshedAt: string | null
   lastError: string | null
@@ -45,6 +51,7 @@ interface StripeConnectedAccountRow {
   livemode: number
   status: StripeConnectStatus
   card_payments_status: StripeCapabilityStatus | null
+  surcharge_basis_points: number | null
   requirements_json: string
   stripe_refreshed_at: string | null
   last_error: string | null
@@ -59,6 +66,8 @@ export interface StripeConnectProjection {
   country: string | null
   livemode: boolean
   cardPaymentsStatus: StripeCapabilityStatus | null
+  /** Stripe's resolution for each reason the card payments capability is not active. */
+  cardPaymentsResolutions: StripeCapabilityResolution[]
   requirements: StripeConnectRequirement[]
   stripeRefreshedAt: string
   financialContractSupported?: boolean
@@ -90,6 +99,7 @@ function mapConnectedAccount(row: StripeConnectedAccountRow): StripeConnectedAcc
     livemode: Boolean(row.livemode),
     status: row.status,
     cardPaymentsStatus: row.card_payments_status,
+    surchargeBasisPoints: row.surcharge_basis_points,
     requirements: parseRequirements(row.requirements_json),
     stripeRefreshedAt: row.stripe_refreshed_at,
     lastError: row.last_error,
@@ -102,6 +112,38 @@ export function stripeLivemodeFromKey(secretKey: string): boolean {
   if (/^(?:sk|rk)_live_/u.test(secretKey)) return true
   if (/^(?:sk|rk)_test_/u.test(secretKey)) return false
   throw new Error('Stripe key mode cannot be determined')
+}
+
+/** The platform's own mode, set by its key. Platform billing and usage only ever run in this mode. */
+export function platformLivemode(env: CloudflareEnv): boolean {
+  if (!env.STRIPE_SECRET_KEY) throw new HTTPError({ statusCode: 503, statusMessage: 'Stripe is not configured' })
+  return stripeLivemodeFromKey(env.STRIPE_SECRET_KEY)
+}
+
+/** A demo organization takes payments in Stripe test mode; every other business in the platform's mode. */
+export function organizationPaymentsLivemode(env: CloudflareEnv, organization: { subdomain?: string | null }): boolean {
+  return isDemoOrganization(organization) ? false : platformLivemode(env)
+}
+
+/**
+ * The tenant-payments Stripe keys for one mode, or null when that mode is not
+ * configured. The platform mode uses the platform's keys; a live platform also
+ * holds the same Stripe account's test-mode keys (STRIPE_TEST_*) for demo
+ * organizations.
+ */
+export function paymentsStripeKeys(env: CloudflareEnv, livemode: boolean) {
+  if (!env.STRIPE_SECRET_KEY) return null
+  const keys = livemode === stripeLivemodeFromKey(env.STRIPE_SECRET_KEY)
+    ? { secretKey: env.STRIPE_SECRET_KEY, publishableKey: env.NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY, methodConfiguration: env.STRIPE_PAYMENTS_METHOD_CONFIGURATION, connectWebhookSecret: env.STRIPE_CONNECT_WEBHOOK_SECRET, paymentsWebhookSecret: env.STRIPE_PAYMENTS_WEBHOOK_SECRET }
+    : { secretKey: env.STRIPE_TEST_SECRET_KEY, publishableKey: env.STRIPE_TEST_PUBLISHABLE_KEY, methodConfiguration: env.STRIPE_TEST_PAYMENTS_METHOD_CONFIGURATION, connectWebhookSecret: env.STRIPE_TEST_CONNECT_WEBHOOK_SECRET, paymentsWebhookSecret: env.STRIPE_TEST_PAYMENTS_WEBHOOK_SECRET }
+  if (!keys.secretKey || stripeLivemodeFromKey(keys.secretKey) !== livemode) return null
+  return { ...keys, secretKey: keys.secretKey }
+}
+
+export function paymentsStripe(env: CloudflareEnv, livemode: boolean): Stripe {
+  const keys = paymentsStripeKeys(env, livemode)
+  if (!keys) throw new HTTPError({ statusCode: 503, statusMessage: `Stripe ${livemode ? 'live' : 'test'} mode is not configured` })
+  return createStripeClient(keys.secretKey, 'payments')
 }
 
 export function buildStripeConnectOnboardingUrls(
@@ -129,16 +171,24 @@ export function buildStripeConnectOnboardingUrls(
   return { returnUrl: returnUrl.toString(), refreshUrl: refreshUrl.toString() }
 }
 
+/**
+ * The account's state from Stripe's own reasons. A restricted capability whose
+ * every reason Stripe resolves itself (`no_resolution`: verification pending,
+ * status being determined) is under review, not waiting on the business; only
+ * `provide_info` asks the business to act, and `contact_stripe` restricts it.
+ */
 export function deriveStripeConnectStatus(input: {
   cardPaymentsStatus: StripeCapabilityStatus | null
+  cardPaymentsResolutions: StripeCapabilityResolution[]
   requirements: StripeConnectRequirement[]
 }): Exclude<StripeConnectStatus, 'creating' | 'creation_failed'> {
   const userActionDue = input.requirements.some(requirement =>
     requirement.awaitingActionFrom === 'user'
     && (requirement.deadlineStatus === 'currently_due' || requirement.deadlineStatus === 'past_due'))
-  if (userActionDue) return 'action_required'
+  if (userActionDue || input.cardPaymentsResolutions.includes('provide_info')) return 'action_required'
   if (input.cardPaymentsStatus === 'active') return 'ready'
-  if (input.cardPaymentsStatus === 'restricted' || input.cardPaymentsStatus === 'unsupported') return 'restricted'
+  if (input.cardPaymentsStatus === 'unsupported' || input.cardPaymentsResolutions.includes('contact_stripe')) return 'restricted'
+  if (input.cardPaymentsStatus === 'restricted' && input.cardPaymentsResolutions.length === 0) return 'restricted'
   return 'pending_review'
 }
 
@@ -148,7 +198,7 @@ export async function getStripeConnectedAccount(
 ): Promise<StripeConnectedAccount | null> {
   const row = await queryFirst<StripeConnectedAccountRow>(db, `
     SELECT id, organization_id, stripe_account_id, country, livemode, status,
-           card_payments_status, requirements_json, stripe_refreshed_at,
+           card_payments_status, surcharge_basis_points, requirements_json, stripe_refreshed_at,
            last_error, created_at, updated_at
     FROM stripe_connected_accounts
     WHERE organization_id = ?
@@ -157,13 +207,36 @@ export async function getStripeConnectedAccount(
   return row ? mapConnectedAccount(row) : null
 }
 
+/** Known checkout setup, read once for a catalogue; final checkout still verifies native providers. */
+export async function readStripeCheckoutSetup(db: DbClient, organizationId: string, env: CloudflareEnv) {
+  const [connected, organization, entitled] = await Promise.all([
+    getStripeConnectedAccount(db, organizationId),
+    queryFirst<{ slug: string; subdomain: string | null; servicing: number }>(db, `
+      SELECT o.slug, o.subdomain, EXISTS(SELECT 1 FROM payment_servicing_tenants WHERE organization_id=o.id) AS servicing
+        FROM organization o WHERE o.id=?
+    `, [organizationId]),
+    hasOrganizationEntitlement(env, organizationId, 'payments'),
+  ])
+  if (!organization) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
+  const missing: string[] = []
+  if (!entitled) missing.push('payments.entitlement')
+  const livemode = env.STRIPE_SECRET_KEY ? organizationPaymentsLivemode(env, organization) : null
+  const keys = livemode === null ? null : paymentsStripeKeys(env, livemode)
+  if (!keys?.methodConfiguration || !keys.publishableKey || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) missing.push('payments.configuration')
+  if (organization.servicing) missing.push('payments.servicing')
+  if (!connected?.stripeAccountId) missing.push('payments.account')
+  else if (connected.status !== 'ready' || connected.cardPaymentsStatus !== 'active' || !connected.stripeRefreshedAt) missing.push('payments.account_ready')
+  if (connected && livemode !== null && connected.livemode !== livemode) missing.push('payments.account_mode')
+  return { connected, slug: organization.slug, missing, livemode }
+}
+
 export async function getStripeConnectedAccountByStripeId(
   db: DbClient,
   stripeAccountId: string,
 ): Promise<StripeConnectedAccount | null> {
   const row = await queryFirst<StripeConnectedAccountRow>(db, `
     SELECT id, organization_id, stripe_account_id, country, livemode, status,
-           card_payments_status, requirements_json, stripe_refreshed_at,
+           card_payments_status, surcharge_basis_points, requirements_json, stripe_refreshed_at,
            last_error, created_at, updated_at
     FROM stripe_connected_accounts
     WHERE stripe_account_id = ?
@@ -269,15 +342,17 @@ function accountProjection(
   refreshedAt = new Date().toISOString(),
 ): StripeConnectProjection {
   const country = account.identity?.country
-  const cardPaymentsStatus = account.configuration?.merchant?.capabilities?.card_payments?.status
+  const cardPayments = account.configuration?.merchant?.capabilities?.card_payments
+  const cardPaymentsStatus = cardPayments?.status
   return {
     reservationId: reservation.id,
     organizationId: reservation.organizationId,
     stripeAccountId: account.id,
-    // Stripe's hosted onboarding sets the country; before the owner chooses it there is none.
+    // Persist only the country Stripe reports for the created account.
     country: country ? country.toUpperCase() : null,
     livemode: account.livemode,
     cardPaymentsStatus: cardPaymentsStatus === undefined ? null : cardPaymentsStatus,
+    cardPaymentsResolutions: (cardPayments?.status_details ?? []).map(detail => detail.resolution),
     financialContractSupported: account.dashboard==='express' && account.defaults?.responsibilities?.fees_collector==='application' && account.defaults.responsibilities.losses_collector==='stripe',
     requirements: normalizeAccountRequirements(account),
     stripeRefreshedAt: refreshedAt,
@@ -291,6 +366,78 @@ const STRIPE_CONNECT_ACCOUNT_INCLUDE: Stripe.V2.Core.AccountRetrieveParams.Inclu
   'requirements',
 ]
 
+/** The business's one active Stripe payment method configuration, inheriting the platform's Payments parent. */
+// Stripe's own failures propagate; only a configuration the business must fix is returned as a problem.
+async function connectedMethodConfiguration(stripe: Stripe, stripeAccountId: string, parent: string): Promise<{ configuration: Stripe.PaymentMethodConfiguration } | { problem: string }> {
+  const configurations = await stripe.paymentMethodConfigurations.list({ limit: 100 }, { stripeAccount: stripeAccountId })
+  if (configurations.has_more) return { problem: 'Connected checkout configuration needs bounded operator review' }
+  const matching = configurations.data.filter(configuration => configuration.parent === parent || configuration.id === parent)
+  if (matching.length !== 1 || !matching[0]!.active) return { problem: 'One active connected payment configuration inheriting the Payments parent is required' }
+  return { configuration: matching[0]! }
+}
+
+/**
+ * Whether a business takes payment online now, and if not, why, for whoever
+ * asks: checkout refuses with the reason, the footer shows no methods. Stripe
+ * is read for the account itself, so a capability event not yet projected
+ * still counts.
+ */
+async function checkoutReadiness(db: DbClient, env: CloudflareEnv, organizationId: string) {
+  const setup = await readStripeCheckoutSetup(db, organizationId, env)
+  const handoff = { code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(setup.slug)}/payments`, missing: setup.missing }
+  // Native retrieval below can resolve a capability event not yet projected.
+  if (setup.missing.some(field => field !== 'payments.account_ready')) {
+    return { ready: false as const, statusCode: setup.missing.includes('payments.configuration') ? 503 : setup.missing.includes('payments.entitlement') ? 403 : 409, statusMessage: 'Complete the business’s Payments setup before accepting online payments', handoff }
+  }
+  // Payments fees are billed only in the platform's mode, on the business's
+  // subscription; a demo's test-mode payments carry none.
+  if (setup.livemode === platformLivemode(env) && !(await paymentsUsage(db, env, organizationId)).configured) {
+    return { ready: false as const, statusCode: 409, statusMessage: 'Your plan subscription does not bill Payments fees yet. Choose Business in Plan before accepting online payments', handoff: { ...handoff, missing: [...handoff.missing, 'payments.billing'] } }
+  }
+  const saved = setup.connected!
+  const keys = paymentsStripeKeys(env, setup.livemode!)!
+  const stripe = createStripeClient(keys.secretKey, 'payments')
+  const account = await stripe.v2.core.accounts.retrieve(saved.stripeAccountId!, { include: STRIPE_CONNECT_ACCOUNT_INCLUDE })
+  const connected = await projectStripeConnectedAccount(db, accountProjection(saved, account))
+  if (connected.status !== 'ready' || account.livemode !== saved.livemode) return { ready: false as const, statusCode: 409, statusMessage: 'Complete the business’s Stripe account setup before requiring online collection', handoff }
+  // Stripe Tax is calculated by hosted Checkout only; checkout refuses an on-site payment for a business registered for it.
+  const [taxSettings, registrations] = await Promise.all([
+    stripe.tax.settings.retrieve({}, { stripeAccount: account.id }),
+    stripe.tax.registrations.list({ status: 'active', limit: 1 }, { stripeAccount: account.id }),
+  ])
+  return { ready: true as const, stripe, account, connected, parent: keys.methodConfiguration!, handoff, automaticTax: taxSettings.status === 'active' && registrations.data.length > 0 }
+}
+
+/**
+ * The ways a business takes payment on its site, as its Stripe configuration
+ * turns them on: what its footer shows, as a shop's footer shows its cards and
+ * wallets. A business not ready to take payment online takes none here.
+ */
+export async function acceptedPaymentMethods(db: DbClient, env: CloudflareEnv, organizationId: string): Promise<{ types: string[]; country: string | null }> {
+  const readiness = await checkoutReadiness(db, env, organizationId)
+  // Not ready, or registered for Stripe Tax which checkout refuses: it takes no payment on the site.
+  if (!readiness.ready || readiness.automaticTax) return { types: [], country: null }
+  const methods = await connectedMethodConfiguration(readiness.stripe, readiness.account.id, readiness.parent)
+  // A configuration the business must still fix takes no payment, as checkout refuses it.
+  if ('problem' in methods) return { types: [], country: null }
+  const types = Object.entries(methods.configuration as unknown as Record<string, unknown>)
+    .filter(([, value]) => typeof value === 'object' && value !== null && (value as { available?: unknown }).available === true
+      && (value as { display_preference?: { value?: unknown } }).display_preference?.value === 'on')
+    .map(([type]) => type)
+  return { types, country: readiness.connected.country }
+}
+
+/** The configured native Stripe account and methods must accept a paid booking before it is offered. */
+export async function requireStripeCheckoutAcceptance(db: DbClient, env: CloudflareEnv, organizationId: string) {
+  const readiness = await checkoutReadiness(db, env, organizationId)
+  if (!readiness.ready) throw new HTTPError({ statusCode: readiness.statusCode, statusMessage: readiness.statusMessage, data: readiness.handoff })
+  const { stripe, account, connected, handoff } = readiness
+  // Which methods the business offers is its Stripe payment method configuration's to decide.
+  const methods = await connectedMethodConfiguration(stripe, account.id, readiness.parent)
+  if ('problem' in methods) throw new HTTPError({ statusCode: 409, statusMessage: methods.problem, data: handoff })
+  return { connected: { ...connected, stripeAccountId: account.id }, methodConfigurationId: methods.configuration.id, automaticTax: readiness.automaticTax }
+}
+
 export async function refreshStripeConnectedAccount(
   db: DbClient,
   stripe: Stripe,
@@ -301,33 +448,7 @@ export async function refreshStripeConnectedAccount(
   const account = await stripe.v2.core.accounts.retrieve(connected.stripeAccountId, {
     include: STRIPE_CONNECT_ACCOUNT_INCLUDE,
   }, stripeContext === undefined ? {} : { stripeContext })
-  // A refresh the dashboard asked for also carries the business's brand to Stripe, so its Checkout and receipts look like the business.
-  if (stripeContext === undefined) await syncStripeConnectedBranding(db, stripe, connected.organizationId, account)
   return await projectStripeConnectedAccount(db, accountProjection(connected, account))
-}
-
-/**
- * Stripe's Checkout, receipts and payout emails for a connected account use
- * that account's branding. The business already has a brand colour and a logo
- * here (its palette's action color); this gives Stripe the same, uploading the logo once.
- */
-export async function syncStripeConnectedBranding(db: DbClient, stripe: Stripe, organizationId: string, account: Stripe.V2.Core.Account): Promise<void> {
-  const [config, logoUrl] = await Promise.all([getConfig(db, organizationId), organizationLogo(db, organizationId)])
-  const current = account.configuration?.merchant?.branding
-  const branding: { primary_color?: string; logo?: string; icon?: string } = {}
-  // The owner's own action color, when they have chosen one; Stripe keeps its default otherwise.
-  const color = config.palette?.light.action ?? null
-  if (color && current?.primary_color?.toLowerCase() !== color.toLowerCase()) branding.primary_color = color
-  if (logoUrl && !current?.logo) {
-    const response = await fetch(logoUrl)
-    if (!response.ok) throw new Error(`The business logo could not be read for Stripe (${response.status})`)
-    const type = response.headers.get('content-type') ?? 'image/png'
-    const file = await stripe.files.create({ purpose: 'business_logo', file: { data: Buffer.from(await response.arrayBuffer()), name: `logo.${type.includes('svg') ? 'svg' : type.includes('jpeg') ? 'jpg' : 'png'}`, type } })
-    branding.logo = file.id
-    branding.icon = file.id
-  }
-  if (!Object.keys(branding).length) return
-  await stripe.v2.core.accounts.update(account.id, { configuration: { merchant: { branding } } })
 }
 
 export async function ensureStripeConnectedAccount(
@@ -338,6 +459,7 @@ export async function ensureStripeConnectedAccount(
     organizationName: string
     contactEmail: string
     livemode: boolean
+    country: string | null
   },
 ): Promise<StripeConnectedAccount> {
   const reservation = await reserveStripeConnectedAccount(db, input)
@@ -349,12 +471,9 @@ export async function ensureStripeConnectedAccount(
       contact_email: input.contactEmail,
       display_name: input.organizationName,
       dashboard: 'express',
-      // No country and no capability request: Stripe's hosted onboarding lets the
-      // owner choose from the countries the platform's Connect onboarding options
-      // allow, and requests that country's default capabilities. Naming either
-      // here would fix the country before the owner chose it.
-      // https://docs.stripe.com/connect/hosted-onboarding#create-account
-      configuration: { merchant: {} },
+      // Stripe requires the country for a merchant account and says so when it is missing or unsupported.
+      ...(input.country ? { identity: { country: input.country } } : {}),
+      configuration: { merchant: { capabilities: { card_payments: { requested: true } } } },
       defaults: {
         responsibilities: { fees_collector: 'application', losses_collector: 'stripe' },
       },

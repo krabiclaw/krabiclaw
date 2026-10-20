@@ -3,10 +3,11 @@ import type Stripe from 'stripe'
 import { HTTPError } from 'nitro'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { cloudflareEnv } from '~/server/utils/api-response'
-import { getAuthSession } from '~/server/utils/auth'
+import { getAuthSession, type CloudflareEnv } from '~/server/utils/auth'
 import { getOrganizationBillingStatus } from '~/server/utils/billing'
 import { resolveRequestedOrganization } from '~/server/utils/dashboard-context'
 import { createStripeClient } from '~/server/utils/stripe-client'
+import { paymentsStripe } from '~/server/utils/stripe-connect'
 
 /**
  * Whose cards a business's Payments page shows: the operating customer Better
@@ -69,7 +70,7 @@ export async function connectedBuyerCustomer(db: DbClient, stripe: Stripe, userI
  * cards saved there with it. Each business keeps its charges, refunds, disputes
  * and receipts, which do not depend on the Customer.
  */
-export async function deleteBuyerCustomers(db: DbClient, stripe: Stripe, userId: string) {
-  const mappings = await queryAll<{ stripe_account_id: string; stripe_customer_id: string }>(db, 'SELECT stripe_account_id,stripe_customer_id FROM stripe_connected_customers WHERE user_id=?', [userId])
-  for (const mapping of mappings) await stripe.customers.del(mapping.stripe_customer_id, {}, { stripeAccount: mapping.stripe_account_id })
+export async function deleteBuyerCustomers(db: DbClient, env: CloudflareEnv, userId: string) {
+  const mappings = await queryAll<{ stripe_account_id: string; stripe_customer_id: string; livemode: number }>(db, 'SELECT stripe_account_id,stripe_customer_id,livemode FROM stripe_connected_customers WHERE user_id=?', [userId])
+  for (const mapping of mappings) await paymentsStripe(env, Boolean(mapping.livemode)).customers.del(mapping.stripe_customer_id, {}, { stripeAccount: mapping.stripe_account_id })
 }

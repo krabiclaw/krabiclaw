@@ -1,10 +1,9 @@
 <template>
   <!--
-    Catalog opens on the three ways into what the organization offers — its
-    Menu, its Experiences, its Services — and All items for everything,
-    whatever its kind. These are entry points, not groupings anyone creates:
-    every organization has all three, whatever its template. Each opens a
-    view suited to its task; every offering opens the one Product editor.
+    Catalog is where everything the business offers is found, as Airbnb's Your
+    listings: kind pills, then one card per thing. A menu is one card per
+    location, opening that location's menu, so the locations need no filter of
+    their own; every other offering is its own card, opening the one Product editor.
   -->
   <DashboardIndexPanel id="catalog" title="Catalog">
     <template #right>
@@ -12,74 +11,97 @@
     </template>
 
     <UAlert v-if="loadError" color="error" variant="soft" icon="i-lucide-triangle-alert" title="Catalog could not be loaded" :description="loadError" />
-    <div v-else class="mx-auto w-full max-w-xl space-y-6">
-      <div class="grid grid-cols-3 gap-3">
-        <NuxtLink
-          v-for="entry in entries"
-          :key="entry.id"
-          :to="entry.to"
-          class="flex aspect-square flex-col rounded-2xl border border-default bg-elevated p-4 transition-colors hover:bg-accented"
-          :data-testid="`catalog-entry-${entry.id}`"
-        >
-          <UIcon :name="entry.icon" class="size-6 text-muted" />
-          <p class="mt-auto text-[15px] font-semibold text-highlighted">{{ entry.label }}</p>
-          <p class="mt-1 text-sm text-muted">{{ entry.summary }}</p>
-        </NuxtLink>
-      </div>
-
-      <EditorNavigationList :groups="allItems" :active-item="level.child.value" />
-    </div>
+    <template v-else>
+      <DashboardFilterPills id="catalog-kind" v-model="kind" label="Kind" :items="kindFilters" class="mb-8" />
+      <OrganizationLocationSelector
+        v-if="items.length"
+        :items="items"
+        :active-item="level.child.value"
+        :label-heading-level="2"
+        missing-image-label="No photo"
+        missing-image-hint="Add one in this item’s photo editor."
+        data-testid="catalog-grid"
+      />
+      <UEmpty v-else icon="i-lucide-store" :title="`No ${activeFilterLabel.toLowerCase()} yet`" />
+    </template>
   </DashboardIndexPanel>
 </template>
 
 <script setup lang="ts">
-import EditorNavigationList, { type EditorNavigationGroup } from '~/components/dashboard/EditorNavigationList.vue'
+import { catalogProductItem } from '~/components/dashboard/CatalogProductList.vue'
+import OrganizationLocationSelector, { type OrganizationLocationSelectorItem } from '~/components/dashboard/OrganizationLocationSelector.vue'
+import type { ProductKind } from '~/shared/product-details'
+import { groupProductsByCollection } from '~/utils/product-presentation'
 import { getErrorMessage } from '~/utils/errors'
 
-// The level runs while setup is still synchronous: it injects the record the
-// `<RouterView>` above rendered, and an `await` before it would bind nothing.
 const level = useRouteLevel()
+const route = useRoute()
+const router = useRouter()
 const organizationId = await useDashboardOrganizationId()
+// One authorized organization read. Location narrows this projection by its
+// explicit product relationships, without dropping membership needed by editors.
 const catalog = useProductCatalog(organizationId, ref(null))
 await catalog.load
-const { locations, error: locationsError } = await useOrganizationLocations()
-
+const { locations, error: locationsError } = await useOrganizationLocations({ includeInactive: true })
+const { priceLabel } = useCatalogPrice(ref(null), locations)
 const loadError = computed(() => {
   const cause = catalog.error.value ?? locationsError.value
   return cause ? getErrorMessage(cause, 'The catalog could not be loaded') : null
 })
 
-const count = (kind: string) => catalog.products.value.filter(product => product.kind === kind).length
-const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`
-
-// A menu belongs to a location. With one location there is nothing to choose,
-// so the Menu opens on it; with several, the Menu asks which.
-const menuTo = computed(() => locations.value.length === 1
-  ? `${level.path.value}/menu?location_id=${encodeURIComponent(locations.value[0]!.id)}`
-  : `${level.path.value}/menu`)
-
-// The menu's sections, as the Menu lists them: holding dishes, or still empty.
-const menuSectionCount = computed(() => catalog.collections.value.filter((collection) => {
-  const members = catalog.products.value.filter(product => product.collections.some(entry => entry.collection_id === collection.id))
+// The kinds this business offers, in Catalog's order; a kind nobody sells is not a pill.
+type CatalogKind = 'all' | 'menu' | Exclude<ProductKind, 'dish'>
+const KINDS: Array<{ value: Exclude<CatalogKind, 'all'>; label: string }> = [
+  { value: 'menu', label: 'Menu' },
+  { value: 'experience', label: 'Experiences' },
+  { value: 'item', label: 'Products' },
+  { value: 'service', label: 'Services' },
+  { value: 'stay', label: 'Places to stay' },
+]
+const grouped = computed(() => new Map(groupProductsByCollection(catalog.products.value, catalog.collections.value).map(group => [group.id, group])))
+// A section is the menu's when it holds dishes or nothing yet.
+const menuCollections = computed(() => catalog.collections.value.filter(collection => {
+  const members = grouped.value.get(collection.id)?.products ?? []
   return !members.length || members.some(product => product.kind === 'dish')
-}).length)
+}))
+const hasMenu = computed(() => menuCollections.value.length > 0 || catalog.products.value.some(product => product.kind === 'dish'))
+const offered = (value: Exclude<CatalogKind, 'all'>) => value === 'menu' ? hasMenu.value : catalog.products.value.some(product => product.kind === value)
+// The chosen kind is held in the URL, so a filtered Catalog can be linked and gone Back to.
+const kind = computed({
+  get: (): CatalogKind => KINDS.find(row => row.value === route.query.kind)?.value ?? 'all',
+  set: (value: string) => void navigateTo({ path: level.path.value, query: { ...route.query, kind: value === 'all' ? undefined : value } }),
+})
+const kindFilters = computed(() => [{ value: 'all' as const, label: 'All' }, ...KINDS.filter(row => row.value === kind.value || offered(row.value))])
+const activeFilterLabel = computed(() => kind.value === 'all' ? 'offerings' : KINDS.find(row => row.value === kind.value)!.label)
 
-const entries = computed(() => [
-  { id: 'menu', label: 'Menu', icon: 'i-lucide-utensils', to: menuTo.value, summary: plural(menuSectionCount.value, 'section', 'sections') },
-  { id: 'experiences', label: 'Experiences', icon: 'i-lucide-sparkles', to: `${level.path.value}/experiences`, summary: plural(count('experience'), 'experience', 'experiences') },
-  { id: 'services', label: 'Services', icon: 'i-lucide-briefcase', to: `${level.path.value}/services`, summary: plural(count('service'), 'service', 'services') },
+// A menu belongs to a location: one card for each, holding that location's
+// sections and the ones every location shares. With no locations there is one menu.
+const menuCards = computed<OrganizationLocationSelectorItem[]>(() => {
+  const sectionCount = (id: string | null) => menuCollections.value.filter(collection => collection.location_id === null || collection.location_id === id).length
+  const sections = (count: number) => `${count} ${count === 1 ? 'section' : 'sections'}`
+  if (!locations.value.length) {
+    return [{ id: 'menu', label: 'Menu', eyebrow: 'Menu', summary: sections(sectionCount(null)), imageUrl: null, fallbackIcon: 'i-lucide-utensils', to: `${level.path.value}/menu` }]
+  }
+  return locations.value.map(location => ({
+    id: `menu-${location.id}`,
+    label: location.title,
+    eyebrow: `Menu${location.status === 'active' ? '' : ` (${location.status})`}`,
+    summary: sections(sectionCount(location.id)),
+    imageUrl: location.picture_url,
+    fallbackIcon: 'i-lucide-utensils',
+    to: router.resolve({ path: `${level.path.value}/menu`, query: { location_id: location.id } }).fullPath,
+  }))
+})
+const offerings = computed(() => catalog.products.value.filter(product => product.kind !== 'dish' && (kind.value === 'all' || product.kind === kind.value)))
+const items = computed<OrganizationLocationSelectorItem[]>(() => [
+  ...(hasMenu.value && (kind.value === 'all' || kind.value === 'menu') ? menuCards.value : []),
+  ...(kind.value === 'menu' ? [] : offerings.value.map(product => catalogProductItem(product, {
+    collections: catalog.collections.value,
+    locations: locations.value,
+    priceLabel,
+    to: `${level.path.value}/${product.id}`,
+  }))),
 ])
 
-const allItems = computed<EditorNavigationGroup[]>(() => [{
-  id: 'all',
-  items: [{
-    id: 'all',
-    label: 'All items',
-    summary: plural(catalog.products.value.length, 'item', 'items'),
-    lead: { icon: 'i-lucide-layout-grid' },
-    to: `${level.path.value}/all`,
-  }],
-}])
-
-useSeoMeta({ title: 'Catalog | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Catalog | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>

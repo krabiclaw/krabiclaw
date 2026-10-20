@@ -6,11 +6,9 @@
     is room for one and the sheet over it where there is not — the shells decide
     that, not this page.
   -->
-  <!-- On a phone the conversation is pushed over the list, so it slides in the way a pushed screen does. -->
   <DashboardIndexPanel
     id="organization-messages-thread"
-    :title="thread?.guestName ?? 'Conversation'"
-    :ui="{ root: 'max-lg:animate-[slide-in-from-right_280ms_var(--ease-out)]', body: 'p-0 sm:p-0 gap-0' }"
+    :title="thread ? thread.participantLabel : 'Conversation'"
     fill
   >
     <template v-if="recordTo" #right>
@@ -44,7 +42,7 @@ const recordTitle = computed(() => thread.value
 // Opening the record keeps the list it was reached through, the same way
 // closing it does. A contact thread has no record and offers no way to one.
 const recordTo = computed(() => {
-  if (!thread.value || thread.value.submissionType === 'contact') return null
+  if (!thread.value?.operationalRecord) return null
   const query = new URLSearchParams()
   for (const [key, value] of Object.entries(route.query)) {
     // `archived` is present and empty on the past list; the emptiness is the value.
@@ -54,5 +52,5 @@ const recordTo = computed(() => {
   return search ? `${threadPath.value}/details?${search}` : `${threadPath.value}/details`
 })
 
-useSeoMeta({ title: 'Conversation | Krabiclaw Dashboard', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Conversation | KrabiClaw Dashboard', robots: 'noindex, nofollow' })
 </script>

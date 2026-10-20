@@ -47,7 +47,7 @@
               :aria-label="`${star} star${star === 1 ? '' : 's'}`"
               @click="rating = star"
             >
-              <SayaIcon name="star" solid class="size-8" :class="star <= rating ? 'text-primary' : 'text-muted'" />
+              <TenantIcon name="star" solid class="size-8" :class="star <= rating ? 'text-primary' : 'text-muted'" />
             </button>
           </div>
         </div>
@@ -102,9 +102,9 @@
         <p v-if="submitError" class="mt-4 text-sm text-error">{{ submitError }}</p>
 
         <div class="mt-8 flex flex-wrap items-center gap-3">
-          <SayaButton type="submit" :disabled="submitting || removingMediaAssetId !== null">
+          <TenantButton type="submit" :disabled="submitting || removingMediaAssetId !== null">
             {{ submitting ? 'Submitting...' : 'Submit review' }}
-          </SayaButton>
+          </TenantButton>
           <button type="button" class="text-sm text-muted underline-offset-4 hover:underline" @click="optOut">
             Opt out of review emails
           </button>
@@ -121,7 +121,7 @@ import { REVIEW_VIDEO_MAX_BYTES, REVIEW_VIDEO_MAX_LABEL } from '~/config/media-l
 
 const { localePath } = useI18n()
 
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const route = useRoute()
 const slug = computed(() => String(route.params.slug))
@@ -201,7 +201,7 @@ async function uploadImage(file: File) {
   if (!requestId) return
   const form = new FormData()
   form.append('image', file)
-  const uploaded = await postReviewMedia(requestId, form, 'image', mediaUploadSignal())
+  const uploaded = await postReviewMedia(requestId, form, 'image')
   media.value.push({ asset_id: uploaded.asset_id, kind: 'image', preview_url: URL.createObjectURL(file) })
 }
 
@@ -217,7 +217,7 @@ async function uploadVideo(file: File) {
     const form = new FormData()
     form.append('video', file)
     form.append('thumbnail', poster)
-    const uploaded = await postReviewMedia(requestId, form, 'video', mediaUploadSignal(controller.signal))
+    const uploaded = await postReviewMedia(requestId, form, 'video', controller.signal)
     media.value.push({ asset_id: uploaded.asset_id, kind: 'video', preview_url: uploaded.thumbnail_url })
   } finally {
     activeVideoUploads.delete(controller)
@@ -227,7 +227,7 @@ async function uploadVideo(file: File) {
 // Photos and videos share one upload route. The asset is active and placed on
 // the review request when this returns; a response that names an asset but
 // breaks the contract is discarded so nothing is left attached.
-async function postReviewMedia(requestId: string, form: FormData, kind: 'image' | 'video', signal: AbortSignal) {
+async function postReviewMedia(requestId: string, form: FormData, kind: 'image' | 'video', signal?: AbortSignal) {
   let assetId: string | null = null
   try {
     const response = await fetch(`/api/public/review-requests/${encodeURIComponent(requestId)}/media/upload`, {

@@ -7,8 +7,8 @@ import { threadPayloadForGuest, requestInsertQueries, cancelBookingRequest, getG
 import { executeGuestThreadOperation } from '../../server/domain/guest-threads/operations.ts'
 import { getGuestThreadOperationSummary, listGuestThreads } from '../../server/domain/guest-threads/repository.ts'
 import { resolveGuestThreadMailbox } from '../../server/domain/guest-threads/mailbox.ts'
-import { claimReservation, upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
-import { claimSessionCapacity, setBookingStatus } from '../../server/utils/availability.ts'
+import { claimReservation, requireLocationReservationConfig, upsertLocationReservationConfig } from '../../server/utils/reservations.ts'
+import { CapacityUnavailableError, claimSessionCapacity, setBookingStatus } from '../../server/utils/availability.ts'
 import { buildCanonicalNotificationInsert } from '../../server/utils/notification-center.ts'
 import { acknowledgeNotification } from '../../server/utils/notification-acknowledgement.ts'
 
@@ -37,7 +37,8 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
     await db.batch([
-      `INSERT INTO organization (id,name,slug) VALUES ('${ORG}','Proof','proof')`,
+      `INSERT INTO organization (id,name,slug, default_currency, timezone) VALUES ('${ORG}','Proof','proof', 'USD', 'UTC')`,
+      `INSERT INTO organization_locales (id,organization_id,locale,is_source,status) VALUES ('proof-en','${ORG}','en',1,'published')`,
       `INSERT INTO user (id,name,email) VALUES ('${ACTOR}','Proof','owner@proof.example')`,
       `INSERT INTO business_locations (id,organization_id,slug,title,timezone) VALUES ('${LOCATION}','${ORG}','proof','Proof','Asia/Bangkok')`,
       `INSERT INTO products (kind, id,organization_id,name,slug,created_by,updated_by) VALUES ('experience', 'product-proof','${ORG}','Pottery Class','pottery-class','${ACTOR}','${ACTOR}')`,
@@ -70,7 +71,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
             params: [id, NOW, bookingId, id],
           },
         ],
-      }).then(() => true, () => false)
+      }).then(() => true, error => { if (error instanceof CapacityUnavailableError) return false; throw error })
     }
     const claims = await Promise.all([bookSession('booking-first'), bookSession('booking-second')])
     assert.equal(claims.filter(Boolean).length, 1)
@@ -103,7 +104,10 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
 
     // A reservation is the other half of the same split: a location policy is
     // what opens reservations, and the claim commits the thread with the row.
-    await upsertLocationReservationConfig(db, { organizationId: ORG, locationId: LOCATION, patch: { slot_capacity: 1 }, actorId: ACTOR })
+    await assert.rejects(requireLocationReservationConfig(db, { organizationId: ORG, locationId: LOCATION }), { statusCode: 404, data: { code: 'RESERVATION_POLICY_NOT_FOUND' } })
+    const policy = await upsertLocationReservationConfig(db, { organizationId: ORG, locationId: LOCATION, patch: { slot_capacity: 1 }, actorId: ACTOR })
+    assert.deepEqual(await db.prepare('SELECT duration_minutes,slot_capacity FROM location_reservation_configs WHERE location_id=?').bind(LOCATION).first(), { duration_minutes: 120, slot_capacity: 1 }, 'ordinary table reservations retain their two-hour default')
+    await upsertLocationReservationConfig(db, { organizationId: ORG, locationId: LOCATION, patch: { slot_capacity: 1, duration_minutes: 120 }, actorId: ACTOR, expectedUpdatedAt: policy.updated_at })
     const reservationThread = 'reservation-proof'
     await db.batch(requestInsertQueries({
       id: reservationThread, kind: 'reservation', organization_id: ORG, location_id: LOCATION,
@@ -156,7 +160,7 @@ test('a thread and the record it refers to commit and cancel as one', { timeout:
 
     // An audit entry belongs to the organization it describes and goes with it.
     await db.batch([
-      "INSERT INTO organization (id,name,slug) VALUES ('org-other','Other','other')",
+      "INSERT INTO organization (id,name,slug, default_currency, timezone) VALUES ('org-other','Other','other', 'USD', 'UTC')",
       `INSERT INTO activity_entries (id,kind,scope_kind,organization_id,actor_kind,event_name,payload_json,dedupe_key,occurred_at) VALUES ('audit-proof','audit','organization','org-other','system','organization.changed','{}','audit-proof','2026-09-01T00:00:00.000Z')`,
     ].map(statement => db.prepare(statement)))
     assert.equal(await db.prepare("SELECT count(*) FROM activity_entries WHERE id='audit-proof'").first('count(*)'), 1)
@@ -238,7 +242,7 @@ test('archive and unarchive file a conversation without touching its booking, st
       `INSERT INTO bookings (id,organization_id,product_id,product_session_id,product_variant_id,request_id,party_size,created_at,updated_at)
        VALUES ('row-${id}','${ORG}','product-proof','${sessionId}','variant-proof','${id}',1,'${NOW}','${NOW}')`
     await db.batch([
-      `INSERT INTO organization (id,name,slug) VALUES ('${ORG}','Proof','proof'), ('org-foreign','Foreign','foreign')`,
+      `INSERT INTO organization (id,name,slug, default_currency, timezone) VALUES ('${ORG}','Proof','proof', 'USD', 'UTC'), ('org-foreign','Foreign','foreign', 'USD', 'UTC')`,
       `INSERT INTO user (id,name,email) VALUES ('${ACTOR}','Proof','owner@proof.example')`,
       `INSERT INTO business_locations (id,organization_id,slug,title,timezone) VALUES ('${LOCATION}','${ORG}','proof','Proof','Asia/Bangkok')`,
       `INSERT INTO products (kind, id,organization_id,name,slug,created_by,updated_by) VALUES ('experience', 'product-proof','${ORG}','Pottery Class','pottery-class','${ACTOR}','${ACTOR}')`,

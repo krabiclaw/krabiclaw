@@ -1,12 +1,11 @@
-import { APIError, betterAuth, type BetterAuthPlugin } from 'better-auth'
+import { APIError, betterAuth, type Account, type BetterAuthPlugin } from 'better-auth'
 import { createAuthMiddleware, getOAuthState, isAPIError } from 'better-auth/api'
 import { drizzleAdapter } from 'better-auth/adapters/drizzle'
-import { hashPassword } from 'better-auth/crypto'
+import { DISCORD_BOT_PERMISSIONS } from '~/server/utils/discord-bot'
 import { loginMethodForPath } from '~/shared/auth/login-method'
-import { admin, anonymous, genericOAuth, getOrgAdapter, hasPermission, jwt, lastLoginMethod, organization, phoneNumber } from 'better-auth/plugins'
+import { admin, anonymous, bearer, genericOAuth, getOrgAdapter, hasPermission, jwt, lastLoginMethod, organization, phoneNumber, type UserWithAnonymous } from 'better-auth/plugins'
 import { stripe as betterAuthStripe } from '@better-auth/stripe'
 import { oauthProvider } from '@better-auth/oauth-provider'
-import type { SchemaClient, Scope } from '@better-auth/oauth-provider'
 import { cimd } from '@better-auth/cimd'
 import { fetchCimdMetadataResource } from '~/server/utils/cimd-metadata-fetch'
 import type { GenericEndpointContext } from '@better-auth/core'
@@ -15,6 +14,8 @@ import { createDb, execute, executeBatch, queryAll, queryFirst, schema, type Bat
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
 import { sendWhatsAppOtp } from '~/server/utils/whatsapp'
 import { parsePhoneOrThrow } from '~/utils/phone'
+import { isCurrencyCode } from '~/shared/currencies'
+import { isValidTimezone } from '~/utils/timezone'
 import { createCanonicalNotification, notifyNewUserSignup } from '~/server/utils/notification-center'
 import { measurementOutcome, readPageEventId, recordAndDeliverConversion } from '~/server/utils/organization-conversions'
 import { getPlatformOrganization } from '~/server/utils/platform-organization'
@@ -26,8 +27,7 @@ import { organizationAccessControl, organizationRoles } from '~/utils/organizati
 import { platformAdminAccessControl, platformAdminRoles } from '~/utils/platform-admin-access'
 import { createStripePlanLoader } from '~/server/utils/better-auth-stripe'
 import { handleStripeGa4Event } from '~/server/utils/stripe-ga4'
-import { notifyPaymentsInvoiceEvent } from '~/server/domain/payments/billing-notifications'
-import { setUpPaymentsBillingForSubscriptionEvent } from '~/server/domain/payments/usage'
+import { ingestStripeFeeReportEvent } from '~/server/domain/payments/costs'
 import { createStripeClient } from '~/server/utils/stripe-client'
 import { deleteBuyerCustomers } from '~/server/utils/billing-customer'
 import { anonymousLinkQueries, linkGuestIdentitiesByVerifiedEmail } from '~/server/utils/guest-accounts'
@@ -35,10 +35,12 @@ import { unwrapInstrumentedD1 } from '~/server/utils/request-metrics'
 import { timingSafeEqualText } from '~/server/utils/dev-route-auth'
 import { notifyOrganizationInvited } from '~/server/utils/notifications'
 import { cleanupOrganizationBeforeDelete } from '~/server/utils/tenant-deletion'
+import { APPLE_AUTHORIZATION_CODE_HEADER, exchangeAppleAuthorizationCode, revokeAppleGrant } from '~/server/utils/apple-revocation'
 import { reconcileZarazAnalytics } from '~/server/utils/zaraz-analytics'
+import { isNewSalePlan, normalizeBillingPlanId } from '~/shared/billing-model'
+import { integrationsThroughAccount } from '~/server/utils/organization-integrations'
 
 type MemberRow = InferSelectModel<typeof schema.member>
-type InvitationRow = InferSelectModel<typeof schema.invitation>
 
 type IntegrationCallbackContext = GenericEndpointContext['context'] & { integrationAccountId?: string }
 
@@ -51,7 +53,6 @@ async function integrationAccountLinked(account: { id: string; userId: string },
   context.integrationAccountId = account.id
 }
 
-const CIMD_TENANT_SCOPES = ['openid', 'email', 'offline_access', 'tenant'] as const
 export const OAUTH_SIGNING_POLICY = {
   algorithm: 'RS256',
   resourceSeedMode: 'merge',
@@ -74,14 +75,30 @@ export function oauthSigningConfig(authBaseUrl: string) {
 export const organizationOptions = {
   ac: organizationAccessControl,
   roles: organizationRoles,
+  teams: { enabled: true, defaultTeam: { enabled: false }, allowRemovingAllTeams: true },
+  // A business cannot exist without the currency it sells in and the clock it
+  // reports in, so Better Auth requires both when the organization is created.
+  schema: {
+    organization: {
+      additionalFields: {
+        default_currency: { type: 'string', required: true, input: true },
+        timezone: { type: 'string', required: true, input: true },
+      },
+    },
+  },
 } as const
+
+function assertOrganizationFacts(data: { default_currency?: unknown; timezone?: unknown }) {
+  if (data.default_currency !== undefined && !isCurrencyCode(data.default_currency)) throw new APIError('BAD_REQUEST', { message: 'default_currency must be a supported ISO 4217 currency' })
+  if (data.timezone !== undefined && !isValidTimezone(typeof data.timezone === 'string' ? data.timezone : null)) throw new APIError('BAD_REQUEST', { message: 'timezone must be an IANA time zone' })
+}
 
 
 /**
  * Better Auth Stripe wraps the organization plugin's delete hook with its own
  * subscription guard. This plugin is deliberately registered after Stripe so
  * that provider-owned billing checks run first; only then do we release the
- * Krabiclaw resources Better Auth cannot know about. Once the organization is
+ * KrabiClaw resources Better Auth cannot know about. Once the organization is
  * gone, Zaraz is reconciled so its measurement id stops being served.
  */
 function organizationDeletionCleanupPlugin(env: CloudflareEnv): BetterAuthPlugin {
@@ -97,7 +114,7 @@ function organizationDeletionCleanupPlugin(env: CloudflareEnv): BetterAuthPlugin
         ...existingHooks,
         beforeDeleteOrganization: async (data, hookCtx) => {
           await beforeDeleteOrganization?.(data, hookCtx)
-          await cleanupOrganizationBeforeDelete(env, data.organization.id)
+          await cleanupOrganizationBeforeDelete(env, data.organization.id, data.user.id)
         },
         afterDeleteOrganization: async (data, hookCtx) => {
           await afterDeleteOrganization?.(data, hookCtx)
@@ -106,22 +123,6 @@ function organizationDeletionCleanupPlugin(env: CloudflareEnv): BetterAuthPlugin
       }
     },
   }
-}
-
-async function configureCimdTenantScopes(event: {
-  client: SchemaClient<Scope[]>
-  clientMetadataDocument: Record<string, unknown>
-  context: GenericEndpointContext
-}) {
-  const { client, context: ctx } = event
-  const update: Record<string, unknown> = { scopes: [...CIMD_TENANT_SCOPES] }
-
-  Object.assign(client, update)
-  await ctx.context.adapter.update({
-    model: 'oauthClient',
-    where: [{ field: 'clientId', value: client.clientId }],
-    update,
-  })
 }
 
 // The generic @better-auth/core AuthContext type doesn't line up with this
@@ -135,13 +136,29 @@ export interface CloudflareEnv {
   BETTER_AUTH_URL?: string
   GOOGLE_CLIENT_ID: string
   GOOGLE_CLIENT_SECRET: string
+  APPLE_APP_BUNDLE_ID: string
   STRIPE_SECRET_KEY?: string
   STRIPE_WEBHOOK_SECRET?: string
   STRIPE_CONNECT_WEBHOOK_SECRET?: string
+  STRIPE_PAYMENTS_WEBHOOK_SECRET?: string
+  STRIPE_PAYMENTS_METHOD_CONFIGURATION?: string
+  NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY?: string
+  STRIPE_TEST_SECRET_KEY?: string
+  STRIPE_TEST_PUBLISHABLE_KEY?: string
+  STRIPE_TEST_PAYMENTS_METHOD_CONFIGURATION?: string
+  STRIPE_TEST_CONNECT_WEBHOOK_SECRET?: string
+  STRIPE_TEST_PAYMENTS_WEBHOOK_SECRET?: string
   GA4_API_SECRET?: string
+  GOOGLE_ADS_DEVELOPER_TOKEN?: string
   AI_SEARCH?: AiSearchNamespace
   AI_SEARCH_INSTANCE_ID?: string
   PLATFORM_SEARCH_REINDEX_SECRET?: string
+  APPLE_TEAM_ID?: string
+  APPLE_KEY_ID?: string
+  APPLE_PRIVATE_KEY?: string
+  CHANNEX_BASE_URL?: string
+  CHANNEX_API_KEY?: string
+  CHANNEX_WEBHOOK_SECRET?: string
   CF_ACCOUNT_ID?: string
   CLOUDFLARE_API_TOKEN?: string
   CLOUDFLARE_IMAGES_API_TOKEN?: string
@@ -160,6 +177,9 @@ export interface CloudflareEnv {
   FACEBOOK_CONFIG_ID?: string
   INSTAGRAM_APP_ID?: string
   INSTAGRAM_APP_SECRET?: string
+  DISCORD_CLIENT_ID?: string
+  DISCORD_CLIENT_SECRET?: string
+  DISCORD_BOT_TOKEN?: string
   RESEND_API_KEY?: string
   RESEND_WEBHOOK_SECRET?: string
   RESEND_PRODUCT_NEWS_SEGMENT_ID?: string
@@ -241,13 +261,78 @@ function trustedOriginsForAuth(env: CloudflareEnv): string[] | ((_request?: Requ
   return [...origins]
 }
 
+async function requireDisconnectedGoogleAds(db: ReturnType<typeof createDb>, account: { id: string; providerId: string }) {
+  if (account.providerId === 'google' && (await integrationsThroughAccount(db, 'google_ads', account.id)).length) {
+    throw new APIError('CONFLICT', { message: 'Disconnect Google Ads in each business through Menu → Integrations → Google Ads before removing this Google account.' })
+  }
+}
+
+/**
+ * What has to hold, and what has to be undone elsewhere, before an account is
+ * deleted (docs/shared-auth-contract.md D6). Each step fails the deletion: the
+ * account stays until all of them succeed.
+ */
+async function prepareAccountDeletion(env: CloudflareEnv, db: ReturnType<typeof createDb>, userId: string, request: Request | undefined) {
+  // An organization keeps an owner. Deleting its only owner would leave a
+  // business nobody can manage, so ownership is transferred or the
+  // organization deleted first.
+  const soleOwned = await queryAll<{ name: string }>(db, `
+    SELECT o.name FROM member m JOIN organization o ON o.id = m."organizationId"
+    WHERE m."userId" = ? AND (',' || m.role || ',') LIKE '%,owner,%'
+      AND NOT EXISTS (
+        SELECT 1 FROM member other
+        WHERE other."organizationId" = m."organizationId" AND other."userId" <> m."userId"
+          AND (',' || other.role || ',') LIKE '%,owner,%'
+      )
+    ORDER BY o.name
+  `, [userId])
+  if (soleOwned.length) {
+    throw new APIError('BAD_REQUEST', {
+      code: 'SOLE_ORGANIZATION_OWNER',
+      message: `Transfer ownership of, or delete, ${soleOwned.map(organization => organization.name).join(', ')} before deleting your account.`,
+    })
+  }
+
+  // Better Auth deletes sessions before its account deleteMany hooks. Preflight
+  // the same condition before any part of a full user deletion can begin.
+  const accounts = await (await createAuth(env).$context).internalAdapter.findAccounts(userId)
+  for (const account of accounts) await requireDisconnectedGoogleAds(db, account)
+
+  // An account signed in with Apple proves it again at deletion so its grant can be revoked.
+  const appleAccount = await queryFirst<{ accountId: string }>(db, `SELECT "accountId" FROM account WHERE "userId" = ? AND "providerId" = 'apple'`, [userId])
+  const appleCode = request?.headers.get(APPLE_AUTHORIZATION_CODE_HEADER)?.trim()
+  if (appleAccount && !appleCode) {
+    throw new APIError('BAD_REQUEST', { code: 'APPLE_REAUTHENTICATION_REQUIRED', message: 'Sign in with Apple again to delete this account.' })
+  }
+  if (!appleAccount && appleCode) {
+    throw new APIError('BAD_REQUEST', { code: 'APPLE_ACCOUNT_MISMATCH', message: 'This account has no Apple ID linked.' })
+  }
+  // The code is single use, so the grant it yields is revoked at once: a later
+  // failure then leaves no unrevoked grant behind, and the retry brings a new
+  // code.
+  if (appleAccount && appleCode) await revokeAppleGrant(env, await exchangeAppleAuthorizationCode(env, appleCode, appleAccount.accountId))
+}
+
+/** Where a password is chosen, and the body field that carries it. */
+const NEW_PASSWORD_FIELD: Record<string, 'password' | 'newPassword'> = {
+  '/sign-up/email': 'password',
+  '/admin/create-user': 'password',
+  '/change-password': 'newPassword',
+  '/reset-password': 'newPassword',
+  '/set-password': 'newPassword',
+  '/admin/set-user-password': 'newPassword',
+}
+
 export function createAuth(env: CloudflareEnv) {
   if (!env?.DB) throw new HTTPError({ statusCode: 503, statusMessage: 'Database unavailable' })
   const d1 = unwrapInstrumentedD1(env.DB)
-
   const cached = authCache.get(d1)
-  if (cached) return cached as ReturnType<typeof betterAuth>
+  if (cached) return cached as ReturnType<typeof buildAuth>
+  return buildAuth(env)
+}
 
+function buildAuth(env: CloudflareEnv) {
+  const d1 = unwrapInstrumentedD1(env.DB)
   const db = d1 === env.DB && env.db ? env.db : createDb(d1)
   // Members are indexed for the dashboard's search; a change to one is a change
   // to every site of the organization. Better Auth has already committed the
@@ -259,16 +344,47 @@ export function createAuth(env: CloudflareEnv) {
   }
   const configuredOrganizationOptions = {
     ...organizationOptions,
+    organizationHooks: {
+      beforeCreateOrganization: async ({ organization }: { organization: Record<string, unknown> }) => assertOrganizationFacts(organization),
+      beforeUpdateOrganization: async ({ organization }: { organization: Record<string, unknown> }) => assertOrganizationFacts(organization),
+      // A removed member or changed role reads differently on every site. A
+      // member who is gone, or who now sees every home, looks after none
+      // (reconciled across the organization, so a failed run is repaired by the
+      // next change); the live dashboard socket re-reads membership per event.
+      // Better Auth's /organization/leave runs no member hook, so the
+      // after-hook below covers it.
+      afterRemoveMember: async ({ organization }: { organization: { id: string } }) => {
+        await recordMemberChange(organization.id)
+        const { releaseUnassignableHomes } = await import('~/server/domain/stays')
+        await releaseUnassignableHomes(env, db, { organizationId: organization.id })
+      },
+      afterUpdateMemberRole: async ({ organization }: { organization: { id: string } }) => {
+        await recordMemberChange(organization.id)
+        const { releaseUnassignableHomes } = await import('~/server/domain/stays')
+        await releaseUnassignableHomes(env, db, { organizationId: organization.id })
+      },
+      afterAddTeamMember: async ({ team, user }: { team: { organizationId: string }; user: { id: string } }) => {
+        const { materializeMemberSessions } = await import('~/server/utils/availability')
+        await materializeMemberSessions(db, { organizationId: team.organizationId, userId: user.id, actorId: 'system' })
+        await recordMemberChange(team.organizationId)
+      },
+      afterRemoveTeamMember: async ({ team }: { team: { organizationId: string } }) => recordMemberChange(team.organizationId),
+      afterDeleteTeam: async ({ team }: { team: { organizationId: string } }) => recordMemberChange(team.organizationId),
+      afterUpdateTeam: async ({ organization }: { organization: { id: string } }) => recordMemberChange(organization.id),
+    },
     sendInvitationEmail: async (data: {
       id: string
       role: string
       email: string
       organization: { id: string; name: string }
       inviter: { user: { name: string; email: string } }
+      invitation: { expiresAt: Date; inviterId: string }
     }) => {
       await notifyOrganizationInvited(env, db, {
         organizationId: data.organization.id,
         invitationId: data.id,
+        expiresAt: data.invitation.expiresAt.toISOString(),
+        inviterUserId: data.invitation.inviterId,
         email: data.email,
         role: data.role,
         organizationName: data.organization.name,
@@ -292,14 +408,47 @@ export function createAuth(env: CloudflareEnv) {
     // a way to sign in. The phone plugin's password sign-in and reset are off, and
     // its verify is accepted only as an update of the caller's own number: without
     // updatePhoneNumber it signs in whoever holds that number.
-    disabledPaths: ['/sign-in/phone-number', '/phone-number/request-password-reset', '/phone-number/reset-password'],
+    //
+    // An administrator does not delete accounts: /admin/remove-user would skip
+    // the ownership guard and Apple revocation that /delete-user runs in
+    // deleteUser.beforeDelete.
+    disabledPaths: ['/sign-in/phone-number', '/phone-number/request-password-reset', '/phone-number/reset-password', '/admin/remove-user'],
     hooks: {
       before: createAuthMiddleware(async (ctx) => {
         if (ctx.path === '/phone-number/verify' && ctx.body?.updatePhoneNumber !== true) {
           throw new APIError('BAD_REQUEST', { message: 'A phone number is verified from your account profile, not used to sign in.' })
         }
+        // A plan is one flat price at quantity 1, and only the current offers
+        // are sold; retired plans stay configured so Better Auth keeps
+        // processing the contracts already on them.
+        if (ctx.path === '/subscription/upgrade') {
+          if (!isNewSalePlan(normalizeBillingPlanId(ctx.body?.plan))) {
+            throw new APIError('BAD_REQUEST', { message: 'This plan is no longer available. Choose Growth or Business.' })
+          }
+          if (ctx.body?.seats !== undefined && ctx.body.seats !== 1) {
+            throw new APIError('BAD_REQUEST', { message: 'A plan is billed once; additional locations are billed by what you use.' })
+          }
+        }
+        // The policy applies where a password is chosen. It is not part of
+        // password.hash: Better Auth also hashes on sign-in for an email with
+        // no password, and a policy error there tells the caller so.
+        const field = NEW_PASSWORD_FIELD[ctx.path]
+        const chosen = field ? ctx.body?.[field] : undefined
+        if (typeof chosen === 'string') {
+          const passwordError = validatePassword(chosen)
+          if (passwordError) throw APIError.from('BAD_REQUEST', { code: 'INVALID_PASSWORD', message: passwordError })
+        }
       }),
       after: createAuthMiddleware(async (ctx) => {
+        if (ctx.path === '/organization/leave') {
+          const left = ctx.context.returned
+          if (left instanceof Error || !ctx.context.session) return
+          const organizationId = (ctx.body as { organizationId: string }).organizationId
+          await recordMemberChange(organizationId)
+          const { releaseUnassignableHomes } = await import('~/server/domain/stays')
+          await releaseUnassignableHomes(env, db, { organizationId })
+          return
+        }
         if (ctx.path !== '/callback/:id') return
         const state = await getOAuthState()
         const location = ctx.context.responseHeaders?.get('location')
@@ -307,7 +456,7 @@ export function createAuth(env: CloudflareEnv) {
         const callback = new URL(state.callbackURL, authBaseUrl)
         // Only a successful integration link continues to resource selection.
         if (new URL(location, authBaseUrl).href !== callback.href) return
-        const integration = callback.pathname.match(/^\/dashboard\/[^/]+\/settings\/integrations\/(facebook|instagram|google-analytics|google-search-console|google-calendar)$/)?.[1]
+        const integration = callback.pathname.match(/^\/dashboard\/[^/]+\/integrations\/(facebook|instagram|discord|google-analytics|google-search-console|google-calendar|google-ads)$/)?.[1]
           ?? (/^\/dashboard\/[^/]+\/calendar\/settings\/availability\/google-calendar$/.test(callback.pathname) || /^\/dashboard\/account\/profile\/calendar\/[^/]+\/google-calendar$/.test(callback.pathname) ? 'google-calendar' : undefined)
         if (!integration) return
         const provider = integration.startsWith('google-') ? 'google' : integration
@@ -333,11 +482,18 @@ export function createAuth(env: CloudflareEnv) {
       cookieCache: {
         enabled: true,
         maxAge: 5 * 60, // Cache duration in seconds
+        // Better Auth refreshes the v16 boolean contract from the same session.
+        version: 'v16',
       },
     },
     user: {
+      // POST /delete-user is the one way an account is deleted
+      // (/admin/remove-user is disabled), so everything that must hold or be
+      // undone before the account goes runs here, before Better Auth deletes
+      // its sessions, accounts and user row.
       deleteUser: {
         enabled: true,
+        beforeDelete: async (user, request) => prepareAccountDeletion(env, db, user.id, request),
       },
     },
     rateLimit: {
@@ -355,22 +511,32 @@ export function createAuth(env: CloudflareEnv) {
       session: {
         create: {
           after: async (session) => {
-            const user = await queryFirst<{ id: string; email: string; emailVerified: number; isAnonymous: number | null }>(db, 'SELECT id, email, "emailVerified", "isAnonymous" FROM user WHERE id = ?', [session.userId])
+            const user = await (await createAuth(env).$context).adapter.findOne<Pick<UserWithAnonymous, 'id' | 'email' | 'emailVerified' | 'isAnonymous'>>({
+              model: 'user', where: [{ field: 'id', value: session.userId }], select: ['id', 'email', 'emailVerified', 'isAnonymous'],
+            })
             if (!user) throw new Error('A session was created for a user that does not exist')
-            await linkGuestIdentitiesByVerifiedEmail(db, { ...user, emailVerified: Boolean(user.emailVerified), isAnonymous: Boolean(user.isAnonymous) })
+            await linkGuestIdentitiesByVerifiedEmail(db, user)
           },
         },
       },
       account: {
         create: { after: integrationAccountLinked },
         update: { after: integrationAccountLinked },
+        delete: { before: async (account) => requireDisconnectedGoogleAds(db, account) },
       },
       user: {
         delete: {
           before: async (user) => {
             // A deleted account's Customer at every business it paid goes with it, and the cards saved there.
-            await deleteBuyerCustomers(db, stripeClient, user.id)
+            await deleteBuyerCustomers(db, env, user.id)
             await execute(db, "DELETE FROM activity_entries WHERE kind='notification' AND scope_kind='global' AND target_user_id=?", [user.id])
+            // The account's member rows cascade away with it; the homes they
+            // looked after are released last, since an assignment names a member
+            // without a foreign key.
+            const { releaseUnassignableHomes } = await import('~/server/domain/stays')
+            for (const { organizationId } of await queryAll<{ organizationId: string }>(db, 'SELECT DISTINCT "organizationId" FROM member WHERE "userId" = ?', [user.id])) {
+              await releaseUnassignableHomes(env, db, { organizationId, departingUserId: user.id })
+            }
           },
         },
         update: {
@@ -444,39 +610,12 @@ export function createAuth(env: CloudflareEnv) {
           }
         }
       },
-      invitation: {
-        create: {
-          after: async (invitation: InvitationRow) => {
-            const audit = organizationEventQuery({
-              organizationId: invitation.organizationId,
-              actorId: invitation.inviterId,
-              eventType: 'member.invited',
-              entityType: 'invitation',
-              entityId: invitation.id,
-              metadata: { role: invitation.role ?? null },
-            })
-            await execute(db, audit.query, audit.params)
-          }
-        }
-      }
     },
     emailAndPassword: {
       enabled: true,
       requireEmailVerification: true,
       minPasswordLength: 8,
       maxPasswordLength: 128,
-      password: {
-        async hash(password: string) {
-          const passwordError = validatePassword(password)
-          if (passwordError) {
-            throw APIError.from('BAD_REQUEST', {
-              code: 'INVALID_PASSWORD',
-              message: passwordError,
-            })
-          }
-          return hashPassword(password)
-        },
-      },
       autoSignIn: false,
       revokeSessionsOnPasswordReset: true,
       sendResetPassword: async ({ user, url }) => {
@@ -521,7 +660,8 @@ export function createAuth(env: CloudflareEnv) {
       },
     },
     plugins: [
-      lastLoginMethod({ customResolveMethod: ctx => loginMethodForPath(ctx.path) }),
+      bearer(),
+      lastLoginMethod({ customResolveMethod: ctx => loginMethodForPath(ctx.path, ctx.body) }),
       jwt({
         // The plugin's default after-hook mints a fresh JWT on every
         // /get-session — reading the jwks row, decrypting the private key and
@@ -585,8 +725,6 @@ export function createAuth(env: CloudflareEnv) {
         // Required: @better-auth/cimd hands the network boundary to the
         // application. See server/utils/cimd-metadata-fetch.ts.
         fetchClientMetadataResource: fetchCimdMetadataResource,
-        onClientCreated: configureCimdTenantScopes,
-        onClientRefreshed: configureCimdTenantScopes,
       }),
       organization(configuredOrganizationOptions),
       betterAuthStripe({
@@ -613,12 +751,14 @@ export function createAuth(env: CloudflareEnv) {
         },
         // The plugin's own /api/auth/stripe/webhook handlers own the
         // `subscription` table, and Stripe's delivery retries are the retry
-        // mechanism. This hook adds analytics, Payments status alerts and Payments fees billing set-up; a throw here returns a
-        // non-2xx so Stripe redelivers the event.
+        // mechanism. This hook adds analytics, the billed counts each new
+        // subscription and period starts with, and fee report ingestion; a throw
+        // here returns a non-2xx so Stripe redelivers the event.
         onEvent: async (event) => {
           await handleStripeGa4Event(env, db, stripeClient, event)
-          await notifyPaymentsInvoiceEvent(db, stripeClient, env, event)
-          await setUpPaymentsBillingForSubscriptionEvent(db, stripeClient, env, event)
+          const { reportBillingUsageForSubscriptionEvent } = await import('~/server/utils/billing')
+          await reportBillingUsageForSubscriptionEvent(env, db, event)
+          await ingestStripeFeeReportEvent(db, stripeClient, env, event)
         },
       }),
       organizationDeletionCleanupPlugin(env),
@@ -627,7 +767,7 @@ export function createAuth(env: CloudflareEnv) {
         adminRoles: ['admin'],
         defaultRole: 'user',
         roles: platformAdminRoles,
-        impersonationSessionDuration: 60 * 60,
+        impersonationSessionDuration: 15 * 60,
       }),
       phoneNumber({
         sendOTP: async ({ phoneNumber: phone, code }) => {
@@ -644,7 +784,7 @@ export function createAuth(env: CloudflareEnv) {
         expiresIn: 300,
         phoneNumberValidator: async (phone) => {
           try {
-            parsePhoneOrThrow(phone, { defaultCountry: 'TH' })
+            parsePhoneOrThrow(phone)
             return true
           } catch {
             return false
@@ -724,6 +864,15 @@ export function createAuth(env: CloudflareEnv) {
       }),
     ],
     socialProviders: {
+      // The native app signs in with the identity token Sign in with Apple hands
+      // it. Better Auth verifies that token against Apple's keys with the app's
+      // bundle id as audience, so no client secret is involved and there is no
+      // web redirect flow. Apple is not a trusted linking provider: an existing
+      // account links it explicitly, and only with a verified email claim.
+      apple: {
+        clientId: env.APPLE_APP_BUNDLE_ID,
+        appBundleIdentifier: env.APPLE_APP_BUNDLE_ID,
+      },
       google: {
         clientId: env.GOOGLE_CLIENT_ID,
         clientSecret: env.GOOGLE_CLIENT_SECRET,
@@ -731,7 +880,7 @@ export function createAuth(env: CloudflareEnv) {
       },
       // Facebook Login for Business: a configuration id carries the Page
       // permissions and yields a system-user token that does not expire, so
-      // there is nothing to refresh. It is linked to a Krabiclaw user for Page
+      // there is nothing to refresh. It is linked to a KrabiClaw user for Page
       // access, never used to create one.
       facebook: {
         clientId: env.FACEBOOK_APP_ID ?? '',
@@ -743,6 +892,15 @@ export function createAuth(env: CloudflareEnv) {
         disableDefaultScope: true,
         disableSignUp: true,
       },
+      // Linked to a KrabiClaw user to choose where posts go, never used to
+      // create one. The `bot` scope adds the KrabiClaw bot, with these
+      // permissions, to the server the owner picks on Discord's consent screen.
+      discord: {
+        clientId: env.DISCORD_CLIENT_ID ?? '',
+        clientSecret: env.DISCORD_CLIENT_SECRET ?? '',
+        permissions: DISCORD_BOT_PERMISSIONS,
+        disableSignUp: true,
+      },
     },
     account: {
       // Integration tokens live on these rows; Better Auth encrypts them with
@@ -750,11 +908,11 @@ export function createAuth(env: CloudflareEnv) {
       encryptOAuthTokens: true,
       accountLinking: {
         enabled: true,
-        // Facebook and Instagram are linked only from an authenticated
+        // Facebook, Instagram and Discord are linked only from an authenticated
         // session, for Page and publishing access. Instagram returns no email
         // at all and a business's Facebook or Google account is rarely the
         // address its owner signs in with, so linking may not require one.
-        trustedProviders: ['google', 'facebook', 'instagram'],
+        trustedProviders: ['google', 'facebook', 'instagram', 'discord'],
         allowDifferentEmails: true,
       }
     }
@@ -769,13 +927,7 @@ export async function findVerifiedAuthUserByPhone(
   phoneNumber: string,
 ): Promise<{ id: string; phoneNumber: string; phoneNumberVerified: boolean } | null> {
   const context = await createAuth(env).$context
-  const adapter = context.adapter as unknown as {
-    findOne<T>(_input: {
-      model: string
-      where: Array<{ field: string; value: string | boolean }>
-    }): Promise<T | null>
-  }
-  return await adapter.findOne({
+  return await context.adapter.findOne({
     model: 'user',
     where: [
       { field: 'phoneNumber', value: phoneNumber },
@@ -784,11 +936,7 @@ export async function findVerifiedAuthUserByPhone(
   })
 }
 
-export interface AuthUserIdentity {
-  id: string
-  name: string | null
-  image: string | null
-}
+export type AuthUserIdentity = Pick<ReturnType<typeof createAuth>['$Infer']['Session']['user'], 'id' | 'name' | 'image'>
 
 // content_documents stores author_id as a plain
 // reference — that's fine, it's just a foreign-looking string, not a query.
@@ -800,15 +948,7 @@ export async function findAuthUsersByIds(env: CloudflareEnv, userIds: Array<stri
   if (uniqueIds.length === 0) return new Map()
 
   const context = await createAuth(env).$context
-  const adapter = context.adapter as unknown as {
-    findMany<T>(_input: {
-      model: string
-      where: Array<{ field: string; operator: string; value: string[] }>
-      select?: string[]
-      limit?: number
-    }): Promise<T[]>
-  }
-  const rows = await adapter.findMany<AuthUserIdentity>({
+  const rows = await context.adapter.findMany<AuthUserIdentity>({
     model: 'user',
     where: [{ field: 'id', operator: 'in', value: uniqueIds }],
     select: ['id', 'name', 'image'],
@@ -822,27 +962,25 @@ export async function findAuthUsersByIds(env: CloudflareEnv, userIds: Array<stri
  * organization names by `account_id`, the user it belongs to, and the scopes
  * Better Auth recorded across every link of it.
  */
-export interface LinkedAccount {
-  id: string
-  userId: string
-  providerId: string
-  /** The provider's own id for the person, which for Meta is app-scoped. */
-  providerAccountId: string
-  scopes: string[]
-}
+type LinkedAccount = Pick<Account, 'id' | 'userId' | 'providerId' | 'accountId' | 'scope'>
 
 /** Reads a linked account through Better Auth's adapter. Null when it has been unlinked. */
+/** Whose linked account a connection acts through: the provider identity's owner, by name and email. */
+export async function linkedAccountOwner(env: CloudflareEnv, accountId: string): Promise<{ email: string | null; name: string | null } | null> {
+  const account = await readLinkedAccount(env, accountId)
+  if (!account) return null
+  const context = await createAuth(env).$context
+  const user = await context.adapter.findOne<{ email: string | null; name: string | null }>({ model: 'user', where: [{ field: 'id', value: account.userId }], select: ['email', 'name'] })
+  return user ? { email: user.email, name: user.name } : null
+}
+
 export async function readLinkedAccount(env: CloudflareEnv, accountId: string): Promise<LinkedAccount | null> {
   const context = await createAuth(env).$context
-  const adapter = context.adapter as unknown as {
-    findOne<T>(_input: { model: string; where: Array<{ field: string; value: string }> }): Promise<T | null>
-  }
-  const row = await adapter.findOne<{ id: string; userId: string; providerId: string; accountId: string; scope: string | null }>({
+  return context.adapter.findOne<LinkedAccount>({
     model: 'account',
     where: [{ field: 'id', value: accountId }],
+    select: ['id', 'userId', 'providerId', 'accountId', 'scope'],
   })
-  if (!row) return null
-  return { id: row.id, userId: row.userId, providerId: row.providerId, providerAccountId: row.accountId, scopes: (row.scope ?? '').split(/[,\s]+/).filter(Boolean) }
 }
 
 /**
@@ -894,7 +1032,7 @@ export async function requireIntegrationAccount(
     || (account.userId !== expected.userId && account.id !== expected.currentAccountId)) {
     throw new HTTPError({ statusCode: 404, message: 'That account is not linked to you.' })
   }
-  const missing = expected.scopes.filter(scope => !account.scopes.includes(scope))
+  const missing = expected.scopes.filter(scope => !account.scope?.split(',').some(granted => granted.trim() === scope))
   if (missing.length) {
     throw new HTTPError({ statusCode: 403, message: `That account has not granted ${missing.join(', ')}. Connect it again.` })
   }
@@ -919,11 +1057,7 @@ export async function getAuthSession(event: H3Event, env: CloudflareEnv): Promis
 export async function ensureInteractionUser(event: H3Event, env: CloudflareEnv): Promise<string> {
   const session = await getAuthSession(event, env)
   if (session?.user) return session.user.id
-  // createAuth's cached instance is typed as bare betterAuth, which erases
-  // plugin endpoints from `api`; anonymous() registers this one.
-  const auth = createAuth(env) as unknown as {
-    api: { signInAnonymous: (input: { headers: Headers; returnHeaders: true }) => Promise<{ headers: Headers; response: { user?: { id?: string } } | null }> }
-  }
+  const auth = createAuth(env)
   const { headers, response } = await auth.api.signInAnonymous({
     headers: event.req.headers,
     returnHeaders: true,

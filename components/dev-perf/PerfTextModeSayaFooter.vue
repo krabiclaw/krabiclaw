@@ -10,13 +10,11 @@
           <h3>Static body</h3>
           <p>The Saya footer is the variable.</p>
         </main>
-        <LazySayaFooter
+        <LazyTenantFooter
           :organization="null"
-          :is-platform="false"
           :locations="[]"
           :error="null"
-          :has-products="false"
-          :has-bookable-products="false"
+          :sections="null"
         />
       </UTheme>
     </div>

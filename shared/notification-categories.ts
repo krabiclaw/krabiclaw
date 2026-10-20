@@ -15,6 +15,7 @@ export const NOTIFICATION_CATEGORIES = [
   'account_security',
   'reservations_bookings',
   'guest_messages',
+  'team_messages',
   'reviews',
   'review_requests',
   'organization_and_billing',
@@ -23,11 +24,12 @@ export const NOTIFICATION_CATEGORIES = [
 
 export type NotificationCategory = typeof NOTIFICATION_CATEGORIES[number]
 
-export type NotificationChannel = 'email' | 'whatsapp'
+export type NotificationChannel = 'email' | 'whatsapp' | 'push'
 
 export interface NotificationCategorySetting {
   email: boolean
   whatsapp: boolean
+  push: boolean
 }
 
 export function isNotificationCategory(value: unknown): value is NotificationCategory {
@@ -46,30 +48,56 @@ export function isMandatoryEmailCategory(category: NotificationCategory): boolea
   return (MANDATORY_EMAIL_CATEGORIES as readonly NotificationCategory[]).includes(category)
 }
 
+/**
+ * Team conversations live in the KrabiClaw app and reach a member only by
+ * push. Nothing sends them by email or WhatsApp, so those switches do not exist
+ * for these categories rather than being switches that do nothing.
+ */
+export const PUSH_ONLY_CATEGORIES = ['team_messages'] as const satisfies readonly NotificationCategory[]
+
+export function isPushOnlyCategory(category: NotificationCategory): boolean {
+  return (PUSH_ONLY_CATEGORIES as readonly NotificationCategory[]).includes(category)
+}
+
 export const NOTIFICATION_CATEGORY_DEFAULTS = {
-  account_security: { email: true, whatsapp: false },
-  reservations_bookings: { email: true, whatsapp: true },
-  guest_messages: { email: true, whatsapp: true },
-  reviews: { email: true, whatsapp: false },
-  review_requests: { email: true, whatsapp: false },
-  organization_and_billing: { email: true, whatsapp: false },
-  product_news: { email: true, whatsapp: false },
+  account_security: { email: true, whatsapp: false, push: false },
+  reservations_bookings: { email: true, whatsapp: true, push: true },
+  guest_messages: { email: true, whatsapp: true, push: true },
+  // Delivered by push only: a member's app is where team conversations live.
+  team_messages: { email: false, whatsapp: false, push: true },
+  reviews: { email: true, whatsapp: false, push: false },
+  review_requests: { email: true, whatsapp: false, push: false },
+  organization_and_billing: { email: true, whatsapp: false, push: false },
+  product_news: { email: true, whatsapp: false, push: false },
 } as const satisfies Record<NotificationCategory, NotificationCategorySetting>
 
 export const NOTIFICATION_CATEGORY_LABELS = {
   account_security: 'Account and security',
   reservations_bookings: 'Reservations and bookings',
   guest_messages: 'Guest messages',
+  team_messages: 'Team messages',
   reviews: 'New reviews',
   review_requests: 'Review requests',
   organization_and_billing: 'Organization and billing',
-  product_news: 'Krabiclaw news',
+  product_news: 'KrabiClaw news',
+} as const satisfies Record<NotificationCategory, string>
+
+export const NOTIFICATION_CATEGORY_ICONS = {
+  account_security: 'i-lucide-shield-check',
+  reservations_bookings: 'i-lucide-calendar-check',
+  guest_messages: 'i-lucide-message-circle',
+  team_messages: 'i-lucide-messages-square',
+  reviews: 'i-lucide-star',
+  review_requests: 'i-lucide-message-square-heart',
+  organization_and_billing: 'i-lucide-credit-card',
+  product_news: 'i-lucide-megaphone',
 } as const satisfies Record<NotificationCategory, string>
 
 /** The state a settings row previews, without restating the channel names twice. */
 export function describeNotificationSetting(setting: NotificationCategorySetting): string {
-  if (setting.email && setting.whatsapp) return 'Email and WhatsApp'
-  if (setting.email) return 'Email'
-  if (setting.whatsapp) return 'WhatsApp'
-  return 'Off'
+  const channels = ([['Email', setting.email], ['WhatsApp', setting.whatsapp], ['Push', setting.push]] as const)
+    .filter(([, enabled]) => enabled)
+    .map(([label]) => label)
+  if (channels.length === 0) return 'Off'
+  return channels.length === 1 ? channels[0]! : `${channels.slice(0, -1).join(', ')} and ${channels.at(-1)}`
 }

@@ -1,8 +1,8 @@
 <template>
   <div class="flex min-h-0 flex-col gap-6 py-6" :data-onboarding-step="step.id" data-onboarding-hydrated="true">
     <div class="flex flex-col gap-3">
-      <h1 class="text-2xl font-bold leading-snug text-highlighted">{{ step.title(state) }}</h1>
-      <p v-if="step.lede" class="text-[15px] leading-relaxed text-toned">{{ step.lede(state) }}</p>
+      <h1 :class="dashboardTitleClass">{{ step.title(state) }}</h1>
+      <p v-if="step.lede" class="text-base text-muted">{{ step.lede(state) }}</p>
     </div>
 
     <OnboardingChoiceGrid
@@ -12,33 +12,38 @@
       @update:model-value="choose(() => { state.vertical = $event as OrganizationVertical })"
     />
 
-    <GooglePlacePicker v-else-if="step.id === 'business'" v-model="businessSearch" @select="choosePlace">
-      <template #actions>
-        <UButton
-          v-if="businessSearch.trim()"
-          block
-          color="neutral"
-          variant="ghost"
-          icon="i-lucide-pencil"
-          class="justify-start border-t border-default"
-          label="Enter details manually"
-          @click="enterManually"
-        />
+    <OnboardingChoiceGrid
+      v-else-if="step.id === 'language'"
+      :choices="LANGUAGE_CHOICES"
+      :model-value="state.details.sourceLocale"
+      @update:model-value="choose(() => { state.details.sourceLocale = $event })"
+    />
+
+    <div v-else-if="step.id === 'business'" class="flex flex-col gap-3">
+      <template v-if="!googleImport">
+        <UFormField label="Name" required>
+          <UInput :model-value="state.details.name" class="w-full" autofocus @update:model-value="setManualName" />
+        </UFormField>
+        <UButton label="Import from Google Maps" variant="link" class="self-start" @click="googleImport = true" />
       </template>
-    </GooglePlacePicker>
+      <template v-else>
+        <GooglePlacePicker v-model="businessSearch" @select="choosePlace" />
+        <UButton label="Enter details manually" color="neutral" variant="ghost" class="self-start" @click="enterManually" />
+      </template>
+    </div>
 
     <IntakeDetailsCard
       v-else-if="step.id === 'location'"
       v-model:form="detailsForm"
       section="location"
-      :require-location-basics="true"
+      :require-location-basics="false"
     />
 
     <IntakeDetailsCard
       v-else-if="step.id === 'contact'"
       v-model:form="detailsForm"
       section="contact"
-      :require-location-basics="true"
+      :require-location-basics="false"
     />
 
     <!-- One control and nothing else to confirm, so the selection is the answer
@@ -56,13 +61,16 @@
 
     <OnboardingProductsCard v-else-if="step.id === 'products'" />
 
-    <DraftBrandCard v-else-if="step.id === 'look'" v-model:form="state.brand" section="look" :draft-id="state.draftId" />
+    <DraftBrandCard v-else-if="step.id === 'look'" v-model:form="state.brand" v-model:revision="state.draftRevision" section="look" :draft-id="state.draftId" />
 
     <OnboardingReviewCard v-else-if="step.id === 'review'" />
   </div>
 </template>
 
 <script setup lang="ts">
+import { dashboardTitleClass } from '~/lib/components/workspace/dashboard/dashboardPanelContext'
+import { PLATFORM_LOCALES } from '~/shared/platform-locales'
+const LANGUAGE_CHOICES = PLATFORM_LOCALES.map(locale => ({ value: locale.locale, label: locale.label, icon: 'i-lucide-languages' }))
 import IntakeDetailsCard from '~/lib/components/workspace/onboarding/IntakeDetailsCard.vue'
 import DraftBrandCard from '~/lib/components/workspace/onboarding/DraftBrandCard.vue'
 import LocationHoursCard from '~/lib/components/workspace/location/LocationHoursCard.vue'
@@ -77,9 +85,7 @@ import { singleTimezoneForCountry } from '~/utils/timezone'
 import type { OrganizationVertical } from '~/utils/vertical-copy'
 
 /**
- * One step of the flow, rendered. Both shells — the routed new-site flow and
- * the add-location column inside an existing site — draw their current step
- * with this, so a step looks and behaves the same in either.
+ * One step of the new-site flow, rendered.
  *
  * The screen owns the controls and nothing else: the shell owns the footer,
  * the server calls and where "next" goes.
@@ -106,20 +112,32 @@ function choose(answer: () => void) {
 // shows what the owner picked rather than an empty box. Both shells keep this
 // screen mounted across steps, so it is read each time the step is entered.
 const businessSearch = ref('')
+const googleImport = ref(false)
 watch(() => props.step.id, (id) => {
-  if (id === 'business') businessSearch.value = state.value.details.name
+  if (id === 'business') {
+    businessSearch.value = state.value.details.name
+    state.value.source ??= 'manual'
+  }
 }, { immediate: true })
 const { seedFromPlace } = useOnboardingDraft()
 
 function choosePlace(place: OnboardingPlacePreview) {
+  googleImport.value = false
   choose(() => seedFromPlace(place))
+}
+
+function setManualName(value: string | number | undefined) {
+  const previousName = state.value.details.name
+  state.value.details.name = String(value ?? '')
+  state.value.source = 'manual'
+  state.value.placeId = null
+  if (!state.value.brand.heroHeadline || state.value.brand.heroHeadline === previousName) state.value.brand.heroHeadline = state.value.details.name
 }
 
 function enterManually() {
   choose(() => {
-    state.value.source = 'manual'
-    state.value.placeId = null
-    state.value.details.name = businessSearch.value.trim()
+    googleImport.value = false
+    setManualName(businessSearch.value.trim())
   })
 }
 

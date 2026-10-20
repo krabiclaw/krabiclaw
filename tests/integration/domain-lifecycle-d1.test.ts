@@ -12,7 +12,7 @@ test('domain claims fence stale results and permanent subdomain reservations sur
     const db = await miniflare.getD1Database('DB')
     const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
     await db.batch(statements.map(statement => db.prepare(statement)))
-    await db.prepare("INSERT INTO organization(id,name,slug) VALUES('org','Org','org'),('other','Other','other'),('audit','Audit','audit')").run()
+    await db.prepare("INSERT INTO organization(id,name,slug, default_currency, timezone) VALUES('org','Org','org', 'USD', 'UTC'),('other','Other','other', 'USD', 'UTC'),('audit','Audit','audit', 'USD', 'UTC')").run()
     const env = { NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN: 'example.test', CF_ZONE_ID: 'zone', CF_CUSTOM_HOSTNAMES_API_TOKEN: 'test', CF_SAAS_CNAME_TARGET: 'target.example.test' }
     await createSystemSubdomain(env, db, 'org', 'first')
     await createSystemSubdomain(env, db, 'org', 'second')

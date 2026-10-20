@@ -1,6 +1,6 @@
 // POST /api/dashboard/google-places/autocomplete
-// The business picker's predictions, shared by new-site onboarding,
-// add-location and Settings → Google Maps. The API key stays on the server.
+// The business picker's predictions, shared by new-site onboarding and
+// Settings → Google Maps. The API key stays on the server.
 import { defineHandler } from 'nitro'
 import { readBody } from 'nitro/h3'
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'

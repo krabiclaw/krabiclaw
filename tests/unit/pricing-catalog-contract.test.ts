@@ -1,45 +1,88 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import type Stripe from 'stripe'
-import { assertStripeCatalogPrices, selectStripeCatalogPrice } from '../../server/utils/stripe-catalog.ts'
+import { assertStripeCatalogPrice, planSubscriptionItem, recurringPriceAmount, selectMeteredPrices, selectStripeCatalogPrice } from '../../server/utils/stripe-catalog.ts'
 import { PRICING_COMPARISON, comparisonValue } from '../../shared/pricing-comparison.ts'
 import { getPlanEntitlements } from '../../server/utils/billing-entitlements.ts'
 import { classifyStripePlanChange } from '../../shared/stripe-ga4.ts'
+import { additionalLocationPrice, assertNewSalePlan, BILLING_METER_KEYS, BILLING_METERS, PAYMENTS_FEE, planMeters, ratePercent } from '../../shared/billing-model.ts'
 import { renderPlansMarkdown } from '../../server/routes/pricing.md.get.ts'
 import type { Plan } from '../../server/utils/billing-plans.ts'
 
-const product = { id: 'prod-existing', metadata: { plan_id: 'growth', monthly_price_id: 'price-month', annual_price_id: 'price-year' } } as unknown as Stripe.Product
-const price = (id: string, interval: 'month' | 'year', amount: number) => ({
-  id, product: product.id, active: true, unit_amount: amount, currency: 'usd', recurring: { interval, interval_count: 1 }, lookup_key: null,
-}) as Stripe.Price
-const monthly = price('price-month', 'month', 4900)
-const annual = price('price-year', 'year', 58800)
+const product = { id: 'prod-existing', metadata: { plan_id: 'growth', monthly_price_id: 'price-month' } } as unknown as Stripe.Product
+// The canonical plan price as Stripe returns it: one flat monthly charge.
+const price = (id: string, amount: number, overrides: Record<string, unknown> = {}) => ({
+  id, product: product.id, active: true, unit_amount: amount, currency: 'usd', billing_scheme: 'per_unit', transform_quantity: null,
+  recurring: { interval: 'month', interval_count: 1, usage_type: 'licensed' }, lookup_key: null, ...overrides,
+}) as unknown as Stripe.Price
+const monthly = price('price-month', 4900)
 
-test('pricing resolves exact provider interval identities, never derives annual from monthly', () => {
-  assert.equal(selectStripeCatalogPrice(product, [monthly, annual], 'month')?.id, 'price-month')
-  assert.equal(selectStripeCatalogPrice(product, [monthly, annual], 'year')?.id, 'price-year')
-  assert.equal(selectStripeCatalogPrice(product, [monthly], 'year'), null)
-  assert.equal(selectStripeCatalogPrice(product, [annual], 'month'), null)
-  assertStripeCatalogPrices('growth', monthly, annual)
-})
-
-test('missing, wrong-currency and fabricated zero paid prices cannot become the current offer', () => {
-  assert.throws(() => assertStripeCatalogPrices('growth', null), /monthly price/)
-  assert.throws(() => assertStripeCatalogPrices('growth', { ...monthly, currency: 'eur' }), /monthly price/)
-  assert.throws(() => assertStripeCatalogPrices('growth', { ...monthly, unit_amount: 0 }), /monthly price/)
-  assert.throws(() => assertStripeCatalogPrices('growth', monthly, { ...annual, unit_amount: 4900 }), /annual price/)
-  assert.equal(selectStripeCatalogPrice(product, [{ ...monthly, unit_amount: 0 }], 'month'), null)
-})
-
-test('Commerce requires the approved USD 89 monthly offer and rejects an invented annual offer', () => {
-  const commerce = price('price-commerce-month', 'month', 8900)
-  assertStripeCatalogPrices('commerce', commerce)
-  for (const amount of [0, 4900, 9900, 14900]) {
-    assert.throws(() => assertStripeCatalogPrices('commerce', { ...commerce, unit_amount: amount }), /monthly price/)
+test('a plan is one flat monthly USD price; anything else cannot become the current offer', () => {
+  assert.equal(selectStripeCatalogPrice(product, [monthly])?.id, 'price-month')
+  assertStripeCatalogPrice('growth', monthly)
+  assertStripeCatalogPrice('business', price('price-business', 14900))
+  assert.throws(() => assertStripeCatalogPrice('growth', null), /flat USD 4900 cent monthly price/)
+  for (const wrong of [{ currency: 'eur' }, { unit_amount: 0 }, { unit_amount: 3900 }, { recurring: { interval: 'year', interval_count: 1, usage_type: 'licensed' } },
+    { recurring: { interval: 'month', interval_count: 1, usage_type: 'metered' } }, { billing_scheme: 'tiered', unit_amount: null }]) {
+    assert.throws(() => assertStripeCatalogPrice('growth', price('price-month', 4900, wrong)), /monthly price/)
   }
-  assert.throws(() => assertStripeCatalogPrices('commerce', { ...commerce, currency: 'eur' }), /monthly price/)
-  assert.throws(() => assertStripeCatalogPrices('commerce', commerce, price('price-commerce-year', 'year', 106800)), /no authorized annual price/)
-  assert.throws(() => assertStripeCatalogPrices('invented_plan', commerce), /Unknown paid plan/)
+  for (const amount of [0, 4900, 8900, 9900]) assert.throws(() => assertStripeCatalogPrice('business', price('price-business', amount)), /monthly price/)
+  for (const retired of ['commerce', 'marketing']) assert.throws(() => assertNewSalePlan(retired), /Unknown paid plan/)
+  assert.throws(() => assertStripeCatalogPrice('invented_plan', monthly), /Unknown paid plan/)
+  // The graduated per-location price the plans were sold at before is not the offer.
+  const graduated = price('price-graduated', 4900, { billing_scheme: 'tiered', unit_amount: null })
+  assert.equal(selectStripeCatalogPrice({ ...product, metadata: { plan_id: 'growth' } } as Stripe.Product, [graduated]), null)
+  assert.throws(() => selectStripeCatalogPrice(product, [graduated]), /invalid monthly_price_id/)
+})
+
+test('display rename preserves provider identities and metadata selects one canonical offer', () => {
+  assert.equal(selectStripeCatalogPrice({ ...product, name: 'Grow' }, [monthly, price('price-other', 4900)])?.id, monthly.id)
+  assert.throws(() => selectStripeCatalogPrice({ ...product, metadata: { plan_id: 'growth' } }, [monthly, price('price-other', 4900)]), /exactly one canonical/)
+})
+
+// Stripe's own phrasing for each metered price, and which plan carries it.
+test('locations and fees are metered prices in Stripe’s phrasing', () => {
+  assert.equal(additionalLocationPrice(), '$49 per additional location per month')
+  assert.equal(PAYMENTS_FEE, '1.4% of payment volume, plus Stripe fees')
+  assert.equal(ratePercent(0.014), '1.4')
+  assert.equal(ratePercent(0.1), '10')
+  assert.deepEqual(planMeters('growth'), ['locations'])
+  assert.deepEqual(planMeters('business'), ['locations', 'captured_volume', 'stripe_cost', 'ad_spend'])
+  assert.deepEqual(planMeters('free'), [])
+  assert.deepEqual(BILLING_METER_KEYS.map(key => BILLING_METERS[key].formula), ['last', 'sum', 'sum', 'sum'])
+})
+
+const meter = (key: string, overrides: Record<string, unknown> = {}) => ({
+  id: `mtr-${key}`, status: 'active', event_name: BILLING_METERS[key as keyof typeof BILLING_METERS].eventName,
+  default_aggregation: { formula: BILLING_METERS[key as keyof typeof BILLING_METERS].formula }, ...overrides,
+}) as unknown as Stripe.Billing.Meter
+const meteredProduct = (key: string) => ({ id: `prod-${key}`, active: true, metadata: { product_family: key, monthly_price_id: `price-${key}` } }) as unknown as Stripe.Product
+const meteredPrice = (key: string, overrides: Record<string, unknown> = {}) => {
+  const definition = BILLING_METERS[key as keyof typeof BILLING_METERS]
+  return {
+    id: `price-${key}`, product: `prod-${key}`, active: true, currency: 'usd',
+    recurring: { interval: 'month', interval_count: 1, usage_type: 'metered', meter: `mtr-${key}` },
+    ...('tiers' in definition
+      ? { billing_scheme: 'tiered', tiers_mode: 'graduated', unit_amount: null, tiers: definition.tiers.map(tier => ({ up_to: tier.up_to === 'inf' ? null : tier.up_to, unit_amount: tier.unit_amount, flat_amount: null })) }
+      : { billing_scheme: 'per_unit', unit_amount: null, unit_amount_decimal: Number(definition.unitAmountDecimal).toFixed(12) }),
+    ...overrides,
+  } as unknown as Stripe.Price
+}
+const catalog = () => ({
+  products: BILLING_METER_KEYS.map(meteredProduct),
+  prices: BILLING_METER_KEYS.map(key => meteredPrice(key)),
+  meters: BILLING_METER_KEYS.map(key => meter(key)),
+})
+
+test('each metered price must be the published one on its meter', () => {
+  assert.deepEqual(Object.fromEntries(Object.entries(selectMeteredPrices(catalog())).map(([key, row]) => [key, row.id])),
+    Object.fromEntries(BILLING_METER_KEYS.map(key => [key, `price-${key}`])))
+  const replace = (key: string, overrides: Record<string, unknown>) => ({ ...catalog(), prices: catalog().prices.map(row => row.id === `price-${key}` ? meteredPrice(key, overrides) : row) })
+  assert.throws(() => selectMeteredPrices({ ...catalog(), products: catalog().products.filter(row => row.id !== 'prod-locations') }), /0 active Additional location products/)
+  assert.throws(() => selectMeteredPrices(replace('locations', { tiers: [{ up_to: 2, unit_amount: 0, flat_amount: null }, { up_to: null, unit_amount: 8900, flat_amount: null }] })), /Additional location monthly on the krabiclaw_locations meter/)
+  assert.throws(() => selectMeteredPrices(replace('captured_volume', { unit_amount_decimal: '0.029' })), /Payments fee monthly/)
+  assert.throws(() => selectMeteredPrices(replace('stripe_cost', { recurring: { interval: 'month', interval_count: 1, usage_type: 'licensed', meter: null } })), /Stripe fees monthly/)
+  assert.throws(() => selectMeteredPrices({ ...catalog(), meters: catalog().meters.map(row => row.id === 'mtr-ad_spend' ? meter('ad_spend', { default_aggregation: { formula: 'last' } }) : row) }), /Managed ads monthly on the krabiclaw_ad_spend meter/)
 })
 
 test('Commerce inherits Growth capabilities and participates in native subscription transitions', () => {
@@ -57,12 +100,28 @@ test('Commerce inherits Growth capabilities and participates in native subscript
   assert.equal(classifyStripePlanChange('commerce', 'commerce', true), null)
 })
 
-test('display rename preserves provider identities and metadata selects one canonical offer', () => {
-  const renamed = { ...product, name: 'Grow' }
-  assert.equal(selectStripeCatalogPrice(renamed, [monthly, annual], 'month')?.id, monthly.id)
-  assert.equal(selectStripeCatalogPrice(renamed, [monthly, annual], 'year')?.id, annual.id)
-  const ambiguous = { ...product, metadata: { plan_id: 'growth' } }
-  assert.throws(() => selectStripeCatalogPrice(ambiguous, [monthly, price('price-other', 'month', 4900)], 'month'), /exactly one canonical/)
+test('Business combines payments and ad management while existing contracts retain their capabilities', () => {
+  const business = getPlanEntitlements('business')
+  const marketing = getPlanEntitlements('marketing')
+  const commerce = getPlanEntitlements('commerce')
+  for (const [capability, value] of Object.entries(marketing)) {
+    if (capability !== 'plan') assert.equal(business[capability], value)
+  }
+  assert.equal(business.payments, true)
+  assert.equal(business.marketing, true)
+  assert.equal(marketing.payments, true)
+  assert.equal(marketing.marketing, true)
+  assert.equal(commerce.payments, true)
+  assert.equal(commerce.marketing, false)
+  assert.equal(getPlanEntitlements('growth').marketing, false)
+  assert.equal(classifyStripePlanChange('commerce', 'business', true), 'upgrade')
+  assert.equal(classifyStripePlanChange('marketing', 'business', true), 'upgrade')
+  assert.equal(classifyStripePlanChange('marketing', 'growth', true), 'downgrade')
+  assert.equal(classifyStripePlanChange('business', 'growth', true), 'downgrade')
+  assert.equal(classifyStripePlanChange('business', 'free', true), 'downgrade')
+  const ads = PRICING_COMPARISON.flatMap(group => [...group.rows]).find(row => row.id === 'ads.google')!
+  assert.equal(comparisonValue(ads, 'commerce'), 'Not included')
+  assert.equal(comparisonValue(ads, 'business'), 'Included')
 })
 
 test('comparison rejects unknown capabilities and preserves current review-request policy', () => {
@@ -105,11 +164,44 @@ test('renderPlansMarkdown generates accurate, machine-readable markdown specific
   ]
 
   const md = renderPlansMarkdown(dummyPlans)
-  assert.ok(md.includes('# Krabiclaw Pricing & Plans'))
+  assert.ok(md.includes('# KrabiClaw Pricing & Plans'))
   assert.ok(md.includes('## Free'))
   assert.ok(md.includes('Free ($0/month)'))
   assert.ok(md.includes('## Growth'))
   assert.ok(md.includes('$49/month'))
   assert.ok(md.includes('Custom Domain: Included'))
   assert.ok(md.includes('Custom Domain: Not included'))
+  assert.ok(md.includes('- **Locations**: 2 included\n'))
+  assert.ok(md.includes('- **Locations**: 2 included, then $49 per additional location per month\n'))
+  const business = renderPlansMarkdown([{ ...dummyPlans[1]!, id: 'business', name: 'Business', prices: [{ id: 'p_business', amount: 14900, currency: 'usd', interval: 'month' }] }])
+  assert.ok(business.includes('$149/month'))
+  assert.ok(!business.includes('rental unit'))
+  assert.ok(business.includes('- **Payments fees**: 1.4% of payment volume, plus Stripe fees.\n'))
+  assert.ok(md.includes('- **Billing**: Additional locations and fees are billed on your subscription invoice at the end of each month.\n'))
+  assert.ok(!md.includes('Payments fees'))
+  assert.ok(md.includes('## Add-ons\n'))
+  assert.ok(md.includes('- **Managed ads**: 10% of monthly ad spend. Chris hand-manages'))
+  assert.ok(md.includes('- **SEO and marketing strategy**: $2,000 per month. Julia leads'))
+})
+
+
+test('the current contract charge uses its exact native price and quantity, including retired graduated prices', () => {
+  assert.equal(recurringPriceAmount(monthly, 1), 4900)
+  const graduated = price('price-graduated', 0, { billing_scheme: 'tiered', tiers_mode: 'graduated', unit_amount: null,
+    tiers: [{ up_to: 2, flat_amount: 4900, unit_amount: null }, { up_to: null, flat_amount: null, unit_amount: 4900 }] })
+  assert.equal(recurringPriceAmount(graduated, 2), 4900)
+  assert.equal(recurringPriceAmount(graduated, 5), 19600)
+  assert.throws(() => recurringPriceAmount(monthly, null), /quantity/)
+  assert.throws(() => recurringPriceAmount(monthly, -1), /quantity/)
+  assert.throws(() => recurringPriceAmount({ ...graduated, tiers: undefined }, 2), /billing scheme/)
+})
+
+test('a plan subscription has one plan item beside its metered and service items', () => {
+  const plan = { id: 'si-business', quantity: 1, price: { ...price('price-business', 14900), product: { id: 'prod-business', metadata: { plan_id: 'business' } } } }
+  const metered = { id: 'si-locations', price: { ...meteredPrice('locations'), product: meteredProduct('locations') } }
+  const strategy = { id: 'si-strategy', quantity: 1, price: { id: 'price-strategy', product: { id: 'prod-strategy', metadata: { product_family: 'services', service: 'strategy' } } } }
+  const subscription = (...items: unknown[]) => ({ id: 'sub-business', items: { data: items } }) as unknown as Stripe.Subscription
+  assert.equal(planSubscriptionItem(subscription(plan, metered, strategy)).id, 'si-business')
+  assert.throws(() => planSubscriptionItem(subscription(metered)), /exactly one plan price/)
+  assert.throws(() => planSubscriptionItem(subscription(plan, { ...plan, id: 'si-growth' })), /exactly one plan price/)
 })

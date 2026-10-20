@@ -4,6 +4,7 @@
    the dashboard, not the operating system setting. */
 @custom-variant dark (&:where(.dark, .dark *));
 @source "../../utils/form-constants.ts";
+@source "../../error.vue";
 @source "../../.nuxt/ui/carousel.ts";
 @source "../../.nuxt/ui/button.ts";
 /* Shared public booking fields use the same control themes as the CMS. */
@@ -33,15 +34,18 @@
   --font-jost: "Jost", sans-serif;
   --font-display: "Jost", sans-serif;
 
+  /* Tailwind's own sm, md, lg, xl and 2xl stand. These add names beside them;
+     redefining a standard one moved every `sm:` and `lg:` away from the 40rem
+     and 64rem that handwritten media queries and Nuxt UI's themes assume. */
   --breakpoint-xs: 375px;
-  --breakpoint-sm: 576px;
-  --breakpoint-md: 768px;
-  --breakpoint-lg: 992px;
+  /* Tailwind's own md and lg, restated only so they are always emitted: the
+     dashboard's script reads them (useDashboardBreakpoint), and Tailwind emits
+     a theme variable only when some CSS happens to use it. */
+  --breakpoint-md: 48rem;
+  --breakpoint-lg: 64rem;
   /* The public shell swaps between the desktop nav pill and the shared
      hamburger here; header, mobile nav and footer all key off it. */
   --breakpoint-nav: 1080px;
-  --breakpoint-xl: 1200px;
-  --breakpoint-2xl: 1366px;
   --breakpoint-3xl: 1600px;
 
   /* Control radius for the public shell (nav menu items, mobile rows,
@@ -87,6 +91,10 @@
 
 @theme inline {
   --color-on-primary: var(--primary-foreground);
+  /* The fill a shared component's call to action wears: the owner's action
+     colour on a site, monochrome on KrabiClaw's own pages. */
+  --color-action: var(--action);
+  --color-on-action: var(--action-foreground);
   --color-primary: var(--ui-primary);
   --color-secondary: var(--ui-secondary);
   --color-success: var(--ui-success);
@@ -121,17 +129,17 @@
   --divide-color-inverted: var(--ui-border-inverted);
 }
 
-/* ── Krabiclaw brand palette ──────────────────────────────── */
+/* ── KrabiClaw brand palette ──────────────────────────────── */
 :root {
-  /* Global type scaling belongs at the root so rem-based sizing stays predictable. */
-  font-size: 106%;
-
   /* Script fallbacks every font stack ends with. A site's chosen family draws
-     the characters it has; Thai falls through to these, and Japanese pages add
-     their own (assets/css/japanese-fonts.css). A face downloads only when a
-     page has text in its script. */
-  --font-script-sans: "Noto Sans Thai";
-  --font-script-serif: "Noto Serif Thai";
+     the characters it has; Thai and Vietnamese fall through to these, and
+     Japanese pages add their own (assets/css/japanese-fonts.css). A face
+     downloads only when a page has text in its script. @nuxt/fonts loads only
+     the first family a declaration names, so each script's face leads its own. */
+  --font-vietnamese-sans: "Noto Sans Display";
+  --font-vietnamese-serif: "Noto Serif Display";
+  --font-script-sans: "Noto Sans Thai", var(--font-vietnamese-sans);
+  --font-script-serif: "Noto Serif Thai", var(--font-vietnamese-serif);
 
   /* Form field boundary. WCAG 2.1 SC 1.4.11 wants 3:1 for the edge of a
      control, and the decorative --ui-border this shared input class used to
@@ -143,15 +151,14 @@
   --kc-navy-700:    #2C3360;
   --kc-navy-500:    #4A5380;
   --kc-navy-300:    #8C92B0;
-  --kc-coral:       var(--color-coral-500);
+  /* The coral sampled from the logo body, light and dark. Coral marks status
+     and selection; actions are monochrome (navy in light, white in dark). */
+  --kc-coral:       #EE4237;
+  --kc-coral-dark:  #FF614F;
   --kc-coral-600:   var(--color-coral-600);
   --kc-coral-400:   var(--color-coral-400);
   --kc-coral-200:   var(--color-coral-200);
   --kc-coral-50:    var(--color-coral-50);
-  /* The one platform CTA gradient. Five call sites hand-rolled this inline,
-     with three different shadow values, before it had a name. */
-  --kc-cta-gradient: linear-gradient(135deg, var(--kc-coral) 0%, #E0524C 100%);
-  --kc-cta-shadow:   0 4px 20px color-mix(in srgb, var(--kc-coral) 35%, transparent);
 
   --kc-teal:        var(--color-teal-500);
   --kc-teal-600:    var(--color-teal-600);
@@ -180,11 +187,12 @@
   );
 }
 
-/* ── Site palette (Saya and Blawby) ──────────────────────── */
+/* ── Site palette (Tenant themes: Saya and Blawby) ──────── */
 /* A public layout root carries the site's six colors per mode as
    --site-<role>-light/-dark (composables/usePublicSiteBrand.ts). This picks the
    mode, then derives every Nuxt UI token from those colors, so tints, borders
    and inverted bands follow whatever the owner chose. */
+.tenant-theme,
 .saya-theme,
 .blawby-theme {
   color-scheme: light;
@@ -200,6 +208,8 @@
   --ui-primary:          var(--site-action);
   --color-primary:       var(--site-action);
   --primary-foreground:  var(--site-on-action);
+  --action:              var(--site-action);
+  --action-foreground:   var(--site-on-action);
   --ui-secondary:        var(--site-accent);
   --ui-bg:               var(--site-ground);
   --ui-bg-elevated:      var(--site-surface);
@@ -216,6 +226,29 @@
   --ui-border-muted:     color-mix(in oklab, var(--site-text) 6%, var(--site-ground));
   --ui-border-accented:  color-mix(in oklab, var(--site-text) 22%, var(--site-ground));
   --ui-border-inverted:  color-mix(in oklab, var(--site-ground) 15%, var(--site-text));
+
+  /* Universal tenant & blawby tonal tokens */
+  --tenant-bg:            var(--site-ground);
+  --tenant-surface:       var(--site-surface);
+  --tenant-ink:           var(--site-text);
+  --tenant-primary:       var(--site-action);
+  --tenant-accent:        var(--site-accent);
+  --tenant-border:        var(--ui-border);
+
+  --blawby-bg:            var(--site-ground);
+  --blawby-surface:       var(--site-surface);
+  --blawby-ink:           var(--site-text);
+  --blawby-primary:       var(--site-action);
+  --blawby-primary-dark:  color-mix(in oklab, var(--site-action) 60%, black);
+  --blawby-primary-100:   color-mix(in oklab, var(--site-action) 6%, var(--site-ground));
+  --blawby-primary-200:   color-mix(in oklab, var(--site-action) 30%, var(--site-ground));
+  --blawby-primary-800:   color-mix(in oklab, var(--site-action) 85%, black);
+  --blawby-accent:        var(--site-accent);
+  --blawby-accent-100:    color-mix(in oklab, var(--site-accent) 10%, var(--site-ground));
+  --blawby-accent-200:    color-mix(in oklab, var(--site-accent) 18%, var(--site-ground));
+  --blawby-accent-strong: color-mix(in oklab, var(--site-accent) 80%, black);
+  --blawby-border:        var(--ui-border);
+
   /* Status colors are fixed, not owner colors, and dark enough to read as
      text on a light ground. */
   --ui-success:          #047857;
@@ -226,6 +259,7 @@
   color: var(--ui-text);
 }
 
+.dark .tenant-theme,
 .dark .saya-theme,
 .dark .blawby-theme {
   color-scheme: dark;
@@ -241,6 +275,15 @@
   --ui-info:        #60A5FA;
   --ui-warning:     #FBBF24;
   --ui-error:       #F87171;
+
+  --tenant-primary:       var(--site-text);
+  --blawby-primary:       var(--site-text);
+  --blawby-primary-dark:  color-mix(in oklab, var(--site-action-light) 60%, black);
+  --blawby-primary-800:   color-mix(in oklab, var(--site-action-light) 85%, black);
+  --blawby-accent-strong: color-mix(in oklab, var(--site-accent) 80%, white);
+  --blawby-primary-100:   color-mix(in oklab, var(--site-surface) 60%, var(--site-ground));
+  --blawby-accent-100:    color-mix(in oklab, var(--site-surface) 45%, var(--site-ground));
+  --blawby-accent-200:    color-mix(in oklab, var(--site-text) 7%, var(--site-surface));
 }
 
 /* ── Platform theme ───────────────────────────────────────── */
@@ -252,6 +295,10 @@
   --ui-primary:           var(--kc-coral);
 
   --primary-foreground:   #FFF;
+  /* Coral is a mark here, never a button: actions are navy on light and
+     white on dark, the inverted surface. */
+  --action:               var(--ui-bg-inverted);
+  --action-foreground:    var(--ui-text-inverted);
 
   --ui-secondary:         var(--kc-teal-600);
   --ui-success:           var(--kc-success);
@@ -286,7 +333,7 @@
 /* ── Platform theme dark mode ─────────────────────────────── */
 /*
    Rule: --kc-* brand palette variables are NEVER overridden for dark mode.
-   They represent absolute brand colours (navy = #1F2547, coral = #FB7461 …)
+   They represent absolute brand colours (navy = #1F2547, coral = #EE4237 …)
    used as backgrounds, borders AND text — overriding them cascades
    incorrectly into backgrounds. Only --ui-* semantic tokens are redefined.
 
@@ -298,13 +345,13 @@
    - text:        #EEF0F8  (warm cream-white, 16:1 on bg)
    - text-muted:  #9CA4C6  (blue-grey, 7:1 on bg)
    - text-dimmed: #6B7198  (muted, 4.8:1 on bg — eyebrows / captions)
-   - Coral, teal, yellow are unchanged — vibrant accents work on dark surfaces.
+   - primary:     --kc-coral-dark, the logo coral lifted for a dark ground.
 
    Hardcoded text-(--kc-navy) in templates must be changed to text-default
    individually — see index.vue. Do NOT override --kc-navy here.
 */
 .dark .platform-theme {
-  --ui-primary:           #FB7461;
+  --ui-primary:           var(--kc-coral-dark);
 
   --primary-foreground:   #F5F4FB;
 
@@ -366,7 +413,7 @@
   letter-spacing: -0.01em;
 }
 .kc-wordmark__krabi { color: var(--kc-navy); }
-.kc-wordmark__claw  { color: var(--kc-coral); }
+.kc-wordmark__claw  { color: var(--ui-primary); }
 .kc-wordmark__tld   { color: var(--kc-navy); font-size: 0.55em; vertical-align: top; margin-left: 1px; }
 /* Docs and blog carry a contextual word instead of the .com lock-up. */
 .kc-wordmark__suffix { color: var(--ui-text-muted); font-weight: 500; margin-left: 7px; }
@@ -471,9 +518,18 @@
   --tw-prose-invert-td-borders: var(--ui-border);
 }
 
+.blog-article .prose [id] {
+  scroll-margin-top: 7rem;
+}
+
 .prose code {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.prose code::before,
+.prose code::after {
+  content: none;
 }
 
 .prose table {
@@ -484,13 +540,18 @@
 }
 
 .prose :where(td, th) code {
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow-wrap: normal;
 }
 
 .prose th,
 .prose td {
-  word-break: break-word;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.prose th {
+  white-space: nowrap;
 }
 
 .gallery-dot {

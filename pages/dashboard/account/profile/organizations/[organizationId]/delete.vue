@@ -37,7 +37,7 @@ watchEffect(() => {
 })
 
 // Better Auth owns the deletion, its owner permission and the Stripe gate;
-// Krabiclaw contributes only its registered external-resource cleanup hook.
+// KrabiClaw contributes only its registered external-resource cleanup hook.
 // The organization deleted is the one this URL names, never the active one.
 async function deleteOrganization() {
   if (confirmText.value !== 'DELETE' || !canDelete.value) return
@@ -56,5 +56,5 @@ async function deleteOrganization() {
   }
 }
 
-useSeoMeta({ title: 'Delete organization | Krabiclaw', robots: 'noindex, nofollow' })
+useSeoMeta({ title: 'Delete organization | KrabiClaw', robots: 'noindex, nofollow' })
 </script>

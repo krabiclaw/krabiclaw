@@ -5,6 +5,7 @@ import { execute, executeBatch, queryAll, queryFirst, type BatchQuery } from '~/
 import { d1JsonStringSet } from '~/server/db/d1-limits'
 import { canonicalDomainForPair, domainPair, normalizeDomain } from '~/server/utils/domain-shared'
 import { organizationEventQuery } from '~/server/utils/organization-events'
+import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 
 export interface DomainEnv {
   CF_ZONE_ID?: string
@@ -103,7 +104,6 @@ interface CloudflareCustomHostname {
 const CF_API_BASE = 'https://api.cloudflare.com/client/v4'
 const MAX_RETRY_COUNT = 12
 const STUCK_AFTER_MS = 48 * 60 * 60 * 1000
-const DNS_QUERY_TIMEOUT_MS = 5_000
 
 const reservedDomains = [
   'app', 'api', 'admin', 'dashboard', 'login', 'signup',
@@ -154,7 +154,7 @@ export function validateCustomDomain(env: DomainEnv, domain: string): { valid: b
 
   for (const platformDomain of platformDomainCandidates(env)) {
     if (normalized === platformDomain || normalized.endsWith(`.${platformDomain}`)) {
-      return { valid: false, reason: 'This domain is reserved for Krabiclaw platform traffic' }
+      return { valid: false, reason: 'This domain is reserved for KrabiClaw platform traffic' }
     }
   }
 
@@ -201,6 +201,7 @@ export async function createSystemSubdomain(
   subdomain: string,
   options: {
     organizationUpdate?: { sql: string; values: unknown[] }
+    writeGuard?: BatchQuery
   } = {},
 ): Promise<DomainRecord> {
   const now = new Date().toISOString()
@@ -256,7 +257,7 @@ export async function createSystemSubdomain(
     stmts.push(options.organizationUpdate)
   }
 
-  await db.batch(stmts.map(s => db.prepare(s.sql).bind(...s.values)))
+  await executeBatch(db, [...(options.writeGuard ? [options.writeGuard] : []), ...stmts.map(s => ({ query: s.sql, params: s.values }))])
 
   return (await queryFirst<DomainRecord>(db, `SELECT * FROM organization_domains WHERE id = ?`, [id])) as DomainRecord
 }
@@ -277,7 +278,7 @@ async function cloudflareRequest<T>(
 
   const response = await fetch(`${CF_API_BASE}${path}`, {
     ...init,
-    signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
+    signal,
     headers: {
       Authorization: `Bearer ${env.CF_CUSTOM_HOSTNAMES_API_TOKEN}`,
       'Content-Type': 'application/json',
@@ -385,28 +386,17 @@ async function queryDnsJson(hostname: string, type: 'CNAME' | 'A' | 'AAAA', sign
   url.searchParams.set('name', hostname)
   url.searchParams.set('type', type)
 
-  const timeoutController = new AbortController()
-  const timeout = setTimeout(() => timeoutController.abort(), DNS_QUERY_TIMEOUT_MS)
-  const abort = () => timeoutController.abort()
-  if (signal?.aborted) abort()
-  signal?.addEventListener('abort', abort, { once: true })
-
-  try {
-    const response = await fetch(url, {
-      headers: { accept: 'application/dns-json' },
-      signal: timeoutController.signal,
-    })
-    if (!response.ok) throw new Error(`DNS ${type} lookup for ${hostname} failed (HTTP ${response.status})`)
-    const body = await response.json() as { Status?: number; Answer?: Array<{ type?: number; data?: string }> }
-    if (body.Status !== 0 && body.Status !== 3) throw new Error(`DNS ${type} lookup for ${hostname} failed (status ${body.Status})`)
-    return (body.Answer ?? [])
-      .filter(answer => answer.type === DNS_RECORD_TYPES[type])
-      .map((answer) => normalizeDnsValue(answer.data))
-      .filter(Boolean)
-  } finally {
-    clearTimeout(timeout)
-    signal?.removeEventListener('abort', abort)
-  }
+  const response = await fetch(url, {
+    headers: { accept: 'application/dns-json' },
+    signal,
+  })
+  if (!response.ok) throw new Error(`DNS ${type} lookup for ${hostname} failed (HTTP ${response.status})`)
+  const body = await response.json() as { Status?: number; Answer?: Array<{ type?: number; data?: string }> }
+  if (body.Status !== 0 && body.Status !== 3) throw new Error(`DNS ${type} lookup for ${hostname} failed (status ${body.Status})`)
+  return (body.Answer ?? [])
+    .filter(answer => answer.type === DNS_RECORD_TYPES[type])
+    .map((answer) => normalizeDnsValue(answer.data))
+    .filter(Boolean)
 }
 
 export interface DomainResolutionInspection {
@@ -1090,11 +1080,20 @@ export async function reconcileDueDomains(env: DomainEnv, db: D1Database, limit 
  * Null when the organization has no active canonical domain yet, which is a organization that
  * cannot be verified — the caller says so rather than guessing a host.
  */
-export async function organizationPublicUrl(db: D1Database, organizationId: string): Promise<string | null> {
-  const row = await queryFirst<{ domain: string }>(db, `
-    SELECT domain FROM organization_domains
-    WHERE organization_id = ? AND role = 'canonical' AND status = 'active'
+export async function organizationPublicUrl(env: DomainEnv, db: D1Database, organizationId: string): Promise<string | null> {
+  const row = await queryFirst<{ domain: string; subdomain: string | null }>(db, `
+    SELECT d.domain, o.subdomain FROM organization_domains d
+    JOIN organization o ON o.id = d.organization_id
+    WHERE d.organization_id = ? AND d.role = 'canonical' AND d.status = 'active'
     LIMIT 1
   `, [organizationId])
-  return row ? `https://${row.domain}/` : null
+  if (!row) return null
+  const origin = tenantOrganizationOrigin({
+    platformDomain: env.NUXT_PUBLIC_PLATFORM_DOMAIN ?? '',
+    freeOrganizationDomain: env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN ?? '',
+    subdomain: row.subdomain ?? '',
+    canonicalDomain: row.domain,
+  })
+  if (!origin) throw new Error('Active organization domain has no configured public origin')
+  return `${origin}/`
 }

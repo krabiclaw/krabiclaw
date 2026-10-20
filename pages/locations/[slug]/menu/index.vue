@@ -7,15 +7,15 @@ import ProductCollectionPage from '~/components/products/ProductCollectionPage.v
 import { isCurrencyCode } from '~/shared/currencies'
 import { presentationForSurface } from '~/utils/product-presentation'
 
-definePageMeta({ layout: 'saya' })
-const { isBlawby } = usePublicTemplate()
-if (isBlawby.value) throw createError({ statusCode: 404 })
+definePageMeta({ layout: 'tenant' })
 const { products, collections, locations, location, config, organization } = await usePublicPageData({ lazy: false })
 // What the merchant sells over the counter. Anything a guest books a seat on
 // is an Experience and has its own surface, so it is not listed twice.
 const goods = computed(() => products.value.filter(product => product.kind === 'dish'))
 const currentLocation = location.value
 if (!currentLocation) throw createError({ statusCode: 404 })
+// A section with nothing on it is not a page; the navigation hides it by the same flag.
+if (!currentLocation.sections.menu) throw createError({ statusCode: 404 })
 const brandName = organization.value?.name
 if (typeof brandName !== 'string' || brandName.trim().length === 0) throw createError({ statusCode: 500, statusMessage: 'Organization brand is unavailable' })
 const vertical = String(organization.value?.vertical ?? '')
@@ -32,7 +32,6 @@ useSocialMetadata(() => ({
   title: `${locationTitle} Menu`,
   description: `Full menu for ${locationTitle}.`,
   socialImage: location.value?.social_image ?? null,
-  brand: { organizationName: brandName },
   breadcrumbs: [
     { name: 'Locations', url: '/locations' },
     { name: locationTitle, url: `/locations/${encodeURIComponent(currentLocation.slug)}` },

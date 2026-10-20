@@ -2,8 +2,11 @@ import { z } from 'zod'
 import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { localDateBounds, parseAnalyticsRange } from '~/server/utils/analytics-calendar'
-import { addLocalDays, localDateAt, isValidTimezone } from '~/utils/timezone'
+import { addLocalDays, localDateAt } from '~/utils/timezone'
 import { CONVERSION_EVENT_CATALOG, ORGANIZATION_CONVERSION_EVENT_NAMES } from '~/utils/organization-conversion-events'
+import { readIntegration } from './organization-integrations'
+import { linkedAccountAccessToken, type CloudflareEnv } from './auth'
+import { getGoogleAdsPerformanceSummary } from './google-ads'
 
 import { analyticsReportSchema, type AnalyticsReport } from '~/shared/analytics-report'
 export type { AnalyticsReport } from '~/shared/analytics-report'
@@ -37,13 +40,12 @@ const OUTCOME_EVENT_SQL_LIST = eventList(definition => definition.outcome)
 const SERVER_DELIVERED_EVENT_SQL_LIST = eventList(definition => definition.ga4 !== null && definition.ga4Sender !== 'browser')
 
 export async function resolveOrganizationAnalyticsContext(db: DbClient, organizationId: string): Promise<OrganizationContext> {
-  const row = await queryFirst<{ organization_id: string; analytics_data_start_at: string | null; timezone: string | null }>(db, `
-    SELECT s.id AS organization_id, s.analytics_data_start_at, json_extract(s.settings_json, '$.config.default_timezone') AS timezone
+  const row = await queryFirst<{ organization_id: string; analytics_data_start_at: string | null; timezone: string }>(db, `
+    SELECT s.id AS organization_id, s.analytics_data_start_at, s.timezone
     FROM organization s
     WHERE s.id = ? LIMIT 1
   `, [organizationId])
   if (!row) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
-  if (!isValidTimezone(row.timezone)) throw new HTTPError({ statusCode: 422, statusMessage: 'Organization default_timezone is missing or invalid' })
   return {
     organizationId: row.organization_id,
     timezone: row.timezone,
@@ -303,7 +305,7 @@ function netByCurrency(valueRows: Array<Record<string, unknown>>) {
 
 export async function getAnalyticsReport(db: DbClient, input: {
   organizationId: string; startDate?: string; endDate?: string; now?: Date
-}): Promise<AnalyticsReport> {
+}, env?: CloudflareEnv): Promise<AnalyticsReport> {
   const now = input.now ?? new Date()
   const context = await resolveOrganizationAnalyticsContext(db, input.organizationId)
   const range = parseAnalyticsRange({ startDate: input.startDate, endDate: input.endDate, timeZone: context.timezone, now })
@@ -365,6 +367,48 @@ export async function getAnalyticsReport(db: DbClient, input: {
     return { value: value!, subvalue, views }
   }).sort((a, b) => b.views - a.views)
 
+  let adSpend: {
+    totalSpendMicros: number
+    clicks: number
+    impressions: number
+    conversions: number
+    costPerClickMicros: number
+    error?: string | null
+  } | undefined = undefined
+
+  if (env) {
+    try {
+      const integration = await readIntegration(db, input.organizationId, 'google_ads')
+      if (integration?.account_id && integration.target_id) {
+        const { accessToken } = await linkedAccountAccessToken(env, integration.account_id)
+        const summary = await getGoogleAdsPerformanceSummary(
+          accessToken,
+          env.GOOGLE_ADS_DEVELOPER_TOKEN,
+          integration.target_id,
+          range.startDate,
+          range.endDate,
+        )
+        adSpend = {
+          totalSpendMicros: summary.costMicros,
+          clicks: summary.clicks,
+          impressions: summary.impressions,
+          conversions: summary.conversions,
+          costPerClickMicros: summary.averageCpcMicros,
+          error: null,
+        }
+      }
+    } catch (error) {
+      adSpend = {
+        totalSpendMicros: 0,
+        clicks: 0,
+        impressions: 0,
+        conversions: 0,
+        costPerClickMicros: 0,
+        error: error instanceof Error ? error.message : String(error),
+      }
+    }
+  }
+
   return analyticsReportSchema.parse({
     period: { startDate: range.startDate, endDate: range.endDate, timezone: context.timezone, analyticsDataStartAt: context.analyticsDataStartAt },
     metrics: {
@@ -391,14 +435,14 @@ export async function getAnalyticsReport(db: DbClient, input: {
     }),
     referrers: dimensionRows('referrer').slice(0, 10).map(row => ({ source: row.value, views: row.views, percentOfTotal: percent(row.views) })),
     devices: dimensionRows('device').map(row => ({ type: row.value, views: row.views, percentOfTotal: percent(row.views) })),
+    ...(adSpend ? { adSpend } : {}),
   })
 }
 
 export async function aggregatePreviousLocalDateForAllOrganizations(db: DbClient, now = new Date()): Promise<string[]> {
-  const organizations = await queryAll<{ id: string; timezone: string | null }>(db, `SELECT s.id, json_extract(s.settings_json, '$.config.default_timezone') AS timezone FROM organization s WHERE s.status = 'active'`)
+  const organizations = await queryAll<{ id: string; timezone: string }>(db, `SELECT s.id, s.timezone FROM organization s WHERE s.status = 'active'`)
   const aggregated: string[] = []
   for (const organization of organizations) {
-    if (!isValidTimezone(organization.timezone)) throw new Error(`Organization ${organization.id} default_timezone is missing or invalid`)
     const timezone = organization.timezone
     const date = addLocalDays(localDateAt(now, timezone), -1)
     await aggregateOrganizationAnalyticsDate(db, organization.id, date)

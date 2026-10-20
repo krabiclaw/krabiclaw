@@ -46,7 +46,7 @@ test('every composed page carries the derived robots directive', () => {
     template: 'platform' as const,
     title: 'Pricing',
     canonicalUrl: 'https://krabiclaw.com/pricing',
-    brand: { organizationName: 'Krabiclaw' },
+    brand: { organizationName: 'KrabiClaw' },
   }
   assert.equal(composeSocialMetadata(base, null).robots, ROBOTS_ENABLED_DIRECTIVE)
   assert.equal(composeSocialMetadata({ ...base, discoverability: null }, null).robots, ROBOTS_ENABLED_DIRECTIVE)

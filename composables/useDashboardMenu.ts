@@ -4,12 +4,24 @@ import { authClient } from '~/lib/auth-client'
 import { useMediaQuery } from '@vueuse/core'
 
 /**
- * How many Cancel/Save footers are mounted. While one is, a leaf is open as a
- * sheet, and the phone's tab bar goes away under it. DashboardPanelFooter
- * counts itself in and out; the layout reads the count.
+ * Inline commit footers replace the phone's tab bar. A leaf drawer covers the
+ * existing shell instead, preserving the size and scroll of its parent.
  */
-export function useDashboardLeafFooters() {
-  return useState<number>('dashboard-leaf-footers', () => 0)
+export function useDashboardInlineFooters() {
+  return useState<number>('dashboard-inline-footers', () => 0)
+}
+
+/**
+ * Whether the window is at or above one of the theme's breakpoints, read from
+ * the same `--breakpoint-*` the `md:` and `lg:` variants compile from, so
+ * script and CSS cannot disagree about where a width begins.
+ */
+export function useDashboardBreakpoint(name: 'md' | 'lg') {
+  return useMediaQuery(() => {
+    const breakpoint = getComputedStyle(document.documentElement).getPropertyValue(`--breakpoint-${name}`).trim()
+    if (!breakpoint) throw createError({ statusCode: 500, statusMessage: `Dashboard breakpoint ${name} is not configured.`, fatal: true })
+    return `(min-width: ${breakpoint})`
+  })
 }
 
 /**
@@ -19,11 +31,7 @@ export function useDashboardLeafFooters() {
  * the two shells, so the redirect and the layout cannot disagree.
  */
 export function useDashboardPane() {
-  return useMediaQuery(() => {
-    const breakpoint = getComputedStyle(document.documentElement).getPropertyValue('--breakpoint-lg').trim()
-    if (!breakpoint) throw createError({ statusCode: 500, statusMessage: 'Dashboard pane breakpoint is not configured.', fatal: true })
-    return `(min-width: ${breakpoint})`
-  })
+  return useDashboardBreakpoint('lg')
 }
 
 export function useDashboardMenu() {
@@ -69,15 +77,15 @@ export function useDashboardMenu() {
   // several open the list under Account settings; none offers to start one.
   const switchRow = computed(() => {
     const organizations = (scopeHeaderModel?.value.peers ?? []).filter(peer => peer.id)
-    if (organizations.length === 1) return organizations[0]!.to ? { id: 'switch-organization', label: `Switch to ${organizations[0]!.label}`, to: organizations[0]!.to } : { id: 'switch-organization', label: `Switch to ${organizations[0]!.label}`, action: {} }
-    if (organizations.length > 1) return { id: 'switch-organization', label: 'Switch to an organization', to: '/dashboard/account/profile/organizations' }
-    return { id: 'switch-organization', label: 'New organization', to: '/dashboard/onboarding' }
+    if (organizations.length === 1) return organizations[0]!.to ? { id: 'switch-organization', icon: 'i-lucide-repeat-2', label: `Switch to ${organizations[0]!.label}`, to: organizations[0]!.to } : { id: 'switch-organization', icon: 'i-lucide-repeat-2', label: `Switch to ${organizations[0]!.label}`, action: {} }
+    if (organizations.length > 1) return { id: 'switch-organization', icon: 'i-lucide-repeat-2', label: 'Switch to an organization', to: '/dashboard/account/profile/organizations' }
+    return { id: 'switch-organization', icon: 'i-lucide-plus', label: 'New organization', to: '/dashboard/onboarding' }
   })
   const groups = computed<EditorNavigationGroup[]>(() => personal.value ? [{
     id: 'account', items: [
-      { id: 'account', label: 'Account settings', to: '/dashboard/account/profile' },
+      { id: 'account', icon: 'i-lucide-user-round-cog', label: 'Account settings', to: '/dashboard/account/profile' },
       switchRow.value,
-      { id: 'log-out', label: 'Log out', action: {} },
+      { id: 'log-out', icon: 'i-lucide-log-out', label: 'Log out', action: {} },
     ],
   }] : organizationSettings.groups.value)
   const activeItem = computed(() => organizationSettings.activeItem.value)

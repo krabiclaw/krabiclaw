@@ -14,7 +14,7 @@
         <h1 class="text-2xl font-semibold">Review not found</h1>
       </div>
 
-      <SayaReviewCard v-else :review="review" class="mt-12">
+      <TenantReviewCard v-else :review="review" class="mt-12">
         <div v-if="mediaItems.length" class="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
           <button
             v-for="(item, index) in mediaItems"
@@ -28,14 +28,14 @@
         </div>
 
         <div class="mt-6 flex flex-wrap items-center gap-3">
-          <SayaButton variant="soft" @click="markHelpful">
+          <TenantButton variant="soft" @click="markHelpful">
             Helpful / {{ helpfulCount }}
-          </SayaButton>
-          <SayaButton variant="outline" @click="shareReview">
+          </TenantButton>
+          <TenantButton variant="outline" @click="shareReview">
             Share
-          </SayaButton>
+          </TenantButton>
         </div>
-      </SayaReviewCard>
+      </TenantReviewCard>
     </section>
 
     <MediaLightbox v-model:open="lightboxOpen" v-model:index="lightboxIndex" :items="lightboxItems" :title="review?.title || 'Review media'" />
@@ -44,13 +44,12 @@
 
 <script setup lang="ts">
 const { localePath } = useI18n()
-definePageMeta({ layout: 'saya' })
+definePageMeta({ layout: 'tenant' })
 
 const route = useRoute()
 const requestEvent = useRequestEvent()
-const { organizationId, organization } = useTenantOrganization()
-if (!organizationId) throw createError({ statusCode: 404 })
-
+const { organization } = useTenantOrganization()
+const { id: organizationId } = organization
 const slug = computed(() => String(route.params.slug))
 const reviewId = computed(() => String(route.params.reviewId))
 
@@ -132,12 +131,9 @@ async function shareReview() {
 
 useSocialMetadata(() => ({
   path: `/locations/${slug.value}/reviews/${reviewId.value}`,
-  title: review.value ? `${review.value.rating}-star review from ${review.value.author_name || 'Guest'}` : 'Review',
+  title: review.value ? `${review.value.rating}-star review from ${review.value.author_name}` : 'Review',
   description: String(review.value?.content || '').slice(0, 150),
   socialImage: review.value?.social_image ?? null,
-  brand: {
-    organizationName: String(review.value?.organization_name || ''),
-  },
   breadcrumbs: [
     { name: 'Locations', url: '/locations' },
     { name: String(review.value?.location_title || slug.value), url: `/locations/${slug.value}` },
@@ -151,7 +147,7 @@ useSchemaOrg([
     if (!review.value) return {}
     return {
       '@type': 'Review',
-      author: { '@type': 'Person', name: review.value.author_name || 'Guest' },
+      author: { '@type': 'Person', name: review.value.author_name },
       reviewRating: { '@type': 'Rating', ratingValue: review.value.rating, bestRating: 5 },
       reviewBody: review.value.content,
       itemReviewed: {

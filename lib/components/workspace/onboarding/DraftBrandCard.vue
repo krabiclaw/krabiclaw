@@ -27,8 +27,8 @@
         <USelect :model-value="form.fontPreset ?? undefined" :items="fontItems" @update:model-value="value => form.fontPreset = value ?? null" value-key="value" label-key="label" class="w-full" placeholder="The template's own" :disabled="disabled" />
       </UFormField>
 
-      <div v-if="showBrand" class="rounded-xl border border-default bg-elevated p-3">
-        <p class="mb-2 text-[12px] font-bold text-highlighted">Logo</p>
+      <UCard v-if="showBrand" variant="subtle">
+        <p class="mb-2 text-xs font-bold text-highlighted">Logo</p>
         <div class="flex items-center gap-3">
           <button
             type="button"
@@ -70,10 +70,10 @@
             {{ shape.label }}
           </button>
         </div>
-      </div>
+      </UCard>
 
-      <div v-if="showHero" class="rounded-xl border border-default bg-elevated p-3">
-        <p class="mb-2 text-[12px] font-bold text-highlighted">Hero photo</p>
+      <UCard v-if="showHero" variant="subtle">
+        <p class="mb-2 text-xs font-bold text-highlighted">Hero photo</p>
         <button
           type="button"
           class="flex aspect-[16/9] w-full items-center justify-center overflow-hidden rounded-xl border border-default bg-default transition-colors hover:border-primary"
@@ -96,7 +96,7 @@
           {{ form.heroPreviewUrl ? 'Replace photo' : 'Upload photo' }}
         </UButton>
         <UInput ref="heroInput" type="file" accept="image/*" class="hidden" @change="event => uploadDraftImage(event, 'hero')" />
-      </div>
+      </UCard>
 
       <UFormField v-if="showHero" label="Hero headline" required>
         <UInput v-model="form.heroHeadline" class="w-full" placeholder="A clear promise guests remember" />
@@ -121,7 +121,6 @@
 
       <div v-if="actionLabel" class="grid gap-3">
         <UButton
-          color="primary"
           block
           :loading="loading"
           :disabled="disabled || activeUploadInProgress"
@@ -162,6 +161,7 @@ export type DraftBrandForm = {
 }
 
 const form = defineModel<DraftBrandForm>('form', { required: true })
+const revision = defineModel<string | null>('revision', { required: true })
 
 const props = defineProps<{
   /** Omitted when the surface around the card owns the commit control. */
@@ -205,15 +205,17 @@ async function uploadDraftImage(event: Event, target: 'logo' | 'hero') {
   else heroUploading.value = true
 
   try {
+    if (!revision.value) throw new Error('Reload your saved website draft before uploading.')
     const body = new FormData()
+    body.set('revision', revision.value)
     body.set('target', target)
     body.set('file', file)
-    const res = await applicationFetch<{ success: boolean; image?: DraftUploadedImage; error?: string; message?: string }>(
+    const res = await applicationFetch<{ success: boolean; image?: DraftUploadedImage; updatedAt?: string; error?: string; message?: string }>(
       `/api/dashboard/onboarding/drafts/${props.draftId}/media/upload`,
       {
         method: 'POST',
         body,
-        validate: (value): value is { success: boolean; image?: DraftUploadedImage; error?: string; message?: string } =>
+        validate: (value): value is { success: boolean; image?: DraftUploadedImage; updatedAt?: string; error?: string; message?: string } =>
           isRecord(value)
           && typeof value.success === 'boolean'
           && (value.image === undefined || (
@@ -224,7 +226,8 @@ async function uploadDraftImage(event: Event, target: 'logo' | 'hero') {
           )),
       },
     )
-    if (!res.success || !res.image) throw new Error(res.error || res.message || 'Upload failed.')
+    if (!res.success || !res.image || typeof res.updatedAt !== 'string') throw new Error(res.error || res.message || 'Upload failed.')
+    revision.value = res.updatedAt
 
     if (target === 'logo') {
       form.value.logoImage = res.image

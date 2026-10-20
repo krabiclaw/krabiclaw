@@ -1,3 +1,4 @@
+import { getSourceLocale } from '~/server/utils/organization-locales'
 import { mcpPageWindow } from '~/server/utils/mcp-pagination'
 import { HTTPError } from 'nitro';
 
@@ -5,7 +6,7 @@ import type { H3Event } from 'nitro'
 import { queryAll, queryFirst, type DbClient } from '~/server/db'
 import { getOrganizationEntitlements } from '~/server/utils/billing-access'
 import { listLocationQa } from '~/server/utils/location-qa'
-import { requireLocationAccess, requireOrganizationAccess } from '~/server/utils/location-access'
+import { requireLocationAccess, requireOrganizationAccess, requireProductAccess } from '~/server/utils/location-access'
 import {
   assertLocationAccess,
   assertResourceAccess,
@@ -37,7 +38,7 @@ export async function loadDashboardEditorContext(event: H3Event, organizationId:
   // requireOrganizationAccess(event, organizationId) has already
   // authorized this caller (location-access.ts), so asserting again here only
   // bought a second read of the same member row.
-  const [locationRows, entitlements] = await Promise.all([
+  const [locationRows, entitlements, sourceLocale] = await Promise.all([
     queryAll<EditorLocationRow>(db, `
       SELECT id, slug, title, status
         FROM business_locations
@@ -45,6 +46,7 @@ export async function loadDashboardEditorContext(event: H3Event, organizationId:
        ORDER BY title ASC
     `, [organization.id]),
     getOrganizationEntitlements(env, organization.id),
+    getSourceLocale(db, organization.id),
   ])
   const locations = locationRows
   if (typeof env.PREVIEW_SECRET !== 'string' || !env.PREVIEW_SECRET) {
@@ -55,6 +57,7 @@ export async function loadDashboardEditorContext(event: H3Event, organizationId:
   return {
     success: true as const,
     context: {
+      sourceLocale,
       organization: {
         id: organization.id,
         name: organization.name,
@@ -240,20 +243,17 @@ export async function loadDashboardBlogPost(
 export async function loadDashboardProduct(
   event: H3Event,
   organizationId: string,
-  locationId: string,
+  locationId: string | null,
   productId: string,
 ) {
-  const { db, organization } = await requireLocationAccess(event, organizationId, locationId)
+  const { db, organization } = await requireProductAccess(event, organizationId, productId)
   const product = await getProduct(db, organization.id, productId)
   // The catalog is organization-owned, so being offered here is what makes
   // this location's editor the right place to open it.
-  if (!product.locations.some(entry => entry.location_id === locationId)) {
+  if (locationId !== null && !product.locations.some(entry => entry.location_id === locationId)) {
     throw new HTTPError({ statusCode: 404, statusMessage: 'Product not found at this location' })
   }
-  // Media placements are site-scoped, and the editor shows the photograph the
-  // public page shows — the same hydration the location list does, so opening
-  // one product and listing them cannot disagree about its cover.
-  const [hydrated] = await hydrateProductMedia(db, organizationId, [product])
+  // Both editor scopes show the same organization-owned media as the catalog.
+  const [hydrated] = await hydrateProductMedia(db, organization.id, [product])
   return { success: true as const, product: hydrated! }
 }
-

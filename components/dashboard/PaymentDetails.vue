@@ -12,6 +12,7 @@
     <div class="mt-4">
       <p class="text-base font-medium text-highlighted">{{ amountLabel }}</p>
       <p class="mt-1 text-base text-muted">{{ paymentMoney(payment.captured_amount, payment.currency) }}</p>
+      <p v-if="payment.surcharge_amount" class="mt-1 text-base text-muted" data-payment-surcharge>Includes a {{ paymentMoney(payment.surcharge_amount, payment.currency) }} card surcharge</p>
     </div>
     <div v-if="payment.refunded_amount" class="mt-4">
       <p class="text-base font-medium text-highlighted">Refunded</p>
@@ -19,7 +20,7 @@
     </div>
     <div v-for="refund in shownRefunds" :key="refund.id" class="mt-4">
       <p class="text-base font-medium text-highlighted">{{ refundLabel(refund.status) }}</p>
-      <p class="mt-1 text-base text-muted">{{ paymentMoney(refund.amount, payment.currency) }}</p>
+      <p class="mt-1 text-base text-muted">{{ refund.amount === null ? 'Everything still held for this payment' : paymentMoney(refund.amount, payment.currency) }}</p>
       <p v-if="refund.note" class="mt-1 text-base text-muted">“{{ refund.note }}”</p>
     </div>
     <div class="mt-4">

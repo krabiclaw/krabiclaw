@@ -1,12 +1,16 @@
-import { assertCalendarDate, localNow, MINUTE_TIME_PATTERN, isValidTimezone } from '~/utils/timezone'
+import { assertCalendarDate, localNow, MINUTE_TIME_PATTERN } from '~/utils/timezone'
 import { HTTPError } from 'nitro'
 import { execute, queryFirst, type DbClient } from '~/server/db'
 import { isOrganizationFontPreset, resolveOrganizationFontPreset, type OrganizationFontPreset } from '~/shared/organization-fonts'
 import { parseSitePalette, type SitePalette } from '~/shared/site-palette'
+import { publicTenantVisibilitySql } from '~/server/utils/public-base'
 
 export interface OrganizationConfig {
   palette?: SitePalette
   font_preset?: OrganizationFontPreset
+  button_shape?: 'pill' | 'rounded' | 'sharp'
+  button_casing?: 'uppercase' | 'none'
+  heading_casing?: 'uppercase' | 'none'
   press_email?: string
   partnerships_email?: string
   catering_email?: string
@@ -17,7 +21,6 @@ export interface OrganizationConfig {
    * it is absent from WritableOrganizationConfigKey below.
    */
   google_analytics_measurement_id?: string
-  default_timezone?: string
 }
 
 /**
@@ -35,21 +38,41 @@ export const getConfig = async (
     SELECT json_extract(settings_json, '$.config.palette') AS palette,
            json_extract(settings_json, '$.config.font_preset') AS font_preset,
            json_type(settings_json, '$.config.font_preset') AS font_preset_type,
+           json_extract(settings_json, '$.config.button_shape') AS button_shape,
+           json_extract(settings_json, '$.config.button_casing') AS button_casing,
+           json_extract(settings_json, '$.config.heading_casing') AS heading_casing,
            json_extract(settings_json, '$.config.press_email') AS press_email,
            json_extract(settings_json, '$.config.partnerships_email') AS partnerships_email,
            json_extract(settings_json, '$.config.catering_email') AS catering_email,
            json_extract(settings_json, '$.config.careers_email') AS careers_email,
-           (SELECT i.measurement_id FROM organization_integrations i WHERE i.organization_id = organization.id AND i.provider = 'google_analytics') AS google_analytics_measurement_id,
-           json_extract(settings_json, '$.config.default_timezone') AS default_timezone
+           (SELECT i.measurement_id FROM organization_integrations i WHERE i.organization_id = organization.id AND i.provider = 'google_analytics') AS google_analytics_measurement_id
       FROM organization WHERE id = ?
   `, [organizationId])
   if (!row) throw new HTTPError({ statusCode: 404, statusMessage: 'Organization not found' })
   const config: OrganizationConfig = {}
-  for (const key of ["press_email","partnerships_email","catering_email","careers_email","google_analytics_measurement_id","default_timezone"] as const) {
+  for (const key of ["press_email","partnerships_email","catering_email","careers_email","google_analytics_measurement_id"] as const) {
     const value = row[key]
     if (value == null) continue
     if (typeof value !== 'string') throw new Error('Invalid stored site setting: ' + key)
     config[key] = value
+  }
+  if (row.button_shape != null) {
+    if (typeof row.button_shape !== 'string' || !['pill', 'rounded', 'sharp'].includes(row.button_shape)) {
+      throw new Error('Invalid stored site setting: button_shape')
+    }
+    config.button_shape = row.button_shape as OrganizationConfig['button_shape']
+  }
+  if (row.button_casing != null) {
+    if (typeof row.button_casing !== 'string' || !['uppercase', 'none'].includes(row.button_casing)) {
+      throw new Error('Invalid stored site setting: button_casing')
+    }
+    config.button_casing = row.button_casing as OrganizationConfig['button_casing']
+  }
+  if (row.heading_casing != null) {
+    if (typeof row.heading_casing !== 'string' || !['uppercase', 'none'].includes(row.heading_casing)) {
+      throw new Error('Invalid stored site setting: heading_casing')
+    }
+    config.heading_casing = row.heading_casing as OrganizationConfig['heading_casing']
   }
   // A missing optional setting preserves the template. An explicit null or an
   // unsupported stored value is not a valid preset.
@@ -63,10 +86,10 @@ export const resolveLocationTimezone = async (
   organizationId: string,
   locationId: string | null,
 ): Promise<string> => {
-  const location = await queryFirst<{ timezone: string | null }>(db,
+  const location = await queryFirst<{ timezone: string }>(db,
     'SELECT timezone FROM business_locations WHERE id = ? AND organization_id = ?',
     [locationId, organizationId])
-  if (!location?.timezone) throw new HTTPError({ statusCode: 409, statusMessage: 'Set the location timezone before offering bookings' })
+  if (!location) throw new HTTPError({ statusCode: 404, statusMessage: 'Location not found' })
   return location.timezone
 }
 
@@ -92,7 +115,9 @@ export const setConfig = async (
   value: string
 ) => {
   if (key === 'font_preset' && !isOrganizationFontPreset(value)) throw new HTTPError({ statusCode: 422, statusMessage: 'Unsupported organization font preset' })
-  if (key === 'default_timezone' && !isValidTimezone(value)) throw new HTTPError({ statusCode: 422, statusMessage: 'A valid analytics timezone is required' })
+  if (key === 'button_shape' && !['pill', 'rounded', 'sharp'].includes(value)) throw new HTTPError({ statusCode: 422, statusMessage: 'Unsupported button shape' })
+  if (key === 'button_casing' && !['uppercase', 'none'].includes(value)) throw new HTTPError({ statusCode: 422, statusMessage: 'Unsupported button casing' })
+  if (key === 'heading_casing' && !['uppercase', 'none'].includes(value)) throw new HTTPError({ statusCode: 422, statusMessage: 'Unsupported heading casing' })
   const result = await execute(
     db,
     `UPDATE organization SET settings_json = json_set(settings_json, ?, ?),
@@ -108,7 +133,6 @@ export const deleteConfig = async (
   organizationId: string,
   key: WritableOrganizationConfigKey
 ) => {
-  if (key === 'default_timezone') throw new HTTPError({ statusCode: 422, statusMessage: 'The analytics timezone cannot be removed' })
   const result = await execute(
     db,
     `UPDATE organization SET settings_json = json_remove(settings_json, ?),
@@ -120,7 +144,7 @@ export const deleteConfig = async (
 }
 
 /** Canonical public site settings and announcement, shared by API and SSR. */
-export async function getPublicConfig(db: DbClient, organizationId: string) {
+export async function getPublicConfig(db: DbClient, organizationId: string, options: { previewAuthorized?: boolean } = {}) {
   const organization = await queryFirst<{
     id: string
     default_currency: string
@@ -134,7 +158,7 @@ export async function getPublicConfig(db: DbClient, organizationId: string) {
       LEFT JOIN media_placements amp ON amp.organization_id = o.id AND amp.owner_type = 'organization'
         AND amp.owner_id = o.id AND amp.slot = 'announcement' AND amp.sort_order = 0 AND amp.status = 'active'
       LEFT JOIN media_assets ama ON ama.id = amp.asset_id AND ama.status = 'active'
-     WHERE o.id = ? AND o.status = 'active' AND o.onboarding_status = 'active'
+     WHERE o.id = ? AND ${publicTenantVisibilitySql('o', options.previewAuthorized)}
      LIMIT 1
   `, [organizationId])
 
@@ -148,6 +172,7 @@ export async function getPublicConfig(db: DbClient, organizationId: string) {
         cta_label: parsedAnnouncement.cta_label ?? null,
         cta_url: parsedAnnouncement.cta_url ?? null,
         dismissible: parsedAnnouncement.dismissible ?? true,
+        format: parsedAnnouncement.format === 'banner' ? 'banner' : 'modal',
         image_url: organization.announcement_public_url,
       }
     : null

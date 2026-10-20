@@ -8,6 +8,12 @@ import { devLoginHeaders, E2E_POTTERY_ORGANIZATION_ID as org, potteryHouseTestEx
 
 type Created = { success: boolean; operational_booking_id: string; request_id: string; status: string; replayed: boolean; code?: string }
 
+// The local Worker inherits the runner's real provider bindings; Playwright
+// supplies its localhost platform URL. CI may supply the complete TEST setup.
+const paymentsProviderConfigured = ['STRIPE_SECRET_KEY', 'STRIPE_PAYMENTS_METHOD_CONFIGURATION', 'NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY']
+  .every(name => Boolean(process.env[name]))
+const missingProviderConfiguration = paymentsProviderConfigured ? [] : ['payments.configuration']
+
 test('MCP Product booking uses public capacity, durable replay, guest identity and canonical inbox transitions', async ({ page, request, baseURL }, testInfo) => {
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Writes and log-only delivery require isolated local D1')
   const release = await acquireTenantMutationLock(testInfo, org)
@@ -67,7 +73,12 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       const replay = await call<Created>('create_product_booking', args)
       expect(replay.replayed).toBe(true)
       expect(replay.operational_booking_id).toBe(created.operational_booking_id)
-      const conflicting = await call<Created>('create_product_booking', { ...args, guest_name: 'Different Guest' })
+      const conflictResponse = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'create_product_booking', args: { organization_id: org, ...args, guest_name: 'Different Guest' } })
+      expect(conflictResponse.status()).toBe(200)
+      const conflictResult = (await conflictResponse.json()).result
+      expect(conflictResult.isError).toBe(true)
+      expect(conflictResult.structuredContent).toBeUndefined()
+      const conflicting = JSON.parse(conflictResult.content[0].text) as Created
       expect(conflicting.success).toBe(false)
       expect(conflicting.code).toBe('idempotency_conflict')
       const afterClaim = await call<{ sessions: Array<{ id: string; remaining: number | null }> }>('list_product_booking_sessions', { product_id: product, from, to })
@@ -146,9 +157,18 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       const beforePaymentPolicy = await request.get(editor)
       expect(beforePaymentPolicy.status()).toBe(200)
       const payLaterPolicy = (await beforePaymentPolicy.json()).product.booking as ProductBookingConfig
+      const billing = await request.get(`${baseURL}/api/billing/status?organizationId=${org}`)
+      expect(billing.status(), await billing.text()).toBe(200)
+      expect((await billing.json()).billing).toMatchObject({ plan: 'growth', subscriptionStatus: 'active' })
+      const usage = await request.get(`${baseURL}/api/dashboard/payments/billing?org=${encodeURIComponent(orgSlug)}`)
+      expect(usage.status(), await usage.text()).toBe(200)
+      expect((await usage.json()).configured).toBe(false)
+      expect((await call<{ configured: boolean }>('get_payment_payouts', {})).configured).toBe(false)
       const paymentPolicy = await request.put(`${editor}/booking`, { data: { duration_minutes: 120, default_capacity: 8, confirmation_mode: 'instant', online_payment_required: true } })
-      expect(paymentPolicy.status()).toBe(403)
-      expect((await paymentPolicy.json()).message).toBe('Commerce is required to collect online payment for paid sessions')
+      expect(paymentPolicy.status(), await paymentPolicy.text()).toBe(paymentsProviderConfigured ? 403 : 503)
+      const paymentError = await paymentPolicy.json()
+      expect(paymentError.message).toBe('Complete the business’s Payments setup before accepting online payments')
+      expect(paymentError.data).toEqual({ code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(orgSlug)}/payments`, missing: ['payments.entitlement', ...missingProviderConfiguration, 'payments.account'] })
       const rejectedPolicyReadback = await request.get(editor)
       expect(rejectedPolicyReadback.status()).toBe(200)
       expect((await rejectedPolicyReadback.json()).product.booking).toEqual(payLaterPolicy)
@@ -157,7 +177,7 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       ids.push(instant.operational_booking_id)
       expect(instant.success).toBe(true)
       expect(instant.status).toBe('confirmed')
-      const publicResponse = await request.post(`${baseURL}/api/public/products/pottery-wheel-class/book`, { headers: potteryHouseTestExtraHeaders(), data: { guest_name: 'Public Guest', guest_email: args.guest_email, session_id: available[2]!.id, party_size: 1 } })
+      const publicResponse = await request.post(`${baseURL}/api/public/products/pottery-wheel-class/book`, { headers: potteryHouseTestExtraHeaders(), data: { guest_name: 'Public Guest', guest_email: args.guest_email, session_id: available[2]!.id, party_size: 1, idempotency_key: crypto.randomUUID() } })
       expect(publicResponse.status(), await publicResponse.text()).toBe(201)
       const publicCreated = await publicResponse.json() as Created
       ids.push(publicCreated.operational_booking_id)
@@ -181,85 +201,75 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
   }
 })
 
-test('MCP online-payment booking returns an incomplete dashboard handoff through the endpoint without consuming capacity or creating payment or unpaid booking records', async ({ page, request, baseURL }, testInfo) => {
-  test.setTimeout(90_000)
+test('MCP online collection returns the real Payments setup handoff without changing the offering or creating a payment', async ({ request, baseURL }, testInfo) => {
   test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Write verification requires isolated local D1')
   const organizationId = MCP_ORGANIZATION_ID
   const release = await acquireTenantMutationLock(testInfo, organizationId)
   let productId: string | null = null
   try {
     await loginAs(request, baseURL!, 'user-e2e-demo-owner')
-    await loginAs(page.request, baseURL!, 'user-e2e-demo-owner')
     const call = async <T>(toolName: string, args: Record<string, unknown> = {}) => {
       const response = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName, args: { organization_id: organizationId, ...args } })
       expect(response.status(), await response.text()).toBe(200)
       return mcpData<T>(await response.json())
     }
     const context = await call<{ context: { organization_slug: string } }>('get_organization')
-    const created = await call<{ product: { id: string; slug: string; variants: Array<{ id: string }> } }>('create_product', {
-      kind: 'service', name: `Paid appointment ${crypto.randomUUID()}`, variants: [{ name: 'Appointment', prices: [{ unit_amount: 10000, currency: 'USD' }] }],
+    const billing = await request.get(`${baseURL}/api/billing/status?organizationId=${organizationId}`)
+    expect(billing.status(), await billing.text()).toBe(200)
+    expect((await billing.json()).billing).toMatchObject({ plan: 'business', subscriptionStatus: 'active' })
+    const usage = await request.get(`${baseURL}/api/dashboard/payments/billing?org=${encodeURIComponent(context.context.organization_slug)}`)
+    expect(usage.status(), await usage.text()).toBe(200)
+    // Business's subscription carries the fee prices, read from Stripe; what is missing is the business's own Stripe account.
+    expect(await usage.json()).toMatchObject({ configured: true, source: 'Stripe', pricing: { captured_volume_rate_percent: '1.4', ad_spend_rate_percent: '10', livemode: false } })
+    expect((await call<{ configured: boolean }>('get_payment_payouts')).configured).toBe(false)
+    const created = await call<{ product: { id: string } }>('create_product', {
+      kind: 'service', name: `Paid appointment ${crypto.randomUUID()}`, idempotency_key: crypto.randomUUID(),
+      variants: [{ name: 'Appointment', prices: [{ unit_amount: 10000, currency: 'USD' }] }],
     })
     productId = created.product.id
     const editor = `${baseURL}/api/editor/organizations/${organizationId}/products/${productId}`
-    const tomorrow = new Date(Date.now() + 86400000)
-    const through = new Date(Date.now() + 8 * 86400000)
-    for (const [url, data] of [
-      [`${editor}/booking`, { duration_minutes: 60, default_capacity: 2, confirmation_mode: 'review', online_timezone: 'UTC', online_payment_required: true }],
-      [`${editor}/availability`, { location_id: null, slots: [{ weekday: tomorrow.getUTCDay(), start_time: '14:00' }] }],
-      [`${editor}/publication`, { published: true }],
-    ] as const) {
-      const response = await request.put(url, { data })
-      expect(response.status(), await response.text()).toBe(200)
-    }
-    const generated = await request.post(`${editor}/sessions/generate`, { data: { through: through.toISOString().slice(0, 10) } })
-    expect(generated.status(), await generated.text()).toBe(200)
-    const period = { from: tomorrow.toISOString(), to: through.toISOString() }
-    const sessions = await call<{ sessions: Array<{ id: string; remaining: number; is_full: boolean }> }>('list_product_booking_sessions', { product_id: productId, ...period })
-    const session = sessions.sessions.find(row => !row.is_full && row.remaining === 2)
-    expect(session).toBeTruthy()
-    const config = (await call<{ product: { booking: ProductBookingConfig } }>('get_product', { product_id: productId })).product.booking
-    expect(config.online_payment_required).toBe(true)
-    const financialPeriod = { from: '2000-01-01T00:00:00.000Z', to: through.toISOString() }
-    const readPayments = async () => {
-      const rows: unknown[] = []
-      let after: string | undefined
-      do {
-        const result = await call<{ payments: unknown[]; next_cursor: string | null }>('list_payments', { ...financialPeriod, ...(after ? { after } : {}) })
-        rows.push(...result.payments)
-        after = result.next_cursor ?? undefined
-      } while (after)
-      return rows
-    }
-    const payments = await readPayments()
-    const args = { product_slug: created.product.slug, session_id: session!.id, variant_id: created.product.variants[0]!.id, party_size: 1, guest_name: 'Online Payment Guest', guest_email: 'demo-owner@playwright.example', source: 'operator', guest_acknowledgement: true, idempotency_key: crypto.randomUUID() }
-    const dashboardUrl = `${baseURL}/dashboard/${encodeURIComponent(context.context.organization_slug)}/products/${encodeURIComponent(productId)}/booking`
+    const beforeResponse = await request.get(editor)
+    expect(beforeResponse.status()).toBe(200)
+    const before = (await beforeResponse.json()).product
+    const period = { from: new Date(Date.now() - 86400000).toISOString(), to: new Date(Date.now() + 8 * 86400000).toISOString() }
+    const payments = await call('list_payments', period)
+    const dashboardUrl = `${baseURL}/dashboard/${encodeURIComponent(context.context.organization_slug)}/payments`
     for (let retry = 0; retry < 2; retry++) {
-      const response = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'create_product_booking', args: { organization_id: organizationId, ...args } })
+      const response = await mcpRequest(request, baseURL!, {
+        method: 'tools/call', toolName: 'set_product_booking_config',
+        args: { organization_id: organizationId, product_id: productId, duration_minutes: 60, default_capacity: 2, online_payment_required: true },
+      })
       expect(response.status(), await response.text()).toBe(200)
       const result = (await response.json()).result
       expect(result.isError).toBe(true)
-      expect(result.structuredContent).toEqual({ success: false, operation_completed: false, action_required: true, code: 'financial_action_required', dashboard_url: dashboardUrl })
+      expect(result.structuredContent).toBeUndefined()
+      expect(JSON.parse(result.content[0].text)).toMatchObject({ status: paymentsProviderConfigured ? 409 : 503, success: false, operation_completed: false, action_required: true, code: 'financial_action_required', dashboard_url: dashboardUrl, missing: [...missingProviderConfiguration, 'payments.account'] })
       expect(result.content[0].text).toContain(dashboardUrl)
     }
-    expect((await call<{ sessions: unknown[] }>('list_product_booking_sessions', { product_id: productId, ...period })).sessions).toEqual(sessions.sessions)
-    expect(await readPayments()).toEqual(payments)
     const stored = await request.get(editor)
-    expect(stored.status(), await stored.text()).toBe(200)
-    expect((await stored.json()).product.booking).toEqual(config)
-    let cursor: string | undefined
-    do {
-      const listed = await call<{ bookings: Array<{ product_id: string }>; page_info: { next_cursor: string | null } }>('list_product_bookings', { limit: 100, ...(cursor ? { cursor } : {}) })
-      expect(listed.bookings.filter(row => row.product_id === productId)).toHaveLength(0)
-      cursor = listed.page_info.next_cursor ?? undefined
-    } while (cursor)
-    await page.goto(dashboardUrl)
-    await expect(page.getByRole('link', { name: 'Payment Online payment required for paid sessions', exact: true })).toBeVisible()
+    expect(stored.status()).toBe(200)
+    expect((await stored.json()).product).toEqual(before)
+    expect(await call('list_payments', period)).toEqual(payments)
+    const sessionsResponse = await mcpRequest(request, baseURL!, {
+      method: 'tools/call', toolName: 'list_product_booking_sessions',
+      args: { organization_id: organizationId, product_id: productId, ...period },
+    })
+    expect(sessionsResponse.status(), await sessionsResponse.text()).toBe(200)
+    const sessionsResult = (await sessionsResponse.json()).result
+    expect(sessionsResult.isError).toBe(true)
+    expect(sessionsResult.structuredContent).toBeUndefined()
+    expect(JSON.parse(sessionsResult.content[0].text)).toEqual({ status: 404, message: 'This product does not take bookings' })
+    const bookings = await call<{ bookings: Array<{ product_id: string }> }>('list_product_bookings', { product_id: productId })
+    expect(bookings.bookings).toEqual([])
   } finally {
-    if (productId) {
-      const removed = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'delete_product', args: { organization_id: organizationId, product_id: productId } })
-      expect(removed.status(), await removed.text()).toBe(200)
-      expect(mcpData<{ deleted: boolean }>(await removed.json()).deleted).toBe(true)
+    try {
+      if (productId) {
+        const removed = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'delete_product', args: { organization_id: organizationId, product_id: productId } })
+        expect(removed.status(), await removed.text()).toBe(200)
+        expect(mcpData<{ deleted: boolean }>(await removed.json()).deleted).toBe(true)
+      }
+    } finally {
+      await release()
     }
-    await release()
   }
 })
