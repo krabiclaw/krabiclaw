@@ -372,7 +372,7 @@ test('the business search API refuses what the picker would never send', async (
   expect(detailsMalformed.status(), await detailsMalformed.text()).toBe(400)
 })
 
-// Ember & Slice is on a paid plan with the 2 included locations in use. A paid
+// Ember & Slice is on Business with the 2 included locations in use. A paid
 // plan refuses no location: a third is made by the createLocation every surface
 // shares, counted in the plan's usage, and billed at the end of the period.
 test('a paid plan adds a location past the included ones and counts it', async ({ page, baseURL }) => {
@@ -383,7 +383,7 @@ test('a paid plan adds a location past the included ones and counts it', async (
     return (await response.json() as { billing: { plan: string; usage: { locations: number } } }).billing
   }
   const before = await status()
-  expect(before.plan).not.toBe('free')
+  expect(before.plan).toBe('business')
   expect(before.usage.locations).toBe(2)
 
   // The new location's own level walks its sections; nothing asks to extend the plan first.
