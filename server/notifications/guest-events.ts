@@ -1,5 +1,6 @@
 import type { NotificationFact, NotificationMessage } from './messages'
 import { platformLocale } from '~/shared/platform-locales'
+import { formatPhone } from '~/utils/phone'
 
 /**
  * Guest-facing and account mail. Email only: a guest has no account, no
@@ -111,7 +112,7 @@ function guestVisitFacts(input: GuestBookingInput): NotificationFact[] {
 }
 
 function contactSection(input: GuestBookingInput) {
-  const details = [input.contactPhone, input.contactEmail].filter(Boolean).join(' · ')
+  const details = [input.contactPhone && formatPhone(input.contactPhone), input.contactEmail].filter(Boolean).join(' · ')
   return details
     ? [{ title: guestLocale(input).messages['site.contact_page.contact_us']!, body: details }]
     : []

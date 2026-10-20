@@ -28,6 +28,7 @@ import { parseOpeningHours, parseSpecialHours, type OpeningHours, type SpecialHo
 import type { Ref } from 'vue'
 import type { LocationReservationConfig, LocationReservationConfigPatch } from '~/server/utils/reservations'
 import { getErrorMessage } from '~/utils/errors'
+import { toE164 } from '~/utils/phone'
 import { postalAddressFromAnswers, type PostalAddress } from '~/utils/postal-address'
 
 
@@ -310,6 +311,7 @@ export async function useLocationEditor(organizationId: string, locationId: Ref<
   const validationMessage = computed(() => {
     if (key === 'name' && !detailsForm.title.trim()) return 'Enter a location name.'
     if (key === 'contact') {
+      if (detailsForm.phone && !toE164(detailsForm.phone)) return 'Enter a valid phone number and choose its country.'
       if (detailsForm.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(detailsForm.email)) return 'Enter a valid email address.'
     }
     if (key === 'hours') {

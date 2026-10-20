@@ -30,8 +30,8 @@
           <TenantIcon name="share" class="mr-1.5 size-4" />
           {{ t(justCopied ? 'social_posts.link_copied' : 'social_posts.share') }}
         </TenantButton>
-        <TenantButton v-if="confirmation.contactPhone" :href="`tel:${confirmation.contactPhone.replace(/\s/g, '')}`" variant="outline">
-          {{ copy.callUsLabel(confirmation.contactPhone) }}
+        <TenantButton v-if="confirmation.contactPhone" :href="`tel:${confirmation.contactPhone}`" variant="outline">
+          {{ copy.callUsLabel(formatPhone(confirmation.contactPhone)) }}
         </TenantButton>
         <TenantButton v-if="confirmation.cancelUrl" :to="confirmation.cancelUrl" color="error" variant="ghost">
           {{ t('site.experience_cancel.title') }}
@@ -50,6 +50,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatPhone } from '~/utils/phone'
 import { loadBookingConfirmation, type BookingConfirmation as BookingConfirmationData } from '~/composables/useBookingHandoff'
 import BookingConfirmation from '~/components/booking/BookingConfirmation.vue'
 import { formatTimestamp } from '~/utils/timezone'

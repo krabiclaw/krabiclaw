@@ -56,6 +56,9 @@
             {{ bookingError }}
           </p>
           <BookingContactForm
+            v-model="contactForm"
+           
+            :default-country="defaultPhoneCountry"
             :loading="submitting"
             :submit-text="paymentRequired ? t('payment.continue_to_pay') : confirmationMode === 'review' ? t('booking.request_appointment') : t('site.experience_detail.confirm_booking')"
             @submit="submitBooking"
@@ -72,7 +75,7 @@ import { formatTime } from '~/utils/timezone'
 import { PUBLIC_BOOKING_WINDOW_DAYS } from '~/shared/bookings'
 // A paid booking is not confirmed in the dialog: the guest goes on to pay, so the button says so.
 const props = defineProps<{ controller: SessionBookingController; confirmationMode: 'instant' | 'review'; paymentRequired: boolean }>()
-const { bookingStep, sellableVariants, selectedVariantId, variantPriceLabel, sessionsPending,
+const { bookingStep, contactForm, defaultPhoneCountry, sellableVariants, selectedVariantId, variantPriceLabel, sessionsPending,
   availabilityDates, referenceDate, timeSelection, partySize, showPartySize, allowTimezoneSelection, guestTimezone, bookingTimezone, timezoneOptions, guestsMax, bookingError, submitting, submitBooking } = props.controller
 const { t, locale } = useI18n()
 const variantGroup = useId()

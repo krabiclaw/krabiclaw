@@ -302,6 +302,10 @@ runtime paths rather than recreating their individual steps manually.
 
 ## Marketing execution
 
+For feature launches, blogs and social distribution, read
+`.agents/skills/krabiclaw-publishing/SKILL.md` before publishing. It covers
+content selection, writer handoffs, SEO research plans, and authorized distribution.
+
 For KrabiClaw marketing videos, use `.agents/skills/krabiclaw-marketing/SKILL.md`.
 Product facts and voice remain in `docs/marketing/product-profile.md`.
 

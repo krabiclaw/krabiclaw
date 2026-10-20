@@ -31,7 +31,7 @@
           <div v-for="loc in formattedLocations" :key="loc.id">
             <div class="tenant-display text-xl font-normal leading-none text-highlighted">{{ loc.title }}</div>
             <div class="mt-2 text-sm leading-relaxed text-muted">{{ formatLocAddress(loc) }}</div>
-            <div v-if="loc.phone" class="mt-1 text-sm text-muted">{{ loc.phone }}</div>
+            <div v-if="loc.phone" class="mt-1 text-sm text-muted">{{ formatPhone(loc.phone) }}</div>
             <div v-if="loc.hoursToday" class="mt-2 text-xs text-highlighted/40">{{ loc.hoursToday }}</div>
             <NuxtLink
               :to="localePath(locationLink(loc))"
@@ -60,6 +60,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatPhone } from '~/utils/phone'
 import type { PublicPageLink, PublicCompliance } from '~/types/public-site'
 import type { PublicShellPayload } from '~/utils/public-resource-contracts'
 import { catalogNavigation, publicLocationPath } from '~/utils/product-presentation'

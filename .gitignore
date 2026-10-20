@@ -40,6 +40,9 @@ pr_body.txt
 /.agents/skills/krabiclaw-marketing/*
 !/.agents/skills/krabiclaw-marketing/SKILL.md
 !/.agents/skills/write-help-docs/
+!/.agents/skills/krabiclaw-publishing/
+/.agents/skills/krabiclaw-publishing/*
+!/.agents/skills/krabiclaw-publishing/SKILL.md
 /.claude/worktrees/
 .codex/*
 !.codex/config.toml

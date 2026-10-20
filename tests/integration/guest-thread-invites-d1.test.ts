@@ -51,7 +51,7 @@ test('a host invites a phone-only guest into their conversation and replies reac
       kind: 'stay', name: 'Cabin', variants: [{ name: 'Cabin', prices: [{ unit_amount: 15_000, currency: 'USD' }] }],
       stay: { location_id: 'cabin-site', check_in_time: '16:00', check_out_time: '10:00', max_guests: 4, min_nights: 1, assigned_member_id: null, assigned_team_id: null },
     } })
-    const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(3), check_out_date: day(5), adults: 1, guest_name: 'Dee', guest_phone: '+15557770000', total_minor: 30_000 })
+    const dee = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'dee', check_in_date: day(3), check_out_date: day(5), adults: 1, guest_name: 'Dee', guest_phone: '+61491570151', total_minor: 30_000 })
     const deeThread = dee.request_id!
     const tokenOf = (url: string) => new URL(url).pathname.replace('/guest-invite/', '')
     const holders = (requestId: string) => db.prepare('SELECT r.user_id AS request_user, s.user_id AS stay_user FROM requests r JOIN stays s ON s.request_id = r.id WHERE r.id = ?').bind(requestId).first()
@@ -135,7 +135,7 @@ test('a host invites a phone-only guest into their conversation and replies reac
     // A guest who lost their anonymous session is invited again and the new
     // account takes the conversation from that identity; a link left open when
     // a named account took it meanwhile is refused to anyone else.
-    const fay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'fay', check_in_date: day(10), check_out_date: day(12), adults: 1, guest_name: 'Fay', guest_phone: '+15558880000', total_minor: 30_000 })
+    const fay = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'fay', check_in_date: day(10), check_out_date: day(12), adults: 1, guest_name: 'Fay', guest_phone: '+61491570152', total_minor: 30_000 })
     const fayThread = fay.request_id!
     await claimGuestThreadInvite(db, { token: tokenOf((await createGuestThreadInvite(db, env, { organizationId: ORG, threadId: fayThread, actorUserId: OWNER })).url), userId: 'anon-c' })
     const again = tokenOf((await createGuestThreadInvite(db, env, { organizationId: ORG, threadId: fayThread, actorUserId: OWNER })).url)
@@ -146,7 +146,7 @@ test('a host invites a phone-only guest into their conversation and replies reac
     assert.deepEqual(await holders(fayThread), { request_user: 'dana', stay_user: 'dana' })
     assert.deepEqual(await claimGuestThreadInvite(db, { token: again, userId: 'dana' }), { thread_id: fayThread, path: `/dashboard/account/messages/${fayThread}` })
 
-    const gus = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'gus', check_in_date: day(20), check_out_date: day(22), adults: 1, guest_name: 'Gus', guest_phone: '+15559990000', total_minor: 30_000 })
+    const gus = await createStay(db, env, manager, { product_id: cabin.id, idempotency_key: 'gus', check_in_date: day(20), check_out_date: day(22), adults: 1, guest_name: 'Gus', guest_phone: '+61491570153', total_minor: 30_000 })
     await claimGuestThreadInvite(db, { token: tokenOf((await createGuestThreadInvite(db, env, { organizationId: ORG, threadId: gus.request_id!, actorUserId: OWNER })).url), userId: 'anon-c' })
     const regain = tokenOf((await createGuestThreadInvite(db, env, { organizationId: ORG, threadId: gus.request_id!, actorUserId: OWNER })).url)
     assert.deepEqual(await claimGuestThreadInvite(db, { token: regain, userId: 'bob' }), { thread_id: gus.request_id, path: `/dashboard/account/messages/${gus.request_id}` })

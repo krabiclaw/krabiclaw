@@ -51,7 +51,7 @@
               <tr v-if="!weekHours.length">
                 <td colspan="2" class="py-4 text-sm text-muted">
                   {{ t('site.location.contact_us_for_hours') }}
-                  <a v-if="location.phone" :href="`tel:${location.phone}`" class="ml-2 text-default underline-offset-2 hover:underline">{{ location.phone }}</a>
+                  <a v-if="location.phone" :href="`tel:${location.phone}`" class="ml-2 text-default underline-offset-2 hover:underline">{{ formatPhone(location.phone) }}</a>
                 </td>
               </tr>
             </tbody>
@@ -112,7 +112,7 @@
           <div v-if="location.phone || location.email" class="mt-7 grid grid-cols-2 gap-6 border-t border-default pt-7">
             <div v-if="location.phone">
               <p class="tenant-eyebrow mb-2 text-muted">{{ t('site.location.phone') }}</p>
-              <a :href="`tel:${location.phone}`" class="border-b border-default pb-0.5 text-sm text-default no-underline hover:opacity-70">{{ location.phone }}</a>
+              <a :href="`tel:${location.phone}`" class="border-b border-default pb-0.5 text-sm text-default no-underline hover:opacity-70">{{ formatPhone(location.phone) }}</a>
             </div>
             <div v-if="location.email">
               <p class="tenant-eyebrow mb-2 text-muted">{{ t('site.location.email') }}</p>
@@ -169,6 +169,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatPhone } from '~/utils/phone'
 import { formatOpeningHours, getIsOpenNow } from '~/utils/formatters'
 import { getTodayHoursLabel, schemaOpeningHours } from '~/shared/reservation-hours'
 import { addressPlaceName, formatPostalAddress, schemaPostalAddress, type PostalAddress } from '~/utils/postal-address'
