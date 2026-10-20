@@ -47,7 +47,7 @@ export function renderPlansMarkdown(plans: Plan[]): string {
   }
 
   lines.push('## Add-ons')
-  lines.push('Services from KrabiClaw\'s own people, added to a paid plan from Payments → Plan → Services.')
+  lines.push('Services from KrabiClaw\'s own people, added to a paid plan from Plan and billing.')
   for (const service of [SERVICES.managed_ads, SERVICES.strategy]) {
     lines.push(`- **${service.name}**: ${service.price}. ${service.description} ${service.billing}`)
   }

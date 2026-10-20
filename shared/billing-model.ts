@@ -62,6 +62,14 @@ export function additionalLocationPrice(): string {
 /** The fee as the pricing page and the plan screen state it. */
 export const PAYMENTS_FEE = `${ratePercent(PAYMENTS_FEE_RATE)}% of payment volume, plus Stripe fees`
 
+/** What Business adds to Growth, each with its one line: what an upgrade gains and a change to Growth ends. */
+export const BUSINESS_ADDITIONS = Object.freeze([
+  { id: 'payments', label: 'Online payments and direct stay booking', summary: PAYMENTS_FEE },
+  { id: 'google-ads', label: 'Google Ads campaigns', summary: 'Create, clone and budget search campaigns; results in Insights' },
+  { id: 'ios', label: 'The iOS app', summary: 'For your whole team' },
+  { id: 'messaging', label: 'Guest messaging and arrival guides', summary: 'Scheduled check-in and checkout messages' },
+] as const)
+
 /**
  * What a plan subscription bills beside its flat price, each a Stripe meter
  * and the monthly metered price that bills it at the end of the period:
@@ -123,7 +131,7 @@ export function planMeters(planId: string): BillingMeterKey[] {
 /**
  * The services as they are offered everywhere — the pricing page and its
  * Markdown, the plan screen, Insights and Today — each turned on and off only
- * in Payments → Plan → Services.
+ * in Plan and billing.
  */
 export const SERVICES = Object.freeze({
   managed_ads: Object.freeze({

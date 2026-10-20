@@ -45,7 +45,7 @@ daily `ad_spend` usage events for businesses with managed ads on.
 - **Today** — the connected account's last 7 complete days (spend, clicks,
   conversions), linking to that range in Insights.
 - **ChatGPT / MCP** — the five `*_google_ads_*` tools above, for Business.
-- **Payments → Plan → Services** — managed ads consent; the daily task reads
+- **Plan and billing → Managed ads** — managed ads consent; the daily task reads
   spend only for days the agreement was on.
 
 ## Basic access application
