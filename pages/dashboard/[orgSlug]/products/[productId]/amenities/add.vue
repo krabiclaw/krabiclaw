@@ -7,7 +7,7 @@
     save-label="Done"
     :error="p.loadError.value || p.saveError.value || ''"
     @cancel="p.revert"
-    @save="p.save(level.to.value ?? undefined)"
+    @save="save"
   >
     <template #right>
       <UButton v-if="searching" label="Cancel" aria-label="Cancel search" color="neutral" variant="soft" :disabled="p.saving.value" @click="cancelSearch" />
@@ -66,7 +66,11 @@ definePageMeta({ layout: 'dashboard' })
 
 const p = inject(productEditorKey)!
 const level = useRouteLevel()
-const activeGroup = ref('all')
+const route = useRoute()
+const router = useRouter()
+const initialGroup = route.query.amenity_group
+if (initialGroup !== undefined && (typeof initialGroup !== 'string' || !Object.hasOwn(STAY_AMENITY_GROUPS, initialGroup))) throw createError({ statusCode: 400, statusMessage: 'Unknown amenity category' })
+const activeGroup = ref(initialGroup ?? 'all')
 const searching = ref(false)
 const query = ref('')
 const groupItems = [
@@ -98,6 +102,12 @@ function cancelSearch() {
   query.value = ''
   activeGroup.value = 'all'
   searching.value = false
+}
+
+async function save() {
+  const query = { ...route.query }
+  delete query.amenity_group
+  await p.save(level.to.value ? router.resolve({ path: router.resolve(level.to.value).path, query }).fullPath : undefined)
 }
 
 onBeforeRouteLeave(() => { p.revert() })

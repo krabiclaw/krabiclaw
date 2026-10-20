@@ -138,14 +138,15 @@ import type { StayAmenity, StayCancellationPolicy, StayListingType, StayLongTerm
 import type { DashboardLocation } from '~/composables/useDashboardOrganization'
 import type { GalleryMediaItem } from '~/components/dashboard/DashboardMediaGalleryField.vue'
 import type { StayArrivalGuide, StayArrivalField } from '~/shared/stay-arrival'
+import type { StaySafetySection } from '~/shared/stay-safety'
 
 export const SECTION_KEYS = [
   'photo', 'kind', 'name', 'price', 'description', 'page', 'options', 'order-url', 'attributes', 'publication', 'booking', 'locations', 'collections',
-  'stay', 'guests', 'availability', 'arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'house-rules', 'checkout-instructions', 'arrival-guide', 'property-type', 'rooms', 'amenities', 'cancellation', 'team',
+  'stay', 'guests', 'availability', 'arrival-time', 'directions', 'check-in-method', 'wifi', 'house-manual', 'house-rules', 'checkout-instructions', 'arrival-guide', 'property-type', 'rooms', 'amenities', 'cancellation', 'team', 'guest-safety',
 ] as const
 export type SectionKey = typeof SECTION_KEYS[number]
 export type BookingConcern = 'enabled' | 'duration' | 'capacity' | 'confirmation' | 'payment' | 'location' | 'assignment' | number
-export type ProductConcern = BookingConcern | 'publication-visibility' | 'publication-availability' | 'house-rules' | 'additional-rules' | 'arrival-time'
+export type ProductConcern = BookingConcern | 'publication-visibility' | 'publication-availability' | 'house-rules' | 'additional-rules' | 'arrival-time' | StaySafetySection
 
 /** Where the product is offered and shown, per location, as its Locations leaf edits it. */
 export interface ProductLocationDraft { active: boolean; published: boolean }
@@ -288,7 +289,7 @@ export interface ProductEditor {
   slotsFor: (weekday: number) => ScheduleSlotDraft[]
   addSlot: (weekday: number) => void
   removeSlot: (slot: ScheduleSlotDraft) => void
-  revert: (concern?: 'additional-rules' | 'arrival-time') => void
+  revert: (concern?: 'additional-rules' | 'arrival-time' | StaySafetySection) => void
   /**
    * Commit the draft, then close the open leaf. A leaf nested below a section
    * (one option, one combination's price) names its own parent, so the save
@@ -312,6 +313,7 @@ import EditorNavigationList, { type EditorNavigationGroup } from '~/components/d
 import DashboardResourceLocalization from '~/components/dashboard/DashboardResourceLocalization.vue'
 import type { ProductDetailField, ProductDetailValue, ProductKind } from '~/shared/product-details'
 import { productDetailFields, PRODUCT_KINDS, PRODUCT_KIND_LABELS, assertProductKind, productDetailKey, PRICING_NOTE_HANDLE, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, stayHouseRuleLines } from '~/shared/product-details'
+import { STAY_SAFETY_DETAIL_KEYS, STAY_SAFETY_SECTIONS, staySafetyLines, staySafetySectionKeys } from '~/shared/stay-safety'
 import { isCurrencyCode } from '~/shared/currencies'
 import { majorAmountToMinor, minorAmountToMajor, selectPrice, type Price } from '~/shared/prices'
 import { formatProductMoney } from '~/utils/product-money'
@@ -405,6 +407,7 @@ const sectionLabels: Record<SectionKey, string> = {
   'wifi': 'Wifi details',
   'house-manual': 'House manual',
   'house-rules': 'House rules',
+  'guest-safety': 'Guest safety',
   'checkout-instructions': 'Checkout instructions',
   'arrival-guide': 'Arrival guide',
   'property-type': 'Property type',
@@ -600,6 +603,10 @@ const photoAssets = computed(() => product.value ? uniqueMediaAssets([...(produc
 const stayPhotos = computed(() => photoAssets.value.map(mediaStillUrl).filter((url): url is string => Boolean(url)))
 const stayAmenityPreview = computed(() => (product.value?.stay?.amenities ?? []).map(code => ({ code, ...STAY_AMENITIES[code] })).sort((left, right) => left.label.localeCompare(right.label)))
 const savedHouseRules = computed(() => product.value?.kind === 'stay' ? stayHouseRuleLines(product.value.details, value => formatTime(value, locale.value)) : [])
+const savedSafety = computed(() => product.value?.kind === 'stay' ? [
+  ...staySafetyLines(product.value.details, { includeNo: true }),
+  ...(['smoke_detector', 'carbon_monoxide_detector'] as const).filter(code => product.value!.stay!.amenities.includes(code)).map(code => STAY_AMENITIES[code].label),
+] : [])
 // A product that is not there is not a page. A request that failed is a state
 // this level shows, because the product may well still exist.
 watchEffect(() => {
@@ -1040,7 +1047,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
       { id: 'checkout-instructions', label: 'Checkout instructions', summary: home.checkout_instructions.length ? `${home.checkout_instructions.length} ${home.checkout_instructions.length === 1 ? 'instruction' : 'instructions'}` : 'Add details', placeholder: !home.checkout_instructions.length, to: sectionPath('checkout-instructions') },
     ] }]
   }
-  const authoredDetails = definitions.value.filter(definition => form.details[productDetailKey(definition)] !== undefined && !(STAY_DESCRIPTION_DETAIL_KEYS as readonly string[]).includes(definition.key) && !(STAY_HOUSE_RULE_DETAIL_KEYS as readonly string[]).includes(definition.key))
+  const authoredDetails = definitions.value.filter(definition => form.details[productDetailKey(definition)] !== undefined && !(STAY_DESCRIPTION_DETAIL_KEYS as readonly string[]).includes(definition.key) && !(STAY_HOUSE_RULE_DETAIL_KEYS as readonly string[]).includes(definition.key) && !(STAY_SAFETY_DETAIL_KEYS as readonly string[]).includes(definition.key))
   // One flat list, the same for every kind: what the product is, what it costs,
   // how it is booked, and where it is offered and shown.
   return [{
@@ -1098,6 +1105,7 @@ const navigationGroups = computed<EditorNavigationGroup[]>(() => {
             { id: 'availability', label: 'Availability', summary: `${product.value.stay!.min_nights} ${product.value.stay!.min_nights === 1 ? 'night' : 'nights'} minimum`, to: sectionPath('availability') },
             { id: 'guests', label: 'Number of guests', summary: `${product.value.stay!.max_guests} ${product.value.stay!.max_guests === 1 ? 'guest' : 'guests'}`, to: sectionPath('guests') },
             { id: 'house-rules', label: 'House rules', summary: savedHouseRules.value.join('\n') || 'Add details', placeholder: !savedHouseRules.value.length, to: sectionPath('house-rules') },
+            { id: 'guest-safety', label: 'Guest safety', summary: savedSafety.value.join('\n') || 'Add details', placeholder: !savedSafety.value.length, to: sectionPath('guest-safety') },
             { id: 'team', label: 'Looked after by', summary: stayTeamSummary(), to: sectionPath('team') },
           ]
         : []),
@@ -1146,7 +1154,7 @@ const autoOpenTarget = computed(() => navigationGroups.value[0]?.items.find(item
 // A service leads with what is changed most: who handles it, what it costs,
 // how it is booked and what its page says. Every other kind keeps the list as written.
 const SERVICE_ROW_ORDER = ['assignment', 'price', 'booking', 'description', 'page', 'locations', 'publication']
-const STAY_ROW_ORDER = ['publication', 'photo', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'house-rules', 'cancellation', 'team', 'options', 'attributes', 'kind', 'collections']
+const STAY_ROW_ORDER = ['publication', 'photo', 'name', 'property-type', 'rooms', 'price', 'availability', 'guests', 'description', 'amenities', 'house-rules', 'guest-safety', 'cancellation', 'team', 'options', 'attributes', 'kind', 'collections']
 function rowRank(id: string) {
   if (form.kind === 'stay') {
     const at = STAY_ROW_ORDER.indexOf(id)
@@ -1239,7 +1247,15 @@ function catalogShapeOf() {
   return JSON.stringify(buildCatalog())
 }
 
+function isSafetyConcern(concern: unknown): concern is StaySafetySection {
+  return typeof concern === 'string' && Object.hasOwn(STAY_SAFETY_SECTIONS, concern)
+}
+
 function payload(concern?: ProductConcern) {
+  if (isSafetyConcern(concern)) {
+    if (product.value?.kind !== 'stay') throw new Error('Guest safety requires a place to stay.')
+    return { details_mode: 'merge', details: Object.fromEntries(staySafetySectionKeys(concern).map(key => [key, form.details[key] ?? null])) }
+  }
   if (concern === 'arrival-time') {
     if (!product.value?.stay) throw new Error('Arrival times require a place to stay.')
     return { stay: { check_in_time: form.check_in_time, check_out_time: form.check_out_time } }
@@ -1378,6 +1394,7 @@ async function commit(concern?: ProductConcern) {
     stay_property_size_unit: form.stay_property_size_unit,
   } : null
   const arrivalTimeDraft = concern === 'arrival-time' ? { check_in_time: form.check_in_time, check_out_time: form.check_out_time } : null
+  const safetyDraft = isSafetyConcern(concern) ? { keys: staySafetySectionKeys(concern), details: { ...form.details } } : null
   const houseRulesDraft = concern === 'house-rules' || concern === 'additional-rules' || concern === 'arrival-time' && editorKey.value === 'house-rules' ? {
     details: { ...form.details },
     max_guests: Number(form.max_guests) !== product.value?.stay?.max_guests ? form.max_guests : null,
@@ -1429,7 +1446,7 @@ async function commit(concern?: ProductConcern) {
       await savePublication()
     } else if (concern === 'publication-availability') {
       await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, { method: 'PATCH', body: { active: form.active }, validate: isMutation })
-    } else if (concern === 'house-rules' || concern === 'additional-rules' || concern === 'arrival-time') {
+    } else if (concern === 'house-rules' || concern === 'additional-rules' || concern === 'arrival-time' || isSafetyConcern(concern)) {
       await dashboardApi(`/api/editor/organizations/${organizationId}/products/${productId.value}`, { method: 'PATCH', body: payload(concern), validate: isMutation })
     } else if (concern !== undefined) {
       await saveBooking(concern)
@@ -1444,11 +1461,11 @@ async function commit(concern?: ProductConcern) {
     if (concern === 'additional-rules' || concern === 'arrival-time') restoreHouseRules(false)
     // A booking write changes what the schedule is: its start times, whether the
     // product has a calendar at all, or the time zone an online one runs in.
-    if (concern !== undefined && concern !== 'publication-visibility' && concern !== 'publication-availability' && concern !== 'house-rules' && concern !== 'additional-rules' && concern !== 'arrival-time') await reloadSchedule()
+    if (concern !== undefined && concern !== 'publication-visibility' && concern !== 'publication-availability' && concern !== 'house-rules' && concern !== 'additional-rules' && concern !== 'arrival-time' && !isSafetyConcern(concern)) await reloadSchedule()
     await (closeTo.value ? navigateTo(closeTo.value) : level.close())
   } catch (error) {
     saveError.value = getErrorMessage(error, `Failed to save ${itemLabel.value.toLowerCase()}`)
-    if (arrivalTimeDraft || houseRulesDraft || propertyDraft || publicationDraft !== null || error instanceof ApiClientError && (error.data.committed === true || (isRecord(error.data.data) && error.data.data.committed === true))) {
+    if (safetyDraft || arrivalTimeDraft || houseRulesDraft || propertyDraft || publicationDraft !== null || error instanceof ApiClientError && (error.data.committed === true || (isRecord(error.data.data) && error.data.data.committed === true))) {
       try { await reload() } catch (readError) { saveError.value += ` ${getErrorMessage(readError, 'The saved listing could not be read again')}` }
     }
     // A failed response may follow a committed write. Saved summaries
@@ -1457,6 +1474,13 @@ async function commit(concern?: ProductConcern) {
     if (concern === 'publication-availability' && publicationDraft !== null) form.active = publicationDraft
     if (propertyDraft) Object.assign(form, propertyDraft)
     if (arrivalTimeDraft) Object.assign(form, arrivalTimeDraft)
+    if (safetyDraft) {
+      for (const key of safetyDraft.keys) {
+        const value = safetyDraft.details[key]
+        if (value === undefined) Reflect.deleteProperty(form.details, key)
+        else form.details[key] = value
+      }
+    }
     restoreHouseRules(concern === 'additional-rules')
   } finally {
     saving.value = false
@@ -1559,8 +1583,16 @@ async function saveSchedule(weekday: number) {
 }
 
 /** A cancelled leaf puts the loaded product back before it closes. */
-function revert(concern?: 'additional-rules' | 'arrival-time') {
+function revert(concern?: 'additional-rules' | 'arrival-time' | StaySafetySection) {
   saveError.value = null
+  if (isSafetyConcern(concern)) {
+    for (const key of staySafetySectionKeys(concern)) {
+      const value = product.value?.details[key]
+      if (value === undefined) Reflect.deleteProperty(form.details, key)
+      else form.details[key] = value
+    }
+    return
+  }
   if (concern === 'arrival-time') {
     form.check_in_time = product.value?.stay?.check_in_time ?? ''
     form.check_out_time = product.value?.stay?.check_out_time ?? ''
@@ -1839,7 +1871,7 @@ provide(productEditorKey, {
   organizationLocationsError: computed(() => locationsError.value ? getErrorMessage(locationsError.value, 'Locations could not be loaded') : null),
   collections,
   sectionPath,
-  definitions: computed(() => definitions.value.filter(field => !(STAY_HOUSE_RULE_DETAIL_KEYS as readonly string[]).includes(field.key))),
+  definitions: computed(() => definitions.value.filter(field => !(STAY_HOUSE_RULE_DETAIL_KEYS as readonly string[]).includes(field.key) && !(STAY_SAFETY_DETAIL_KEYS as readonly string[]).includes(field.key))),
   isNew,
   loadError,
   sectionLabels,
