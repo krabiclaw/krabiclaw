@@ -19,7 +19,6 @@ export type ScheduledTaskName =
   | 'social-card-cleanup'
   | 'sessions-materialize'
   | 'stripe-ga4-intent-retention'
-  | 'article-broadcast-send'
   | 'stripe-fee-report-request'
   | 'marketing-ad-spend-daily'
   | 'channex-revision-feed'
@@ -30,7 +29,7 @@ type TaskLoader = () => Promise<{ default: ScheduledTaskDefinition }>
 
 /** The single source of truth for cron-to-task dispatch in Nitro's scheduled hook. */
 export const SCHEDULED_TASKS: Readonly<Record<string, readonly ScheduledTaskName[]>> = {
-  '*/5 * * * *': ['google-calendar-sync', 'social-card-backfill', 'article-broadcast-send', 'scheduled-guest-messages', 'stay-checkout-holds'],
+  '*/5 * * * *': ['google-calendar-sync', 'social-card-backfill', 'scheduled-guest-messages', 'stay-checkout-holds'],
   '*/2 * * * *': ['public-resource-cache-invalidation'],
   '*/10 * * * *': ['domain-reconciliation', 'zaraz-analytics-reconciliation', 'channex-revision-feed'],
   '0 3 * * *': ['domain-reconciliation-daily', 'analytics-aggregate-daily', 'stripe-ga4-intent-retention', 'stripe-fee-report-request', 'marketing-ad-spend-daily'],
@@ -55,7 +54,6 @@ const TASK_LOADERS: Readonly<Record<ScheduledTaskName, TaskLoader>> = {
   'google-places-sync': async () => import('./tasks/google-places-sync'),
   'review-request-automation': async () => import('./tasks/review-request-automation'),
   'stripe-fee-report-request': async () => import('./tasks/stripe-fee-report-request'),
-  'article-broadcast-send': async () => import('./tasks/article-broadcast-send'),
   'marketing-ad-spend-daily': async () => import('./tasks/marketing-ad-spend-daily'),
 }
 
