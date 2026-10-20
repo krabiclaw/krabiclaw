@@ -2,7 +2,7 @@ import { HTTPError } from 'nitro'
 import { NOT_HANDLED, type McpExecutorContext } from './execution'
 import { authorizePayments, listPayments, paymentSummary, paymentPayouts, readPaymentDetails } from '~/server/domain/payments'
 import { paymentTransactions } from '~/server/domain/payments/earnings'
-import { paymentsUsageStatus } from '~/server/domain/payments/usage'
+import { paymentsUsage } from '~/server/domain/payments/usage'
 import { assertRoleAllows } from '~/server/utils/member-access'
 import { dashboardOrigin } from '~/server/utils/dashboard-notification-links'
 import { isRecord } from '~/server/utils/type-guards'
@@ -34,21 +34,16 @@ const payoutsResult = { type: 'object', properties: { ...readInfo, configured: {
   payouts: { type: 'array', items: { type: 'object', properties: { id: string, amount: integer, currency: string, status: string, arrival_date: integer, created: integer, automatic: { type: 'boolean' }, dashboard_url: string }, required: ['id', 'amount', 'currency', 'status', 'dashboard_url'] } },
 }, required: ['organization_id', 'configured', 'source', 'next_cursor', 'payouts', 'dashboard_url'], additionalProperties: false }
 const usageResult = { type: 'object', properties: { ...readInfo, configured: { type: 'boolean' },
-  account: { type: ['object', 'null'], properties: { currency: string, status: string, contract_start_at: nullableString } },
-  pricing: { type: ['object', 'null'], properties: { currency: { const: 'USD' }, units: { const: 'cents' }, captured_volume_rate: { type: 'number' }, captured_volume_rate_percent: string, ad_spend_rate: { type: ['number', 'null'] }, ad_spend_rate_percent: nullableString, validated_at: string }, required: ['currency', 'units', 'captured_volume_rate', 'captured_volume_rate_percent', 'ad_spend_rate', 'ad_spend_rate_percent', 'validated_at'] },
+  pricing: { type: ['object', 'null'], properties: { currency: { const: 'USD' }, units: { const: 'cents' }, captured_volume_rate: { type: 'number' }, captured_volume_rate_percent: string, stripe_cost_rate: { type: 'number' }, ad_spend_rate: { type: ['number', 'null'] }, ad_spend_rate_percent: nullableString }, required: ['currency', 'units', 'captured_volume_rate', 'captured_volume_rate_percent', 'stripe_cost_rate', 'ad_spend_rate', 'ad_spend_rate_percent'] },
   pending: { type: 'array', items: { type: 'object', properties: { currency: string, kind: string, event_count: integer, amount: integer, billing_currency: { const: 'USD' }, billing_amount: integer, action_required: { type: 'boolean' } }, required: ['currency', 'kind', 'event_count', 'amount', 'billing_currency', 'billing_amount', 'action_required'] } },
-  credits: { type: 'array', items: { type: 'object', properties: { id: string, kind: string, currency: { const: 'USD' }, amount: integer, source_currency: string, source_amount: integer, fx_quote_id: nullableString, provider_occurred_at: string, action_required: { type: 'boolean' } }, required: ['id', 'kind', 'currency', 'amount', 'source_currency', 'source_amount', 'fx_quote_id', 'provider_occurred_at', 'action_required'] } },
-  invoices: { type: 'array', items: { type: 'object', properties: { id: string, type: nullableString, status: nullableString, start_timestamp: nullableString, end_timestamp: nullableString, total: { type: 'number' }, credit_type: { type: 'object', properties: { name: { const: 'USD (cents)' } }, required: ['name'] },
-    collection_invoice: { type: ['object', 'null'], properties: { id: string, status: nullableString, currency: string, total: integer, amount_due: integer, amount_paid: integer, amount_remaining: integer, hosted_invoice_url: nullableString, invoice_pdf: nullableString }, required: ['id', 'status', 'currency', 'total', 'amount_due', 'amount_paid', 'amount_remaining', 'hosted_invoice_url', 'invoice_pdf'] },
-  }, required: ['id', 'total', 'credit_type', 'collection_invoice'] } },
-}, required: ['organization_id', 'configured', 'source', 'pricing', 'pending', 'credits', 'invoices', 'dashboard_url'], additionalProperties: false }
+}, required: ['organization_id', 'configured', 'source', 'pricing', 'pending', 'dashboard_url'], additionalProperties: false }
 
 export const PAYMENTS_TOOLS: McpToolDefinition[] = [
   organizationTool({ name: 'get_payment_summary', outputSchema: summaryResult, description: 'Read totals for the selected business’s customer payments in a UTC period: captured volume, refunds and disputes, separately by currency. Use list_payments for individual transactions. Trust receipts are distinct from earned revenue. Does not change payments or move money.', domain: 'payments', minimumRole: 'admin', inputSchema: period, required: ['from', 'to'] }),
   organizationTool({ name: 'list_payments', outputSchema: paymentPageResult, description: 'List the selected business’s customer payment records in a UTC period, with purchase links and amounts in each currency’s minor units. Use the returned cursor as after for another page and get_payment for one transaction’s details. These are customer payments, separate from the business’s platform subscription bill. Does not change payments.', domain: 'payments', minimumRole: 'admin', inputSchema: { ...period, after: { ...string, description: 'The cursor returned by the previous payment page.' }, location_id: string, earnings_type: { type: 'string', enum: ['paid', 'refunded'], description: 'Only payments still paid, or only payments with a refund.' } }, required: ['from', 'to'] }),
   organizationTool({ name: 'get_payment', outputSchema: paymentResult, description: 'Read one customer payment belonging to the selected business, including its original purchase details, current refund records, disputes and authenticated dashboard URL. Requires payment_id from list_payments. Does not issue a refund, prepare an approval or change payment state; use the authenticated dashboard for financial actions.', domain: 'payments', minimumRole: 'admin', inputSchema: { payment_id: string }, required: ['payment_id'] }),
   organizationTool({ name: 'get_payment_payouts', outputSchema: payoutsResult, description: 'Read the selected business’s connected Stripe balance and payout history, with source and retrieval time. Continue with next_cursor as after for another page. Use get_payment_summary for customer payment totals. This is a read of the business’s own connected account; it does not create a payout or transfer funds.', domain: 'payments', minimumRole: 'admin', inputSchema: { after: { ...string, description: 'next_cursor from the previous payout page.' } } }),
-  organizationTool({ name: 'get_payments_usage', outputSchema: usageResult, description: 'Read the selected business’s KrabiClaw Payments usage, Metronome invoices, accrued usage and undelivered provider-cost events. These are operating costs, separate from customer payments and platform subscription billing. Requires payment and billing read access. Does not change billing or move money.', domain: 'payments', minimumRole: 'admin', }),
+  organizationTool({ name: 'get_payments_usage', outputSchema: usageResult, description: 'Read the selected business’s KrabiClaw Payments fees: the rates its plan subscription’s metered prices charge for payment volume, Stripe fees and managed ad spend, and usage not yet reported to Stripe. Stripe bills these fees on the subscription invoice at the end of each period, separate from customer payments. Requires payment and billing read access. Does not change billing or move money.', domain: 'payments', minimumRole: 'admin', }),
   organizationTool({ name: 'get_payments_dashboard_link', description: 'Get the selected business’s authenticated Payments setup and dashboard URL when the owner wants to manage its Stripe integration. Returns a link for the person to open; it does not open a page, create an account, start onboarding, prepare a refund or change the integration. Identity and bank details are entered only in the dashboard’s Stripe-hosted flow.', domain: 'payments', minimumRole: 'owner', outputSchema: { type: 'object', properties: { organization_id: string, dashboard_url: string, source: string }, required: ['organization_id', 'dashboard_url', 'source'] } }),
 ]
 
@@ -92,23 +87,11 @@ export async function handlePaymentsTools(ctx: McpExecutorContext): Promise<unkn
     case 'get_payments_usage': {
       await authorizePayments(principal, 'read')
       await assertRoleAllows({ organizationId, role, permissions: { billing: ['read'] } })
-      const result = await paymentsUsageStatus(db, env, organizationId)
+      const result = await paymentsUsage(db, env, organizationId)
       return {
-        organization_id: organizationId, configured: result.configured, source: result.source, refreshed_at: result.refreshed_at, dashboard_url: dashboard('/payments/invoices'),
-        account: result.account ? { currency: result.account.currency, status: result.account.status, contract_start_at: result.account.contract_start_at } : null,
-        pricing: result.pricing ? { currency: result.pricing.currency, units: result.pricing.units, captured_volume_rate: result.pricing.captured_volume_rate, captured_volume_rate_percent: result.pricing.captured_volume_rate_percent, ad_spend_rate: result.pricing.ad_spend_rate, ad_spend_rate_percent: result.pricing.ad_spend_rate_percent, validated_at: result.pricing.validated_at } : null,
-        pending: result.pending.map(row => {
-          if (!isRecord(row)) throw new Error('Payments usage details are invalid')
-          return { currency: row.currency, kind: row.kind, event_count: row.event_count, amount: row.amount, billing_currency: 'USD', billing_amount: row.billing_amount, action_required: Boolean(row.error) }
-        }),
-        credits: result.credits.map(credit => ({ id: credit.id, kind: credit.kind, currency: credit.currency, amount: credit.amount, source_currency: credit.source_currency, source_amount: credit.source_amount, fx_quote_id: credit.fx_quote_id, provider_occurred_at: credit.provider_occurred_at, action_required: Boolean(credit.error) })),
-        invoices: result.invoices.map((invoice: unknown) => {
-          if (!isRecord(invoice) || !isRecord(invoice.credit_type)) throw new Error('Payments invoice details are invalid')
-          return { id: invoice.id, type: invoice.type ?? null, status: invoice.status ?? null, start_timestamp: invoice.start_timestamp ?? null, end_timestamp: invoice.end_timestamp ?? null, total: invoice.total,
-            credit_type: { name: invoice.credit_type.name },
-            collection_invoice: invoice.collection_invoice,
-          }
-        }),
+        organization_id: organizationId, configured: result.configured, source: result.source, refreshed_at: result.refreshed_at, dashboard_url: dashboard('/payments?tab=plan'),
+        pricing: result.pricing ? { currency: result.pricing.currency, units: result.pricing.units, captured_volume_rate: result.pricing.captured_volume_rate, captured_volume_rate_percent: result.pricing.captured_volume_rate_percent, stripe_cost_rate: result.pricing.stripe_cost_rate, ad_spend_rate: result.pricing.ad_spend_rate, ad_spend_rate_percent: result.pricing.ad_spend_rate_percent } : null,
+        pending: result.pending.map(row => ({ ...row, billing_currency: 'USD' })),
       }
     }
     case 'get_payment_payouts': {

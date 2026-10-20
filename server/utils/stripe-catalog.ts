@@ -1,107 +1,78 @@
 import type Stripe from 'stripe'
-import { ADDITIONAL_RENTAL_UNIT_PRICE, assertNewSalePlan, BUSINESS_PLAN_ID, isKnownRecurringPlan, PAID_PLAN_PRICES, planPriceTiers } from '~/shared/billing-model'
+import { assertNewSalePlan, BILLING_METER_KEYS, BILLING_METERS, isKnownRecurringPlan, PAID_PLAN_PRICES, type BillingMeterKey } from '~/shared/billing-model'
 
 /**
- * Each new-sale plan is one fixed application offer. Stripe catalog metadata may
- * identify the product, but it cannot change this price contract: a graduated
- * USD price whose first tier is the plan amount for the included locations and
- * whose second is each additional location (`planPriceTiers`).
+ * Each new-sale plan is one fixed application offer: a flat monthly USD price
+ * billed at quantity 1. Stripe catalog metadata may identify the product, but
+ * it cannot change this price contract.
  */
-export function assertStripeCatalogPrices(
-  planId: string,
-  monthly: Stripe.Price | null | undefined,
-  annual?: Stripe.Price | null,
-): asserts monthly is Stripe.Price {
+export function assertStripeCatalogPrice(planId: string, monthly: Stripe.Price | null | undefined): asserts monthly is Stripe.Price {
   const plan = assertNewSalePlan(planId)
-  const amounts = PAID_PLAN_PRICES[plan]
-  if (!monthly || !hasPlanTiers(monthly, amounts.monthly, 'month')) {
-    throw new Error(`${plan} monthly price must be the graduated USD ${amounts.monthly} cent plan price`)
-  }
-  if (annual && (amounts.annual === undefined || !hasPlanTiers(annual, amounts.annual, 'year'))) {
-    throw new Error(amounts.annual === undefined
-      ? `${plan} has no authorized annual price`
-      : `${plan} annual price must be the graduated USD ${amounts.annual} cent plan price`)
+  const amount = PAID_PLAN_PRICES[plan].monthly
+  if (!monthly || monthly.currency?.toLowerCase() !== 'usd' || monthly.billing_scheme !== 'per_unit' || monthly.unit_amount !== amount
+    || monthly.transform_quantity || monthly.recurring?.interval !== 'month' || monthly.recurring.interval_count !== 1 || monthly.recurring.usage_type !== 'licensed') {
+    throw new Error(`${plan} monthly price must be the flat USD ${amount} cent monthly price`)
   }
 }
 
-function hasPlanTiers(price: Stripe.Price, amount: number, interval: 'month' | 'year'): boolean {
-  const expected = planPriceTiers(amount, interval)
-  return price.currency?.trim().toLowerCase() === 'usd'
-    && price.billing_scheme === 'tiered'
-    && price.tiers_mode === 'graduated'
-    && Array.isArray(price.tiers)
-    && price.tiers.length === expected.length
-    && price.tiers.every((tier, index) => {
-      const want = expected[index]!
-      return (tier.up_to ?? 'inf') === want.up_to
-        && tier.flat_amount === (want.flat_amount ?? null)
-        && tier.unit_amount === (want.unit_amount ?? null)
-    })
+/** Metered prices are read with their tiers, which Stripe lists only when expanded. */
+export const PLAN_PRICE_LIST_EXPAND = ['data.tiers']
+
+export interface StripeCatalog { products: Stripe.Product[]; prices: Stripe.Price[]; meters: Stripe.Billing.Meter[] }
+
+/** Every product, recurring price and meter of the account: archived ones too, which still identify existing contracts. */
+export async function readStripeCatalog(stripe: Stripe): Promise<StripeCatalog> {
+  const [products, prices, meters] = await Promise.all([
+    stripe.products.list({ limit: 100 }).autoPagingToArray({ limit: 10_000 }),
+    stripe.prices.list({ type: 'recurring', limit: 100, expand: PLAN_PRICE_LIST_EXPAND }).autoPagingToArray({ limit: 10_000 }),
+    stripe.billing.meters.list({ limit: 100 }).autoPagingToArray({ limit: 10_000 }),
+  ])
+  return { products, prices, meters }
+}
+
+function priceProductId(price: Stripe.Price): string {
+  return typeof price.product === 'string' ? price.product : price.product.id
 }
 
 /**
- * A Business price is the current offer when it charges the current amount on
- * the current tiers. Business prices sold before it remain the contracts of
- * the subscriptions on them: they bill every location and no rental units.
+ * The metered price each meter bills through: the one active product of its
+ * family, its `monthly_price_id`, on the active meter with the event name and
+ * formula `BILLING_METERS` names, at exactly the published tiers or rate.
  */
-export function isCurrentBusinessPrice(price: Stripe.Price): boolean {
-  return price.recurring?.interval === 'month' && price.recurring.interval_count === 1
-    && hasPlanTiers(price, PAID_PLAN_PRICES[BUSINESS_PLAN_ID].monthly, 'month')
+export function selectMeteredPrices({ products, prices, meters }: StripeCatalog): Record<BillingMeterKey, Stripe.Price> {
+  return Object.fromEntries(BILLING_METER_KEYS.map(key => {
+    const definition = BILLING_METERS[key]
+    const matching = products.filter(product => product.active && product.metadata?.product_family === key)
+    if (matching.length !== 1) throw new Error(`Stripe catalog has ${matching.length} active ${definition.name} products; exactly one is required`)
+    const product = matching[0]!
+    const price = prices.find(row => row.id === product.metadata.monthly_price_id?.trim() && priceProductId(row) === product.id)
+    const meter = meters.find(row => row.id === price?.recurring?.meter)
+    const tiers = 'tiers' in definition ? definition.tiers : null
+    const unitAmountDecimal = 'unitAmountDecimal' in definition ? definition.unitAmountDecimal : null
+    const rateMatches = tiers
+      ? price?.billing_scheme === 'tiered' && price.tiers_mode === 'graduated' && price.tiers?.length === tiers.length
+        && price.tiers.every((tier, index) => (tier.up_to ?? 'inf') === tiers[index]!.up_to && tier.unit_amount === tiers[index]!.unit_amount && tier.flat_amount === null)
+      : price?.billing_scheme === 'per_unit' && price.unit_amount_decimal !== null && Number(String(price.unit_amount_decimal)) === Number(unitAmountDecimal)
+    if (!price || !price.active || price.currency !== 'usd' || price.recurring?.usage_type !== 'metered' || price.recurring.interval !== 'month'
+      || price.recurring.interval_count !== 1 || !rateMatches || !meter || meter.status !== 'active'
+      || meter.event_name !== definition.eventName || meter.default_aggregation.formula !== definition.formula) {
+      throw new Error(`Stripe product ${product.id} must bill ${definition.name} monthly on the ${definition.eventName} meter at the published rate`)
+    }
+    return [key, price]
+  })) as Record<BillingMeterKey, Stripe.Price>
 }
 
-/** The catalog family of the Additional rental unit product, which never carries a `plan_id`. */
-export const RENTAL_UNITS_FAMILY = 'rental_units'
-
-/** The Additional rental unit price Business is sold with: per unit, USD 19, monthly. */
-export function assertRentalUnitPrice(price: Stripe.Price | undefined, productId: string): asserts price is Stripe.Price {
-  if (!price || price.active === false || price.currency?.toLowerCase() !== 'usd' || price.billing_scheme !== 'per_unit'
-    || price.unit_amount !== ADDITIONAL_RENTAL_UNIT_PRICE || price.transform_quantity
-    || price.recurring?.interval !== 'month' || price.recurring.interval_count !== 1 || price.recurring.usage_type !== 'licensed') {
-    throw new Error(`Stripe product ${productId} must sell additional rental units at the per-unit USD ${ADDITIONAL_RENTAL_UNIT_PRICE} cent monthly price`)
-  }
-}
-
-/** The one active Additional rental unit product's canonical price, from a catalog listing. */
-export function selectRentalUnitPrice(products: Stripe.Product[], prices: Stripe.Price[]): Stripe.Price {
-  const matching = products.filter(product => product.active && product.metadata?.product_family === RENTAL_UNITS_FAMILY)
-  if (matching.length !== 1) throw new Error(`Stripe catalog has ${matching.length} active Additional rental unit products; exactly one is required`)
-  const product = matching[0]!
-  const priceId = product.metadata.monthly_price_id?.trim()
-  const price = prices.find(row => row.id === priceId && (typeof row.product === 'string' ? row.product : row.product.id) === product.id)
-  assertRentalUnitPrice(price, product.id)
-  return price
-}
-
-/**
- * A plan subscription's items by what they bill: the one plan item, and the
- * Additional rental unit item when the business pays for more units than its
- * plan includes. Products must be expanded.
- */
-export function planSubscriptionItems(subscription: Stripe.Subscription): { plan: Stripe.SubscriptionItem; rentalUnits: Stripe.SubscriptionItem | null } {
-  const product = (item: Stripe.SubscriptionItem) => {
+/** A plan subscription's one plan item. Products must be expanded. */
+export function planSubscriptionItem(subscription: Stripe.Subscription): Stripe.SubscriptionItem {
+  const plans = subscription.items.data.filter(item => {
     if (typeof item.price.product === 'string' || item.price.product.deleted) throw new Error(`Stripe subscription ${subscription.id} item ${item.id} product is not readable`)
-    return item.price.product
-  }
-  const plans = subscription.items.data.filter(item => isKnownRecurringPlan(product(item).metadata.plan_id))
+    return isKnownRecurringPlan(item.price.product.metadata.plan_id)
+  })
   if (plans.length !== 1) throw new Error(`Stripe subscription ${subscription.id} must contain exactly one plan price`)
-  const units = subscription.items.data.filter(item => product(item).metadata.product_family === RENTAL_UNITS_FAMILY)
-  if (units.length > 1) throw new Error(`Stripe subscription ${subscription.id} has more than one Additional rental unit item`)
-  const plan = plans[0]!
-  const rentalUnits = units[0] ?? null
-  if (rentalUnits && (product(plan).metadata.plan_id !== BUSINESS_PLAN_ID || !isCurrentBusinessPrice(plan.price))) {
-    throw new Error(`Stripe subscription ${subscription.id} bills rental units without the current Business price`)
-  }
-  return { plan, rentalUnits }
+  return plans[0]!
 }
 
-/** The plan amount a canonical price charges for its included locations. */
-export function planPriceAmount(price: Stripe.Price): number {
-  const amount = price.tiers?.[0]?.flat_amount
-  if (typeof amount !== 'number' || amount <= 0) throw new Error(`Stripe price ${price.id} has no plan amount`)
-  return amount
-}
-
-/** The recurring charge for the native subscription quantity, including its original price tiers. */
+/** The recurring charge a licensed price makes for its subscription quantity, including graduated tiers. */
 export function recurringPriceAmount(price: Stripe.Price, quantity: number | null | undefined): number {
   if (!Number.isSafeInteger(quantity) || (quantity as number) < 1 || price.transform_quantity) throw new Error(`Stripe price ${price.id} has an unsupported subscription quantity`)
   let amount: number
@@ -125,52 +96,23 @@ export function recurringPriceAmount(price: Stripe.Price, quantity: number | nul
   return amount
 }
 
-/** Plan prices are read with their tiers, which Stripe lists only when expanded. */
-export const PLAN_PRICE_LIST_EXPAND = ['data.tiers']
-
-export function selectStripeCatalogPrice(
-  product: Stripe.Product,
-  prices: Stripe.Price[],
-  interval: 'month' | 'year',
-): Stripe.Price | null {
-  const productPrices = prices.filter(price => {
-    const productId = typeof price.product === 'string' ? price.product : price.product?.id
-    return productId === product.id
-  })
-  const candidates = productPrices.filter(price =>
-    price.active !== false
-    && price.recurring?.interval === interval
+/**
+ * A plan product's canonical monthly price: its `monthly_price_id`, or the one
+ * active flat monthly price when the product names none.
+ */
+export function selectStripeCatalogPrice(product: Stripe.Product, prices: Stripe.Price[]): Stripe.Price | null {
+  const candidates = prices.filter(price => priceProductId(price) === product.id
+    && price.active !== false
+    && price.recurring?.interval === 'month'
     && price.recurring.interval_count === 1
-    && price.billing_scheme === 'tiered'
-    && typeof price.currency === 'string'
-    && price.currency.length > 0,
-  )
-  if (candidates.length === 0) return null
-
-  const metadataKey = interval === 'month' ? 'monthly_price_id' : 'annual_price_id'
-  const metadataPriceId = product.metadata?.[metadataKey]?.trim()
+    && price.recurring.usage_type === 'licensed'
+    && price.billing_scheme === 'per_unit')
+  const metadataPriceId = product.metadata?.monthly_price_id?.trim()
   if (metadataPriceId) {
     const selected = candidates.find(price => price.id === metadataPriceId)
-    if (!selected) {
-      throw new Error(`Stripe product ${product.id} has an invalid ${metadataKey} canonical price`)
-    }
+    if (!selected) throw new Error(`Stripe product ${product.id} has an invalid monthly_price_id canonical price`)
     return selected
   }
-
-  const lookupKeyCandidates = candidates.filter(price => {
-    const lookupKey = price.lookup_key?.toLowerCase() ?? ''
-    return interval === 'month'
-      ? lookupKey.includes('month')
-      : lookupKey.includes('annual') || lookupKey.includes('year')
-  })
-  if (lookupKeyCandidates.length > 1) {
-    throw new Error(`Stripe product ${product.id} has multiple ${interval} prices marked by lookup_key`)
-  }
-  if (lookupKeyCandidates.length === 1) {
-    return lookupKeyCandidates[0] ?? null
-  }
-  if (candidates.length !== 1) {
-    throw new Error(`Stripe product ${product.id} must have exactly one canonical ${interval} price`)
-  }
+  if (candidates.length > 1) throw new Error(`Stripe product ${product.id} must have exactly one canonical month price`)
   return candidates[0] ?? null
 }

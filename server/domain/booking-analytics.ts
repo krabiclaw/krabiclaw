@@ -113,7 +113,7 @@ export async function recordBookingChangeAnswer(db: DbClient, input: { organizat
   })
 }
 
-/** A business's captured volume, reported to Metronome for its Payments fee, on the platform's analytics. */
+/** A business’s captured volume, reported to its Stripe meter for its Payments fee, on the platform’s analytics. */
 export async function recordPaymentsVolumeBilled(db: DbClient, input: { organizationId: string; paymentId: string; volumeMinor: number; currency: string }) {
   await recordOrganizationConversionEvent(db, null, {
     organizationId: (await getPlatformOrganization(db)).id, eventName: 'payments_volume_billed', stage: 'occurred', surface: 'stripe',
@@ -122,12 +122,3 @@ export async function recordPaymentsVolumeBilled(db: DbClient, input: { organiza
   })
 }
 
-/** A Payments fee invoice a business paid, on the platform's analytics. */
-export async function recordPaymentsFeeInvoicePaid(db: DbClient, input: { organizationId: string; invoiceId: string; amountPaid: number; currency: string }) {
-  await recordOrganizationConversionEvent(db, null, {
-    organizationId: (await getPlatformOrganization(db)).id, eventName: 'payments_fee_invoice_paid', stage: 'completed', surface: 'stripe',
-    entityType: 'invoice', entityId: input.invoiceId,
-    value: { basis: 'purchase', amount_minor: input.amountPaid, collected_minor: input.amountPaid, currency: input.currency, transaction_id: input.invoiceId },
-    properties: { tenant_organization_id: input.organizationId },
-  })
-}

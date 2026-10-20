@@ -99,7 +99,7 @@ export async function paymentSummary(db: DbClient, principal: FinancialPrincipal
     COALESCE((SELECT SUM(d.amount) FROM payment_disputes d JOIN payments p2 ON p2.id=d.payment_id WHERE p2.organization_id=p.organization_id AND d.currency=p.currency AND p2.created_at>=? AND p2.created_at<? AND d.status NOT IN ('won','warning_closed')),0) AS disputed_amount
     FROM payments p WHERE organization_id=? AND created_at>=? AND created_at<? GROUP BY currency`, [from,to,principal.organizationId,from,to])
   const usage = await queryAll(db, `SELECT currency, kind, SUM(amount) AS amount, SUM(CASE WHEN delivery_at IS NULL THEN 1 ELSE 0 END) AS pending_delivery FROM payment_usage_events WHERE organization_id=? AND provider_occurred_at>=? AND provider_occurred_at<? GROUP BY currency,kind`, [principal.organizationId,from,to])
-  return { organization_id: principal.organizationId, timezone: 'UTC', from, to, amounts, usage, usage_status: 'Metronome rates captured volume; Stripe costs remain unreconciled until provider itemization arrives', source: 'Stripe authenticated projections', refreshed_at: new Date().toISOString() }
+  return { organization_id: principal.organizationId, timezone: 'UTC', from, to, amounts, usage, usage_status: 'Stripe meters bill captured volume on the plan subscription; Stripe costs follow once Stripe itemizes them', source: 'Stripe authenticated projections', refreshed_at: new Date().toISOString() }
 }
 
 /** Only an authenticated browser approval may approve this request. MCP receives a handoff. */

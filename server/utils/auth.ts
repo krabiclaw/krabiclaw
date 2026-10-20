@@ -4,7 +4,7 @@ import { drizzleAdapter } from 'better-auth/adapters/drizzle'
 import { DISCORD_BOT_PERMISSIONS } from '~/server/utils/discord-bot'
 import { loginMethodForPath } from '~/shared/auth/login-method'
 import { admin, anonymous, bearer, genericOAuth, getOrgAdapter, hasPermission, jwt, lastLoginMethod, organization, phoneNumber, type UserWithAnonymous } from 'better-auth/plugins'
-import { stripe as betterAuthStripe, type Subscription } from '@better-auth/stripe'
+import { stripe as betterAuthStripe } from '@better-auth/stripe'
 import { oauthProvider } from '@better-auth/oauth-provider'
 import { cimd } from '@better-auth/cimd'
 import { fetchCimdMetadataResource } from '~/server/utils/cimd-metadata-fetch'
@@ -27,8 +27,6 @@ import { organizationAccessControl, organizationRoles } from '~/utils/organizati
 import { platformAdminAccessControl, platformAdminRoles } from '~/utils/platform-admin-access'
 import { createStripePlanLoader } from '~/server/utils/better-auth-stripe'
 import { handleStripeGa4Event } from '~/server/utils/stripe-ga4'
-import { notifyPaymentsInvoiceEvent } from '~/server/domain/payments/billing-notifications'
-import { setUpPaymentsBillingForSubscriptionEvent } from '~/server/domain/payments/usage'
 import { ingestStripeFeeReportEvent } from '~/server/domain/payments/costs'
 import { createStripeClient } from '~/server/utils/stripe-client'
 import { deleteBuyerCustomers } from '~/server/utils/billing-customer'
@@ -39,7 +37,7 @@ import { notifyOrganizationInvited } from '~/server/utils/notifications'
 import { cleanupOrganizationBeforeDelete } from '~/server/utils/tenant-deletion'
 import { APPLE_AUTHORIZATION_CODE_HEADER, exchangeAppleAuthorizationCode, revokeAppleGrant } from '~/server/utils/apple-revocation'
 import { reconcileZarazAnalytics } from '~/server/utils/zaraz-analytics'
-import { BUSINESS_PLAN_ID, INCLUDED_LOCATIONS, INCLUDED_RENTAL_UNITS, isKnownRecurringPlan, isNewSalePlan, normalizeBillingPlanId } from '~/shared/billing-model'
+import { isNewSalePlan, normalizeBillingPlanId } from '~/shared/billing-model'
 import { integrationsThroughAccount } from '~/server/utils/organization-integrations'
 
 type MemberRow = InferSelectModel<typeof schema.member>
@@ -420,46 +418,15 @@ function buildAuth(env: CloudflareEnv) {
         if (ctx.path === '/phone-number/verify' && ctx.body?.updatePhoneNumber !== true) {
           throw new APIError('BAD_REQUEST', { message: 'A phone number is verified from your account profile, not used to sign in.' })
         }
-        // Retired prices remain configured so Better Auth can maintain their
-        // existing contracts. Their only upgrade action is changing the current
-        // contract's location quantity; Better Auth still authorizes the member
-        // and reference before performing that change.
-        const requestedPlan = ctx.path === '/subscription/upgrade' ? normalizeBillingPlanId(ctx.body?.plan) : null
-        // Business bills locations and rental units on two items, which
-        // Stripe's portal cannot confirm. An existing subscription moves to it
-        // or changes it through Payments → Plan, which shows Stripe's invoice
-        // preview first; Better Auth's Checkout starts a new one.
-        if (requestedPlan === BUSINESS_PLAN_ID && typeof ctx.body?.referenceId === 'string') {
-          const current = await ctx.context.adapter.findMany<Subscription>({ model: 'subscription', where: [{ field: 'referenceId', value: ctx.body.referenceId }] })
-          if (ctx.body.subscriptionId || current.some(row => row.status === 'active' || row.status === 'trialing' || row.status === 'past_due')) {
-            throw new APIError('BAD_REQUEST', { message: 'Business changes on an existing plan are confirmed in Payments → Plan.' })
+        // A plan is one flat price at quantity 1, and only the current offers
+        // are sold; retired plans stay configured so Better Auth keeps
+        // processing the contracts already on them.
+        if (ctx.path === '/subscription/upgrade') {
+          if (!isNewSalePlan(normalizeBillingPlanId(ctx.body?.plan))) {
+            throw new APIError('BAD_REQUEST', { message: 'This plan is no longer available. Choose Growth or Business.' })
           }
-        }
-        if (isKnownRecurringPlan(requestedPlan) && !isNewSalePlan(requestedPlan)) {
-          const body = ctx.body
-          const subscription = typeof body.subscriptionId === 'string'
-            ? await ctx.context.adapter.findOne<Subscription>({ model: 'subscription', where: [{ field: 'stripeSubscriptionId', value: body.subscriptionId }] })
-            : null
-          if (!subscription || body.customerType !== 'organization' || body.referenceId !== subscription.referenceId
-            || subscription.plan !== requestedPlan || !['active', 'trialing'].includes(subscription.status)
-            || (subscription.periodEnd && subscription.periodEnd <= new Date())
-            || subscription.stripeScheduleId || subscription.cancelAtPeriodEnd
-            || (body.annual === true) !== (subscription.billingInterval === 'year')
-            || !Number.isSafeInteger(body.seats) || body.seats < 1 || body.seats === subscription.seats
-            || body.scheduleAtPeriodEnd === true) {
-            throw new APIError('BAD_REQUEST', { message: 'This plan is available only on an existing subscription. Choose Growth or Business for a new plan.' })
-          }
-          const [plans, native] = await Promise.all([
-            loadStripePlans(),
-            stripeClient.subscriptions.retrieve(subscription.stripeSubscriptionId!),
-          ])
-          const plan = plans.find(row => row.name === requestedPlan)
-          const priceId = body.annual === true ? plan?.annualDiscountPriceId : plan?.priceId
-          const customerId = typeof native.customer === 'string' ? native.customer : native.customer.id
-          if (!['active', 'trialing'].includes(native.status) || native.cancel_at_period_end || native.schedule
-            || (subscription.stripeCustomerId && customerId !== subscription.stripeCustomerId)
-            || !priceId || native.items.data.filter(item => item.price.id === priceId).length !== 1) {
-            throw new APIError('BAD_REQUEST', { message: 'This subscription’s existing price cannot be changed through a location update.' })
+          if (ctx.body?.seats !== undefined && ctx.body.seats !== 1) {
+            throw new APIError('BAD_REQUEST', { message: 'A plan is billed once; additional locations are billed by what you use.' })
           }
         }
         // The policy applies where a password is chosen. It is not part of
@@ -768,27 +735,6 @@ function buildAuth(env: CloudflareEnv) {
           enabled: true,
           plans: () => loadStripePlans(),
           requireEmailVerification: true,
-          getCheckoutSessionParams: async ({ plan, subscription }, _request, ctx) => {
-            if (!isNewSalePlan(plan.name)) {
-              throw new APIError('BAD_REQUEST', { message: 'This plan is no longer available for new subscriptions. Choose Growth or Business.' })
-            }
-            if (plan.name === BUSINESS_PLAN_ID) {
-              const { readBillingUsage } = await import('~/server/utils/billing')
-              const usage = await readBillingUsage(db, subscription.referenceId)
-              const seats = ctx.body?.seats
-              if (!Number.isSafeInteger(seats) || Math.max(INCLUDED_LOCATIONS, seats) < usage.nonLodgingLocations) {
-                throw new APIError('BAD_REQUEST', { message: `Business must cover your ${usage.nonLodgingLocations} locations besides those with only rental units.` })
-              }
-              // Better Auth adds this plan's line items to the Checkout it
-              // creates next, and the plan is this request's own copy: the
-              // Additional rental unit item is billed for the business's own
-              // units past the included ones, and left out when there are none.
-              const additional = Math.max(0, usage.rentalUnits - INCLUDED_RENTAL_UNITS)
-              if (!plan.lineItems?.length) throw new Error('The Business plan has no Additional rental unit price')
-              plan.lineItems = additional > 0 ? plan.lineItems.map(item => ({ ...item, quantity: additional })) : []
-            }
-            return {}
-          },
           authorizeReference: async ({ user, referenceId }, ctx) => {
             const member = await getOrgAdapter(ctx.context, configuredOrganizationOptions).findMemberByOrgId({
               userId: user.id,
@@ -805,13 +751,13 @@ function buildAuth(env: CloudflareEnv) {
         },
         // The plugin's own /api/auth/stripe/webhook handlers own the
         // `subscription` table, and Stripe's delivery retries are the retry
-        // mechanism. This hook adds analytics, Payments status alerts, Payments fees
-        // billing set-up and fee report ingestion; a throw here returns a non-2xx so
-        // Stripe redelivers the event.
+        // mechanism. This hook adds analytics, the billed counts each new
+        // subscription and period starts with, and fee report ingestion; a throw
+        // here returns a non-2xx so Stripe redelivers the event.
         onEvent: async (event) => {
           await handleStripeGa4Event(env, db, stripeClient, event)
-          await notifyPaymentsInvoiceEvent(db, stripeClient, env, event)
-          await setUpPaymentsBillingForSubscriptionEvent(db, stripeClient, env, event)
+          const { reportBillingUsageForSubscriptionEvent } = await import('~/server/utils/billing')
+          await reportBillingUsageForSubscriptionEvent(env, db, event)
           await ingestStripeFeeReportEvent(db, stripeClient, env, event)
         },
       }),

@@ -1,5 +1,5 @@
 import { HTTPError } from 'nitro'
-import { paymentsBillingPricing } from '~/server/domain/payments/usage'
+import { paymentsUsage } from '~/server/domain/payments/usage'
 import type Stripe from 'stripe'
 import { execute, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
@@ -211,11 +211,9 @@ export async function getStripeConnectedAccount(
 export async function readStripeCheckoutSetup(db: DbClient, organizationId: string, env: CloudflareEnv) {
   const [connected, organization, entitled] = await Promise.all([
     getStripeConnectedAccount(db, organizationId),
-    queryFirst<{ slug: string; subdomain: string | null; billing_status: string | null; billing_customer: string | null; customer: string | null; contract: string | null; currency: string | null; start: string | null; servicing: number }>(db, `
-      SELECT o.slug, o.subdomain, b.status AS billing_status, b.stripe_billing_customer_id AS billing_customer,
-             b.metronome_customer_id AS customer, b.metronome_contract_id AS contract, b.currency, b.contract_start_at AS start,
-             EXISTS(SELECT 1 FROM payment_servicing_tenants WHERE organization_id=o.id) AS servicing
-        FROM organization o LEFT JOIN payment_billing_accounts b ON b.organization_id=o.id WHERE o.id=?
+    queryFirst<{ slug: string; subdomain: string | null; servicing: number }>(db, `
+      SELECT o.slug, o.subdomain, EXISTS(SELECT 1 FROM payment_servicing_tenants WHERE organization_id=o.id) AS servicing
+        FROM organization o WHERE o.id=?
     `, [organizationId]),
     hasOrganizationEntitlement(env, organizationId, 'payments'),
   ])
@@ -224,10 +222,7 @@ export async function readStripeCheckoutSetup(db: DbClient, organizationId: stri
   if (!entitled) missing.push('payments.entitlement')
   const livemode = env.STRIPE_SECRET_KEY ? organizationPaymentsLivemode(env, organization) : null
   const keys = livemode === null ? null : paymentsStripeKeys(env, livemode)
-  if (!keys?.methodConfiguration || !keys.publishableKey || !env.NUXT_PUBLIC_PLATFORM_DOMAIN || !env.METRONOME_API_KEY || !env.METRONOME_RATE_CARD_ID) missing.push('payments.configuration')
-  // Payments fees are billed only in the platform's mode; a demo's test-mode payments carry none.
-  const billed = livemode === null || livemode === stripeLivemodeFromKey(env.STRIPE_SECRET_KEY!)
-  if (billed && (organization.billing_status !== 'active' || !organization.billing_customer || !organization.customer || !organization.contract || organization.currency !== 'USD' || !organization.start || !Number.isFinite(Date.parse(organization.start)) || Date.parse(organization.start) > Date.now())) missing.push('payments.billing')
+  if (!keys?.methodConfiguration || !keys.publishableKey || !env.NUXT_PUBLIC_PLATFORM_DOMAIN) missing.push('payments.configuration')
   if (organization.servicing) missing.push('payments.servicing')
   if (!connected?.stripeAccountId) missing.push('payments.account')
   else if (connected.status !== 'ready' || connected.cardPaymentsStatus !== 'active' || !connected.stripeRefreshedAt) missing.push('payments.account_ready')
@@ -394,8 +389,11 @@ async function checkoutReadiness(db: DbClient, env: CloudflareEnv, organizationI
   if (setup.missing.some(field => field !== 'payments.account_ready')) {
     return { ready: false as const, statusCode: setup.missing.includes('payments.configuration') ? 503 : setup.missing.includes('payments.entitlement') ? 403 : 409, statusMessage: 'Complete the business’s Payments setup before accepting online payments', handoff }
   }
-  const billing = setup.livemode === platformLivemode(env) ? await paymentsBillingPricing(db, env, organizationId) : null
-  if (billing && (!billing.contract || !billing.pricing)) return { ready: false as const, statusCode: 409, statusMessage: 'Complete Payments billing setup before accepting online payments', handoff }
+  // Payments fees are billed only in the platform's mode, on the business's
+  // subscription; a demo's test-mode payments carry none.
+  if (setup.livemode === platformLivemode(env) && !(await paymentsUsage(db, env, organizationId)).configured) {
+    return { ready: false as const, statusCode: 409, statusMessage: 'Your plan subscription does not bill Payments fees yet. Choose Business in Plan before accepting online payments', handoff: { ...handoff, missing: [...handoff.missing, 'payments.billing'] } }
+  }
   const saved = setup.connected!
   const keys = paymentsStripeKeys(env, setup.livemode!)!
   const stripe = createStripeClient(keys.secretKey, 'payments')

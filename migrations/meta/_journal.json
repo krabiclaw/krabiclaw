@@ -85,6 +85,13 @@
       "when": 1792381443999,
       "tag": "0011_team_thread_location",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1792467300989,
+      "tag": "0012_metronome_removed",
+      "breakpoints": true
     }
   ]
 }
