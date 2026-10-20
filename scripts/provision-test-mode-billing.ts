@@ -18,6 +18,8 @@ import { resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import Stripe from 'stripe'
 import { getBetterAuthStripePlans } from '../server/utils/better-auth-stripe.ts'
+import { BILLING_USAGE_SQL } from '../server/utils/billing.ts'
+import { BUSINESS_PLAN_ID, INCLUDED_RENTAL_UNITS } from '../shared/billing-model.ts'
 
 const { values } = parseArgs({ options: { local: { type: 'boolean', default: false }, staging: { type: 'boolean', default: false } }, strict: true })
 if (values.local === values.staging) throw new Error('Choose --local or --staging.')
@@ -60,6 +62,13 @@ for (const row of rows) {
   const plan = plans.get(row.plan)
   if (!plan) throw new Error(`The test-mode catalog has no ${row.plan} plan for ${row.referenceId}`)
   if (!row.stripeCustomerId) throw new Error(`Subscription ${row.id} has no Stripe customer`)
+  // Business bills the business's own rental units past the included ones, as its Checkout does, and none when there are none.
+  const [usage] = row.plan === BUSINESS_PLAN_ID ? d1<{ rentalUnits: number }>(BILLING_USAGE_SQL.replaceAll('?', sqlString(row.referenceId))) : []
+  const additional = usage ? Math.max(0, usage.rentalUnits - INCLUDED_RENTAL_UNITS) : 0
+  const lineItems = row.plan === BUSINESS_PLAN_ID
+    ? (additional > 0 ? (plan.lineItems ?? []).map(item => ({ price: item.price!, quantity: additional })) : [])
+    : (plan.lineItems ?? []).map(item => ({ price: item.price!, quantity: item.quantity ?? 1 }))
+  if (row.plan === BUSINESS_PLAN_ID && !plan.lineItems?.length) throw new Error('The Business plan has no Additional rental unit price')
   const source = { krabiclaw_source_customer: row.stripeCustomerId, krabiclaw_organization: row.referenceId }
   // Invoice billing needs an address; example.com receives nothing.
   const email = `test-mode-billing+${row.referenceId.toLowerCase().replace(/[^a-z0-9-]/g, '')}@example.com`
@@ -70,11 +79,11 @@ for (const row of rows) {
   const subscription = (await stripe.subscriptions.search({ query: `metadata['krabiclaw_source_subscription']:'${row.stripeSubscriptionId}'` })).data.find(found => found.status !== 'canceled')
     ?? await stripe.subscriptions.create({
       customer: customer.id,
-      items: [{ price: plan.priceId, quantity: row.seats ?? 1 }, ...(plan.lineItems ?? []).map(item => ({ price: item.price!, quantity: item.quantity ?? 1 }))],
+      items: [{ price: plan.priceId, quantity: row.seats ?? 1 }, ...lineItems],
       collection_method: 'send_invoice',
       days_until_due: 30,
       metadata: { ...source, krabiclaw_source_subscription: row.stripeSubscriptionId!, referenceId: row.referenceId, plan: row.plan },
-    }, { idempotencyKey: `test-mode-billing:subscription:v2:${row.stripeSubscriptionId}` })
+    }, { idempotencyKey: `test-mode-billing:subscription:v3:${row.stripeSubscriptionId}` })
   d1(`UPDATE subscription SET stripeCustomerId = ${sqlString(customer.id)}, stripeSubscriptionId = ${sqlString(subscription.id)}, stripeScheduleId = NULL WHERE id = ${sqlString(row.id)};
 UPDATE organization SET stripeCustomerId = ${sqlString(customer.id)} WHERE id = ${sqlString(row.referenceId)};`)
   provisioned++

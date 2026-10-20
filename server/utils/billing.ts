@@ -148,9 +148,12 @@ const RENTAL_UNITS_SQL = `SELECT COUNT(*) FROM products p WHERE p.organization_i
 
 export interface BillingUsageCounts { activeLocations: number; nonLodgingLocations: number; rentalUnits: number }
 
+/** One organization's billed usage; each `?` is its ID. */
+export const BILLING_USAGE_SQL = `SELECT (${ACTIVE_LOCATIONS_SQL}) AS activeLocations,
+    (${NON_LODGING_LOCATIONS_SQL}) AS nonLodgingLocations, (${RENTAL_UNITS_SQL}) AS rentalUnits`
+
 export async function readBillingUsage(db: DbClient, organizationId: string): Promise<BillingUsageCounts> {
-  const row = await queryFirst<BillingUsageCounts>(db, `SELECT (${ACTIVE_LOCATIONS_SQL}) AS activeLocations,
-    (${NON_LODGING_LOCATIONS_SQL}) AS nonLodgingLocations, (${RENTAL_UNITS_SQL}) AS rentalUnits`, [organizationId, organizationId, organizationId])
+  const row = await queryFirst<BillingUsageCounts>(db, BILLING_USAGE_SQL, [organizationId, organizationId, organizationId])
   if (!row) throw new Error('Billing usage could not be read')
   return row
 }
