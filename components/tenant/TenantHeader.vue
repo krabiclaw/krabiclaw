@@ -7,10 +7,10 @@
   >
     <div
       data-tenant-critical-header-inner
-      class="tenant-container flex h-16 items-center justify-between gap-4 lg:grid lg:grid-cols-[minmax(max-content,1fr)_minmax(0,auto)_minmax(max-content,1fr)]"
+      class="tenant-container flex min-h-16 items-center justify-between gap-4 py-2 lg:grid lg:grid-cols-[minmax(max-content,1fr)_minmax(0,auto)_minmax(max-content,1fr)]"
     >
       <NuxtLink :to="localePath('/')" class="block min-w-0 no-underline leading-none" :aria-label="`${brandName} home`">
-        <SiteLogo :alt="brandName" size="sm" loading="eager">
+        <SiteLogo :alt="brandName" size="lg" loading="eager">
           <span class="tenant-display block truncate text-lg text-highlighted sm:text-xl">{{ brandName }}</span>
         </SiteLogo>
       </NuxtLink>
