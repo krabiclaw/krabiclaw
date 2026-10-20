@@ -720,7 +720,11 @@ test('a host describes a place to stay through its focused editors and previews 
   await expect(safetyAmenities.getByTestId('amenity-categories-home_safety')).toHaveAttribute('aria-pressed', 'true')
   await expect(safetyAmenities.getByRole('list').getByRole('button')).toHaveText(['Carbon monoxide alarm', 'Fire extinguisher', 'First aid kit', 'Smoke alarm'])
   await safetyAmenities.getByRole('button', { name: 'Smoke alarm', exact: true }).click()
+  const alarmSaved = page.waitForResponse(response => response.request().method() === 'PATCH' && new URL(response.url()).pathname === `/api/editor/organizations/${organizationId}/products/${productId}`)
   await safetyAmenities.getByRole('button', { name: 'Done', exact: true }).click()
+  const alarmResponse = await alarmSaved
+  expect(alarmResponse.status(), await alarmResponse.text()).toBe(200)
+  expect(alarmResponse.request().postDataJSON()).toEqual({ stay: { amenities: ['dryer', 'wireless_internet', 'smoke_detector'] } })
   await expect(page).toHaveURL(`/dashboard/${slug}/products/${productId}/amenities`)
   const savedSafety = await call<{ product: Product }>('get_product', { product_id: productId })
   expect(savedSafety.error).toBeNull()

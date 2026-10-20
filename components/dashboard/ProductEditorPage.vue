@@ -1252,6 +1252,7 @@ function isSafetyConcern(concern: unknown): concern is StaySafetySection {
 }
 
 function payload(concern?: ProductConcern) {
+  if (form.kind === 'stay' && !isNew.value && editorKey.value === 'amenities') return { stay: { amenities: form.stay_amenities } }
   if (isSafetyConcern(concern)) {
     if (product.value?.kind !== 'stay') throw new Error('Guest safety requires a place to stay.')
     return { details_mode: 'merge', details: Object.fromEntries(staySafetySectionKeys(concern).map(key => [key, form.details[key] ?? null])) }
@@ -1343,9 +1344,6 @@ function payload(concern?: ProductConcern) {
       bedrooms: String(form.stay_bedrooms ?? '').trim() && !Number.isNaN(Number(form.stay_bedrooms)) ? Number(form.stay_bedrooms) : null,
       beds: String(form.stay_beds ?? '').trim() && !Number.isNaN(Number(form.stay_beds)) ? Number(form.stay_beds) : null,
       bathrooms: String(form.stay_bathrooms ?? '').trim() && !Number.isNaN(Number(form.stay_bathrooms)) ? Number(form.stay_bathrooms) : null,
-    } } : {}),
-    ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'amenities' ? { stay: {
-      amenities: form.stay_amenities,
     } } : {}),
     ...(form.kind === 'stay' && !isNew.value && editorKey.value === 'cancellation' ? { stay: {
       cancellation_policy: form.stay_cancellation_policy || null,
