@@ -92,6 +92,13 @@
       "when": 1792461078052,
       "tag": "0012_tenant_theme_id",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1792467372256,
+      "tag": "0013_heading_level_column",
+      "breakpoints": true
     }
   ]
 }
