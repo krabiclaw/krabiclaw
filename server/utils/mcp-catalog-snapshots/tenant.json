@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:6e83c7133ea90af3a91d4fae0a8bcd1287ea13fa38923b04cec4c6a9e1d4051c",
-  "documentationFingerprint": "sha256:0ede6a08109776ad6674ec922ed5fda6e42ed69191f309547d8675722ebbce53",
+  "fingerprint": "sha256:78f41a1a6d862dccdf6e2befc49a3c292abfccdaa872171de5946df6ed8865cd",
+  "documentationFingerprint": "sha256:b6b2f01f31485b3a86d3d25a5fd09f07e79999bad73e425f84f6d73091543457",
   "tools": [
     {
       "name": "add_organization_language",
@@ -106037,7 +106037,7 @@
             "type": "string"
           },
           "font_preset": {
-            "description": "Website heading and body fonts, on every template: default (Default), mali (Mali), sarabun (Sarabun), prompt (Prompt), kanit (Kanit with Sarabun), ibm-plex-sans-thai (IBM Plex Sans Thai), noto-serif-thai (Noto Serif Thai with Noto Sans Thai), inter (Inter), dm-sans (DM Sans), montserrat (Montserrat), lora (Lora), playfair-display (Playfair Display with Inter), cormorant-garamond (Cormorant Garamond with Inter), marcellus (Marcellus). Thai, Vietnamese and Japanese text renders in every choice.",
+            "description": "Website heading and body fonts, on every template: default (Default), mali (Mali), sarabun (Sarabun), prompt (Prompt), kanit (Kanit with Sarabun), ibm-plex-sans-thai (IBM Plex Sans Thai), noto-serif-thai (Noto Serif Thai with Noto Sans Thai), inter (Inter), dm-sans (DM Sans), montserrat (Montserrat), lora (Lora), playfair-display (Playfair Display with Inter), cormorant-garamond (Cormorant Garamond with Inter), marcellus (Marcellus with Inter). Thai, Vietnamese and Japanese text renders in every choice.",
             "enum": [
               "default",
               "mali",
@@ -118880,7 +118880,7 @@
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
         "update_menu": "sha256:4ab27009a3a126aed4b328f7f1db8b4cc7e321f720da7e5a16d82f8badb202d8",
-        "update_organization_settings": "sha256:24a6bf50d775f6612d779e0c377ba24aaf36b882fa18458c5a25e7c38e908e86",
+        "update_organization_settings": "sha256:25cdf195df01ed62f410cc89e3862f2a8d6e41c4dbbae0770ac9f8a674fe7b7f",
         "update_site_page": "sha256:f7c8737677adc7423ceca224e011d8f2542b7b0f793fa5933e4a86be6f947d0b"
       }
     },
