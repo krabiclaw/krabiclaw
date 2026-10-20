@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:c3667ba3360287c3ee73e391fd74b0c3f7cc2851b7f1a0441f18a97e921e90e9",
-  "documentationFingerprint": "sha256:b5f71ee072a1fd3160000162f10bdadd3addd7096eb6c1f530e04da1a7a5c47e",
+  "fingerprint": "sha256:b52e8cb7c52f515ec8d89967c5b2a9723467d8ae904c817d3bd05bdf776de623",
+  "documentationFingerprint": "sha256:b77e470d5d19ef4e26cdd1decbdec253cf11b864e560b53ade9808e3f1d2cfa3",
   "tools": [
     {
       "name": "add_organization_language",
@@ -15376,7 +15376,7 @@
     {
       "name": "create_location",
       "title": "Create location",
-      "description": "Add a location to the selected business website. Every plan includes 2 locations; on Growth and Business each additional location is $49 per month, added to the plan by its owner in Billing first, and a location beyond those the plan covers is refused. On the current Business price a location with only rental units is billed by its units instead: 2 included, then $19 per additional rental unit per month. Repeat the same idempotency key with the same details on retry.",
+      "description": "Add a location to the selected business website. Every plan includes 2 locations. Growth and Business include 2 locations, then $49 per additional location per month, billed at the end of the period; Basic refuses a third location. Repeat the same idempotency key with the same details on retry.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -16867,7 +16867,7 @@
     {
       "name": "create_product",
       "title": "Create product",
-      "description": "Add a catalog item, experience, service or place to stay. Experiences need booking duration, capacity, location and actual times, or an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and stay settings), keeps its public house rules in details, and is priced per night by its variant price; guests book it on the site and pay in full, so it takes no order_url and publishes only once it has a nightly price and online payments are set up. On the current Business price each home is a rental unit: 2 included, then $19 per additional rental unit per month, added to the plan by its owner in Billing first; a home beyond those the plan covers is refused. Repeat the same idempotency key on retry.",
+      "description": "Add a catalog item, experience, service or place to stay. Experiences need booking duration, capacity, location and actual times, or an external booking URL. Supplying booking creates its configuration, offering, schedule and public page together, using instant confirmation and no online collection by default. A place to stay needs stay (its location and stay settings), keeps its public house rules in details, and is priced per night by its variant price; guests book it on the site and pay in full, so it takes no order_url and publishes only once it has a nightly price and online payments are set up. Repeat the same idempotency key on retry.",
       "inputSchema": {
         "$defs": {
           "content_ai_assistance": {
@@ -45538,7 +45538,7 @@
     {
       "name": "get_payments_usage",
       "title": "Get payments usage",
-      "description": "Read the selected business’s KrabiClaw Payments usage, Metronome invoices, accrued usage and undelivered provider-cost events. These are operating costs, separate from customer payments and platform subscription billing. Requires payment and billing read access. Does not change billing or move money.",
+      "description": "Read the selected business’s KrabiClaw Payments fees: the rates its plan subscription’s metered prices charge for payment volume, Stripe fees and managed ad spend, and usage not yet reported to Stripe. Stripe bills these fees on the subscription invoice at the end of each period, separate from customer payments. Requires payment and billing read access. Does not change billing or move money.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -45554,190 +45554,11 @@
         "$defs": {},
         "additionalProperties": false,
         "properties": {
-          "account": {
-            "properties": {
-              "contract_start_at": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "currency": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string"
-              }
-            },
-            "type": [
-              "object",
-              "null"
-            ]
-          },
           "configured": {
             "type": "boolean"
           },
-          "credits": {
-            "items": {
-              "properties": {
-                "action_required": {
-                  "type": "boolean"
-                },
-                "amount": {
-                  "type": "integer"
-                },
-                "currency": {
-                  "const": "USD"
-                },
-                "fx_quote_id": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "id": {
-                  "type": "string"
-                },
-                "kind": {
-                  "type": "string"
-                },
-                "provider_occurred_at": {
-                  "type": "string"
-                },
-                "source_amount": {
-                  "type": "integer"
-                },
-                "source_currency": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "id",
-                "kind",
-                "currency",
-                "amount",
-                "source_currency",
-                "source_amount",
-                "fx_quote_id",
-                "provider_occurred_at",
-                "action_required"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
           "dashboard_url": {
             "type": "string"
-          },
-          "invoices": {
-            "items": {
-              "properties": {
-                "collection_invoice": {
-                  "properties": {
-                    "amount_due": {
-                      "type": "integer"
-                    },
-                    "amount_paid": {
-                      "type": "integer"
-                    },
-                    "amount_remaining": {
-                      "type": "integer"
-                    },
-                    "currency": {
-                      "type": "string"
-                    },
-                    "hosted_invoice_url": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "invoice_pdf": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "status": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "total": {
-                      "type": "integer"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "status",
-                    "currency",
-                    "total",
-                    "amount_due",
-                    "amount_paid",
-                    "amount_remaining",
-                    "hosted_invoice_url",
-                    "invoice_pdf"
-                  ],
-                  "type": [
-                    "object",
-                    "null"
-                  ]
-                },
-                "credit_type": {
-                  "properties": {
-                    "name": {
-                      "const": "USD (cents)"
-                    }
-                  },
-                  "required": [
-                    "name"
-                  ],
-                  "type": "object"
-                },
-                "end_timestamp": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "id": {
-                  "type": "string"
-                },
-                "start_timestamp": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "status": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "total": {
-                  "type": "number"
-                },
-                "type": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                }
-              },
-              "required": [
-                "id",
-                "total",
-                "credit_type",
-                "collection_invoice"
-              ],
-              "type": "object"
-            },
-            "type": "array"
           },
           "organization_id": {
             "type": "string"
@@ -45803,11 +45624,11 @@
               "currency": {
                 "const": "USD"
               },
+              "stripe_cost_rate": {
+                "type": "number"
+              },
               "units": {
                 "const": "cents"
-              },
-              "validated_at": {
-                "type": "string"
               }
             },
             "required": [
@@ -45815,9 +45636,9 @@
               "units",
               "captured_volume_rate",
               "captured_volume_rate_percent",
+              "stripe_cost_rate",
               "ad_spend_rate",
-              "ad_spend_rate_percent",
-              "validated_at"
+              "ad_spend_rate_percent"
             ],
             "type": [
               "object",
@@ -45840,8 +45661,6 @@
           "source",
           "pricing",
           "pending",
-          "credits",
-          "invoices",
           "dashboard_url"
         ],
         "type": "object"
@@ -118533,7 +118352,7 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:c097f4593e7d1fb17fa5aad6f035f4b84725db3bee2ff2d34da068fe7837852a",
+        "create_product": "sha256:041a77454099d5bf390ecf1c10623c5211ef4ea072b9799f4be8bd96cd7ac1c2",
         "get_product": "sha256:b9e0be9c62e11923243eb43b719fe76e3b8b022e719a56ea9654915300dee8cd",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
@@ -118589,7 +118408,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
-        "create_product": "sha256:c097f4593e7d1fb17fa5aad6f035f4b84725db3bee2ff2d34da068fe7837852a",
+        "create_product": "sha256:041a77454099d5bf390ecf1c10623c5211ef4ea072b9799f4be8bd96cd7ac1c2",
         "get_product": "sha256:b9e0be9c62e11923243eb43b719fe76e3b8b022e719a56ea9654915300dee8cd",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -118670,7 +118489,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:c097f4593e7d1fb17fa5aad6f035f4b84725db3bee2ff2d34da068fe7837852a",
+        "create_product": "sha256:041a77454099d5bf390ecf1c10623c5211ef4ea072b9799f4be8bd96cd7ac1c2",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
         "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_website_draft": "sha256:fccf7d7281ba30d1e79163929e61abec1893c2e910460c4068364a65784a7bac",
@@ -118754,9 +118573,9 @@
   "publicDocumentation": [
     {
       "slug": "what-you-can-edit-through-chatgpt",
-      "contentHash": "sha256:1aa095e046466e5231a1c6e06a28af5b90c19ad5afe3d229cc14e2560cf15d6c",
+      "contentHash": "sha256:6b1c5205427d0e9f78516a5fa1f2af3a556033059a0801405c3cc9fc076fe2af",
       "toolContracts": {
-        "create_location": "sha256:037aa077585a9224a7c3be37ea22682aa14188996133d401984f0946511cc502",
+        "create_location": "sha256:f819486a992ddd46918bea50c223e740523093e3f0a08e646bd777255d7513ce",
         "create_product_session": "sha256:20a84410e6e8731ad7690e782db6ef318504548f85f88994e028c6fee181e9b6",
         "get_guest_conversation": "sha256:9317ec6c2b3ac34c709673df3372fbee93f3a7da1cca18e86c2f465aa8f1f5ea",
         "get_stay": "sha256:9a13594b951339411e59e4425f62d60e3056430eab9698c77c93572cfaf19d48",

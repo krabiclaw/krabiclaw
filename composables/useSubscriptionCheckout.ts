@@ -7,9 +7,6 @@ interface SubscriptionCheckoutInput {
   plan: string
   currentPlan: string
   subscriptionId?: string | null
-  annual?: boolean
-  /** Locations the subscription is billed for: its Stripe quantity, carried through every plan change. */
-  locations: number
   previousPriceId?: string | null
   newPriceId?: string | null
   onAction?: (_action: StripeGa4IntentAction) => void
@@ -87,8 +84,6 @@ export function useSubscriptionCheckout() {
 
     const response = await authClient.subscription.upgrade({
       plan,
-      annual: input.annual ?? false,
-      seats: input.locations,
       referenceId: input.organizationId,
       ...(input.subscriptionId ? { subscriptionId: input.subscriptionId } : {}),
       customerType: 'organization',

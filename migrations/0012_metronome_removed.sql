@@ -1,0 +1,6 @@
+DROP TABLE `payment_billing_accounts`;--> statement-breakpoint
+DROP INDEX `payment_usage_events_credit_note_id_unique`;--> statement-breakpoint
+ALTER TABLE `payment_usage_events` DROP COLUMN `billing_timestamp`;--> statement-breakpoint
+ALTER TABLE `payment_usage_events` DROP COLUMN `credit_note_id`;--> statement-breakpoint
+DROP INDEX `analytics_events_conversion_entity_unique`;--> statement-breakpoint
+CREATE UNIQUE INDEX `analytics_events_conversion_entity_unique` ON `analytics_events` (`organization_id`,(payload_json ->> '$.event_name'),(payload_json ->> '$.entity_type'),(payload_json ->> '$.entity_id')) WHERE kind = 'conversion' AND (payload_json ->> '$.entity_type') IS NOT NULL AND (payload_json ->> '$.entity_id') IS NOT NULL AND (payload_json ->> '$.event_name') IN ('contact_submit', 'reservation_submit', 'booking_submit', 'sign_up', 'onboarding_complete', 'purchase', 'refund', 'payment_paid', 'payment_refunded', 'booking_confirmed', 'booking_declined', 'booking_cancelled', 'booking_change_accepted', 'booking_change_declined');

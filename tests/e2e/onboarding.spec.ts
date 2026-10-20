@@ -372,36 +372,32 @@ test('the business search API refuses what the picker would never send', async (
   expect(detailsMalformed.status(), await detailsMalformed.text()).toBe(400)
 })
 
-// Ember & Slice is on Business, billed for the 2 included locations, and has
-// both; neither holds only rental units, so both count. A third is refused by
-// the createLocation every surface shares, and the
-// new location's own level offers to add a location to the plan instead of its sections.
-test('a location beyond the ones the plan pays for is refused until the plan covers it', async ({ page, baseURL }) => {
+// Ember & Slice is on Business with the 2 included locations in use. A paid
+// plan refuses no location: a third is made by the createLocation every surface
+// shares, counted in the plan's usage, and billed at the end of the period.
+test('a paid plan adds a location past the included ones and counts it', async ({ page, baseURL }) => {
   await loginAs(page.request, baseURL!, 'user-e2e-demo-owner')
   const status = async () => {
     const response = await page.request.get('/api/billing/status?organizationId=org-demo')
     expect(response.status(), await response.text()).toBe(200)
-    return (await response.json() as { billing: { plan: string; locations: { used: number; covered: number } } }).billing
+    return (await response.json() as { billing: { plan: string; usage: { locations: number } } }).billing
   }
   const before = await status()
   expect(before.plan).toBe('business')
-  expect(before.locations).toEqual({ used: 2, covered: 2 })
+  expect(before.usage.locations).toBe(2)
 
-  const refused = await page.request.post('/api/dashboard/locations?org=ember-slice-demo', { data: { title: 'Third branch', timezone: 'America/New_York' } })
-  expect(refused.status(), await refused.text()).toBe(402)
-  expect(await refused.json()).toEqual({
-    error: 'Your plan covers 2 locations besides those with only rental units. Add a location to your plan in Billing (2 included, then $49 per additional location per month), then create it.',
-    code: 'LOCATION_LIMIT',
-    locations: { used: 2, covered: 2 },
-  })
-  expect((await status()).locations).toEqual({ used: 2, covered: 2 })
-
+  // The new location's own level walks its sections; nothing asks to extend the plan first.
   await page.goto('/dashboard/ember-slice-demo/locations/new')
-  const limit = page.locator('[data-location-limit]')
-  await expect(limit).toContainText('Your site has 2 locations, and your plan covers 2. Plans include 2, then $49 per additional location per month.')
-  await expect(limit.getByRole('button', { name: 'Add a location to your plan', exact: true })).toBeVisible()
-  // No step opens: there is no section to walk until the plan covers one more.
-  await expect(page).toHaveURL(/\/dashboard\/ember-slice-demo\/locations\/new$/)
+  await expect(page).toHaveURL(/\/dashboard\/ember-slice-demo\/locations\/new\/name$/)
+  await expect(page.locator('[data-location-limit]')).toHaveCount(0)
+
+  const created = await page.request.post('/api/dashboard/locations?org=ember-slice-demo', { data: { title: 'Third branch', timezone: 'America/New_York' } })
+  expect(created.status(), await created.text()).toBe(201)
+  const location = (await created.json() as { location: { id: string } }).location
+  expect((await status()).usage.locations).toBe(3)
+  const deleted = await page.request.delete(`/api/organizations/org-demo/locations/${location.id}`)
+  expect(deleted.status(), await deleted.text()).toBe(200)
+  expect((await status()).usage.locations).toBe(2)
 })
 
 // NCLS has one of the two locations its plan includes. Adding one walks the

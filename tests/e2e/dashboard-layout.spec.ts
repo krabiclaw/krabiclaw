@@ -1177,16 +1177,16 @@ test.describe('dashboard pane hierarchy', () => {
       await plans.getByTestId('dashboard-navbar-close').click()
       await expect(page).toHaveURL(`${basic}/payments?tab=plan`)
 
-      // A Basic business without an operating billing customer gets the actual
-      // setup action, and cannot record a billable agreement by submitting it.
+      // A Basic business gets the actual setup action, and cannot record a
+      // billable agreement by submitting it.
       const servicesBefore = await page.request.get('/api/dashboard/services?org=krabiclaw-review-legal')
       expect(servicesBefore.status(), await servicesBefore.text()).toBe(200)
       expect(await servicesBefore.json()).toEqual({ success: true, services: { managed_ads: null, strategy: null } })
       await payments.getByRole('link', { name: /^Managed ads/ }).click()
       const managedAds = page.getByRole('dialog', { name: 'Managed ads', exact: true })
-      await expect(managedAds.getByText('Before turning it on, connect a Google Ads account billed in USD and set up active Payments billing with a default payment method.', { exact: true })).toBeVisible()
+      await expect(managedAds.getByText('Before turning it on, choose Business, set a default payment method and connect a Google Ads account billed in USD.', { exact: true })).toBeVisible()
       await expect(managedAds.getByRole('link', { name: 'Payment methods', exact: true })).toHaveCount(0)
-      await managedAds.getByRole('link', { name: 'Choose a plan with Payments', exact: true }).click()
+      await managedAds.getByRole('link', { name: 'Choose Business', exact: true }).click()
       await expect(page).toHaveURL(`${basic}/payments/plan`)
       await expect(plans).toBeVisible()
       await plans.getByTestId('dashboard-navbar-close').click()
@@ -1195,7 +1195,7 @@ test.describe('dashboard pane hierarchy', () => {
       await managedAds.getByRole('button', { name: 'Agree and turn on', exact: true }).click()
       const rejected = await rejectedAgreement
       expect(rejected.status(), await rejected.text()).toBe(409)
-      const setupMessage = 'Set up active Payments billing in Plan before turning on managed ads. Choose a plan with Payments if your business does not have billing set up.'
+      const setupMessage = 'Managed ads is billed on the Business plan. Choose Business in Plan before turning on managed ads.'
       await expect(managedAds.getByText(setupMessage, { exact: true })).toBeVisible()
       await expect(payments.getByText('Managed ads is off.', { exact: true })).toHaveCount(0)
       const servicesAfter = await page.request.get('/api/dashboard/services?org=krabiclaw-review-legal')

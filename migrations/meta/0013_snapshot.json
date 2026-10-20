@@ -1,6 +1,6 @@
 {
-  "id": "56107da4-66ec-49d2-bee1-ad3a277c19aa",
-  "prevId": "c4d35e24-3e3b-4a57-a133-64b5d06e548c",
+  "id": "2592c33d-b72b-42cf-a550-5d2efa42fdaa",
+  "prevId": "f424351e-2611-4cba-9458-05bc2b8744e9",
   "version": "6",
   "dialect": "sqlite",
   "tables": {
@@ -585,7 +585,7 @@
             "(payload_json ->> '$.entity_type')",
             "(payload_json ->> '$.entity_id')"
           ],
-          "where": "kind = 'conversion' AND (payload_json ->> '$.entity_type') IS NOT NULL AND (payload_json ->> '$.entity_id') IS NOT NULL AND (payload_json ->> '$.event_name') IN ('contact_submit', 'reservation_submit', 'booking_submit', 'sign_up', 'onboarding_complete', 'purchase', 'refund', 'payment_paid', 'payment_refunded', 'booking_confirmed', 'booking_declined', 'booking_cancelled', 'booking_change_accepted', 'booking_change_declined', 'payments_fee_invoice_paid')",
+          "where": "kind = 'conversion' AND (payload_json ->> '$.entity_type') IS NOT NULL AND (payload_json ->> '$.entity_id') IS NOT NULL AND (payload_json ->> '$.event_name') IN ('contact_submit', 'reservation_submit', 'booking_submit', 'sign_up', 'onboarding_complete', 'purchase', 'refund', 'payment_paid', 'payment_refunded', 'booking_confirmed', 'booking_declined', 'booking_cancelled', 'booking_change_accepted', 'booking_change_declined')",
           "isUnique": true
         }
       },
@@ -8449,72 +8449,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "payment_billing_accounts": {
-      "name": "payment_billing_accounts",
-      "columns": {
-        "organization_id": {
-          "name": "organization_id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "stripe_billing_customer_id": {
-          "name": "stripe_billing_customer_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "metronome_customer_id": {
-          "name": "metronome_customer_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "metronome_contract_id": {
-          "name": "metronome_contract_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "contract_start_at": {
-          "name": "contract_start_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "currency": {
-          "name": "currency",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {},
-      "foreignKeys": {},
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
     "payment_checkout_holds": {
       "name": "payment_checkout_holds",
       "columns": {
@@ -9555,20 +9489,6 @@
           "notNull": false,
           "autoincrement": false
         },
-        "billing_timestamp": {
-          "name": "billing_timestamp",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "credit_note_id": {
-          "name": "credit_note_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "dead_letter_at": {
           "name": "dead_letter_at",
           "type": "text",
@@ -9589,13 +9509,6 @@
           "name": "payment_usage_events_source_id_unique",
           "columns": [
             "source_id"
-          ],
-          "isUnique": true
-        },
-        "payment_usage_events_credit_note_id_unique": {
-          "name": "payment_usage_events_credit_note_id_unique",
-          "columns": [
-            "credit_note_id"
           ],
           "isUnique": true
         }

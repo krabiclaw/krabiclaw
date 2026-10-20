@@ -1570,8 +1570,8 @@ export const inventory_levels = sqliteTable("inventory_levels", {
 /**
  * A service the business asked KrabiClaw's people for, with the consent that
  * started it: who agreed, when, and to which terms. Managed ads is the only
- * service whose fee is usage (Metronome `payments_ad_spend`), so its consent
- * lives here rather than on a Stripe subscription. A row with `ended_at` is
+ * service whose fee is usage (the Business subscription's ad-spend meter), so
+ * its consent lives here rather than on a Stripe subscription item. A row with `ended_at` is
  * history; the current agreement for a service is the one without.
  */
 export const organization_services = sqliteTable("organization_services", {
@@ -2794,7 +2794,7 @@ export const analytics_events = sqliteTable("analytics_events", {
   index("analytics_events_org_visitor_idx").on(table.organization_id, table.kind, table.visitor_id),
   index("analytics_events_conversion_name_idx").on(table.kind, sql`(payload_json ->> '$.event_name')`, table.created_at),
   index("analytics_events_conversion_entity_idx").on(table.organization_id, sql`(payload_json ->> '$.entity_type')`, sql`(payload_json ->> '$.entity_id')`).where(sql`kind IN ('conversion', 'interaction')`),
-  uniqueIndex("analytics_events_conversion_entity_unique").on(table.organization_id, sql`(payload_json ->> '$.event_name')`, sql`(payload_json ->> '$.entity_type')`, sql`(payload_json ->> '$.entity_id')`).where(sql`kind = 'conversion' AND (payload_json ->> '$.entity_type') IS NOT NULL AND (payload_json ->> '$.entity_id') IS NOT NULL AND (payload_json ->> '$.event_name') IN ('contact_submit', 'reservation_submit', 'booking_submit', 'sign_up', 'onboarding_complete', 'purchase', 'refund', 'payment_paid', 'payment_refunded', 'booking_confirmed', 'booking_declined', 'booking_cancelled', 'booking_change_accepted', 'booking_change_declined', 'payments_fee_invoice_paid')`),
+  uniqueIndex("analytics_events_conversion_entity_unique").on(table.organization_id, sql`(payload_json ->> '$.event_name')`, sql`(payload_json ->> '$.entity_type')`, sql`(payload_json ->> '$.entity_id')`).where(sql`kind = 'conversion' AND (payload_json ->> '$.entity_type') IS NOT NULL AND (payload_json ->> '$.entity_id') IS NOT NULL AND (payload_json ->> '$.event_name') IN ('contact_submit', 'reservation_submit', 'booking_submit', 'sign_up', 'onboarding_complete', 'purchase', 'refund', 'payment_paid', 'payment_refunded', 'booking_confirmed', 'booking_declined', 'booking_cancelled', 'booking_change_accepted', 'booking_change_declined')`),
 ]);
 
 export const analytics_summaries = sqliteTable("analytics_summaries", {
@@ -3070,7 +3070,8 @@ export const payment_disputes = sqliteTable("payment_disputes", {
  updated_at: text().notNull(),
 },t=>[unique('payment_disputes_provider_unique').on(t.payment_id,t.stripe_dispute_id)]);
 
-// Metronome owns rating/invoices. This is only a delivery outbox, not a ledger.
+// Stripe meters rate and invoice usage on the plan subscription. This is only
+// the delivery outbox to them, not a ledger.
 export const payment_usage_events = sqliteTable("payment_usage_events", {
  id: text().primaryKey(),
  organization_id: text().notNull(),
@@ -3083,20 +3084,8 @@ export const payment_usage_events = sqliteTable("payment_usage_events", {
  provider_occurred_at: text().notNull(),
  delivery_at: text(),
  error: text(),
- billing_timestamp: text(),
- credit_note_id: text().unique(),
  dead_letter_at: text(),
  created_at: text().notNull(),
-});
-export const payment_billing_accounts = sqliteTable("payment_billing_accounts", {
- organization_id: text().primaryKey(),
- stripe_billing_customer_id: text().notNull(),
- metronome_customer_id: text(),
- metronome_contract_id: text(),
- contract_start_at: text().notNull(),
- currency: text().notNull(),
- status: text().$type<'provisioning' | 'active' | 'servicing' | 'closing' | 'closed'>().notNull(),
- updated_at: text().notNull(),
 });
 
 export const payment_authorizations = sqliteTable("payment_authorizations", {
