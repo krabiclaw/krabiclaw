@@ -11,6 +11,7 @@ import { notifyPaymentFinancialEvent } from './notifications'
 import { loadOwnerPictures } from '~/server/notifications/hero'
 import { getGuestRequest } from '~/server/domain/requests'
 import { createReplayableReservationCancelToken, hashReservationCancelToken } from '~/server/utils/reservation-cancel-token'
+import { createStayReceiptToken } from '~/server/utils/stay-receipt-token'
 
 /**
  * The payment the buyer confirms on the site: Stripe's Payment Element collects
@@ -189,9 +190,9 @@ async function paymentReceipt(db: DbClient, env: CloudflareEnv, payment: Payment
   }
   if (payment.subject_type === 'stay') {
     // The stay is read by its activity ID, as the guest's account reads it.
-    const stay = await queryFirst<{ id: string }>(db, 'SELECT COALESCE(request_id,id) AS id FROM stays WHERE id=? AND organization_id=?', [hold.converted_stay_id, payment.organization_id])
+    const stay = await queryFirst<{ id: string; created_at: string }>(db, 'SELECT COALESCE(request_id,id) AS id,created_at FROM stays WHERE id=? AND organization_id=?', [hold.converted_stay_id, payment.organization_id])
     if (!stay) throw new Error('Converted stay hold has no stay')
-    return { state: 'paid', kind: 'stay', activity_id: stay.id, receipt_token: (await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', stay.id)).token }
+    return { state: 'paid', kind: 'stay', activity_id: stay.id, receipt_token: (await createStayReceiptToken(env.EMAIL_REPLY_SECRET ?? '', stay.id, stay.created_at)).token }
   }
   if (payment.subject_type !== 'booking' && payment.subject_type !== 'reservation') throw new Error(`Payment subject ${payment.subject_type} has no guest confirmation`)
   if (!hold.request_id) throw new Error('Captured visit payment has no guest request')
