@@ -533,9 +533,9 @@ test('a business’s site shows a guest the stay its signed link names, from any
     // No session is sent: the link alone opens the stay, as from the email on another device.
     const own = await read(ORG, link)
     assert.equal(own.status, 200)
-    const body = await own.json() as { organization_id: string; stay: { id: string; guest_email: string; cancellation_policy: string; check_in_date: string; check_out_date: string }; home: { name: string; check_in_time: string; check_out_time: string }; cancellation: unknown }
+    const body = await own.json() as { organization_id: string; stay: { id: string; guest_email: string; cancellation_policy: string; check_in_date: string; check_out_date: string }; home: { name: string; check_in_time: string; check_out_time: string; image_url: string | null }; cancellation: unknown }
     assert.deepEqual({ organization_id: body.organization_id, id: body.stay.id, email: body.stay.guest_email, policy: body.stay.cancellation_policy, dates: [body.stay.check_in_date, body.stay.check_out_date], home: body.home, cancellation: body.cancellation },
-      { organization_id: ORG, id: stay.id, email: 'ana@example.com', policy: 'moderate', dates: ['2026-11-01', '2026-11-04'], home: { name: 'Cabin', organization_name: 'Org', check_in_time: '16:00', check_out_time: '10:00' }, cancellation: null })
+      { organization_id: ORG, id: stay.id, email: 'ana@example.com', policy: 'moderate', dates: ['2026-11-01', '2026-11-04'], home: { name: 'Cabin', organization_name: 'Org', check_in_time: '16:00', check_out_time: '10:00', image_url: null }, cancellation: null })
     assert.equal((await read('another-org', link)).status, 404)
     assert.equal((await read(ORG, otherLink)).status, 404)
     assert.equal((await read(ORG)).status, 401)

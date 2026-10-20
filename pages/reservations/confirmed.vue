@@ -10,7 +10,9 @@
       v-else-if="confirmation"
       :kicker="receiptTitle"
       :cancelled="confirmation.status === 'cancelled'"
-      :receipt-kicker="resCopy.reservationWord"
+      :item-title="confirmation.locationName || confirmation.organizationName"
+      :item-subtitle="confirmation.locationName ? confirmation.organizationName : ''"
+      :image-url="confirmation.imageUrl"
       :receipt-rows="receiptRows"
       :next-steps-kicker="resolvedPolicySummary?.heading ?? resCopy.reservationPoliciesHeading"
       :next-steps="policyLines"
@@ -86,8 +88,7 @@ const readableTime = computed(() => confirmation.value
 
 const receiptRows = computed(() => {
   if (!confirmation.value) return []
-  const rows: Array<{ label: string; value: string }> = []
-  if (confirmation.value.locationName) rows.push({ label: resCopy.value.locationLabel, value: confirmation.value.locationName })
+  const rows: Array<{ label: string; value: string; wide?: boolean }> = []
   rows.push({ label: resCopy.value.dateLabel, value: readableDate.value })
   rows.push({ label: resCopy.value.timeLabel, value: readableTime.value })
   rows.push({
@@ -95,7 +96,7 @@ const receiptRows = computed(() => {
     value: `${confirmation.value.guests} ${Number(confirmation.value.guests) === 1 ? resCopy.value.guestLabel : resCopy.value.guestsLabelPlural}`,
   })
   rows.push({ label: resCopy.value.nameLabel, value: confirmation.value.guestName })
-  if (confirmation.value.requests) rows.push({ label: resCopy.value.specialRequestsLabel, value: confirmation.value.requests })
+  if (confirmation.value.requests) rows.push({ label: resCopy.value.specialRequestsLabel, value: confirmation.value.requests, wide: true })
   if (confirmation.value.paid) rows.push({ label: t('payment.paid'), value: paymentMoney(confirmation.value.paid.amount, confirmation.value.paid.currency) })
   return rows
 })

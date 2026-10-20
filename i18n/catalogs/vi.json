@@ -485,6 +485,7 @@
   "booking_policy.reschedule_allowed": "Bạn có thể yêu cầu đổi lịch.",
   "booking_policy.reschedule_disallowed": "Không được đổi lịch.",
   "legal.powered_by": "Vận hành bởi KrabiClaw",
+  "legal.payment_methods": "Phương thức thanh toán được chấp nhận",
   "stay.confirmed_title": "Kỳ lưu trú của bạn đã được xác nhận",
   "stay.your_stay": "Kỳ lưu trú của bạn",
   "stay.check_in": "Nhận phòng",

@@ -1,4 +1,5 @@
 import { HTTPError } from 'nitro'
+import { loadOwnerPictures } from '~/server/notifications/hero'
 import { d1JsonStringSet, executeBatch, queryAll, queryFirst, type BatchQuery, type DbClient } from '~/server/db'
 import { assertRoleAllows, assignedHomeSql, isOrganizationWideRole, organizationAdapter, roleAllows, type MemberAccessPrincipal } from '~/server/utils/member-access'
 import { creationDedupeKey, organizationEventQuery, readCreationRecord } from '~/server/utils/organization-events'
@@ -1306,25 +1307,28 @@ export interface GuestStay {
   /** The business the stay is with: a business's site shows only its own. */
   organization_id: string
   stay: StayDetail
-  home: { name: string; organization_name: string; check_in_time: string; check_out_time: string }
+  home: { name: string; organization_name: string; check_in_time: string; check_out_time: string; image_url: string | null }
   /** Null once the stay is cancelled, or for a stay not paid on the site. */
   cancellation: StayCancellationQuote | null
 }
 
 /** The account's stay by its activity ID: its conversation's ID, or the stay's own when it has none. */
 export async function readGuestStay(db: DbClient, buyerUserId: string, activityId: string): Promise<GuestStay> {
-  const owned = await queryFirst<{ id: string; organization_id: string; status: string; name: string; organization_name: string; check_in_time: string; check_out_time: string; paid_online: number }>(db, `
-    SELECT s.id, s.organization_id, s.status, p.name, o.name AS organization_name, c.check_in_time, c.check_out_time,
+  const owned = await queryFirst<{ id: string; organization_id: string; product_id: string; status: string; name: string; organization_name: string; check_in_time: string; check_out_time: string; paid_online: number }>(db, `
+    SELECT s.id, s.organization_id, s.product_id, s.status, p.name, o.name AS organization_name, c.check_in_time, c.check_out_time,
            EXISTS (SELECT 1 FROM payments WHERE organization_id = s.organization_id AND subject_type = 'stay' AND subject_id = s.id AND captured_amount > 0) AS paid_online
       FROM stays s JOIN products p ON p.organization_id = s.organization_id AND p.id = s.product_id
       JOIN product_stay_configs c ON c.organization_id = s.organization_id AND c.product_id = s.product_id
       JOIN organization o ON o.id = s.organization_id
      WHERE COALESCE(s.request_id, s.id) = ? AND s.user_id = ? AND s.owner = 'app'`, [activityId, buyerUserId])
   if (!owned) fail(404, 'STAY_NOT_FOUND', 'That stay is not in your account', 'stay_id')
-  const stay = await getStay(db, { organizationId: owned.organization_id, actorId: buyerUserId, manage: true }, owned.id)
+  const [stay, pictures] = await Promise.all([
+    getStay(db, { organizationId: owned.organization_id, actorId: buyerUserId, manage: true }, owned.id),
+    loadOwnerPictures(db, owned.organization_id, 'product', [owned.product_id]),
+  ])
   const cancellation = owned.status !== 'cancelled' && owned.paid_online === 1
     ? (await guestStayCancellation(db, owned.organization_id, owned.id, buyerUserId, new Date().toISOString())).quote : null
-  return { organization_id: owned.organization_id, stay, home: { name: owned.name, organization_name: owned.organization_name, check_in_time: owned.check_in_time, check_out_time: owned.check_out_time }, cancellation }
+  return { organization_id: owned.organization_id, stay, home: { name: owned.name, organization_name: owned.organization_name, check_in_time: owned.check_in_time, check_out_time: owned.check_out_time, image_url: pictures.get(owned.product_id)?.imageUrl ?? null }, cancellation }
 }
 
 /**

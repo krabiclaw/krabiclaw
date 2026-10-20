@@ -358,6 +358,32 @@ const STRIPE_CONNECT_ACCOUNT_INCLUDE: Stripe.V2.Core.AccountRetrieveParams.Inclu
   'requirements',
 ]
 
+/** The business's one active Stripe payment method configuration, inheriting the platform's Payments parent. */
+async function connectedMethodConfiguration(stripe: Stripe, stripeAccountId: string, parent: string) {
+  const configurations = await stripe.paymentMethodConfigurations.list({ limit: 100 }, { stripeAccount: stripeAccountId })
+  if (configurations.has_more) throw new Error('Connected checkout configuration needs bounded operator review')
+  const matching = configurations.data.filter(configuration => configuration.parent === parent || configuration.id === parent)
+  if (matching.length !== 1 || !matching[0]!.active) throw new Error('One active connected payment configuration inheriting the Payments parent is required')
+  return matching[0]!
+}
+
+/**
+ * The ways a business takes payment on its site, as its Stripe configuration
+ * turns them on: what its footer shows, as a shop's footer shows its cards and
+ * wallets. A business not set up to take payment online takes none here.
+ */
+export async function acceptedPaymentMethods(db: DbClient, env: CloudflareEnv, organizationId: string): Promise<{ types: string[]; country: string | null }> {
+  const setup = await readStripeCheckoutSetup(db, organizationId, env)
+  if (setup.missing.length || !setup.connected?.stripeAccountId || setup.livemode === null) return { types: [], country: null }
+  const keys = paymentsStripeKeys(env, setup.livemode)!
+  const configuration = await connectedMethodConfiguration(createStripeClient(keys.secretKey, 'payments'), setup.connected.stripeAccountId, keys.methodConfiguration!) as unknown as Record<string, unknown>
+  const types = Object.entries(configuration)
+    .filter(([, value]) => typeof value === 'object' && value !== null && (value as { available?: unknown }).available === true
+      && (value as { display_preference?: { value?: unknown } }).display_preference?.value === 'on')
+    .map(([type]) => type)
+  return { types, country: setup.connected.country }
+}
+
 /** The configured native Stripe account and methods must accept a paid booking before it is offered. */
 export async function requireStripeCheckoutAcceptance(db: DbClient, env: CloudflareEnv, organizationId: string) {
   const setup = await readStripeCheckoutSetup(db, organizationId, env)
@@ -375,12 +401,10 @@ export async function requireStripeCheckoutAcceptance(db: DbClient, env: Cloudfl
   const account = await stripe.v2.core.accounts.retrieve(saved.stripeAccountId!, { include: STRIPE_CONNECT_ACCOUNT_INCLUDE })
   const connected = await projectStripeConnectedAccount(db, accountProjection(saved, account))
   if (connected.status !== 'ready' || account.livemode !== saved.livemode) throw new HTTPError({ statusCode: 409, statusMessage: 'Complete the business’s Stripe account setup before requiring online collection', data: handoff })
-  const configurations = await stripe.paymentMethodConfigurations.list({ limit: 100 }, { stripeAccount: account.id })
-  if (configurations.has_more) throw new HTTPError({ statusCode: 409, statusMessage: 'Connected checkout configuration needs bounded operator review', data: handoff })
-  const matching = configurations.data.filter(configuration => configuration.parent === keys.methodConfiguration || configuration.id === keys.methodConfiguration)
-  if (matching.length !== 1 || !matching[0]!.active) throw new HTTPError({ statusCode: 409, statusMessage: 'One active connected payment configuration inheriting the Payments parent is required', data: handoff })
   // Which methods the business offers is its Stripe payment method configuration's to decide.
-  const methods = matching[0]!
+  const methods = await connectedMethodConfiguration(stripe, account.id, keys.methodConfiguration!).catch((cause: Error) => {
+    throw new HTTPError({ statusCode: 409, statusMessage: cause.message, data: handoff })
+  })
   const [taxSettings, registrations] = await Promise.all([
     stripe.tax.settings.retrieve({}, { stripeAccount: account.id }),
     stripe.tax.registrations.list({ status: 'active', limit: 1 }, { stripeAccount: account.id }),

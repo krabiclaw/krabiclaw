@@ -485,6 +485,7 @@
   "booking_policy.reschedule_allowed": "日時の変更をリクエストできます。",
   "booking_policy.reschedule_disallowed": "日時の変更はできません。",
   "legal.powered_by": "Powered by KrabiClaw",
+  "legal.payment_methods": "利用可能なお支払い方法",
   "stay.confirmed_title": "ご宿泊の予約が確定しました",
   "stay.your_stay": "ご宿泊",
   "stay.check_in": "チェックイン",

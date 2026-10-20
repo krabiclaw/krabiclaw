@@ -3,7 +3,14 @@
        own: each footer's palette is inherited, and hover dims what it gave.
        Stacked on a phone — identity first, then the controls — and one row
        from sm up. -->
-  <div class="flex flex-col gap-4 text-xs sm:flex-row sm:items-center sm:justify-between">
+  <div class="flex flex-col gap-5 text-xs">
+  <!-- Shopify's row of cards and wallets: what the business's Stripe settings take, each as its own mark. -->
+  <ul v-if="paymentBadges.length" class="m-0 flex list-none flex-wrap gap-2 p-0" :aria-label="t('legal.payment_methods')">
+    <li v-for="badge in paymentBadges" :key="badge.icon" class="flex h-6 w-10 items-center justify-center rounded border border-default bg-white" :class="badge.tint" :title="badge.label">
+      <UIcon :name="badge.icon" class="h-3.5 w-7" :class="badge.iconClass" :aria-label="badge.label" />
+    </li>
+  </ul>
+  <div class="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
     <div class="flex flex-wrap items-center gap-x-4 gap-y-2">
       <p class="m-0">{{ t('legal.copyright', { year, name }) }}</p>
       <!-- The accounts the owner connected in Integrations, and only those. -->
@@ -66,9 +73,12 @@
       <slot />
     </div>
   </div>
+  </div>
 </template>
 
 <script setup lang="ts">
+import { isRecord, publicApiRequest } from '~/utils/api-clients'
+
 defineProps<{
   /** Whose copyright the line states. */
   name: string
@@ -94,4 +104,26 @@ const themeSlug = organization?.template.slug
 const poweredByUrl = themeSlug && themeSlug !== 'platform'
   ? `${platformOrigin}/?${new URLSearchParams({ utm_source: requestHost, utm_medium: 'referral', utm_campaign: 'powered_by', utm_content: themeSlug })}`
   : null
+
+// A business site's accepted payments, read after hydration so no page render waits on Stripe.
+type AcceptedPayments = { types: string[]; country: string | null }
+const isAccepted = (value: unknown): value is AcceptedPayments => isRecord(value) && Array.isArray(value.types) && value.types.every(type => typeof type === 'string') && (value.country === null || typeof value.country === 'string')
+const { data: accepted } = useAsyncData('accepted-payments', () => publicApiRequest<AcceptedPayments>('/api/public/payment-methods', { validate: isAccepted }), { server: false, lazy: true, immediate: Boolean(poweredByUrl) })
+// Stripe takes Visa, Mastercard and American Express everywhere it operates, and Discover in the US, Canada and Japan.
+const DISCOVER_COUNTRIES = new Set(['US', 'CA', 'JP'])
+const paymentBadges = computed(() => {
+  const types = new Set(accepted.value?.types ?? [])
+  return [
+    ...(types.has('card') ? [
+      { icon: 'i-logos-visa', label: 'Visa' },
+      { icon: 'i-logos-mastercard', label: 'Mastercard' },
+      { icon: 'i-logos-amex', label: 'American Express' },
+      ...(DISCOVER_COUNTRIES.has(accepted.value?.country ?? '') ? [{ icon: 'i-logos-discover', label: 'Discover' }] : []),
+    ] : []),
+    ...(types.has('apple_pay') ? [{ icon: 'i-logos-apple-pay', label: 'Apple Pay' }] : []),
+    ...(types.has('google_pay') ? [{ icon: 'i-logos-google-pay', label: 'Google Pay' }] : []),
+    ...(types.has('klarna') ? [{ icon: 'i-simple-icons-klarna', label: 'Klarna', tint: 'bg-[#FFB3C7]! border-transparent', iconClass: 'text-black' }] : []),
+    ...(types.has('afterpay_clearpay') ? [{ icon: 'i-simple-icons-afterpay', label: 'Afterpay', tint: 'bg-[#B2FCE4]! border-transparent', iconClass: 'text-black' }] : []),
+  ] as Array<{ icon: string; label: string; tint?: string; iconClass?: string }>
+})
 </script>

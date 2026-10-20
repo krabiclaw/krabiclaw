@@ -4,7 +4,7 @@
     gathers every business's bookings, messages and receipts is on the platform,
     where the email they used joins its records to it once verified.
   -->
-  <aside class="border border-default bg-default p-7 text-left sm:p-8">
+  <aside class="border-t border-default pt-8 text-left">
     <p class="mb-3 font-semibold text-default">{{ t('guest_account.title') }}</p>
     <p class="text-sm leading-relaxed text-muted">{{ email ? t('guest_account.body_email', { email }) : t('guest_account.body') }}</p>
     <div class="mt-6 flex flex-wrap items-center gap-4">
