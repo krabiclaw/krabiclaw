@@ -1,4 +1,4 @@
-import type { Product } from '~/server/types/products'
+import type { PublicProduct } from '~/server/types/products'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import { isPublicProduct } from '~/utils/public-resource-contracts'
 import { isRecord, publicApiRequest } from '~/utils/api-clients'
@@ -17,9 +17,9 @@ export async function useConsultationProducts() {
       if (!collection) throw createError({ statusCode: 404, statusMessage: 'Consultation services not found' })
       return { products: collection.products, currency: collection.currency }
     }
-    return await publicApiRequest<{ products: Product[]; currency: CurrencyCode }>('/api/public/products', {
+    return await publicApiRequest<{ products: PublicProduct[]; currency: CurrencyCode }>('/api/public/products', {
       query: { locale: locale.value }, signal,
-      validate: (value): value is { products: Product[]; currency: CurrencyCode } => isRecord(value) && Array.isArray(value.products) && value.products.every(isPublicProduct) && isCurrencyCode(value.currency),
+      validate: (value): value is { products: PublicProduct[]; currency: CurrencyCode } => isRecord(value) && Array.isArray(value.products) && value.products.every(isPublicProduct) && isCurrencyCode(value.currency),
     })
   })
   if (error.value) throw error.value

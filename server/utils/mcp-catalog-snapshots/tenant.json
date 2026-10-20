@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:360b4dc7077d398bddcbe60a702d58ae57b308edf74820347cc083d25ac3c2a5",
-  "documentationFingerprint": "sha256:16a8c632b206d5f690a162488c7ea11e17b93f882bb258388b27aae0fcf67a40",
+  "fingerprint": "sha256:e79542be3386d7e4ca7307add403a355baa5957816e13fb53266cab4bdf36f69",
+  "documentationFingerprint": "sha256:d4bf594e91109e388ccea68b89fec97893a9294a099f177e176b237bc3c433f1",
   "tools": [
     {
       "name": "add_organization_language",
@@ -21025,7 +21025,7 @@
                 ]
               },
               "title": {
-                "description": "The page title to write. Always sent in full — an omitted title is not kept.",
+                "description": "The page's name, as the site navigation and browser tab show it. The site name is added to the tab title, so leave it out. Always sent in full — an omitted title is not kept.",
                 "type": "string"
               }
             },
@@ -26986,7 +26986,7 @@
             ]
           },
           "title": {
-            "description": "The page title to write. Always sent in full — an omitted title is not kept.",
+            "description": "The page's name, as the site navigation and browser tab show it. The site name is added to the tab title, so leave it out. Always sent in full — an omitted title is not kept.",
             "type": "string"
           },
           "variant_id": {
@@ -91639,6 +91639,7 @@
                     "enum": [
                       "logo",
                       "logo_dark",
+                      "favicon",
                       "social_share",
                       "announcement"
                     ],
@@ -113371,7 +113372,7 @@
             ]
           },
           "title": {
-            "description": "The page title to write. Always sent in full — an omitted title is not kept.",
+            "description": "The page's name, as the site navigation and browser tab show it. The site name is added to the tab title, so leave it out. Always sent in full — an omitted title is not kept.",
             "type": "string"
           },
           "variant_id": {
@@ -118538,7 +118539,7 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:cd94947b0db82f22327ccdd8af1449aa920438398a27b76c5ae39c210f85cf7d",
+        "create_product": "sha256:4a5886d5831d8633da74e6c20ad01e6c3137131aa5db1008b16ac3adae6244fa",
         "get_product": "sha256:b9e0be9c62e11923243eb43b719fe76e3b8b022e719a56ea9654915300dee8cd",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
@@ -118594,7 +118595,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
-        "create_product": "sha256:cd94947b0db82f22327ccdd8af1449aa920438398a27b76c5ae39c210f85cf7d",
+        "create_product": "sha256:4a5886d5831d8633da74e6c20ad01e6c3137131aa5db1008b16ac3adae6244fa",
         "get_product": "sha256:b9e0be9c62e11923243eb43b719fe76e3b8b022e719a56ea9654915300dee8cd",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -118643,8 +118644,8 @@
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "remove_media": "sha256:a59343b7aaf1b361ba9e70d9bcfff4a454baa3d618af3fc93f92188f9cb3893c",
         "reorder_media": "sha256:0b9419a7d891bcf9f75032994fcf329651d3c888a0409356ad4ae7b94a199e25",
-        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0",
-        "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
+        "set_media": "sha256:c5eab766610db3a84aaf33f9affe011d098083de2b94debf8d15d15da6d3a930",
+        "update_site_page": "sha256:d1873b9d3c8f8fbb5590aca7989e927e96c38dde13f587eff1c9e8873437b55d"
       }
     },
     {
@@ -118663,7 +118664,7 @@
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871",
-        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0"
+        "set_media": "sha256:c5eab766610db3a84aaf33f9affe011d098083de2b94debf8d15d15da6d3a930"
       }
     },
     {
@@ -118675,7 +118676,7 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:cd94947b0db82f22327ccdd8af1449aa920438398a27b76c5ae39c210f85cf7d",
+        "create_product": "sha256:4a5886d5831d8633da74e6c20ad01e6c3137131aa5db1008b16ac3adae6244fa",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
         "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
         "get_website_draft": "sha256:fccf7d7281ba30d1e79163929e61abec1893c2e910460c4068364a65784a7bac",
@@ -118688,7 +118689,7 @@
         "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
         "update_menu": "sha256:4ab27009a3a126aed4b328f7f1db8b4cc7e321f720da7e5a16d82f8badb202d8",
         "update_organization_settings": "sha256:b5488027b9a151e5759c0cf78e9010b60ff1d07ba783525d50e30cc233f2ef94",
-        "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
+        "update_site_page": "sha256:d1873b9d3c8f8fbb5590aca7989e927e96c38dde13f587eff1c9e8873437b55d"
       }
     },
     {
@@ -118728,9 +118729,9 @@
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
-        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0",
+        "set_media": "sha256:c5eab766610db3a84aaf33f9affe011d098083de2b94debf8d15d15da6d3a930",
         "update_product": "sha256:a5a3db8edacc990e450e880b738479b7e4ef197e4ff9fcdb7e110d2db1f44851",
-        "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
+        "update_site_page": "sha256:d1873b9d3c8f8fbb5590aca7989e927e96c38dde13f587eff1c9e8873437b55d"
       }
     },
     {
@@ -118822,7 +118823,7 @@
         "remove_media": "sha256:a59343b7aaf1b361ba9e70d9bcfff4a454baa3d618af3fc93f92188f9cb3893c",
         "reorder_media": "sha256:0b9419a7d891bcf9f75032994fcf329651d3c888a0409356ad4ae7b94a199e25",
         "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871",
-        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0",
+        "set_media": "sha256:c5eab766610db3a84aaf33f9affe011d098083de2b94debf8d15d15da6d3a930",
         "update_media_asset": "sha256:25902033f7e73a819b6c9660c6a2e70b4ab3dfb972a49b594f1c3a34d8a1a8f7"
       }
     },

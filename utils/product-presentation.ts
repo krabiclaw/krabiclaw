@@ -277,7 +277,7 @@ export function collectionsOnSurface<
   })
 }
 
-export interface ProductCollectionGroup {
+export interface ProductCollectionGroup<T extends Pick<Product, 'id' | 'name' | 'collections'> = Product> {
   id: string
   name: string
   description: string | null
@@ -286,7 +286,7 @@ export interface ProductCollectionGroup {
   sort_order: number
   /** The location whose collection this is, or null for a site-wide one. */
   location_id: string | null
-  products: Product[]
+  products: T[]
 }
 
 /**
@@ -301,10 +301,10 @@ export interface ProductCollectionGroup {
  * Both the collection page and the home page's preview read their order from
  * here, so the order a merchant arranges is the order every surface shows.
  */
-export function groupProductsByCollection(
-  products: readonly Product[],
+export function groupProductsByCollection<T extends Pick<Product, 'id' | 'name' | 'collections'>>(
+  products: readonly T[],
   collections: readonly Collection[],
-): ProductCollectionGroup[] {
+): ProductCollectionGroup<T>[] {
   const positionFor = new Map<string, Map<string, number>>()
   for (const product of products) {
     for (const membership of product.collections) {

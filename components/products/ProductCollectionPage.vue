@@ -246,7 +246,7 @@
 </template>
 
 <script setup lang="ts">
-import type { Collection, Product, ProductPresentation } from '~/server/types/products'
+import type { Collection, ProductPresentation, PublicProduct } from '~/server/types/products'
 import { useSchemaOrg } from '#imports'
 import type { CurrencyCode } from '~/shared/currencies'
 import { formatProductMoney, formatProductPriceRange, summarizeProductPrices } from '~/utils/product-money'
@@ -269,7 +269,7 @@ const NuxtLinkComponent = resolveComponent('NuxtLink')
 const requestURL = useRequestURL()
 
 const props = defineProps<{
-  products: Product[]
+  products: PublicProduct[]
   collections: Collection[]
   locations: LocationSummary[]
   locationId?: string | null
@@ -316,7 +316,7 @@ const currentLocation = computed(() => {
  * route to be unambiguous. Several, and there is no single path — the product
  * is linked from each location's own collection instead.
  */
-const productLocationId = (product: Product, collectionLocationId: string | null = null): string | null => {
+const productLocationId = (product: PublicProduct, collectionLocationId: string | null = null): string | null => {
   if (props.locationId) return props.locationId
   // A location's collection is that branch's menu, so a dish offered at two
   // branches is linked, priced and labelled as the branch whose section it is
@@ -346,7 +346,7 @@ const locationTitle = (id: string) => {
  * this location offers it, and it has an applicable price. None of them
  * substitutes for another, and none of them is a stock statement.
  */
-const isAvailable = (product: Product, collectionLocationId: string | null = null): boolean => {
+const isAvailable = (product: PublicProduct, collectionLocationId: string | null = null): boolean => {
   if (!product.active) return false
   const id = productLocationId(product, collectionLocationId)
   // Under a site-wide collection a product offered at several branches has no
@@ -364,7 +364,7 @@ const isAvailable = (product: Product, collectionLocationId: string | null = nul
     || typeof product.details[PRICING_NOTE_HANDLE] === 'string'
 }
 
-const productHref = (product: Product, collectionLocationId: string | null = null): string | null => {
+const productHref = (product: PublicProduct, collectionLocationId: string | null = null): string | null => {
   const id = productLocationId(product, collectionLocationId)
   if (product.kind === 'experience') return localePath(props.presentation.productPath('', product.slug)) + (id ? `?location_id=${encodeURIComponent(id)}` : '')
   if (product.kind === 'stay') return localePath(props.presentation.productPath('', product.slug))
@@ -377,18 +377,18 @@ const productHref = (product: Product, collectionLocationId: string | null = nul
  *
  * A product with several applicable prices shows their actual range.
  */
-const priceScopes = (product: Product, collectionLocationId: string | null = null) => {
+const priceScopes = (product: PublicProduct, collectionLocationId: string | null = null) => {
   const locationId = productLocationId(product, collectionLocationId)
   return locationId ? [locationId] : [
     ...product.locations.filter(location => location.published && locationMap.value.has(location.location_id)).map(location => location.location_id),
     ...(product.booking?.held_online || product.order_url ? [null] : []),
   ]
 }
-const pricesFor = (product: Product, collectionLocationId: string | null = null) => {
+const pricesFor = (product: PublicProduct, collectionLocationId: string | null = null) => {
   const at = new Date().toISOString()
   return summarizeProductPrices(product.variants, priceScopes(product, collectionLocationId).map(location_id => ({ currency: props.currency, location_id, at })))
 }
-const priceFor = (product: Product, collectionLocationId: string | null = null): Price | null => pricesFor(product, collectionLocationId).lowest
+const priceFor = (product: PublicProduct, collectionLocationId: string | null = null): Price | null => pricesFor(product, collectionLocationId).lowest
 /**
  * What this card says about price.
  *
@@ -396,7 +396,7 @@ const priceFor = (product: Product, collectionLocationId: string | null = null):
  * priced in words instead, and nothing at all when it states neither. A
  * missing amount never becomes zero, "Free" or "Market price" here.
  */
-const priceLabel = (product: Product, collectionLocationId: string | null = null): string | null => {
+const priceLabel = (product: PublicProduct, collectionLocationId: string | null = null): string | null => {
   const amount = formatProductPriceRange(pricesFor(product, collectionLocationId), locale.value)
   if (amount) return amount
   const note = product.details[PRICING_NOTE_HANDLE]
@@ -442,7 +442,7 @@ watch(groups, () => {
  * video itself — the same asset, not a second one — and a card with no cover
  * shows the empty state rather than borrowing a gallery photograph.
  */
-function coverUrl(product: Product): string | null {
+function coverUrl(product: PublicProduct): string | null {
   const cover = product.image
   if (!cover) return null
   return cover.kind === 'video' ? cover.thumbnail_url : cover.public_url
@@ -457,7 +457,7 @@ function durationLabel(minutes: number): string {
     : t('saya.experience_detail.hours', { count: hours })
 }
 
-function previewItem(product: Product) {
+function previewItem(product: PublicProduct) {
   return {
     name: product.name,
     media: product.image ? [product.image] : [],
@@ -468,19 +468,19 @@ function previewItem(product: Product) {
  * Dietary marks come from the product's dietary_notes field.
  * A site that has not defined it shows none, rather than a guess.
  */
-function dietaryTags(product: Product): string[] {
+function dietaryTags(product: PublicProduct): string[] {
   const notes = product.details['dietary_notes']
   if (!Array.isArray(notes)) return []
   return notes.filter(note => note === 'V' || note === 'VG' || note === 'GF')
 }
 
-function compareAtPrice(product: Product, collectionLocationId: string | null = null): string | null {
+function compareAtPrice(product: PublicProduct, collectionLocationId: string | null = null): string | null {
   const price = priceFor(product, collectionLocationId)
   if (!price || price.compare_at_unit_amount === null) return null
   return formatProductMoney({ ...price, unit_amount: price.compare_at_unit_amount, compare_at_unit_amount: null })
 }
 
-function offerFor(product: Product, collectionLocationId: string | null = null) {
+function offerFor(product: PublicProduct, collectionLocationId: string | null = null) {
   const { lowest, highest, count } = pricesFor(product, collectionLocationId)
   if (!lowest || !highest) return undefined
   return lowest.unit_amount === highest.unit_amount
