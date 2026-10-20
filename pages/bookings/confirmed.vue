@@ -8,7 +8,9 @@
       v-else-if="confirmation"
       :kicker="receiptTitle"
       :cancelled="confirmation.status === 'cancelled'"
-      :receipt-kicker="t('booking.receipt')"
+      :item-title="confirmation.title || organizationName"
+      :item-subtitle="itemSubtitle"
+      :image-url="confirmation.imageUrl"
       :receipt-rows="receiptRows"
       :next-steps-kicker="resolvedPolicySummary?.heading ?? t(confirmation.productKind === 'service' ? 'booking_policy.consultation_heading' : 'booking_policy.experience_heading')"
       :next-steps="policyLines"
@@ -109,19 +111,19 @@ const readableTime = computed(() => confirmation.value
   ? formatTimestamp(confirmation.value.startsAt, locale.value, confirmation.value.timezone, { timeStyle: 'short' })
   : '')
 
+const organizationName = String((organization as ApiValue)?.name ?? '')
+// Where it happens, under what was booked: the place, or online.
+const itemSubtitle = computed(() => !confirmation.value ? '' : !confirmation.value.locationId ? t('booking.online') : confirmation.value.locationName ?? '')
 const receiptRows = computed(() => {
   if (!confirmation.value) return []
-  const rows: Array<{ label: string; value: string }> = []
-  if (confirmation.value.title) rows.push({ label: t('saya.experience_cancel.booking_for'), value: confirmation.value.title })
-  if (!confirmation.value.locationId) rows.push({ label: copy.value.locationLabel, value: t('booking.online') })
-  else if (confirmation.value.locationName) rows.push({ label: copy.value.locationLabel, value: confirmation.value.locationName })
+  const rows: Array<{ label: string; value: string; wide?: boolean }> = []
   rows.push({ label: copy.value.dateLabel, value: readableDate.value })
   rows.push({ label: copy.value.timeLabel, value: readableTime.value })
   if (!confirmation.value.locationId) rows.push({ label: t('booking.timezone'), value: confirmation.value.timezone })
   if ((organization as { vertical?: string | null } | null)?.vertical !== 'service') {
     rows.push({ label: copy.value.guestsLabel, value: String(confirmation.value.guests) })
   }
-  if (confirmation.value.requests) rows.push({ label: copy.value.specialRequestsLabel, value: confirmation.value.requests })
+  if (confirmation.value.requests) rows.push({ label: copy.value.specialRequestsLabel, value: confirmation.value.requests, wide: true })
   if (confirmation.value.paid) rows.push({ label: t('payment.paid'), value: paymentMoney(confirmation.value.paid.amount, confirmation.value.paid.currency) })
   return rows
 })

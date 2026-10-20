@@ -8,7 +8,9 @@
       v-else-if="guestStay"
       :kicker="receiptTitle"
       :cancelled="guestStay.stay.status === 'cancelled'"
-      :receipt-kicker="t('stay.your_stay')"
+      :item-title="guestStay.home.name"
+      :item-subtitle="guestStay.home.organization_name"
+      :image-url="guestStay.home.image_url"
       :receipt-rows="receiptRows"
       :next-steps-kicker="t('stay.cancellation_policy')"
       :next-steps="policy ? [...policy.terms] : []"
@@ -85,7 +87,6 @@ const receiptRows = computed(() => {
   const { stay, home } = value
   const nights = Math.round((Date.parse(`${stay.check_out_date}T00:00:00Z`) - Date.parse(`${stay.check_in_date}T00:00:00Z`)) / 86_400_000)
   return [
-    { label: t('stay.your_stay'), value: home.name },
     { label: t('stay.check_in'), value: `${day(stay.check_in_date)} · ${formatTime(home.check_in_time, locale.value)}` },
     { label: t('stay.check_out'), value: `${day(stay.check_out_date)} · ${formatTime(home.check_out_time, locale.value)}` },
     { label: t('stay.nights'), value: String(nights) },

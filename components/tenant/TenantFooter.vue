@@ -24,7 +24,7 @@
           </ul>
         </div>
 
-        <div class="mt-16 grid grid-cols-2 gap-8 md:grid-cols-4 xl:col-span-2 xl:mt-0">
+        <div class="mt-10 grid grid-cols-2 gap-8 sm:mt-16 md:grid-cols-4 xl:col-span-2 xl:mt-0">
           <div v-for="group in footerGroups" :key="group.label" v-show="group.items.length">
             <h3 class="text-sm font-semibold leading-6 text-highlighted">{{ group.label }}</h3>
             <ul class="mt-6 space-y-4" role="list">
@@ -36,13 +36,13 @@
         </div>
       </div>
 
-      <SiteFooterBar :name="compliance?.entity_name || brandName" color-mode class="mt-16 border-t border-default pt-8 leading-5 text-muted sm:mt-20 lg:mt-24" />
+      <SiteFooterBar :name="compliance?.entity_name || brandName" color-mode class="mt-12 border-t border-default pt-8 leading-5 text-muted sm:mt-20 lg:mt-24" />
     </div>
 
     <!-- Hospitality / Saya Footer Layout -->
-    <div v-else class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8 pt-20 pb-8">
+    <div v-else class="mx-auto max-w-7xl px-4 pt-12 pb-8 sm:px-6 sm:pt-16 lg:px-8 lg:pt-20">
       <!-- Top section: brand + locations grid -->
-      <div class="grid gap-16 border-b border-default pb-14 lg:grid-cols-[1fr_1.4fr]">
+      <div class="grid gap-10 border-b border-default pb-10 sm:pb-14 lg:grid-cols-[1fr_1.4fr] lg:gap-16">
         <!-- Brand column -->
         <div>
           <NuxtLink :to="localePath('/')" class="block no-underline leading-none" :aria-label="`${brandName} home`">
@@ -69,8 +69,8 @@
         <div
           v-else-if="locations.length"
           :class="[
-            'grid gap-8',
-            locations.length > 2 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'
+            'grid gap-8 sm:grid-cols-2',
+            locations.length > 2 ? 'xl:grid-cols-3' : undefined
           ]"
         >
           <div v-for="loc in formattedLocations" :key="loc.id">
@@ -91,8 +91,8 @@
       <!-- Navigation links: Experience, Discover, Connect -->
       <div
         :class="[
-          'grid gap-8 border-b border-default py-12',
-          discoverLinks.length ? 'sm:grid-cols-3' : 'sm:grid-cols-2'
+          'grid grid-cols-2 gap-x-6 gap-y-10 border-b border-default py-10 sm:py-12',
+          discoverLinks.length ? 'sm:grid-cols-3' : undefined
         ]"
       >
         <div>
@@ -112,6 +112,7 @@
             </li>
           </ul>
         </div>
+        <!-- Two columns on a phone: the third group wraps beneath the first. -->
         <div v-if="discoverLinks.length">
           <h4 class="tenant-eyebrow mb-5 text-dimmed">{{ t('saya.footer.heading_discover') }}</h4>
           <ul class="space-y-3 text-sm">
