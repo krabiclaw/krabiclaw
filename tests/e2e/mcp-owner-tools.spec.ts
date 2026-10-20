@@ -506,6 +506,14 @@ test.describe('stateless MCP server', () => {
     const refused = (await nationalOnly.json()).result
     expect(refused.isError).toBe(true)
     expect(refused.content[0].text).toMatch(/phone must be an international number with its country calling code/)
+    const afterRefusal = await mcpRequest(request, baseURL!, {
+      method: 'tools/call',
+      toolName: 'get_location',
+      args: { organization_id: organizationId, location_id: locationId },
+    })
+    expect(afterRefusal.status()).toBe(200)
+    expect(mcpData<{ location: { phone: string | null } }>(await afterRefusal.json()).location.phone)
+      .toBe(mcpData<{ location: { phone: string | null } }>(await locationRead.json()).location.phone)
     const locationUpdate = await mcpRequest(request, baseURL!, {
       method: 'tools/call',
       toolName: 'update_location',

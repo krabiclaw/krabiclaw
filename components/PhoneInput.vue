@@ -60,8 +60,9 @@
   and the text being typed while it is not, so the value alone says whether it
   can be saved: the input's own validity blocks a native form, and a parent
   without one checks `toE164(value)`. The country is the field's interpretation
-  of national digits, never part of the value; a number typed with "+" brings
-  its own.
+  of national digits, never part of the value: the person's own choice (the
+  picker, a number typed with "+", a saved number) and otherwise the default.
+  A form that remounts the field binds `v-model:country` to keep that choice.
 */
 import { parseIncompletePhoneNumber } from 'libphonenumber-js/min'
 import { examplePhone, exceedsPhoneLength, formatPhoneAsTyped, listPhoneCountries, parsePhone, type CountryCode } from '~/utils/phone'
@@ -79,7 +80,8 @@ const { t, locale } = useI18n()
 const field = ref<{ inputRef: HTMLInputElement | null } | null>(null)
 const input = computed(() => field.value?.inputRef ?? null)
 const touched = ref(false)
-const country = ref<CountryCode | undefined>()
+const chosen = defineModel<CountryCode | undefined>('country')
+const country = computed(() => chosen.value ?? props.defaultCountry)
 const display = ref('')
 
 const countries = computed(() => {
@@ -116,16 +118,14 @@ function show(value: string) {
 function load(value: string) {
   const number = parsePhone(value)
   if (number.valid && number.country) {
-    country.value = number.country
+    chosen.value = number.country
     show(formatPhoneAsTyped(number.nationalFormat ?? value, number.country))
     return
   }
-  country.value ??= props.defaultCountry
   show(value)
 }
 load(model.value)
 watch(model, value => { if (value !== emitted) load(value) })
-watch(() => props.defaultCountry, value => { if (!display.value.trim()) country.value = value })
 
 /**
  * Format what is typed. An international number moves the picker to its own
@@ -135,7 +135,7 @@ function format(value: string): string {
   if (!isInternational(value)) return formatPhoneAsTyped(value, country.value)
   const number = parsePhone(value)
   if (!number.country) return formatPhoneAsTyped(value)
-  country.value = number.country
+  chosen.value = number.country
   return number.valid && number.nationalFormat ? formatPhoneAsTyped(number.nationalFormat, number.country) : formatPhoneAsTyped(value)
 }
 
@@ -143,7 +143,7 @@ function selectCountry(value: CountryCode | undefined) {
   if (!value) return
   // A number already complete keeps its digits, read nationally in the new country.
   const digits = parsed.value.valid ? parsed.value.nationalFormat ?? display.value : display.value
-  country.value = value
+  chosen.value = value
   show(formatPhoneAsTyped(digits, value))
   nextTick(() => input.value?.focus())
 }

@@ -27,6 +27,7 @@
       <PhoneInput
         id="booking-phone"
         v-model="form.phone"
+        v-model:country="form.phoneCountry"
         :default-country="defaultCountry"
         :required="phoneRequired"
         :disabled="loading"
@@ -60,6 +61,8 @@ export interface ContactFormState {
   email: string
   /** E.164, or empty when no number was given. */
   phone: string
+  /** The country the guest chose for the phone field; the location's is the default. */
+  phoneCountry?: CountryCode
   notes: string
 }
 
