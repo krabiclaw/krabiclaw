@@ -1009,6 +1009,10 @@ async function planProduct(
     prices: (declaredVariants[index]?.prices ?? []).map((price, priceIndex) =>
       normalizePriceInput(price, defaultCurrency, `variants[${index}].prices[${priceIndex}]`)),
   }))
+  const stay = await planStayConfig(db, organizationId, kind, input.stay)
+  if (input.details?.no_property_parking === true && stay?.amenities.some(code => code === 'free_parking' || code === 'paid_parking_on_premises')) {
+    invalid('Remove on-property parking amenities or change “No parking on the property” before saving.')
+  }
 
   return {
     id: context.existingId ?? crypto.randomUUID(),
@@ -1028,7 +1032,7 @@ async function planProduct(
     kind,
     details: validateProductDetails(kind, input.details ?? {}),
     source: input.source ?? 'manual',
-    stay: await planStayConfig(db, organizationId, kind, input.stay),
+    stay,
   }
 }
 

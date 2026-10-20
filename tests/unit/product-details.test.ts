@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { assertProductKind, patchProductDetails, productDetailFields, validateProductDetails, ProductDetailError } from '../../shared/product-details.ts'
+import { staySafetyLines } from '../../shared/stay-safety.ts'
 
 test('a product kind closes its descriptive fields and defaults to unfeatured', () => {
   assert.equal(assertProductKind('dish'), 'dish')
@@ -83,4 +84,41 @@ test('quiet hours require two authored hourly choices and clearing removes the w
   assert.deepEqual(validateProductDetails('stay', { house_rules: 'Leave shoes by the door.' }, true), { house_rules: 'Leave shoes by the door.' })
   assert.throws(() => validateProductDetails('stay', { quiet_hours_start: '22:00' }, true), /not a field/)
   assert.throws(() => validateProductDetails('stay', { pets_allowed: false }, true), /not a field/)
+})
+
+test('safety disclosure text belongs to an affirmative answer and clears independently of other details', () => {
+  const details = validateProductDetails('stay', {
+    house_rules: 'Leave shoes at the door.', exterior_security_cameras: true, exterior_security_cameras_details: 'C'.repeat(300),
+    noise_decibel_monitors: false, special_safety_considerations: 'An uneven path leads to the orchard.',
+  })
+  assert.equal(details.exterior_security_cameras_details, 'C'.repeat(300))
+  assert.deepEqual(patchProductDetails('stay', details, { exterior_security_cameras: false, exterior_security_cameras_details: null }, 'merge'), {
+    featured: false, house_rules: 'Leave shoes at the door.', exterior_security_cameras: false,
+    noise_decibel_monitors: false, special_safety_considerations: 'An uneven path leads to the orchard.',
+  })
+  assert.deepEqual(patchProductDetails('stay', details, { exterior_security_cameras: null, exterior_security_cameras_details: null }, 'merge'), {
+    featured: false, house_rules: 'Leave shoes at the door.', noise_decibel_monitors: false,
+    special_safety_considerations: 'An uneven path leads to the orchard.',
+  })
+  assert.throws(() => patchProductDetails('stay', details, { exterior_security_cameras: false }, 'merge'), /exterior_security_cameras_details requires details.exterior_security_cameras to be true/)
+  assert.throws(() => validateProductDetails('stay', { exterior_security_cameras_details: 'Gate camera.' }), /requires/)
+  assert.throws(() => validateProductDetails('stay', { exterior_security_cameras: true, exterior_security_cameras_details: 'C'.repeat(301) }), /at most 300/)
+  assert.throws(() => validateProductDetails('stay', { special_safety_considerations: 'C'.repeat(301) }), /at most 300/)
+  assert.throws(() => validateProductDetails('stay', { exterior_security_cameras: 'yes' }), /must be a boolean/)
+  assert.throws(() => validateProductDetails('service', { exterior_security_cameras: true }), /not a field for service/)
+  assert.deepEqual(validateProductDetails('stay', { exterior_security_cameras_details: 'The camera covers the garden gate.' }, true), {
+    exterior_security_cameras_details: 'The camera covers the garden gate.',
+  })
+  assert.throws(() => validateProductDetails('stay', { exterior_security_cameras: true }, true), /not a field/)
+})
+
+test('public safety text reports authored concerns and device absences without inventing negative hazards', () => {
+  assert.deepEqual(staySafetyLines({}), [])
+  assert.deepEqual(staySafetyLines({ unsecured_pool: false, nearby_water_details: 'Stale translated text.', exterior_security_cameras: false, noise_decibel_monitors: false }), [
+    'No exterior security cameras', 'No noise decibel monitors',
+  ])
+  assert.deepEqual(staySafetyLines({ stairs_required: true, stairs_required_details: 'Two flights\nNo lift.', exterior_security_cameras: true, exterior_security_cameras_details: 'Garden gate only.' }), [
+    'Exterior security cameras\nGarden gate only.', 'Guests must climb stairs\nTwo flights\nNo lift.',
+  ])
+  assert.deepEqual(staySafetyLines({ unsecured_pool: false }, { includeNo: true }), ['Unsecured pool or hot tub: No'])
 })

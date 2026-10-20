@@ -24,6 +24,8 @@
         </div>
         <p v-if="planLine" class="mt-1 text-sm text-muted">{{ planLine }}</p>
         <UButton v-if="dashboard.canUpdateBilling.value && change" class="mt-6" :label="change.label" :to="change.to" :variant="change.outline ? 'outline' : 'solid'" />
+        <!-- A pending cancellation or plan change is undone here, by Better Auth's restore at Stripe. -->
+        <UButton v-else-if="dashboard.canUpdateBilling.value && pending" class="mt-6" :label="`Keep ${planName}`" variant="outline" :loading="busy" @click="keepPlan" />
       </UCard>
 
       <EditorNavigationList :groups="groups" :active-item="level.child.value" @act="onRowAction">
@@ -55,7 +57,7 @@ const { startOrganizationCheckout, openBillingPortal } = useOrganizationSubscrip
 const { formatExactDateTime } = useHumanTime()
 const { plans, formatRecurring } = await usePlans()
 
-const [{ billing, billingError }, { services, servicesError }, { methods, methodsError }] = await Promise.all([
+const [{ billing, billingError, refreshBilling }, { services, servicesError }, { methods, methodsError }] = await Promise.all([
   useOrganizationBilling(), useOrganizationServices(), usePaymentMethods(),
 ])
 
@@ -109,6 +111,8 @@ const change = computed<{ label: string; to: string; outline?: boolean } | null>
   if (status.plan === BUSINESS_PLAN_ID) return { label: 'Change plan', to: to('change'), outline: true }
   return { label: 'Upgrade to Business', to: to('upgrade') }
 })
+const pending = computed(() => !!billing.value && (!!billing.value.cancelAtPeriodEnd || !!scheduledPlan.value))
+
 // Beside a pane the index opens a way up; Business, with nothing above it, opens its first service.
 const firstLeaf = computed(() => change.value && !change.value.outline ? change.value.to : to('managed-ads'))
 
@@ -148,6 +152,23 @@ const groups = computed<EditorNavigationGroup[]>(() => [{
     ...(portalRow.value ? [portalRow.value] : []),
   ],
 }])
+
+async function keepPlan() {
+  if (busy.value) return
+  busy.value = true
+  errorMessage.value = ''
+  try {
+    const organizationId = dashboard.organization.value?.id
+    if (!organizationId) throw new Error('Organization context is unavailable')
+    const restored = await authClient.subscription.restore({ referenceId: organizationId, customerType: 'organization' })
+    if (restored.error) throw new Error(restored.error.message ?? 'Your plan could not be kept')
+    await refreshBilling()
+  } catch (error) {
+    errorMessage.value = getErrorMessage(error, 'Your plan could not be kept')
+  } finally {
+    busy.value = false
+  }
+}
 
 async function onRowAction(id: string) {
   if (busy.value || id !== 'portal') return

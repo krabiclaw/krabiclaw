@@ -488,6 +488,7 @@ import { productLocationCollectionPath, staySpecLabels } from '~/utils/product-p
 import { extractDietarySchemaUrls, type ProductCollectionSibling } from '~/utils/product-seo'
 import type { ProductDetailValue } from '~/shared/product-details'
 import { EXPERIENCE_ATTRIBUTE_HANDLES, productDetailFields, productDetailKey, PRICING_NOTE_HANDLE, STAY_DESCRIPTION_DETAIL_KEYS, STAY_HOUSE_RULE_DETAIL_KEYS, stayHouseRuleLines } from '~/shared/product-details'
+import { STAY_SAFETY_DETAIL_KEYS, staySafetyLines } from '~/shared/stay-safety'
 import type { PublicProductBooking, PublicProductLocation, PublicProductReview, PublicProductSession } from '~/server/utils/public-products'
 import { addressPlaceName, formatPostalAddress, schemaPostalAddress } from '~/utils/postal-address'
 import { formatTime } from '~/utils/timezone'
@@ -727,7 +728,7 @@ const visibleDetails = computed(() => productDetailFields(props.product.kind).fl
   const handle = productDetailKey(definition)
   // The pricing note is shown where the price goes, so it is not repeated in
   // the attribute list underneath it.
-  if (handle === PRICING_NOTE_HANDLE || definition.value_type === 'boolean' || (STAY_HOUSE_RULE_DETAIL_KEYS as readonly string[]).includes(handle)) return []
+  if (handle === PRICING_NOTE_HANDLE || definition.value_type === 'boolean' || (STAY_HOUSE_RULE_DETAIL_KEYS as readonly string[]).includes(handle) || (STAY_SAFETY_DETAIL_KEYS as readonly string[]).includes(handle)) return []
   const value = props.product.details[handle]
   if (value === undefined || value === null) return []
   const values = Array.isArray(value) ? value : [String(value)]
@@ -844,9 +845,12 @@ const stayHouseRules = computed(() => props.product.stay ? [
 const staySafety = computed(() => {
   const stay = props.product.stay
   if (!stay) return []
-  return STAY_AMENITY_GROUPS.home_safety.amenities.flatMap(code => (stay.amenities as readonly string[]).includes(code)
-    ? [STAY_AMENITIES[code].label]
-    : code === 'carbon_monoxide_detector' || code === 'smoke_detector' ? [t('stay.not_reported', { item: STAY_AMENITIES[code].label })] : [])
+  return [
+    ...STAY_AMENITY_GROUPS.home_safety.amenities.flatMap(code => (stay.amenities as readonly string[]).includes(code)
+      ? [STAY_AMENITIES[code].label]
+      : code === 'carbon_monoxide_detector' || code === 'smoke_detector' ? [t('stay.not_reported', { item: STAY_AMENITIES[code].label })] : []),
+    ...staySafetyLines(props.product.details),
+  ]
 })
 const thingsToKnow = computed(() => [
   ...(stayHouseRules.value.length ? [{ key: 'house_rules', label: t('stay.house_rules'), values: stayHouseRules.value }] : []),

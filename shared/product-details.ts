@@ -1,4 +1,5 @@
 import { PRODUCT_LIMITS } from './product-limits.ts'
+import { STAY_SAFETY_DETAIL_FIELDS, STAY_SAFETY_FIELDS } from './stay-safety.ts'
 
 /** Named product facts shared by validation, CMS, MCP, localization and templates. */
 export const PRODUCT_KINDS = ['dish', 'experience', 'service', 'item', 'stay'] as const
@@ -58,6 +59,7 @@ const DETAIL_FIELDS = {
   ...STAY_HOUSE_RULE_TOGGLES,
   quiet_hours_start: { name: 'Quiet hours start time', description: 'Local start of quiet hours, required with quiet hours and its end time.', value_type: 'single_line_text', localizable: false, validations: { choices: STAY_QUIET_HOUR_TIMES }, kinds: ['stay'] },
   quiet_hours_end: { name: 'Quiet hours end time', description: 'Local end of quiet hours, required with quiet hours and its start time.', value_type: 'single_line_text', localizable: false, validations: { choices: STAY_QUIET_HOUR_TIMES }, kinds: ['stay'] },
+  ...STAY_SAFETY_DETAIL_FIELDS,
   materials: { icon: 'i-lucide-layers', name: 'Materials', description: 'Materials the item is made from, shown in its details.', value_type: 'list.single_line_text', kinds: ['item'] },
   dimensions: { icon: 'i-lucide-ruler', name: 'Dimensions', description: 'Item measurements including their units, shown in its details.', value_type: 'single_line_text', kinds: ['item'] },
   care_instructions: { icon: 'i-lucide-hand-heart', name: 'Care instructions', description: 'How to care for the item, shown in its details.', value_type: 'multi_line_text', kinds: ['item'] },
@@ -90,6 +92,9 @@ export function validateProductDetails(kind: ProductKind, value: unknown, locali
   if (kind === 'stay' && !localizableOnly) {
     if (result.quiet_hours === true && (result.quiet_hours_start === undefined || result.quiet_hours_end === undefined)) throw new ProductDetailError('Quiet hours need both a start time and an end time')
     if (result.quiet_hours !== true && (result.quiet_hours_start !== undefined || result.quiet_hours_end !== undefined)) throw new ProductDetailError('Quiet hours must be enabled before setting their start and end times')
+    for (const [key, field] of Object.entries(STAY_SAFETY_FIELDS)) {
+      if (result[field.detailsKey] !== undefined && result[key as keyof typeof STAY_SAFETY_FIELDS] !== true) throw new ProductDetailError(`details.${field.detailsKey} requires details.${key} to be true`)
+    }
   }
   return result
 }
