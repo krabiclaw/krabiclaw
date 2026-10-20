@@ -49,27 +49,31 @@ const rows = d1<Row>(`SELECT s.id, s.referenceId, s.plan, s.seats, s.stripeSubsc
 const plans = new Map<string, Awaited<ReturnType<typeof getBetterAuthStripePlans>>[number]>()
 for (const plan of await getBetterAuthStripePlans(stripe)) if (!plans.has(plan.name)) plans.set(plan.name, plan)
 
-const readable = async (id: string) => {
+const readable = async (id: string): Promise<Stripe.Subscription | null> => {
   try {
-    await stripe.subscriptions.retrieve(id)
-    return true
+    return await stripe.subscriptions.retrieve(id)
   } catch (error) {
-    if (error instanceof Stripe.errors.StripeInvalidRequestError && error.code === 'resource_missing') return false
+    if (error instanceof Stripe.errors.StripeInvalidRequestError && error.code === 'resource_missing') return null
     throw error
   }
 }
+const customerOf = (subscription: Stripe.Subscription) => typeof subscription.customer === 'string' ? subscription.customer : subscription.customer.id
 
 let provisioned = 0
 for (const row of rows) {
   // D1 does not make the two updates below one transaction: a run that stopped
   // between them left the subscription moved and its organization not, which
   // this finishes rather than leaving billing to refuse the mismatch.
-  if (await readable(row.stripeSubscriptionId!)) {
-    if (row.stripeCustomerId && row.organizationCustomerId !== row.stripeCustomerId) d1(`UPDATE organization SET stripeCustomerId = ${sqlString(row.stripeCustomerId)} WHERE id = ${sqlString(row.referenceId)}`)
+  const existing = await readable(row.stripeSubscriptionId!)
+  if (existing) {
+    // Only the row's own subscription settles its organization's customer.
+    if (customerOf(existing) !== row.stripeCustomerId) throw new Error(`Subscription ${existing.id} belongs to ${customerOf(existing)}, not ${row.referenceId}'s customer ${row.stripeCustomerId}`)
+    if (row.organizationCustomerId !== row.stripeCustomerId) d1(`UPDATE organization SET stripeCustomerId = ${sqlString(row.stripeCustomerId)} WHERE id = ${sqlString(row.referenceId)}`)
     continue
   }
   const plan = plans.get(row.plan)
-  if (!plan) throw new Error(`The test-mode catalog has no ${row.plan} plan for ${row.referenceId}`)
+  if (!plan?.priceId) throw new Error(`The test-mode catalog has no ${row.plan} plan price for ${row.referenceId}`)
+  const planPrice = plan.priceId
   if (!row.stripeCustomerId) throw new Error(`Subscription ${row.id} has no Stripe customer`)
   // Business bills the business's own rental units past the included ones, as its Checkout does, and none when there are none.
   const [usage] = row.plan === BUSINESS_PLAN_ID ? d1<{ rentalUnits: number }>(BILLING_USAGE_SQL.replaceAll('?', sqlString(row.referenceId))) : []
@@ -88,15 +92,22 @@ for (const row of rows) {
   const subscription = (await stripe.subscriptions.search({ query: `metadata['krabiclaw_source_subscription']:'${row.stripeSubscriptionId}'` })).data.find(found => found.status !== 'canceled')
     ?? await stripe.subscriptions.create({
       customer: customer.id,
-      items: [{ price: plan.priceId, quantity: row.seats ?? 1 }, ...lineItems],
+      items: [{ price: planPrice, quantity: row.seats ?? 1 }, ...lineItems],
       collection_method: 'send_invoice',
       days_until_due: 30,
       metadata: { ...source, krabiclaw_source_subscription: row.stripeSubscriptionId!, referenceId: row.referenceId, plan: row.plan },
     }, { idempotencyKey: `test-mode-billing:subscription:v3:${row.stripeSubscriptionId}` })
   // A subscription found by its source ID is used only if it is the one made for this row.
-  const ownCustomer = typeof subscription.customer === 'string' ? subscription.customer : subscription.customer.id
-  if (ownCustomer !== customer.id || subscription.metadata.referenceId !== row.referenceId || subscription.metadata.plan !== row.plan || !['active', 'trialing', 'past_due'].includes(subscription.status)) {
+  if (customerOf(subscription) !== customer.id || subscription.metadata.referenceId !== row.referenceId || subscription.metadata.plan !== row.plan || !['active', 'trialing', 'past_due'].includes(subscription.status)) {
     throw new Error(`Test-mode subscription ${subscription.id} does not match ${row.referenceId}'s ${row.plan} subscription`)
+  }
+  // One made by an earlier run is brought to this run's prices and quantities: the catalog or the business's units may have changed since.
+  const wanted = [{ price: planPrice, quantity: row.seats ?? 1 }, ...lineItems]
+  const has = subscription.items.data.map(item => ({ price: item.price.id, quantity: item.quantity ?? 1 }))
+  const key = (items: Array<{ price: string; quantity: number }>) => items.map(item => `${item.price}×${item.quantity}`).sort().join(',')
+  if (key(has) !== key(wanted)) {
+    await stripe.subscriptions.update(subscription.id, { items: [...subscription.items.data.map(item => ({ id: item.id, deleted: true })), ...wanted], proration_behavior: 'none' })
+    console.log(`${row.name ?? row.referenceId}: ${subscription.id} brought to ${key(wanted)}`)
   }
   d1(`UPDATE subscription SET stripeCustomerId = ${sqlString(customer.id)}, stripeSubscriptionId = ${sqlString(subscription.id)}, stripeScheduleId = NULL WHERE id = ${sqlString(row.id)};
 UPDATE organization SET stripeCustomerId = ${sqlString(customer.id)} WHERE id = ${sqlString(row.referenceId)};`)

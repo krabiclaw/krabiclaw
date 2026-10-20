@@ -151,7 +151,8 @@ keys, and follows the release contract. Replacement deltas require an explicit
 source; production loads always require one. Follow a staging refresh with
 `corepack yarn billing:test-mode --staging`: the copy carries production's live-mode
 Stripe subscriptions, which staging's test-mode key cannot read, and that step points
-each one at a test-mode equivalent on the current catalog price.
+each one at a test-mode equivalent at the price Better Auth knows its plan by: an
+offered plan's current price, a retired plan's own contract price.
 
 Local setup copies production through `db:pull:local`.
 One SQL read captures the tables and rows from the same database revision.
