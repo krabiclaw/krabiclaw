@@ -4,7 +4,7 @@
     <UFormField v-if="changeable" label="Locations">
       <UInputNumber v-model="quantity" :min="minimum" :disabled="busy" class="w-full" />
     </UFormField>
-    <p v-else class="text-base text-muted">Locations change on an active plan with no change or cancellation scheduled.</p>
+    <p v-else class="text-base text-muted">{{ dashboard.canUpdateBilling.value ? 'Locations change on an active plan with no change or cancellation scheduled.' : 'Only an owner of this business changes its plan.' }}</p>
   </DashboardLeafPanel>
 </template>
 
@@ -22,7 +22,7 @@ const { billing } = await useOrganizationBilling()
 const minimum = computed(() => Math.max(INCLUDED_LOCATIONS, billing.value?.locations.used ?? INCLUDED_LOCATIONS))
 const quantity = ref(Math.max(minimum.value, billing.value?.locations.covered ?? INCLUDED_LOCATIONS))
 // The same rule that links the row: an active subscription with nothing scheduled against it.
-const changeable = computed(() => !!billing.value && !(billing.value.plan === STARTER_PLAN_ID && !billing.value.stripeSubscriptionId)
+const changeable = computed(() => dashboard.canUpdateBilling.value && !!billing.value && !(billing.value.plan === STARTER_PLAN_ID && !billing.value.stripeSubscriptionId)
   && billing.value.subscriptionStatus === 'active' && !billing.value.scheduledPlan && !billing.value.cancelAtPeriodEnd)
 const changed = computed(() => changeable.value && quantity.value !== billing.value?.locations.covered)
 const note = computed(() => billing.value && isNewSalePlan(billing.value.plan)

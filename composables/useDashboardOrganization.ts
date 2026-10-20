@@ -1,5 +1,6 @@
 import { dashboardFetch, type DashboardRequestScope } from '~/composables/dashboardFetch'
 import { ALL_VERTICALS, type OrganizationVertical } from '~/utils/vertical-copy'
+import { organizationRoles } from '~/utils/organization-access'
 
 /**
  * The tenant, as the dashboard reads it.
@@ -153,6 +154,11 @@ export function useDashboardOrganization() {
   const organization = computed(() => state.value?.organization ?? null)
   const organizationId = computed(() => organization.value?.id ?? null)
   const locations = computed(() => state.value?.locations ?? [])
+  /** Whether the signed-in member's role may change the plan, by the same rule the billing endpoints enforce. */
+  const canUpdateBilling = computed(() => {
+    const role = organization.value?.role
+    return !!role && role in organizationRoles && organizationRoles[role as keyof typeof organizationRoles].authorize({ billing: ['update'] }).success
+  })
 
   const organizationPaths = computed(() => {
     const organizationSlug = scope.value?.orgSlug
@@ -176,6 +182,7 @@ export function useDashboardOrganization() {
     organization,
     organizationId,
     locations,
+    canUpdateBilling,
     organizationPaths,
     /** Re-runs the context request. For an explicit reload after a mutation. */
     refresh: () => refreshNuxtData(contextKey.value),

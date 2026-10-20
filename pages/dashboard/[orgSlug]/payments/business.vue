@@ -22,7 +22,7 @@
         <p class="flex justify-between gap-4"><span>Then every month</span><strong data-plan-change-recurring class="tabular-nums">{{ paymentMoney(preview.recurring, preview.currency) }}</strong></p>
       </div>
     </div>
-    <p v-else class="text-base text-muted">Your plan changes once it is active with no change or cancellation scheduled.</p>
+    <p v-else class="text-base text-muted">{{ dashboard.canUpdateBilling.value ? 'Your plan changes once it is active with no change or cancellation scheduled.' : 'Only an owner of this business changes its plan.' }}</p>
   </DashboardLeafPanel>
 </template>
 
@@ -54,7 +54,7 @@ const switching = computed(() => !!billing.value && billing.value.plan !== BUSIN
 const earlierPrice = computed(() => billing.value?.plan === BUSINESS_PLAN_ID && !billing.value.billsRentalUnits)
 const acceptOffer = ref(false)
 const billsUnits = computed(() => switching.value || acceptOffer.value || !!billing.value?.billsRentalUnits)
-const changeable = computed(() => !!billing.value?.stripeSubscriptionId && billing.value.subscriptionStatus === 'active' && !billing.value.scheduledPlan && !billing.value.cancelAtPeriodEnd)
+const changeable = computed(() => dashboard.canUpdateBilling.value && !!billing.value?.stripeSubscriptionId && billing.value.subscriptionStatus === 'active' && !billing.value.scheduledPlan && !billing.value.cancelAtPeriodEnd)
 // What is in use is the least the plan can cover; a business pays for no fewer than are on its site.
 const usedLocations = computed(() => billsUnits.value ? billing.value?.businessUsage.locations ?? 0 : billing.value?.locations.used ?? 0)
 const minimumLocations = computed(() => Math.max(INCLUDED_LOCATIONS, usedLocations.value))

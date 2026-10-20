@@ -28,8 +28,6 @@ export interface ConnectedIntegration {
 }
 
 export interface IntegrationsSummary {
-  /** The services the business is on, for the connections that offer one. */
-  services: { managed_ads: boolean }
   google_maps: Array<{
     id: string
     slug: string
@@ -78,7 +76,7 @@ const base = computed(() => `/dashboard/${String(route.params.orgSlug)}/integrat
 
 const isSummaryResponse = (value: unknown): value is { settings: { integrations: IntegrationsSummary } } =>
   isRecord(value) && isRecord(value.settings) && isRecord(value.settings.integrations)
-  && Array.isArray(value.settings.integrations.google_maps) && isRecord(value.settings.integrations.services)
+  && Array.isArray(value.settings.integrations.google_maps)
 
 const { data: summary, error, refresh } = await useAsyncData(
   () => `dashboard-integrations:${String(route.params.orgSlug)}`,
