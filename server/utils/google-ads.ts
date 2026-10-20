@@ -1,4 +1,4 @@
-import type { CloudflareEnv } from './auth'
+import { linkedAccountAccessToken, type CloudflareEnv } from './auth'
 import { readIntegration, storeIntegration } from './organization-integrations'
 import { requireRecordedManagedSpend } from '~/server/domain/payments/ad-spend'
 import { HTTPError } from 'nitro'
@@ -104,6 +104,11 @@ export async function selectGoogleAdsCustomer(
 ): Promise<string> {
   await requireRecordedManagedSpend(env.DB, env, organizationId)
   if (await readIntegration(env.DB, organizationId, 'google_ads')) throw new HTTPError({ statusCode: 409, message: 'Disconnect Google Ads before connecting again.' })
+  // A manager account holds other accounts; it has no campaigns or results of its own.
+  const { accessToken } = await linkedAccountAccessToken(env, accountId)
+  if ((await getGoogleAdsCustomer(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, customerId)).isManager) {
+    throw new HTTPError({ statusCode: 422, message: 'That is a Google Ads manager account. Choose one of the accounts it manages.' })
+  }
   return await storeIntegration(env.DB, organizationId, 'google_ads', {
     account_id: accountId,
     target_id: customerId,
@@ -599,19 +604,34 @@ export async function updateGoogleAdsCampaignBudget(
 }
 
 /** The account's currency, reporting timezone and name, independent of any reporting range. */
-export async function getGoogleAdsCustomer(accessToken: string, developerToken: string | undefined, customerId: string): Promise<{ descriptiveName: string; currencyCode: string; timeZone: string }> {
+/**
+ * Google's own reason for a refused request: each error's code and message from
+ * the GoogleAdsFailure details, which a truncated body cuts off.
+ */
+async function googleAdsFailure(label: string, response: Response): Promise<Error> {
+  const text = await response.text()
+  type Failure = { error?: { message?: string; details?: Array<{ errors?: Array<{ errorCode?: Record<string, string>; message?: string }> }> } }
+  // A body that is not Google's JSON failure is reported as it came.
+  const body = (() => { try { return JSON.parse(text) as Failure } catch { return null } })()
+  const reasons = (body?.error?.details ?? []).flatMap(detail => detail.errors ?? [])
+    .map(error => [Object.values(error.errorCode ?? {}).join(', '), error.message].filter(Boolean).join(': '))
+  const reason = reasons.join('; ') || body?.error?.message || text.slice(0, 500)
+  return new Error(`${label} (${response.status}): ${reason}`)
+}
+
+export async function getGoogleAdsCustomer(accessToken: string, developerToken: string | undefined, customerId: string): Promise<{ descriptiveName: string; currencyCode: string; timeZone: string; isManager: boolean }> {
   const cid = cleanCustomerId(customerId)
   const response = await fetch(`https://googleads.googleapis.com/v25/customers/${cid}/googleAds:search`, {
     method: 'POST',
     headers: googleAdsHeaders(accessToken, developerToken),
-    body: JSON.stringify({ query: 'SELECT customer.descriptive_name, customer.currency_code, customer.time_zone FROM customer LIMIT 1' }),
+    body: JSON.stringify({ query: 'SELECT customer.descriptive_name, customer.currency_code, customer.time_zone, customer.manager FROM customer LIMIT 1' }),
   })
-  if (!response.ok) throw new Error(`Google Ads API error (${response.status}): ${(await response.text()).slice(0, 300)}`)
-  const data = (await response.json()) as { results?: Array<{ customer?: { descriptiveName?: string; currencyCode?: string; timeZone?: string } }> }
+  if (!response.ok) throw await googleAdsFailure('Google Ads API error', response)
+  const data = (await response.json()) as { results?: Array<{ customer?: { descriptiveName?: string; currencyCode?: string; timeZone?: string; manager?: boolean } }> }
   const customer = data.results?.[0]?.customer
   if (!customer?.currencyCode) throw new Error(`Google Ads did not describe customer ${cid}`)
   if (!isValidTimezone(customer.timeZone)) throw new Error(`Google Ads did not provide a valid reporting timezone for customer ${cid}`)
-  return { descriptiveName: customer.descriptiveName ?? '', currencyCode: customer.currencyCode, timeZone: customer.timeZone }
+  return { descriptiveName: customer.descriptiveName ?? '', currencyCode: customer.currencyCode, timeZone: customer.timeZone, isManager: customer.manager === true }
 }
 
 /** Query aggregated Google Ads performance for date range */
@@ -644,10 +664,7 @@ export async function getGoogleAdsPerformanceSummary(
     }),
   })
 
-  if (!response.ok) {
-    const errorText = (await response.text()).slice(0, 300)
-    throw new Error(`Google Ads search query failed (${response.status}): ${errorText}`)
-  }
+  if (!response.ok) throw await googleAdsFailure('Google Ads search query failed', response)
 
   const data = await response.json() as {
     results?: Array<{

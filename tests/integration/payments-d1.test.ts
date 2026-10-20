@@ -1050,14 +1050,15 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
    }
    if (url.origin === 'https://googleads.googleapis.com') {
     googleReads++
-    assert.equal(url.pathname, '/v25/customers/1234567890/googleAds:search')
+    // The managed account, and the accounts a later free connection chooses from: 3333333333 is a manager account.
+    assert.ok(['1234567890', '2222222222', '3333333333'].some(id => url.pathname === `/v25/customers/${id}/googleAds:search`), url.pathname)
     assert.equal(new Headers(init?.headers).get('authorization'), 'Bearer managed-ads-token')
     if (providerUnavailable) return Response.json({ error: 'Reporting unavailable at external boundary' }, { status: 503 })
     const query = JSON.parse(String(init?.body)).query as string
     if (query.includes('metrics.cost_micros')) {
      return Response.json({ results: query.includes("'2026-10-01'") ? [] : [{ customer: { currencyCode: 'USD' }, metrics: { costMicros: '12500000', clicks: '10', impressions: '100', conversions: 1 } }] })
     }
-    return Response.json({ results: [{ customer: { currencyCode: currency, timeZone, descriptiveName: 'Managed ads fixture' } }] })
+    return Response.json({ results: [{ customer: { currencyCode: currency, timeZone, descriptiveName: 'Managed ads fixture', manager: url.pathname.includes('3333333333') } }] })
    }
    throw new Error(`Unexpected provider request: ${url.origin}${url.pathname}`)
   })
@@ -1146,6 +1147,8 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
    { source_id: 'google_ads:1234567890:2026-10-02', amount: 1250, provider_occurred_at: '2026-10-03T03:59:59.999Z', delivery_at: null },
   ])
   assert.deepEqual(await releaseIntegration(env, ORG, 'google-ads'), { product: 'google-ads', released: true })
+  // A manager account has no campaigns or results of its own, so it is not a connection.
+  await assert.rejects(selectGoogleAdsCustomer(env, ORG, 'ads-linked', '3333333333', 'Manager account'), { status: 422, message: 'That is a Google Ads manager account. Choose one of the accounts it manages.' })
   // A new free connection cannot make the previous agreement bill its account.
   await selectGoogleAdsCustomer(env, ORG, 'ads-linked', '2222222222', 'New free connection')
   const readsBeforeDelivery = googleReads
