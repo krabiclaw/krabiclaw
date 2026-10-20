@@ -35,7 +35,7 @@
         <details ref="mobileNavDetails" class="relative lg:hidden" @toggle="syncMobileNavState">
           <summary
             class="inline-flex size-8 list-none items-center justify-center rounded-full text-muted transition hover:bg-muted hover:text-default focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary [&::-webkit-details-marker]:hidden"
-            :aria-label="mobileMenuOpen ? t('site.header.close_navigation') : t('site.header.open_navigation')"
+            :aria-label="t('site.header.toggle_navigation')"
             :aria-expanded="mobileMenuOpen"
           >
             <svg class="size-4 overflow-visible stroke-current" viewBox="0 0 14 14" fill="none" stroke-width="2" stroke-linecap="round" aria-hidden="true">

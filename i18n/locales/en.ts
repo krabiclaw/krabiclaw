@@ -325,10 +325,9 @@ export default {
       "reservations": "Reservations",
       "experiences": "Experiences",
       "contact": "Contact",
-      "open_navigation": "Open navigation",
-      "close_navigation": "Close navigation",
       "nav_aria": "Primary navigation",
-      "mobile_nav_aria": "Mobile navigation"
+      "mobile_nav_aria": "Mobile navigation",
+      "toggle_navigation": "Toggle navigation"
     },
     "footer": {
       "locations_error": "We could not load locations right now. Please try again in a moment.",

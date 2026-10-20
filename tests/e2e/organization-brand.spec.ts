@@ -361,8 +361,8 @@ test('palette changes through MCP reach the CMS and the legal site, and invalid 
     // Blawby renders the palette, and its dark mode.
     const light = await renderedPalette(browser, `${blawbyTestBaseUrl()}/`, blawbyTestExtraHeaders(), '.tenant-layout', 'light')
     expect(light.primary).toBe('#0F4C5C')
-    // A button takes the action color unless the site's button_color says accent.
-    expect(light.accentButton).toEqual({ color: 'rgb(255, 255, 255)', background: 'rgb(15, 76, 92)' })
+    // NCLS keeps its former accent buttons as its own button_color setting (migration 0012).
+    expect(light.accentButton).toEqual({ color: 'rgb(0, 0, 0)', background: 'rgb(248, 250, 252)' })
     const dark = await renderedPalette(browser, `${blawbyTestBaseUrl()}/`, blawbyTestExtraHeaders(), '.tenant-layout', 'dark')
     expect(dark.dark).toBe(true)
     expect(dark.background).toBe(rgb(DEFAULT_SITE_PALETTE.dark.ground))
