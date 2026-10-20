@@ -381,41 +381,52 @@ async function connectedMethodConfiguration(stripe: Stripe, stripeAccountId: str
 }
 
 /**
- * The ways a business takes payment on its site, as its Stripe configuration
- * turns them on: what its footer shows, as a shop's footer shows its cards and
- * wallets. A business not set up to take payment online takes none here.
+ * Whether a business takes payment online now, and if not, why, for whoever
+ * asks: checkout refuses with the reason, the footer shows no methods. Stripe
+ * is read for the account itself, so a capability event not yet projected
+ * still counts.
  */
-export async function acceptedPaymentMethods(db: DbClient, env: CloudflareEnv, organizationId: string): Promise<{ types: string[]; country: string | null }> {
-  const setup = await readStripeCheckoutSetup(db, organizationId, env)
-  if (setup.missing.length || !setup.connected?.stripeAccountId || setup.livemode === null) return { types: [], country: null }
-  const keys = paymentsStripeKeys(env, setup.livemode)!
-  const configuration = await connectedMethodConfiguration(createStripeClient(keys.secretKey, 'payments'), setup.connected.stripeAccountId, keys.methodConfiguration!) as unknown as Record<string, unknown>
-  const types = Object.entries(configuration)
-    .filter(([, value]) => typeof value === 'object' && value !== null && (value as { available?: unknown }).available === true
-      && (value as { display_preference?: { value?: unknown } }).display_preference?.value === 'on')
-    .map(([type]) => type)
-  return { types, country: setup.connected.country }
-}
-
-/** The configured native Stripe account and methods must accept a paid booking before it is offered. */
-export async function requireStripeCheckoutAcceptance(db: DbClient, env: CloudflareEnv, organizationId: string) {
+async function checkoutReadiness(db: DbClient, env: CloudflareEnv, organizationId: string) {
   const setup = await readStripeCheckoutSetup(db, organizationId, env)
   const handoff = { code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(setup.slug)}/payments`, missing: setup.missing }
   // Native retrieval below can resolve a capability event not yet projected.
-  if (setup.missing.some(field => field !== 'payments.account_ready')) throw new HTTPError({
-    statusCode: setup.missing.includes('payments.configuration') ? 503 : setup.missing.includes('payments.entitlement') ? 403 : 409,
-    statusMessage: 'Complete the business’s Payments setup before accepting online payments', data: handoff,
-  })
+  if (setup.missing.some(field => field !== 'payments.account_ready')) {
+    return { ready: false as const, statusCode: setup.missing.includes('payments.configuration') ? 503 : setup.missing.includes('payments.entitlement') ? 403 : 409, statusMessage: 'Complete the business’s Payments setup before accepting online payments', handoff }
+  }
   const billing = setup.livemode === platformLivemode(env) ? await paymentsBillingPricing(db, env, organizationId) : null
-  if (billing && (!billing.contract || !billing.pricing)) throw new HTTPError({ statusCode: 409, statusMessage: 'Complete Payments billing setup before accepting online payments', data: handoff })
+  if (billing && (!billing.contract || !billing.pricing)) return { ready: false as const, statusCode: 409, statusMessage: 'Complete Payments billing setup before accepting online payments', handoff }
   const saved = setup.connected!
   const keys = paymentsStripeKeys(env, setup.livemode!)!
   const stripe = createStripeClient(keys.secretKey, 'payments')
   const account = await stripe.v2.core.accounts.retrieve(saved.stripeAccountId!, { include: STRIPE_CONNECT_ACCOUNT_INCLUDE })
   const connected = await projectStripeConnectedAccount(db, accountProjection(saved, account))
-  if (connected.status !== 'ready' || account.livemode !== saved.livemode) throw new HTTPError({ statusCode: 409, statusMessage: 'Complete the business’s Stripe account setup before requiring online collection', data: handoff })
+  if (connected.status !== 'ready' || account.livemode !== saved.livemode) return { ready: false as const, statusCode: 409, statusMessage: 'Complete the business’s Stripe account setup before requiring online collection', handoff }
+  return { ready: true as const, stripe, account, connected, parent: keys.methodConfiguration!, handoff }
+}
+
+/**
+ * The ways a business takes payment on its site, as its Stripe configuration
+ * turns them on: what its footer shows, as a shop's footer shows its cards and
+ * wallets. A business not ready to take payment online takes none here.
+ */
+export async function acceptedPaymentMethods(db: DbClient, env: CloudflareEnv, organizationId: string): Promise<{ types: string[]; country: string | null }> {
+  const readiness = await checkoutReadiness(db, env, organizationId)
+  if (!readiness.ready) return { types: [], country: null }
+  const configuration = await connectedMethodConfiguration(readiness.stripe, readiness.account.id, readiness.parent) as unknown as Record<string, unknown>
+  const types = Object.entries(configuration)
+    .filter(([, value]) => typeof value === 'object' && value !== null && (value as { available?: unknown }).available === true
+      && (value as { display_preference?: { value?: unknown } }).display_preference?.value === 'on')
+    .map(([type]) => type)
+  return { types, country: readiness.connected.country }
+}
+
+/** The configured native Stripe account and methods must accept a paid booking before it is offered. */
+export async function requireStripeCheckoutAcceptance(db: DbClient, env: CloudflareEnv, organizationId: string) {
+  const readiness = await checkoutReadiness(db, env, organizationId)
+  if (!readiness.ready) throw new HTTPError({ statusCode: readiness.statusCode, statusMessage: readiness.statusMessage, data: readiness.handoff })
+  const { stripe, account, connected, handoff } = readiness
   // Which methods the business offers is its Stripe payment method configuration's to decide.
-  const methods = await connectedMethodConfiguration(stripe, account.id, keys.methodConfiguration!).catch((cause: Error) => {
+  const methods = await connectedMethodConfiguration(stripe, account.id, readiness.parent).catch((cause: Error) => {
     throw new HTTPError({ statusCode: 409, statusMessage: cause.message, data: handoff })
   })
   const [taxSettings, registrations] = await Promise.all([
