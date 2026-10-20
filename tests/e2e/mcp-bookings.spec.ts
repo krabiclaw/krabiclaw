@@ -216,7 +216,7 @@ test('MCP online collection returns the real Payments setup handoff without chan
     const context = await call<{ context: { organization_slug: string } }>('get_organization')
     const billing = await request.get(`${baseURL}/api/billing/status?organizationId=${organizationId}`)
     expect(billing.status(), await billing.text()).toBe(200)
-    expect((await billing.json()).billing).toMatchObject({ plan: 'commerce', subscriptionStatus: 'active' })
+    expect((await billing.json()).billing).toMatchObject({ plan: 'business', subscriptionStatus: 'active' })
     const usage = await request.get(`${baseURL}/api/dashboard/payments/billing?org=${encodeURIComponent(context.context.organization_slug)}`)
     expect(usage.status(), await usage.text()).toBe(200)
     expect((await usage.json()).configured).toBe(false)
