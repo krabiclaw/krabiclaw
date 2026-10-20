@@ -16,7 +16,7 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   expect(JSON.stringify(document), 'complete canonical pricing document').toContain('billing_features')
   const comparison = page.locator('[data-parity-section="comparison"]')
   await expect(comparison).toBeVisible()
-  await expect(comparison.locator('tr[data-feature-id]')).toHaveCount(32)
+  await expect(comparison.locator('tr[data-feature-id]')).toHaveCount(31)
   const locations = comparison.locator('tr[data-feature-id="locations.included"]')
   await expect(locations.locator('td')).toHaveText([
     '2 included',

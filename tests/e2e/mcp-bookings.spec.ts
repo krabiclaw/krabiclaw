@@ -219,7 +219,8 @@ test('MCP online collection returns the real Payments setup handoff without chan
     expect((await billing.json()).billing).toMatchObject({ plan: 'business', subscriptionStatus: 'active' })
     const usage = await request.get(`${baseURL}/api/dashboard/payments/billing?org=${encodeURIComponent(context.context.organization_slug)}`)
     expect(usage.status(), await usage.text()).toBe(200)
-    expect((await usage.json()).configured).toBe(false)
+    // Business's subscription carries the fee prices, read from Stripe; what is missing is the business's own Stripe account.
+    expect(await usage.json()).toMatchObject({ configured: true, source: 'Stripe', pricing: { captured_volume_rate_percent: '1.4', ad_spend_rate_percent: '10', livemode: false } })
     expect((await call<{ configured: boolean }>('get_payment_payouts')).configured).toBe(false)
     const created = await call<{ product: { id: string } }>('create_product', {
       kind: 'service', name: `Paid appointment ${crypto.randomUUID()}`, idempotency_key: crypto.randomUUID(),
