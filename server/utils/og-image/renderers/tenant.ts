@@ -5,6 +5,6 @@ const VARIANT = {
   accentColor: '#fdba74',
 }
 
-export function renderSayaCard(payload: RenderInputs): SatoriNode {
+export function renderTenantCard(payload: RenderInputs): SatoriNode {
   return buildOgImageCard(payload, VARIANT)
 }

@@ -9,7 +9,6 @@
             :alt="brandName"
             :class="profileImageClass"
           >
-          <p v-if="template.slug === 'blawby'" class="text-xs font-semibold uppercase tracking-[0.18em] text-[color:var(--blawby-accent-strong)]">{{ linksPage.page.title }}</p>
           <h1 :class="headingClass">{{ linksPage.page.title }}</h1>
         </div>
 
@@ -92,12 +91,9 @@ const templateClass = 'min-h-[calc(100vh-8rem)] bg-default px-4 py-10 sm:px-6 sm
 const shellClass = 'mx-auto max-w-md'
 const identityClass = 'text-center'
 const profileImageClass = 'mx-auto size-18 rounded-full object-cover shadow-sm'
-const headingClass = computed(() => template.slug === 'blawby'
-  ? 'mt-5 text-3xl font-semibold tracking-normal text-highlighted'
-  : 'saya-display-md mt-5 text-default')
-const linkClass = computed(() => template.slug === 'blawby'
-  ? 'group flex min-h-14 items-center rounded-lg border border-default bg-elevated px-5 py-4 text-center text-highlighted no-underline shadow-sm transition hover:-translate-y-0.5 hover:border-secondary hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-secondary'
-  : 'group flex min-h-14 items-center rounded-full border border-primary/25 bg-primary/8 px-5 py-4 text-center text-default no-underline shadow-sm transition hover:-translate-y-0.5 hover:bg-primary/12 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary')
+const headingClass = 'tenant-display-md mt-5 text-highlighted'
+// A link is shaped like the site's buttons.
+const linkClass = 'group flex min-h-14 items-center rounded-[var(--site-button-radius)] border border-primary/25 bg-primary/8 px-5 py-4 text-center text-default no-underline shadow-sm transition hover:-translate-y-0.5 hover:bg-primary/12 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-primary'
 const labelClass = 'block truncate text-base font-semibold'
 
 function isHttpDestination(destination: string) {

@@ -7,7 +7,7 @@ export const MEDIA_PLACEMENT_SLOTS = {
   collection: ['image'],
   content_document: ['cover', 'gallery', 'social_card'],
   content_block: [
-    'media', 'gallery', 'background', 'featured', 'decoration',
+    'media', 'gallery', 'featured', 'decoration',
     'parallax_sky', 'parallax_sky_xxs', 'parallax_sky_xs', 'parallax_sky_sm', 'parallax_sky_md', 'parallax_sky_lg',
     'parallax_clouds', 'parallax_clouds_xxs', 'parallax_clouds_xs', 'parallax_clouds_sm', 'parallax_clouds_md', 'parallax_clouds_lg',
     'parallax_mountains', 'parallax_mountains_xxs', 'parallax_mountains_xs', 'parallax_mountains_sm', 'parallax_mountains_md', 'parallax_mountains_lg',

@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:29b88591909e4a076a2546e4c405efd2173b1bf3adfb96de3b33e905e56e94ef",
-  "documentationFingerprint": "sha256:608230e293bcfc3ad186d0d6e9d2daf99300bea3d099bd12bb1c56d6fc905aac",
+  "fingerprint": "sha256:e74eced8aaa2d331c6b0884b7b7de2ee192e792ac0332e6f8649b870671b11db",
+  "documentationFingerprint": "sha256:ba6919f347e43fca4c7a4405299766c1833167702319745a81ec321f47cb4347",
   "tools": [
     {
       "name": "add_organization_language",
@@ -209,7 +209,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -2060,7 +2059,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -5998,7 +5996,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -10377,7 +10374,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -11686,7 +11682,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -17292,7 +17287,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -21509,7 +21503,7 @@
                 ]
               },
               "title": {
-                "description": "The page title to write. Always sent in full — an omitted title is not kept.",
+                "description": "The page's name, e.g. About. The site name is appended to the browser title. Always sent in full — an omitted title is not kept.",
                 "type": "string"
               }
             },
@@ -24086,7 +24080,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -27631,7 +27624,7 @@
             ]
           },
           "title": {
-            "description": "The page title to write. Always sent in full — an omitted title is not kept.",
+            "description": "The page's name, e.g. About. The site name is appended to the browser title. Always sent in full — an omitted title is not kept.",
             "type": "string"
           },
           "variant_id": {
@@ -27744,7 +27737,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -32479,7 +32471,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -37259,7 +37250,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -45288,13 +45278,23 @@
                 ]
               },
               "button_casing": {
+                "description": "Button text casing: uppercase or none (natural case). Absent when the site uses the Default.",
                 "enum": [
                   "uppercase",
                   "none"
                 ],
                 "type": "string"
               },
+              "button_color": {
+                "description": "Button fill: action (the palette's action color) or accent (the palette's accent color). Absent when the site uses the Default.",
+                "enum": [
+                  "action",
+                  "accent"
+                ],
+                "type": "string"
+              },
               "button_shape": {
+                "description": "Button corner styling: pill (fully rounded), rounded (subtle radius), or sharp (square corners). Absent when the site uses the Default.",
                 "enum": [
                   "pill",
                   "rounded",
@@ -45352,7 +45352,8 @@
                   "montserrat",
                   "lora",
                   "playfair-display",
-                  "cormorant-garamond"
+                  "cormorant-garamond",
+                  "marcellus"
                 ],
                 "type": "string"
               },
@@ -45363,6 +45364,7 @@
                 ]
               },
               "heading_casing": {
+                "description": "Display heading casing: uppercase or none (natural case). Absent when the site uses the Default.",
                 "enum": [
                   "uppercase",
                   "none"
@@ -45418,7 +45420,7 @@
                 "type": "string"
               },
               "palette": {
-                "description": "The colors the site renders, light and dark: its own, or its template's. Null on the platform template.",
+                "description": "The colors the site renders, light and dark: its own, or the default. Null on KrabiClaw's own site.",
                 "properties": {
                   "dark": {
                     "additionalProperties": false,
@@ -45489,7 +45491,7 @@
               "palette_source": {
                 "enum": [
                   "custom",
-                  "template",
+                  "default",
                   null
                 ],
                 "type": [
@@ -49754,7 +49756,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -54029,7 +54030,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -65558,7 +65558,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -69766,7 +69765,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -73858,7 +73856,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -81959,7 +81956,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -84759,7 +84755,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -85103,7 +85098,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -86905,7 +86899,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -91936,7 +91929,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -92269,7 +92261,6 @@
                             "enum": [
                               "media",
                               "gallery",
-                              "background",
                               "featured",
                               "decoration",
                               "parallax_sky",
@@ -93436,6 +93427,7 @@
                     "enum": [
                       "logo",
                       "logo_dark",
+                      "favicon",
                       "social_share",
                       "announcement"
                     ],
@@ -93570,7 +93562,6 @@
                       {
                         "enum": [
                           "media",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -93975,7 +93966,6 @@
                         "enum": [
                           "media",
                           "gallery",
-                          "background",
                           "featured",
                           "decoration",
                           "parallax_sky",
@@ -99597,7 +99587,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -100919,7 +100908,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -108263,6 +108251,14 @@
             ],
             "type": "string"
           },
+          "button_color": {
+            "description": "Button fill: action (the palette's action color) or accent (the palette's accent color).",
+            "enum": [
+              "action",
+              "accent"
+            ],
+            "type": "string"
+          },
           "button_shape": {
             "description": "Button corner styling: pill (fully rounded), rounded (subtle radius), or sharp (square corners).",
             "enum": [
@@ -108306,7 +108302,7 @@
             "type": "string"
           },
           "font_preset": {
-            "description": "Website heading and body fonts, on every template: default (Default), mali (Mali), sarabun (Sarabun), prompt (Prompt), kanit (Kanit with Sarabun), ibm-plex-sans-thai (IBM Plex Sans Thai), noto-serif-thai (Noto Serif Thai with Noto Sans Thai), inter (Inter), dm-sans (DM Sans), montserrat (Montserrat), lora (Lora), playfair-display (Playfair Display with Inter), cormorant-garamond (Cormorant Garamond with Inter). Thai, Vietnamese and Japanese text renders in every choice.",
+            "description": "Website heading and body fonts, on every template: default (Default), mali (Mali), sarabun (Sarabun), prompt (Prompt), kanit (Kanit with Sarabun), ibm-plex-sans-thai (IBM Plex Sans Thai), noto-serif-thai (Noto Serif Thai with Noto Sans Thai), inter (Inter), dm-sans (DM Sans), montserrat (Montserrat), lora (Lora), playfair-display (Playfair Display with Inter), cormorant-garamond (Cormorant Garamond with Inter), marcellus (Marcellus with Inter). Thai, Vietnamese and Japanese text renders in every choice.",
             "enum": [
               "default",
               "mali",
@@ -108320,7 +108316,8 @@
               "montserrat",
               "lora",
               "playfair-display",
-              "cormorant-garamond"
+              "cormorant-garamond",
+              "marcellus"
             ],
             "type": "string"
           },
@@ -108341,7 +108338,7 @@
           },
           "palette": {
             "additionalProperties": false,
-            "description": "Saya and Blawby website colors, each with a light and a dark value. Roles: ground (The page background.) surface (Cards, the header and footer, dialogs and fields.) text (Body copy and headings.) muted (Captions, details and supporting copy.) action (Buttons, links and selected states.) accent (Emphasis, decoration and highlighted buttons.) Start from a starter (coastal, forest, terracotta, ink, blossom, saffron, slate, midnight) and/or name only the roles to change; colors are #RRGGBB or a plain description such as \"forest green\". Borders and tints are derived. null returns to the template's colors. The result reports any text or button pair below WCAG AA contrast.",
+            "description": "Website colors, each with a light and a dark value. Roles: ground (The page background.) surface (Cards, the header and footer, dialogs and fields.) text (Body copy and headings.) muted (Captions, details and supporting copy.) action (Buttons, links and selected states.) accent (Emphasis, decoration and highlighted buttons.) Start from a starter (coastal, forest, terracotta, ink, blossom, saffron, slate, midnight) and/or name only the roles to change; colors are #RRGGBB or a plain description such as \"forest green\". Borders and tints are derived. null returns to the default colors. The result reports any text or button pair below WCAG AA contrast.",
             "properties": {
               "dark": {
                 "additionalProperties": false,
@@ -112746,7 +112743,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -116296,7 +116292,7 @@
             ]
           },
           "title": {
-            "description": "The page title to write. Always sent in full — an omitted title is not kept.",
+            "description": "The page's name, e.g. About. The site name is appended to the browser title. Always sent in full — an omitted title is not kept.",
             "type": "string"
           },
           "variant_id": {
@@ -116411,7 +116407,6 @@
                     "enum": [
                       "media",
                       "gallery",
-                      "background",
                       "featured",
                       "decoration",
                       "parallax_sky",
@@ -121463,7 +121458,7 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:1d77a9dee44f08cd82530a1427f9b3d9c953042289185a2ad4b505bbd5ecd126",
+        "create_product": "sha256:6b6c5210d3c4d22ac40117fe57ef7618a0025b2c4d7c044ec2cdf10823eb91c2",
         "get_product": "sha256:0576e4c4688ede0ada51ec95fb6ab19e554ada44ecdc2a2d4115bfa20aea20a3",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
@@ -121518,14 +121513,14 @@
         "text": "Create a bookable offering from: <description> Use get_workspace_context, list_locations and list_products to resolve the business, existing offerings and explicit location or online scope. Ask for missing price, duration, capacity, actual start times, confirmation and payment choices. Use create_product with booking setup and one idempotency key. Preserve the supplied facts and attach supplied media to the returned product ID. Use get_product to read booking_readiness and list_product_booking_sessions with a concrete date range to verify actual availability. Use save_media_attachment for supplied files or attach_media for existing assets. Open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
-        "create_product": "sha256:1d77a9dee44f08cd82530a1427f9b3d9c953042289185a2ad4b505bbd5ecd126",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
+        "create_product": "sha256:6b6c5210d3c4d22ac40117fe57ef7618a0025b2c4d7c044ec2cdf10823eb91c2",
         "get_product": "sha256:0576e4c4688ede0ada51ec95fb6ab19e554ada44ecdc2a2d4115bfa20aea20a3",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
         "list_product_booking_sessions": "sha256:5344043fd436db540d0faa379be2e3cb011dfb95efa5d20db8b04cfd736cb2ca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
-        "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871"
+        "save_media_attachment": "sha256:fd9306458e6552d6a787cd03ff48b1887c648a210fbbd5acc03c7896deaf6a8b"
       }
     },
     {
@@ -121561,15 +121556,15 @@
         "text": "Use get_workspace_context, list_site_pages and get_site_page to read the selected business's homepage, and get_organization_media_assets for its media. Open its public preview and recommend the most useful improvements in plain language. Apply requested copy changes with update_site_page; use set_media for one image or attach_media, remove_media and reorder_media for a gallery. Read back the page and public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
+        "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
-        "remove_media": "sha256:a59343b7aaf1b361ba9e70d9bcfff4a454baa3d618af3fc93f92188f9cb3893c",
-        "reorder_media": "sha256:0b9419a7d891bcf9f75032994fcf329651d3c888a0409356ad4ae7b94a199e25",
-        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0",
-        "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
+        "remove_media": "sha256:227bb1165062216319751f5570613385e782b0a209e74ed1a47f9022eee1cc0b",
+        "reorder_media": "sha256:0e8083651c6b2bcb7484e01be67d001c8b829ce6f4f3b5e4b2f652c9f83dc829",
+        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
+        "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
       }
     },
     {
@@ -121581,14 +121576,14 @@
         "text": "Inspect the supplied photos and use get_workspace_context plus the relevant get_site_page, get_location, get_product or get_post read to resolve the intended owner and placement. Ask only about an ambiguous destination. Use save_media_attachment with a stable idempotency_key and the intended placement for each attachment; retries reuse that key. For an existing asset use set_media or attach_media. Read back the owner and open the public result before reporting placement."
       },
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_product": "sha256:0576e4c4688ede0ada51ec95fb6ab19e554ada44ecdc2a2d4115bfa20aea20a3",
-        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
+        "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
-        "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871",
-        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0"
+        "save_media_attachment": "sha256:fd9306458e6552d6a787cd03ff48b1887c648a210fbbd5acc03c7896deaf6a8b",
+        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f"
       }
     },
     {
@@ -121600,9 +121595,9 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:1d77a9dee44f08cd82530a1427f9b3d9c953042289185a2ad4b505bbd5ecd126",
+        "create_product": "sha256:6b6c5210d3c4d22ac40117fe57ef7618a0025b2c4d7c044ec2cdf10823eb91c2",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
-        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
+        "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_website_draft": "sha256:df0618dc1530516a8379a9774e920bc77d93dc0ff2b0c810c28c041248c6eff0",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -121612,8 +121607,8 @@
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "save_website_draft": "sha256:3535ccb7682b88abadce6852c02862e241e4c2fd97f6940d62caeae63f70a839",
         "update_menu": "sha256:a98669973156cf353a911e15ddc542aedbc30a6cbc61653d444092a8bbcf4bbe",
-        "update_organization_settings": "sha256:b5488027b9a151e5759c0cf78e9010b60ff1d07ba783525d50e30cc233f2ef94",
-        "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
+        "update_organization_settings": "sha256:25cdf195df01ed62f410cc89e3862f2a8d6e41c4dbbae0770ac9f8a674fe7b7f",
+        "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
       }
     },
     {
@@ -121647,15 +121642,15 @@
         "text": "Use get_workspace_context, list_site_pages, get_site_page, get_organization_media_assets and list_products to read the actual public pages, media and catalog. Recommend specific improvements in plain language. Apply the requested copy with update_site_page or update_product, and media with set_media or attach_media. Read back the changed record and verify the public result."
       },
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
+        "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
-        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0",
+        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
         "update_product": "sha256:2f7ba391a3f927dedc1cb825836789be6a051ffcec9098ea071224aed2e650e3",
-        "update_site_page": "sha256:f2f8de95307bc241ebb93a2f8c51971b0cdd3727df820b4ca300d7e5dceabf97"
+        "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
       }
     },
     {
@@ -121741,13 +121736,13 @@
       "slug": "add-photos-and-video",
       "contentHash": "sha256:12d4c163d18a26ef149addaaf3ee345df1a5db52168d3c611513a27dfcbded2c",
       "toolContracts": {
-        "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
+        "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "delete_media_asset": "sha256:7cd7618939616504dc9e0ec08771cc009b09671c40b69c23485dfb172b18ec2e",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "remove_media": "sha256:a59343b7aaf1b361ba9e70d9bcfff4a454baa3d618af3fc93f92188f9cb3893c",
-        "reorder_media": "sha256:0b9419a7d891bcf9f75032994fcf329651d3c888a0409356ad4ae7b94a199e25",
-        "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871",
-        "set_media": "sha256:782e89d3cf4093c82d684ce2be4e2a230c591a6eb41650b7d957e3079a4ccec0",
+        "remove_media": "sha256:227bb1165062216319751f5570613385e782b0a209e74ed1a47f9022eee1cc0b",
+        "reorder_media": "sha256:0e8083651c6b2bcb7484e01be67d001c8b829ce6f4f3b5e4b2f652c9f83dc829",
+        "save_media_attachment": "sha256:fd9306458e6552d6a787cd03ff48b1887c648a210fbbd5acc03c7896deaf6a8b",
+        "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
         "update_media_asset": "sha256:25902033f7e73a819b6c9660c6a2e70b4ab3dfb972a49b594f1c3a34d8a1a8f7"
       }
     },
@@ -121755,12 +121750,12 @@
       "slug": "publish-a-post",
       "contentHash": "sha256:20b71a412abc2f5b707463326e643c5f540dba815c168559b15c3aa3274e44f2",
       "toolContracts": {
-        "create_blog_post": "sha256:eadc0eba432b4e9844c9c8ed23327aafee2fdfc4b3c306b36c9d235a4a109cfe",
+        "create_blog_post": "sha256:04ebcf9dff460dd7c58bee894fff23a76431073dc3e2deb1ac1be33be6d37150",
         "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
         "get_channel_post": "sha256:698bf8872c9dd2a8620b91933ded4589e572e082603730a787b21b53f895d9e8",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_social_connections": "sha256:96a2be10163ed07a418b1ff7a6b240307f6129a8ccd172e521fa2cc3af2e14f4",
-        "publish_blog_post": "sha256:8b9880534e39b242f4c5c498b6a3a8297ddf07080007e51ce633d3286db0c5c7",
+        "publish_blog_post": "sha256:844a8eb04331dba2c4b7e738b192222e3f68e0b3d24ca3555dd7c7b7a5c17440",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reconcile_post_publication": "sha256:f97049daa773708807be8f9f0a58a5ebbf76c5b38acb2592610a2d997b319843",
         "update_post": "sha256:b186430401e60fb65257100332ce0c4bd01b8e1c531ea8277dcc2910cfe356b0"

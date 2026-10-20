@@ -30,7 +30,7 @@ import { creationDedupeKey, creationRequestHash, organizationEventQuery, readCre
 import { mcpPageInfo, type McpPageInfo } from '~/server/utils/mcp-pagination'
 import { resolvePublicTemplate } from '~/utils/template-registry'
 import { getConfig } from '~/server/utils/organization-config'
-import { isPaletteTemplate, resolveSitePalette } from '~/shared/site-palette'
+import { resolveSitePalette } from '~/shared/site-palette'
 import { buildSingleMediaPlacementQueries, hydrateMediaPlacementRefs, insertInitialMediaPlacements } from '~/server/utils/media-asset-manager'
 import { COVER_SELECT, attachCoverMedia, coverJoinSql } from '~/server/utils/content/cover'
 import { attachPageQa } from '~/server/utils/location-qa'
@@ -489,10 +489,10 @@ export async function listBlogPosts(
     ORDER BY ${ARTICLE_ORDER_SQL('p')} LIMIT ? OFFSET ?`,
   [organizationId, ...(status ? [status] : []), ...(collection ? [collection] : []), window.limit + 1, window.offset])
   const page = rows.slice(0, window.limit)
-  const [context, organization] = await Promise.all([resolveTenantContext(db, organizationId, env), loadOrganizationTemplate(db, organizationId)])
+  const context = await resolveTenantContext(db, organizationId, env)
   const posts = await Promise.all(page.map((record) => {
     const slug = typeof record.slug === 'string' ? record.slug : ''
-    const publicPath = slug ? tenantBlogPostPath(organization.template, slug, articleCollectionOf(record.collection)) : null
+    const publicPath = slug ? tenantBlogPostPath(slug, articleCollectionOf(record.collection)) : null
     return contentReviewUrls(attachArticleCategory(attachCoverMedia(attachPublished(record, Boolean(record.published_at)))), publicPath, organizationId, context, env)
   }))
   return { posts, page_info: mcpPageInfo(window, page.length, rows.length > window.limit, resource) }
@@ -534,11 +534,11 @@ export async function getBlogPost(db: DbClient, postIdOrSlug: string, organizati
   }
   const slug = typeof postFields.slug === 'string' ? postFields.slug : ''
   const [context, organization] = await Promise.all([resolveTenantContext(db, organizationId, env), loadOrganizationTemplate(db, organizationId)])
-  const publicPath = slug ? tenantBlogPostPath(organization.template, slug, articleCollectionOf(postFields.collection)) : null
+  const publicPath = slug ? tenantBlogPostPath(slug, articleCollectionOf(postFields.collection)) : null
   // The canvas wears the site's light palette, so a draft reads as it will publish.
   const templateSlug = organization.template.slug
-  const editorColors = isPaletteTemplate(templateSlug)
-    ? resolveSitePalette(templateSlug, (await getConfig(db, organizationId)).palette).light
+  const editorColors = templateSlug !== 'platform'
+    ? resolveSitePalette((await getConfig(db, organizationId)).palette).light
     : null
   return {
     ...await contentReviewUrls(attachArticleCategory(attachCoverMedia(attachPublished(postFields, Boolean(postFields.published_at)))), publicPath, organizationId, context, env),
@@ -567,12 +567,9 @@ async function getPublicOrganizationBlogPost(db: DbClient, organizationId: strin
 
   if (!post) return null
 
-  const [loadedBlocks, organization] = await Promise.all([
-    getContentBlocksForDocument(db, String(post.id)),
-    loadOrganizationTemplate(db, organizationId),
-  ])
+  const loadedBlocks = await getContentBlocksForDocument(db, String(post.id))
   if (!loadedBlocks) throw new HTTPError({ statusCode: 500, statusMessage: 'Blog content document is missing' })
-  const articlePath = tenantBlogPostPath(organization.template, slug, collection)
+  const articlePath = tenantBlogPostPath(slug, collection)
   const contentBlocks = await attachPageQa(db, organizationId, articlePath, loadedBlocks)
   const socialMedia = (await loadPublicSocialMedia(db, organizationId, 'content_document', [String(post.id)])).get(String(post.id))
   const { author_id: authorId, ...postRecord } = post
@@ -603,8 +600,7 @@ export async function getPublishedBlogPost(
 ) {
   const active = await queryFirst<{ id: string }>(db, `SELECT id FROM organization WHERE id = ? AND status = 'active' LIMIT 1`, [organizationId])
   if (!active) return null
-  const { template } = await loadOrganizationTemplate(db, organizationId)
-  const pathOf = (articleSlug: string) => tenantBlogPostPath(template, articleSlug, collection)
+  const pathOf = (articleSlug: string) => tenantBlogPostPath(articleSlug, collection)
   if (locale === await getSourceLocale(db, organizationId)) {
     const post = await getPublicOrganizationBlogPost(db, organizationId, collection, slug, env, previewAuthorized)
     if (!post || typeof post.id !== 'string') return post
@@ -870,8 +866,8 @@ async function createBlogRedirect(db: D1Database, postId: string, organizationId
      WHERE p.kind = 'article' AND p.row_role = 'root' AND p.id = ? AND p.organization_id = ? LIMIT 1
   `, [postId, organizationId])
   if (!post) throw new HTTPError({ statusCode: 400, statusMessage: 'Blog redirect scope must match its post' })
-  const oldPath = tenantBlogPostPath({ themeId: post.theme_id }, oldSlug)
-  const newPath = tenantBlogPostPath({ themeId: post.theme_id }, post.slug)
+  const oldPath = tenantBlogPostPath(oldSlug)
+  const newPath = tenantBlogPostPath(post.slug)
   // The scope check is the SELECT above: the post was read under the caller's
   // organization, so the redirect cannot be written against another tenant's.
   await execute(db, `INSERT INTO organization_redirects

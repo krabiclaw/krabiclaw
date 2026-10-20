@@ -27,7 +27,7 @@ async function boot() {
   const statements = await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))
   await db.batch(statements.map(statement => db.prepare(statement)))
   await db.prepare(`INSERT INTO organization (id, name, slug, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
-    VALUES (?, 'Org', 'org', '{}', 'saya-theme-v1', 'THB', 'active', 'complete', 'flat', 'restaurant', ?, 'Asia/Bangkok')`).bind(ORG, NOW).run()
+    VALUES (?, 'Org', 'org', '{}', 'tenant-theme-v1', 'THB', 'active', 'complete', 'flat', 'restaurant', ?, 'Asia/Bangkok')`).bind(ORG, NOW).run()
   await db.prepare("INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, 'Actor', 'actor@example.test', 0, 0, 0)").bind(ACTOR.actorId).run()
   await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES (?, ?, 'en', 1, 'published')")
     .bind('locale-en', ORG).run()

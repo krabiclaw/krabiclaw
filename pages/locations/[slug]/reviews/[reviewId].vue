@@ -1,7 +1,7 @@
 <template>
   <div class="min-h-screen bg-default text-default">
     <section class="mx-auto max-w-3xl px-4 py-16 sm:px-6 lg:px-8">
-      <NuxtLink :to="localePath(`/locations/${slug}/reviews`)" class="saya-kicker text-muted no-underline hover:text-default">
+      <NuxtLink :to="localePath(`/locations/${slug}/reviews`)" class="tenant-kicker text-muted no-underline hover:text-default">
         Back to reviews
       </NuxtLink>
 

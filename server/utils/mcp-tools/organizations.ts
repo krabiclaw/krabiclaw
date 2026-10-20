@@ -12,6 +12,7 @@ import { resolveMcpWorkspace } from '~/server/utils/mcp-context'
 import { loadSettingsPayload, updateOrganizationSettingsFields } from '~/server/utils/organization-settings'
 import { ORGANIZATION_FONT_OPTIONS, ORGANIZATION_FONT_PRESETS } from '~/shared/organization-fonts'
 import { SITE_PALETTE_ROLES, STARTER_PALETTES, paletteContrast, type SitePalettePatch } from '~/shared/site-palette'
+import { SITE_RECIPE_DESCRIPTIONS, SITE_RECIPE_KEYS, SITE_RECIPE_OPTIONS } from '~/shared/site-recipe'
 import { resolveColor } from '~/utils/color-utils'
 import { requireMcpOrganizationApi } from '~/server/utils/mcp-auth'
 import { organizationRoles } from '~/utils/organization-access'
@@ -236,11 +237,9 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
               name: { type: ['string', 'null'] },
               brand_description: { type: ['string', 'null'] },
               font_preset: { type: 'string', enum: [...ORGANIZATION_FONT_PRESETS] },
-              button_shape: { type: 'string', enum: ['pill', 'rounded', 'sharp'] },
-              button_casing: { type: 'string', enum: ['uppercase', 'none'] },
-              heading_casing: { type: 'string', enum: ['uppercase', 'none'] },
-              palette: { type: ['object', 'null'], description: 'The colors the site renders, light and dark: its own, or its template\'s. Null on the platform template.', properties: { light: PALETTE_COLORS_SCHEMA, dark: PALETTE_COLORS_SCHEMA } },
-              palette_source: { type: ['string', 'null'], enum: ['custom', 'template', null] },
+              ...Object.fromEntries(SITE_RECIPE_KEYS.map(key => [key, { type: 'string', enum: [...SITE_RECIPE_OPTIONS[key]], description: `${SITE_RECIPE_DESCRIPTIONS[key]} Absent when the site uses the Default.` }])),
+              palette: { type: ['object', 'null'], description: 'The colors the site renders, light and dark: its own, or the default. Null on KrabiClaw\'s own site.', properties: { light: PALETTE_COLORS_SCHEMA, dark: PALETTE_COLORS_SCHEMA } },
+              palette_source: { type: ['string', 'null'], enum: ['custom', 'default', null] },
               announcement: ANNOUNCEMENT_SCHEMA,
               media: { type: 'array', items: ORGANIZATION_MEDIA_ITEM_SCHEMA },
               contact_email: { type: ['string', 'null'] },
@@ -273,12 +272,10 @@ export const ORGANIZATIONS_TOOLS: McpToolDefinition[] = [
         name: { type: 'string' },
         brand_description: { type: 'string' },
         font_preset: { type: 'string', enum: [...ORGANIZATION_FONT_PRESETS], description: `Website heading and body fonts, on every template: ${ORGANIZATION_FONT_OPTIONS.map(option => `${option.value} (${option.label})`).join(', ')}. Thai, Vietnamese and Japanese text renders in every choice.` },
-        button_shape: { type: 'string', enum: ['pill', 'rounded', 'sharp'], description: 'Button corner styling: pill (fully rounded), rounded (subtle radius), or sharp (square corners).' },
-        button_casing: { type: 'string', enum: ['uppercase', 'none'], description: 'Button text casing: uppercase or none (natural case).' },
-        heading_casing: { type: 'string', enum: ['uppercase', 'none'], description: 'Display heading casing: uppercase or none (natural case).' },
+        ...Object.fromEntries(SITE_RECIPE_KEYS.map(key => [key, { type: 'string', enum: [...SITE_RECIPE_OPTIONS[key]], description: SITE_RECIPE_DESCRIPTIONS[key] }])),
         palette: {
           type: ['object', 'null'],
-          description: `Saya and Blawby website colors, each with a light and a dark value. Roles: ${SITE_PALETTE_ROLES.map(entry => `${entry.role} (${entry.rule})`).join(' ')} Start from a starter (${STARTER_PALETTES.map(entry => entry.id).join(', ')}) and/or name only the roles to change; colors are #RRGGBB or a plain description such as "forest green". Borders and tints are derived. null returns to the template's colors. The result reports any text or button pair below WCAG AA contrast.`,
+          description: `Website colors, each with a light and a dark value. Roles: ${SITE_PALETTE_ROLES.map(entry => `${entry.role} (${entry.rule})`).join(' ')} Start from a starter (${STARTER_PALETTES.map(entry => entry.id).join(', ')}) and/or name only the roles to change; colors are #RRGGBB or a plain description such as "forest green". Borders and tints are derived. null returns to the default colors. The result reports any text or button pair below WCAG AA contrast.`,
           properties: {
             starter: { type: 'string', enum: STARTER_PALETTES.map(entry => entry.id) },
             light: PALETTE_COLORS_SCHEMA,

@@ -27,7 +27,7 @@ export default defineHandler(async (event) => {
   const post = await getPublishedTenantBlogPostBySlug(db, String(event.context.organizationId), slug, 'blog')
   if (!post) return textResponse('Post not found\n', { status: 404 })
 
-  return textResponse(renderTenantBlogMarkdown(post, resolvePublicOrigin(event), { themeId: String(event.context.themeId ?? '') }), {}, 'text/markdown; charset=utf-8')
+  return textResponse(renderTenantBlogMarkdown(post, resolvePublicOrigin(event)), {}, 'text/markdown; charset=utf-8')
 })
 import { defineHandler } from 'nitro';
 import { getRouterParam } from 'nitro/h3';

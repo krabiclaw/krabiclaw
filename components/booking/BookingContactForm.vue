@@ -1,7 +1,7 @@
 <template>
   <form @submit.prevent="submit" class="booking-contact-form space-y-4">
     <div>
-      <label for="booking-name" class="block text-sm font-medium text-default mb-1">{{ t('saya.experience_detail.full_name') }}</label>
+      <label for="booking-name" class="block text-sm font-medium text-default mb-1">{{ t('site.experience_detail.full_name') }}</label>
       <input 
         id="booking-name"
         v-model="form.name"
@@ -12,7 +12,7 @@
     </div>
 
     <div>
-      <label for="booking-email" class="block text-sm font-medium text-default mb-1">{{ t('saya.experience_detail.email_address') }}</label>
+      <label for="booking-email" class="block text-sm font-medium text-default mb-1">{{ t('site.experience_detail.email_address') }}</label>
       <input 
         id="booking-email"
         v-model="form.email"
@@ -23,7 +23,7 @@
     </div>
 
     <div>
-      <label for="booking-phone" class="block text-sm font-medium text-default mb-1">{{ t('saya.experience_detail.phone_number') }} <span v-if="!phoneRequired" class="text-muted font-normal">({{ t('saya.experience_detail.optional') }})</span></label>
+      <label for="booking-phone" class="block text-sm font-medium text-default mb-1">{{ t('site.experience_detail.phone_number') }} <span v-if="!phoneRequired" class="text-muted font-normal">({{ t('site.experience_detail.optional') }})</span></label>
       <PhoneInput
         id="booking-phone"
         v-model="form.phone"
@@ -35,7 +35,7 @@
     </div>
 
     <div>
-      <label for="booking-notes" class="block text-sm font-medium text-default mb-1">{{ t('saya.experience_detail.special_requests') }} <span class="text-muted font-normal">({{ t('saya.experience_detail.optional') }})</span></label>
+      <label for="booking-notes" class="block text-sm font-medium text-default mb-1">{{ t('site.experience_detail.special_requests') }} <span class="text-muted font-normal">({{ t('site.experience_detail.optional') }})</span></label>
       <textarea 
         id="booking-notes"
         v-model="form.notes"
@@ -46,7 +46,7 @@
 
     <div class="pt-2">
       <TenantButton type="submit" size="lg" block :loading="loading" :disabled="loading">
-        {{ loading ? t('saya.experience_detail.processing') : submitText || t('saya.experience_detail.confirm_booking') }}
+        {{ loading ? t('site.experience_detail.processing') : submitText || t('site.experience_detail.confirm_booking') }}
       </TenantButton>
     </div>
   </form>

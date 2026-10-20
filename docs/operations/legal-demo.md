@@ -28,22 +28,26 @@ contracts are exercised and verified.
 - **Office**: Downtown Raleigh Office (`loc-abce1341-c462-4e8d-ab8c-f4f6657f07cf`),
   420 Fayetteville St, Suite 1100, Raleigh, NC 27601.
 - **Operating Hours**: Monday through Friday, 8:30 AM to 5:30 PM (Google Places-compatible periods).
-- **Initial Consultation**: 45-minute confidential intake booking slot.
-- **Practice Areas**:
-  1. Business Formation & Corporate Counsel (`business-counsel`)
-  2. Estate Planning, Wills & Trusts (`estate-planning`)
-  3. Employment & Labor Advisory (`employment-law`)
-  4. Real Estate & Commercial Transactions (`real-estate`)
-  5. Civil Litigation & Dispute Resolution (`civil-litigation`)
+- **Practice Areas**: each is a paid 30-minute consultation held online in its
+  attorney's hours and booked on its own `/services/<slug>` page, the way North
+  Carolina Legal Services books through Clio Grow today. There is no separate
+  free intake consultation.
+  1. Business Formation & Corporate Counsel — Elena Vance, $90
+  2. Estate Planning, Wills & Trusts — Elena Vance, $80
+  3. Employment & Labor Advisory — Elena Vance, $80
+  4. Real Estate & Commercial Transactions — Marcus Thorne, $90
+  5. Civil Litigation & Dispute Resolution — Marcus Thorne, $80
+- **Attorneys**: Elena Vance (managing partner) and Marcus Thorne, each a member
+  with an approved public profile shown as the consultation's host.
 
 ## Canonical Legal Pages
 
 The demo site renders 5 canonical legal routes configured via `update_site_page`:
 - `/`: Firm overview, feature grid ("Why Clients Choose Cedar Legal"), practice area cards, partner roster, testimonials, and consultation CTA.
 - `/about`: Firm philosophy, trial and deal record stats, and attorney bios.
-- `/services`: Practice area catalog and consultation booking links.
+- `/services`: Practice area catalog; each card opens the area's own page, where it is booked.
 - `/contact`: Office location grid with interactive details, hours, and intake contact form.
-- `/schedule`: Consultation request flow with conflict-check instructions, privilege callout, and intake slot booking.
+- `/schedule`: The bookable practice-area consultations, each linking to its own page, with conflict-check steps and the privilege notice.
 
 ## Verifying and Running MCP Dry Run
 

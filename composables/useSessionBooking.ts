@@ -217,7 +217,6 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
       .sort((left, right) => left.starts_at.localeCompare(right.starts_at))
       .slice(0, 4)
   })
-  const nextSession = computed(() => upcomingSessions.value[0] ?? null)
 
   function sessionDayLabel(session: PublicProductSession): string {
     return new Intl.DateTimeFormat(locale.value, { weekday: 'short', day: 'numeric', month: 'short', timeZone: allowTimezoneSelection.value ? bookingTimezone.value! : session.timezone }).format(new Date(session.starts_at))
@@ -232,12 +231,12 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
     const session = selectedSession.value
     if (submitting.value) return
     if (!session) {
-      bookingError.value = t('saya.experience_detail.choose_time')
+      bookingError.value = t('site.experience_detail.choose_time')
       bookingStep.value = 1
       return
     }
     if (!selectedVariantId.value) {
-      bookingError.value = t('saya.product_detail.choose_option')
+      bookingError.value = t('site.product_detail.choose_option')
       bookingStep.value = 1
       return
     }
@@ -324,7 +323,7 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
 
     return { bookingOpen, bookingStep, contactForm, defaultPhoneCountry, partySize, showPartySize, allowTimezoneSelection, guestTimezone, bookingTimezone, timezoneOptions, selectedVariantId, selectedPrice, sellableVariants, variantPriceLabel,
       timeSelection, submitting, bookingError, sessions, sessionsPending, availabilityDates, referenceDate, guestsMax,
-      selectedSession, loadSessions, openBooking, openBookingAt, upcomingSessions, nextSession,
+      selectedSession, loadSessions, openBooking, openBookingAt, upcomingSessions,
       sessionDayLabel, sessionTimeLabel, submitBooking }
 }
 export type SessionBookingController = ReturnType<typeof useSessionBooking>

@@ -44,25 +44,12 @@ const palette = (light: SitePaletteColors, dark: SitePaletteColors): SitePalette
 const colors = (ground: string, surface: string, text: string, muted: string, action: string, accent: string): SitePaletteColors =>
   ({ ground, surface, text, muted, action, accent })
 
-// What each template wears until its owner chooses: the surfaces and text its
-// theme CSS carried before palettes existed. Saya's light action is a deeper
-// coral than the platform's, which read at 2.7:1 on white.
-export const TEMPLATE_PALETTES = {
-  saya: palette(
-    colors('#FFFFFF', '#FAFAFA', '#18181B', '#52525B', '#C8452E', '#6366F1'),
-    colors('#09090B', '#121216', '#F4F4F5', '#D4D4D8', '#FB7461', '#818CF8'),
-  ),
-  blawby: palette(
-    colors('#FBFAF7', '#FFFFFF', '#162033', '#565D6A', '#25356C', '#C19855'),
-    colors('#0E0E10', '#18181B', '#F4F4F5', '#A1A1AA', '#9DB1E6', '#C19855'),
-  ),
-} as const satisfies Record<string, SitePalette>
-
-export type PaletteTemplate = keyof typeof TEMPLATE_PALETTES
-
-export function isPaletteTemplate(template: string): template is PaletteTemplate {
-  return template in TEMPLATE_PALETTES
-}
+// What every customer site wears until its owner chooses its own colors. Its
+// light action is a deeper coral than the platform's, which read at 2.7:1 on white.
+export const DEFAULT_SITE_PALETTE: SitePalette = palette(
+  colors('#FFFFFF', '#FAFAFA', '#18181B', '#52525B', '#C8452E', '#6366F1'),
+  colors('#09090B', '#121216', '#F4F4F5', '#D4D4D8', '#FB7461', '#818CF8'),
+)
 
 export const STARTER_PALETTES = [
   { id: 'coastal', label: 'Coastal', palette: palette(
@@ -99,9 +86,9 @@ export function starterPalette(id: string): SitePalette {
   return starter.palette
 }
 
-/** The palette a site renders: its own, or its template's when it has none. */
-export function resolveSitePalette(template: PaletteTemplate, stored: SitePalette | undefined): SitePalette {
-  return stored ?? TEMPLATE_PALETTES[template]
+/** The palette a customer site renders: its own, or the default when it has none. */
+export function resolveSitePalette(stored: SitePalette | undefined): SitePalette {
+  return stored ?? DEFAULT_SITE_PALETTE
 }
 
 export interface PaletteContrastCheck { mode: SitePaletteMode; pair: string; ratio: number; minimum: number }

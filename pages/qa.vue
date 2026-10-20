@@ -1,9 +1,9 @@
 <template>
   <div class="min-h-screen bg-default text-default">
     <header class="mx-auto max-w-7xl px-4 pt-16 pb-12 sm:px-6 lg:px-8">
-      <p class="saya-kicker mb-6">{{ t('saya.qa.title') }}</p>
-      <h1 class="saya-display-md text-default"><em class="saya-italic">{{ t('saya.qa_page.title') }}</em></h1>
-      <p class="mt-5 max-w-xl text-sm leading-relaxed text-muted">{{ t('saya.qa_page.intro') }}</p>
+      <p class="tenant-kicker mb-6">{{ t('site.qa.title') }}</p>
+      <h1 class="tenant-display-md text-default"><em class="tenant-italic">{{ t('site.qa_page.title') }}</em></h1>
+      <p class="mt-5 max-w-xl text-sm leading-relaxed text-muted">{{ t('site.qa_page.intro') }}</p>
 
       <!-- Multi-location pills -->
       <div v-if="locations.length > 1" class="mt-8 flex flex-wrap gap-3">
@@ -35,12 +35,12 @@ const organizationName = organization.name
 
 useSocialMetadata(() => ({
   path: '/qa',
-  title: `${t('saya.qa.title')} | ${organizationName}`,
-  description: t('saya.qa_page.meta_description', { organization: organizationName }),
-  label: t('saya.qa.title'),
+  title: `${t('site.qa.title')} | ${organizationName}`,
+  description: t('site.qa_page.meta_description', { organization: organizationName }),
+  label: t('site.qa.title'),
   socialImage: organization.social_image,
   breadcrumbs: [
-    { name: t('saya.qa.title'), url: '/qa' },
+    { name: t('site.qa.title'), url: '/qa' },
   ],
   faqItems: Array.isArray(qaList.value)
     ? qaList.value

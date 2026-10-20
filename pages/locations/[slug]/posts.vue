@@ -10,13 +10,13 @@
 
       <!-- Compact Page header -->
       <header class="mx-auto max-w-7xl px-4 pt-12 pb-10 sm:px-6 lg:px-8 text-center">
-        <NuxtLink :to="localePath(`/locations/${slug}`)" class="saya-kicker mb-8 inline-block text-muted no-underline hover:text-default">
-          ← {{ t('saya.location.back_to', { title: location?.title }) }}
+        <NuxtLink :to="localePath(`/locations/${slug}`)" class="tenant-kicker mb-8 inline-block text-muted no-underline hover:text-default">
+          ← {{ t('site.location.back_to', { title: location?.title }) }}
         </NuxtLink>
 
         <div class="flex flex-col gap-2">
-          <h1 class="saya-display-md text-default">
-            <em class="saya-italic">{{ t('saya.location.posts_from', { title: location?.title }) }}</em>
+          <h1 class="tenant-display-md text-default">
+            <em class="tenant-italic">{{ t('site.location.posts_from', { title: location?.title }) }}</em>
           </h1>
         </div>
       </header>

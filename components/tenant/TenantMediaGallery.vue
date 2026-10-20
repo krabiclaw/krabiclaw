@@ -1,6 +1,6 @@
 <template>
   <div class="mx-auto block w-[95%] md:hidden">
-    <div class="mb-6 max-h-80 overflow-hidden rounded-md bg-[var(--tenant-primary-dark,var(--blawby-primary-dark,#1e293b))]">
+    <div class="mb-6 max-h-80 overflow-hidden rounded-md bg-[var(--tenant-primary-dark,var(--tenant-primary-dark,#1e293b))]">
       <img
         v-if="active"
         :src="active.public_url"

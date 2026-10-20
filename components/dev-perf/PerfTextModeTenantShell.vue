@@ -1,10 +1,10 @@
 <template>
-  <section class="dev-perf-section dev-perf-platform-shell" aria-label="Saya shell render test">
-    <h2>Saya shell render test</h2>
+  <section class="dev-perf-section dev-perf-platform-shell" aria-label="tenant shell render test">
+    <h2>tenant shell render test</h2>
     <p>
-      This mode renders the real Saya header and footer around static text.
+      This mode renders the real tenant header and footer around static text.
     </p>
-    <div class="dev-perf-shell-frame saya-theme">
+    <div class="dev-perf-shell-frame tenant-theme">
       <UTheme :ui="{}">
         <LazyTenantHeader :organization="null" :locations="[]" :sections="null" />
         <main class="dev-perf-shell-body">

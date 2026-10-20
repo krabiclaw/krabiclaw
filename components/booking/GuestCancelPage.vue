@@ -1,7 +1,7 @@
 <template>
   <div class="min-h-screen bg-default text-default">
     <header class="mx-auto max-w-7xl px-4 pt-16 pb-10 text-center sm:px-6 lg:px-8">
-      <h1 class="saya-display-md text-default"><em class="saya-italic">{{ copy('title') }}</em></h1>
+      <h1 class="tenant-display-md text-default"><em class="tenant-italic">{{ copy('title') }}</em></h1>
     </header>
 
     <div class="mx-auto max-w-xl px-4 pb-24 text-center">
@@ -17,7 +17,7 @@
               <TenantIcon name="calendar-days" class="size-10" />
             </div>
           </div>
-          <h2 class="saya-display saya-italic text-3xl">{{ copy('cancel_visit') }}</h2>
+          <h2 class="tenant-display tenant-italic text-3xl">{{ copy('cancel_visit') }}</h2>
           <div class="mt-6 space-y-2 border-y border-default py-6 text-sm">
             <p><strong>{{ copy(kind === 'booking' ? 'booking_for' : 'reservation_for') }}</strong> {{ booking.name }}</p>
             <p v-if="booking.product_name"><strong>{{ booking.product_name }}</strong></p>
@@ -40,11 +40,11 @@
               <TenantIcon name="check-circle" class="size-10" />
             </div>
           </div>
-          <h2 class="saya-display saya-italic text-3xl">{{ copy('cancelled_title') }}</h2>
-          <p class="mt-4 text-muted">{{ t(`saya.${keyPrefix}.cancelled_desc`, { date: readableDate }) }}</p>
+          <h2 class="tenant-display tenant-italic text-3xl">{{ copy('cancelled_title') }}</h2>
+          <p class="mt-4 text-muted">{{ t(`site.${keyPrefix}.cancelled_desc`, { date: readableDate }) }}</p>
           <p v-if="cancelError" class="mt-4 text-sm text-error">{{ cancelError }}</p>
           <div class="mt-10">
-            <TenantButton v-if="booking.can_retry_cancellation && !cancellationSubmitted" class="mb-3" size="lg" block :loading="loading" @click="handleCancel">{{ t('saya.reservation_cancel.retry_refund') }}</TenantButton>
+            <TenantButton v-if="booking.can_retry_cancellation && !cancellationSubmitted" class="mb-3" size="lg" block :loading="loading" @click="handleCancel">{{ t('site.reservation_cancel.retry_refund') }}</TenantButton>
             <TenantButton :to="localePath('/')" variant="soft">{{ copy('back_home') }}</TenantButton>
           </div>
         </div>
@@ -80,7 +80,7 @@ const route = useRoute()
 const { organization } = useTenantOrganization()
 
 const keyPrefix = computed(() => props.kind === 'booking' ? 'experience_cancel' : 'reservation_cancel')
-const copy = (key: string) => t(`saya.${keyPrefix.value}.${key}`)
+const copy = (key: string) => t(`site.${keyPrefix.value}.${key}`)
 const requestId = computed(() => typeof route.query.id === 'string' ? route.query.id : '')
 const token = computed(() => route.hash ? route.hash.slice(1) : '')
 
@@ -148,7 +148,7 @@ async function handleCancel() {
     cancellationSubmitted.value = true
   } catch (err) {
     const message = (err as { data?: { error?: string } })?.data?.error
-    cancelError.value = message || (booking.value?.can_retry_cancellation ? t('saya.reservation_cancel.toast_refund_failed') : copy('toast_cancel_failed'))
+    cancelError.value = message || (booking.value?.can_retry_cancellation ? t('site.reservation_cancel.toast_refund_failed') : copy('toast_cancel_failed'))
   } finally {
     loading.value = false
   }

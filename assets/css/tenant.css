@@ -1,22 +1,21 @@
-/* Canonical Tenant Design Tokens — KrabiClaw Design System */
+/* Canonical Tenant Design Tokens — every customer site, whatever its vertical.
+   The palette comes from the site's own colors (base.css); everything a site may
+   choose differently — button shape, casing and color, heading casing, fonts —
+   is a site setting (shared/site-recipe.ts, assets/css/font-presets.css). */
 
 :root {
   --tenant-surface-dark:    #09090b;
   --tenant-on-surface-dark: #fafafa;
-  /* Compatibility aliases */
-  --saya-surface-dark:      var(--tenant-surface-dark);
-  --saya-on-surface-dark:   var(--tenant-on-surface-dark);
 }
 
-.tenant-theme,
-.saya-theme,
-.blawby-theme {
+.tenant-theme {
   font-family: var(--font-sans);
-  --ui-radius: 0.375rem;
+  --ui-radius: 0.5rem;
 
   --tenant-bg:              var(--site-ground, var(--ui-bg));
   --tenant-surface:         var(--site-surface, var(--ui-bg-elevated));
   --tenant-ink:             var(--site-text, var(--ui-text));
+  --tenant-border:          var(--ui-border);
   --tenant-primary:         var(--site-action, var(--primary));
   --tenant-primary-dark:    color-mix(in oklab, var(--tenant-primary) 60%, black);
   --tenant-primary-100:     color-mix(in oklab, var(--tenant-primary) 6%, var(--site-ground, #fff));
@@ -26,91 +25,22 @@
   --tenant-accent-100:      color-mix(in oklab, var(--tenant-accent) 10%, var(--site-ground, #fff));
   --tenant-accent-200:      color-mix(in oklab, var(--tenant-accent) 18%, var(--site-ground, #fff));
   --tenant-accent-strong:   color-mix(in oklab, var(--tenant-accent) 80%, black);
+  /* The band a page opens on; the shield divider beneath a hero continues it. */
+  --tenant-band:            var(--tenant-accent-200);
 
-  /* Compatibility aliases */
-  --blawby-bg:              var(--tenant-bg);
-  --blawby-surface:         var(--tenant-surface);
-  --blawby-ink:             var(--tenant-ink);
-  --blawby-primary:         var(--tenant-primary);
-  --blawby-primary-dark:    var(--tenant-primary-dark);
-  --blawby-primary-100:     var(--tenant-primary-100);
-  --blawby-primary-200:     var(--tenant-primary-200);
-  --blawby-primary-800:     var(--tenant-primary-800);
-  --blawby-accent:          var(--tenant-accent);
-  --blawby-accent-100:      var(--tenant-accent-100);
-  --blawby-accent-200:      var(--tenant-accent-200);
-  --blawby-accent-strong:   var(--tenant-accent-strong);
-
-  /* Semantic Button & Typography Recipe Tokens */
+  /* Site recipe defaults; a site's settings override them on the layout root. */
   --site-button-radius:     9999px;
   --site-button-transform:  none;
   --site-button-tracking:   normal;
   --site-button-weight:     500;
-  --site-button-bg:         var(--primary, var(--site-action, #18181b));
-  --site-button-text:       var(--on-primary, var(--site-on-action, #ffffff));
-  --site-button-hover-bg:   var(--primary, var(--site-action, #18181b));
-  --site-button-ring:       var(--primary, var(--site-action, #18181b));
+  --site-button-bg:         var(--site-action, #18181b);
+  --site-button-text:       var(--site-on-action, #ffffff);
+  --site-button-hover-bg:   color-mix(in oklab, var(--site-button-bg) 85%, black);
+  --site-button-ring:       var(--site-button-bg);
   --site-display-transform: none;
 }
 
-.blawby-theme {
-  --header-overlap:        3rem;
-  --blawby-border:         var(--ui-border);
-
-  /* Blawby headings take the action color, and its tints come from it. */
-  --ui-text-highlighted:   var(--site-action);
-  --ui-bg-muted:           var(--blawby-primary-100);
-  --ui-bg-accented:        var(--blawby-accent-100);
-  --ui-bg-inverted:        var(--blawby-primary-dark);
-  --ui-border-muted:       var(--blawby-primary-100);
-  --ui-border-accented:    var(--blawby-primary-200);
-  --ui-border-inverted:    var(--blawby-primary-dark);
-  --ui-text-inverted:      var(--site-surface);
-  --ui-radius:             0.5rem;
-
-  /* Blawby Button & Typography Recipe Tokens */
-  --site-button-radius:     0.5rem;
-  --site-button-transform:  uppercase;
-  --site-button-tracking:   0.05em;
-  --site-button-weight:     600;
-  --site-button-bg:         var(--site-accent, #c19855);
-  --site-button-text:       var(--site-on-accent, #ffffff);
-  --site-button-hover-bg:   var(--blawby-accent-strong, #9e7939);
-  --site-button-ring:       var(--blawby-accent, #c19855);
-  --site-display-transform: uppercase;
-
-  --text-xs: 0.75rem;
-  --text-xs--line-height: 1rem;
-  --text-sm: 0.875rem;
-  --text-sm--line-height: 1.5rem;
-  --text-base: 1rem;
-  --text-base--line-height: 1.75rem;
-  --text-lg: 1.125rem;
-  --text-lg--line-height: 2rem;
-  --text-xl: 1.25rem;
-  --text-xl--line-height: 2rem;
-  --text-2xl: 1.5rem;
-  --text-2xl--line-height: 2rem;
-  --text-3xl: 2rem;
-  --text-3xl--line-height: 2.5rem;
-  --text-4xl: 2.5rem;
-  --text-4xl--line-height: 3.5rem;
-  --text-5xl: 3rem;
-  --text-5xl--line-height: 3.5rem;
-  --text-6xl: 3.75rem;
-  --text-6xl--line-height: 1;
-  --text-7xl: 4.5rem;
-  --text-7xl--line-height: 1.1;
-  --text-8xl: 6rem;
-  --text-8xl--line-height: 1;
-  --text-9xl: 8rem;
-  --text-9xl--line-height: 1;
-  --container-2xl: 40rem;
-}
-
-.dark .tenant-theme,
-.dark .saya-theme,
-.dark .blawby-theme {
+.dark .tenant-theme {
   --tenant-primary:         var(--site-text);
   --tenant-primary-dark:    color-mix(in oklab, var(--site-action-light, var(--primary)) 60%, black);
   --tenant-primary-800:     color-mix(in oklab, var(--site-action-light, var(--primary)) 85%, black);
@@ -118,54 +48,48 @@
   --tenant-primary-100:     color-mix(in oklab, var(--site-surface) 60%, var(--site-ground));
   --tenant-accent-100:      color-mix(in oklab, var(--site-surface) 45%, var(--site-ground));
   --tenant-accent-200:      color-mix(in oklab, var(--site-text) 7%, var(--site-surface));
-
-  --blawby-primary:         var(--tenant-primary);
-  --blawby-primary-dark:    var(--tenant-primary-dark);
-  --blawby-primary-800:     var(--tenant-primary-800);
-  --blawby-accent-strong:   var(--tenant-accent-strong);
-  --blawby-primary-100:     var(--tenant-primary-100);
-  --blawby-accent-100:      var(--tenant-accent-100);
-  --blawby-accent-200:      var(--tenant-accent-200);
-}
-
-.dark .blawby-theme {
-  --blawby-primary:         var(--site-text);
-  --ui-text-highlighted:    var(--site-text);
-  --blawby-primary-dark:    color-mix(in oklab, var(--site-action-light) 60%, black);
-  --blawby-primary-800:     color-mix(in oklab, var(--site-action-light) 85%, black);
-  --blawby-accent-strong:   color-mix(in oklab, var(--site-accent) 80%, white);
-  --blawby-primary-100:     color-mix(in oklab, var(--site-surface) 60%, var(--site-ground));
-  --blawby-accent-100:      color-mix(in oklab, var(--site-surface) 45%, var(--site-ground));
-  --blawby-accent-200:      color-mix(in oklab, var(--site-text) 7%, var(--site-surface));
   --ui-text-inverted:       var(--site-text);
-  --site-button-bg:         var(--site-accent, #c19855);
-  --site-button-text:       var(--site-on-accent, #ffffff);
-  --site-button-hover-bg:   var(--blawby-accent-strong, color-mix(in oklab, var(--site-accent) 80%, white));
-  --site-button-ring:       var(--blawby-accent, #c19855);
+  --site-button-hover-bg:   color-mix(in oklab, var(--site-button-bg) 80%, white);
 }
 
-.blawby-shell .prose :where(h1, h2, h3, h4) {
+/* Authored prose takes the site's heading face; a policy's numbered clauses read in the body face. */
+.tenant-theme .prose :where(h1, h2, h3, h4) {
   font-family: var(--font-heading);
 }
 
-.blawby-shell .prose.blawby-policy-prose :where(h1, h2, h3, h4) {
+.tenant-theme .prose.tenant-policy-prose :where(h1, h2, h3, h4) {
   font-family: var(--font-sans);
 }
 
-.blawby-footer-copy :where(.prose, p, a) {
+.tenant-footer-copy :where(.prose, p, a) {
   color: inherit;
   font-size: inherit;
   line-height: inherit;
 }
 
-.blawby-footer-copy a {
+.tenant-footer-copy a {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
 
+/* A hero section ends in the shield's curve, and whatever section follows
+   shows beneath its point. The last block inside it grows by the shield's
+   height, so its words keep their space and a picture hero's picture fills
+   the shield. */
+.tenant-shield-edge {
+  --tenant-shield-height: 8.333vw;
+  -webkit-mask: linear-gradient(#000 0 0) top / 100% calc(100% - var(--tenant-shield-height)) no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1920 160' preserveAspectRatio='none'%3E%3Cpath d='M0 0H1920V23.4197C1920 40.325 1907.32 54.2924 1890.45 55.3984C1744.66 64.9576 1103.56 109.281 970.166 157.83C963.441 160.277 956.559 160.277 949.834 157.83C816.436 109.281 175.342 64.9576 29.5456 55.3984C12.6765 54.2924 0 40.325 0 23.4197V0Z'/%3E%3C/svg%3E") bottom / 100% var(--tenant-shield-height) no-repeat;
+  mask: linear-gradient(#000 0 0) top / 100% calc(100% - var(--tenant-shield-height)) no-repeat,
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1920 160' preserveAspectRatio='none'%3E%3Cpath d='M0 0H1920V23.4197C1920 40.325 1907.32 54.2924 1890.45 55.3984C1744.66 64.9576 1103.56 109.281 970.166 157.83C963.441 160.277 956.559 160.277 949.834 157.83C816.436 109.281 175.342 64.9576 29.5456 55.3984C12.6765 54.2924 0 40.325 0 23.4197V0Z'/%3E%3C/svg%3E") bottom / 100% var(--tenant-shield-height) no-repeat;
+}
+
+.tenant-shield-edge > :nth-last-child(2) > :last-child {
+  padding-bottom: calc(var(--tenant-shield-height) + 2rem);
+}
+
 /* Container */
-.tenant-container,
-.blawby-container {
+.tenant-container {
   margin-inline: auto;
   max-width: 80rem;
   padding-inline: 1rem;
@@ -173,39 +97,33 @@
 }
 
 @media (min-width: 640px) {
-  .tenant-container,
-  .blawby-container {
+  .tenant-container {
     padding-inline: 1.5rem;
   }
 }
 
 @media (min-width: 1024px) {
-  .tenant-container,
-  .blawby-container {
+  .tenant-container {
     padding-inline: 2rem;
   }
 }
 
 @media (min-width: 1920px) {
-  .tenant-container,
-  .blawby-container {
+  .tenant-container {
     max-width: 88rem;
     padding-inline: 3rem;
   }
 }
 
 @media (min-width: 2560px) {
-  .tenant-container,
-  .blawby-container {
+  .tenant-container {
     max-width: 96rem;
     padding-inline: 4rem;
   }
 }
 
 /* Typography */
-.tenant-display,
-.blawby-display,
-.saya-display {
+.tenant-display {
   font-family: var(--font-heading);
   font-weight: 400;
   letter-spacing: -0.01em;
@@ -213,8 +131,7 @@
   text-transform: var(--site-display-transform, none);
 }
 
-.tenant-display-lg,
-.saya-display-lg {
+.tenant-display-lg {
   font-family: var(--font-heading);
   font-size: clamp(56px, 7.5vw, 104px);
   font-weight: 400;
@@ -223,8 +140,7 @@
   text-wrap: balance;
 }
 
-.tenant-display-md,
-.saya-display-md {
+.tenant-display-md {
   font-family: var(--font-heading);
   font-size: clamp(40px, 5vw, 64px);
   font-weight: 400;
@@ -233,8 +149,7 @@
   text-wrap: balance;
 }
 
-.tenant-display-sm,
-.saya-display-sm {
+.tenant-display-sm {
   font-family: var(--font-heading);
   font-size: clamp(28px, 3.5vw, 40px);
   font-weight: 400;
@@ -243,19 +158,16 @@
   text-wrap: balance;
 }
 
-.tenant-italic,
-.saya-italic { font-style: italic; }
+.tenant-italic { font-style: italic; }
 
-.tenant-eyebrow,
-.saya-eyebrow {
+.tenant-eyebrow {
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.32em;
   text-transform: uppercase;
 }
 
-.tenant-kicker,
-.saya-kicker {
+.tenant-kicker {
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 0.4em;
@@ -263,15 +175,12 @@
   color: var(--ui-primary);
 }
 
-.tenant-body,
-.saya-body { font-size: 16px; line-height: 1.65; }
+.tenant-body { font-size: 16px; line-height: 1.65; }
 
-.tenant-body-lg,
-.saya-body-lg { font-size: 18px; line-height: 1.6; }
+.tenant-body-lg { font-size: 18px; line-height: 1.6; }
 
 /* Menu dotted leader line */
-.tenant-dotted-leader,
-.saya-dotted-leader {
+.tenant-dotted-leader {
   flex: 1;
   border-bottom: 1px dotted var(--ui-text);
   transform: translateY(-4px);
@@ -280,27 +189,18 @@
 }
 
 /* Photo masonry gallery */
-.tenant-masonry,
-.saya-masonry {
+.tenant-masonry {
   columns: 3;
   column-gap: 16px;
 }
-.tenant-masonry > *,
-.saya-masonry > * {
+.tenant-masonry > * {
   break-inside: avoid;
   margin-bottom: 16px;
 }
 
 @media (max-width: 768px) {
-  .tenant-masonry,
-  .saya-masonry { columns: 2; }
+  .tenant-masonry { columns: 2; }
 }
 @media (max-width: 480px) {
-  .tenant-masonry,
-  .saya-masonry { columns: 1; }
-}
-
-/* Shared Product, booking, and tenant components inherit this theme's heading family. */
-.blawby-theme :is(.saya-display, .saya-display-md, .saya-display-sm, .saya-display-lg, .tenant-display, .tenant-display-md, .tenant-display-sm, .tenant-display-lg) {
-  font-family: var(--font-heading);
+  .tenant-masonry { columns: 1; }
 }

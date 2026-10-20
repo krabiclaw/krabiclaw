@@ -3,7 +3,7 @@
     <!-- What to choose next, and the nights chosen so far. -->
     <div class="flex shrink-0 items-start justify-between gap-4 px-1 pb-3" :class="inline ? undefined : 'border-b border-default'">
       <div class="min-w-0">
-        <p class="saya-display text-default" :class="inline ? 'text-2xl sm:text-3xl' : 'text-xl'">{{ heading }}</p>
+        <p class="tenant-display text-default" :class="inline ? 'text-2xl sm:text-3xl' : 'text-xl'">{{ heading }}</p>
         <p class="mt-0.5 text-muted" :class="inline ? 'text-sm' : 'text-xs'">{{ subheading }}</p>
       </div>
       <button v-if="checkIn && !inline" type="button" class="shrink-0 text-[11px] font-medium uppercase tracking-[0.2em] text-primary" @click="clearDates">{{ t('stay.clear_dates') }}</button>
@@ -22,7 +22,7 @@
               <button type="button" class="flex size-9 items-center justify-center rounded-full border border-default disabled:opacity-30" :class="index > 0 ? 'invisible' : undefined" :disabled="monthOffset === 0" :aria-label="t('stay.previous_month')" @click="monthOffset--">
                 <TenantIcon name="chevron-left" class="size-4" />
               </button>
-              <span class="saya-display text-lg">{{ month.label }}</span>
+              <span class="tenant-display text-lg">{{ month.label }}</span>
               <button type="button" class="flex size-9 items-center justify-center rounded-full border border-default disabled:opacity-30" :class="index < months.length - 1 ? 'md:invisible' : undefined" :disabled="monthOffset + index >= lastMonthOffset" :aria-label="t('stay.next_month')" @click="monthOffset++">
                 <TenantIcon name="chevron-right" class="size-4" />
               </button>
@@ -93,7 +93,7 @@
 
     <div v-if="!inline" class="flex shrink-0 items-center justify-between gap-4 border-t border-default px-1 py-4">
       <div class="min-w-0">
-        <div v-if="quote" class="saya-display saya-italic truncate text-lg">{{ rangeLabel }}</div>
+        <div v-if="quote" class="tenant-display tenant-italic truncate text-lg">{{ rangeLabel }}</div>
         <div class="mt-0.5 text-xs text-muted">{{ quote ? `${nightsLabel(quote.nights)} · ${guestsLabel}` : checkout ? t('stay.charged_in_full') : t('stay.enquiry_note') }}</div>
       </div>
       <TenantButton v-if="checkout" size="lg" class="shrink-0" :disabled="!quote || quotePending" @click="$emit('next')">{{ t('stay.reserve') }}</TenantButton>
