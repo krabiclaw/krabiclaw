@@ -45,7 +45,7 @@ export default defineHandler(async (event) => {
       buildLlmsTxt(
         origin,
         buildPlatformDocLinkEntries(docs, origin),
-        buildTenantBlogLinkEntries(posts ?? [], origin, { themeId: String(event.context.themeId ?? '') }),
+        buildTenantBlogLinkEntries(posts ?? [], origin),
         {
           title: organizationName,
           intro: `${organizationName} website, offerings, and public content available for machine retrieval and citation.`,

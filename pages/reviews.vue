@@ -1,8 +1,8 @@
 <template>
   <div class="min-h-screen bg-default text-default">
     <header class="mx-auto max-w-7xl px-4 pt-16 pb-12 sm:px-6 lg:px-8">
-      <p class="saya-kicker mb-6">{{ t('saya.reviews.title') }}</p>
-      <h1 class="saya-display-md text-default">
+      <p class="tenant-kicker mb-6">{{ t('site.reviews.title') }}</p>
+      <h1 class="tenant-display-md text-default">
         <template v-if="googleReviewSummary">
           <span class="flex flex-wrap items-center gap-4">
             <span class="flex text-primary" aria-hidden="true">
@@ -16,10 +16,10 @@
                 class="size-8"
               ><path stroke-linecap="round" stroke-linejoin="round" d="M11.48 3.499a.562.562 0 0 1 1.04 0l2.125 5.111a.563.563 0 0 0 .475.345l5.518.442c.499.04.701.663.321.988l-4.204 3.602a.563.563 0 0 0-.182.557l1.285 5.385a.562.562 0 0 1-.84.61l-4.725-2.885a.562.562 0 0 0-.586 0L6.982 20.54a.562.562 0 0 1-.84-.61l1.285-5.386a.562.562 0 0 0-.182-.557l-4.204-3.602a.562.562 0 0 1 .321-.988l5.518-.442a.563.563 0 0 0 .475-.345L11.48 3.5Z"/></svg>
             </span>
-            <span class="text-muted">{{ t('saya.reviews.rating_summary', { average: googleReviewSummary.average, count: googleReviewSummary.count?.toLocaleString() }) }}</span>
+            <span class="text-muted">{{ t('site.reviews.rating_summary', { average: googleReviewSummary.average, count: googleReviewSummary.count?.toLocaleString() }) }}</span>
           </span>
         </template>
-        <em v-else class="saya-italic">{{ t('saya.reviews_page.title') }}</em>
+        <em v-else class="tenant-italic">{{ t('site.reviews_page.title') }}</em>
       </h1>
 
       <!-- Multi-location pills -->
@@ -46,8 +46,8 @@
         />
       </div>
       <div v-else class="rounded-2xl border border-dashed border-default py-20 text-center">
-        <h2 class="saya-display saya-italic text-3xl text-default">{{ t('saya.reviews.empty_title') }}</h2>
-        <p class="mt-2 text-sm text-muted">{{ t('saya.reviews.empty_desc') }}</p>
+        <h2 class="tenant-display tenant-italic text-3xl text-default">{{ t('site.reviews.empty_title') }}</h2>
+        <p class="mt-2 text-sm text-muted">{{ t('site.reviews.empty_desc') }}</p>
       </div>
     </section>
 
@@ -57,7 +57,7 @@
         class="inline-flex items-center gap-2 rounded-full border border-default px-8 py-3 text-[11px] font-medium uppercase tracking-widest text-default transition hover:bg-muted"
         @click="loadMore"
       >
-        {{ t('saya.posts.show_more') }} <span class="opacity-50">({{ remaining }} {{ t('saya.posts.remaining') }})</span>
+        {{ t('site.posts.show_more') }} <span class="opacity-50">({{ remaining }} {{ t('site.posts.remaining') }})</span>
       </button>
     </div>
   </div>
@@ -98,11 +98,11 @@ const organizationName = organization.name
 
 useSocialMetadata(() => ({
   path: '/reviews',
-  title: `${t('saya.footer.reviews')} | ${organizationName}`,
-  description: t('saya.reviews_page.meta_description', { organization: organizationName }),
-  label: t('saya.footer.reviews'),
+  title: `${t('site.footer.reviews')} | ${organizationName}`,
+  description: t('site.reviews_page.meta_description', { organization: organizationName }),
+  label: t('site.footer.reviews'),
   breadcrumbs: [
-    { name: t('saya.footer.reviews'), url: '/reviews' },
+    { name: t('site.footer.reviews'), url: '/reviews' },
   ],
 }))
 
@@ -119,7 +119,7 @@ useSchemaOrg([
     } : {}),
     review: allReviews.value.map(r => ({
       '@type': 'Review',
-      author: { '@type': 'Person', name: r.author_name || t('saya.qa.guest') },
+      author: { '@type': 'Person', name: r.author_name || t('site.qa.guest') },
       datePublished: r.source === 'google_places' ? r.original_review_date : r.created_at,
       reviewBody: r.content ?? '',
       reviewRating: { '@type': 'Rating', ratingValue: r.rating, bestRating: 5 }

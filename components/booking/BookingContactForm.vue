@@ -1,7 +1,7 @@
 <template>
   <form @submit.prevent="submit" class="booking-contact-form space-y-4">
     <div>
-      <label for="booking-name" class="block text-sm font-medium text-default mb-1">{{ t('saya.experience_detail.full_name') }}</label>
+      <label for="booking-name" class="block text-sm font-medium text-default mb-1">{{ t('site.experience_detail.full_name') }}</label>
       <input 
         id="booking-name"
         v-model="form.name"
@@ -12,7 +12,7 @@
     </div>
 
     <div>
-      <label for="booking-email" class="block text-sm font-medium text-default mb-1">{{ t('saya.experience_detail.email_address') }}</label>
+      <label for="booking-email" class="block text-sm font-medium text-default mb-1">{{ t('site.experience_detail.email_address') }}</label>
       <input 
         id="booking-email"
         v-model="form.email"
@@ -23,7 +23,7 @@
     </div>
 
     <div>
-      <label for="booking-phone" class="block text-sm font-medium text-default mb-1">{{ t('saya.experience_detail.phone_number') }} <span v-if="!phoneRequired" class="text-muted font-normal">({{ t('saya.experience_detail.optional') }})</span></label>
+      <label for="booking-phone" class="block text-sm font-medium text-default mb-1">{{ t('site.experience_detail.phone_number') }} <span v-if="!phoneRequired" class="text-muted font-normal">({{ t('site.experience_detail.optional') }})</span></label>
       <div class="flex rounded-lg border border-(--kc-field-border) bg-default transition-colors focus-within:border-primary focus-within:ring-2 focus-within:ring-inset focus-within:ring-primary">
         <div class="relative flex items-center border-r border-(--kc-field-border) shrink-0">
           <div class="flex items-center gap-1.5 px-3 py-2.5 text-sm font-medium text-default select-none pointer-events-none">
@@ -56,7 +56,7 @@
     </div>
 
     <div>
-      <label for="booking-notes" class="block text-sm font-medium text-default mb-1">{{ t('saya.experience_detail.special_requests') }} <span class="text-muted font-normal">({{ t('saya.experience_detail.optional') }})</span></label>
+      <label for="booking-notes" class="block text-sm font-medium text-default mb-1">{{ t('site.experience_detail.special_requests') }} <span class="text-muted font-normal">({{ t('site.experience_detail.optional') }})</span></label>
       <textarea 
         id="booking-notes"
         v-model="form.notes"
@@ -67,7 +67,7 @@
 
     <div class="pt-2">
       <TenantButton type="submit" size="lg" block :loading="loading" :disabled="loading">
-        {{ loading ? t('saya.experience_detail.processing') : submitText || t('saya.experience_detail.confirm_booking') }}
+        {{ loading ? t('site.experience_detail.processing') : submitText || t('site.experience_detail.confirm_booking') }}
       </TenantButton>
     </div>
   </form>
@@ -102,7 +102,7 @@ const countries = computed(() => {
 })
 const selectedCountry = computed(() => countries.value.find(c => c.code === countryCode.value) ?? null)
 const phonePlaceholder = computed(() => {
-  if (!selectedCountry.value) return t('saya.experience_detail.phone_number')
+  if (!selectedCountry.value) return t('site.experience_detail.phone_number')
   return selectedCountry.value.code === 'US' || selectedCountry.value.code === 'CA'
     ? '(555) 000-0000'
     : selectedCountry.value.dialCode

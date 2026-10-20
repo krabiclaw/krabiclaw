@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:e79542be3386d7e4ca7307add403a355baa5957816e13fb53266cab4bdf36f69",
-  "documentationFingerprint": "sha256:d4bf594e91109e388ccea68b89fec97893a9294a099f177e176b237bc3c433f1",
+  "fingerprint": "sha256:0ddeebd50cd56fb41f5919f6ff237859e8047d2c4b64de8899ee9d4172da61af",
+  "documentationFingerprint": "sha256:907b5e14c2614a6b3b7c9ac5a72c392cb75c7d227268c0730cf73b63ab9428fa",
   "tools": [
     {
       "name": "add_organization_language",
@@ -984,6 +984,17 @@
                 ]
               },
               "cta_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "edge": {
+                "enum": [
+                  "straight",
+                  "shield",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -2835,6 +2846,17 @@
                 ]
               },
               "cta_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "edge": {
+                "enum": [
+                  "straight",
+                  "shield",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -12144,6 +12166,17 @@
                   "null"
                 ]
               },
+              "edge": {
+                "enum": [
+                  "straight",
+                  "shield",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "eyebrow": {
                 "type": [
                   "string",
@@ -17749,6 +17782,17 @@
                   "null"
                 ]
               },
+              "edge": {
+                "enum": [
+                  "straight",
+                  "shield",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "eyebrow": {
                 "type": [
                   "string",
@@ -21025,7 +21069,7 @@
                 ]
               },
               "title": {
-                "description": "The page's name, as the site navigation and browser tab show it. The site name is added to the tab title, so leave it out. Always sent in full — an omitted title is not kept.",
+                "description": "The page's name, e.g. About. The site name is appended to the browser title. Always sent in full — an omitted title is not kept.",
                 "type": "string"
               }
             },
@@ -24221,6 +24265,17 @@
                   "null"
                 ]
               },
+              "edge": {
+                "enum": [
+                  "straight",
+                  "shield",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "eyebrow": {
                 "type": [
                   "string",
@@ -26986,7 +27041,7 @@
             ]
           },
           "title": {
-            "description": "The page's name, as the site navigation and browser tab show it. The site name is added to the tab title, so leave it out. Always sent in full — an omitted title is not kept.",
+            "description": "The page's name, e.g. About. The site name is appended to the browser title. Always sent in full — an omitted title is not kept.",
             "type": "string"
           },
           "variant_id": {
@@ -27874,6 +27929,17 @@
                 ]
               },
               "cta_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "edge": {
+                "enum": [
+                  "straight",
+                  "shield",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -32609,6 +32675,17 @@
                 ]
               },
               "cta_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "edge": {
+                "enum": [
+                  "straight",
+                  "shield",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -37389,6 +37466,17 @@
                 ]
               },
               "cta_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "edge": {
+                "enum": [
+                  "straight",
+                  "shield",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -44643,13 +44731,23 @@
                 ]
               },
               "button_casing": {
+                "description": "Button text casing: uppercase or none (natural case). Absent when the site uses the Default.",
                 "enum": [
                   "uppercase",
                   "none"
                 ],
                 "type": "string"
               },
+              "button_color": {
+                "description": "Button fill: action (the palette's action color) or accent (the palette's accent color). Absent when the site uses the Default.",
+                "enum": [
+                  "action",
+                  "accent"
+                ],
+                "type": "string"
+              },
               "button_shape": {
+                "description": "Button corner styling: pill (fully rounded), rounded (subtle radius), or sharp (square corners). Absent when the site uses the Default.",
                 "enum": [
                   "pill",
                   "rounded",
@@ -44707,7 +44805,8 @@
                   "montserrat",
                   "lora",
                   "playfair-display",
-                  "cormorant-garamond"
+                  "cormorant-garamond",
+                  "marcellus"
                 ],
                 "type": "string"
               },
@@ -44718,6 +44817,7 @@
                 ]
               },
               "heading_casing": {
+                "description": "Display heading casing: uppercase or none (natural case). Absent when the site uses the Default.",
                 "enum": [
                   "uppercase",
                   "none"
@@ -44773,7 +44873,7 @@
                 "type": "string"
               },
               "palette": {
-                "description": "The colors the site renders, light and dark: its own, or its template's. Null on the platform template.",
+                "description": "The colors the site renders, light and dark: its own, or the default. Null on KrabiClaw's own site.",
                 "properties": {
                   "dark": {
                     "additionalProperties": false,
@@ -44844,7 +44944,7 @@
               "palette_source": {
                 "enum": [
                   "custom",
-                  "template",
+                  "default",
                   null
                 ],
                 "type": [
@@ -49643,6 +49743,17 @@
                   "null"
                 ]
               },
+              "edge": {
+                "enum": [
+                  "straight",
+                  "shield",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "eyebrow": {
                 "type": [
                   "string",
@@ -53808,6 +53919,17 @@
                 ]
               },
               "cta_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "edge": {
+                "enum": [
+                  "straight",
+                  "shield",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -65341,6 +65463,17 @@
                   "null"
                 ]
               },
+              "edge": {
+                "enum": [
+                  "straight",
+                  "shield",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "eyebrow": {
                 "type": [
                   "string",
@@ -69549,6 +69682,17 @@
                   "null"
                 ]
               },
+              "edge": {
+                "enum": [
+                  "straight",
+                  "shield",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "eyebrow": {
                 "type": [
                   "string",
@@ -73531,6 +73675,17 @@
                 ]
               },
               "cta_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "edge": {
+                "enum": [
+                  "straight",
+                  "shield",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -84193,6 +84348,17 @@
                   "null"
                 ]
               },
+              "edge": {
+                "enum": [
+                  "straight",
+                  "shield",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "eyebrow": {
                 "type": [
                   "string",
@@ -85990,6 +86156,17 @@
                 ]
               },
               "cta_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "edge": {
+                "enum": [
+                  "straight",
+                  "shield",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -99581,6 +99758,17 @@
                   "null"
                 ]
               },
+              "edge": {
+                "enum": [
+                  "straight",
+                  "shield",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "eyebrow": {
                 "type": [
                   "string",
@@ -105823,6 +106011,14 @@
             ],
             "type": "string"
           },
+          "button_color": {
+            "description": "Button fill: action (the palette's action color) or accent (the palette's accent color).",
+            "enum": [
+              "action",
+              "accent"
+            ],
+            "type": "string"
+          },
           "button_shape": {
             "description": "Button corner styling: pill (fully rounded), rounded (subtle radius), or sharp (square corners).",
             "enum": [
@@ -105866,7 +106062,7 @@
             "type": "string"
           },
           "font_preset": {
-            "description": "Website heading and body fonts, on every template: default (Default), mali (Mali), sarabun (Sarabun), prompt (Prompt), kanit (Kanit with Sarabun), ibm-plex-sans-thai (IBM Plex Sans Thai), noto-serif-thai (Noto Serif Thai with Noto Sans Thai), inter (Inter), dm-sans (DM Sans), montserrat (Montserrat), lora (Lora), playfair-display (Playfair Display with Inter), cormorant-garamond (Cormorant Garamond with Inter). Thai, Vietnamese and Japanese text renders in every choice.",
+            "description": "Website heading and body fonts, on every template: default (Default), mali (Mali), sarabun (Sarabun), prompt (Prompt), kanit (Kanit with Sarabun), ibm-plex-sans-thai (IBM Plex Sans Thai), noto-serif-thai (Noto Serif Thai with Noto Sans Thai), inter (Inter), dm-sans (DM Sans), montserrat (Montserrat), lora (Lora), playfair-display (Playfair Display with Inter), cormorant-garamond (Cormorant Garamond with Inter), marcellus (Marcellus). Thai, Vietnamese and Japanese text renders in every choice.",
             "enum": [
               "default",
               "mali",
@@ -105880,7 +106076,8 @@
               "montserrat",
               "lora",
               "playfair-display",
-              "cormorant-garamond"
+              "cormorant-garamond",
+              "marcellus"
             ],
             "type": "string"
           },
@@ -105901,7 +106098,7 @@
           },
           "palette": {
             "additionalProperties": false,
-            "description": "Saya and Blawby website colors, each with a light and a dark value. Roles: ground (The page background.) surface (Cards, the header and footer, dialogs and fields.) text (Body copy and headings.) muted (Captions, details and supporting copy.) action (Buttons, links and selected states.) accent (Emphasis, decoration and highlighted buttons.) Start from a starter (coastal, forest, terracotta, ink, blossom, saffron, slate, midnight) and/or name only the roles to change; colors are #RRGGBB or a plain description such as \"forest green\". Borders and tints are derived. null returns to the template's colors. The result reports any text or button pair below WCAG AA contrast.",
+            "description": "Website colors, each with a light and a dark value. Roles: ground (The page background.) surface (Cards, the header and footer, dialogs and fields.) text (Body copy and headings.) muted (Captions, details and supporting copy.) action (Buttons, links and selected states.) accent (Emphasis, decoration and highlighted buttons.) Start from a starter (coastal, forest, terracotta, ink, blossom, saffron, slate, midnight) and/or name only the roles to change; colors are #RRGGBB or a plain description such as \"forest green\". Borders and tints are derived. null returns to the default colors. The result reports any text or button pair below WCAG AA contrast.",
             "properties": {
               "dark": {
                 "additionalProperties": false,
@@ -110602,6 +110799,17 @@
                   "null"
                 ]
               },
+              "edge": {
+                "enum": [
+                  "straight",
+                  "shield",
+                  null
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "eyebrow": {
                 "type": [
                   "string",
@@ -113372,7 +113580,7 @@
             ]
           },
           "title": {
-            "description": "The page's name, as the site navigation and browser tab show it. The site name is added to the tab title, so leave it out. Always sent in full — an omitted title is not kept.",
+            "description": "The page's name, e.g. About. The site name is appended to the browser title. Always sent in full — an omitted title is not kept.",
             "type": "string"
           },
           "variant_id": {
@@ -114262,6 +114470,17 @@
                 ]
               },
               "cta_url": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "edge": {
+                "enum": [
+                  "straight",
+                  "shield",
+                  null
+                ],
                 "type": [
                   "string",
                   "null"
@@ -118539,7 +118758,7 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:4a5886d5831d8633da74e6c20ad01e6c3137131aa5db1008b16ac3adae6244fa",
+        "create_product": "sha256:034dd10d3eb285cb0d967ed4797c2e04b10c2eb9da9bad7b47b5aa42b352f99e",
         "get_product": "sha256:b9e0be9c62e11923243eb43b719fe76e3b8b022e719a56ea9654915300dee8cd",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
@@ -118595,7 +118814,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
-        "create_product": "sha256:4a5886d5831d8633da74e6c20ad01e6c3137131aa5db1008b16ac3adae6244fa",
+        "create_product": "sha256:034dd10d3eb285cb0d967ed4797c2e04b10c2eb9da9bad7b47b5aa42b352f99e",
         "get_product": "sha256:b9e0be9c62e11923243eb43b719fe76e3b8b022e719a56ea9654915300dee8cd",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -118639,13 +118858,13 @@
       "toolContracts": {
         "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
+        "get_site_page": "sha256:768684cb01606f5caa64729e1b549e70423d4a046c64e64673ea18570effafa8",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "remove_media": "sha256:a59343b7aaf1b361ba9e70d9bcfff4a454baa3d618af3fc93f92188f9cb3893c",
         "reorder_media": "sha256:0b9419a7d891bcf9f75032994fcf329651d3c888a0409356ad4ae7b94a199e25",
         "set_media": "sha256:c5eab766610db3a84aaf33f9affe011d098083de2b94debf8d15d15da6d3a930",
-        "update_site_page": "sha256:d1873b9d3c8f8fbb5590aca7989e927e96c38dde13f587eff1c9e8873437b55d"
+        "update_site_page": "sha256:06077f4676ffb10596fe094b8a849955484ac3a2175eae3529cad037eb39645a"
       }
     },
     {
@@ -118661,7 +118880,7 @@
         "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_product": "sha256:b9e0be9c62e11923243eb43b719fe76e3b8b022e719a56ea9654915300dee8cd",
-        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
+        "get_site_page": "sha256:768684cb01606f5caa64729e1b549e70423d4a046c64e64673ea18570effafa8",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "save_media_attachment": "sha256:ab8b0afb9c905bfef91062f9a3f8664bc3089583a43971175cd9953e6b53a871",
         "set_media": "sha256:c5eab766610db3a84aaf33f9affe011d098083de2b94debf8d15d15da6d3a930"
@@ -118676,9 +118895,9 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:4a5886d5831d8633da74e6c20ad01e6c3137131aa5db1008b16ac3adae6244fa",
+        "create_product": "sha256:034dd10d3eb285cb0d967ed4797c2e04b10c2eb9da9bad7b47b5aa42b352f99e",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
-        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
+        "get_site_page": "sha256:768684cb01606f5caa64729e1b549e70423d4a046c64e64673ea18570effafa8",
         "get_website_draft": "sha256:fccf7d7281ba30d1e79163929e61abec1893c2e910460c4068364a65784a7bac",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -118688,8 +118907,8 @@
         "publish_website": "sha256:aaf05850c90c08b5c291cef9c6e1e19ca59830d17b658cf52389294487a19fc1",
         "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
         "update_menu": "sha256:4ab27009a3a126aed4b328f7f1db8b4cc7e321f720da7e5a16d82f8badb202d8",
-        "update_organization_settings": "sha256:b5488027b9a151e5759c0cf78e9010b60ff1d07ba783525d50e30cc233f2ef94",
-        "update_site_page": "sha256:d1873b9d3c8f8fbb5590aca7989e927e96c38dde13f587eff1c9e8873437b55d"
+        "update_organization_settings": "sha256:24a6bf50d775f6612d779e0c377ba24aaf36b882fa18458c5a25e7c38e908e86",
+        "update_site_page": "sha256:06077f4676ffb10596fe094b8a849955484ac3a2175eae3529cad037eb39645a"
       }
     },
     {
@@ -118725,13 +118944,13 @@
       "toolContracts": {
         "attach_media": "sha256:43076d0fcf113d082bd5dcf13fa897dcf8158747f4e22f0be6de589e03d9cae7",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "get_site_page": "sha256:339a67d589acf5bc95f228993474311218ce1ed5f13a041299c43eb4271cb9f5",
+        "get_site_page": "sha256:768684cb01606f5caa64729e1b549e70423d4a046c64e64673ea18570effafa8",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "set_media": "sha256:c5eab766610db3a84aaf33f9affe011d098083de2b94debf8d15d15da6d3a930",
         "update_product": "sha256:a5a3db8edacc990e450e880b738479b7e4ef197e4ff9fcdb7e110d2db1f44851",
-        "update_site_page": "sha256:d1873b9d3c8f8fbb5590aca7989e927e96c38dde13f587eff1c9e8873437b55d"
+        "update_site_page": "sha256:06077f4676ffb10596fe094b8a849955484ac3a2175eae3529cad037eb39645a"
       }
     },
     {
@@ -118831,12 +119050,12 @@
       "slug": "publish-a-post",
       "contentHash": "sha256:20b71a412abc2f5b707463326e643c5f540dba815c168559b15c3aa3274e44f2",
       "toolContracts": {
-        "create_blog_post": "sha256:eadc0eba432b4e9844c9c8ed23327aafee2fdfc4b3c306b36c9d235a4a109cfe",
+        "create_blog_post": "sha256:5b37b1fe8eba2227dc0d470508510e38d20e8bbdb37a94b1c2e79a0444209d15",
         "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
         "get_channel_post": "sha256:698bf8872c9dd2a8620b91933ded4589e572e082603730a787b21b53f895d9e8",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_social_connections": "sha256:96a2be10163ed07a418b1ff7a6b240307f6129a8ccd172e521fa2cc3af2e14f4",
-        "publish_blog_post": "sha256:8b9880534e39b242f4c5c498b6a3a8297ddf07080007e51ce633d3286db0c5c7",
+        "publish_blog_post": "sha256:3f8204deef1b67db4f95c0955f290ef75a529f413fad41f86b2e9e6cd8654097",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reconcile_post_publication": "sha256:f97049daa773708807be8f9f0a58a5ebbf76c5b38acb2592610a2d997b319843",
         "update_post": "sha256:b186430401e60fb65257100332ce0c4bd01b8e1c531ea8277dcc2910cfe356b0"

@@ -117,7 +117,7 @@ interface SearchResponse {
 
 const props = withDefaults(defineProps<{
   surface: PlatformSearchPaletteSurface
-  variant?: 'platform' | 'blawby' | 'saya'
+  variant?: 'platform' | 'tenant'
 }>(), {
   variant: 'platform',
 })
@@ -152,28 +152,12 @@ const PLATFORM_PALETTE: SearchPalette = {
   badge: 'border-default text-dimmed',
 }
 
-// Tenant variants deliberately reuse the platform's semantic Nuxt UI utility classes
-// rather than bespoke theme-only classes: assets/css/saya.css and assets/css/blawby.css
-// repoint the underlying --ui-* custom properties inside their layout theme scopes.
-// The visual difference comes entirely from where these classes render.
-const SAYA_PALETTE: SearchPalette = PLATFORM_PALETTE
-const BLAWBY_PALETTE: SearchPalette = PLATFORM_PALETTE
+const palette = computed<SearchPalette>(() => PLATFORM_PALETTE)
 
-const palette = computed<SearchPalette>(() => {
-  if (props.variant === 'blawby') return BLAWBY_PALETTE
-  if (props.variant === 'saya') return SAYA_PALETTE
-  return PLATFORM_PALETTE
-})
-
-// Platform search teleports straight to <body> (it has no tenant palette to escape).
-// Saya and Blawby must teleport inside their own theme-scoped portal root or the modal
-// silently falls back to the platform's default (non-tenant) look — see the comments
-// on #saya-portal-root (layouts/saya.vue) and #blawby-portal-root (layouts/blawby.vue).
-const teleportTarget = computed(() => {
-  if (props.variant === 'blawby') return '#blawby-portal-root'
-  if (props.variant === 'saya') return '#saya-portal-root'
-  return 'body'
-})
+// Platform search teleports straight to <body>. A customer site's search must
+// teleport inside its layout's portal root, which sits within .tenant-theme,
+// or the modal silently loses the site's palette.
+const teleportTarget = computed(() => props.variant === 'tenant' ? '#tenant-portal-root' : 'body')
 
 const panelClass = computed(() => palette.value.panel)
 const headerBorderClass = computed(() => palette.value.headerBorder)
@@ -211,7 +195,7 @@ const resultTypeMeta: Partial<Record<PublicSearchResult['type'], { badge: string
 }
 
 const surfaceLabel = computed(() => {
-  if (props.surface === 'tenant_blog') return t('saya.footer.blog')
+  if (props.surface === 'tenant_blog') return t('site.footer.blog')
   if (props.surface === 'public') return 'KrabiClaw'
   if (props.surface === 'docs') return 'Documentation'
   if (props.surface === 'blog') return 'Blog'
@@ -224,29 +208,29 @@ const surfacePhrase = computed(() => props.surface === 'public'
   : surfaceLabel.value.toLowerCase())
 
 const dialogTitle = computed(() => props.surface === 'tenant_blog'
-  ? t('saya.search.dialog_title', { surface: surfaceLabel.value })
+  ? t('site.search.dialog_title', { surface: surfaceLabel.value })
   : `Search ${surfacePhrase.value}`)
 const searchingLabel = computed(() => props.surface === 'tenant_blog'
-  ? t('saya.search.searching', { surface: surfaceLabel.value })
+  ? t('site.search.searching', { surface: surfaceLabel.value })
   : `Searching ${surfacePhrase.value}...`)
 const noResultsLabel = computed(() => props.surface === 'tenant_blog'
-  ? t('saya.search.no_results')
+  ? t('site.search.no_results')
   : 'No results found')
 
 const placeholder = computed(() => {
   if (props.surface === 'dashboard') return 'Search dashboard, docs, blog, help...'
-  if (props.surface === 'tenant_blog') return t('saya.search.placeholder')
+  if (props.surface === 'tenant_blog') return t('site.search.placeholder')
   return 'Search docs, blog, help, platform pages...'
 })
 
 const emptyStateHint = computed(() => {
-  if (props.surface === 'tenant_blog') return t('saya.search.hint')
+  if (props.surface === 'tenant_blog') return t('site.search.hint')
   if (props.surface === 'dashboard') return 'Search docs, blog posts, support answers, and dashboard destinations.'
   return 'Search docs, blog posts, support answers, and platform pages.'
 })
 
 const noResultsHint = computed(() => {
-  if (props.surface === 'tenant_blog') return t('saya.search.no_results_hint')
+  if (props.surface === 'tenant_blog') return t('site.search.no_results_hint')
   return 'Try a more specific task, page, or support question.'
 })
 
@@ -268,12 +252,12 @@ const flatIndexById = computed(() => {
 })
 
 function resultTypeLabel(type: PublicSearchResult['type']) {
-  if (props.surface === 'tenant_blog' && type === 'blog') return t('saya.search.article')
+  if (props.surface === 'tenant_blog' && type === 'blog') return t('site.search.article')
   return resultTypeMeta[type]?.badge ?? 'Result'
 }
 
 function groupLabel(type: PublicSearchResult['type']) {
-  if (props.surface === 'tenant_blog' && type === 'blog') return t('saya.search.articles')
+  if (props.surface === 'tenant_blog' && type === 'blog') return t('site.search.articles')
   return resultTypeMeta[type]?.group ?? 'Results'
 }
 

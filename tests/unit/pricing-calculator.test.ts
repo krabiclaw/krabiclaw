@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { calculateSlidingScaleRate, parsePricingAmount } from '../../utils/blawby-pricing.ts'
+import { calculateSlidingScaleRate, parsePricingAmount } from '../../utils/pricing-calculator.ts'
 
 const rows = [['1', '$39,900', '$55,860', '$63,840']]
 

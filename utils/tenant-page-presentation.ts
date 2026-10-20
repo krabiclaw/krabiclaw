@@ -36,7 +36,6 @@ import TenantLocationsGridBlock from '~/components/tenant/TenantLocationsGridBlo
 import TenantFaqBlock from '~/components/tenant/TenantFaqBlock.vue'
 import TenantReviewsBlock from '~/components/tenant/TenantReviewsBlock.vue'
 import TenantCtaBlock from '~/components/tenant/TenantCtaBlock.vue'
-import TenantDividerBlock from '~/components/tenant/TenantDividerBlock.vue'
 import TenantDonationChoicesBlock from '~/components/tenant/TenantDonationChoicesBlock.vue'
 import TenantMediaTextBlock from '~/components/tenant/TenantMediaTextBlock.vue'
 import TenantButtonGroupBlock from '~/components/tenant/TenantButtonGroupBlock.vue'
@@ -79,7 +78,6 @@ const PRESENTATIONS: Readonly<Record<string, BlockPresentation>> = {
   'tenant:cta': TenantCtaBlock,
   'tenant:booking_cta': TenantCtaBlock,
   'tenant:contact_cta': TenantCtaBlock,
-  'tenant:divider': TenantDividerBlock,
   'tenant:donation_choices': TenantDonationChoicesBlock,
   'tenant:video_feature': TenantMediaTextBlock,
   'tenant:button_group': TenantButtonGroupBlock,

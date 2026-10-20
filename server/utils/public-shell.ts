@@ -125,7 +125,7 @@ export async function loadPublicShellSource(
     .map(page => ({ id: page.id, path: page.path, title: page.title }))
 
   if (experiences.length && !pageLinks.some(page => page.path === '/experiences')) {
-    const title = platformLocale(locale ?? sourceLocale)?.messages['saya.footer.experiences'] || 'Experiences'
+    const title = platformLocale(locale ?? sourceLocale)?.messages['site.footer.experiences'] || 'Experiences'
     pageLinks.push({ id: 'experiences', path: '/experiences', title })
   }
 

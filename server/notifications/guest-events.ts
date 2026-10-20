@@ -97,19 +97,19 @@ const accountAction = (url: string | null | undefined, locale?: string) => url ?
 function guestVisitFacts(input: GuestBookingInput): NotificationFact[] {
   const labels = guestLocale(input).messages
   return facts(
-    fact('what', labels[input.productTitle ? 'booking.receipt' : 'saya.experience_detail.meeting_point']!, input.productTitle ?? input.locationName ?? null),
-    input.productTitle ? fact('location', labels['saya.experience_detail.meeting_point']!, input.locationName ?? null) : null,
-    fact('date', labels['saya.reservation_cancel.date']!, input.date),
-    fact('time', labels['saya.reservation_cancel.time']!, input.time),
-    fact('partySize', labels['saya.experience_detail.party_size']!, input.partySize),
-    fact('notes', labels['saya.experience_detail.special_requests']!, input.notes ?? null),
+    fact('what', labels[input.productTitle ? 'booking.receipt' : 'site.experience_detail.meeting_point']!, input.productTitle ?? input.locationName ?? null),
+    input.productTitle ? fact('location', labels['site.experience_detail.meeting_point']!, input.locationName ?? null) : null,
+    fact('date', labels['site.reservation_cancel.date']!, input.date),
+    fact('time', labels['site.reservation_cancel.time']!, input.time),
+    fact('partySize', labels['site.experience_detail.party_size']!, input.partySize),
+    fact('notes', labels['site.experience_detail.special_requests']!, input.notes ?? null),
   )
 }
 
 function contactSection(input: GuestBookingInput) {
   const details = [input.contactPhone, input.contactEmail].filter(Boolean).join(' · ')
   return details
-    ? [{ title: guestLocale(input).messages['saya.contact_page.contact_us']!, body: details }]
+    ? [{ title: guestLocale(input).messages['site.contact_page.contact_us']!, body: details }]
     : []
 }
 
@@ -134,7 +134,7 @@ export function guestReservationCancelledMessage(input: GuestBookingInput & { wa
   const locale = guestLocale(input)
   return {
     locale: locale.locale,
-    title: locale.messages['saya.reservation_cancel.cancelled_title']!,
+    title: locale.messages['site.reservation_cancel.cancelled_title']!,
     preheader: `${input.organizationName} · ${input.date} · ${input.time}`,
     hero: null,
     facts: guestVisitFacts(input),
@@ -213,7 +213,7 @@ export function guestBookingCancelledMessage(input: GuestBookingInput & { produc
   const locale = guestLocale(input)
   return {
     locale: locale.locale,
-    title: locale.messages['saya.experience_cancel.cancelled_title']!,
+    title: locale.messages['site.experience_cancel.cancelled_title']!,
     preheader: `${input.productTitle} · ${input.date} · ${input.time}`,
     hero: null,
     facts: guestVisitFacts(input),
@@ -239,16 +239,16 @@ export function guestContactReceivedMessage(input: {
   const labels = locale.messages
   return {
     locale: locale.locale,
-    title: labels['saya.contact_page.confirmed_title']!,
+    title: labels['site.contact_page.confirmed_title']!,
     preheader: input.organizationName,
     hero: null,
     facts: facts(
-      fact('subject', labels['saya.contact_page.what_about']!, input.subject),
+      fact('subject', labels['site.contact_page.what_about']!, input.subject),
       fact('productTitle', labels['booking.service']!, input.productTitle),
       input.consentAcknowledged ? fact('consent', labels['legal.privacy']!, '✓') : null,
     ),
     primaryAction: accountAction(input.accountUrl, locale.locale),
-    sections: [{ title: labels['saya.contact_page.your_message']!, body: input.message }],
+    sections: [{ title: labels['site.contact_page.your_message']!, body: input.message }],
     category: 'account_security',
     organizationName: input.organizationName,
     organizationLogoUrl: input.organizationLogoUrl,

@@ -11,15 +11,15 @@
         <NuxtLink
           v-if="currentLocation"
           :to="localePath(`/locations/${encodeURIComponent(currentLocation.slug)}`)"
-          class="saya-kicker mb-8 inline-block text-muted no-underline hover:text-default"
+          class="tenant-kicker mb-8 inline-block text-muted no-underline hover:text-default"
         >
-          ← {{ t('saya.location.back_to', { title: currentLocation.title }) }}
+          ← {{ t('site.location.back_to', { title: currentLocation.title }) }}
         </NuxtLink>
-        <p v-else-if="collectionLabel" class="saya-kicker mb-4">{{ collectionLabel }}</p>
+        <p v-else-if="collectionLabel" class="tenant-kicker mb-4">{{ collectionLabel }}</p>
         <div class="flex flex-col gap-2">
-          <h1 class="saya-display-md text-default">{{ currentLocation?.title ?? brandName }}</h1>
+          <h1 class="tenant-display-md text-default">{{ currentLocation?.title ?? brandName }}</h1>
           <p v-if="currentLocation && menuUpdated" class="text-sm text-muted">
-            {{ t('saya.menu_page.updated', { date: menuUpdated }) }}
+            {{ t('site.menu_page.updated', { date: menuUpdated }) }}
           </p>
         </div>
         <div v-if="locations.length > 1 && !locationId" class="mt-8 flex flex-wrap justify-center gap-3">
@@ -44,8 +44,8 @@
       />
       <header v-if="title" class="mx-auto max-w-7xl px-4 pb-10 pt-16 sm:px-6 lg:px-8">
         <div class="max-w-2xl">
-          <p v-if="collectionLabel" class="saya-kicker mb-4">{{ collectionLabel }}</p>
-          <h1 class="saya-display-md text-default">{{ title }}</h1>
+          <p v-if="collectionLabel" class="tenant-kicker mb-4">{{ collectionLabel }}</p>
+          <h1 class="tenant-display-md text-default">{{ title }}</h1>
         </div>
         <div v-if="locations.length > 1 && !locationId && !isStays" class="mt-8 flex flex-wrap gap-3">
           <NuxtLink
@@ -62,11 +62,11 @@
     </template>
 
     <div v-if="products.length === 0 && (isMenu || emptyCollectionMessage)" class="mx-auto max-w-xl px-4 py-24 text-center sm:px-6">
-      <p v-if="currentLocation && isMenu || emptyCollectionMessage" class="saya-display saya-italic text-3xl">
-        {{ currentLocation && isMenu ? t('saya.menu_page.coming_soon_title') : emptyCollectionMessage }}
+      <p v-if="currentLocation && isMenu || emptyCollectionMessage" class="tenant-display tenant-italic text-3xl">
+        {{ currentLocation && isMenu ? t('site.menu_page.coming_soon_title') : emptyCollectionMessage }}
       </p>
       <p v-if="currentLocation && isMenu" class="mt-4 text-sm text-muted">
-        {{ t('saya.menu_page.coming_soon_desc', { location: currentLocation.title }) }}
+        {{ t('site.menu_page.coming_soon_desc', { location: currentLocation.title }) }}
       </p>
     </div>
 
@@ -89,8 +89,8 @@
           <div class="mb-8 border-b border-default pb-6">
             <!-- A section's own picture introduces it. -->
             <img v-if="mediaStillUrl(group.image)" :src="mediaStillUrl(group.image)!" :alt="group.image!.alt_text || group.category" class="mb-8 aspect-[16/9] w-full rounded-lg object-cover" loading="lazy" decoding="async">
-            <p v-if="showLocations && group.location_id" class="saya-kicker mb-2">{{ locationTitle(group.location_id) }}</p>
-            <h2 class="saya-display saya-italic text-5xl text-default">{{ group.category }}</h2>
+            <p v-if="showLocations && group.location_id" class="tenant-kicker mb-2">{{ locationTitle(group.location_id) }}</p>
+            <h2 class="tenant-display tenant-italic text-5xl text-default">{{ group.category }}</h2>
             <p v-if="group.description" class="mt-4 text-sm leading-relaxed text-muted">{{ group.description }}</p>
           </div>
 
@@ -125,11 +125,11 @@
                     </NuxtLink>
                     <span v-else class="text-default opacity-50">{{ product.name }}</span>
                     <span v-if="product.details.featured === true" class="inline-flex shrink-0 items-center rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
-                      {{ t('saya.posts.featured') }}
+                      {{ t('site.posts.featured') }}
                     </span>
                     <TenantBadgeUnavailable
                       v-if="!isAvailable(product, group.location_id)"
-                      :text="t('saya.menu_page.unavailable')"
+                      :text="t('site.menu_page.unavailable')"
                     />
                     <span
                       v-for="tag in dietaryTags(product)"
@@ -140,7 +140,7 @@
                     </span>
                   </div>
                   <template v-if="priceLabel(product, group.location_id)">
-                    <div class="saya-dotted-leader" />
+                    <div class="tenant-dotted-leader" />
                     <div class="flex shrink-0 items-baseline gap-1.5 tabular-nums text-base text-default">
                       <span v-if="compareAtPrice(product, group.location_id)" class="text-sm text-muted line-through">{{ compareAtPrice(product, group.location_id) }}</span>
                       <span>{{ priceLabel(product, group.location_id) }}</span>
@@ -163,9 +163,9 @@
         </section>
 
         <section class="border-t border-default pt-12">
-          <p class="saya-kicker mb-4">{{ t('saya.menu_page.allergens_title') }}</p>
+          <p class="tenant-kicker mb-4">{{ t('site.menu_page.allergens_title') }}</p>
           <p class="text-sm leading-relaxed text-muted">
-            {{ t('saya.menu_page.allergens_desc') }}
+            {{ t('site.menu_page.allergens_desc') }}
           </p>
         </section>
       </div>
@@ -175,8 +175,8 @@
       <section v-for="group in groups" :key="group.id" class="mb-20">
         <div class="mb-8 border-b border-default pb-6">
           <img v-if="mediaStillUrl(group.image)" :src="mediaStillUrl(group.image)!" :alt="group.image!.alt_text || group.category" class="mb-8 aspect-[16/9] w-full rounded-lg object-cover" loading="lazy" decoding="async">
-          <p v-if="showLocations && group.location_id" class="saya-kicker mb-2">{{ locationTitle(group.location_id) }}</p>
-          <h2 class="saya-display saya-italic text-5xl">{{ group.category }}</h2>
+          <p v-if="showLocations && group.location_id" class="tenant-kicker mb-2">{{ locationTitle(group.location_id) }}</p>
+          <h2 class="tenant-display tenant-italic text-5xl">{{ group.category }}</h2>
           <p v-if="group.description" class="mt-4 text-sm leading-relaxed text-muted">{{ group.description }}</p>
         </div>
         <div class="grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
@@ -205,7 +205,7 @@
                 <TenantBadgeUnavailable
                   v-if="!isAvailable(product, group.location_id)"
                   overlay
-                  :text="t('saya.menu_page.unavailable')"
+                  :text="t('site.menu_page.unavailable')"
                 />
               </div>
               <div class="mt-5">
@@ -293,13 +293,13 @@ const subNavTab = computed(() => {
   return segment === 'stays' ? null : segment
 })
 const collectionLabel = computed(() => {
-  if (isMenu.value) return t('saya.footer.menu')
-  if (isStays.value) return t('saya.footer.stays')
-  return isExperiences.value ? t('saya.footer.experiences') : t('saya.footer.products')
+  if (isMenu.value) return t('site.footer.menu')
+  if (isStays.value) return t('site.footer.stays')
+  return isExperiences.value ? t('site.footer.experiences') : t('site.footer.products')
 })
 const emptyCollectionMessage = computed(() => (isExperiences.value
-  ? t('saya.experiences.empty')
-  : t('saya.products.empty')))
+  ? t('site.experiences.empty')
+  : t('site.products.empty')))
 const locationMap = computed(() => new Map(props.locations.map(location => [location.id, location])))
 const showLocations = computed(() => !props.locationId && props.locations.length > 1)
 const currentLocation = computed(() => {
@@ -449,12 +449,12 @@ function coverUrl(product: PublicProduct): string | null {
 }
 
 function durationLabel(minutes: number): string {
-  if (minutes < 60) return t('saya.experience_detail.minutes', { count: minutes })
+  if (minutes < 60) return t('site.experience_detail.minutes', { count: minutes })
   const hours = Math.floor(minutes / 60)
   const rest = minutes % 60
   return rest
-    ? t('saya.experience_detail.hours_minutes', { hours, minutes: rest })
-    : t('saya.experience_detail.hours', { count: hours })
+    ? t('site.experience_detail.hours_minutes', { hours, minutes: rest })
+    : t('site.experience_detail.hours', { count: hours })
 }
 
 function previewItem(product: PublicProduct) {

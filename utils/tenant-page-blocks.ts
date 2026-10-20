@@ -186,6 +186,9 @@ const CTA_FIELDS = {
   // declared, so it could be written and never translated or validated.
   secondary_label: text('Second button label', { section: 'second_button', pairedWith: 'secondary_url' }),
   secondary_url: link('Second button URL', { section: 'second_button', pairedWith: 'secondary_label' }),
+  // The prompt's picture behind its words, and an optional cut-out beside them.
+  media: { kind: 'media', label: 'Background image', translatable: false, section: 'image', slot: 'media' },
+  featured: { kind: 'media', label: 'Featured image', translatable: false, section: 'image', slot: 'featured' },
 } as const
 
 const GRID_ITEM_FIELDS = {
@@ -272,10 +275,7 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
   divider: blockDefinitionWithMetadata('divider', 'Divider', 'i-lucide-minus', 'A break between sections.', ALL_RECIPES, {},
     { accessibility: 'inherited', seo: 'none' }),
 
-  cta: blockDefinitionWithMetadata('cta', 'Call to action', 'i-lucide-mouse-pointer-click', 'A prompt with one button.', ALL_RECIPES, {
-    ...CTA_FIELDS,
-    media: { kind: 'media', label: 'Background image', translatable: false, section: 'image', slot: 'media' },
-  }),
+  cta: blockDefinitionWithMetadata('cta', 'Call to action', 'i-lucide-mouse-pointer-click', 'A prompt with one button.', ALL_RECIPES, CTA_FIELDS),
   contact_cta: blockDefinitionWithMetadata('contact_cta', 'Contact prompt', 'i-lucide-phone', 'A prompt to get in touch.', ALL_RECIPES, CTA_FIELDS),
   // A booking prompt says what it costs and what the visitor is agreeing to.
   // Both were stored and read as `priceLine` and `notice`, which no list
@@ -319,6 +319,13 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
     // declared, so it could be written and never translated or validated.
     secondary_label: text('Second button label', { section: 'second_button', pairedWith: 'secondary_url' }),
     secondary_url: link('Second button URL', { section: 'second_button', pairedWith: 'secondary_label' }),
+    // How the hero meets the section after it: a straight edge, or the shield
+    // curve, cut from the hero's own picture and band so the next section's
+    // color shows beneath the point.
+    edge: {
+      kind: 'enum', label: 'Bottom edge', translatable: false, section: 'image', default: 'straight',
+      options: [{ value: 'straight', label: 'Straight' }, { value: 'shield', label: 'Shield' }],
+    },
   }, { accessibility: 'required', seo: 'structured' }),
 
   button_group: blockDefinitionWithMetadata('button_group', 'Buttons', 'i-lucide-mouse-pointer-click', 'A row of links.', ALL_RECIPES, {

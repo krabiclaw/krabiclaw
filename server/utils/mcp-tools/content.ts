@@ -44,7 +44,7 @@ import { NOT_HANDLED, omit, mutationContextPayload, optionalString, requiredStri
 // their stored values on update.
 export const TENANT_PAGE_METADATA_SCHEMA = {
   path: { type: 'string', description: 'The page path to write. Send the current path unless you are moving the page; a different path moves it and creates the locale-scoped redirect.' },
-  title: { type: 'string', description: "The page's name, as the site navigation and browser tab show it. The site name is added to the tab title, so leave it out. Always sent in full — an omitted title is not kept." },
+  title: { type: 'string', description: "The page's name, e.g. About. The site name is appended to the browser title. Always sent in full — an omitted title is not kept." },
   summary: { type: ['string', 'null'], description: 'Omit to preserve on update; null clears it.' },
   pageType: { type: 'string', enum: ['custom', 'recipe', 'legal', 'system'], description: "The page's type. Send the page_type from the last read unless you are changing it." },
   recipe: { type: ['string', 'null'], description: 'The template section this page fills, or null for a page that fills none. Send the recipe from the last read unless you are changing it; an omitted recipe is not kept.' },

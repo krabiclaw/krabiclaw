@@ -60,7 +60,7 @@ export function onboardingDraftWriteGuard(draft: Pick<SavedOnboardingDraft, 'id'
 }
 
 export interface DraftBrandInput {
-  /** A starter palette id; the site wears its template's colors until one is chosen. */
+  /** A starter palette id; the site wears the default colors until one is chosen. */
   paletteStarter: string | null
   fontPreset: string | null
   /** How the uploaded logo is shown: original, square or circle. */

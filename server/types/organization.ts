@@ -5,7 +5,8 @@ import type { CurrencyCode } from '~/shared/currencies'
 import type { OrganizationFontPreset } from '~/shared/organization-fonts'
 import type { SitePalette, SitePalettePatch } from '~/shared/site-palette'
 import type { LogoPresentation } from '~/shared/media-placement-contract'
-import type { PublicCompliance } from '~/types/blawby'
+import type { SiteRecipe } from '~/shared/site-recipe'
+import type { PublicCompliance } from '~/types/public-site'
 
 export type { CurrencyCode }
 
@@ -39,11 +40,12 @@ export interface OrganizationSettings {
   address_visibility?: PublicCompliance['address_visibility']
   /** What the site renders: its own palette, or its template's. Null on the platform template, whose palette is fixed. */
   palette: SitePalette | null
-  palette_source: 'custom' | 'template' | null
+  palette_source: 'custom' | 'default' | null
   font_preset: OrganizationFontPreset
-  button_shape?: 'pill' | 'rounded' | 'sharp'
-  button_casing?: 'uppercase' | 'none'
-  heading_casing?: 'uppercase' | 'none'
+  button_shape?: SiteRecipe['button_shape']
+  button_casing?: SiteRecipe['button_casing']
+  button_color?: SiteRecipe['button_color']
+  heading_casing?: SiteRecipe['heading_casing']
   default_currency: CurrencyCode
   /** The business's reporting clock: the day boundaries of its analytics. */
   timezone: string
@@ -71,9 +73,10 @@ export interface UpdateOrganizationSettingsRequest {
   font_preset?: OrganizationFontPreset
   default_currency?: CurrencyCode
   timezone?: string
-  button_shape?: 'pill' | 'rounded' | 'sharp'
-  button_casing?: 'uppercase' | 'none'
-  heading_casing?: 'uppercase' | 'none'
+  button_shape?: SiteRecipe['button_shape']
+  button_casing?: SiteRecipe['button_casing']
+  button_color?: SiteRecipe['button_color']
+  heading_casing?: SiteRecipe['heading_casing']
   press_email?: string
   partnerships_email?: string
   catering_email?: string

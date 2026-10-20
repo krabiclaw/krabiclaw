@@ -38,12 +38,12 @@
       v-else-if="mode === 'static-shell'"
       :static-nav-items="staticNavItems"
     />
-    <LazyPerfTextModeSayaHeader v-else-if="mode === 'saya-header'" />
-    <LazyPerfTextModeSayaFooter v-else-if="mode === 'saya-footer'" />
-    <LazyPerfTextModeSayaShell v-else-if="mode === 'saya-shell'" />
-    <LazyPerfTextModeSayaStaticShell
-      v-else-if="mode === 'saya-static-shell'"
-      :saya-static-nav-items="sayaStaticNavItems"
+    <LazyPerfTextModeTenantHeader v-else-if="mode === 'tenant-header'" />
+    <LazyPerfTextModeTenantFooter v-else-if="mode === 'tenant-footer'" />
+    <LazyPerfTextModeTenantShell v-else-if="mode === 'tenant-shell'" />
+    <LazyPerfTextModeTenantStaticShell
+      v-else-if="mode === 'tenant-static-shell'"
+      :tenant-static-nav-items="tenantStaticNavItems"
     />
     <LazyPerfTextModeIcons
       v-else-if="mode === 'simple-icons'"
@@ -54,7 +54,7 @@
     <LazyPerfTextModeI18n v-else-if="mode === 'text-with-i18n'" />
     <LazyPerfTextModeAnalytics v-else-if="mode === 'text-with-analytics-plugin'" />
     <LazyPerfTextModeLayout v-else-if="mode === 'text-with-layout'" />
-    <LazyPerfTextModeSayaCss v-else-if="mode === 'text-with-saya-css'" />
+    <LazyPerfTextModeTenantCss v-else-if="mode === 'text-with-tenant-css'" />
   </main>
 </template>
 
@@ -76,10 +76,10 @@ const modes = new Set([
   'icon-placeholders',
   'platform-shell',
   'static-shell',
-  'saya-header',
-  'saya-footer',
-  'saya-shell',
-  'saya-static-shell',
+  'tenant-header',
+  'tenant-footer',
+  'tenant-shell',
+  'tenant-static-shell',
   'simple-icons',
   'text-no-icons',
   'text-with-one-icon',
@@ -87,7 +87,7 @@ const modes = new Set([
   'text-with-i18n',
   'text-with-analytics-plugin',
   'text-with-layout',
-  'text-with-saya-css',
+  'text-with-tenant-css',
 ])
 const mode = computed(() => {
   const requestedMode = Array.isArray(route.query.mode) ? route.query.mode[0] : route.query.mode
@@ -137,7 +137,7 @@ const iconModeVariants = {
   },
   'simple-icons': {
     heading: 'Simple Icons render test',
-    description: 'This mode renders the social icon collection used by Saya footer social links.',
+    description: 'This mode renders the social icon collection used by tenant footer social links.',
     ariaLabel: 'Simple Icons render test',
     renderMode: 'icons',
     icons: simpleIcons,
@@ -151,7 +151,7 @@ const staticNavItems = [
   { label: 'Docs', to: '/docs' },
   { label: 'Blog', to: '/blog' },
 ]
-const sayaStaticNavItems = [
+const tenantStaticNavItems = [
   { label: 'Menu', to: '/menu' },
   { label: 'Reservations', to: '/reservations' },
   { label: 'Experiences', to: '/experiences' },
@@ -325,7 +325,7 @@ li {
   font-size: 14px;
 }
 
-.dev-perf-saya-css-frame {
+.dev-perf-tenant-css-frame {
   margin-top: 18px;
   padding: 24px;
   border: 1px solid #e5e7eb;

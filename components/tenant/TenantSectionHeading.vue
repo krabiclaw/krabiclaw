@@ -9,7 +9,7 @@
 </template>
 
 <script setup lang="ts">
-import { blawbySplitAccent } from '~/types/blawby'
+import { splitAccent } from '~/utils/tenant-page-block-data'
 
 const props = withDefaults(defineProps<{
   title: string
@@ -26,5 +26,5 @@ const props = withDefaults(defineProps<{
   tag: 'h2',
 })
 
-const split = computed(() => blawbySplitAccent(props.title, props.accent))
+const split = computed(() => splitAccent(props.title, props.accent))
 </script>

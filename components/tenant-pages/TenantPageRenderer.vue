@@ -157,7 +157,7 @@
               <img v-if="gridItemImage(item)" :src="gridItemImage(item)!.url" :alt="gridItemImage(item)!.alt" class="mb-5 aspect-[4/3] w-full rounded-xl object-cover">
               <p v-if="item.value" class="text-3xl font-bold text-primary">{{ item.value }}</p>
               <h3 v-if="item.title" class="text-lg font-semibold">{{ item.title }}</h3>
-              <span v-if="item.featured" class="mt-2 inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">{{ t('saya.posts.featured') }}</span>
+              <span v-if="item.featured" class="mt-2 inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">{{ t('site.posts.featured') }}</span>
               <p v-if="item.description || item.address" class="mt-2 text-sm leading-6 text-muted">{{ item.description }}<br v-if="item.description && item.address">{{ item.address }}</p>
               <TenantPageButton v-if="item.url && itemLabel(item)" class="mt-4" :label="itemLabel(item)" :url="item.url" />
             </article>
@@ -212,22 +212,14 @@ import type { TenantPageBlock, TenantPageHowToStep } from '~/utils/tenant-page-b
 import type { Component } from 'vue'
 import type { PublicTemplateSlug } from '~/utils/template-registry'
 import { tenantPageBlockPresentation } from '~/utils/tenant-page-presentation'
-import { blawbyHeroProseBlockId } from '~/types/blawby'
+import { overviewProseBlockId } from '~/utils/tenant-page-block-data'
 import { resolveSocialImageUrl } from '~/utils/social-metadata'
 import ContentVideoEmbed from '~/components/content/ContentVideoEmbed.vue'
 
-const props = withDefaults(defineProps<{ page: PublicTenantPage; template?: PublicTemplateSlug }>(), {
-  template: undefined,
-})
+const props = defineProps<{ page: PublicTenantPage }>()
 
-/**
- * Which template's presentations apply. The prop wins so a route may render a
- * page for a template other than the host's — pages/contact/index.vue renders a
- * Saya section on a Blawby host — and the resolved template is the default.
- */
-const { organization: tenantOrganization } = useTenantOrganization()
-const { template: resolvedTemplate } = tenantOrganization
-const template = computed<PublicTemplateSlug>(() => props.template ?? resolvedTemplate.slug)
+const { template: resolvedTemplate } = useTenantOrganization().organization
+const template = computed<PublicTemplateSlug>(() => resolvedTemplate.slug)
 const platformHome = computed(() => template.value === 'platform' && props.page.path === '/')
 
 function presentationOf(block: TenantPageBlock): Component | null {
@@ -244,7 +236,7 @@ const { t } = useI18n()
  * twice: once beside the pictures and once in a band below them.
  */
 const renderedBlocks = computed(() => {
-  const absorbed = template.value === 'blawby' ? blawbyHeroProseBlockId(props.page) : null
+  const absorbed = template.value === 'platform' ? null : overviewProseBlockId(props.page)
   return absorbed ? props.page.blocks.filter(block => block.id !== absorbed) : props.page.blocks
 })
 
@@ -253,7 +245,7 @@ const renderedBlocks = computed(() => {
  * the space around it. A page whose template draws bands does not: each band
  * carries its own, and the outer padding left a gap above the first one.
  */
-const readingColumn = computed(() => template.value === 'saya' && !renderedBlocks.value.some(presentationOf))
+const readingColumn = computed(() => template.value !== 'platform' && !renderedBlocks.value.some(presentationOf))
 
 type GridItem = { id?: string; title?: string; description?: string; address?: string; value?: string; featured?: boolean; media?: Array<{ slot?: string; public_url?: string | null; thumbnail_url?: string | null; alt_text?: string | null; kind?: string | null }>; label?: string; labelKey?: string; url?: string; amount?: string }
 
@@ -313,7 +305,7 @@ function gridTitle(block: TenantPageBlock): string {
   const title = text(block.data.title)
   if (title || block.type !== 'product_grid') return title
   const items = asItems(block.data.items)
-  return items.length && items.every(item => item.featured) ? t('saya.posts.featured') : ''
+  return items.length && items.every(item => item.featured) ? t('site.posts.featured') : ''
 }
 
 /**

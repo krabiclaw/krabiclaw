@@ -67,32 +67,32 @@
   <!-- Standard Feature Cards Grid -->
   <section
     v-else-if="features.length"
-    :class="isBlawby ? 'relative bg-[var(--blawby-accent-200)] pb-16 pt-4 sm:pb-16 sm:pt-4 lg:pb-16' : 'relative py-16'"
+    class="relative py-16"
     data-parity-section="features"
   >
-    <div :class="isBlawby ? 'blawby-container' : 'tenant-container'">
+    <div class="tenant-container">
       <div v-if="heading || kicker" class="mb-12 max-w-2xl">
         <p v-if="kicker" class="tenant-kicker mb-4">{{ kicker }}</p>
         <h2 v-if="heading" class="tenant-display-md text-highlighted">{{ heading }}</h2>
       </div>
-      <div class="relative z-20 mt-4 grid gap-8 sm:grid-cols-2 lg:grid-cols-3" :class="isBlawby ? 'gap-10' : ''">
+      <div class="relative z-20 mt-4 grid gap-8 sm:grid-cols-2 lg:grid-cols-3">
         <article
           v-for="(feature, index) in features"
           :key="index"
-          :class="isBlawby ? 'relative h-full rounded-2xl bg-elevated p-6 shadow-xl shadow-slate-900/10' : 'relative h-full rounded-2xl border border-default bg-elevated p-8 shadow-sm'"
+          class="relative h-full rounded-2xl border border-default bg-elevated p-8 shadow-sm"
         >
-          <div v-if="feature.media[0]?.public_url" :class="isBlawby ? 'size-16 rounded-lg' : 'size-14 rounded-lg mb-6'">
+          <div v-if="feature.media[0]?.public_url" class="mb-6 size-14 rounded-lg">
             <img :src="feature.media[0].public_url!" :alt="feature.title" width="64" height="64" loading="lazy" class="size-full rounded object-cover">
           </div>
-          <TenantFeatureIcon v-else-if="feature.icon && !isBlawby" :name="feature.icon" class="size-8 text-primary mb-6" />
+          <TenantFeatureIcon v-else-if="feature.icon" :name="feature.icon" class="mb-6 size-8 text-primary" />
           <h3 class="mt-4 tenant-display text-xl font-bold text-highlighted">
             {{ feature.title }}
           </h3>
-          <TenantRichText v-if="feature.body" unstyled class="prose prose-sm max-w-none text-default" :class="isBlawby ? 'mt-4 text-sm' : 'mt-3 text-sm text-muted'" :content="feature.body" />
-          <p v-else-if="feature.description" class="text-default" :class="isBlawby ? 'mt-4 text-sm' : 'mt-3 text-sm leading-relaxed text-muted'">{{ feature.description }}</p>
+          <TenantRichText v-if="feature.body" unstyled class="prose prose-sm mt-3 max-w-none text-sm text-default" :content="feature.body" />
+          <p v-else-if="feature.description" class="mt-3 text-sm leading-relaxed text-muted">{{ feature.description }}</p>
         </article>
       </div>
-      <div v-if="ctaLabel && ctaUrl" :class="isBlawby ? 'mt-10 flex justify-center' : 'mt-12 flex justify-center'">
+      <div v-if="ctaLabel && ctaUrl" class="mt-12 flex justify-center">
         <TenantButton :to="ctaUrl">{{ ctaLabel }}</TenantButton>
       </div>
     </div>
@@ -114,9 +114,6 @@ const ctaUrl = computed(() => {
   const url = blockText(props.block.data.cta_url)
   return url && isInternalRoute(url) ? localePath(url) : url
 })
-
-const { organization } = useTenantOrganization()
-const isBlawby = computed(() => organization.template?.slug === 'blawby' || organization.vertical === 'service')
 
 const isArticles = computed(() => blockText(props.block.data.source) === 'organization_posts' || props.page.recipe === 'blog')
 

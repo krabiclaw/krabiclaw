@@ -20,10 +20,10 @@
       :guest-email="confirmation.guestEmail"
     >
       <template #title>
-        {{ confirmation.status === 'cancelled' ? t('saya.reservation_cancel.cancelled_title') : resCopy.thankYouLabel(confirmation.guestName) }}
+        {{ confirmation.status === 'cancelled' ? t('site.reservation_cancel.cancelled_title') : resCopy.thankYouLabel(confirmation.guestName) }}
       </template>
       <template #subtitle>
-        {{ confirmation.status === 'cancelled' ? t('saya.reservation_cancel.cancelled_desc', { date: readableDate }) : resCopy.confirmationMessage(
+        {{ confirmation.status === 'cancelled' ? t('site.reservation_cancel.cancelled_desc', { date: readableDate }) : resCopy.confirmationMessage(
           confirmation.guests,
           Number(confirmation.guests) === 1 ? resCopy.guestLabel : resCopy.guestsLabelPlural,
           readableDate,
@@ -72,7 +72,7 @@ const justCopied = ref(false)
 const confirmation = ref<BookingConfirmationData | null>(null)
 const pending = ref(true)
 const loadError = ref<string | null>(null)
-const receiptTitle = computed(() => t(confirmation.value?.status === 'cancelled' ? 'saya.reservation_cancel.cancelled_title' : 'reservations.confirmed'))
+const receiptTitle = computed(() => t(confirmation.value?.status === 'cancelled' ? 'site.reservation_cancel.cancelled_title' : 'reservations.confirmed'))
 
 // One instant plus one zone, read in the location's own zone — the guest sees
 // the hour the table is held, wherever they open the page.
@@ -149,7 +149,7 @@ async function share() {
 useSocialMetadata(() => ({
   path: localePath('/reservations/confirmed'),
   title: receiptTitle.value,
-  description: confirmation.value?.status === 'cancelled' ? t('saya.reservation_cancel.cancelled_desc', { date: readableDate.value }) : t('booking.confirmed_message'),
+  description: confirmation.value?.status === 'cancelled' ? t('site.reservation_cancel.cancelled_desc', { date: readableDate.value }) : t('booking.confirmed_message'),
   socialImage: null,
   discoverability: 'private',
 }))

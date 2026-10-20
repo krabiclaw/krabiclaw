@@ -222,12 +222,12 @@ export function useSessionBooking(input: MaybeRefOrGetter<SessionBookingContext>
     const session = selectedSession.value
     if (submitting.value) return
     if (!session) {
-      bookingError.value = t('saya.experience_detail.choose_time')
+      bookingError.value = t('site.experience_detail.choose_time')
       bookingStep.value = 1
       return
     }
     if (!selectedVariantId.value) {
-      bookingError.value = t('saya.product_detail.choose_option')
+      bookingError.value = t('site.product_detail.choose_option')
       bookingStep.value = 1
       return
     }

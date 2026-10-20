@@ -1085,7 +1085,7 @@ export async function notifyContactSubmitted(
     organizationName: restaurant, consentAcknowledged: Boolean(opts.consentAcknowledged), replyUrl: inboxUrl,
   })
   const guest = await guestPresentation(db, opts)
-  const subjectLabel = opts.subject ? platformLocale(guest.locale)!.messages[`saya.contact_page.${opts.subject}`] ?? opts.subject : null
+  const subjectLabel = opts.subject ? platformLocale(guest.locale)!.messages[`site.contact_page.${opts.subject}`] ?? opts.subject : null
   const guestMessage = guestContactReceivedMessage({
     ...guest,
     accountUrl: guestAccountUrl(env.NUXT_PUBLIC_PLATFORM_DOMAIN!, '/signup', opts.email),

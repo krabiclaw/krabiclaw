@@ -799,7 +799,7 @@ async function loadPublicPageSource(
     options.signal?.throwIfAborted();
     const loadedBlocks = await getContentBlocksForDocument(db, String(postRow.id));
     const contentBlocks = loadedBlocks
-      ? await attachPageQa(db, organizationId, tenantBlogPostPath({ themeId: organization.theme_id, vertical: organization.vertical }, String(postRow.source_slug)), loadedBlocks, localizedLocale ?? 'en')
+      ? await attachPageQa(db, organizationId, tenantBlogPostPath(String(postRow.source_slug)), loadedBlocks, localizedLocale ?? 'en')
       : loadedBlocks
     blogPost = (await localizeArticleCategories(env, db, orgId, localizedLocale ?? 'en',
       [attachArticleCategory(attachCoverMedia({ ...postRow, content_blocks: contentBlocks }))], publicLocalizations))[0]!;

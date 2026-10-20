@@ -18,7 +18,7 @@
       </div>
       <TenantButton v-if="canOrderExternally" class="shrink-0" :href="product.order_url!" target="_blank" rel="noopener noreferrer" @click="recordExternalOrderClick">{{ externalActionLabel }}</TenantButton>
       <TenantButton v-else-if="canEnquire" class="shrink-0" :to="enquiryPath">
-        {{ t('saya.experience_detail.enquire') }}
+        {{ t('site.experience_detail.enquire') }}
       </TenantButton>
       <TenantButton v-else class="shrink-0" control-id="product-booking-toggle" @click="openBooking">
         {{ bookingLabel }}
@@ -34,7 +34,7 @@
       <div v-if="booking || product.order_url || isStay">
         <!-- Stays Airbnb-style header: title & rating/location above the photo mosaic -->
         <header v-if="isStay" class="mb-6">
-          <h1 class="saya-display text-2xl font-semibold text-default sm:text-3xl lg:text-4xl">{{ displayTitle }}</h1>
+          <h1 class="tenant-display text-2xl font-semibold text-default sm:text-3xl lg:text-4xl">{{ displayTitle }}</h1>
           <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
             <template v-if="averageRating">
               <span class="inline-flex items-center gap-1 font-semibold text-default">
@@ -55,8 +55,8 @@
         <MediaGallery v-if="galleryItems.length" :items="galleryItems" :title="displayTitle" />
 
         <header v-if="!isStay" class="mx-auto mt-10 max-w-3xl text-center" :class="galleryItems.length ? 'lg:mt-0' : undefined">
-          <p class="saya-kicker mb-3">{{ collectionName }}</p>
-          <h1 class="saya-display-md text-3xl text-default sm:text-4xl lg:text-5xl">{{ displayTitle }}</h1>
+          <p class="tenant-kicker mb-3">{{ collectionName }}</p>
+          <h1 class="tenant-display-md text-3xl text-default sm:text-4xl lg:text-5xl">{{ displayTitle }}</h1>
           <p v-if="tagline" class="mx-auto mt-4 max-w-2xl text-base text-muted sm:text-lg">{{ tagline }}</p>
           <HostedBy v-if="booking" class="mt-5 justify-center" :organization-id="organizationId" :product-id="product.id" :slug="product.slug" :session-id="bookingController.selectedSession.value?.id" />
           <ProductVariantPrices v-if="!booking && !isStay" :product="product" :location-ids="[location?.id ?? null]" :currency="currency" class="mx-auto mt-6 max-w-xl text-base" />
@@ -98,7 +98,7 @@
 
         <div id="consultations" class="grid scroll-mt-32 gap-10 lg:grid-cols-[1fr_380px] lg:items-start" :class="isStay ? 'mt-8' : 'mt-14'">
         <div class="min-w-0">
-          <p v-if="!canBook && !canEnquire && !canOrderExternally" role="status" class="rounded-xl border border-default bg-elevated p-5 text-muted lg:hidden">{{ scopeRequired ? t('booking.choose_location') : vertical === 'service' && !offer ? t('booking.price_unavailable_contact') : t('saya.common.temporarily_unavailable') }}</p>
+          <p v-if="!canBook && !canEnquire && !canOrderExternally" role="status" class="rounded-xl border border-default bg-elevated p-5 text-muted lg:hidden">{{ scopeRequired ? t('booking.choose_location') : vertical === 'service' && !offer ? t('booking.price_unavailable_contact') : t('site.common.temporarily_unavailable') }}</p>
 
           <!-- Airbnb's overview under the photos: what kind of place, where, and its size. -->
           <div v-if="isStay" class="pb-6">
@@ -134,7 +134,7 @@
           </div>
 
           <section v-if="(product.description || stayDescriptionDetails.length)" class="border-t border-default pt-8" data-testid="product-description">
-            <h2 v-if="vertical !== 'service'" class="saya-display text-2xl text-default sm:text-3xl">{{ isStay ? t('stay.about_this_place') : t('saya.experience_detail.what_youll_do') }}</h2>
+            <h2 v-if="vertical !== 'service'" class="tenant-display text-2xl text-default sm:text-3xl">{{ isStay ? t('stay.about_this_place') : t('site.experience_detail.what_youll_do') }}</h2>
             <!-- A long listing opens on its first lines, as Airbnb's does; the rest is one press away. -->
             <div :class="descriptionClamped ? 'max-h-48 overflow-hidden [mask-image:linear-gradient(to_bottom,black_60%,transparent)]' : undefined">
               <p v-if="product.description" class="mt-4 text-base leading-relaxed text-muted sm:text-lg" :class="isStay ? 'whitespace-pre-wrap break-words' : 'whitespace-pre-line'" :data-testid="isStay ? 'stay-description-listing-description' : undefined">{{ product.description }}</p>
@@ -150,7 +150,7 @@
 
           <!-- What this place offers (Amenities) -->
           <section v-if="isStay && stayAmenitiesList.length" class="mt-10 border-t border-default pt-8">
-            <h2 class="saya-display text-2xl text-default sm:text-3xl">{{ t('stay.what_this_place_offers') }}</h2>
+            <h2 class="tenant-display text-2xl text-default sm:text-3xl">{{ t('stay.what_this_place_offers') }}</h2>
             <div class="mt-5 grid grid-cols-2 gap-4">
               <div v-for="amenity in stayAmenitiesList.slice(0, AMENITIES_SHOWN)" :key="amenity.code" class="flex items-center gap-3">
                 <UIcon :name="amenity.icon" class="size-5 shrink-0 text-muted" aria-hidden="true" />
@@ -183,21 +183,21 @@
                the booking card instead, as Airbnb's do. -->
           <section v-if="canBook && !enquiryOnly && !isStay" class="border-t border-default pt-8 lg:hidden">
             <div class="flex flex-wrap items-baseline justify-between gap-4">
-              <h2 class="saya-display text-2xl text-default sm:text-3xl">{{ t('saya.experience_detail.upcoming_availability') }}</h2>
+              <h2 class="tenant-display text-2xl text-default sm:text-3xl">{{ t('site.experience_detail.upcoming_availability') }}</h2>
               <TenantButton v-if="upcomingSessions.length" variant="ghost" control-id="product-booking-toggle" @click="openBooking">
-                {{ t('saya.experience_detail.see_all_dates') }} →
+                {{ t('site.experience_detail.see_all_dates') }} →
               </TenantButton>
             </div>
             <BookingTimezoneSelect v-if="allowTimezoneSelection" :model-value="bookingTimezone" :options="timezoneOptions" class="mt-5 max-w-sm" @update:model-value="guestTimezone = $event" />
             <p v-if="bookingError" role="alert" class="mt-4 text-sm text-error">{{ bookingError }}</p>
             <UpcomingSessions v-else-if="upcomingSessions.length" class="mt-5 grid gap-3 space-y-0! sm:grid-cols-2" :sessions="upcomingSessions" :day-label="sessionDayLabel" :time-label="sessionTimeLabel" :pick-label="sessionPickLabel" control-id="product-booking-toggle" :show-remaining="vertical !== 'service'" @pick="openBookingAt" />
-            <p v-else-if="sessionsPending" class="mt-4 text-sm text-muted">{{ t('saya.experience_detail.processing') }}</p>
-            <p v-else class="mt-4 text-sm text-muted">{{ t('saya.experience_detail.no_availability', { count: PUBLIC_BOOKING_WINDOW_DAYS }) }}</p>
+            <p v-else-if="sessionsPending" class="mt-4 text-sm text-muted">{{ t('site.experience_detail.processing') }}</p>
+            <p v-else class="mt-4 text-sm text-muted">{{ t('site.experience_detail.no_availability', { count: PUBLIC_BOOKING_WINDOW_DAYS }) }}</p>
           </section>
 
           <section v-if="includedItems.length || whatToBring.length" class="mt-10 grid gap-8 border-t border-default pt-10 sm:grid-cols-2">
             <div v-if="includedItems.length">
-              <h2 class="saya-display text-2xl text-default sm:text-3xl">{{ t('saya.experience_detail.included') }}</h2>
+              <h2 class="tenant-display text-2xl text-default sm:text-3xl">{{ t('site.experience_detail.included') }}</h2>
               <ul class="mt-4 space-y-2">
                 <li v-for="item in includedItems" :key="item" class="flex items-start gap-2 text-sm leading-6 text-muted">
                   <TenantIcon name="check-circle" class="mt-1 size-4 shrink-0 text-primary" />{{ item }}
@@ -205,7 +205,7 @@
               </ul>
             </div>
             <div v-if="whatToBring.length">
-              <h2 class="saya-display text-2xl text-default sm:text-3xl">{{ t('saya.experience_detail.what_to_bring') }}</h2>
+              <h2 class="tenant-display text-2xl text-default sm:text-3xl">{{ t('site.experience_detail.what_to_bring') }}</h2>
               <ul class="mt-4 space-y-2">
                 <li v-for="item in whatToBring" :key="item" class="flex items-start gap-2 text-sm leading-6 text-muted">
                   <TenantIcon name="shopping-bag" class="mt-1 size-4 shrink-0 text-primary" />{{ item }}
@@ -215,7 +215,7 @@
           </section>
 
           <section v-if="location" class="mt-10 border-t border-default pt-10">
-            <h2 class="saya-display text-2xl text-default sm:text-3xl">{{ isStay ? t('stay.where_youll_be') : t('saya.experience_detail.where_youll_meet') }}</h2>
+            <h2 class="tenant-display text-2xl text-default sm:text-3xl">{{ isStay ? t('stay.where_youll_be') : t('site.experience_detail.where_youll_meet') }}</h2>
             <div class="mt-5 overflow-hidden rounded-xl border border-default bg-elevated">
               <div class="flex items-start gap-4 p-6">
                 <TenantIcon name="map-pin" class="mt-0.5 size-5 shrink-0 text-primary" />
@@ -231,7 +231,7 @@
                     rel="noopener noreferrer"
                     class="mt-2 inline-flex items-center gap-1 text-xs text-primary hover:underline"
                   >
-                    {{ t('saya.experience_detail.open_in_maps') }}
+                    {{ t('site.experience_detail.open_in_maps') }}
                     <TenantIcon name="arrow-top-right-on-square" class="size-3" />
                   </a>
                 </div>
@@ -251,7 +251,7 @@
           <WhoYouMeet v-if="booking || isStay" class="mt-10" :organization-id="organizationId" :product-id="product.id" :slug="product.slug" :session-id="bookingController.selectedSession.value?.id" :contact-to="enquiryPath" />
 
           <section v-if="thingsToKnow.length" class="mt-10 border-t border-default pt-10">
-            <h2 class="saya-display text-2xl text-default sm:text-3xl">{{ t('saya.experience_detail.things_to_know') }}</h2>
+            <h2 class="tenant-display text-2xl text-default sm:text-3xl">{{ t('site.experience_detail.things_to_know') }}</h2>
             <div class="mt-5 grid gap-x-10 gap-y-6 sm:grid-cols-2" :class="isStay ? 'lg:grid-cols-3' : undefined">
               <div v-for="detail in thingsToKnow" :key="detail.key">
                 <h3 class="text-sm font-semibold text-default">{{ detail.label }}</h3>
@@ -269,11 +269,11 @@
           <div class="space-y-5 rounded-2xl border border-default bg-elevated p-6 shadow-xl">
             <div v-if="priceLabel" class="flex items-center justify-between gap-4">
               <div>
-                <span class="saya-display text-2xl font-bold tabular-nums text-default">
-                  <span v-if="compareAtLabel" class="mr-2 text-base text-muted line-through">{{ compareAtLabel }}</span>{{ isStay ? priceLabel : enquiryOnly || (vertical === 'service' && sellableVariants.length === 1) ? priceLabel : t('saya.experience_detail.from_price', { price: priceLabel }) }}
+                <span class="tenant-display text-2xl font-bold tabular-nums text-default">
+                  <span v-if="compareAtLabel" class="mr-2 text-base text-muted line-through">{{ compareAtLabel }}</span>{{ isStay ? priceLabel : enquiryOnly || (vertical === 'service' && sellableVariants.length === 1) ? priceLabel : t('site.experience_detail.from_price', { price: priceLabel }) }}
                 </span>
                 <span v-if="isStay" class="text-sm font-normal text-muted"> / night</span>
-                <p v-if="!enquiryOnly && vertical !== 'service' && !isStay" class="mt-1 text-sm text-muted">{{ t('saya.experience_detail.per_person') }}</p>
+                <p v-if="!enquiryOnly && vertical !== 'service' && !isStay" class="mt-1 text-sm text-muted">{{ t('site.experience_detail.per_person') }}</p>
               </div>
               <div v-if="isStay && averageRating" class="flex items-center gap-1 text-xs font-semibold text-default">
                 <TenantIcon name="star" solid class="size-3.5" />
@@ -307,7 +307,7 @@
             <div v-if="!cardListsSessions" class="pt-1">
               <TenantButton v-if="canOrderExternally" block :href="product.order_url!" target="_blank" rel="noopener noreferrer" @click="recordExternalOrderClick">{{ externalActionLabel }}</TenantButton>
               <TenantButton v-else-if="canEnquire" block :to="enquiryPath">
-                {{ t('saya.experience_detail.enquire') }}
+                {{ t('site.experience_detail.enquire') }}
               </TenantButton>
               <TenantButton v-else-if="canBook" block size="lg" control-id="product-booking-toggle" class="w-full font-semibold" @click="openBooking">
                 {{ bookingLabel }}
@@ -332,16 +332,16 @@
               <BookingTimezoneSelect v-if="allowTimezoneSelection" :model-value="bookingTimezone" :options="timezoneOptions" @update:model-value="guestTimezone = $event" />
               <p v-if="bookingError" role="alert" class="text-sm text-error">{{ bookingError }}</p>
               <UpcomingSessions v-else-if="upcomingSessions.length" :sessions="upcomingSessions" :day-label="sessionDayLabel" :time-label="sessionTimeLabel" :pick-label="sessionPickLabel" control-id="product-booking-toggle" :show-remaining="vertical !== 'service'" @pick="openBookingAt" />
-              <p v-else-if="sessionsPending" class="text-sm text-muted">{{ t('saya.experience_detail.processing') }}</p>
-              <p v-else class="text-sm text-muted">{{ t('saya.experience_detail.no_availability', { count: PUBLIC_BOOKING_WINDOW_DAYS }) }}</p>
+              <p v-else-if="sessionsPending" class="text-sm text-muted">{{ t('site.experience_detail.processing') }}</p>
+              <p v-else class="text-sm text-muted">{{ t('site.experience_detail.no_availability', { count: PUBLIC_BOOKING_WINDOW_DAYS }) }}</p>
               <TenantButton v-if="upcomingSessions.length" variant="ghost" block control-id="product-booking-toggle" @click="openBooking">
-                {{ t('saya.experience_detail.see_all_dates') }}
+                {{ t('site.experience_detail.see_all_dates') }}
               </TenantButton>
             </template>
 
             <p v-if="vertical === 'service' && !isStay && !product.order_url" class="text-sm text-muted">{{ booking?.confirmation_mode === 'review' ? t('booking.review_notice') : t('booking.instant_notice') }}</p>
             <p v-if="!canBook && !canEnquire && !canOrderExternally" class="rounded-lg bg-default px-4 py-3 text-center text-sm font-semibold text-muted">
-              {{ scopeRequired ? t('booking.choose_location') : vertical === 'service' && !offer ? t('booking.price_unavailable') : t('saya.common.temporarily_unavailable') }}
+              {{ scopeRequired ? t('booking.choose_location') : vertical === 'service' && !offer ? t('booking.price_unavailable') : t('site.common.temporarily_unavailable') }}
             </p>
           </div>
         </div>
@@ -358,8 +358,8 @@
             >
           </div>
           <div class="py-2">
-            <p class="saya-kicker">{{ collectionName }}</p>
-            <h1 class="saya-display saya-italic mt-3 text-3xl sm:text-4xl lg:text-5xl text-default leading-tight">{{ product.name }}</h1>
+            <p class="tenant-kicker">{{ collectionName }}</p>
+            <h1 class="tenant-display tenant-italic mt-3 text-3xl sm:text-4xl lg:text-5xl text-default leading-tight">{{ product.name }}</h1>
             <p class="mt-2 text-sm sm:text-base text-muted">{{ location?.title ?? organizationName }}</p>
             <ProductVariantPrices :product="product" :location-ids="[location?.id ?? null]" :currency="currency" class="mt-6 text-lg" />
             <div v-if="!offer && priceLabel" class="mt-6 flex items-baseline gap-3 text-2xl font-semibold tabular-nums">
@@ -367,9 +367,9 @@
               <span>{{ priceLabel }}</span>
             </div>
             <p v-if="product.description" class="mt-6 text-base sm:text-lg leading-relaxed text-muted">{{ product.description }}</p>
-            <p v-if="!isAvailable" class="mt-6 font-semibold text-muted">{{ t('saya.common.temporarily_unavailable') }}</p>
+            <p v-if="!isAvailable" class="mt-6 font-semibold text-muted">{{ t('site.common.temporarily_unavailable') }}</p>
             <div class="mt-8 flex flex-wrap items-center gap-5">
-              <TenantButton v-if="canEnquire" :to="enquiryPath">{{ t('saya.experience_detail.enquire') }}</TenantButton>
+              <TenantButton v-if="canEnquire" :to="enquiryPath">{{ t('site.experience_detail.enquire') }}</TenantButton>
               <TenantButton
                 v-if="canOrderExternally"
                 :href="product.order_url!"
@@ -398,7 +398,7 @@
            entirely from membership, so every page's body text varies by real
            data and every item in a collection is reachable by internal link. -->
       <section v-if="collectionSiblings.length" class="mt-16 border-t border-default pt-12">
-        <h2 class="saya-display saya-italic text-3xl sm:text-4xl">{{ t('saya.product_detail.more_in_category', { category: collectionName }) }}</h2>
+        <h2 class="tenant-display tenant-italic text-3xl sm:text-4xl">{{ t('site.product_detail.more_in_category', { category: collectionName }) }}</h2>
         <!-- Airbnb's row of cards: the picture, the name and what it costs. -->
         <ul class="mt-6 grid grid-cols-2 gap-x-6 gap-y-8 md:grid-cols-3 lg:grid-cols-4">
           <li v-for="sibling in collectionSiblings" :key="sibling.id">
@@ -408,7 +408,7 @@
               </div>
               <p class="mt-3 font-medium leading-snug">{{ sibling.name }}</p>
               <p v-if="sibling.price" class="mt-0.5 text-sm text-muted">
-                {{ isStay ? t('stay.price_per_night', { price: formatProductMoney(sibling.price, locale) }) : t('saya.experience_detail.from_price', { price: formatProductMoney(sibling.price, locale) }) }}
+                {{ isStay ? t('stay.price_per_night', { price: formatProductMoney(sibling.price, locale) }) : t('site.experience_detail.from_price', { price: formatProductMoney(sibling.price, locale) }) }}
               </p>
             </NuxtLink>
           </li>
@@ -418,7 +418,7 @@
       <!-- The bookable layout already shows every photograph in its gallery;
            this strip is the card layout's only place for them. -->
       <section v-if="!booking && !isStay && product.gallery.length" class="mt-16">
-        <h2 class="saya-display saya-italic text-4xl">{{ t('saya.footer.gallery') }}</h2>
+        <h2 class="tenant-display tenant-italic text-4xl">{{ t('site.footer.gallery') }}</h2>
         <div class="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <img
             v-for="asset in product.gallery"
@@ -542,7 +542,7 @@ const bookingLabel = computed(() => isStay.value
   ? stayBooking.quote.value ? props.stayCheckoutAvailable ? t('stay.reserve') : t('stay.send_enquiry') : t('stay.check_availability')
   : props.vertical === 'service'
     ? props.booking?.confirmation_mode === 'review' ? t('booking.request_appointment') : t('booking.book_appointment')
-    : t('saya.experience_detail.book_now'))
+    : t('site.experience_detail.book_now'))
 
 const staySpecsSummary = computed(() => props.product.stay ? staySpecLabels(props.product.stay, t).join(' · ') : '')
 
@@ -591,15 +591,15 @@ const { trackProductOrder, trackProductView } = useOrganizationConversionTrackin
 const { localePath, t, locale } = useI18n()
 const verticalCopy = computed(() => getVerticalCopy(props.vertical, locale.value))
 const collectionLabel = computed(() => {
-  if (props.vertical === 'service' && (props.pageDocument || !props.location)) return t('blawby.footer.services')
-  if (props.presentation.locationCollectionSegment === 'menu') return t('saya.footer.menu')
-  if (props.presentation.locationCollectionSegment === 'stays') return t('saya.footer.stays')
+  if (props.vertical === 'service' && (props.pageDocument || !props.location)) return t('site.footer.services')
+  if (props.presentation.locationCollectionSegment === 'menu') return t('site.footer.menu')
+  if (props.presentation.locationCollectionSegment === 'stays') return t('site.footer.stays')
   return props.presentation.locationCollectionSegment === 'experiences'
-    ? t('saya.footer.experiences')
-    : t('saya.footer.products')
+    ? t('site.footer.experiences')
+    : t('site.footer.products')
 })
 const breadcrumbs = computed(() => [
-  { to: localePath('/'), label: t('saya.experience_detail.home') },
+  { to: localePath('/'), label: t('site.experience_detail.home') },
   { to: localePath(props.pageDocument ? '/services' : props.presentation.collectionPath), label: collectionLabel.value },
   // A home is its own page, so no branch stands between it and its index.
   ...(props.location && props.presentation.locationCollectionSegment !== 'stays' ? [{ to: localePath(props.presentation.locationCollectionSegment === 'experiences'
@@ -661,7 +661,7 @@ const isAvailable = computed(() =>
   // booking form otherwise asked for an option it had none to offer.
   && (Boolean(props.product.order_url) || sellableVariants.value.length > 0))
 const canOrderExternally = computed(() => isAvailable.value && Boolean(props.product.order_url))
-const externalActionLabel = computed(() => props.product.kind === 'experience' || props.product.kind === 'service' || props.product.kind === 'stay' ? t('saya.experience_detail.book_now') : t('saya.cta.order_now'))
+const externalActionLabel = computed(() => props.product.kind === 'experience' || props.product.kind === 'service' || props.product.kind === 'stay' ? t('site.experience_detail.book_now') : t('site.cta.order_now'))
 const canEnquire = computed(() => props.product.kind !== 'experience' && isAvailable.value && !props.product.order_url && enquiryOnly.value)
 const canBook = computed(() => isStay.value
   ? !props.scopeRequired && isAvailable.value && offer.value !== null
@@ -705,14 +705,14 @@ const factChips = computed(() => {
     chips.push({
       icon: 'clock',
       label: minutes < 60
-        ? t('saya.experience_detail.minutes', { count: minutes })
+        ? t('site.experience_detail.minutes', { count: minutes })
         : rest
-          ? t('saya.experience_detail.hours_minutes', { hours, minutes: rest })
-          : t('saya.experience_detail.hours', { count: hours }),
+          ? t('site.experience_detail.hours_minutes', { hours, minutes: rest })
+          : t('site.experience_detail.hours', { count: hours }),
     })
   }
   if (config.default_capacity && props.vertical !== 'service') {
-    chips.push({ icon: 'user-group', label: t('saya.experience_detail.capacity', { count: config.default_capacity }) })
+    chips.push({ icon: 'user-group', label: t('site.experience_detail.capacity', { count: config.default_capacity }) })
   }
   if (props.vertical === 'service' && !props.product.order_url) chips.push({ icon: 'check-circle', label: config.confirmation_mode === 'review' ? 'Staff review' : 'Instant confirmation' })
   return chips
@@ -773,7 +773,7 @@ function openBooking() {
 /** A label pressed from the keyboard activates the checkbox it names, as a click does. */
 /** A wide product page with dated sessions carries them in its booking card, as Airbnb's experience and service pages do. */
 const cardListsSessions = computed(() => !isStay.value && canBook.value && !enquiryOnly.value && !canOrderExternally.value && !canEnquire.value && Boolean(priceLabel.value))
-const sessionPickLabel = computed(() => props.vertical === 'service' ? t('saya.experience_detail.select_time') : t('saya.experience_detail.book'))
+const sessionPickLabel = computed(() => props.vertical === 'service' ? t('site.experience_detail.select_time') : t('site.experience_detail.book'))
 
 function pressLabel(event: KeyboardEvent) {
   (event.currentTarget as HTMLElement).click()
@@ -800,13 +800,13 @@ const experienceHighlights = computed(() => {
   const cancellation = props.product.details.cancellation_policy
   const recent = [...props.reviews].sort((left, right) => (right.original_review_date ?? right.created_at).localeCompare(left.original_review_date ?? left.created_at))[0]
   return [
-    ...(typeof cancellation === 'string' && cancellation.trim() ? [{ key: 'cancellation', icon: 'calendar-days' as const, title: t('saya.experience_detail.cancellation'), text: cancellation.trim() }] : []),
-    ...(recent ? [{ key: 'review', icon: 'star' as const, title: t('saya.experience_detail.recent_review'), text: `“${recent.content}” — ${recent.author_name}` }] : []),
+    ...(typeof cancellation === 'string' && cancellation.trim() ? [{ key: 'cancellation', icon: 'calendar-days' as const, title: t('site.experience_detail.cancellation'), text: cancellation.trim() }] : []),
+    ...(recent ? [{ key: 'review', icon: 'star' as const, title: t('site.experience_detail.recent_review'), text: `“${recent.content}” — ${recent.author_name}` }] : []),
   ]
 })
 const reviewCountLabel = computed(() => (props.reviews.length === 1
-  ? t('saya.experience_detail.review_count_one')
-  : t('saya.experience_detail.review_count', { count: props.reviews.length })))
+  ? t('site.experience_detail.review_count_one')
+  : t('site.experience_detail.review_count', { count: props.reviews.length })))
 
 /**
  * The attributes the page gives their own place, read by their canonical

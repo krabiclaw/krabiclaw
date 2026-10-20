@@ -78,7 +78,7 @@
         <h2 class="text-base font-semibold text-highlighted">Preview</h2>
         <div class="mt-4 grid gap-3 sm:grid-cols-2">
           <div v-for="mode in SITE_PALETTE_MODES" :key="mode">
-            <div class="saya-theme rounded-lg p-5" :style="previewStyle(mode)" :data-font-template="editor.theme.value" :data-font-preset="editor.form.font_preset" :data-testid="`palette-preview-${mode}`">
+            <div class="tenant-theme rounded-lg p-5" :style="previewStyle(mode)" :data-font-template="editor.theme.value" :data-font-preset="editor.form.font_preset" :data-testid="`palette-preview-${mode}`">
               <p class="text-xs uppercase tracking-wide text-muted">{{ mode }}</p>
               <p class="mt-2 font-[family-name:var(--font-heading)] [font-weight:var(--font-heading-weight)] text-2xl text-highlighted">Welcome in</p>
               <p class="mt-1 text-sm text-default">Fresh plates every evening, by the sea.</p>
@@ -96,7 +96,7 @@
         </div>
       </section>
 
-      <UButton v-if="editor.paletteSource.value === 'custom'" color="neutral" variant="outline" label="Use the template's colors" :loading="editor.saving.value" @click="editor.resetPalette" />
+      <UButton v-if="editor.paletteSource.value === 'custom'" color="neutral" variant="outline" label="Use the default colors" :loading="editor.saving.value" @click="editor.resetPalette" />
     </div>
     <!-- No palette on loaded settings is the platform template; unloaded settings say nothing. -->
     <p v-else-if="editor.theme.value" class="text-base text-muted">KrabiClaw's own site keeps its colors.</p>

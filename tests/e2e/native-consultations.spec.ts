@@ -4,7 +4,8 @@ import { openTenantPage, waitForNuxtHydration } from './helpers'
 import { mcpData, mcpRequest } from './helpers/mcp'
 import { blawbyTestExtraHeaders } from './test-env'
 import type { Product } from '../../server/types/products'
-import type { BlawbyDocumentPayload } from '../../utils/blawby-document-contract'
+import type { PublicTenantPage } from '../../server/utils/public-tenant-pages'
+import type { PublicShellPayload } from '../../utils/public-resource-contracts'
 
 test.use({ timezoneId: 'America/New_York' })
 
@@ -193,11 +194,9 @@ test('native online review uses canonical Products, holds capacity, and releases
     }))).flat()
     expect(storedGallery).toHaveLength(8)
     expect(publishedService.media.filter((media: { slot: string }) => ['cover', 'gallery'].includes(media.slot)).map((media: { asset_id: string }) => media.asset_id)).toEqual(storedGallery.map(media => media.id))
-    const scheduleSource = await request.get('/api/public/blawby/document?recipe=schedule', { headers })
+    const scheduleSource = await request.get('/api/public/pages?path=/schedule', { headers })
     expect(scheduleSource.status(), await scheduleSource.text()).toBe(200)
-    const scheduleDocument: BlawbyDocumentPayload = await scheduleSource.json()
-    expect(scheduleDocument.route.page).toBeTruthy()
-    const authoredSchedule = scheduleDocument.route.page!
+    const authoredSchedule: PublicTenantPage = (await scheduleSource.json()).page
     expect(authoredSchedule.blocks.length).toBeGreaterThan(0)
     await openTenantPage(page, new URL('/schedule', baseURL).href, {})
     const scheduleArticle = page.locator('[data-tenant-page]')
@@ -467,11 +466,14 @@ test('native online review uses canonical Products, holds capacity, and releases
     for (const mode of ['external_url', 'native_disabled', 'native'] as const) {
       const switchMode = await page.request.put(`${editor}/consultation`, { data: { mode } })
       expect(switchMode.status(), await switchMode.text()).toBe(200)
-      const publicDocument = await request.get('/api/public/blawby/document?recipe=schedule', { headers })
+      const publicDocument = await request.get('/api/public/pages?path=/schedule', { headers })
+      const publicShell = await request.get('/api/public/shell', { headers })
+      expect(publicShell.status(), await publicShell.text()).toBe(200)
+      const modeShell: PublicShellPayload = await publicShell.json()
       expect(publicDocument.status(), await publicDocument.text()).toBe(200)
-      const modeDocument: BlawbyDocumentPayload = await publicDocument.json()
-      expect(modeDocument.shell.consultation.mode).toBe(mode)
-      expect(modeDocument.route.page!.blocks).toEqual(authoredSchedule.blocks)
+      const modeDocument: PublicTenantPage = (await publicDocument.json()).page
+      expect(modeShell.consultation!.mode).toBe(mode)
+      expect(modeDocument.blocks).toEqual(authoredSchedule.blocks)
       await page.goto(service.path)
       await expect(page.locator('[data-media-gallery]')).toHaveCount(1)
       await expect(page.locator('[data-block-type="hero"]')).toHaveCount(0)
@@ -480,9 +482,9 @@ test('native online review uses canonical Products, holds capacity, and releases
       await expect(page.locator('#consultations')).toHaveCount(mode === 'native' ? 1 : 0)
       expect(await scheduleBlocks.evaluateAll(elements => elements.map(element => element.getAttribute('data-block-type')))).toEqual(authoredSchedule.blocks.map(block => block.type))
       if (mode === 'external_url') {
-        const externalAction = page.locator('main > div').getByRole('link', { name: modeDocument.shell.consultation.cta_label, exact: true })
+        const externalAction = page.locator('main > div').getByRole('link', { name: modeShell.consultation!.cta_label, exact: true })
         await expect(externalAction).toHaveCount(1)
-        await expect(externalAction).toHaveAttribute('href', modeDocument.shell.consultation.external_url!)
+        await expect(externalAction).toHaveAttribute('href', modeShell.consultation!.external_url!)
       } else if (mode === 'native_disabled') {
         const contactAction = page.locator('main > div').getByRole('link', { name: 'Contact', exact: true })
         await expect(contactAction).toHaveCount(1)

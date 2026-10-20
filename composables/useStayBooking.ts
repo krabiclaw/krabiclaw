@@ -176,7 +176,7 @@ export function useStayBooking(input: MaybeRefOrGetter<StayBookingContext>) {
   const rangeLabel = computed(() => checkIn.value && checkOut.value ? `${dateLabel(checkIn.value)} – ${dateLabel(checkOut.value)}` : '')
   const guestsLabel = computed(() => {
     const guests = adults.value + children.value
-    return `${guests} ${t(guests === 1 ? 'saya.experience_detail.guest' : 'saya.experience_detail.guests')}`
+    return `${guests} ${t(guests === 1 ? 'site.experience_detail.guest' : 'site.experience_detail.guests')}`
   })
   const breakdown = computed(() => quote.value
     ? stayNightlyGroups(quote.value.nightly.map(entry => entry.price_minor)).map(({ price, nights }) => ({ label: t('stay.nightly_line', { price: money(price), nights: nightsLabel(nights) }), amount: money(price * nights) }))

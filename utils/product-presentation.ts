@@ -1,7 +1,7 @@
 import type { Collection, Product, ProductPresentation, ProductSurface, SiteProductSurface } from '~/server/types/products'
 import { normalizeVertical } from '~/utils/vertical-copy'
 import { isMediaCategory, type MediaCategory } from '~/shared/media-placement-contract'
-import { organizationSupportsBlawbyTemplate } from '~/utils/template-registry'
+import { isLegalPracticeSite } from '~/utils/template-registry'
 
 /** Product kind owns its public surface; scheduling is an independent capability. */
 export function isExperience(product: Pick<Product, 'kind'>): boolean {
@@ -61,7 +61,7 @@ export const STAY_PRESENTATION: ProductPresentation = {
 export function catalogNavigation(vertical: string | null | undefined, sections: Partial<Record<ProductSurface, boolean>> | null): Array<{ surface: ProductSurface, path: string, labelKey: string }> {
   const order: ProductSurface[] = ['menu', 'products', 'stays', 'experiences']
   return order.filter(surface => sections?.[surface] === true)
-    .map(surface => ({ surface, path: presentationForSurface(vertical, surface).collectionPath, labelKey: `saya.footer.${surface}` }))
+    .map(surface => ({ surface, path: presentationForSurface(vertical, surface).collectionPath, labelKey: `site.footer.${surface}` }))
 }
 
 /** Where a location's items on one surface are listed. Homes have no branch index; they are listed site-wide. */
@@ -95,10 +95,10 @@ export function parseSiteProductPath(path: string): { surface: SiteProductSurfac
 
 /** The i18n key for a product card's call to action, by the product's own kind. */
 export function productCtaKey(kind: string | null | undefined): string {
-  return kind === 'experience' ? 'saya.common.view_experience'
-    : kind === 'dish' ? 'saya.common.view_dish'
+  return kind === 'experience' ? 'site.common.view_experience'
+    : kind === 'dish' ? 'site.common.view_dish'
       : kind === 'stay' ? 'stay.check_availability'
-        : 'saya.common.view_item'
+        : 'site.common.view_item'
 }
 
 /** The surface this product is read on, and the paths and words that go with it. */
@@ -136,9 +136,9 @@ export function resolveProductPresentation(vertical: string | null | undefined, 
       collectionPath: '/products',
       locationCollectionSegment: 'products',
       productPath: (locationSlug, productSlug) => `/locations/${encodeURIComponent(locationSlug)}/products/${encodeURIComponent(productSlug)}`,
-      collectionLabel: organizationSupportsBlawbyTemplate({ vertical, themeId }) ? 'Services' : 'Products',
-      itemLabel: organizationSupportsBlawbyTemplate({ vertical, themeId }) ? 'Service' : 'Product',
-      itemLabelPlural: organizationSupportsBlawbyTemplate({ vertical, themeId }) ? 'Services' : 'Products',
+      collectionLabel: isLegalPracticeSite({ vertical, themeId }) ? 'Services' : 'Products',
+      itemLabel: isLegalPracticeSite({ vertical, themeId }) ? 'Service' : 'Product',
+      itemLabelPlural: isLegalPracticeSite({ vertical, themeId }) ? 'Services' : 'Products',
       collectionGroupLabel: 'Collection',
       collectionGroupLabelPlural: 'Collections',
       structuredDataType: 'Product',

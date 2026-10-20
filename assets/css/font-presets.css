@@ -4,7 +4,7 @@
   own @font-face rules, imported below and bundled from node_modules, so a build
   fetches nothing: each weight file splits its family into unicode-range slices,
   and a browser downloads a slice only when rendered text uses it, so only the
-  selected preset's files are fetched. Without a preset rule, the theme's own
+  selected preset's files are fetched. Without a preset rule, the Default
   --font-heading and --font-sans apply. Every stack ends with the script
   fallbacks from base.css, so a family without Thai, Vietnamese or Japanese glyphs leaves
   those characters to a font that has them.
@@ -88,17 +88,12 @@
   unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
 }
 
-/* Each template's own heading face: what Default renders. The CMS preview names
-   the template with data-font-template. Platform pages and the dashboard take
+/* The Default heading face, on every customer site. The CMS preview names the
+   site's template with data-font-template. Platform pages and the dashboard take
    theirs from .platform-theme in base.css. */
-.saya-theme,
-[data-font-template="saya"] {
+.tenant-theme,
+[data-font-template="tenant"] {
   --font-heading: "Instrument Serif", var(--font-script-serif), serif;
-  --font-heading-weight: 400;
-}
-.blawby-theme,
-[data-font-template="blawby"] {
-  --font-heading: "Marcellus", var(--font-script-serif), serif;
   --font-heading-weight: 400;
 }
 
@@ -160,4 +155,8 @@
   --font-heading: "Cormorant Garamond", var(--font-script-serif), serif;
   --font-heading-weight: 500;
   --font-sans: "Inter", var(--font-script-sans), sans-serif;
+}
+[data-font-preset="marcellus"] {
+  --font-heading: "Marcellus", var(--font-script-serif), serif;
+  --font-heading-weight: 400;
 }

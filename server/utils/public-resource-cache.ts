@@ -183,28 +183,12 @@ export interface PublicResourceCacheParams {
 const encodeKeyField = (value: string | null | undefined): string =>
   encodeURIComponent(value ?? '').replace(/~/g, '%7E')
 
-export function buildPublicBlawbyDocumentCacheKey(
-  organizationId: string,
-  recipe: string,
-  slug?: string | null,
-  locale?: string,
-): string {
-  return [
-    'public',
-    encodeKeyField(organizationId),
-    'v12',
-    'blawby-document',
-    encodeKeyField(recipe),
-    encodeKeyField(slug),
-    encodeKeyField(locale),
-  ].join('~')
-}
-
 export function buildPublicResourceCacheKey(organizationId: string, params: PublicResourceCacheParams): string {
   return [
     'public',
     encodeKeyField(organizationId),
-    'v12',
+    // v13: payloads name the site's template as tenant or platform.
+    'v13',
     params.contract,
     encodeKeyField(params.page),
     encodeKeyField(params.location),

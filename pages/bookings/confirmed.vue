@@ -18,7 +18,7 @@
       :guest-email="confirmation.guestEmail"
     >
       <template #title>
-        {{ confirmation.status === 'cancelled' ? t('saya.experience_cancel.cancelled_title') : copy.thankYouLabel(confirmation.guestName) }}
+        {{ confirmation.status === 'cancelled' ? t('site.experience_cancel.cancelled_title') : copy.thankYouLabel(confirmation.guestName) }}
       </template>
       <template #subtitle>
         {{ receiptDescription }}
@@ -32,7 +32,7 @@
           {{ copy.callUsLabel(confirmation.contactPhone) }}
         </TenantButton>
         <TenantButton v-if="confirmation.cancelUrl" :to="confirmation.cancelUrl" color="error" variant="ghost">
-          {{ t('saya.experience_cancel.title') }}
+          {{ t('site.experience_cancel.title') }}
         </TenantButton>
       </template>
     </BookingConfirmation>
@@ -71,20 +71,20 @@ const presentation = computed(() => confirmation.value?.productKind ? presentati
 // booking names one, otherwise the site's.
 const browseHref = computed(() => {
   if (!presentation.value) return localePath('/')
-  if (!confirmation.value?.locationId && (template.slug === 'blawby' || confirmation.value?.productKind === 'service')) return localePath('/schedule')
+  if (!confirmation.value?.locationId && (isLegalPractice(organization.vertical) || confirmation.value?.productKind === 'service')) return localePath('/schedule')
   const locationSlug = confirmation.value?.locationSlug
   return localePath(locationSlug
     ? `/locations/${locationSlug}/${presentation.value.locationCollectionSegment}`
     : presentation.value.collectionPath)
 })
 const browseLabel = computed(() => confirmation.value?.productKind === 'experience'
-  ? t('saya.header.experiences')
-  : !confirmation.value?.locationId && (template.slug === 'blawby' || confirmation.value?.productKind === 'service')
+  ? t('site.header.experiences')
+  : !confirmation.value?.locationId && (isLegalPractice(organization.vertical) || confirmation.value?.productKind === 'service')
     ? t('site_pages.schedule')
     : copy.value.reservationExploreLabel)
-const receiptTitle = computed(() => t(confirmation.value?.status === 'cancelled' ? 'saya.experience_cancel.cancelled_title' : confirmation.value?.status === 'pending' ? 'booking.request_received' : 'booking.confirmed'))
+const receiptTitle = computed(() => t(confirmation.value?.status === 'cancelled' ? 'site.experience_cancel.cancelled_title' : confirmation.value?.status === 'pending' ? 'booking.request_received' : 'booking.confirmed'))
 const receiptDescription = computed(() => confirmation.value?.status === 'cancelled'
-  ? t('saya.experience_cancel.cancelled_desc', { date: readableDate.value })
+  ? t('site.experience_cancel.cancelled_desc', { date: readableDate.value })
   : t(confirmation.value?.status === 'pending' ? 'booking.pending_message' : 'booking.confirmed_message'))
 
 onMounted(async () => {
@@ -111,7 +111,7 @@ const readableTime = computed(() => confirmation.value
 const receiptRows = computed(() => {
   if (!confirmation.value) return []
   const rows: Array<{ label: string; value: string }> = []
-  if (confirmation.value.title) rows.push({ label: t('saya.experience_cancel.booking_for'), value: confirmation.value.title })
+  if (confirmation.value.title) rows.push({ label: t('site.experience_cancel.booking_for'), value: confirmation.value.title })
   if (!confirmation.value.locationId) rows.push({ label: copy.value.locationLabel, value: t('booking.online') })
   else if (confirmation.value.locationName) rows.push({ label: copy.value.locationLabel, value: confirmation.value.locationName })
   rows.push({ label: copy.value.dateLabel, value: readableDate.value })

@@ -9,7 +9,7 @@
         :to="localePath(linkTarget)"
         class="mt-4 inline-block border-b border-default pb-1 text-xs uppercase tracking-widest text-default no-underline transition hover:opacity-60"
       >
-        {{ t('saya.common.view_all') }} →
+        {{ t('site.common.view_all') }} →
       </NuxtLink>
     </div>
 
@@ -31,7 +31,7 @@
           <TenantBadgeUnavailable
             v-if="item.unavailable"
             overlay
-            :text="t('saya.common.temporarily_unavailable')"
+            :text="t('site.common.temporarily_unavailable')"
           />
           <img
             :src="item.image"
@@ -46,7 +46,7 @@
         <!-- Card body -->
         <div class="flex flex-1 flex-col p-7">
           <div>
-            <span v-if="item.featured" class="mb-3 inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">{{ t('saya.posts.featured') }}</span>
+            <span v-if="item.featured" class="mb-3 inline-flex rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">{{ t('site.posts.featured') }}</span>
             <p v-if="item.category" class="tenant-kicker mb-3 text-xs">{{ item.category }}</p>
             <p class="tenant-display tenant-italic text-2xl text-default leading-snug">{{ item.name }}</p>
             <p v-if="item.description" class="mt-3 text-sm leading-relaxed text-muted line-clamp-3">{{ item.description }}</p>
@@ -57,7 +57,7 @@
               <span>{{ item.price }}</span>
             </p>
             <span v-if="item.href" class="border-b border-current pb-0.5 text-xs uppercase tracking-widest text-default">
-              {{ item.ctaText || t('saya.common.view_item') }} →
+              {{ item.ctaText || t('site.common.view_item') }} →
             </span>
           </div>
         </div>
@@ -70,7 +70,7 @@
         type="button"
         :disabled="activeIndex === 0"
         class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-default text-default transition hover:opacity-60 disabled:opacity-25 cursor-pointer"
-        :aria-label="t('saya.carousel.previous')"
+        :aria-label="t('site.carousel.previous')"
         @click="scroll(-1)"
       >
         ←
@@ -82,7 +82,7 @@
           type="button"
           class="h-0.5 rounded-full transition-all duration-300 cursor-pointer"
           :class="i === activeIndex ? 'w-10 bg-inverted' : 'w-6 bg-inverted/30'"
-          :aria-label="t('saya.carousel.go_to_item', { number: i + 1 })"
+          :aria-label="t('site.carousel.go_to_item', { number: i + 1 })"
           @click="scrollToIndex(i)"
         />
       </div>
@@ -90,7 +90,7 @@
         type="button"
         :disabled="activeIndex >= items.length - 1"
         class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-default text-default transition hover:opacity-60 disabled:opacity-25 cursor-pointer"
-        :aria-label="t('saya.carousel.next')"
+        :aria-label="t('site.carousel.next')"
         @click="scroll(1)"
       >
         →

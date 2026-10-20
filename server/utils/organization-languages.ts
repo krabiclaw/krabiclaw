@@ -7,7 +7,7 @@ import type { CloudflareEnv } from '~/server/utils/auth'
 import { assertOrganizationLanguageEntitlement, canonicalizeLocale, getPersistedSourceLocale } from '~/server/utils/localization'
 import { localizationError } from '~/server/utils/localization-errors'
 import { validateLocalizedValues } from '~/server/utils/localization-registry'
-import { organizationSupportsBlawbyTemplate } from '~/utils/template-registry'
+import { isLegalPracticeSite } from '~/utils/template-registry'
 
 interface OrganizationLanguageRow {
   id: string
@@ -64,8 +64,8 @@ export async function publishOrganizationLanguage(
      WHERE o.id = ?
   `, [locale, input.organizationId])
   if (!organization) localizationError(404, 'LOCALIZATION_NOT_FOUND', 'Organization was not found', { organization_id: input.organizationId })
-  if (organizationSupportsBlawbyTemplate({ vertical: organization.vertical, themeId: organization.theme_id })) {
-    validateLocalizedValues('organization', organization.values_json === null ? null : JSON.parse(organization.values_json), undefined, { publishedTemplate: 'blawby' })
+  if (isLegalPracticeSite({ vertical: organization.vertical, themeId: organization.theme_id })) {
+    validateLocalizedValues('organization', organization.values_json === null ? null : JSON.parse(organization.values_json), undefined, { publishedLegalPractice: true })
   }
 
   const now = new Date().toISOString()

@@ -15,6 +15,7 @@ export const ORGANIZATION_FONT_OPTIONS = [
   { value: 'lora', label: 'Lora' },
   { value: 'playfair-display', label: 'Playfair Display with Inter' },
   { value: 'cormorant-garamond', label: 'Cormorant Garamond with Inter' },
+  { value: 'marcellus', label: 'Marcellus' },
 ] as const
 
 export type OrganizationFontPreset = typeof ORGANIZATION_FONT_OPTIONS[number]['value']
@@ -24,7 +25,7 @@ export function isOrganizationFontPreset(value: unknown): value is OrganizationF
   return ORGANIZATION_FONT_PRESETS.includes(value as OrganizationFontPreset)
 }
 
-// An absent optional setting means the template's existing typography. Invalid
+// An absent optional setting means the Default typography. Invalid
 // stored values are errors, never arbitrary CSS or a substitute font choice.
 export function resolveOrganizationFontPreset(value: unknown): OrganizationFontPreset {
   if (value === undefined) return 'default'

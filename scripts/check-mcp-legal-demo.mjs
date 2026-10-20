@@ -313,7 +313,7 @@ async function main() {
         product_id: productId,
         unit_label: 'consultation',
         variants: [{ id: variant.id, prices: [{ ...(price ? { id: price.id } : {}), currency: 'USD', unit_amount: area.unit_amount, type: 'one_time', location_id: null }] }],
-        booking: { location_id: null, duration_minutes: 30, default_capacity: 1, scheduling_mode: 'provider', assigned_member_id: area.host, assigned_team_id: null, confirmation_mode: 'instant' },
+        booking: { location_id: null, duration_minutes: 30, default_capacity: 1, scheduling_mode: 'provider', assigned_member_id: area.host, assigned_team_id: null, confirmation_mode: 'instant', online_payment_required: true },
         idempotency_key: `cedar-legal-consultation-${area.slug}`,
       })
       const booked = expectSuccess(`update_product booking ${area.name} succeeds`, bookingRes)?.product
@@ -379,6 +379,7 @@ async function main() {
     {
       type: 'hero',
       data: {
+        edge: 'shield',
         eyebrow: 'Attorneys & Counselors at Law',
         title: 'Decisive Legal Counsel. Practical Solutions.',
         subtitle: 'Cedar Legal delivers strategic guidance and courtroom advocacy for businesses, entrepreneurs, and families across North Carolina.',
@@ -388,10 +389,6 @@ async function main() {
         secondary_url: '/services',
       },
       media: mediaMap['cedar-hero-background'] ? [{ slot: 'media', asset_id: mediaMap['cedar-hero-background'] }] : [],
-    },
-    {
-      type: 'divider',
-      data: {},
     },
     {
       type: 'feature_grid',
@@ -448,14 +445,11 @@ async function main() {
     {
       type: 'hero',
       data: {
+        edge: 'shield',
         eyebrow: 'Our Heritage & Philosophy',
         title: 'Unwavering Advocacy. Principled Guidance.',
         subtitle: 'Founded in Raleigh, Cedar Legal combines the sophistication of a large corporate practice with the responsiveness and personal attention of a boutique firm.',
       },
-    },
-    {
-      type: 'divider',
-      data: {},
     },
     {
       type: 'markdown',
@@ -500,14 +494,11 @@ Whether navigating an intricate corporate merger, safeguarding family assets for
     {
       type: 'hero',
       data: {
+        edge: 'shield',
         eyebrow: 'Our Capabilities',
         title: 'Specialized Legal Services',
         subtitle: 'From contract drafting and entity formation to complex litigation and wealth planning, our practice areas cover the legal lifecycles of individuals and companies.',
       },
-    },
-    {
-      type: 'divider',
-      data: {},
     },
     {
       type: 'product_grid',
@@ -532,14 +523,11 @@ Whether navigating an intricate corporate merger, safeguarding family assets for
     {
       type: 'hero',
       data: {
+        edge: 'shield',
         eyebrow: 'Get In Touch',
         title: 'Contact Our Offices',
         subtitle: 'We welcome prospective clients and corporate inquiries. Reach out to schedule a consultation at our downtown Raleigh office or via secure video conference.',
       },
-    },
-    {
-      type: 'divider',
-      data: {},
     },
     {
       type: 'location_grid',
@@ -559,14 +547,11 @@ Whether navigating an intricate corporate merger, safeguarding family assets for
     {
       type: 'hero',
       data: {
+        edge: 'shield',
         eyebrow: 'Consultations',
         title: 'Schedule a Consultation',
         subtitle: 'Choose your practice area and book a 30-minute consultation with the attorney who handles it.',
       },
-    },
-    {
-      type: 'divider',
-      data: {},
     },
     {
       type: 'how_to',
