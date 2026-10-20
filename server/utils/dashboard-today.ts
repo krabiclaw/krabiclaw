@@ -109,6 +109,12 @@ async function googleAdsCard(db: DbClient, env: CloudflareEnv, organization: Das
   const { accessToken } = await linkedAccountAccessToken(env, connection.account_id)
   // Google reports a day in the account's own time zone, so a complete day is one that has closed there.
   const customer = await getGoogleAdsCustomer(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, connection.target_id)
+  // A manager account has no results of its own; the business chooses the account it advertises from.
+  if (customer.isManager) {
+    return card({ id: `google-ads-manager:${connection.target_id}`, to: `/dashboard/${encodeURIComponent(organization.slug)}/integrations/google-ads`, priority: 'attention',
+      eyebrow: 'Google Ads', headline: 'Choose the Google Ads account you advertise from',
+      description: `${connection.target_name} is a manager account, which has no campaigns or results of its own. Disconnect it and choose one of the accounts it manages.`, imageIcon: 'i-lucide-megaphone' })
+  }
   const endDate = addLocalDays(localDateAt(now, customer.timeZone), -1)
   const startDate = addLocalDays(endDate, -6)
   const summary = await getGoogleAdsPerformanceSummary(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, connection.target_id, startDate, endDate)
