@@ -254,16 +254,16 @@ behavior.
 
 ## Pricing copy
 
-Use Stripe and Metronome's exact pricing terms, phrasing and breakdown wherever
-they apply. This governs public pages, SEO metadata, LLM-readable content,
+Use Stripe's exact pricing terms, phrasing and breakdown wherever they apply. This governs public pages, SEO metadata, LLM-readable content,
 customer-facing billing and documentation. Do not replace their wording with
 technical jargon or invent a different pricing tone. Add plain wording only for
 KrabiClaw's own subscription and fee.
 
-Read the current primary [Stripe pricing](https://stripe.com/pricing) and
-[Metronome pricing](https://metronome.com/pricing) before changing pricing copy.
-Preserve the actual amounts, charge basis, currency, billing interval and
-conditions. Public pages and their Markdown, SEO and LLM projections use the
+Read the current primary [Stripe pricing](https://stripe.com/pricing) before
+changing pricing copy. Preserve the actual amounts, charge basis, currency,
+billing interval and conditions. Every plan charge is on the business's one
+Stripe subscription; additional locations and fees are metered and billed at
+the end of each period (`docs/payments/payments.md`). Public pages and their Markdown, SEO and LLM projections use the
 same canonical published pricing content.
 
 ## Vertical focus and domain boundaries

@@ -2,15 +2,15 @@ import { HTTPError } from 'nitro'
 import { AD_SPEND_RATE } from '~/shared/billing-model'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { linkedAccountAccessToken, type CloudflareEnv } from '~/server/utils/auth'
-import { getStripe } from '~/server/utils/billing'
-import { paymentsBillingPricing } from '~/server/domain/payments/usage'
+import { getOrganizationBillingStatus, getStripe } from '~/server/utils/billing'
+import { paymentsUsage } from '~/server/domain/payments/usage'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { getGoogleAdsCustomer } from '~/server/utils/google-ads'
 
 /**
  * The services a business asked KrabiClaw's people for. Managed ads: Chris and
- * Julia run the Google Ads campaigns, billed at the ad-spend rate on the
- * Payments rate card. Agreeing writes the consent; ending it closes the row.
+ * Julia run the Google Ads campaigns, billed at the ad-spend price on the
+ * Business subscription. Agreeing writes the consent; ending it closes the row.
  */
 export const SERVICES = ['managed_ads'] as const
 export type Service = typeof SERVICES[number]
@@ -32,15 +32,16 @@ export async function listServices(db: DbClient, organizationId: string): Promis
 export async function agreeToService(db: DbClient, env: CloudflareEnv, organizationId: string, service: Service, userId: string): Promise<ServiceAgreement> {
   const current = await queryFirst<{ id: string }>(db, 'SELECT id FROM organization_services WHERE organization_id=? AND service=? AND ended_at IS NULL', [organizationId, service])
   if (current) throw new HTTPError({ statusCode: 409, statusMessage: 'This service is already on' })
-  // Consent starts billable work. A copied mapping alone cannot establish that
-  // the native contract, its current rate and its collection customer work.
-  const { account, contract, pricing } = await paymentsBillingPricing(db, env, organizationId)
-  if (!account || account.status !== 'active' || !contract || contract.ending_before || !pricing) {
-    throw new HTTPError({ statusCode: 409, message: 'Set up active Payments billing in Plan before turning on managed ads. Choose a plan with Payments if your business does not have billing set up.' })
+  // Consent starts billable work: the fee is the ad-spend price on the Business
+  // subscription, charged to the card it is paid with.
+  const { configured, pricing } = await paymentsUsage(db, env, organizationId)
+  if (!configured || pricing?.ad_spend_rate !== AD_SPEND_RATE) {
+    throw new HTTPError({ statusCode: 409, message: 'Managed ads is billed on the Business plan. Choose Business in Plan before turning on managed ads.' })
   }
-  if (pricing.ad_spend_rate !== AD_SPEND_RATE) throw new HTTPError({ statusCode: 409, message: 'Your Payments contract does not have the managed ads rate. Contact support to complete billing setup.' })
-  const customer = await getStripe(env).customers.retrieve(account.stripe_billing_customer_id)
-  if (customer.deleted || !customer.invoice_settings.default_payment_method) {
+  const billing = await getOrganizationBillingStatus(env, db, organizationId)
+  const subscription = await getStripe(env).subscriptions.retrieve(billing.stripeSubscriptionId!)
+  const customer = await getStripe(env).customers.retrieve(billing.stripeCustomerId!)
+  if (customer.deleted || (!subscription.default_payment_method && !customer.invoice_settings.default_payment_method)) {
     throw new HTTPError({ statusCode: 409, message: 'Add a payment method and set it as default in Payments before turning on managed ads.' })
   }
   const ads = await readIntegration(db, organizationId, 'google_ads')
@@ -51,9 +52,8 @@ export async function agreeToService(db: DbClient, env: CloudflareEnv, organizat
   const now = new Date().toISOString()
   const id = crypto.randomUUID()
   const result = await execute(db, `INSERT INTO organization_services(id,organization_id,service,terms_version,agreed_by_user_id,agreed_at)
-    SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM payment_billing_accounts WHERE organization_id=? AND status='active' AND metronome_contract_id=?)
-    AND EXISTS(SELECT 1 FROM organization_integrations WHERE organization_id=? AND provider='google_ads' AND revision=?)`, [id, organizationId, service, SERVICE_TERMS_VERSION[service], userId, now, organizationId, account.metronome_contract_id, organizationId, ads.revision])
-  if (result.meta.changes !== 1) throw new HTTPError({ statusCode: 409, message: 'Payments billing or Google Ads changed. Reload before turning on managed ads.' })
+    SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM organization_integrations WHERE organization_id=? AND provider='google_ads' AND revision=?)`, [id, organizationId, service, SERVICE_TERMS_VERSION[service], userId, now, organizationId, ads.revision])
+  if (result.meta.changes !== 1) throw new HTTPError({ statusCode: 409, message: 'Google Ads changed. Reload before turning on managed ads.' })
   const written = (await listServices(db, organizationId))[service]
   if (!written || written.id !== id) throw new Error('Service agreement was not recorded')
   return written

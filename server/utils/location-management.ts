@@ -9,7 +9,7 @@ import { refreshSocialCard } from '~/server/utils/social-card'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { prepareContentDocumentDeletion } from '~/server/utils/content/documents'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
-import { capacityRefusalOf, executeWithinCapacity } from '~/server/utils/billing'
+import { capacityRefusalOf, executeWithinCapacity, reportBillingUsage } from '~/server/utils/billing'
 import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 
 type SetupEnv = CloudflareEnv;
@@ -208,11 +208,7 @@ export async function createLocation(
   organizationId: string,
   input: CreateLocationInput,
   userId: string,
-  /**
-   * `holdsHome`: made inactive for the home created at it next, which makes it
-   * active once it holds the home (see createStayHome).
-   */
-  options: { refreshSocialCardAfterCreate?: boolean; idempotencyKey?: string; holdsHome?: boolean } = {},
+  options: { refreshSocialCardAfterCreate?: boolean; idempotencyKey?: string } = {},
 ) {
   const key = options.idempotencyKey?.trim();
   if (options.idempotencyKey !== undefined && (!key || key.length > 200)) {
@@ -359,7 +355,7 @@ export async function createLocation(
           input.price_level ?? null,
           normalizedTimezone,
           input.max_capacity ?? null,
-          options.holdsHome ? 'inactive' : 'active',
+          'active',
           input.seo_title ?? null,
           input.seo_description ?? null,
           input.canonical_url ?? null,
@@ -636,8 +632,8 @@ export async function updateLocation(
     // The site changed: recorded with the change, so its caches and search index follow it.
     statements.push(publicResourceCacheInvalidationQuery(organizationId, 'location_updated'));
 
-    // An inactive location is off the site and holds no slot; making it active
-    // again is refused when the plan has none left.
+    // An inactive location is off the site and is not counted; making it
+    // active again is refused past the locations Basic includes.
     const results = await executeWithinCapacity(env, db, organizationId, [...(writeGuard ? [writeGuard] : []), ...statements], { action: 'make it active' });
     return (results[writeGuard ? 1 : 0]?.meta?.changes ?? 0) === 1;
   };
@@ -777,6 +773,7 @@ export async function deleteLocation(
   if (!deleteResult?.meta.changes) {
     return { status: 404, data: { error: "Location not found." } };
   }
+  await reportBillingUsage(env, db, organizationId);
 
   return {
     status: 200,

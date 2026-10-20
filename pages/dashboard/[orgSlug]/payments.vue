@@ -25,21 +25,14 @@
       <UAlert v-if="successMessage" class="mb-6" color="success" variant="soft" icon="i-lucide-circle-check" :description="successMessage" />
       <EditorNavigationList :groups="groups" :active-item="level.child.value" @act="onRowAction" />
     </div>
-
-    <!-- An operator's one-off: a Stripe credit note verified against the pending credit Metronome reported. -->
-    <DashboardListItemDialog v-model:open="creditOpen" title="Verify credit note" :saving="busy" :save-disabled="!creditNote.trim()" :error="sheetError" save-label="Verify credit" @save="settleCredit">
-      <UFormField label="Issued Stripe credit note ID"><UInput v-model="creditNote" placeholder="cn_…" :disabled="busy" class="w-full" /></UFormField>
-    </DashboardListItemDialog>
   </DashboardIndexPanel>
 </template>
 
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationGroup, type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
-import DashboardListItemDialog from '~/components/dashboard/DashboardListItemDialog.vue'
 import { authClient } from '~/lib/auth-client'
-import { additionalLocationPrice, additionalRentalUnitPrice, BUSINESS_PLAN_ID, INCLUDED_LOCATIONS, INCLUDED_RENTAL_UNITS, SERVICE_PRICES, STARTER_PLAN_ID, isNewSalePlan, SERVICES } from '~/shared/billing-model'
+import { additionalLocationPrice, INCLUDED_LOCATIONS, SERVICE_PRICES, STARTER_PLAN_ID, isNewSalePlan, SERVICES } from '~/shared/billing-model'
 import { paymentMoney } from '~/shared/payment-display'
-import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
 import { cardBrandLabel, connectStatusPresentation, useConnectAccount, useOrganizationBilling, useOrganizationServices, usePaymentMethods, usePaymentsUsage } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'dashboard-orgSlug-earnings' })
@@ -48,7 +41,6 @@ useSeoMeta({ title: 'Payments | KrabiClaw', robots: 'noindex, nofollow' })
 const route = useRoute()
 const router = useRouter()
 const level = useRouteLevel()
-const dashboardApi = useDashboardApi()
 const dashboard = useDashboardOrganization()
 const { trackSubscriptionCheckoutSuccess } = useAnalytics()
 const { startOrganizationCheckout } = useOrganizationSubscription()
@@ -65,7 +57,7 @@ const tabs: Array<{ label: string; value: Tab }> = [
 const LEAF_TABS: Record<string, Tab> = {
   'invoices': 'payments', 'payment-methods': 'payments',
   'payout-method': 'payouts', 'surcharge': 'payouts',
-  'plan': 'plan', 'locations': 'plan', 'business': 'plan', 'cancel': 'plan', 'managed-ads': 'plan', 'strategy': 'plan',
+  'plan': 'plan', 'cancel': 'plan', 'managed-ads': 'plan', 'strategy': 'plan',
 }
 const childTab = computed<Tab | null>(() => (level.child.value && LEAF_TABS[level.child.value]) || null)
 const queryTab = computed<Tab | null>(() => route.query.tab === 'plan' || route.query.tab === 'payouts' || route.query.tab === 'payments' ? route.query.tab : null)
@@ -82,13 +74,12 @@ const tab = computed<string>({
   set: value => void router.replace({ path: level.path.value, query: { ...route.query, tab: value === 'payments' ? undefined : String(value) } }),
 })
 
-const [{ billing, billingError, refreshBilling }, { services, servicesError }, { usage, usageError, refreshUsage }, { account, payout, connectError }, { methods, methodsError }] = await Promise.all([
+const [{ billing, billingError, refreshBilling }, { services, servicesError }, { usage, usageError }, { account, payout, connectError }, { methods, methodsError }] = await Promise.all([
   useOrganizationBilling(), useOrganizationServices(), usePaymentsUsage(), useConnectAccount(), usePaymentMethods(),
 ])
 
 const errorMessage = ref('')
 const successMessage = ref('')
-const sheetError = ref('')
 const busy = ref(false)
 const to = (leaf: string) => `${level.path.value}/${leaf}`
 
@@ -112,22 +103,14 @@ const planSummary = computed(() => {
   else if (status.currentPeriodEnd) parts.push(`${status.cancelAtPeriodEnd ? 'Ends' : 'Renews'} ${formatExactDateTime(status.currentPeriodEnd)}`)
   return parts.join(' · ')
 })
-// Stripe's phrasing: the included allowance, then the charge per additional unit.
+// Stripe's phrasing: the included allowance, then the charge per additional
+// unit, billed on the subscription's invoice at the end of the period.
 const locationsSummary = computed(() => {
-  const locations = billing.value?.locations
-  if (!locations) return ''
-  if (onStarter.value) return `${locations.used} of ${INCLUDED_LOCATIONS} included. Growth and Business add more locations.`
-  if (billing.value?.billsRentalUnits) return `${locations.used} in use, not counting locations with only rental units, ${locations.covered} on your plan · ${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}`
-  if (!isNewSalePlan(billing.value?.plan) || billing.value?.plan === BUSINESS_PLAN_ID) return `${locations.used} in use, ${locations.covered} on your existing plan. Stripe shows the price before you confirm a change.`
-  return `${locations.used} in use, ${locations.covered} on your plan · ${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice(billing.value?.billingInterval)}`
+  const usage = billing.value?.usage
+  if (!usage) return ''
+  if (onStarter.value) return `${usage.locations} of ${INCLUDED_LOCATIONS} included. Growth and Business add more locations.`
+  return `${usage.locations} in use · ${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}, billed at the end of the period`
 })
-const rentalUnitsSummary = computed(() => {
-  const units = billing.value?.rentalUnits
-  return units ? `${units.used} in use, ${units.covered} on your plan · ${INCLUDED_RENTAL_UNITS} included, then ${additionalRentalUnitPrice()}` : ''
-})
-// Business bills its locations and rental units together, so both rows open its leaf.
-const quantityLeaf = computed(() => billing.value?.plan === BUSINESS_PLAN_ID ? 'business' : 'locations')
-const locationsChangeable = computed(() => !!billing.value && !onStarter.value && billing.value.subscriptionStatus === 'active' && !scheduledPlan.value && !billing.value.cancelAtPeriodEnd)
 
 const paymentRows = computed<EditorNavigationItem[]>(() => {
   const cards = methods.value?.payment_methods ?? []
@@ -145,14 +128,13 @@ const payoutRows = computed<EditorNavigationItem[]>(() => [
     : { summary: connectStatusPresentation(account.value?.status).description, status: account.value ? 'neutral' as const : undefined }) },
   ...(account.value?.status === 'ready' ? [{ id: 'surcharge', label: 'Card surcharge', to: to('surcharge'), summary: account.value.surchargeBasisPoints === null ? 'Off. Pass credit card fees on to the buyer.' : `On at ${account.value.surchargeBasisPoints / 100}%.` }] : []),
 ])
+const refusedUsage = computed(() => (usage.value?.pending ?? []).filter(row => row.action_required).reduce((sum, row) => sum + row.event_count, 0))
 const planRows = computed<EditorNavigationItem[]>(() => [
   { id: 'plan', label: currentPlan.value?.name ?? 'Plan', summary: planSummary.value, to: to('plan') },
-  ...(billing.value ? [{ id: 'locations', label: 'Locations', summary: locationsSummary.value, ...(locationsChangeable.value ? { to: to(quantityLeaf.value) } : {}) }] : []),
-  ...(billing.value?.rentalUnits ? [{ id: 'rental-units', label: 'Rental units', summary: rentalUnitsSummary.value, ...(locationsChangeable.value ? { to: to('business') } : {}) }] : []),
-  ...(usage.value?.pricing ? [{ id: 'fees', label: 'Payments fees', summary: `${usage.value.pricing.captured_volume_rate_percent}% of payment volume, plus Stripe fees.${usage.value.pricing.ad_spend_rate_percent === null ? '' : ` ${usage.value.pricing.ad_spend_rate_percent}% of monthly ad spend for campaigns we manage.`} Fees aren’t returned after a refund or dispute.` }] : []),
-  ...(usage.value && usage.value.configured === false && billing.value && getPlanEntitlements(billing.value.plan).payments === true ? [{ id: 'usage:pending', label: 'Payments fees', summary: 'Getting ready. Fees for payments you take before then are billed once it’s done.' }] : []),
-  ...(usage.value?.account && ['servicing', 'closing'].includes(usage.value.account.status) ? [{ id: 'usage:finalize', label: 'Previous Payments billing', summary: 'Charges from earlier payments still apply; end it once they are settled.', action: { label: 'End' } }] : []),
-  ...(usage.value?.credits ?? []).map(credit => ({ id: `credit:${credit.id}`, label: `Pending credit ${paymentMoney(-credit.amount, credit.currency)}`, summary: 'Issue the credit in Stripe, then verify its credit note here.', action: { label: 'Verify' } })),
+  ...(billing.value ? [{ id: 'locations', label: 'Locations', summary: locationsSummary.value }] : []),
+  ...(usage.value?.pricing ? [{ id: 'fees', label: 'Payments fees', summary: `${usage.value.pricing.captured_volume_rate_percent}% of payment volume, plus Stripe fees.${usage.value.pricing.ad_spend_rate_percent === null ? '' : ` ${usage.value.pricing.ad_spend_rate_percent}% of monthly ad spend for campaigns we manage.`} Billed at the end of the period. Fees aren’t returned after a refund or dispute.` }] : []),
+  // Usage Stripe has not accepted stays in the outbox with its reason; the owner sees it until it is resolved.
+  ...(refusedUsage.value ? [{ id: 'usage:refused', label: 'Payments fees not reported', summary: `${refusedUsage.value} ${refusedUsage.value === 1 ? 'charge' : 'charges'} could not be reported to Stripe and ${refusedUsage.value === 1 ? 'is' : 'are'} not billed yet. Contact support to resolve ${refusedUsage.value === 1 ? 'it' : 'them'}.`, status: 'error' as const }] : []),
   ...(billing.value && (scheduledPlan.value || billing.value.cancelAtPeriodEnd) && currentPlan.value ? [{ id: 'restore', label: `Keep ${currentPlan.value.name}`, summary: scheduledPlan.value ? `Stay on ${currentPlan.value.name} instead of changing to ${scheduledPlan.value.name}.` : `Stay on ${currentPlan.value.name} after ${formatExactDateTime(billing.value.currentPeriodEnd!)}.`, action: { label: 'Keep plan' } }] : []),
   ...(!onStarter.value && billing.value && !billing.value.cancelAtPeriodEnd && !scheduledPlan.value ? [{ id: 'cancel', label: 'Cancel plan', summary: 'If you cancel, you keep full access to your plan features until the end of your billing period.', to: to('cancel') }] : []),
 ])
@@ -185,7 +167,6 @@ const organizationId = () => {
 async function onRowAction(id: string) {
   if (busy.value) return
   errorMessage.value = ''
-  if (id.startsWith('credit:')) { creditId.value = id.slice('credit:'.length); creditNote.value = ''; sheetError.value = ''; return }
   busy.value = true
   try {
     if (id === 'restore') {
@@ -194,28 +175,9 @@ async function onRowAction(id: string) {
       if (restored.error) throw new Error(restored.error.message ?? 'Your plan could not be kept')
       await refreshBilling()
     }
-    else if (id === 'usage:finalize') { await dashboardApi('/api/dashboard/payments/billing', { method: 'POST', body: { action: 'finalize' }, validate: (value: unknown): value is Record<string, unknown> => isRecord(value) && value.closed === true }); await refreshUsage() }
-    else if (id !== 'fees' && id !== 'usage:pending') throw new Error('Unknown billing action')
+    else throw new Error('Unknown billing action')
   } catch (error) {
     errorMessage.value = getErrorMessage(error, 'Billing is unavailable right now')
-  } finally {
-    busy.value = false
-  }
-}
-
-const creditId = ref<string | null>(null)
-const creditNote = ref('')
-const creditOpen = computed({ get: () => creditId.value !== null, set: (open: boolean) => { if (!open) { creditId.value = null; creditNote.value = '' } } })
-async function settleCredit() {
-  if (busy.value || !creditId.value || !creditNote.value.trim()) return
-  busy.value = true
-  sheetError.value = ''
-  try {
-    await dashboardApi('/api/dashboard/payments/billing', { method: 'POST', body: { action: 'reconcile_credit', event_id: creditId.value, credit_note_id: creditNote.value.trim() }, validate: (value: unknown): value is Record<string, unknown> => isRecord(value) && value.settled === true })
-    await refreshUsage()
-    creditOpen.value = false
-  } catch (error) {
-    sheetError.value = getErrorMessage(error, 'The credit note could not be verified')
   } finally {
     busy.value = false
   }

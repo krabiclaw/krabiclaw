@@ -10,7 +10,7 @@ type Created = { success: boolean; operational_booking_id: string; request_id: s
 
 // The local Worker inherits the runner's real provider bindings; Playwright
 // supplies its localhost platform URL. CI may supply the complete TEST setup.
-const paymentsProviderConfigured = ['STRIPE_SECRET_KEY', 'STRIPE_PAYMENTS_METHOD_CONFIGURATION', 'METRONOME_API_KEY', 'METRONOME_RATE_CARD_ID']
+const paymentsProviderConfigured = ['STRIPE_SECRET_KEY', 'STRIPE_PAYMENTS_METHOD_CONFIGURATION', 'NUXT_PUBLIC_STRIPE_PUBLISHABLE_KEY']
   .every(name => Boolean(process.env[name]))
 const missingProviderConfiguration = paymentsProviderConfigured ? [] : ['payments.configuration']
 
@@ -168,7 +168,7 @@ test('MCP Product booking uses public capacity, durable replay, guest identity a
       expect(paymentPolicy.status(), await paymentPolicy.text()).toBe(paymentsProviderConfigured ? 403 : 503)
       const paymentError = await paymentPolicy.json()
       expect(paymentError.message).toBe('Complete the business’s Payments setup before accepting online payments')
-      expect(paymentError.data).toEqual({ code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(orgSlug)}/payments`, missing: ['payments.entitlement', ...missingProviderConfiguration, 'payments.billing', 'payments.account'] })
+      expect(paymentError.data).toEqual({ code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(orgSlug)}/payments`, missing: ['payments.entitlement', ...missingProviderConfiguration, 'payments.account'] })
       const rejectedPolicyReadback = await request.get(editor)
       expect(rejectedPolicyReadback.status()).toBe(200)
       expect((await rejectedPolicyReadback.json()).product.booking).toEqual(payLaterPolicy)
@@ -219,7 +219,8 @@ test('MCP online collection returns the real Payments setup handoff without chan
     expect((await billing.json()).billing).toMatchObject({ plan: 'business', subscriptionStatus: 'active' })
     const usage = await request.get(`${baseURL}/api/dashboard/payments/billing?org=${encodeURIComponent(context.context.organization_slug)}`)
     expect(usage.status(), await usage.text()).toBe(200)
-    expect((await usage.json()).configured).toBe(false)
+    // Business's subscription carries the fee prices, read from Stripe; what is missing is the business's own Stripe account.
+    expect(await usage.json()).toMatchObject({ configured: true, source: 'Stripe', pricing: { captured_volume_rate_percent: '1.4', ad_spend_rate_percent: '10', livemode: false } })
     expect((await call<{ configured: boolean }>('get_payment_payouts')).configured).toBe(false)
     const created = await call<{ product: { id: string } }>('create_product', {
       kind: 'service', name: `Paid appointment ${crypto.randomUUID()}`, idempotency_key: crypto.randomUUID(),
@@ -242,7 +243,7 @@ test('MCP online collection returns the real Payments setup handoff without chan
       const result = (await response.json()).result
       expect(result.isError).toBe(true)
       expect(result.structuredContent).toBeUndefined()
-      expect(JSON.parse(result.content[0].text)).toMatchObject({ status: paymentsProviderConfigured ? 409 : 503, success: false, operation_completed: false, action_required: true, code: 'financial_action_required', dashboard_url: dashboardUrl, missing: [...missingProviderConfiguration, 'payments.billing', 'payments.account'] })
+      expect(JSON.parse(result.content[0].text)).toMatchObject({ status: paymentsProviderConfigured ? 409 : 503, success: false, operation_completed: false, action_required: true, code: 'financial_action_required', dashboard_url: dashboardUrl, missing: [...missingProviderConfiguration, 'payments.account'] })
       expect(result.content[0].text).toContain(dashboardUrl)
     }
     const stored = await request.get(editor)
