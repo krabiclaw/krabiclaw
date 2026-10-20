@@ -539,6 +539,9 @@ test('a business’s site shows a guest the stay its signed link names, from any
     assert.equal((await read('another-org', link)).status, 404)
     assert.equal((await read(ORG, otherLink)).status, 404)
     assert.equal((await read(ORG)).status, 401)
+    // The link lasts as a booking's does: thirty days from when the stay was booked.
+    await db.prepare("UPDATE stays SET created_at = ? WHERE id = ?").bind(new Date(Date.now() - 31 * 86_400_000).toISOString(), stay.id).run()
+    assert.equal((await read(ORG, link)).status, 410)
   } finally {
     await runtime.dispose()
   }
