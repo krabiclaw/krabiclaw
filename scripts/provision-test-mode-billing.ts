@@ -6,9 +6,9 @@
 //
 // This gives every current subscription in the copy its test-mode equivalent in
 // the target's Stripe account: the same plan at the price Better Auth knows it by
-// (an offered plan's current price; a retired plan's own contract price), the
-// same location quantity, Business's rental-unit line, billed by invoice so no
-// card is needed. The rows are then pointed at those objects. A rerun finds the
+// (an offered plan's current price; a retired plan's own contract price) at
+// quantity 1 and the plan's metered prices, which carry no quantity, billed by
+// invoice so no card is needed. The rows are then pointed at those objects. A rerun finds the
 // objects it made before by the live IDs they carry, so nothing is duplicated.
 //
 //   node --env-file-if-exists=.env --experimental-strip-types --import ./tests/unit/support/register-aliases.mjs scripts/provision-test-mode-billing.ts --local
@@ -19,8 +19,6 @@ import { resolve } from 'node:path'
 import { parseArgs } from 'node:util'
 import Stripe from 'stripe'
 import { getBetterAuthStripePlans } from '../server/utils/better-auth-stripe.ts'
-import { BILLING_USAGE_SQL } from '../server/utils/billing.ts'
-import { BUSINESS_PLAN_ID, INCLUDED_RENTAL_UNITS } from '../shared/billing-model.ts'
 
 const { values } = parseArgs({ options: { local: { type: 'boolean', default: false }, staging: { type: 'boolean', default: false } }, strict: true })
 if (values.local === values.staging) throw new Error('Choose --local or --staging.')
@@ -38,8 +36,8 @@ const d1 = <T>(sql: string): T[] => {
 }
 const sqlString = (value: string) => `'${value.replaceAll("'", "''")}'`
 
-type Row = { id: string; referenceId: string; plan: string; seats: number | null; stripeSubscriptionId: string | null; stripeCustomerId: string | null; name: string | null; organizationCustomerId: string | null }
-const rows = d1<Row>(`SELECT s.id, s.referenceId, s.plan, s.seats, s.stripeSubscriptionId, s.stripeCustomerId, o.name, o.stripeCustomerId AS organizationCustomerId
+type Row = { id: string; referenceId: string; plan: string; stripeSubscriptionId: string | null; stripeCustomerId: string | null; name: string | null; organizationCustomerId: string | null }
+const rows = d1<Row>(`SELECT s.id, s.referenceId, s.plan, s.stripeSubscriptionId, s.stripeCustomerId, o.name, o.stripeCustomerId AS organizationCustomerId
   FROM subscription s LEFT JOIN organization o ON o.id = s.referenceId
  WHERE s.status NOT IN ('canceled', 'incomplete_expired') AND s.stripeSubscriptionId IS NOT NULL`)
 
@@ -76,13 +74,8 @@ for (const row of rows) {
   if (!plan?.priceId) throw new Error(`The test-mode catalog has no ${row.plan} plan price for ${row.referenceId}`)
   const planPrice = plan.priceId
   if (!row.stripeCustomerId) throw new Error(`Subscription ${row.id} has no Stripe customer`)
-  // Business bills the business's own rental units past the included ones, as its Checkout does, and none when there are none.
-  const [usage] = row.plan === BUSINESS_PLAN_ID ? d1<{ rentalUnits: number }>(BILLING_USAGE_SQL.replaceAll('?', sqlString(row.referenceId))) : []
-  const additional = usage ? Math.max(0, usage.rentalUnits - INCLUDED_RENTAL_UNITS) : 0
-  const lineItems = row.plan === BUSINESS_PLAN_ID
-    ? (additional > 0 ? (plan.lineItems ?? []).map(item => ({ price: item.price!, quantity: additional })) : [])
-    : (plan.lineItems ?? []).map(item => ({ price: item.price!, quantity: item.quantity ?? 1 }))
-  if (row.plan === BUSINESS_PLAN_ID && !plan.lineItems?.length) throw new Error('The Business plan has no Additional rental unit price')
+  // The plan's metered prices, as its Checkout adds them; what they bill is reported to their meters.
+  const lineItems = (plan.lineItems ?? []).map(item => ({ price: item.price as string }))
   const source = { krabiclaw_source_customer: row.stripeCustomerId, krabiclaw_organization: row.referenceId }
   // Invoice billing needs an address; example.com receives nothing.
   const email = `test-mode-billing+${row.referenceId.toLowerCase().replace(/[^a-z0-9-]/g, '')}@example.com`
@@ -93,19 +86,19 @@ for (const row of rows) {
   const subscription = (await stripe.subscriptions.search({ query: `metadata['krabiclaw_source_subscription']:'${row.stripeSubscriptionId}'` })).data.find(found => found.status !== 'canceled')
     ?? await stripe.subscriptions.create({
       customer: customer.id,
-      items: [{ price: planPrice, quantity: row.seats ?? 1 }, ...lineItems],
+      items: [{ price: planPrice, quantity: 1 }, ...lineItems],
       collection_method: 'send_invoice',
       days_until_due: 30,
       metadata: { ...source, krabiclaw_source_subscription: row.stripeSubscriptionId!, referenceId: row.referenceId, plan: row.plan },
-    }, { idempotencyKey: `test-mode-billing:subscription:v3:${row.stripeSubscriptionId}` })
+    }, { idempotencyKey: `test-mode-billing:subscription:v4:${row.stripeSubscriptionId}` })
   // A subscription found by its source ID is used only if it is the one made for this row.
   if (customerOf(subscription) !== customer.id || subscription.metadata.referenceId !== row.referenceId || subscription.metadata.plan !== row.plan || !['active', 'trialing', 'past_due'].includes(subscription.status)) {
     throw new Error(`Test-mode subscription ${subscription.id} does not match ${row.referenceId}'s ${row.plan} subscription`)
   }
-  // One made by an earlier run is brought to this run's prices and quantities: the catalog or the business's units may have changed since.
-  const wanted = [{ price: planPrice, quantity: row.seats ?? 1 }, ...lineItems]
-  const has = subscription.items.data.map(item => ({ price: item.price.id, quantity: item.quantity ?? 1 }))
-  const key = (items: Array<{ price: string; quantity: number }>) => items.map(item => `${item.price}×${item.quantity}`).sort().join(',')
+  // One made by an earlier run is brought to this run's prices: the catalog may have changed since.
+  const wanted: Array<{ price: string; quantity?: number }> = [{ price: planPrice, quantity: 1 }, ...lineItems]
+  const has = subscription.items.data.map(item => ({ price: item.price.id, quantity: item.price.recurring?.usage_type === 'metered' ? undefined : item.quantity ?? 1 }))
+  const key = (items: Array<{ price: string; quantity?: number }>) => items.map(item => `${item.price}×${item.quantity ?? 'metered'}`).sort().join(',')
   if (key(has) !== key(wanted)) {
     await stripe.subscriptions.update(subscription.id, { items: [...subscription.items.data.map(item => ({ id: item.id, deleted: true })), ...wanted], proration_behavior: 'none' })
     console.log(`${row.name ?? row.referenceId}: ${subscription.id} brought to ${key(wanted)}`)

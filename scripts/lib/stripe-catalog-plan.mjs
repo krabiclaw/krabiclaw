@@ -7,7 +7,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { basename, dirname } from 'node:path'
-import { BILLING_METER_KEYS, BILLING_METERS, INCLUDED_LOCATIONS, INCLUDED_RENTAL_UNITS, NEW_SALE_PAID_PLAN_IDS, PAID_PLAN_PRICES, PAYMENTS_FEE, SERVICE_PRICES, additionalLocationPrice, additionalRentalUnitPrice } from '../../shared/billing-model.ts'
+import { BILLING_METER_KEYS, BILLING_METERS, INCLUDED_LOCATIONS, NEW_SALE_PAID_PLAN_IDS, PAID_PLAN_PRICES, PAYMENTS_FEE, SERVICE_PRICES, additionalLocationPrice } from '../../shared/billing-model.ts'
 
 export const CATALOG_PLAN_SCHEMA_VERSION = 14
 export const CATALOG_APPLY_JOURNAL_SCHEMA_VERSION = 1
@@ -16,6 +16,8 @@ export const CATALOG_PLAN_KIND = 'stripe-catalog-plan'
 export const OFFERED_PLAN_IDS = Object.freeze([...NEW_SALE_PAID_PLAN_IDS, ...BILLING_METER_KEYS, 'site_language', 'strategy'])
 export const RETIRED_PLAN_IDS = Object.freeze(['commerce', 'marketing', 'managed', 'seo_accelerator'])
 export const RETIRED_ADDON_TYPES = Object.freeze(['translation', 'seasonal', 'gbp_setup'])
+// Products no longer sold that carry a family rather than a plan: rental units are not billed.
+export const RETIRED_PRODUCT_FAMILIES = Object.freeze(['rental_units'])
 export const CATALOG_PLAN_SCOPES = Object.freeze(['full', 'offers-only', 'retirement-only'])
 export const STRIPE_CATALOG_REQUEST_TIMEOUT_MS = 10_000
 const SUPPORTED_OPERATION_TYPES = new Set([
@@ -71,8 +73,6 @@ export const PLAN_DEFINITIONS = Object.freeze([
     highlighted: false,
     features: [
       'Everything in Growth',
-      `${INCLUDED_RENTAL_UNITS} rental units included, then ${additionalRentalUnitPrice()}`,
-      'Locations with only rental units are not billed as locations',
       'Direct stay booking with online payment',
       'The KrabiClaw iOS app at no extra cost for your whole team',
       'Online payments for paid bookings and one-time orders',
@@ -529,6 +529,8 @@ function retiredCatalogFamily(product) {
     ? product.metadata.addon_type.trim().toLowerCase()
     : ''
   if (RETIRED_ADDON_TYPES.includes(addonType)) return `addon:${addonType}`
+  const family = typeof product?.metadata?.product_family === 'string' ? product.metadata.product_family.trim().toLowerCase() : ''
+  if (RETIRED_PRODUCT_FAMILIES.includes(family)) return `family:${family}`
   return null
 }
 

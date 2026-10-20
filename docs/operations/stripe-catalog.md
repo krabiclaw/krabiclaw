@@ -12,7 +12,6 @@ its own product with `product_family` set to the meter key (never a `plan_id`):
 | `product_family` | Meter event | Formula | Price | Plans |
 | --- | --- | --- | --- | --- |
 | `locations` | `krabiclaw_locations` | `last` | graduated: 2 included, then $49 per additional location per month | Growth, Business |
-| `rental_units` | `krabiclaw_rental_units` | `last` | graduated: 2 included, then $19 per additional rental unit per month | Business |
 | `captured_volume` | `krabiclaw_captured_volume` | `sum` | 0.014 cents per cent (1.4% of payment volume) | Business |
 | `stripe_cost` | `krabiclaw_stripe_cost` | `sum` | 1 cent per cent (Stripe fees at cost) | Business |
 | `ad_spend` | `krabiclaw_ad_spend` | `sum` | 0.1 cents per cent (10% of monthly ad spend) | Business |
@@ -28,16 +27,19 @@ Growth → Business is one `subscription.upgrade` (`docs/payments/payments.md`).
 without exactly one active product per meter at its published price, so apply
 the offers before deploying an application that sells them.
 
-The graduated per-location plan prices sold before #1503, the annual Growth
-price and the licensed Additional rental unit price are retired for new sales by
-the full plan's `deactivate_price` operations; subscriptions on them keep them.
+The graduated per-location plan prices sold before #1503 and the annual Growth
+price are retired for new sales by the full plan's `deactivate_price`
+operations. Rental units are not billed: the Additional rental unit product
+(`product_family=rental_units`) is a retired family, so the full plan clears its
+default price, deactivates its prices and archives it. Subscriptions on any of
+them keep their items until they change plan.
 
 Commerce (`$89`), Marketing (`$99`),
 Managed (`$149`) and SEO Accelerator (`$349`) are retired from new offers. Every
 product and price, including already-archived products and inactive or one-time prices, is
 read into the reviewed snapshot. Only products whose metadata explicitly names
-`plan_id=commerce|marketing|managed|seo_accelerator` or
-`addon_type=translation|seasonal|gbp_setup` are retired; unknown products are never classified by name. For each still-active
+`plan_id=commerce|marketing|managed|seo_accelerator`,
+`addon_type=translation|seasonal|gbp_setup` or `product_family=rental_units` are retired; unknown products are never classified by name. For each still-active
 retired product whose default price is active, the plan first clears that exact
 default price, then deactivates every independently active price before archiving
 the product, including duplicates. Inactive products are never cleared or

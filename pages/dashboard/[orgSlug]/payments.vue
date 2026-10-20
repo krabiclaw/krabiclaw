@@ -31,7 +31,7 @@
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationGroup, type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
 import { authClient } from '~/lib/auth-client'
-import { additionalLocationPrice, additionalRentalUnitPrice, INCLUDED_LOCATIONS, INCLUDED_RENTAL_UNITS, SERVICE_PRICES, STARTER_PLAN_ID, isNewSalePlan, SERVICES } from '~/shared/billing-model'
+import { additionalLocationPrice, INCLUDED_LOCATIONS, SERVICE_PRICES, STARTER_PLAN_ID, isNewSalePlan, SERVICES } from '~/shared/billing-model'
 import { paymentMoney } from '~/shared/payment-display'
 import { cardBrandLabel, connectStatusPresentation, useConnectAccount, useOrganizationBilling, useOrganizationServices, usePaymentMethods, usePaymentsUsage } from '~/composables/usePaymentsSettings'
 
@@ -109,11 +109,7 @@ const locationsSummary = computed(() => {
   const usage = billing.value?.usage
   if (!usage) return ''
   if (onStarter.value) return `${usage.locations} of ${INCLUDED_LOCATIONS} included. Growth and Business add more locations.`
-  return `${usage.locations} in use${usage.billsRentalUnits ? ', not counting locations with only rental units' : ''} · ${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}, billed at the end of the period`
-})
-const rentalUnitsSummary = computed(() => {
-  const units = billing.value?.usage.rentalUnits
-  return units === null || units === undefined ? '' : `${units} in use · ${INCLUDED_RENTAL_UNITS} included, then ${additionalRentalUnitPrice()}, billed at the end of the period`
+  return `${usage.locations} in use · ${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}, billed at the end of the period`
 })
 
 const paymentRows = computed<EditorNavigationItem[]>(() => {
@@ -136,7 +132,6 @@ const refusedUsage = computed(() => (usage.value?.pending ?? []).filter(row => r
 const planRows = computed<EditorNavigationItem[]>(() => [
   { id: 'plan', label: currentPlan.value?.name ?? 'Plan', summary: planSummary.value, to: to('plan') },
   ...(billing.value ? [{ id: 'locations', label: 'Locations', summary: locationsSummary.value }] : []),
-  ...(billing.value?.usage.rentalUnits != null ? [{ id: 'rental-units', label: 'Rental units', summary: rentalUnitsSummary.value }] : []),
   ...(usage.value?.pricing ? [{ id: 'fees', label: 'Payments fees', summary: `${usage.value.pricing.captured_volume_rate_percent}% of payment volume, plus Stripe fees.${usage.value.pricing.ad_spend_rate_percent === null ? '' : ` ${usage.value.pricing.ad_spend_rate_percent}% of monthly ad spend for campaigns we manage.`} Billed at the end of the period. Fees aren’t returned after a refund or dispute.` }] : []),
   // Usage Stripe has not accepted stays in the outbox with its reason; the owner sees it until it is resolved.
   ...(refusedUsage.value ? [{ id: 'usage:refused', label: 'Payments fees not reported', summary: `${refusedUsage.value} ${refusedUsage.value === 1 ? 'charge' : 'charges'} could not be reported to Stripe and ${refusedUsage.value === 1 ? 'is' : 'are'} not billed yet. Contact support to resolve ${refusedUsage.value === 1 ? 'it' : 'them'}.`, status: 'error' as const }] : []),

@@ -66,9 +66,6 @@
         <p data-plan-locations class="text-xs font-semibold mt-2" :class="isHighlighted ? 'text-white/70' : 'text-muted'">
           {{ locationsNote }}
         </p>
-        <p v-if="plan.id === BUSINESS_PLAN_ID" data-plan-rental-units class="text-xs font-semibold mt-1" :class="isHighlighted ? 'text-white/70' : 'text-muted'">
-          {{ INCLUDED_RENTAL_UNITS }} rental units included, then {{ additionalRentalUnitPrice() }}
-        </p>
         <p v-if="annual && savingsNote" class="text-xs font-semibold mt-2.5 flex items-center gap-1.5" :class="isHighlighted ? 'text-emerald-400' : 'text-emerald-600'">
           <PlatformIcon name="sparkles" class="size-3.5 shrink-0" />
           {{ savingsNote }}
@@ -121,7 +118,7 @@
 <script setup lang="ts">
 import { useEventListener } from '@vueuse/core'
 import type { Plan } from '~/composables/usePlans'
-import { additionalLocationPrice, additionalRentalUnitPrice, BUSINESS_PLAN_ID, INCLUDED_LOCATIONS, INCLUDED_RENTAL_UNITS } from '~/shared/billing-model'
+import { additionalLocationPrice, INCLUDED_LOCATIONS } from '~/shared/billing-model'
 
 const props = defineProps<{
   plan: Plan

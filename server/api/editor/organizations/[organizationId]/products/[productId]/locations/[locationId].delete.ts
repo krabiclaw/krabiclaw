@@ -1,4 +1,4 @@
-import { cloudflareEnv, jsonResponse, rethrowHttpError } from '~/server/utils/api-response'
+import { jsonResponse, rethrowHttpError } from '~/server/utils/api-response'
 import { requireLocationAccess } from '~/server/utils/location-access'
 import { getProduct, removeProductLocation, requireOrganizationProduct } from '~/server/utils/product-management'
 import { defineHandler } from 'nitro'
@@ -13,7 +13,7 @@ export default defineHandler(async (event) => {
     const { db, organization } = await requireLocationAccess(event, organizationId, locationId)
     // A product id in the path is not authorized by the site in the path.
     await requireOrganizationProduct(db, { organizationId: organization.id, productId })
-    await removeProductLocation(db, { organizationId: organization.id, productId, locationId, env: cloudflareEnv(event) })
+    await removeProductLocation(db, { organizationId: organization.id, productId, locationId })
     return jsonResponse({ success: true, product: await getProduct(db, organization.id, productId) })
   } catch (error) {
     rethrowHttpError(error)

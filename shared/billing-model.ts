@@ -43,12 +43,6 @@ export const INCLUDED_LOCATIONS = 2
 /** USD cents for each location beyond the included ones, per month. */
 export const ADDITIONAL_LOCATION_PRICE = 4900
 
-/** Rental units Business includes. A rental unit is one independently bookable home. */
-export const INCLUDED_RENTAL_UNITS = 2
-
-/** USD cents for each rental unit beyond the included ones, per month. */
-export const ADDITIONAL_RENTAL_UNIT_PRICE = 1900
-
 /** Business's Payments fee: a share of the payment volume it captures. */
 export const PAYMENTS_FEE_RATE = 0.014
 
@@ -65,11 +59,6 @@ export function additionalLocationPrice(): string {
   return `$${ADDITIONAL_LOCATION_PRICE / 100} per additional location per month`
 }
 
-/** Stripe's phrasing for the per-unit charge after the included allowance: "$19 per additional rental unit per month". */
-export function additionalRentalUnitPrice(): string {
-  return `$${ADDITIONAL_RENTAL_UNIT_PRICE / 100} per additional rental unit per month`
-}
-
 /** The fee as the pricing page and the plan screen state it. */
 export const PAYMENTS_FEE = `${ratePercent(PAYMENTS_FEE_RATE)}% of payment volume, plus Stripe fees`
 
@@ -77,8 +66,8 @@ export const PAYMENTS_FEE = `${ratePercent(PAYMENTS_FEE_RATE)}% of payment volum
  * What a plan subscription bills beside its flat price, each a Stripe meter
  * and the monthly metered price that bills it at the end of the period:
  *
- * - locations and rental units report the count in use (`last`), billed in
- *   graduated tiers after the included ones;
+ * - locations report the active locations (`last`), billed in graduated
+ *   tiers after the included ones;
  * - captured volume, Stripe cost and ad spend report USD cents as they occur
  *   (`sum`), billed at a flat rate per cent.
  *
@@ -93,15 +82,6 @@ export const BILLING_METERS = Object.freeze({
     plans: [GROWTH_PLAN_ID, BUSINESS_PLAN_ID],
     tiers: [{ up_to: INCLUDED_LOCATIONS, unit_amount: 0 }, { up_to: 'inf', unit_amount: ADDITIONAL_LOCATION_PRICE }],
     description: `${INCLUDED_LOCATIONS} locations included, then ${additionalLocationPrice()}.`,
-  }),
-  rental_units: Object.freeze({
-    name: 'Additional rental unit',
-    eventName: 'krabiclaw_rental_units',
-    formula: 'last',
-    unitLabel: 'rental unit',
-    plans: [BUSINESS_PLAN_ID],
-    tiers: [{ up_to: INCLUDED_RENTAL_UNITS, unit_amount: 0 }, { up_to: 'inf', unit_amount: ADDITIONAL_RENTAL_UNIT_PRICE }],
-    description: `${INCLUDED_RENTAL_UNITS} rental units included, then ${additionalRentalUnitPrice()}.`,
   }),
   captured_volume: Object.freeze({
     name: 'Payments fee',

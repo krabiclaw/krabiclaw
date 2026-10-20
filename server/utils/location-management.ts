@@ -208,11 +208,7 @@ export async function createLocation(
   organizationId: string,
   input: CreateLocationInput,
   userId: string,
-  /**
-   * `holdsHome`: made inactive for the home created at it next, which makes it
-   * active once it holds the home (see createStayHome).
-   */
-  options: { refreshSocialCardAfterCreate?: boolean; idempotencyKey?: string; holdsHome?: boolean } = {},
+  options: { refreshSocialCardAfterCreate?: boolean; idempotencyKey?: string } = {},
 ) {
   const key = options.idempotencyKey?.trim();
   if (options.idempotencyKey !== undefined && (!key || key.length > 200)) {
@@ -359,7 +355,7 @@ export async function createLocation(
           input.price_level ?? null,
           normalizedTimezone,
           input.max_capacity ?? null,
-          options.holdsHome ? 'inactive' : 'active',
+          'active',
           input.seo_title ?? null,
           input.seo_description ?? null,
           input.canonical_url ?? null,

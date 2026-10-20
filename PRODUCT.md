@@ -80,13 +80,12 @@ same link. A used, expired or withdrawn link says so.
 
 ## Plans
 
-New subscriptions use `growth` ($49/month or $588/year) and `business` ($149/month);
-`free` is Basic with no subscription. Business includes Growth, online payments,
-direct stay booking and managed advertising, with 2 locations and 2 rental units
-included, then $49 per additional location and $19 per additional rental unit per
-month. A rental unit is one independently bookable home (a `stay` product, counted
-once however many channels list it); a location holding only homes is billed by
-its units, not as a location. The iOS app is included with every account at no
+New subscriptions use `growth` ($49/month) and `business` ($149/month); `free` is
+Basic with no subscription. Business includes Growth, online payments, direct stay
+booking and managed advertising. Growth and Business include 2 locations, then $49
+per additional location per month, billed at the end of the period; every active
+location counts, including a home's, and a home itself is not billed. Basic
+includes 2 locations. The iOS app is included with every account at no
 charge. Commerce ($89), Marketing ($99) and Business subscriptions on the earlier
 $99 price remain existing contracts with their original prices and entitlements. One organization
 subscription covers its sites. Customer display names, Stripe product IDs, price IDs and lookup keys

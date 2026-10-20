@@ -1,5 +1,4 @@
 import { HTTPError } from 'nitro'
-import { reportBillingUsage } from '~/server/utils/billing'
 import { d1JsonStringSet, execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { createStayHome, importStayNights, stayHomeInput, type StayAccess } from '~/server/domain/stays'
@@ -381,8 +380,6 @@ export class AirbnbConnection {
       await execute(this.db, `INSERT INTO product_channel_mappings (organization_id, product_id, provider, listing_id, channel_id, import_stage, import_property, import_calendar)
         VALUES (?, ?, 'channex', ?, ?, 'property', ?, ?) ON CONFLICT (product_id, provider) DO NOTHING`,
       [this.organizationId, home.product_id, listingId, channelId, JSON.stringify(property), JSON.stringify(calendar)])
-      // A mapped home is a rental unit while its channel takes stays, on sale or not.
-      await reportBillingUsage(this.env, this.db, this.organizationId)
       return { product_id: home.product_id, stage: 'property', waiting: false }
     })
   }
@@ -580,7 +577,6 @@ export class AirbnbConnection {
       const path = `/channels/${encodeURIComponent(channel.id)}`
       await this.save(row, { status: 'disconnecting' })
       await execute(this.db, "UPDATE product_channel_mappings SET enabled = 0, updated_at = ? WHERE organization_id = ? AND provider = 'channex' AND channel_id = ?", [now(), this.organizationId, channel.id])
-      await reportBillingUsage(this.env, this.db, this.organizationId)
       const first = channel.ratePlans[0]
       if (first !== undefined) {
         const mappingId = provided(() => string(first.id, 'Mapping id'))
@@ -649,7 +645,6 @@ export class AirbnbConnection {
         LIMIT 1`, [this.organizationId, d1JsonStringSet(grouped), this.organizationId, row.group_id, d1JsonStringSet(grouped)])
       if (shared) fail(409, 'SHARED_PROVIDER_PROPERTY', 'A Channex property in this group belongs to another organization.')
       await execute(this.db, "UPDATE product_channel_mappings SET enabled = 0, updated_at = ? WHERE organization_id = ? AND provider = 'channex'", [now(), this.organizationId])
-      await reportBillingUsage(this.env, this.db, this.organizationId)
       for (const id of grouped) {
         const path = `/properties/${encodeURIComponent(id)}`
         await this.save(row, { pending_step: `delete_property:${id}` })

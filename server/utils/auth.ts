@@ -426,7 +426,7 @@ function buildAuth(env: CloudflareEnv) {
             throw new APIError('BAD_REQUEST', { message: 'This plan is no longer available. Choose Growth or Business.' })
           }
           if (ctx.body?.seats !== undefined && ctx.body.seats !== 1) {
-            throw new APIError('BAD_REQUEST', { message: 'A plan is billed once; locations and rental units are billed by what you use.' })
+            throw new APIError('BAD_REQUEST', { message: 'A plan is billed once; additional locations are billed by what you use.' })
           }
         }
         // The policy applies where a password is chosen. It is not part of
