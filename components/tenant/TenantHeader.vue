@@ -74,6 +74,7 @@ import PlatformCommandSearchTrigger from '~/components/platform/search/PlatformC
 import { articleNavKey } from '~/composables/useArticleNav'
 import { catalogNavigation } from '~/utils/product-presentation'
 import { getVerticalCopy } from '~/utils/vertical-copy'
+import { isLegalPractice } from '~/utils/template-registry'
 import type { PublicShellPayload } from '~/utils/public-resource-contracts'
 
 const props = withDefaults(defineProps<{
@@ -141,7 +142,8 @@ const headerOrder = ['/services', '/experiences', '/pricing', '/about', '/blog',
 const catalogLinks = computed(() => (props.organization?.vertical
   ? catalogNavigation(props.organization.vertical as string, props.sections)
   : []))
-const showLocations = computed(() => (props.locations || []).filter(location => !location.home_slug).length > 1)
+// A legal practice's offices are listed on its contact page; it has no locations route.
+const showLocations = computed(() => !isLegalPractice(props.organization?.vertical as string | undefined) && (props.locations || []).filter(location => !location.home_slug).length > 1)
 const navItems = computed(() => {
   // A published page names its own link; a catalog surface with no page of its own uses the catalog's word.
   const byPath = new Map(props.pageLinks.map(item => [item.path, item]))

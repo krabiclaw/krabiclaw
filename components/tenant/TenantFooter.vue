@@ -132,7 +132,7 @@ const footerGroups = computed(() => [
     label: t('site.footer.heading_connect'),
     items: [
       ...linksFor(['/about', '/schedule', '/contact']),
-      ...((props.locations || []).filter(location => !location.home_slug).length > 1 ? [{ path: '/locations', title: t('site.footer.all_locations') }] : []),
+      ...(!legalPractice.value && (props.locations || []).filter(location => !location.home_slug).length > 1 ? [{ path: '/locations', title: t('site.footer.all_locations') }] : []),
     ],
   },
   { label: t('site.footer.legal'), items: linksFor(['/third-party-notices', '/policies/privacy', '/policies/terms']) },
