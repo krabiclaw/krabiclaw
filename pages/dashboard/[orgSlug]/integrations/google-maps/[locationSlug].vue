@@ -35,7 +35,7 @@
         <dl v-if="location.phone || location.website_url" class="grid grid-cols-[6rem_1fr] gap-x-4 gap-y-2 border-t border-default pt-5 text-sm">
           <template v-if="location.phone">
             <dt class="text-muted">Phone</dt>
-            <dd class="text-highlighted">{{ location.phone }}</dd>
+            <dd class="text-highlighted">{{ formatPhone(location.phone) }}</dd>
           </template>
           <template v-if="location.website_url">
             <dt class="text-muted">Website</dt>
@@ -71,6 +71,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatPhone } from '~/utils/phone'
 import GooglePlacePicker from '~/lib/components/workspace/location/GooglePlacePicker.vue'
 import type { OnboardingPlacePreview } from '~/composables/useOnboardingFlow'
 import { integrationsKey } from '../../integrations.vue'

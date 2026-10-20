@@ -4,6 +4,7 @@ import { creationDedupeKey, creationRequestHash, isUniqueDedupeConflict, organiz
 import { HTTPError } from 'nitro'
 import { executeBatch, queryAll, queryFirst, type BatchQuery } from "~/server/db";
 import { isValidTimezone, normalizeTimezone } from "~/utils/timezone";
+import { toE164 } from "~/utils/phone";
 import type { CloudflareEnv } from "~/server/utils/auth";
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
@@ -132,6 +133,14 @@ function locationValidationFailure(error: unknown, field: string) {
   return { status: 400 as const, data: { error: error.message, code: 'INVALID_LOCATION_FIELD', field } };
 }
 
+/** A location's phone is stored as E.164, or null for none; a number without its calling code is refused. */
+function readSubmittedPhone(value: string | null | undefined): { ok: true; phone: string | null } | { ok: false; status: 400; data: { error: string; code: string; field: string } } {
+  if (!value?.trim()) return { ok: true, phone: null };
+  const phone = toE164(value);
+  if (!phone) return { ok: false, status: 400, data: { error: "phone must be an international number with its country calling code, such as +66812345678.", code: "INVALID_LOCATION_FIELD", field: "phone" } };
+  return { ok: true, phone };
+}
+
 function readSubmittedAddress(value: unknown): { ok: true; address: PostalAddress | null } | { ok: false; status: 400; data: { error: string; code: string; field: string } } {
   try {
     return { ok: true, address: parsePostalAddress(value) };
@@ -245,6 +254,8 @@ export async function createLocation(
   }
   const submittedAddress = readSubmittedAddress(input.address);
   if (!submittedAddress.ok) return submittedAddress;
+  const submittedPhone = readSubmittedPhone(input.phone);
+  if (!submittedPhone.ok) return submittedPhone;
 
   if (
     input.rating !== undefined &&
@@ -339,7 +350,7 @@ export async function createLocation(
           organizationId,
           title,
           slug,
-          input.phone ?? null,
+          submittedPhone.phone,
           input.email ?? null,
           input.website_url ?? null,
           input.maps_url ?? null,
@@ -465,6 +476,8 @@ export async function updateLocation(
   }
   const submittedAddress = input.address === undefined ? undefined : readSubmittedAddress(input.address);
   if (submittedAddress && !submittedAddress.ok) return submittedAddress;
+  const submittedPhone = input.phone === undefined ? undefined : readSubmittedPhone(input.phone);
+  if (submittedPhone && !submittedPhone.ok) return submittedPhone;
 
   if (
     input.rating !== undefined &&
@@ -568,7 +581,9 @@ export async function updateLocation(
       params.push(
         field === "timezone"
           ? normalizedTimezone ?? null
-          : input[field] ?? null,
+          : field === "phone" && submittedPhone?.ok
+            ? submittedPhone.phone
+            : input[field] ?? null,
       );
     }
   }

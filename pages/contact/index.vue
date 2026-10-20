@@ -177,7 +177,7 @@
                     </div>
                     <div v-if="loc.phone">
                       <p class="saya-eyebrow mb-2 text-muted">{{ t('saya.contact_page.phone') }}</p>
-                      <a :href="`tel:${loc.phone}`" class="border-b border-default pb-px text-sm text-default no-underline hover:opacity-70">{{ loc.phone }}</a>
+                      <a :href="`tel:${loc.phone}`" class="border-b border-default pb-px text-sm text-default no-underline hover:opacity-70">{{ formatPhone(loc.phone) }}</a>
                     </div>
                     <div v-if="loc.email">
                       <p class="saya-eyebrow mb-2 text-muted">{{ t('saya.contact_page.email') }}</p>
@@ -229,6 +229,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatPhone } from '~/utils/phone'
 import type { SubmissionMeasurement } from '~/composables/useOrganizationConversionTracking'
 
 definePageMeta({ layout: false })

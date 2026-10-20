@@ -1,4 +1,5 @@
 import type { NotificationFact, NotificationMessage } from './messages'
+import { formatPhone } from '~/utils/phone'
 
 /**
  * The owner-facing events that send on both channels, each described once.
@@ -48,7 +49,7 @@ export function reservationCreatedMessage(input: ReservationEventInput): Notific
       fact('time', 'Time', input.time, true),
       fact('partySize', 'Party size', input.partySize, true),
       fact('context', 'Location', input.locationName),
-      fact('guestPhone', 'Phone', input.guestPhone),
+      fact('guestPhone', 'Phone', input.guestPhone && formatPhone(input.guestPhone)),
       fact('guestEmail', 'Email', input.guestEmail, true),
       fact('notes', 'Special requests', input.notes),
     ),
@@ -74,7 +75,7 @@ export function reservationCancelledMessage(input: ReservationEventInput & { was
       fact('date', 'Date', input.date, true),
       fact('time', 'Time', input.time, true),
       fact('partySize', 'Party size', input.partySize, true),
-      fact('guestPhone', 'Phone', input.guestPhone),
+      fact('guestPhone', 'Phone', input.guestPhone && formatPhone(input.guestPhone)),
       fact('guestEmail', 'Email', input.guestEmail),
       fact('notes', 'Special requests', input.notes),
     ),
@@ -114,7 +115,7 @@ export function stayBookedMessage(input: StayEventInput): NotificationMessage {
       fact('nights', 'Nights', input.nights, true),
       fact('partySize', 'Guests', input.guests, true),
       fact('total', 'Paid', input.total, true),
-      fact('guestPhone', 'Phone', input.guestPhone),
+      fact('guestPhone', 'Phone', input.guestPhone && formatPhone(input.guestPhone)),
       fact('guestEmail', 'Email', input.guestEmail, true),
       fact('notes', 'Message from the guest', input.notes),
     ),
@@ -138,7 +139,7 @@ export function stayCancelledMessage(input: Omit<StayEventInput, 'notes' | 'tota
       fact('nights', 'Nights', input.nights, true),
       fact('partySize', 'Guests', input.guests, true),
       fact('refund', 'Refunded by your cancellation policy', input.refund, true),
-      fact('guestPhone', 'Phone', input.guestPhone),
+      fact('guestPhone', 'Phone', input.guestPhone && formatPhone(input.guestPhone)),
       fact('guestEmail', 'Email', input.guestEmail, true),
     ),
     primaryAction: input.replyUrl ? { url: input.replyUrl, label: 'Open in dashboard' } : undefined,
@@ -162,7 +163,7 @@ export function bookingCreatedMessage(input: BookingEventInput): NotificationMes
       fact('date', 'Date', input.date, true),
       fact('time', 'Time', input.time, true),
       fact('partySize', 'Party size', input.partySize, true),
-      fact('guestPhone', 'Phone', input.guestPhone),
+      fact('guestPhone', 'Phone', input.guestPhone && formatPhone(input.guestPhone)),
       fact('guestEmail', 'Email', input.guestEmail, true),
       fact('notes', 'Special requests', input.notes),
     ),
@@ -184,7 +185,7 @@ export function bookingCancelledMessage(input: BookingEventInput & { wasConfirme
       fact('date', 'Date', input.date, true),
       fact('time', 'Time', input.time, true),
       fact('partySize', 'Party size', input.partySize, true),
-      fact('guestPhone', 'Phone', input.guestPhone),
+      fact('guestPhone', 'Phone', input.guestPhone && formatPhone(input.guestPhone)),
       fact('guestEmail', 'Email', input.guestEmail),
       fact('notes', 'Special requests', input.notes),
     ),

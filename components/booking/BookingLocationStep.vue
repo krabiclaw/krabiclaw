@@ -79,7 +79,7 @@
           </p>
 
           <!-- Phone -->
-          <p v-if="loc.phone" class="text-sm text-muted">{{ loc.phone }}</p>
+          <p v-if="loc.phone" class="text-sm text-muted">{{ formatPhone(loc.phone) }}</p>
         </div>
       </button>
     </div>
@@ -94,6 +94,7 @@
 </template>
 
 <script setup lang="ts">
+import { formatPhone } from '~/utils/phone'
 import { formatPostalAddress, parsePostalAddress } from '~/utils/postal-address'
 
 const { t } = useI18n()
