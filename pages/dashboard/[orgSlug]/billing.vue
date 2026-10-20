@@ -177,9 +177,10 @@ onMounted(async () => {
   if (success || plan || canceled) await router.replace({ query: restQuery })
   if (success || canceled) return
   // A plan chosen on the pricing page starts only a way up, and only for someone who changes billing:
-  // the current plan, a lower one, or an admin's visit leaves the index as it is.
+  // the current plan, a lower one, a plan already changing or an admin's visit leaves the index as it is.
   const planId = Array.isArray(plan) ? plan[0] : plan
-  const step = typeof planId === 'string' && billing.value ? classifyStripePlanChange(billing.value.plan, planId, Boolean(billing.value.stripeSubscriptionId)) : null
+  const status = billing.value
+  const step = typeof planId === 'string' && status && !status.cancelAtPeriodEnd && !status.scheduledPlan ? classifyStripePlanChange(status.plan, planId, Boolean(status.stripeSubscriptionId)) : null
   if (typeof planId === 'string' && isNewSalePlan(planId) && (step === 'upgrade' || step === 'initial_subscription') && dashboard.canUpdateBilling.value && !busy.value) {
     busy.value = true
     try {

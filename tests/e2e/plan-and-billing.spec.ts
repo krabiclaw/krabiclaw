@@ -234,58 +234,67 @@ test.describe('Plan and billing', () => {
     test.skip(!['localhost', '127.0.0.1'].includes(new URL(baseURL!).hostname), 'Role changes use disposable local actors only')
     test.setTimeout(90_000)
     const release = await acquireTenantMutationLock(testInfo, 'org-demo')
-    const membersResponse = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
-    expect(membersResponse.status(), await membersResponse.text()).toBe(200)
-    const { members } = await membersResponse.json() as { members: Array<{ id: string; userId: string; role: string }> }
-    const actor = members.find(member => member.userId === 'user-e2e-demo-role-owner')
-    expect(actor).toBeTruthy()
-    const context = await browser.newContext({ viewport: { width: 1440, height: 1200 } })
-    const setRole = async (role: string) => {
-      const changed = await page.request.post('/api/auth/organization/update-member-role', { headers: authRequestHeaders(baseURL!), data: { organizationId: 'org-demo', memberId: actor!.id, role } })
-      expect(changed.status(), await changed.text()).toBe(200)
-    }
     try {
-      await setRole('admin')
-      await loginAs(context.request, baseURL!, actor!.userId)
-      const admin = await context.newPage()
-      await dismissPreviewToolbar(admin)
-      await open(admin, '/dashboard/ember-slice-demo/menu')
-      await admin.getByTestId('dashboard-top-nav-menu-button').click()
-      await expect(admin.getByRole('dialog', { name: 'Menu', exact: true }).getByRole('link', { name: 'Plan and billing', exact: true })).toBeVisible()
-      await open(admin, '/dashboard/ember-slice-demo/billing')
-      const index = admin.locator('#dashboard-panel-organization-billing')
-      // One line names who changes it; the plan card has no button and Stripe's portal is not offered.
-      await expect(index.getByTestId('billing-owner-line')).toContainText('is the owner and changes the plan and billing.')
-      await expect(index.getByTestId('billing-plan-card')).toContainText('Business')
-      await expect(index.getByTestId('billing-plan-card').getByRole('button')).toHaveCount(0)
-      await expect(index.getByTestId('billing-plan-card').getByRole('link')).toHaveCount(0)
-      await expect(index.getByTestId('editor-row-portal')).toContainText('Manage billing')
-      await expect(index.locator('button[data-testid="editor-row-portal"]')).toHaveCount(0)
-      // A service leaf reads the same, with no consent to give.
-      await open(admin, '/dashboard/ember-slice-demo/billing/strategy')
-      const strategy = admin.locator('#dashboard-panel-organization-strategy')
-      await expect(strategy.getByText('Owners turn services on and off.', { exact: true })).toBeVisible()
-      await expect(admin.getByRole('button', { name: /^(Agree and turn on|Turn off)$/ })).toHaveCount(0)
-      // Better Auth refuses the admin's agreement on the server too.
-      const refused = await context.request.post('/api/dashboard/services?org=ember-slice-demo', { headers: authRequestHeaders(baseURL!), data: { service: 'managed_ads', action: 'agree' } })
-      expect(refused.status(), await refused.text()).toBe(403)
-
-      await setRole('member')
-      await open(admin, '/dashboard/ember-slice-demo/menu')
-      await admin.getByTestId('dashboard-top-nav-menu-button').click()
-      const menu = admin.getByRole('dialog', { name: 'Menu', exact: true })
-      await expect(menu.getByRole('link', { name: 'Website', exact: true })).toBeVisible()
-      await expect(menu.getByRole('link', { name: 'Plan and billing', exact: true })).toHaveCount(0)
-    } finally {
+      const membersResponse = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
+      expect(membersResponse.status(), await membersResponse.text()).toBe(200)
+      const { members } = await membersResponse.json() as { members: Array<{ id: string; userId: string; role: string }> }
+      const actor = members.find(member => member.userId === 'user-e2e-demo-role-owner')
+      expect(actor).toBeTruthy()
+      const setRole = async (role: string) => {
+        const changed = await page.request.post('/api/auth/organization/update-member-role', { headers: authRequestHeaders(baseURL!), data: { organizationId: 'org-demo', memberId: actor!.id, role } })
+        expect(changed.status(), await changed.text()).toBe(200)
+      }
+      const context = await browser.newContext({ viewport: { width: 1440, height: 1200 } })
       try {
-        await setRole(actor!.role)
-        const read = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
-        expect(read.status()).toBe(200)
-        expect((await read.json() as { members: Array<{ id: string; role: string }> }).members.find(member => member.id === actor!.id)?.role).toBe(actor!.role)
+        try {
+          await setRole('admin')
+          await loginAs(context.request, baseURL!, actor!.userId)
+          const admin = await context.newPage()
+          await dismissPreviewToolbar(admin)
+          await open(admin, '/dashboard/ember-slice-demo/menu')
+          await admin.getByTestId('dashboard-top-nav-menu-button').click()
+          await expect(admin.getByRole('dialog', { name: 'Menu', exact: true }).getByRole('link', { name: 'Plan and billing', exact: true })).toBeVisible()
+          await open(admin, '/dashboard/ember-slice-demo/billing')
+          const index = admin.locator('#dashboard-panel-organization-billing')
+          // One line names who changes it; the plan card has no button and Stripe's portal is not offered.
+          await expect(index.getByTestId('billing-owner-line')).toContainText('is the owner and changes the plan and billing.')
+          await expect(index.getByTestId('billing-plan-card')).toContainText('Business')
+          await expect(index.getByTestId('billing-plan-card').getByRole('button')).toHaveCount(0)
+          await expect(index.getByTestId('billing-plan-card').getByRole('link')).toHaveCount(0)
+          await expect(index.getByTestId('editor-row-portal')).toContainText('Manage billing')
+          await expect(index.locator('button[data-testid="editor-row-portal"]')).toHaveCount(0)
+          // A service leaf reads the same, with no consent to give.
+          await open(admin, '/dashboard/ember-slice-demo/billing/strategy')
+          const strategy = admin.locator('#dashboard-panel-organization-strategy')
+          await expect(strategy.getByText('Owners turn services on and off.', { exact: true })).toBeVisible()
+          await expect(admin.getByRole('button', { name: /^(Agree and turn on|Turn off)$/ })).toHaveCount(0)
+          // Better Auth refuses the admin's agreement on the server too, and nothing is recorded.
+          const servicesBefore = await page.request.get('/api/dashboard/services?org=ember-slice-demo')
+          expect(servicesBefore.status(), await servicesBefore.text()).toBe(200)
+          const before = (await servicesBefore.json() as { services: Record<string, unknown> }).services
+          const refused = await context.request.post('/api/dashboard/services?org=ember-slice-demo', { headers: authRequestHeaders(baseURL!), data: { service: 'managed_ads', action: 'agree' } })
+          expect(refused.status(), await refused.text()).toBe(403)
+          const servicesAfter = await page.request.get('/api/dashboard/services?org=ember-slice-demo')
+          expect(servicesAfter.status(), await servicesAfter.text()).toBe(200)
+          expect((await servicesAfter.json() as { services: Record<string, unknown> }).services).toEqual(before)
+
+          await setRole('member')
+          await open(admin, '/dashboard/ember-slice-demo/menu')
+          await admin.getByTestId('dashboard-top-nav-menu-button').click()
+          const menu = admin.getByRole('dialog', { name: 'Menu', exact: true })
+          await expect(menu.getByRole('link', { name: 'Website', exact: true })).toBeVisible()
+          await expect(menu.getByRole('link', { name: 'Plan and billing', exact: true })).toHaveCount(0)
+        } finally {
+          await setRole(actor!.role)
+          const read = await page.request.get('/api/dashboard/members', { params: { org: 'ember-slice-demo' } })
+          expect(read.status()).toBe(200)
+          expect((await read.json() as { members: Array<{ id: string; role: string }> }).members.find(member => member.id === actor!.id)?.role).toBe(actor!.role)
+        }
       } finally {
         await context.close()
-        await release()
       }
+    } finally {
+      await release()
     }
   })
 })
