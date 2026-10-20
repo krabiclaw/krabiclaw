@@ -200,6 +200,11 @@ export function buildPublicBlawbyDocumentCacheKey(
   ].join('~')
 }
 
+/** The site's accepted payment methods, under the site's prefix so its purge clears them. */
+export function buildPublicPaymentMethodsCacheKey(organizationId: string): string {
+  return ['public', encodeKeyField(organizationId), 'v12', 'payment-methods'].join('~')
+}
+
 export function buildPublicResourceCacheKey(organizationId: string, params: PublicResourceCacheParams): string {
   return [
     'public',
