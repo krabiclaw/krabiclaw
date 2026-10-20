@@ -72,7 +72,8 @@ const requirementRows = computed<EditorNavigationItem[]>(() => {
   return [
     row('google-ads', 'Google Ads account connected (USD)', state.google_ads_usd, { to: `/dashboard/${encodeURIComponent(orgSlug)}/integrations/google-ads` }),
     row('business-plan', 'Business plan', state.business_plan, { to: level.to.value ? `${level.to.value}/upgrade` : undefined }),
-    row('payment-method', 'Default payment method', state.default_payment_method, { action: { label: 'Add' } }),
+    // Stripe's portal needs the plan's customer, which only a paid plan has.
+    row('payment-method', 'Default payment method', state.default_payment_method, state.business_plan ? { action: { label: 'Add' } } : {}),
   ]
 })
 
