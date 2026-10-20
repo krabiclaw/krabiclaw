@@ -2,11 +2,12 @@
   <!-- ChatGPT's picker in our cards: every plan for sale, the current one marked, each with what it includes. The change itself is Better Auth's subscription flow, which Stripe confirms with its proration before anything is charged. -->
   <DashboardLeafPanel id="organization-plan" :title="onStarter ? 'Choose a plan' : 'Change plan'" :footer="false">
     <UAlert v-if="error" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="error" />
+    <p v-if="!dashboard.canUpdateBilling.value" class="mb-6 text-base text-muted">Only an owner of this business changes its plan.</p>
     <div class="grid gap-4">
       <BillingPlanCard v-for="plan in salePlans" :key="plan.id" :plan="plan" :highlighted="plan.id === billing?.plan">
         <template #cta>
           <UButton v-if="plan.id === billing?.plan" label="Your current plan" color="neutral" variant="outline" size="xl" block disabled />
-          <UButton v-else :label="`Switch to ${plan.name}`" size="xl" block :loading="busy" @click="choose(plan.id)" />
+          <UButton v-else :label="`Switch to ${plan.name}`" size="xl" block :loading="busy" :disabled="!dashboard.canUpdateBilling.value" @click="choose(plan.id)" />
         </template>
       </BillingPlanCard>
     </div>

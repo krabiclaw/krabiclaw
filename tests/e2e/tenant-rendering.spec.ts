@@ -553,7 +553,7 @@ test('a guest opens a stay\'s booking dialog, picks nights the calendar allows a
   await expect(totalRow.locator('dd')).toHaveText(total)
   await dialog.getByRole('button', { name: 'Reserve', exact: true }).click()
   await expect(dialog.getByRole('textbox', { name: 'Full name' })).toBeVisible()
-  await expect(dialog.getByRole('button', { name: 'Confirm and pay', exact: true })).toBeEnabled()
+  await expect(dialog.getByRole('button', { name: 'Continue to pay', exact: true })).toBeEnabled()
 
   // Closed, the card reads the stay back; its dates reopen the calendar.
   await page.keyboard.press('Escape')

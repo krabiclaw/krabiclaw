@@ -22,6 +22,7 @@ import { DEFAULT_EMAIL_DAILY_LIMIT as EMAIL_DAILY_LIMIT, DEFAULT_IP_HOURLY_LIMIT
 import { resolveBookingPresentation } from '~/utils/booking-presentation'
 import { HTTPError, type H3Event } from 'nitro'
 import { createPaymentCheckout } from '~/server/domain/payments/checkout'
+import { paidOnline } from '~/server/domain/payments'
 import { hasOrganizationEntitlement } from '~/server/utils/billing'
 import { isRecord } from '~/server/utils/type-guards'
 import { pushStayHoldNights, quoteStay, readPublicStayHome, type StayQuote } from '~/server/domain/stays'
@@ -52,12 +53,13 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
   const token = cancellationToken ?? (await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', requestId)).token
   const tokenMatches = await hashReservationCancelToken(token) === request.payload.cancellation.token_hash
   if (cancellationToken && !tokenMatches) throw new Error('Booking cancellation capability does not match its request')
-  const cancelUrl = tokenMatches && organization.public_url
-    ? `${organization.public_url.replace(/\/$/, '')}${formatTenantLocalePath('/bookings/cancel', locale, sourceLocale)}?id=${requestId}#${token}`
-    : env.NUXT_PUBLIC_PLATFORM_DOMAIN ? new URL('/account', env.NUXT_PUBLIC_PLATFORM_DOMAIN).toString() : null
-  const [{ contactPhone, contactEmail }, ownerInboxUrl] = await Promise.all([
+  const receiptUrl = tokenMatches && organization.public_url
+    ? `${organization.public_url.replace(/\/$/, '')}${formatTenantLocalePath('/bookings/confirmed', locale, sourceLocale)}?id=${requestId}#${token}`
+    : null
+  const [{ contactPhone, contactEmail }, ownerInboxUrl, paid] = await Promise.all([
     resolveLocationContact(db, organizationId, record.location_id),
     buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: record.location_id ?? undefined, threadId: requestId }),
+    paidOnline(db, organizationId, 'booking', record.id),
   ])
   const results = await Promise.allSettled([
     publishGuestInboxThreadEvent(env, db, { threadId: requestId, type: 'thread.created' }),
@@ -68,7 +70,7 @@ export async function notifyProductBookingCreated(env: CloudflareEnv, db: DbClie
       email: request.payload.guest.email, guestPhone: request.payload.guest.phone,
       productId: record.product_id, productTitle: record.product_name, startsAt: record.starts_at,
       timezone: record.timezone, partySize: record.party_size, notes: request.payload.notes,
-      cancelUrl, contactPhone, contactEmail, ownerInboxUrl, locale,
+      receiptUrl, paid, contactPhone, contactEmail, ownerInboxUrl, locale,
     }),
   ])
   raiseSettledFailures('booking creation delivery', `bookingId ${requestId}`, results)

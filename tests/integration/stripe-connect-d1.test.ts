@@ -53,9 +53,17 @@ test('Stripe account projection preserves provider identity and derives onboardi
     const reserved = await reserveStripeConnectedAccount(db, { organizationId: 'org', livemode: false })
     const actionRequired = deriveStripeConnectStatus({
       cardPaymentsStatus: 'pending',
+      cardPaymentsResolutions: [],
       requirements: [{ awaitingActionFrom: 'user', deadlineStatus: 'currently_due' }],
     })
     assert.equal(actionRequired, 'action_required')
+    // Restricted while Stripe verifies what was just submitted is under review, not an action for the business.
+    const derive = (cardPaymentsStatus: 'restricted' | 'pending', cardPaymentsResolutions: Array<'no_resolution' | 'provide_info' | 'contact_stripe'>) => deriveStripeConnectStatus({ cardPaymentsStatus, cardPaymentsResolutions, requirements: [] })
+    assert.equal(derive('restricted', ['no_resolution']), 'pending_review')
+    assert.equal(derive('pending', ['no_resolution']), 'pending_review')
+    assert.equal(derive('restricted', ['provide_info']), 'action_required')
+    assert.equal(derive('restricted', ['contact_stripe']), 'restricted')
+    assert.equal(derive('restricted', []), 'restricted')
 
     await projectStripeConnectedAccount(db, {
       reservationId: reserved.id,
@@ -64,6 +72,7 @@ test('Stripe account projection preserves provider identity and derives onboardi
       country: 'US',
       livemode: false,
       cardPaymentsStatus: 'active',
+      cardPaymentsResolutions: [],
       requirements: [],
       stripeRefreshedAt: '2026-09-12T12:00:00.000Z',
     })

@@ -19,6 +19,7 @@ import { getSourceLocale } from '~/server/utils/organization-locales'
 import { assertExactCanonicalLocale, assertPublicOrganizationLanguageEntitlement } from '~/server/utils/localization'
 import { formatTenantLocalePath } from '~/utils/tenant-locale-path'
 import { createPaymentCheckout } from '~/server/domain/payments/checkout'
+import { paidOnline } from '~/server/domain/payments'
 import { isRecord } from '~/server/utils/type-guards'
 import { ensureInteractionUser, type CloudflareEnv } from '~/server/utils/auth'
 import { DEFAULT_EMAIL_DAILY_LIMIT as EMAIL_DAILY_LIMIT, DEFAULT_IP_HOURLY_LIMIT as IP_HOURLY_LIMIT, getClientIp, hashClientIp, hashIdentifier, incrementHourlyRateLimit } from '~/server/utils/hourly-rate-limit'
@@ -45,11 +46,12 @@ export async function notifyTableReservationCreated(env: CloudflareEnv, db: DbCl
   const locale = request.payload.guest.locale ?? sourceLocale
   const cancellation = await createReplayableReservationCancelToken(env.EMAIL_REPLY_SECRET ?? '', requestId)
   const matches = await hashReservationCancelToken(cancellation.token) === request.payload.cancellation.token_hash
-  const cancelUrl = matches && organization.public_url ? `${organization.public_url.replace(/\/$/, '')}${formatTenantLocalePath('/reservations/cancel', locale, sourceLocale)}?id=${requestId}#${cancellation.token}` : env.NUXT_PUBLIC_PLATFORM_DOMAIN ? new URL('/account', env.NUXT_PUBLIC_PLATFORM_DOMAIN).toString() : null
-  const [location, { contactPhone, contactEmail }, ownerInboxUrl] = await Promise.all([
+  const receiptUrl = matches && organization.public_url ? `${organization.public_url.replace(/\/$/, '')}${formatTenantLocalePath('/reservations/confirmed', locale, sourceLocale)}?id=${requestId}#${cancellation.token}` : null
+  const [location, { contactPhone, contactEmail }, ownerInboxUrl, paid] = await Promise.all([
     queryFirst<{ title: string }>(db, 'SELECT title FROM business_locations WHERE organization_id = ? AND id = ?', [organizationId, record.location_id]),
     resolveLocationContact(db, organizationId, record.location_id),
     buildOwnerThreadInboxUrl(env, db, { organizationId, locationId: record.location_id, threadId: requestId }),
+    paidOnline(db, organizationId, 'reservation', record.id),
   ])
   if (!location) throw new Error('Reservation delivery location is missing')
   const local = localNow(record.timezone, new Date(record.starts_at))
@@ -59,7 +61,7 @@ export async function notifyTableReservationCreated(env: CloudflareEnv, db: DbCl
       reservationId: requestId, guestAcknowledgement: request.payload.provenance?.guest_acknowledgement ?? true,
       guestName: request.payload.guest.name, email: request.payload.guest.email, phone: request.payload.guest.phone,
       date: local.date, time: local.time, guests: `${record.party_size}${request.payload.party_size_is_minimum ? '+' : ''}`, requests: request.payload.notes,
-      cancelUrl, contactPhone, contactEmail, ownerInboxUrl, locale }),
+      receiptUrl, paid, contactPhone, contactEmail, ownerInboxUrl, locale }),
   ])
   raiseSettledFailures('Reservation creation delivery', requestId, outcomes)
 }

@@ -39,6 +39,8 @@ export interface BookingConfirmation {
   locationName?: string | null
   locationAddress?: string | null
   locationSlug?: string | null
+  /** What the guest paid on the site, net of refunds; null when nothing was paid online. */
+  paid?: { amount: number; currency: string } | null
 }
 
 const STORAGE_KEY = 'kc:booking-confirmation'
@@ -85,7 +87,7 @@ export async function loadBookingConfirmation(
     kind: BookingConfirmation['type']; status: 'pending' | 'confirmed' | 'cancelled'; name: string; email: string
     starts_at: string; timezone: string; guests: string; location_id: string | null; product_id: string | null; product_kind: ProductKind | null; product_name: string | null
     location_name: string | null; location_slug: string | null
-    locale: string; policy_summary: ApiRecord | null
+    locale: string; policy_summary: ApiRecord | null; paid: { amount: number; currency: string } | null
   } }>(`/api/public/booking-requests/${encodeURIComponent(requestId)}`, {
     query: { locale: language.locale },
     headers: { Authorization: `Bearer ${token}` }, cache: 'no-store',
@@ -95,7 +97,8 @@ export async function loadBookingConfirmation(
     || !['pending', 'confirmed', 'cancelled'].includes(booking.status)
     || typeof booking.name !== 'string' || typeof booking.email !== 'string' || !isValidInstant(booking.starts_at) || !isValidTimezone(booking.timezone)
     || (kind === 'booking' && (!booking.product_kind || !PRODUCT_KINDS.includes(booking.product_kind)))
-    || typeof booking.guests !== 'string' || booking.locale !== language.locale || (booking.location_id !== null && typeof booking.location_id !== 'string')) {
+    || typeof booking.guests !== 'string' || booking.locale !== language.locale || (booking.location_id !== null && typeof booking.location_id !== 'string')
+    || (booking.paid !== null && (!Number.isInteger(booking.paid?.amount) || typeof booking.paid?.currency !== 'string'))) {
     throw new Error(language.t('booking.receipt_failed'))
   }
   const matchingHandoff = requestId === savedId ? handoff : null
@@ -111,6 +114,7 @@ export async function loadBookingConfirmation(
     productKind: booking.product_kind,
     locationName: booking.location_name,
     locationSlug: booking.location_slug,
+    paid: booking.paid,
     locationAddress: sameLocation && sameLocale ? matchingHandoff?.locationAddress : null,
     title: booking.product_name ?? (sameLocale ? matchingHandoff?.title : undefined),
     policySummary: sameLocale && sameLocation && sameProduct && matchingHandoff?.policySummary ? matchingHandoff.policySummary : booking.policy_summary,

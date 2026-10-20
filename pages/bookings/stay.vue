@@ -34,7 +34,7 @@
 </template>
 
 <script setup lang="ts">
-// A stay paid on this site, confirmed here as a visit is: the browser that paid for it owns it.
+// A stay paid on this site, confirmed here as a visit is: by the link that names and signs it.
 import BookingConfirmation from '~/components/booking/BookingConfirmation.vue'
 import { bookedPolicyTerms } from '~/shared/stay-cancellation'
 import { paymentMoney } from '~/shared/payment-display'
@@ -60,7 +60,8 @@ const loadError = ref<string | null>(null)
 onMounted(async () => {
   const id = typeof route.query.id === 'string' ? route.query.id : ''
   try {
-    if (id) guestStay.value = await publicApiRequest<GuestStay>(`/api/public/guest-stays/${encodeURIComponent(id)}`, { validate: isGuestStay })
+    // The link's signature is in the fragment: no server log or referrer sees it.
+    if (id) guestStay.value = await publicApiRequest<GuestStay>(`/api/public/guest-stays/${encodeURIComponent(id)}`, { validate: isGuestStay, headers: { Authorization: `Bearer ${route.hash.slice(1)}` } })
   } catch (cause) {
     loadError.value = getErrorMessage(cause, t('booking.receipt_failed'))
   } finally {
@@ -89,7 +90,7 @@ const receiptRows = computed(() => {
     { label: t('stay.check_out'), value: `${day(stay.check_out_date)} · ${formatTime(home.check_out_time, locale.value)}` },
     { label: t('stay.nights'), value: String(nights) },
     { label: t('stay.guests'), value: String(stay.adults + stay.children) },
-    { label: t('stay.paid_total'), value: paymentMoney(stay.paid_minor, stay.currency) },
+    { label: t('payment.paid'), value: paymentMoney(stay.paid_minor, stay.currency) },
   ]
 })
 

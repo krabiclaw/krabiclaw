@@ -140,6 +140,7 @@ export function publicApiRequest<T>(
     signal?: AbortSignal
     coalesceKey?: string
     query?: Record<string, unknown>
+    headers?: HeadersInit
   },
 ) {
   return request(url, options)
