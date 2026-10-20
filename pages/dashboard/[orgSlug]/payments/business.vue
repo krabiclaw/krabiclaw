@@ -3,6 +3,7 @@
   <DashboardLeafPanel id="organization-business-plan" :title="switching ? 'Switch to Business' : 'Business plan'" :lead="lead" :saving="busy" :disabled="!changeable || !valid" :error="error" :save-label="saveLabel" @save="save">
     <UAlert v-if="success" class="mb-6" color="success" variant="soft" icon="i-lucide-circle-check" :description="success" />
     <div v-if="changeable && billing" class="grid gap-6">
+      <UButton v-if="earlierPrice && !acceptOffer" label="Move to the current Business offer" color="neutral" variant="outline" :disabled="busy" @click="acceptCurrentOffer" />
       <UFormField label="Locations" :help="locationsHelp">
         <UInputNumber v-model="locations" :min="minimumLocations" :disabled="busy" class="w-full" />
       </UFormField>
@@ -49,7 +50,10 @@ const { billing, refreshBilling } = await useOrganizationBilling()
 
 // Moving another plan to Business lands on the current offer; a Business subscription on an earlier price keeps it.
 const switching = computed(() => !!billing.value && billing.value.plan !== BUSINESS_PLAN_ID)
-const billsUnits = computed(() => switching.value || !!billing.value?.billsRentalUnits)
+// A Business subscription on an earlier price keeps it until the business accepts the current offer here.
+const earlierPrice = computed(() => billing.value?.plan === BUSINESS_PLAN_ID && !billing.value.billsRentalUnits)
+const acceptOffer = ref(false)
+const billsUnits = computed(() => switching.value || acceptOffer.value || !!billing.value?.billsRentalUnits)
 const changeable = computed(() => !!billing.value?.stripeSubscriptionId && billing.value.subscriptionStatus === 'active' && !billing.value.scheduledPlan && !billing.value.cancelAtPeriodEnd)
 // What is in use is the least the plan can cover; a business pays for no fewer than are on its site.
 const usedLocations = computed(() => billsUnits.value ? billing.value?.businessUsage.locations ?? 0 : billing.value?.locations.used ?? 0)
@@ -67,9 +71,15 @@ const locationsHelp = computed(() => billsUnits.value
   : `${usedLocations.value} in use.`)
 const unitsHelp = computed(() => `${billing.value?.businessUsage.rentalUnits ?? 0} in use: each home on sale or connected to a channel.`)
 
+function acceptCurrentOffer() {
+  acceptOffer.value = true
+  locations.value = minimumLocations.value
+  rentalUnits.value = minimumUnits.value
+}
+
 const preview = ref<Preview | null>(null)
 // A change to the numbers is a different invoice; the preview no longer describes it.
-watch([locations, rentalUnits], () => { preview.value = null })
+watch([locations, rentalUnits, acceptOffer], () => { preview.value = null })
 const saveLabel = computed(() => preview.value
   ? preview.value.total < 0 ? 'Confirm change' : `Confirm and pay ${paymentMoney(preview.value.amountDue, preview.value.currency)}`
   : 'Review change')
@@ -84,7 +94,7 @@ async function save() {
   busy.value = true
   error.value = ''
   success.value = ''
-  const change = { locations: locations.value, rentalUnits: billsUnits.value ? rentalUnits.value : null }
+  const change = { locations: locations.value, rentalUnits: billsUnits.value ? rentalUnits.value : null, ...(acceptOffer.value ? { offer: 'current' } : {}) }
   try {
     if (!preview.value) {
       preview.value = (await dashboardApi('/api/dashboard/plan-change', { method: 'POST', body: { action: 'preview', ...change }, validate: isPreview })).preview

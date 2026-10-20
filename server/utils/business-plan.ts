@@ -40,6 +40,9 @@ export interface BusinessChangePreview extends BusinessChange {
   prorationDate: number
 }
 
+/** `offer: 'current'` is a business on an earlier Business price accepting the current offer. */
+export interface BusinessChangeRequest { locations?: unknown; rentalUnits?: unknown; offer?: unknown }
+
 interface PlannedChange {
   subscription: Stripe.Subscription
   items: Stripe.SubscriptionUpdateParams.Item[]
@@ -56,7 +59,7 @@ function wholeAtLeast(value: unknown, minimum: number, field: string, label: str
   return value as number
 }
 
-async function planChange(env: CloudflareEnv, db: DbClient, organizationId: string, request: { locations?: unknown; rentalUnits?: unknown }): Promise<PlannedChange> {
+async function planChange(env: CloudflareEnv, db: DbClient, organizationId: string, request: BusinessChangeRequest): Promise<PlannedChange> {
   const status = await getOrganizationBillingStatus(env, db, organizationId)
   if (!status.stripeSubscriptionId) refuse(409, 'Choose a plan in Billing first.', 'SUBSCRIPTION_REQUIRED')
   if (status.subscriptionStatus !== 'active' || status.stripeScheduleId || status.cancelAtPeriodEnd) {
@@ -76,7 +79,8 @@ async function planChange(env: CloudflareEnv, db: DbClient, organizationId: stri
   const offer = plans.find(plan => plan.name === BUSINESS_PLAN_ID)
   const rentalUnitPrice = offer?.lineItems?.[0]?.price
   if (!offer?.priceId || typeof rentalUnitPrice !== 'string') throw new Error('The Stripe catalog has no current Business offer')
-  const earlierBusiness = currentProduct.metadata.plan_id === BUSINESS_PLAN_ID && !isCurrentBusinessPrice(current.plan.price)
+  // An earlier Business price is kept unless the business accepts the current offer.
+  const earlierBusiness = currentProduct.metadata.plan_id === BUSINESS_PLAN_ID && !isCurrentBusinessPrice(current.plan.price) && request.offer !== 'current'
 
   const price = earlierBusiness ? current.plan.price.id : offer.priceId
   const locations = wholeAtLeast(request.locations, Math.max(INCLUDED_LOCATIONS, earlierBusiness ? status.locations.used : status.businessUsage.locations), 'locations', 'locations')
@@ -108,7 +112,7 @@ async function planChange(env: CloudflareEnv, db: DbClient, organizationId: stri
 const PRORATION = 'always_invoice' as const
 
 /** Stripe's invoice for the change, before anything changes. */
-export async function previewBusinessChange(env: CloudflareEnv, db: DbClient, organizationId: string, request: { locations?: unknown; rentalUnits?: unknown }): Promise<BusinessChangePreview> {
+export async function previewBusinessChange(env: CloudflareEnv, db: DbClient, organizationId: string, request: BusinessChangeRequest): Promise<BusinessChangePreview> {
   const planned = await planChange(env, db, organizationId, request)
   const prorationDate = Math.floor(Date.now() / 1000)
   const customer = typeof planned.subscription.customer === 'string' ? planned.subscription.customer : planned.subscription.customer.id
@@ -130,7 +134,7 @@ export async function previewBusinessChange(env: CloudflareEnv, db: DbClient, or
 }
 
 /** Confirm a previewed change: the same items and proration instant, then Stripe's subscription read back. */
-export async function confirmBusinessChange(env: CloudflareEnv, db: DbClient, organizationId: string, request: { locations?: unknown; rentalUnits?: unknown; prorationDate?: unknown; attempt: string }): Promise<BusinessChange> {
+export async function confirmBusinessChange(env: CloudflareEnv, db: DbClient, organizationId: string, request: BusinessChangeRequest & { prorationDate?: unknown; attempt: string }): Promise<BusinessChange> {
   const prorationDate = request.prorationDate
   // Stripe accepts a proration date within the current period; an old preview is re-read rather than confirmed.
   if (!Number.isSafeInteger(prorationDate) || Math.abs(Date.now() / 1000 - (prorationDate as number)) > 15 * 60) {
