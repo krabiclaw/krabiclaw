@@ -33,7 +33,7 @@
 
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
-import { BUSINESS_PLAN_ID, GROWTH_PLAN_ID, PAID_PLAN_PRICES, PAYMENTS_FEE, STARTER_PLAN_ID, type NewSalePlanId } from '~/shared/billing-model'
+import { BUSINESS_PLAN_ID, GROWTH_PLAN_ID, BUSINESS_ADDITIONS, PAID_PLAN_PRICES, STARTER_PLAN_ID, type NewSalePlanId } from '~/shared/billing-model'
 import { useOrganizationBilling } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard' })
@@ -52,13 +52,7 @@ watchEffect(() => {
   if (status && (status.plan === BUSINESS_PLAN_ID || status.cancelAtPeriodEnd || status.scheduledPlan)) showError({ statusCode: 404, statusMessage: 'There is no upgrade for this plan' })
 })
 
-// What Business adds to Growth, each with the one line that says what it is.
-const changes: EditorNavigationItem[] = [
-  { id: 'payments', label: 'Online payments and direct stay booking', summary: PAYMENTS_FEE },
-  { id: 'google-ads', label: 'Google Ads campaigns', summary: 'Create, clone and budget search campaigns; results in Insights' },
-  { id: 'ios', label: 'The iOS app', summary: 'For your whole team' },
-  { id: 'messaging', label: 'Guest messaging and arrival guides', summary: 'Scheduled check-in and checkout messages' },
-]
+const changes: EditorNavigationItem[] = BUSINESS_ADDITIONS.map(row => ({ ...row }))
 
 const planName = (id: string) => plans.value.find(plan => plan.id === id)?.name ?? id
 type Choice = { value: NewSalePlanId; label: string; price: string; description?: string }

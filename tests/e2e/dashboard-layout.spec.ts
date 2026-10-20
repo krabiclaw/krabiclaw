@@ -1050,6 +1050,12 @@ test.describe('dashboard pane hierarchy', () => {
     await open(page, `${ORG}/billing`)
     await expect(page).toHaveURL(`${ORG}/billing/managed-ads`)
     await expectPanes(page, ['organization-billing', 'organization-managed-ads'])
+    // Business's one change is its own leaf, which says what ends before anything is committed.
+    await page.getByTestId('billing-plan-card').getByRole('link', { name: 'Change plan', exact: true }).click()
+    await expect(page).toHaveURL(`${ORG}/billing/change`)
+    await expectPanes(page, ['organization-billing', 'organization-change-plan'])
+    await expect(page.locator('#dashboard-panel-organization-change-plan').getByText(/^Business continues until \w{3} \d{1,2}, \d{4}, then Growth at \$49\/mo without what is listed here\.$/)).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Change to Growth', exact: true })).toBeVisible()
   })
 
   test('five organization destinations keep tenant management in Menu', async ({ page }) => {

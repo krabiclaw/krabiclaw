@@ -534,10 +534,11 @@ and links to Insights → Google Ads; nothing there starts a service.
 Activation verifies that the plan subscription carries the 10% ad-spend price,
 that the subscription or its customer has a default payment method, and the
 connected Google Ads account's USD currency before recording consent. A missing
-or invalid prerequisite leaves no agreement. Setup uses the existing Plan and
-payment-method flows; connecting Ads and reading Insights remain free. An
-active agreement must be ended before disconnecting Ads or removing the billing
-default card. Ending the service remains available when a provider cannot be
+or invalid prerequisite leaves no agreement. Setup is Upgrade to Business and
+Manage billing (Stripe's portal, where the card is kept) in Plan and billing;
+connecting Ads and reading Insights remain free. An active agreement must be
+ended before disconnecting Ads. Stripe's portal manages the card, so KrabiClaw
+does not guard its removal. Ending the service remains available when a provider cannot be
 read, and preserves its previously billable days. The connection remains until
 the intersecting managed days have actual daily spend receipts, including zero
 spend, in the usage outbox. The daily task revisits unrecorded days after

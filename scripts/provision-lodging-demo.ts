@@ -337,7 +337,7 @@ async function main() {
   }
 
   if (planShort) {
-    throw new StepError(`Adding ${planShort.name} needs a plan that covers four locations (the four homes): ${JSON.stringify(planShort.refusal)}. Choose Commerce for 4 locations at ${BASE}/dashboard/${DEMO.slug}/billing, then run this again.`)
+    throw new StepError(`Adding ${planShort.name} needs a plan that covers four locations (the four homes): ${JSON.stringify(planShort.refusal)}. Choose Business at ${BASE}/dashboard/${DEMO.slug}/billing/upgrade, then run this again.`)
   }
   const unpublished: Array<{ name: string; missing: unknown }> = []
   for (const spec of HOMES) {

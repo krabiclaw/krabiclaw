@@ -23,10 +23,7 @@
           <span class="text-base font-medium text-highlighted">{{ price }}</span>
         </div>
         <p v-if="planLine" class="mt-1 text-sm text-muted">{{ planLine }}</p>
-        <template v-if="dashboard.canUpdateBilling.value && change">
-          <UButton v-if="change.to" class="mt-6" :label="change.label" :to="change.to" :variant="change.outline ? 'outline' : 'solid'" />
-          <UButton v-else class="mt-6" :label="change.label" variant="outline" :loading="busy" @click="changeToGrowth" />
-        </template>
+        <UButton v-if="dashboard.canUpdateBilling.value && change" class="mt-6" :label="change.label" :to="change.to" :variant="change.outline ? 'outline' : 'solid'" />
       </UCard>
 
       <EditorNavigationList :groups="groups" :active-item="level.child.value" @act="onRowAction">
@@ -42,7 +39,8 @@
 <script setup lang="ts">
 import EditorNavigationList, { type EditorNavigationGroup, type EditorNavigationItem } from '~/components/dashboard/EditorNavigationList.vue'
 import { authClient } from '~/lib/auth-client'
-import { BUSINESS_PLAN_ID, GROWTH_PLAN_ID, INCLUDED_LOCATIONS, SERVICE_PRICES, SERVICES, STARTER_PLAN_ID, additionalLocationPrice, isNewSalePlan } from '~/shared/billing-model'
+import { classifyStripePlanChange } from '~/shared/stripe-ga4'
+import { BUSINESS_PLAN_ID, INCLUDED_LOCATIONS, SERVICE_PRICES, SERVICES, STARTER_PLAN_ID, additionalLocationPrice, isNewSalePlan } from '~/shared/billing-model'
 import { cardBrandLabel, useOrganizationBilling, useOrganizationServices, usePaymentMethods } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard', tab: 'menu', back: 'menu' })
@@ -103,15 +101,16 @@ const planLine = computed(() => {
   if (card.value) parts.push(card.value)
   return parts.join(' · ')
 })
-// The plan's one change: up from Basic or Growth, down from Business at the period's end; none while a change is pending.
-const change = computed<{ label: string; to?: string; outline?: boolean } | null>(() => {
+// The plan's one change: up from Basic or Growth, or to Growth from Business, each its own leaf; none while a change is pending.
+const change = computed<{ label: string; to: string; outline?: boolean } | null>(() => {
   const status = billing.value
   if (!status || status.cancelAtPeriodEnd || scheduledPlan.value) return null
   if (onStarter.value) return { label: 'Choose a plan', to: to('upgrade') }
-  if (status.plan === BUSINESS_PLAN_ID) return { label: 'Change plan', outline: true }
+  if (status.plan === BUSINESS_PLAN_ID) return { label: 'Change plan', to: to('change'), outline: true }
   return { label: 'Upgrade to Business', to: to('upgrade') }
 })
-const firstLeaf = computed(() => change.value?.to ?? to('managed-ads'))
+// Beside a pane the index opens a way up; Business, with nothing above it, opens its first service.
+const firstLeaf = computed(() => change.value && !change.value.outline ? change.value.to : to('managed-ads'))
 
 // Stripe's phrasing: the locations in use, the included allowance, then the charge per additional one.
 const locationsRow = computed<EditorNavigationItem | null>(() => {
@@ -150,22 +149,6 @@ const groups = computed<EditorNavigationGroup[]>(() => [{
   ],
 }])
 
-// Business moves down to Growth at the period's end through Better Auth's scheduled change.
-async function changeToGrowth() {
-  if (busy.value) return
-  busy.value = true
-  errorMessage.value = ''
-  try {
-    const organizationId = dashboard.organization.value?.id
-    if (!organizationId) throw new Error('Organization context is unavailable')
-    await startOrganizationCheckout(organizationId, GROWTH_PLAN_ID)
-  } catch (error) {
-    errorMessage.value = getErrorMessage(error, 'The plan could not be changed')
-  } finally {
-    busy.value = false
-  }
-}
-
 async function onRowAction(id: string) {
   if (busy.value || id !== 'portal') return
   busy.value = true
@@ -193,8 +176,11 @@ onMounted(async () => {
   if (canceled === 'true') errorMessage.value = 'Payment was canceled. Your plan was not changed.'
   if (success || plan || canceled) await router.replace({ query: restQuery })
   if (success || canceled) return
+  // A plan chosen on the pricing page starts only a way up, and only for someone who changes billing:
+  // the current plan, a lower one, or an admin's visit leaves the index as it is.
   const planId = Array.isArray(plan) ? plan[0] : plan
-  if (typeof planId === 'string' && isNewSalePlan(planId) && !busy.value) {
+  const step = typeof planId === 'string' && billing.value ? classifyStripePlanChange(billing.value.plan, planId, Boolean(billing.value.stripeSubscriptionId)) : null
+  if (typeof planId === 'string' && isNewSalePlan(planId) && (step === 'upgrade' || step === 'initial_subscription') && dashboard.canUpdateBilling.value && !busy.value) {
     busy.value = true
     try {
       const organizationId = dashboard.organization.value?.id
