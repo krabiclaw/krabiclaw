@@ -164,10 +164,14 @@ test('a v12 export transfers into the v13 baseline with one site palette and log
       assert.deepEqual(saya.config.palette.light, { ...DEFAULT_SITE_PALETTE.light, action: '#96826A' })
       assert.equal(saya.config.palette.dark.ground, DEFAULT_SITE_PALETTE.dark.ground)
       assert.notEqual(saya.config.palette.dark.action, '#96826A')
-      // Blawby's stored tokens were its defaults: it wears its template's palette.
+      // Blawby's stored tokens were its defaults. Once one look serves every site
+      // (migration 0012), the legal site keeps those defaults as its own settings.
       const blawby = settings('blawby')
       assert.equal(blawby.theme_by_template, undefined)
-      assert.equal(blawby.config.palette, undefined)
+      assert.deepEqual(blawby.config.palette.light, { ground: '#FBFAF7', surface: '#FFFFFF', text: '#162033', muted: '#565D6A', action: '#25356C', accent: '#C19855' })
+      assert.equal(blawby.config.font_preset, 'marcellus')
+      assert.equal(blawby.config.button_color, 'accent')
+      assert.equal((target.prepare("SELECT theme_id FROM organization WHERE id = 'blawby'").get() as { theme_id: string }).theme_id, 'tenant-theme-v1')
       const presentation = (id: string) => (target.prepare("SELECT presentation_json FROM media_placements WHERE organization_id = ? AND slot = 'logo'").get(id) as { presentation_json: string | null }).presentation_json
       assert.deepEqual(JSON.parse(presentation('saya')!), { shape: 'circle', focus: { x: 0.5, y: 0.5 } })
       assert.equal(presentation('blawby'), null)

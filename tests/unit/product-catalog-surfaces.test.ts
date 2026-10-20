@@ -146,7 +146,8 @@ test('a card names what it opens by the product kind', () => {
 })
 
 test('catalog navigation links each section where the site\'s vertical lists it, and a site without a vertical is refused', () => {
-  assert.equal(presentationForSurface('service', 'products').collectionPath, '/products')
+  // A legal practice lists its practice areas at /services; it has no /products page.
+  assert.equal(presentationForSurface('service', 'products').collectionPath, '/services')
   assert.equal(presentationForSurface('experience', 'products').collectionPath, '/products')
   assert.equal(presentationForSurface(null, 'stays').collectionPath, '/stays')
   assert.equal(presentationForSurface(null, 'experiences').collectionPath, '/experiences')

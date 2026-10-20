@@ -7,7 +7,7 @@
   >
     <div
       data-tenant-critical-header-inner
-      class="tenant-container flex h-16 items-center justify-between gap-4 lg:grid lg:grid-cols-[1fr_auto_1fr]"
+      class="tenant-container flex h-16 items-center justify-between gap-4 lg:grid lg:grid-cols-[minmax(max-content,1fr)_minmax(0,auto)_minmax(max-content,1fr)]"
     >
       <NuxtLink :to="localePath('/')" class="block min-w-0 no-underline leading-none" :aria-label="`${brandName} home`">
         <SiteLogo :alt="brandName" size="sm" loading="eager">
@@ -15,12 +15,13 @@
         </SiteLogo>
       </NuxtLink>
 
-      <nav data-tenant-critical-nav class="hidden items-center justify-center gap-1 whitespace-nowrap font-semibold uppercase lg:flex" :aria-label="navAriaLabel">
+      <nav data-tenant-critical-nav class="hidden min-w-0 items-center justify-center gap-1 overflow-hidden whitespace-nowrap font-semibold uppercase lg:flex" :aria-label="navAriaLabel">
         <NuxtLink
           v-for="item in navItems"
           :key="item.path"
           :to="localePath(item.path)"
-          class="rounded-full px-3 py-2 text-sm text-muted no-underline transition hover:bg-muted hover:text-default"
+          class="max-w-48 truncate rounded-full px-3 py-2 text-sm text-muted no-underline transition hover:bg-muted hover:text-default"
+          :title="item.title"
         >
           {{ item.title }}
         </NuxtLink>
@@ -54,7 +55,7 @@
             />
             <ArticleSidebar v-if="articleNav" :nav="articleNav" class="mb-3 border-b border-default pb-3" @navigate="closeMobileNav" />
             <nav class="grid gap-1" :aria-label="t('site.header.mobile_nav_aria')">
-              <NuxtLink v-for="item in mobileNavItems" :key="item.path" :to="localePath(item.path)" class="rounded-full px-4 py-2.5 text-sm font-semibold text-default hover:bg-muted" @click="closeMobileNav">
+              <NuxtLink v-for="item in navItems" :key="item.path" :to="localePath(item.path)" class="rounded-full px-4 py-2.5 text-sm font-semibold text-default hover:bg-muted" @click="closeMobileNav">
                 {{ item.title }}
               </NuxtLink>
             </nav>
@@ -142,17 +143,18 @@ const catalogLinks = computed(() => (props.organization?.vertical
   : []))
 const showLocations = computed(() => (props.locations || []).filter(location => !location.home_slug).length > 1)
 const navItems = computed(() => {
-  const items: Array<{ path: string; title: string }> = catalogLinks.value.map(item => ({ path: item.path, title: t(item.labelKey) }))
+  // A published page names its own link; a catalog surface with no page of its own uses the catalog's word.
   const byPath = new Map(props.pageLinks.map(item => [item.path, item]))
+  const items: Array<{ path: string; title: string }> = catalogLinks.value.map(item => ({ path: item.path, title: byPath.get(item.path)?.title ?? t(item.labelKey) }))
   for (const path of headerOrder) {
     const page = byPath.get(path)
     if (page && !items.some(item => item.path === path)) items.push({ path, title: page.title })
   }
   if (props.sections?.reservations) items.push({ path: '/reservations', title: t('site.header.reservations') })
   if (showLocations.value) items.push({ path: '/locations', title: t('site.header.locations') })
+  items.push({ path: '/contact', title: props.pageLinks.find(page => page.path === '/contact')?.title || t('site.header.contact') })
   return items
 })
-const mobileNavItems = computed(() => [...navItems.value, { path: '/contact', title: props.pageLinks.find(page => page.path === '/contact')?.title || t('site.header.contact') }])
 
 // One action: a legal practice's consultation, or the venue's own next step.
 const primaryAction = computed(() => {

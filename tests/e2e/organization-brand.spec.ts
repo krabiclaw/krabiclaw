@@ -188,6 +188,7 @@ test('every catalog preset saves through MCP and renders on Blawby and the platf
     const rejected = await (await update('https://example.com/font.css')).json()
     expect(() => mcpData(rejected)).toThrow()
 
+    mcpData(await (await update('default')).json())
     const defaults = await renderedTypography(browser, `${blawbyTestBaseUrl()}/`, blawbyTestExtraHeaders(), '.tenant-layout', 'default')
     for (const option of ORGANIZATION_FONT_OPTIONS.filter(option => option.value !== 'default')) {
       mcpData(await (await update(option.value)).json())
@@ -360,7 +361,8 @@ test('palette changes through MCP reach the CMS and the legal site, and invalid 
     // Blawby renders the palette, and its dark mode.
     const light = await renderedPalette(browser, `${blawbyTestBaseUrl()}/`, blawbyTestExtraHeaders(), '.tenant-layout', 'light')
     expect(light.primary).toBe('#0F4C5C')
-    expect(light.accentButton).toEqual({ color: 'rgb(0, 0, 0)', background: 'rgb(248, 250, 252)' })
+    // A button takes the action color unless the site's button_color says accent.
+    expect(light.accentButton).toEqual({ color: 'rgb(255, 255, 255)', background: 'rgb(15, 76, 92)' })
     const dark = await renderedPalette(browser, `${blawbyTestBaseUrl()}/`, blawbyTestExtraHeaders(), '.tenant-layout', 'dark')
     expect(dark.dark).toBe(true)
     expect(dark.background).toBe(rgb(DEFAULT_SITE_PALETTE.dark.ground))

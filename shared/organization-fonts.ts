@@ -15,7 +15,7 @@ export const ORGANIZATION_FONT_OPTIONS = [
   { value: 'lora', label: 'Lora' },
   { value: 'playfair-display', label: 'Playfair Display with Inter' },
   { value: 'cormorant-garamond', label: 'Cormorant Garamond with Inter' },
-  { value: 'marcellus', label: 'Marcellus' },
+  { value: 'marcellus', label: 'Marcellus with Inter' },
 ] as const
 
 export type OrganizationFontPreset = typeof ORGANIZATION_FONT_OPTIONS[number]['value']

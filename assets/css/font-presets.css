@@ -159,4 +159,5 @@
 [data-font-preset="marcellus"] {
   --font-heading: "Marcellus", var(--font-script-serif), serif;
   --font-heading-weight: 400;
+  --font-sans: "Inter", var(--font-script-sans), sans-serif;
 }

@@ -133,7 +133,8 @@ export function resolveProductPresentation(vertical: string | null | undefined, 
   if (normalized === 'experience' || normalized === 'service' || normalized === 'lodging') {
     return {
       feature: 'products',
-      collectionPath: '/products',
+      // A legal practice lists its practice areas at /services; it has no /products.
+      collectionPath: normalized === 'service' ? '/services' : '/products',
       locationCollectionSegment: 'products',
       productPath: (locationSlug, productSlug) => `/locations/${encodeURIComponent(locationSlug)}/products/${encodeURIComponent(productSlug)}`,
       collectionLabel: isLegalPracticeSite({ vertical, themeId }) ? 'Services' : 'Products',
