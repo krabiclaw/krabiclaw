@@ -5,6 +5,7 @@ import type { PublicTenantPage } from '~/server/utils/public-tenant-pages'
 import type { SocialImageSource } from '~/utils/social-metadata'
 import type { PublicLocationArea } from '~/types/public-location'
 import type { StayMapSharing } from '~/shared/stay-listing'
+import { isRecord } from '~/utils/api-clients'
 
 export interface PublicShellOrganization {
   name: string | null

@@ -9,11 +9,13 @@ import * as schema from '../../server/db/schema.ts'
 import { createAuth, type CloudflareEnv } from '../../server/utils/auth.ts'
 import createHomeRoute from '../../server/api/dashboard/stay-homes/index.post.ts'
 import listHomesRoute from '../../server/api/dashboard/stay-homes/index.get.ts'
+import updateHomeRoute from '../../server/api/dashboard/stay-homes/[productId].patch.ts'
 import addPhotoRoute from '../../server/api/dashboard/stay-homes/[productId]/photos/index.post.ts'
 import orderPhotosRoute from '../../server/api/dashboard/stay-homes/[productId]/photos/index.put.ts'
 import describePhotoRoute from '../../server/api/dashboard/stay-homes/[productId]/photos/[photoId].patch.ts'
 import removePhotoRoute from '../../server/api/dashboard/stay-homes/[productId]/photos/[photoId].delete.ts'
 import { getProduct, hydrateProductMedia } from '../../server/utils/product-management.ts'
+import publicShellRoute from '../../server/api/public/shell.get.ts'
 
 // A home's photos are its product's media: the product image is the cover and
 // the gallery follows. The native app's routes order, describe and remove them
@@ -30,7 +32,7 @@ test('a home orders, describes and removes its product photos, and refuses what 
     name: 'stay-home-photos-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { fetch() { return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
-    env: { DB: { type: 'd1' }, MEDIA_BUCKET: { type: 'r2' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stay-home-photos-proof', exportName: 'Hub' } },
+    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, MEDIA_BUCKET: { type: 'r2' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stay-home-photos-proof', exportName: 'Hub' } },
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
@@ -38,6 +40,7 @@ test('a home orders, describes and removes its product photos, and refuses what 
     await db.batch(statements.map(statement => db.prepare(statement)))
     await db.prepare(`INSERT INTO organization (id, name, slug, subdomain, settings_json, theme_id, default_currency, status, onboarding_status, url_structure, vertical, updated_at, timezone)
       VALUES (?, 'Org', 'org', 'org', '{}', 'saya-theme-v1', 'USD', 'active', 'active', 'flat', 'lodging', '2026-10-15T00:00:00.000Z', 'America/Denver')`).bind(ORG).run()
+    await db.prepare("INSERT INTO organization_locales (id, organization_id, locale, is_source, status) VALUES ('source-en', ?, 'en', 1, 'published')").bind(ORG).run()
     for (const [id, role] of [['owner', 'owner'], ['helper', 'member']] as const) {
       await db.prepare('INSERT INTO user (id, name, email, emailVerified, createdAt, updatedAt) VALUES (?, ?, ?, 1, 0, 0)').bind(id, id, `${id}@proof.example`).run()
       await db.prepare('INSERT INTO member (id, organizationId, userId, role, createdAt) VALUES (?, ?, ?, ?, 0)').bind(`m-${id}`, ORG, id, role).run()
@@ -54,8 +57,11 @@ test('a home orders, describes and removes its product photos, and refuses what 
       return login.headers.getSetCookie().map(value => value.split(';')[0]).join('; ')
     }
     const app = new H3()
+    app.use(event => { if (new URL(event.req.url).pathname === '/api/public/shell') event.context.organizationId = ORG })
+    app.get('/api/public/shell', publicShellRoute)
     app.post('/api/dashboard/stay-homes', createHomeRoute)
     app.get('/api/dashboard/stay-homes', listHomesRoute)
+    app.patch('/api/dashboard/stay-homes/:productId', updateHomeRoute)
     app.post('/api/dashboard/stay-homes/:productId/photos', addPhotoRoute)
     app.put('/api/dashboard/stay-homes/:productId/photos', orderPhotosRoute)
     app.patch('/api/dashboard/stay-homes/:productId/photos/:photoId', describePhotoRoute)
@@ -78,6 +84,32 @@ test('a home orders, describes and removes its product photos, and refuses what 
     assert.equal(created.status, 201)
     const productId = (created.body.home as { product_id: string }).product_id
     assert.deepEqual((created.body.home as { photos: unknown[] }).photos, [])
+
+    // Native Home updates must complete their Location's visibility change,
+    // including a public shell already cached by an earlier guest request.
+    const locationId = (created.body.home as { location_id: string }).location_id
+    const shell = () => app.request(Object.assign(new Request('https://org.proof.example/api/public/shell', { headers: { host: 'org.proof.example' } }), { runtime: { name: 'cloudflare', cloudflare: { env } } }))
+    const initialShell = await shell()
+    assert.equal(initialShell.status, 200, await initialShell.clone().text())
+    assert.equal(initialShell.headers.get('x-bootstrap-cache'), 'MISS')
+    const cachedShell = await shell()
+    assert.equal(cachedShell.status, 200, await cachedShell.clone().text())
+    assert.equal(cachedShell.headers.get('x-bootstrap-cache'), 'HIT')
+    assert.equal((await cachedShell.json() as { locations: Array<{ id: string; stay_map_sharing: string }> }).locations.find(location => location.id === locationId)?.stay_map_sharing, 'general')
+    const changedPrivacy = await call(owner, 'PATCH', `/${productId}`, { stay_map_sharing: 'specific' })
+    assert.equal(changedPrivacy.status, 200, JSON.stringify(changedPrivacy.body))
+    assert.equal(await db.prepare('SELECT stay_map_sharing FROM business_locations WHERE id = ? AND organization_id = ?').bind(locationId, ORG).first('stay_map_sharing'), 'specific')
+    const changedShell = await shell()
+    assert.equal(changedShell.status, 200, await changedShell.clone().text())
+    assert.equal(changedShell.headers.get('x-bootstrap-cache'), 'MISS')
+    assert.equal((await changedShell.json() as { locations: Array<{ id: string; stay_map_sharing: string; address: unknown }> }).locations.find(location => location.id === locationId)?.stay_map_sharing, 'specific')
+    const recachedShell = await shell()
+    assert.equal(recachedShell.status, 200, await recachedShell.clone().text())
+    assert.equal(recachedShell.headers.get('x-bootstrap-cache'), 'HIT')
+    const publicLocation = (await recachedShell.json() as { locations: Array<{ id: string; stay_map_sharing: string; address: unknown }> }).locations.find(location => location.id === locationId)
+    assert(publicLocation)
+    assert.equal(publicLocation.stay_map_sharing, 'specific')
+    assert.equal(publicLocation.address, null)
 
     const now = '2026-10-15T00:00:00.000Z'
     for (const id of ['deck', 'kitchen', 'bedroom']) {

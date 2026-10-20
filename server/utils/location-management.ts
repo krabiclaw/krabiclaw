@@ -10,7 +10,7 @@ import type { CloudflareEnv } from "~/server/utils/auth";
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { prepareContentDocumentDeletion } from '~/server/utils/content/documents'
-import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
+import { publicResourceCacheInvalidationQuery, purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { capacityRefusalOf, executeWithinCapacity, reportBillingUsage } from '~/server/utils/billing'
 import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 
@@ -636,7 +636,10 @@ export async function updateLocation(
     // An inactive location is off the site and is not counted; making it
     // active again is refused past the locations Basic includes.
     const results = await executeWithinCapacity(env, db, organizationId, [...(writeGuard ? [writeGuard] : []), ...statements], { action: 'make it active' });
-    return (results[writeGuard ? 1 : 0]?.meta?.changes ?? 0) === 1;
+    const changed = (results[writeGuard ? 1 : 0]?.meta?.changes ?? 0) === 1;
+    // The saved privacy mode must be visible even if readback or card work fails.
+    if (changed) await purgePublicResourceCacheNow(env, organizationId);
+    return changed;
   };
   const stale = {
     status: 409,
@@ -673,6 +676,7 @@ export async function updateLocation(
 
     if (updated) {
       if (cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId })
+      await purgePublicResourceCacheNow(env, organizationId);
       await publishHomes(updated.location?.updated_at);
       return { status: 200, data: { success: true, location: updated.location } };
     }
@@ -697,6 +701,7 @@ export async function updateLocation(
   const location = await loadLocation(db, organizationId, locationId);
   if (!location) throw new HTTPError({ statusCode: 500, statusMessage: 'Updated location could not be read back', data: { code: 'LOCATION_NOT_READABLE', field: 'location.id' } });
   if (cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId })
+  await purgePublicResourceCacheNow(env, organizationId);
   await publishHomes(location.updated_at);
   return { status: 200, data: { success: true, location } };
 }

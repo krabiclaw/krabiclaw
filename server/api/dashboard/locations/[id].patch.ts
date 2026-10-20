@@ -4,7 +4,6 @@ import { jsonResponse } from '~/server/utils/api-response'
 import { getDashboardLocationContext } from '~/server/utils/dashboard-context'
 import { updateLocation, type LocationRecord, type UpdateLocationInput } from '~/server/utils/location-management'
 import { parseLocationPayload } from '~/server/utils/location-payload'
-import { purgePublicResourceCacheNow } from '~/server/utils/public-resource-cache'
 import { assertMemberScope, memberAccessPrincipal } from '~/server/utils/member-access'
 
 export default defineHandler(async (event) => {
@@ -59,8 +58,6 @@ export default defineHandler(async (event) => {
   if (result.status >= 400) {
     return jsonResponse(result.data, { status: result.status })
   }
-
-  await purgePublicResourceCacheNow(env, organizationId)
 
   const { location } = result.data as { location: LocationRecord }
   return jsonResponse({

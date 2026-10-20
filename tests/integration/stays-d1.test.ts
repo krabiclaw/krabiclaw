@@ -42,7 +42,7 @@ async function boot() {
     name: 'stays-proof', compatibilityDate: '2024-11-01',
     manifest: { mainModule: 'index.mjs', modules: { 'index.mjs': { type: 'esm', contents: 'export class Hub { constructor(ctx) { this.ctx = ctx } async fetch(request) { if (new URL(request.url).pathname === "/observed") return Response.json(await this.ctx.storage.get("events") ?? []); if (new URL(request.url).pathname === "/failure") { await this.ctx.storage.put("failure", request.method === "PUT"); return new Response(null, { status: 204 }) } const event = await request.json(); await this.ctx.storage.put("events", [...await this.ctx.storage.get("events") ?? [], event]); if (await this.ctx.storage.get("failure")) return new Response("Publication refused", { status: 503 }); return new Response(null, { status: 204 }) } } export default { fetch() { return new Response("ok") } }' } } },
     exports: { Hub: { type: 'durable-object', storage: 'sqlite' } },
-    env: { DB: { type: 'd1' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stays-proof', exportName: 'Hub' } },
+    env: { DB: { type: 'd1' }, ORGANIZATION_CACHE: { type: 'kv' }, GUEST_INBOX_HUBS: { type: 'durable-object', worker: 'stays-proof', exportName: 'Hub' } },
   } }] })
   try {
     const db = await runtime.getD1Database('DB')
