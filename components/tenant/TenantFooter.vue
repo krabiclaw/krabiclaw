@@ -34,7 +34,7 @@
             <div v-if="loc.phone" class="mt-1 text-sm text-muted">{{ loc.phone }}</div>
             <div v-if="loc.hoursToday" class="mt-2 text-xs text-highlighted/40">{{ loc.hoursToday }}</div>
             <NuxtLink
-              :to="localePath(publicLocationPath(loc))"
+              :to="localePath(locationLink(loc))"
               class="mt-3 inline-block border-b border-current pb-0.5 text-xs uppercase tracking-widest text-highlighted transition hover:opacity-70"
             >
               {{ t('site.footer.visit_page') }}
@@ -62,7 +62,7 @@
 <script setup lang="ts">
 import type { PublicPageLink, PublicCompliance } from '~/types/public-site'
 import type { PublicShellPayload } from '~/utils/public-resource-contracts'
-import { catalogNavigation } from '~/utils/product-presentation'
+import { catalogNavigation, publicLocationPath } from '~/utils/product-presentation'
 import { getActiveSpecialClosure } from '~/utils/formatters'
 import { getTodayHoursLabel, type OpeningHours, type SpecialHours } from '~/shared/reservation-hours'
 import { formatPostalAddress, type PostalAddress } from '~/utils/postal-address'
@@ -154,7 +154,8 @@ function formatLocAddress(loc: ApiRecord): string {
   return formatPostalAddress((loc.address as PostalAddress) ?? null)
 }
 
-function publicLocationPath(loc: ApiRecord): string {
-  return `/locations/${loc.slug || loc.id}`
+// A legal practice's offices are on its contact page; a venue's on their own pages.
+function locationLink(loc: ApiRecord): string {
+  return legalPractice.value ? '/contact' : publicLocationPath(loc as { slug: string, home_slug?: string | null })
 }
 </script>
