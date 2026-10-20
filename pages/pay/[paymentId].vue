@@ -5,196 +5,101 @@
     the card will cost — with any surcharge Stripe permits for it — before the
     buyer confirms. Nothing is charged until Pay.
   -->
-  <main class="platform-theme min-h-screen bg-default px-5 py-10 lg:py-14 text-default">
-    <div class="mx-auto max-w-6xl">
-      <!-- Back button and Page Title -->
-      <div class="mb-8 flex items-center gap-4">
+  <!-- White, as Airbnb's checkout is: Stripe's fields are white and sit on the page, not in a panel. -->
+  <main class="platform-theme min-h-screen bg-white px-5 py-10 lg:py-14 text-default dark:bg-default">
+    <div class="mx-auto max-w-5xl">
+      <div class="mb-8 flex items-center gap-4 lg:-ml-14">
         <button
           type="button"
-          class="flex size-10 items-center justify-center rounded-full border border-default hover:bg-muted transition text-default"
+          class="flex size-10 items-center justify-center rounded-full hover:bg-muted transition text-default"
           :aria-label="t('payment.cancel')"
           @click="leave"
         >
           <PlatformIcon name="arrow-left" class="size-4" />
         </button>
-        <h1 class="text-2xl sm:text-3xl font-bold tracking-tight text-highlighted">{{ t('payment.title') }}</h1>
+        <h1 class="text-2xl sm:text-[32px] font-semibold tracking-tight text-highlighted">{{ t('payment.title') }}</h1>
       </div>
 
       <USkeleton v-if="status === 'idle' || status === 'pending'" class="h-64 w-full rounded-2xl" />
       <UAlert v-else-if="loadError" color="error" :title="t('payment.unavailable')" :description="loadError" />
-      <div v-else-if="handoff" class="grid gap-10 lg:grid-cols-[1fr_400px] xl:grid-cols-[1fr_440px] items-start">
-        <!-- Left Column: Reservation / Appointment Details, Payment, and Agreement -->
-        <div class="space-y-8 min-w-0">
-          <!-- Reservation / Appointment details -->
-          <section class="space-y-4">
-            <h2 class="text-xl font-semibold text-highlighted">
-              {{ handoff.stay ? 'Your trip' : 'Your appointment' }}
-            </h2>
+      <!-- Airbnb's Confirm and pay: the method and the one button on the left, what is being bought on the right. -->
+      <div v-else-if="handoff" class="grid gap-8 lg:grid-cols-[minmax(0,1fr)_400px] lg:gap-16 items-start">
+        <aside class="lg:sticky lg:top-8 lg:order-2 min-w-0 rounded-2xl border border-default bg-white p-6 space-y-5 dark:bg-default" data-payment-summary>
+          <div class="flex gap-4 items-center">
+            <img v-if="handoff.image_url" :src="handoff.image_url" alt="" class="size-24 shrink-0 rounded-xl object-cover">
+            <h2 class="min-w-0 text-lg font-semibold leading-snug text-highlighted">{{ handoff.title }}</h2>
+          </div>
+          <p v-if="policySummary" class="text-sm text-default">{{ policySummary }}</p>
 
-            <div v-if="handoff.stay" class="space-y-4" data-payment-stay>
-              <div class="flex justify-between items-baseline">
-                <div>
-                  <h3 class="font-medium text-sm text-highlighted">Dates</h3>
-                  <p class="text-sm text-muted mt-0.5">
-                    {{ formatCalendarDate(handoff.stay.check_in_date, locale, { month: 'short', day: 'numeric' }) }} – {{ formatCalendarDate(handoff.stay.check_out_date, locale, { month: 'short', day: 'numeric', year: 'numeric' }) }}
-                  </p>
-                </div>
+          <div v-if="handoff.stay" class="border-t border-default pt-5" data-payment-stay>
+            <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.dates') }}</h3>
+            <p class="mt-1 text-sm text-default">{{ stayRange }}</p>
+          </div>
+          <div v-else-if="handoff.starts_at && handoff.ends_at && handoff.timezone" class="border-t border-default pt-5" data-payment-time>
+            <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.date') }}</h3>
+            <p class="mt-1 text-sm text-default">{{ formatTimestamp(handoff.starts_at, locale, handoff.timezone, { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' }) }}</p>
+            <p class="text-sm text-default">{{ formatTimestamp(handoff.starts_at, locale, handoff.timezone, { hour: 'numeric', minute: '2-digit' }) }} – {{ formatTimestamp(handoff.ends_at, locale, handoff.timezone, { hour: 'numeric', minute: '2-digit', timeZoneName: 'short' }) }}</p>
+          </div>
+          <div v-if="guests" class="border-t border-default pt-5">
+            <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.guests') }}</h3>
+            <p class="mt-1 text-sm text-default">{{ guests }}</p>
+          </div>
+
+          <div class="border-t border-default pt-5 space-y-2">
+            <h3 class="text-sm font-semibold text-highlighted">{{ t('payment.price_details') }}</h3>
+            <dl class="space-y-2 text-sm">
+              <div v-for="line in priceLines" :key="line.label" class="flex justify-between gap-4">
+                <dt class="text-default">{{ line.label }}</dt>
+                <dd class="tabular-nums text-default">{{ line.amount }}</dd>
               </div>
-              <div class="flex justify-between items-baseline">
-                <div>
-                  <h3 class="font-medium text-sm text-highlighted">Guests</h3>
-                  <p class="text-sm text-muted mt-0.5">
-                    {{ handoff.stay.adults + handoff.stay.children }} {{ (handoff.stay.adults + handoff.stay.children) === 1 ? 'guest' : 'guests' }}
-                  </p>
-                </div>
+              <div v-if="review && review.surcharge > 0" class="flex justify-between gap-4" data-payment-surcharge>
+                <dt class="text-default">{{ t('payment.surcharge') }}</dt>
+                <dd class="tabular-nums text-default">{{ paymentMoney(review.surcharge, review.currency) }}</dd>
               </div>
-            </div>
+            </dl>
+          </div>
 
-            <div v-else class="space-y-4">
-              <div class="flex justify-between items-baseline">
-                <div>
-                  <h3 class="font-medium text-sm text-highlighted">{{ handoff.title }}</h3>
-                  <p class="text-sm text-muted mt-0.5">
-                    {{ handoff.quantity > 1 ? `Quantity: ${handoff.quantity}` : 'Confirmed booking' }}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </section>
+          <div class="flex justify-between items-baseline border-t border-default pt-5">
+            <span class="font-semibold text-highlighted">{{ t('payment.total') }} <span class="underline">{{ handoff.currency }}</span></span>
+            <span class="font-semibold text-highlighted tabular-nums" data-payment-total>
+              {{ paymentMoney(review ? review.total : handoff.subtotal, handoff.currency) }}
+            </span>
+          </div>
+        </aside>
 
-          <hr class="border-default" />
-
-          <!-- Payment Section -->
-          <section class="space-y-4">
-            <div class="flex items-center justify-between">
-              <h2 class="text-xl font-semibold text-highlighted">Pay with</h2>
-              <span class="inline-flex items-center gap-1.5 text-xs text-muted">
-                <PlatformIcon name="shield-check" class="size-4 text-emerald-500" />
-                Guaranteed secure
-              </span>
-            </div>
-
-            <UAlert v-if="handoff.state === 'paid'" color="success" :title="t('payment.already_paid')" />
-            <UAlert v-else-if="handoff.state !== 'open'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
-            <div v-else class="space-y-4">
-              <!-- Stripe's form stays mounted; a reviewed method is shown read-only until the buyer changes it. -->
-              <div v-show="!review" ref="mount" class="min-h-40 rounded-xl border border-default p-4 bg-elevated" />
-
-              <div v-if="review" class="rounded-xl border border-default bg-elevated p-4 flex items-center justify-between">
+        <div class="lg:order-1 min-w-0 space-y-6">
+          <p v-if="completing" class="text-sm text-muted">{{ t('payment.verifying') }}</p>
+          <UAlert v-if="outcome === 'processing'" color="info" :title="t('payment.processing')" :description="t('payment.processing_help')" />
+          <UAlert v-else-if="outcome === 'refunded'" color="warning" :title="t('payment.refunded')" :description="t('payment.refunded_help')" />
+          <UAlert v-else-if="paid || handoff.state === 'paid'" color="success" :title="t('payment.already_paid')" />
+          <UAlert v-else-if="handoff.state !== 'open'" color="warning" :title="t('payment.expired')" :description="t('payment.expired_help')" />
+          <template v-else>
+            <!-- No frame around Stripe's form: its fields are the only boxes, as on Airbnb's page. -->
+            <section class="space-y-4">
+              <h2 class="text-lg font-semibold text-highlighted">{{ t('payment.pay_with') }}</h2>
+              <!-- Stripe's form stays mounted; a method that carries a surcharge is shown read-only until the buyer pays or changes it. -->
+              <div v-show="!review" ref="mount" class="min-h-40" />
+              <div v-if="review" class="flex items-center justify-between gap-4">
                 <div class="space-y-1" data-payment-method>
                   <p class="font-medium text-sm text-highlighted">{{ methodLabel }}</p>
-                  <p v-if="handoff.surcharge_basis_points !== null" class="text-xs text-muted">
-                    {{ review.surcharge > 0 ? t('payment.surcharge_applies') : t('payment.no_surcharge') }}
-                  </p>
+                  <p v-if="review.surcharge > 0" class="text-xs text-muted">{{ t('payment.surcharge_applies') }}</p>
                 </div>
-                <UButton variant="outline" size="sm" :label="t('payment.change_method')" :disabled="working" @click="changeMethod" />
+                <UButton color="neutral" variant="soft" size="sm" :label="t('payment.change_method')" :disabled="working" @click="changeMethod" />
               </div>
+            </section>
 
-              <UAlert v-if="actionError" color="error" :description="actionError" />
-            </div>
-          </section>
-
-          <hr class="border-default" />
-
-          <!-- Ground rules / Notes -->
-          <section class="space-y-3">
-            <h2 class="text-xl font-semibold text-highlighted">
-              {{ handoff.stay ? 'Ground rules' : 'Before your session' }}
-            </h2>
-            <p v-if="handoff.stay" class="text-sm text-muted leading-relaxed">
-              We ask every guest to remember a few simple things about what makes a great guest:
-              Follow the house rules, treat your Host's home like your own, and communicate with your host if issues arise.
-            </p>
-            <p v-else class="text-sm text-muted leading-relaxed">
-              Please ensure your contact information is accurate and prepare any questions or documents for your appointment.
-            </p>
-          </section>
-
-          <hr class="border-default" />
-
-          <!-- Policies and Primary Confirm CTA -->
-          <section class="space-y-4 pt-2">
-            <p class="text-xs text-muted leading-relaxed">
-              By selecting the button below, I agree to the Host's House Rules, Ground Rules for guests, and that KrabiClaw can charge my payment method for the amount stated.
-            </p>
-
-            <div v-if="handoff.state === 'open'" class="pt-2">
-              <UButton
-                v-if="!review"
-                size="xl"
-                block
-                :label="t('payment.review')"
-                :loading="working"
-                :disabled="!ready"
-                class="font-semibold py-3.5 text-base"
-                @click="reviewMethod"
-              />
-              <UButton
-                v-else
-                size="xl"
-                block
-                :label="t('payment.pay', { amount: paymentMoney(review.total, review.currency) })"
-                :loading="working"
-                class="font-semibold py-3.5 text-base"
-                @click="pay"
-              />
-            </div>
-            <div class="text-center">
-              <button type="button" class="text-xs text-muted hover:text-highlighted underline" :disabled="working" @click="leave">
-                {{ t('payment.cancel') }}
-              </button>
-            </div>
-          </section>
-        </div>
-
-        <!-- Right Column: Sticky Reservation Summary Card -->
-        <div class="lg:sticky lg:top-8 min-w-0">
-          <div class="rounded-2xl border border-default bg-elevated p-6 shadow-sm space-y-5">
-            <!-- Property / Service Header -->
-            <div class="flex gap-4 items-center">
-              <div class="size-20 shrink-0 rounded-xl bg-muted border border-default flex items-center justify-center overflow-hidden">
-                <TenantIcon v-if="handoff.stay" name="home" class="size-8 text-dimmed" />
-                <PlatformIcon v-else name="calendar" class="size-8 text-dimmed" />
-              </div>
-              <div class="min-w-0 flex-1">
-                <p class="text-xs text-muted font-medium uppercase tracking-wider">{{ handoff.stay ? 'Place to stay' : 'Appointment' }}</p>
-                <h3 class="font-semibold text-highlighted text-base truncate mt-0.5">{{ handoff.title }}</h3>
-                <p v-if="handoff.quantity > 1" class="text-xs text-muted mt-0.5">Quantity: {{ handoff.quantity }}</p>
-              </div>
-            </div>
-
-            <hr class="border-default" />
-
-            <!-- Price Details -->
-            <div class="space-y-3">
-              <h4 class="font-semibold text-sm text-highlighted">Price details</h4>
-              <dl class="space-y-2 text-sm">
-                <div class="flex justify-between items-baseline">
-                  <dt class="text-muted">
-                    {{ handoff.stay ? `${handoff.stay.nights} nights` : handoff.title }}
-                  </dt>
-                  <dd class="tabular-nums text-highlighted font-medium">
-                    {{ paymentMoney(handoff.subtotal, handoff.currency) }}
-                  </dd>
-                </div>
-                <div v-if="review && review.surcharge > 0" class="flex justify-between items-baseline" data-payment-surcharge>
-                  <dt class="text-muted">{{ t('payment.surcharge') }}</dt>
-                  <dd class="tabular-nums text-highlighted font-medium">{{ paymentMoney(review.surcharge, review.currency) }}</dd>
-                </div>
-              </dl>
-            </div>
-
-            <hr class="border-default" />
-
-            <!-- Total -->
-            <div class="flex justify-between items-baseline">
-              <span class="font-semibold text-base text-highlighted">{{ t('payment.total') }} ({{ handoff.currency }})</span>
-              <span class="font-bold text-lg text-highlighted tabular-nums" data-payment-total>
-                {{ paymentMoney(review ? review.total : handoff.subtotal, handoff.currency) }}
-              </span>
-            </div>
-            <p class="text-xs text-muted">Charged in full at confirmation.</p>
-          </div>
+            <p class="text-xs text-muted leading-relaxed">{{ t('payment.agreement') }}</p>
+            <UButton
+              size="xl"
+              block
+              :label="review ? t('payment.pay', { amount: paymentMoney(review.total, review.currency) }) : t('payment.confirm')"
+              :loading="working || completing"
+              :disabled="!review && !ready"
+              class="font-semibold py-3.5 text-base"
+              @click="review ? pay() : confirmAndPay()"
+            />
+          </template>
+          <UAlert v-if="actionError" color="error" :description="actionError" />
         </div>
       </div>
     </div>
@@ -204,25 +109,33 @@
 <script setup lang="ts">
 import { loadStripe, type Stripe, type StripeElements, type StripePaymentElement } from '@stripe/stripe-js'
 import { paymentMoney } from '~/shared/payment-display'
-import { formatCalendarDate } from '~/utils/timezone'
+import { cardBrandLabel } from '~/composables/usePaymentsSettings'
+import { formatCalendarDate, formatTimestamp } from '~/utils/timezone'
+import { stayNightlyGroups } from '~/shared/stay-listing'
+import { bookedPolicyTerms } from '~/shared/stay-cancellation'
 import { isRecord, publicApiMutation, publicApiRequest } from '~/utils/api-clients'
-import type { paymentHandoff, reviewPayment, confirmPayment } from '~/server/domain/payments/intent'
+import type { paymentHandoff, reviewPayment, confirmPayment, PaymentReturn } from '~/server/domain/payments/intent'
 
 definePageMeta({ layout: 'standalone' })
 useResponseHeader('cache-control').value = 'private, no-store'
 useHead({ meta: [{ name: 'referrer', content: 'no-referrer' }, { name: 'robots', content: 'noindex, nofollow' }] })
-const { t, locale } = useI18n()
+const { t, locale, localePath } = useI18n()
 const route = useRoute()
 const paymentId = String(route.params.paymentId)
-// The claim the checkout handed this browser, in the fragment: no server, log or referrer sees it.
-const claim = computed(() => route.hash.slice(1))
+// A method that left the site comes back here from Stripe, the claim in its return URL's query.
+const returned = typeof route.query.claim === 'string'
+// Otherwise the claim the checkout handed this browser is in the fragment: no server, log or referrer sees it.
+const claim = computed(() => typeof route.query.claim === 'string' ? route.query.claim : route.hash.slice(1))
 
 type Handoff = Awaited<ReturnType<typeof paymentHandoff>>
 type Review = Awaited<ReturnType<typeof reviewPayment>>
 type Confirmation = Awaited<ReturnType<typeof confirmPayment>>
 const isHandoff = (value: unknown): value is Handoff => isRecord(value) && value.payment_id === paymentId && typeof value.title === 'string' && Number.isSafeInteger(value.subtotal) && typeof value.currency === 'string' && typeof value.stripe_account_id === 'string' && typeof value.publishable_key === 'string' && Array.isArray(value.payment_method_types) && value.payment_method_types.every(type => typeof type === 'string') && ['open', 'paid', 'failed', 'expired'].includes(String(value.state))
 const isReview = (value: unknown): value is Review => isRecord(value) && typeof value.payment_method_id === 'string' && Number.isSafeInteger(value.subtotal) && Number.isSafeInteger(value.surcharge) && value.total === (value.subtotal as number) + (value.surcharge as number) && isRecord(value.method)
-const isConfirmation = (value: unknown): value is Confirmation => isRecord(value) && typeof value.status === 'string' && typeof value.requires_action === 'boolean' && typeof value.return_url === 'string'
+const isConfirmation = (value: unknown): value is Confirmation => isRecord(value) && typeof value.status === 'string' && typeof value.requires_action === 'boolean'
+const isReturn = (value: unknown): value is PaymentReturn => isRecord(value) && (value.state === 'processing' || value.state === 'refunded' || (value.state === 'paid' && (
+  (value.kind === 'stay' && typeof value.activity_id === 'string')
+  || ((value.kind === 'booking' || value.kind === 'reservation') && typeof value.request_id === 'string' && typeof value.cancellation_token === 'string'))))
 
 const { data: handoff, status, error } = await useAsyncData(`payment-handoff:${paymentId}`, () => publicApiRequest<Handoff>(`/api/public/payments/${encodeURIComponent(paymentId)}`, { query: { claim: claim.value }, validate: isHandoff }), { server: false, immediate: Boolean(claim.value) })
 const loadError = computed(() => !claim.value ? t('payment.unavailable') : error.value ? getErrorMessage(error.value, t('payment.unavailable')) : '')
@@ -233,6 +146,9 @@ const ready = ref(false)
 const working = ref(false)
 const actionError = ref('')
 const review = ref<Review | null>(null)
+const completing = ref(false)
+const paid = ref(false)
+const outcome = ref<'processing' | 'refunded' | null>(null)
 let stripe: Stripe | null = null
 let mounting = false
 let elements: StripeElements | null = null
@@ -243,8 +159,40 @@ const methodLabel = computed(() => {
   if (!method) return ''
   if (method.wallet) return method.wallet.replace('_', ' ')
   if (method.bank_name && method.last4) return `${method.bank_name} •••• ${method.last4}`
-  return method.brand && method.last4 ? `${method.brand} •••• ${method.last4}` : method.type
+  return method.brand && method.last4 ? `${cardBrandLabel(method.brand)} •••• ${method.last4}` : method.type
 })
+
+const money = (minor: number) => paymentMoney(minor, handoff.value!.currency)
+const nightsLabel = (count: number) => count === 1 ? t('stay.one_night') : t('stay.nights_count', { count })
+const guestsLabel = (count: number) => `${count} ${t(count === 1 ? 'saya.experience_detail.guest' : 'saya.experience_detail.guests')}`
+const stayRange = computed(() => {
+  const stay = handoff.value?.stay
+  return stay ? `${formatCalendarDate(stay.check_in_date, locale.value, { month: 'short', day: 'numeric' })} – ${formatCalendarDate(stay.check_out_date, locale.value, { month: 'short', day: 'numeric', year: 'numeric' })}` : ''
+})
+// A party is shown where it was chosen: a stay's guests, an experience's places.
+const guests = computed(() => {
+  const value = handoff.value
+  if (!value) return ''
+  if (value.stay) return guestsLabel(value.stay.adults + value.stay.children)
+  return value.kind === 'experience' || value.kind === 'reservation' ? guestsLabel(value.quantity) : ''
+})
+const policySummary = computed(() => {
+  const policy = handoff.value?.stay?.cancellation_policy
+  return policy ? bookedPolicyTerms(policy).summary : ''
+})
+/** How the total adds up, the way Airbnb's receipt reads: "$120.00 × 2 nights", "$95.00 × 1 guest". */
+const priceLines = computed(() => {
+  const value = handoff.value
+  if (!value) return []
+  if (value.stay) return stayNightlyGroups(value.stay.nightly).map(({ price, nights }) => ({ label: t('stay.nightly_line', { price: money(price), nights: nightsLabel(nights) }), amount: money(price * nights) }))
+  if (value.quantity === 1) return [{ label: value.title, amount: money(value.subtotal) }]
+  return [{ label: t('payment.unit_line', { price: money(value.unit_amount), count: guests.value || value.quantity }), amount: money(value.subtotal) }]
+})
+
+// A paid purchase, or one Stripe sent back here, goes on to its receipt.
+watch(handoff, (value) => {
+  if (value && !import.meta.server && (value.state === 'paid' || (returned && value.state === 'open'))) void complete()
+}, { immediate: true })
 
 // Stripe's Payment Element on the business's own account, in deferred mode: the
 // method is created first so the server can price it before anything is confirmed.
@@ -263,9 +211,13 @@ watch([handoff, mount], async ([value, container]) => {
       // The method is created here and attached by the server, which prices it before anything is confirmed.
       paymentMethodCreation: 'manual',
       ...(value.customer_session_client_secret ? { customerSessionClientSecret: value.customer_session_client_secret } : {}),
-      appearance: { theme: document.documentElement.classList.contains('dark') ? 'night' : 'stripe' },
+      // Airbnb lists the ways to pay as radio rows divided by hairlines, not boxed tabs.
+      appearance: {
+        theme: document.documentElement.classList.contains('dark') ? 'night' : 'stripe',
+        rules: { '.AccordionItem': { border: 'none', boxShadow: 'none', paddingLeft: '0px', paddingRight: '0px', backgroundColor: 'transparent' } },
+      },
     })
-    paymentElement = elements.create('payment', { layout: 'tabs' })
+    paymentElement = elements.create('payment', { layout: { type: 'accordion', defaultCollapsed: false, radios: 'always', spacedAccordionItems: false } })
     paymentElement.on('ready', () => { ready.value = true })
     paymentElement.on('change', () => { if (review.value) review.value = null })
     paymentElement.mount(container)
@@ -273,6 +225,16 @@ watch([handoff, mount], async ([value, container]) => {
     actionError.value = getErrorMessage(cause, t('payment.unavailable'))
   }
 }, { immediate: true })
+
+/**
+ * Airbnb's one button. The method is priced first; with no surcharge the
+ * reviewed total is the one on screen, so it is paid at once. A surcharge is
+ * shown, and the buyer pays the new total with a second press.
+ */
+async function confirmAndPay() {
+  await reviewMethod()
+  if (review.value && review.value.surcharge === 0) await pay()
+}
 
 async function reviewMethod() {
   if (working.value || !stripe || !elements) return
@@ -311,7 +273,7 @@ async function pay() {
     } else if (confirmed.status !== 'succeeded' && confirmed.status !== 'processing') {
       throw new Error(t('payment.declined'))
     }
-    await navigateTo(confirmed.return_url, { external: true })
+    paid.value = true
   } catch (cause) {
     actionError.value = getErrorMessage(cause, t('payment.declined'))
     // A decline leaves the intent waiting for another method; the review it was for is over.
@@ -319,6 +281,28 @@ async function pay() {
     if (elements && handoff.value) elements.update({ amount: handoff.value.subtotal })
   } finally {
     working.value = false
+  }
+  if (paid.value) await complete()
+}
+
+/**
+ * The business's site confirms what was paid for, as it does an unpaid
+ * booking: its own receipt page. A payment still clearing, or one refunded
+ * because what it paid for was taken first, is said so here.
+ */
+async function complete() {
+  if (completing.value) return
+  completing.value = true
+  actionError.value = ''
+  try {
+    const done = await publicApiMutation<PaymentReturn>(`/api/public/payments/${encodeURIComponent(paymentId)}/return`, { method: 'POST', body: { claim: claim.value }, validate: isReturn })
+    if (done.state !== 'paid') outcome.value = done.state
+    else if (done.kind === 'stay') await navigateTo({ path: localePath('/bookings/stay'), query: { id: done.activity_id } }, { replace: true })
+    else await navigateTo({ path: localePath(done.kind === 'booking' ? '/bookings/confirmed' : '/reservations/confirmed'), query: { id: done.request_id }, hash: `#${done.cancellation_token}` }, { replace: true })
+  } catch (cause) {
+    actionError.value = getErrorMessage(cause, t('payment.unavailable'))
+  } finally {
+    completing.value = false
   }
 }
 

@@ -71,24 +71,29 @@ test('unknown sites render an unbranded 404 while resolved tenant errors retain 
 
 test('Blawby authored contact sections retain their forms and selected locations', async ({ page, request }) => {
   test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'The local production copy carries these existing contact pages.')
+  // Two generated contact pages, and Cedar's, re-authored in the CMS with its own titles and a divider.
+  const generated = (documentId: string) => ({ types: ['hero', 'location_grid', 'contact_form'], locations: { id: `block-contact-locations-${documentId}`, title: 'Our locations', description: 'Contact' }, formId: `block-contact-form-${documentId}` })
   for (const tenant of [
-    { slug: 'krabiclaw-review-legal', documentId: 'ade2018e-693d-4b0e-8025-daf3143abb8a', locationIds: ['loc-554dde4c-3dcf-406f-ab9d-82038dd1b70c'] },
-    { slug: 'krabiclaw-onboarding-check', documentId: '8780bc6a-6e90-4db6-aac3-2cb1048fbe28', locationIds: ['e151c459-0437-477a-a27e-bb360128b43d', 'loc-5b52502a-0a3e-4410-b14c-d3662f74ae43'] },
-    { slug: 'cedar-legal-demo', documentId: 'cd961dbe-9250-4878-b05b-b7fe1e95591d', locationIds: ['loc-abce1341-c462-4e8d-ab8c-f4f6657f07cf'] },
+    { slug: 'krabiclaw-review-legal', documentId: 'ade2018e-693d-4b0e-8025-daf3143abb8a', locationIds: ['loc-554dde4c-3dcf-406f-ab9d-82038dd1b70c'], ...generated('ade2018e-693d-4b0e-8025-daf3143abb8a') },
+    { slug: 'krabiclaw-onboarding-check', documentId: '8780bc6a-6e90-4db6-aac3-2cb1048fbe28', locationIds: ['e151c459-0437-477a-a27e-bb360128b43d', 'loc-5b52502a-0a3e-4410-b14c-d3662f74ae43'], ...generated('8780bc6a-6e90-4db6-aac3-2cb1048fbe28') },
+    { slug: 'cedar-legal', documentId: 'cd961dbe-9250-4878-b05b-b7fe1e95591d', locationIds: ['loc-abce1341-c462-4e8d-ab8c-f4f6657f07cf'], types: ['hero', 'divider', 'location_grid', 'contact_form'], locations: { id: 'ce64db84-0b72-41e2-a87b-2090c29103d7', title: 'Office Location & Contact Info', description: undefined }, formId: 'a0970094-2071-42a4-8605-2b1ab88b3dcd' },
   ]) {
     const headers = { 'x-preview-tenant': tenant.slug }
     const response = await request.get(`${testBaseUrl()}/api/public/blawby/document`, { headers, params: { recipe: 'contact' } })
     expect(response.status(), await response.text()).toBe(200)
     const document = await response.json() as { route: { page: { id: string; blocks: Array<{ id: string; type: string; data: { title?: string; description?: string; location_ids?: string[]; items?: Array<{ id: string }> } }> } } }
     expect(document.route.page.id).toBe(tenant.documentId)
-    expect(document.route.page.blocks.map(block => block.type)).toEqual(['hero', 'location_grid', 'contact_form'])
-    expect(document.route.page.blocks[1]).toMatchObject({ id: `block-contact-locations-${tenant.documentId}`, data: { title: 'Our locations', description: 'Contact', location_ids: tenant.locationIds } })
-    expect(document.route.page.blocks[1]!.data.items!.map(item => item.id)).toEqual(tenant.locationIds)
-    expect(document.route.page.blocks[2]!.id).toBe(`block-contact-form-${tenant.documentId}`)
+    expect(document.route.page.blocks.map(block => block.type)).toEqual(tenant.types)
+    const locations = document.route.page.blocks.find(block => block.type === 'location_grid')!
+    expect(locations).toMatchObject({ id: tenant.locations.id, data: { title: tenant.locations.title, location_ids: tenant.locationIds } })
+    // Cedar's authored block carries no description at all.
+    expect(locations.data.description).toBe(tenant.locations.description)
+    expect(locations.data.items!.map(item => item.id)).toEqual(tenant.locationIds)
+    expect(document.route.page.blocks.find(block => block.type === 'contact_form')!.id).toBe(tenant.formId)
     await page.unrouteAll()
     const rendered = await openTenantPage(page, `${testBaseUrl()}/contact`, headers)
     expect(rendered?.status()).toBe(200)
-    await expect(page.getByRole('heading', { name: 'Our locations', exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: tenant.locations.title, exact: true })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Send a message', exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Send message', exact: true })).toHaveCount(1)
   }
@@ -102,7 +107,7 @@ test('Blawby authored contact sections retain their forms and selected locations
 for (const tenant of [
   { name: 'Saya', organizationId: 'org-demo', baseURL: tenantTestBaseUrl(), headers: tenantTestExtraHeaders(), path: '/about', schemaType: 'Organization' },
   ...['/about', '/contact', '/schedule'].map(path => ({ name: 'Blawby', organizationId: 'org-ncls-blawby', baseURL: blawbyBaseURL, headers: blawbyExtraHeaders, path, schemaType: 'LegalService' })),
-  { name: 'Cedar Legal Demo', organizationId: '5WebMejsoVLyZLHC29wHH5GbQx1jlvCd', baseURL: testBaseUrl(), headers: { 'x-preview-tenant': 'cedar-legal-demo' }, path: '/contact', ownerId: 'ivUlJc9BoyZeFszowpbUEjh1pugcDHiT', schemaType: 'ProfessionalService' },
+  { name: 'Cedar Legal Demo', organizationId: '5WebMejsoVLyZLHC29wHH5GbQx1jlvCd', baseURL: testBaseUrl(), headers: { 'x-preview-tenant': 'cedar-legal' }, path: '/contact', ownerId: 'ivUlJc9BoyZeFszowpbUEjh1pugcDHiT', schemaType: 'ProfessionalService' },
 ]) {
   test(`${tenant.name} ${tenant.path} CMS-authored HowTo persists and accompanies the public page schema`, async ({ page, request, baseURL }) => {
     test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'Content writes use local D1 only.')
@@ -122,7 +127,8 @@ for (const tenant of [
       const before = await mcpRequest(request, baseURL!, { method: 'tools/call', toolName: 'get_site_page', args: { organization_id: tenant.organizationId, variant_id: about!.id } })
       expect(before.status()).toBe(200)
       const original = mcpData<{ page: { document: { id: string }; blocks: Array<{ id: string; type: string }> } }>(await before.json()).page
-      if ('ownerId' in tenant) expect(original.blocks.map(block => block.type)).toEqual(['hero', 'location_grid', 'contact_form'])
+      // Cedar's contact page as authored in its CMS: the office list and the form the HowTo is added beside.
+      if ('ownerId' in tenant) expect(original.blocks.map(block => block.type)).toEqual(['hero', 'divider', 'location_grid', 'contact_form'])
       const title = `Plan your visit ${crypto.randomUUID()}`
       const steps = [{ name: 'Choose a time', text: 'Contact our team to choose a time for your visit.' }, { name: 'Prepare for your visit', text: 'Read the information our team sends before you arrive.' }]
       const added: Array<{ id: string; updated_at: string }> = []
@@ -480,7 +486,7 @@ for (const tenant of tenants) {
   })
 }
 
-// The staging lodging demo's studio (docs/operations/lodging-demo.md), Stripe
+// The staging lodging demo's studio, Stripe
 // test mode ready: reached from the home page's link, it opens the booking
 // dialog from the card and walks a guest to the contact step. Nothing is
 // submitted. A pressed "Check availability" once flipped the dialog's checkbox shut.
@@ -620,7 +626,7 @@ test.describe('NCLS representative journeys', () => {
 
     for (const [name, path] of [
       ['home', '/'],
-      ['article', '/article/when-you-disagree-with-the-schools-evaluation-your-right-to-an-independent-educational-evaluation'],
+      ['article', '/blog/when-you-disagree-with-the-schools-evaluation-your-right-to-an-independent-educational-evaluation'],
     ] as const) {
       const response = await openTenantPage(page, `${blawbyBaseURL}${path}`, blawbyExtraHeaders)
       expect(response?.status()).toBe(200)
@@ -677,7 +683,7 @@ test.describe('NCLS representative journeys', () => {
   test('renders every route reachable from the header', async ({ page }) => {
     const journeys = [
       { path: '/pricing', text: /pricing|income|calculator/i },
-      { path: '/article/writing-your-own-will-how-it-works', text: /will|North Carolina/i },
+      { path: '/blog/writing-your-own-will-how-it-works', text: /will|North Carolina/i },
       { path: '/contact', text: /contact|message/i },
       { path: '/schedule', text: /consultation|schedule/i },
       { path: '/blog', text: /blog|legal/i },

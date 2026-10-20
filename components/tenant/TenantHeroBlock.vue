@@ -156,7 +156,7 @@
     <TenantMediaGallery v-model="activeMedia" :media="gallery" :fallback-alt="page.title" />
     <div class="flex-1">
       <div class="tenant-container pb-8 pt-8">
-        <h1 v-if="title" class="mx-auto max-w-4xl tenant-display text-3xl font-bold text-highlighted sm:text-4xl md:mt-2" :class="isBlawby ? 'blawby-display text-[var(--blawby-primary)]' : undefined">
+        <h1 v-if="title" class="mx-auto max-w-4xl tenant-display text-3xl font-bold text-highlighted sm:text-4xl md:mt-2">
           <span v-if="isBlawby" class="flex items-center" aria-hidden="true">
             <TenantIcon v-for="star in 5" :key="star" name="star" solid class="size-5 shrink-0 text-yellow-400" />
           </span>

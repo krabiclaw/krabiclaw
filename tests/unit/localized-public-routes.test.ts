@@ -43,8 +43,8 @@ test('localized projection clears untranslated localizable fields', () => {
   assert.deepEqual(projected.variants, [{ id: 'var-1', prices: [{ unit_amount: 2500 }] }])
 })
 
-test('professional-service blog paths use the Blawby article route', () => {
-  assert.equal(tenantBlogPostPath({ vertical: 'service' }, 'thai-law'), '/article/thai-law')
+test('professional-service blog paths use the canonical /blog route', () => {
+  assert.equal(tenantBlogPostPath({ vertical: 'service' }, 'thai-law'), '/blog/thai-law')
 })
 
 test('platform catalog validation rejects placeholder drift', () => {

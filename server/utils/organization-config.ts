@@ -8,6 +8,9 @@ import { publicTenantVisibilitySql } from '~/server/utils/public-base'
 export interface OrganizationConfig {
   palette?: SitePalette
   font_preset?: OrganizationFontPreset
+  button_shape?: 'pill' | 'rounded' | 'sharp'
+  button_casing?: 'uppercase' | 'none'
+  heading_casing?: 'uppercase' | 'none'
   press_email?: string
   partnerships_email?: string
   catering_email?: string
@@ -35,6 +38,9 @@ export const getConfig = async (
     SELECT json_extract(settings_json, '$.config.palette') AS palette,
            json_extract(settings_json, '$.config.font_preset') AS font_preset,
            json_type(settings_json, '$.config.font_preset') AS font_preset_type,
+           json_extract(settings_json, '$.config.button_shape') AS button_shape,
+           json_extract(settings_json, '$.config.button_casing') AS button_casing,
+           json_extract(settings_json, '$.config.heading_casing') AS heading_casing,
            json_extract(settings_json, '$.config.press_email') AS press_email,
            json_extract(settings_json, '$.config.partnerships_email') AS partnerships_email,
            json_extract(settings_json, '$.config.catering_email') AS catering_email,
@@ -49,6 +55,24 @@ export const getConfig = async (
     if (value == null) continue
     if (typeof value !== 'string') throw new Error('Invalid stored site setting: ' + key)
     config[key] = value
+  }
+  if (row.button_shape != null) {
+    if (typeof row.button_shape !== 'string' || !['pill', 'rounded', 'sharp'].includes(row.button_shape)) {
+      throw new Error('Invalid stored site setting: button_shape')
+    }
+    config.button_shape = row.button_shape as OrganizationConfig['button_shape']
+  }
+  if (row.button_casing != null) {
+    if (typeof row.button_casing !== 'string' || !['uppercase', 'none'].includes(row.button_casing)) {
+      throw new Error('Invalid stored site setting: button_casing')
+    }
+    config.button_casing = row.button_casing as OrganizationConfig['button_casing']
+  }
+  if (row.heading_casing != null) {
+    if (typeof row.heading_casing !== 'string' || !['uppercase', 'none'].includes(row.heading_casing)) {
+      throw new Error('Invalid stored site setting: heading_casing')
+    }
+    config.heading_casing = row.heading_casing as OrganizationConfig['heading_casing']
   }
   // A missing optional setting preserves the template. An explicit null or an
   // unsupported stored value is not a valid preset.
@@ -91,6 +115,9 @@ export const setConfig = async (
   value: string
 ) => {
   if (key === 'font_preset' && !isOrganizationFontPreset(value)) throw new HTTPError({ statusCode: 422, statusMessage: 'Unsupported organization font preset' })
+  if (key === 'button_shape' && !['pill', 'rounded', 'sharp'].includes(value)) throw new HTTPError({ statusCode: 422, statusMessage: 'Unsupported button shape' })
+  if (key === 'button_casing' && !['uppercase', 'none'].includes(value)) throw new HTTPError({ statusCode: 422, statusMessage: 'Unsupported button casing' })
+  if (key === 'heading_casing' && !['uppercase', 'none'].includes(value)) throw new HTTPError({ statusCode: 422, statusMessage: 'Unsupported heading casing' })
   const result = await execute(
     db,
     `UPDATE organization SET settings_json = json_set(settings_json, ?, ?),

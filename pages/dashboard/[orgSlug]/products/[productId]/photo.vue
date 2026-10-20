@@ -1,5 +1,5 @@
 <template>
-  <DashboardIndexPanel v-if="isStay" id="product-photo" title="Photos" column="wide">
+  <DashboardIndexPanel v-if="isStay" id="product-photo" title="Photos">
     <template #right>
       <UButton :to="p.sectionPath('photo/photos')" label="All photos" color="neutral" variant="soft" :disabled="p.saving.value" data-testid="stay-all-photos" />
       <MediaPicker :organization-id="p.organizationId" accept="image" title="Add photos" :disabled="p.saving.value" @change="addPhoto">

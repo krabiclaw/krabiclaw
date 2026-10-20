@@ -564,7 +564,7 @@ test('provider allocation shares a class Session, excludes distinct overlapping 
  const {runtime,db}=await boot()
  try {
   const {workingWindows}=await import('../../server/domain/member-scheduling.ts')
-  const {publicProductProvider}=await import('../../server/utils/public-provider.ts')
+  const {publicProductHosts}=await import('../../server/utils/public-provider.ts')
   const day=addLocalDays(localNow('UTC').date,3), start=`${day}T09:00:00.000Z`, end=`${day}T10:00:00.000Z`
   await db.prepare(`INSERT INTO user(id,name,email,emailVerified,createdAt,updatedAt) VALUES ('provider-user','Private account name','private-provider@example.com',1,1,1)`).run()
   await db.prepare(`INSERT INTO member(id,organizationId,userId,role) VALUES ('provider-one',?,'provider-user','member')`).bind(ORG).run()
@@ -590,19 +590,19 @@ test('provider allocation shares a class Session, excludes distinct overlapping 
   assert.equal(await db.prepare('SELECT assigned_member_id FROM bookings WHERE id=?').bind(attendee.bookingId).first('assigned_member_id'),'provider-one','a second attendee shares the committed provider')
   assert.equal(await db.prepare('SELECT COUNT(*) n FROM bookings').first('n'),2)
   assert.equal((await listSessions(db,{organizationId:ORG,fromInstant:`${day}T00:00:00.000Z`,toInstant:`${day}T23:59:59.999Z`})).find(s=>s.id===winner!.product_session_id)?.remaining,1,'remaining capacity is attendee based')
-  assert.deepEqual(await publicProductProvider(db,ORG,winner!.product_id),{name:'Approved public name',photo_url:null,bio:'Approved public bio'})
+  assert.deepEqual(await publicProductHosts(db,ORG,winner!.product_id),[{name:'Approved public name',photo_url:null,bio:'Approved public bio'}])
   for(const sessionId of ['missing-session',winner!.product_session_id==='group-session'?'other-session':'group-session']) {
-   await assert.rejects(()=>publicProductProvider(db,ORG,winner!.product_id,sessionId),{statusCode:404},'an explicitly selected missing or foreign-product Session cannot substitute the offering provider')
+   await assert.rejects(()=>publicProductHosts(db,ORG,winner!.product_id,sessionId),{statusCode:404},'an explicitly selected missing or foreign-product Session cannot substitute the offering provider')
   }
-  await assert.rejects(()=>publicProductProvider(db,'foreign-org',winner!.product_id,winner!.product_session_id),{statusCode:404})
-  for(const sessionId of ['',null,['group-session']])await assert.rejects(()=>publicProductProvider(db,ORG,winner!.product_id,sessionId),{statusCode:400})
+  await assert.rejects(()=>publicProductHosts(db,'foreign-org',winner!.product_id,winner!.product_session_id),{statusCode:404})
+  for(const sessionId of ['',null,['group-session']])await assert.rejects(()=>publicProductHosts(db,ORG,winner!.product_id,sessionId),{statusCode:400})
   await db.prepare("UPDATE product_booking_configs SET assigned_member_id=NULL WHERE product_id=?").bind(winner!.product_id).run()
   await db.prepare("UPDATE member_scheduling SET time_off_json=? WHERE member_id='provider-one'").bind(JSON.stringify([{start,end}])).run()
   await assert.rejects(()=>claimSessionCapacity(db,{organizationId:ORG,productId:winner!.product_id,sessionId:winner!.product_session_id,productVariantId:variant,partySize:1}),CapacityUnavailableError)
   assert.equal(await db.prepare('SELECT assigned_member_id FROM bookings WHERE id=?').bind(winner!.id).first('assigned_member_id'),'provider-one','hours/assignment edits never rewrite a booked commitment')
-  assert.deepEqual(await publicProductProvider(db,ORG,winner!.product_id,winner!.product_session_id),{name:'Approved public name',photo_url:null,bio:'Approved public bio'})
+  assert.deepEqual(await publicProductHosts(db,ORG,winner!.product_id,winner!.product_session_id),[{name:'Approved public name',photo_url:null,bio:'Approved public bio'}])
   await db.prepare("UPDATE member_scheduling SET public_approved=0 WHERE member_id='provider-one'").run()
-  assert.equal(await publicProductProvider(db,ORG,winner!.product_id,winner!.product_session_id),null,'unapproved/private identity is not public content')
+  assert.deepEqual(await publicProductHosts(db,ORG,winner!.product_id,winner!.product_session_id),[],'unapproved/private identity is not public content')
  }finally{await runtime.dispose()}
 })
 

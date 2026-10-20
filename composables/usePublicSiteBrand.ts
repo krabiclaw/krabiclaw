@@ -1,6 +1,8 @@
 import japaneseFontsUrl from '~/assets/css/japanese-fonts.css?url'
 import type { TenantOrganizationInfo } from '~/composables/useTenantOrganization'
 import { sitePaletteStyle } from '~/shared/site-palette'
+import { siteRecipeStyle } from '~/shared/site-recipe'
+
 
 // A public layout's brand: the site's font preset (on its root and <html>, so
 // text a layout teleports or the body renders outside it follows), the
@@ -10,12 +12,20 @@ import { sitePaletteStyle } from '~/shared/site-palette'
 export function usePublicSiteBrand(organization: TenantOrganizationInfo | null = useTenantOrganization().organization) {
   const fontPreset = organization?.fontPreset
   const palette = organization?.palette
+  const recipe = organization?.recipe
   const locale = useState<string>('public-locale', () => 'en')
-  const paletteStyle = palette ? sitePaletteStyle(palette) : {}
+  const paletteStyle = {
+    ...(palette ? sitePaletteStyle(palette) : {}),
+    ...siteRecipeStyle(recipe),
+  }
+  const hasStyle = Object.keys(paletteStyle).length > 0
   useHead(() => ({
     // <html> carries the palette too, for what renders outside the layout root
     // (the loading bar, body text).
-    htmlAttrs: { ...(fontPreset && { 'data-font-preset': fontPreset }), ...(palette && { style: Object.entries(paletteStyle).map(([name, value]) => `${name}:${value}`).join(';') }) },
+    htmlAttrs: {
+      ...(fontPreset && { 'data-font-preset': fontPreset }),
+      ...(hasStyle && { style: Object.entries(paletteStyle).map(([name, value]) => `${name}:${value}`).join(';') }),
+    },
     link: locale.value === 'ja' ? [{ key: 'japanese-fonts', rel: 'stylesheet', href: japaneseFontsUrl }] : [],
   }))
 
@@ -35,3 +45,4 @@ export function usePublicSiteBrand(organization: TenantOrganizationInfo | null =
 
   return { fontPreset, paletteStyle }
 }
+

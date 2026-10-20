@@ -89,6 +89,7 @@ export default defineHandler(async (event) => {
     booking: {
       kind: record.kind,
       name: request.payload.guest.name,
+      email: request.payload.guest.email,
       starts_at: record.starts_at,
       timezone: record.timezone,
       guests: `${record.party_size}${request.payload.party_size_is_minimum ? '+' : ''}`,

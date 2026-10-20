@@ -39,7 +39,7 @@ import { notifyOrganizationInvited } from '~/server/utils/notifications'
 import { cleanupOrganizationBeforeDelete } from '~/server/utils/tenant-deletion'
 import { APPLE_AUTHORIZATION_CODE_HEADER, exchangeAppleAuthorizationCode, revokeAppleGrant } from '~/server/utils/apple-revocation'
 import { reconcileZarazAnalytics } from '~/server/utils/zaraz-analytics'
-import { isKnownRecurringPlan, isNewSalePlan, normalizeBillingPlanId } from '~/shared/billing-model'
+import { BUSINESS_PLAN_ID, INCLUDED_LOCATIONS, INCLUDED_RENTAL_UNITS, isKnownRecurringPlan, isNewSalePlan, normalizeBillingPlanId } from '~/shared/billing-model'
 import { integrationsThroughAccount } from '~/server/utils/organization-integrations'
 
 type MemberRow = InferSelectModel<typeof schema.member>
@@ -425,6 +425,16 @@ function buildAuth(env: CloudflareEnv) {
         // contract's location quantity; Better Auth still authorizes the member
         // and reference before performing that change.
         const requestedPlan = ctx.path === '/subscription/upgrade' ? normalizeBillingPlanId(ctx.body?.plan) : null
+        // Business bills locations and rental units on two items, which
+        // Stripe's portal cannot confirm. An existing subscription moves to it
+        // or changes it through Payments → Plan, which shows Stripe's invoice
+        // preview first; Better Auth's Checkout starts a new one.
+        if (requestedPlan === BUSINESS_PLAN_ID && typeof ctx.body?.referenceId === 'string') {
+          const current = await ctx.context.adapter.findMany<Subscription>({ model: 'subscription', where: [{ field: 'referenceId', value: ctx.body.referenceId }] })
+          if (ctx.body.subscriptionId || current.some(row => row.status === 'active' || row.status === 'trialing' || row.status === 'past_due')) {
+            throw new APIError('BAD_REQUEST', { message: 'Business changes on an existing plan are confirmed in Payments → Plan.' })
+          }
+        }
         if (isKnownRecurringPlan(requestedPlan) && !isNewSalePlan(requestedPlan)) {
           const body = ctx.body
           const subscription = typeof body.subscriptionId === 'string'
@@ -758,9 +768,24 @@ function buildAuth(env: CloudflareEnv) {
           enabled: true,
           plans: () => loadStripePlans(),
           requireEmailVerification: true,
-          getCheckoutSessionParams: ({ plan }) => {
+          getCheckoutSessionParams: async ({ plan, subscription }, _request, ctx) => {
             if (!isNewSalePlan(plan.name)) {
               throw new APIError('BAD_REQUEST', { message: 'This plan is no longer available for new subscriptions. Choose Growth or Business.' })
+            }
+            if (plan.name === BUSINESS_PLAN_ID) {
+              const { readBillingUsage } = await import('~/server/utils/billing')
+              const usage = await readBillingUsage(db, subscription.referenceId)
+              const seats = ctx.body?.seats
+              if (!Number.isSafeInteger(seats) || Math.max(INCLUDED_LOCATIONS, seats) < usage.nonLodgingLocations) {
+                throw new APIError('BAD_REQUEST', { message: `Business must cover your ${usage.nonLodgingLocations} locations besides those with only rental units.` })
+              }
+              // Better Auth adds this plan's line items to the Checkout it
+              // creates next, and the plan is this request's own copy: the
+              // Additional rental unit item is billed for the business's own
+              // units past the included ones, and left out when there are none.
+              const additional = Math.max(0, usage.rentalUnits - INCLUDED_RENTAL_UNITS)
+              if (!plan.lineItems?.length) throw new Error('The Business plan has no Additional rental unit price')
+              plan.lineItems = additional > 0 ? plan.lineItems.map(item => ({ ...item, quantity: additional })) : []
             }
             return {}
           },

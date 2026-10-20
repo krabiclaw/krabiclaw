@@ -1,5 +1,5 @@
 import { authClient } from '~/lib/auth-client'
-import { isKnownBillingPlan } from '~/shared/billing-model'
+import { BUSINESS_PLAN_ID, isKnownBillingPlan } from '~/shared/billing-model'
 
 function checkoutReturnUrls(): { successUrl: string; cancelUrl: string; returnUrl: string } {
   const current = new URL(window.location.href)
@@ -15,7 +15,7 @@ function checkoutReturnUrls(): { successUrl: string; cancelUrl: string; returnUr
 async function organizationSubscriptionId(
   dashboardApi: ReturnType<typeof useDashboardApi>,
   organizationId: string,
-): Promise<{ id?: string; status?: string; plan: string; annual: boolean; locations: { used: number; covered: number } }> {
+): Promise<{ id?: string; status?: string; plan: string; annual: boolean; locations: { used: number; covered: number }; businessLocations: number }> {
   // A business on Starter has no subscription row, so the id and status are
   // absent from the response rather than present and empty.
   type BillingStatusResponse = {
@@ -26,6 +26,7 @@ async function organizationSubscriptionId(
       billingInterval?: 'month' | 'year'
       plan: string
       locations: { used: number; covered: number }
+      businessUsage: { locations: number; rentalUnits: number }
     }
   }
   const response = await dashboardApi<BillingStatusResponse>('/api/billing/status', {
@@ -42,6 +43,8 @@ async function organizationSubscriptionId(
         && isKnownBillingPlan(billing.plan)
         && 'locations' in billing
         && isLocationCount(billing.locations)
+        && 'businessUsage' in billing && typeof billing.businessUsage === 'object' && billing.businessUsage !== null
+        && 'locations' in billing.businessUsage && Number.isSafeInteger(billing.businessUsage.locations)
     },
   })
   return {
@@ -50,6 +53,7 @@ async function organizationSubscriptionId(
     plan: response.billing.plan,
     annual: response.billing.billingInterval === 'year',
     locations: response.billing.locations,
+    businessLocations: response.billing.businessUsage.locations,
   }
 }
 
@@ -62,6 +66,7 @@ export function isLocationCount(value: unknown): value is { used: number; covere
 export const useOrganizationSubscription = () => {
   const dashboard = useDashboardOrganization()
   const dashboardApi = useDashboardApi()
+  const route = useRoute()
   const { trackSubscriptionUpgrade, trackSubscriptionDowngrade } = useAnalytics()
   const { startSubscriptionCheckout } = useSubscriptionCheckout()
 
@@ -91,13 +96,21 @@ export const useOrganizationSubscription = () => {
       await openBillingPortal()
       return
     }
+    // Business bills locations and rental units on two items, which Stripe's
+    // portal cannot confirm: an existing subscription moves to it on the
+    // Business leaf, from Stripe's invoice preview.
+    if (plan === BUSINESS_PLAN_ID && subscription.id) {
+      await navigateTo(`/dashboard/${encodeURIComponent(String(route.params.orgSlug))}/payments/business`)
+      return
+    }
     const currentPlan = subscription.plan
     await startSubscriptionCheckout({
       organizationId,
       plan,
       currentPlan,
       subscriptionId: subscription.id,
-      locations: Math.max(subscription.locations.used, subscription.locations.covered),
+      // Business bills only the locations that are not only homes; its rental units are set at Checkout from the homes themselves.
+      locations: plan === BUSINESS_PLAN_ID ? Math.max(1, subscription.businessLocations) : Math.max(subscription.locations.used, subscription.locations.covered),
       onAction: action => {
         if (action === 'upgrade') trackSubscriptionUpgrade(plan, organizationId)
         if (action === 'downgrade' && plan !== 'free') trackSubscriptionDowngrade(plan, organizationId)
@@ -111,6 +124,7 @@ export const useOrganizationSubscription = () => {
   async function setPlanLocations(organizationId: string, locations: number) {
     const subscription = await organizationSubscriptionId(dashboardApi, organizationId)
     if (!subscription.id) throw new Error('Choose a plan before adding locations to it')
+    if (subscription.plan === BUSINESS_PLAN_ID) throw new Error('Business locations change on the Business plan leaf')
     if (subscription.status === 'past_due') {
       await openBillingPortal()
       return

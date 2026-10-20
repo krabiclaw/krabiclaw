@@ -190,6 +190,9 @@ export async function loadSettingsPayload(
     palette: isPaletteTemplate(template) ? resolveSitePalette(template, siteConfig.palette) : null,
     palette_source: isPaletteTemplate(template) ? (siteConfig.palette ? 'custom' : 'template') : null,
     font_preset: resolveOrganizationFontPreset(siteConfig.font_preset),
+    button_shape: siteConfig.button_shape ?? (template === 'blawby' ? 'rounded' : 'pill'),
+    button_casing: siteConfig.button_casing ?? (template === 'blawby' ? 'uppercase' : 'none'),
+    heading_casing: siteConfig.heading_casing ?? (template === 'blawby' ? 'uppercase' : 'none'),
     default_currency: updatedOrganization.default_currency,
     timezone: updatedOrganization.timezone,
     press_email: siteConfig.press_email || '',
@@ -301,6 +304,9 @@ async function attemptOrganizationUpdate(
 
   const settingsPatch: Record<string, unknown> = {}
   if (updates.font_preset !== undefined) settingsPatch.config = { font_preset: updates.font_preset }
+  if (updates.button_shape !== undefined) settingsPatch.config = { ...(settingsPatch.config as Record<string, unknown> | undefined), button_shape: updates.button_shape }
+  if (updates.button_casing !== undefined) settingsPatch.config = { ...(settingsPatch.config as Record<string, unknown> | undefined), button_casing: updates.button_casing }
+  if (updates.heading_casing !== undefined) settingsPatch.config = { ...(settingsPatch.config as Record<string, unknown> | undefined), heading_casing: updates.heading_casing }
   // Resolved to a whole palette by updateOrganizationSettingsFields; null removes
   // it (json_patch deletes a key patched with null), returning to the template's.
   if (updates.palette !== undefined) settingsPatch.config = { ...(settingsPatch.config as Record<string, unknown> | undefined), palette: updates.palette }
@@ -448,10 +454,17 @@ async function attemptOrganizationUpdate(
   }
 
   // A status change adds or removes this site's indexed content. Typography,
-  // colors and announcements affect only its public resource and HTML caches.
+  // colors, recipe tokens and announcements affect only its public resource and HTML caches.
   if (updates.status !== undefined || updates.address_visibility !== undefined) {
     await purgePublicResourceCacheNow(env, organizationId)
-  } else if (updates.font_preset !== undefined || updates.palette !== undefined || updates.announcement !== undefined) {
+  } else if (
+    updates.font_preset !== undefined ||
+    updates.palette !== undefined ||
+    updates.announcement !== undefined ||
+    updates.button_shape !== undefined ||
+    updates.button_casing !== undefined ||
+    updates.heading_casing !== undefined
+  ) {
     if (!env.ORGANIZATION_CACHE) throw new Error('ORGANIZATION_CACHE is not bound; site caches cannot be purged')
     await purgeOrganizationCaches(db, env.ORGANIZATION_CACHE, organizationId, env.NUXT_PUBLIC_FREE_ORGANIZATION_DOMAIN)
   }
@@ -526,9 +539,18 @@ export async function updateOrganizationSettingsFields(
     if (!organizationSupportsBlawbyTemplate({ vertical: organization.vertical, themeId: organization.theme_id })) return { status: 400, data: { error: 'Office address visibility is available for service websites' } }
   }
 
-  // Validate before any settings writes. Preset IDs are not CSS or font URLs.
   if (updates.font_preset !== undefined && !isOrganizationFontPreset(updates.font_preset)) {
     return { status: 400, data: { error: `font_preset must be one of: ${ORGANIZATION_FONT_PRESETS.join(', ')}` } }
+  }
+
+  if (updates.button_shape !== undefined && !['pill', 'rounded', 'sharp'].includes(updates.button_shape)) {
+    return { status: 400, data: { error: 'button_shape must be one of: pill, rounded, sharp' } }
+  }
+  if (updates.button_casing !== undefined && !['uppercase', 'none'].includes(updates.button_casing)) {
+    return { status: 400, data: { error: 'button_casing must be one of: uppercase, none' } }
+  }
+  if (updates.heading_casing !== undefined && !['uppercase', 'none'].includes(updates.heading_casing)) {
+    return { status: 400, data: { error: 'heading_casing must be one of: uppercase, none' } }
   }
 
   // A palette change resolves to the whole palette the site will render, so

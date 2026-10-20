@@ -3,11 +3,15 @@ import type { OrganizationFontPreset } from '~/shared/organization-fonts'
 import type { SitePalette } from '~/shared/site-palette'
 import type { SiteLogo } from '~/shared/media-placement-contract'
 import type { PublicTemplateDefinition } from '~/utils/template-registry'
+import type { SiteRecipe } from '~/shared/site-recipe'
+
+export type { SiteRecipe }
 
 export interface TenantContext {
   organization: TenantOrganizationInfo
   previewAuthorized: boolean
 }
+
 
 export interface TenantOrganizationInfo {
   id: string
@@ -18,6 +22,7 @@ export interface TenantOrganizationInfo {
   template: PublicTemplateDefinition
   fontPreset: OrganizationFontPreset
   palette: SitePalette | null
+  recipe?: SiteRecipe
   logos: SiteLogo[]
   brand_description: string | null
   media: Array<{ asset_id: string; slot: string; public_url: string | null; thumbnail_url: string | null; kind: string; mime_type: string | null }>

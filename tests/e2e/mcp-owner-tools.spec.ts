@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 import { blawbyBaseURL, blawbyExtraHeaders, dismissPreviewToolbar, openTenantPage, waitForNuxtHydration } from './helpers'
 import { loginAs } from './helpers/auth'
-import { MCP_ORGANIZATION_ID, mcpRequest, mcpData } from './helpers/mcp'
+import { MCP_ORGANIZATION_ID, mcpRequest, mcpData, publishOwnHostProfile } from './helpers/mcp'
 import { E2E_POTTERY_ORGANIZATION_ID, tenantTestExtraHeaders } from './test-env'
 import { acquireTenantMutationLock } from './helpers/tenant-mutation-lock'
 import { generateReservationTimes, type OpeningHours, type SpecialHours } from '../../shared/reservation-hours'
@@ -864,6 +864,7 @@ test.describe('stateless MCP server', () => {
       type Menu = { sections: Array<{ collection: { id: string; name: string }; products: Array<{ id: string; name: string }> }>; replayed: boolean }
       let menu: Menu | null = null
       let experienceId: string | null = null
+      let host: Awaited<ReturnType<typeof publishOwnHostProfile>> | null = null
       try {
         menu = await call<Menu>('update_menu', args)
         const written = menu.sections.filter(section => section.collection.name.endsWith(stamp))
@@ -907,8 +908,10 @@ test.describe('stateless MCP server', () => {
         expect(seating, 'the existing location has an open one-hour seating within the chosen week').toBeTruthy()
         const start = localDateTimeToInstant(seating!.date, seating!.time, location.timezone)
         const name = `Omakase ${stamp}`
+        // Setting up bookings publishes the experience, and guests see who hosts it.
+        host = await publishOwnHostProfile(request, baseURL!, organizationId, 'Omakase host')
         const creation = { kind: 'experience', name, idempotency_key: crypto.randomUUID(), variants: [{ name: 'Per person', prices: [{ unit_amount: 13000, currency: settings.settings.default_currency }] }],
-          booking: { location_id: locationId, duration_minutes: 60, default_capacity: 6, confirmation_mode: 'review', online_payment_required: false,
+          booking: { location_id: locationId, duration_minutes: 60, default_capacity: 6, confirmation_mode: 'review', online_payment_required: false, assigned_member_id: host.memberId,
             sessions: [{ starts_at: start.toISOString(), ends_at: new Date(start.getTime() + 3600000).toISOString(), capacity: 6 }] } }
         const missing = await mcpRequest(request,baseURL!,{method:'tools/call',toolName:'create_product',args:{organization_id:organizationId,kind:'experience',name,idempotency_key:crypto.randomUUID()}})
         expect((await missing.json()).result.isError).toBe(true)
@@ -918,13 +921,14 @@ test.describe('stateless MCP server', () => {
         expect((await call<{product:{id:string}}>('create_product', creation)).product.id).toBe(product.id)
         const readback = await request.get(`${baseURL}/api/editor/organizations/${organizationId}/products/${product.id}`)
         expect(readback.status()).toBe(200)
-        expect((await readback.json()).product).toMatchObject({ kind: 'experience', booking: { duration_minutes: 60, confirmation_mode: 'review' }, locations: [{ location_id: locationId, active: true, published: true }] })
+        expect((await readback.json()).product).toMatchObject({ kind: 'experience', booking: { duration_minutes: 60, confirmation_mode: 'review', assigned_member_id: host.memberId }, locations: [{ location_id: locationId, active: true, published: true }] })
         await page.reload()
         await expect(page.getByText(name, {exact:true})).toHaveCount(0)
         expect((await page.goto(`${baseURL}/experiences`))?.status()).toBe(200)
         await expect(page.getByText(name,{exact:true}).first()).toBeVisible()
         expect((await page.goto(`${baseURL}${new URL(product.public_url).pathname}`))?.status()).toBe(200)
         await expect(page.getByRole('heading',{name,exact:true}).first()).toBeVisible()
+        await expect(page.locator('section[aria-label="Meet your host"]').getByText('Omakase host', { exact: true })).toBeVisible()
         const sessions = await request.get(`${baseURL}/api/public/products/${product.slug}/sessions`, {headers: tenantTestExtraHeaders()})
         expect(sessions.status(),await sessions.text()).toBe(200)
         expect((await sessions.json()).sessions).toEqual([expect.objectContaining({starts_at:start.toISOString(),remaining:6,is_full:false})])
@@ -935,6 +939,7 @@ test.describe('stateless MCP server', () => {
           expect((await call<{deleted:boolean}>('delete_collection',{collection_id:section.collection.id})).deleted).toBe(true)
         }
         if (original.collections.length) await call('reorder_collections',{location_id:locationId,collection_ids:original.collections.map(collection=>collection.id)})
+        await host?.restore()
       }
     })
     test('MCP teams and invitation delivery use the same Better Auth records as the dashboard', async ({request,baseURL}) => {

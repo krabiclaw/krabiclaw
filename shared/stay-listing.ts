@@ -334,3 +334,10 @@ export function isStayAmenity(value: unknown): value is StayAmenity {
 export function stayCodes<T extends Record<string, unknown>>(vocabulary: T): Array<keyof T & string> {
   return Object.keys(vocabulary) as Array<keyof T & string>
 }
+
+/** A stay's nightly prices grouped by price, the way a receipt reads: "$120 × 3 nights". */
+export function stayNightlyGroups(nightly: readonly number[]): Array<{ price: number; nights: number }> {
+  const groups = new Map<number, number>()
+  for (const price of nightly) groups.set(price, (groups.get(price) ?? 0) + 1)
+  return [...groups].map(([price, nights]) => ({ price, nights }))
+}

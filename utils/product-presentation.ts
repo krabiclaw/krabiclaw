@@ -332,3 +332,13 @@ export function groupProductsByCollection(
     })
     .filter(group => group.products.length > 0)
 }
+
+/** A home's size the way Airbnb lists it under the title: "2 guests · Studio · 1 bed · 1 bath". */
+export function staySpecLabels(stay: { max_guests: number; bedrooms: number | null; beds: number | null; bathrooms: number | null }, t: (key: string, plural: number) => string): string[] {
+  return [
+    t('stay.sleeps', stay.max_guests),
+    ...(stay.bedrooms === null ? [] : [stay.bedrooms === 0 ? t('stay.studio', 1) : t('stay.bedrooms', stay.bedrooms)]),
+    ...(stay.beds === null ? [] : [t('stay.beds', stay.beds)]),
+    ...(stay.bathrooms === null ? [] : [t('stay.bathrooms', stay.bathrooms)]),
+  ]
+}

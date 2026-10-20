@@ -19,11 +19,25 @@
       <UFormField v-else-if="concern === 'confirmation'" name="confirmation_mode">
         <URadioGroup v-model="p.form.confirmation_mode" :items="[{ value: 'instant', label: 'Confirm automatically' }, { value: 'review', label: 'Review each request' }]" variant="card" />
       </UFormField>
-      <UFormField v-else-if="concern === 'assignment'" name="scheduling_mode" label="Who guests meet">
-        <p v-if="membersError" role="alert" class="mb-3 text-error">Team members could not be loaded.</p>
-        <p v-else-if="membersStatus !== 'success'" class="mb-3 text-muted">Loading team members…</p>
-        <URadioGroup v-else v-model="assignedMember" :items="memberOptions" variant="card" class="w-full" />
-      </UFormField>
+      <div v-else-if="concern === 'assignment'" class="space-y-6">
+        <UFormField name="assigned_member_id" label="Host">
+          <p v-if="membersError" role="alert" class="mb-3 text-error">Team members could not be loaded.</p>
+          <p v-else-if="membersStatus !== 'success'" class="mb-3 text-muted">Loading team members…</p>
+          <URadioGroup v-else v-model="host" :items="hostOptions" variant="card" indicator="end" color="neutral" class="w-full" :ui="{ item: 'items-center', wrapper: 'flex items-center gap-4' }">
+            <template #label="{ item }">
+              <span class="flex items-center gap-4">
+                <UAvatar :src="item.avatar ?? undefined" :alt="item.label" :icon="item.team ? 'i-lucide-users' : undefined" size="xl" />
+                <span>
+                  <span class="block font-medium text-highlighted">{{ item.label }}</span>
+                  <span class="block text-sm font-normal" :class="item.published ? 'text-muted' : 'text-warning'">{{ item.state }}</span>
+                </span>
+              </span>
+            </template>
+          </URadioGroup>
+          <UButton v-if="unpublishedHost" class="mt-4" color="neutral" variant="outline" :to="`/dashboard/${route.params.orgSlug}/team/${unpublishedHost.id}/profile`">Edit {{ unpublishedHost.name }}'s profile</UButton>
+        </UFormField>
+        <SettingRow v-model="hostHours" :disabled="!host || p.form.held_online" label="Book the host's working hours" description="Guests choose from the host's own hours instead of the weekly schedule." />
+      </div>
       <UFormField v-else-if="concern === 'payment'" name="online_payment_required">
         <SettingRow v-model="p.form.online_payment_required" :disabled="!paymentEntitled && !p.form.online_payment_required" label="Require online payment for paid sessions" />
         <template v-if="!paymentEntitled">
@@ -33,7 +47,7 @@
       </UFormField>
       <UFormField v-else-if="concern === 'location'" name="held_online">
         <SettingRow v-model="p.form.held_online" :disabled="p.form.scheduling_mode !== 'provider' && !p.form.held_online" label="Held online" />
-        <UButton v-if="p.form.scheduling_mode !== 'provider'" class="mt-4" variant="outline" :to="`${level.to.value}/assignment`">Choose who guests meet</UButton>
+        <UButton v-if="p.form.scheduling_mode !== 'provider'" class="mt-4" variant="outline" :to="`${level.to.value}/assignment`">Book the host's working hours</UButton>
       </UFormField>
     </UForm>
   </DashboardLeafPanel>
@@ -54,7 +68,7 @@ const settings = {
   duration: { title: 'Duration', lead: 'How long does each session last? Existing appointments keep their saved duration.' },
   capacity: { title: 'Guest limit', lead: 'How many guests can book the same session? Existing appointments keep their saved guest limit.' },
   confirmation: { title: 'Confirmation', lead: 'Confirm bookings as soon as guests reserve, or review each request before confirming.' },
-  assignment: { title: 'Who guests meet', lead: 'Choose whose availability guests can book.' },
+  assignment: { title: 'Host', lead: 'Who runs it. Guests see the host\'s published profile on the page.' },
   payment: { title: 'Payment', lead: 'Guests pay before their booking is made. Free sessions remain bookable.' },
   location: { title: 'Meeting location', lead: 'Online, guests book in the working hours of whoever provides it, shown in their own time zone.' },
 }
@@ -65,20 +79,27 @@ const paymentEntitled = computed(() => {
   return getPlanEntitlements(plan).payments === true
 })
 const { data: members, error: membersError, status: membersStatus } = await useMemberSchedulingList(() => dashboard.organization.value?.id)
-// The business schedule is its own choice, held as no member and no team.
-const BUSINESS_SCHEDULE = 'business-schedule'
-const assignedMember = computed({
-  get: () => p.form.assigned_team_id ? `team:${p.form.assigned_team_id}` : p.form.assigned_member_id ? `member:${p.form.assigned_member_id}` : BUSINESS_SCHEDULE,
-  set: (value: string) => {
-    p.form.assigned_team_id = value.startsWith('team:') ? value.slice(5) : null
-    p.form.assigned_member_id = value.startsWith('member:') ? value.slice(7) : null
-    p.form.scheduling_mode = value === BUSINESS_SCHEDULE ? 'legacy' : 'provider'
+// The host is who runs it: one member or one team. Whose hours guests book is a separate choice.
+const host = computed({
+  get: () => p.form.assigned_team_id ? `team:${p.form.assigned_team_id}` : p.form.assigned_member_id ? `member:${p.form.assigned_member_id}` : undefined,
+  set: (value: string | undefined) => {
+    p.form.assigned_team_id = value?.startsWith('team:') ? value.slice(5) : null
+    p.form.assigned_member_id = value?.startsWith('member:') ? value.slice(7) : null
   },
 })
+const hostHours = computed({
+  get: () => p.form.scheduling_mode === 'provider',
+  set: (value: boolean) => { p.form.scheduling_mode = value ? 'provider' : 'legacy' },
+})
+const profileState = (published: boolean) => published ? 'Profile published' : 'Profile not published: guests can\'t see it yet'
 // Offered only once the list has loaded; see the template's loading and error states.
-const memberOptions = computed(() => members.value ? [{ label: 'Use the business schedule', value: BUSINESS_SCHEDULE },
-  ...members.value.teams.map(team => ({ label: `Any available member of ${team.name}`, value: `team:${team.id}` })),
-  ...members.value.members.map(member => ({ label: member.name, value: `member:${member.id}` }))] : [])
+// A chosen member guests can't see yet: their profile is one step away.
+const unpublishedHost = computed(() => members.value?.members.find(member => `member:${member.id}` === host.value && member.scheduling?.public_approved !== 1) ?? null)
+// Each host as guests will see them: the published photo, else the account picture.
+const hostOptions = computed(() => members.value ? [
+  ...members.value.members.map(member => ({ label: member.name, avatar: member.scheduling?.public_photo_url || member.image, published: member.scheduling?.public_approved === 1, team: false, state: profileState(member.scheduling?.public_approved === 1), value: `member:${member.id}` })),
+  ...members.value.teams.map(team => ({ label: team.name, avatar: null, published: true, team: true, state: `${team.members.length} ${team.members.length === 1 ? 'member' : 'members'}: guests see each one with a published profile`, value: `team:${team.id}` })),
+] : [])
 const setting = computed(() => settings[concern.value as keyof typeof settings] ?? { title: '', lead: '' })
 watchEffect(() => {
   if (level.mode.value === 'yield') return
@@ -100,7 +121,7 @@ watch(capacityChoice, choice => {
   else if (Number(p.form.booking_capacity) < 2) p.form.booking_capacity = ''
 })
 const valid = computed(() => {
-  if (concern.value === 'assignment') return membersStatus.value === 'success'
+  if (concern.value === 'assignment') return membersStatus.value === 'success' && Boolean(host.value)
   if (concern.value === 'duration') return Number.isSafeInteger(Number(p.form.booking_duration)) && Number(p.form.booking_duration) > 0
   if (concern.value === 'capacity') return capacityChoice.value !== 'group' || (Number.isSafeInteger(Number(p.form.booking_capacity)) && Number(p.form.booking_capacity) >= 2)
   if (concern.value === 'location') return !p.form.held_online || p.form.scheduling_mode === 'provider'

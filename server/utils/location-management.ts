@@ -9,8 +9,7 @@ import { refreshSocialCard } from '~/server/utils/social-card'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { prepareContentDocumentDeletion } from '~/server/utils/content/documents'
 import { publicResourceCacheInvalidationQuery } from '~/server/utils/public-resource-cache'
-import { organizationLocations } from '~/server/utils/billing'
-import { additionalLocationPrice, INCLUDED_LOCATIONS, isKnownRecurringPlan } from '~/shared/billing-model'
+import { capacityRefusalOf, executeWithinCapacity } from '~/server/utils/billing'
 import { publishStayInvalidation } from '~/server/cloudflare/guest-inbox-events'
 
 type SetupEnv = CloudflareEnv;
@@ -209,7 +208,11 @@ export async function createLocation(
   organizationId: string,
   input: CreateLocationInput,
   userId: string,
-  options: { refreshSocialCardAfterCreate?: boolean; idempotencyKey?: string } = {},
+  /**
+   * `holdsHome`: made inactive for the home created at it next, which makes it
+   * active once it holds the home (see createStayHome).
+   */
+  options: { refreshSocialCardAfterCreate?: boolean; idempotencyKey?: string; holdsHome?: boolean } = {},
 ) {
   const key = options.idempotencyKey?.trim();
   if (options.idempotencyKey !== undefined && (!key || key.length > 200)) {
@@ -240,9 +243,6 @@ export async function createLocation(
   if (organization.onboarding_status !== 'active') {
     return { status: 409, data: { error: 'Finish website setup before adding another location.', code: 'ONBOARDING_INCOMPLETE' } };
   }
-  const limit = await locationLimitRefusal(env, db, organizationId, 'create it');
-  if (limit) return limit;
-
   const title = input.title.trim();
   if (!title) {
     return { status: 400, data: { error: "Location title is required.", code: 'INVALID_LOCATION_FIELD', field: 'title' } };
@@ -336,7 +336,7 @@ export async function createLocation(
             assigned_member_id, assigned_team_id,
             created_at, updated_at
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
         params: [
           id,
@@ -359,6 +359,7 @@ export async function createLocation(
           input.price_level ?? null,
           normalizedTimezone,
           input.max_capacity ?? null,
+          options.holdsHome ? 'inactive' : 'active',
           input.seo_title ?? null,
           input.seo_description ?? null,
           input.canonical_url ?? null,
@@ -383,11 +384,13 @@ export async function createLocation(
       }));
       statements.push(publicResourceCacheInvalidationQuery(organizationId, 'location_created'));
 
-      await executeBatch(db, statements);
+      await executeWithinCapacity(env, db, organizationId, statements, { action: 'create it' });
       created = await loadLocation(db, organizationId, id, true);
       if (!created) throw new HTTPError({ statusCode: 500, statusMessage: 'Created location could not be read back', data: { code: 'LOCATION_NOT_READABLE', field: 'location.id' } });
       break;
     } catch (error) {
+      const refusal = capacityRefusalOf(error);
+      if (refusal) return refusal;
       // The location insert can collide on its slug before the audit key is
       // reached. Either collision may mean this same request just committed.
       if (isSlugConflict(error) || isUniqueDedupeConflict(error)) {
@@ -427,26 +430,6 @@ export function coordinatesFailure(input: Pick<UpdateLocationInput, 'latitude' |
   return null;
 }
 
-/**
- * The plan covers its active locations: an inactive one is off the site and
- * does not hold a slot. Creating a location, or making one active again, is
- * refused when every slot is taken.
- */
-async function locationLimitRefusal(env: CloudflareEnv, db: D1Database, organizationId: string, action: string) {
-  const locations = await organizationLocations(env, db, organizationId);
-  if (locations.used < locations.covered) return null;
-  return {
-    status: 402,
-    data: {
-      error: isKnownRecurringPlan(locations.plan)
-        ? `Your plan covers ${locations.covered} locations. Add a location to your plan in Billing (${INCLUDED_LOCATIONS} included, then ${additionalLocationPrice()}), then ${action}.`
-        : `Basic includes ${INCLUDED_LOCATIONS} locations. Choose Growth or Business in Billing to add more.`,
-      code: 'LOCATION_LIMIT',
-      locations: { used: locations.used, covered: locations.covered },
-    },
-  };
-}
-
 export async function updateLocation(
   db: D1Database,
   organizationId: string,
@@ -479,10 +462,6 @@ export async function updateLocation(
 
   if (Object.keys(input).length === 0) {
     return { status: 400, data: { error: "No update fields provided.", code: 'EMPTY_LOCATION_UPDATE' } };
-  }
-  if (input.status === 'active' && existing.status !== 'active') {
-    const limit = await locationLimitRefusal(env, db, organizationId, 'make it active');
-    if (limit) return limit;
   }
 
   if (input.title !== undefined && !input.title.trim()) {
@@ -657,7 +636,9 @@ export async function updateLocation(
     // The site changed: recorded with the change, so its caches and search index follow it.
     statements.push(publicResourceCacheInvalidationQuery(organizationId, 'location_updated'));
 
-    const results = await executeBatch(db, [...(writeGuard ? [writeGuard] : []), ...statements]);
+    // An inactive location is off the site and holds no slot; making it active
+    // again is refused when the plan has none left.
+    const results = await executeWithinCapacity(env, db, organizationId, [...(writeGuard ? [writeGuard] : []), ...statements], { action: 'make it active' });
     return (results[writeGuard ? 1 : 0]?.meta?.changes ?? 0) === 1;
   };
   const stale = {
@@ -683,6 +664,8 @@ export async function updateLocation(
         updated = { location };
         break;
       } catch (error) {
+        const refusal = capacityRefusalOf(error);
+        if (refusal) return refusal;
         if (isSlugConflict(error)) continue;
         if (isCheckConstraintError(error)) {
           return { status: 400, data: { error: (error as Error).message, code: 'LOCATION_CONSTRAINT_VIOLATION' } };
@@ -707,7 +690,13 @@ export async function updateLocation(
   }
 
   params.push(locationId, organizationId);
-  if (!(await runUpdate(params))) return stale;
+  try {
+    if (!(await runUpdate(params))) return stale;
+  } catch (error) {
+    const refusal = capacityRefusalOf(error);
+    if (refusal) return refusal;
+    throw error;
+  }
   const location = await loadLocation(db, organizationId, locationId);
   if (!location) throw new HTTPError({ statusCode: 500, statusMessage: 'Updated location could not be read back', data: { code: 'LOCATION_NOT_READABLE', field: 'location.id' } });
   if (cardInputChanged) await refreshSocialCard({ db, env, owner: { owner_type: 'business_location', owner_id: locationId }, actorId: userId })

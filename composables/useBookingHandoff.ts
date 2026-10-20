@@ -82,7 +82,7 @@ export async function loadBookingConfirmation(
   if (!requestId || !token) throw new Error(language.t('booking.receipt_missing_description'))
 
   const response = await $fetch<{ success: true; booking: {
-    kind: BookingConfirmation['type']; status: 'pending' | 'confirmed' | 'cancelled'; name: string
+    kind: BookingConfirmation['type']; status: 'pending' | 'confirmed' | 'cancelled'; name: string; email: string
     starts_at: string; timezone: string; guests: string; location_id: string | null; product_id: string | null; product_kind: ProductKind | null; product_name: string | null
     location_name: string | null; location_slug: string | null
     locale: string; policy_summary: ApiRecord | null
@@ -93,7 +93,7 @@ export async function loadBookingConfirmation(
   const booking = response?.booking
   if (response?.success !== true || !booking || booking.kind !== kind
     || !['pending', 'confirmed', 'cancelled'].includes(booking.status)
-    || typeof booking.name !== 'string' || !isValidInstant(booking.starts_at) || !isValidTimezone(booking.timezone)
+    || typeof booking.name !== 'string' || typeof booking.email !== 'string' || !isValidInstant(booking.starts_at) || !isValidTimezone(booking.timezone)
     || (kind === 'booking' && (!booking.product_kind || !PRODUCT_KINDS.includes(booking.product_kind)))
     || typeof booking.guests !== 'string' || booking.locale !== language.locale || (booking.location_id !== null && typeof booking.location_id !== 'string')) {
     throw new Error(language.t('booking.receipt_failed'))
@@ -105,7 +105,7 @@ export async function loadBookingConfirmation(
   return {
     ...matchingHandoff,
     type: kind, locale: language.locale, organizationId, organizationName,
-    requestId, status: booking.status, guestName: booking.name, startsAt: booking.starts_at,
+    requestId, status: booking.status, guestName: booking.name, guestEmail: booking.email, startsAt: booking.starts_at,
     timezone: booking.timezone, guests: booking.guests, locationId: booking.location_id,
     productId: booking.product_id,
     productKind: booking.product_kind,

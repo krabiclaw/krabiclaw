@@ -21,7 +21,7 @@
       <span class="mt-6 inline-block rounded bg-[var(--tenant-primary-dark,var(--blawby-primary-dark,#1e293b))] px-2 text-sm font-semibold uppercase text-white">
         {{ item.title }}
       </span>
-      <h3 v-if="item.description" :class="isBlawby ? 'mt-2 blawby-display text-xl font-bold text-[var(--blawby-primary)]' : 'mt-2 tenant-display text-xl font-bold text-highlighted'">
+      <h3 v-if="item.description" class="mt-2 tenant-display text-xl font-bold text-highlighted">
         {{ item.description }}
       </h3>
       <p v-if="item.city" class="mt-4 text-sm text-highlighted">{{ item.city }}</p>
@@ -56,8 +56,6 @@ export interface PageGridItem {
 
 const props = defineProps<{ items: PageGridItem[]; imageSlot: 'cover' | 'image' | 'hero' }>()
 const { t } = useI18n()
-const { organization } = useTenantOrganization()
-const isBlawby = computed(() => organization.template?.slug === 'blawby' || organization.vertical === 'service')
 
 function imageUrl(item: PageGridItem): string | null {
   return mediaStillUrl(item.media?.find(media => media.slot === props.imageSlot))

@@ -349,10 +349,10 @@ export async function assertOrganizationWideAccess(_db: DbClient, input: MemberA
   throw new HTTPError({ statusCode: 404, message: 'Not found or access denied' })
 }
 
-/** The offering assignment belongs to this tenant's Better Auth member or team. */
+/** The offering's host is this tenant's Better Auth member or team. */
 export const ASSIGNED_SERVICE_SQL = `(p.kind = 'service' OR p.kind = 'experience') AND EXISTS (
   SELECT 1 FROM product_booking_configs c
-  WHERE c.organization_id = p.organization_id AND c.product_id = p.id AND c.scheduling_mode = 'provider'
+  WHERE c.organization_id = p.organization_id AND c.product_id = p.id
     AND (EXISTS (SELECT 1 FROM member m WHERE m.id = c.assigned_member_id AND m.organizationId = c.organization_id AND m.userId = ?)
       OR EXISTS (SELECT 1 FROM team t JOIN teamMember tm ON tm.teamId = t.id
         JOIN member m ON m.userId = tm.userId AND m.organizationId = t.organizationId

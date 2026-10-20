@@ -23,7 +23,7 @@ const groups = computed<EditorNavigationGroup[]>(() => {
     row('duration', 'Duration', config.duration_minutes ? `${config.duration_minutes} minutes` : 'Choose a duration'),
     p.locationId.value ? { id: 'location', label: 'Meeting location', summary: p.location.value?.title ?? '' } : row('location', 'Meeting location', config.held_online ? 'Online' : 'Not set'),
     row('capacity', 'Guest limit', config.default_capacity === null ? 'No guest limit' : config.default_capacity === 1 ? 'One guest per session' : config.default_capacity === 0 ? 'Closed to new guests' : `Up to ${config.default_capacity} guests per session`),
-    row('assignment', 'Who guests meet', config.assigned_team_id ? 'Any available member of the assigned team' : config.assigned_member_id ? 'Assigned team member' : 'The business schedule', 'i-lucide-users'),
+    row('assignment', 'Host', p.assignmentSummary.value, 'i-lucide-user-round'),
     row('confirmation', 'Confirmation', config.confirmation_mode === 'instant' ? 'Confirm automatically' : 'Review each request'),
     // Online, the provider's working hours are the schedule; at a location, its weekly times are.
     ...(config.held_online
