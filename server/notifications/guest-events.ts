@@ -80,7 +80,10 @@ export interface GuestBookingInput {
   notes?: string | null
   contactPhone?: string | null
   contactEmail?: string | null
-  cancelUrl?: string | null
+  /** The guest's receipt on the business's site: what they booked, paid and can cancel. */
+  receiptUrl?: string | null
+  /** What the guest paid on the site, formatted; absent when nothing was paid online. */
+  paid?: string | null
   heroImageUrl?: string | null
   /** The platform sign-up the guest's email joins this booking to. */
   accountUrl?: string | null
@@ -103,6 +106,7 @@ function guestVisitFacts(input: GuestBookingInput): NotificationFact[] {
     fact('time', labels['site.reservation_cancel.time']!, input.time),
     fact('partySize', labels['site.experience_detail.party_size']!, input.partySize),
     fact('notes', labels['site.experience_detail.special_requests']!, input.notes ?? null),
+    fact('total', labels['payment.paid']!, input.paid ?? null),
   )
 }
 
@@ -121,7 +125,7 @@ export function guestReservationReceivedMessage(input: GuestBookingInput): Notif
     preheader: `${input.organizationName} · ${input.date} · ${input.time}`,
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.organizationName } : null,
     facts: guestVisitFacts(input),
-    primaryAction: input.cancelUrl ? { url: input.cancelUrl, label: locale.messages['booking.receipt']! } : undefined,
+    primaryAction: input.receiptUrl ? { url: input.receiptUrl, label: locale.messages['booking.receipt']! } : undefined,
     secondaryAction: accountAction(input.accountUrl, locale.locale),
     sections: contactSection(input),
     category: 'account_security',
@@ -154,7 +158,7 @@ export function guestBookingReceivedMessage(input: GuestBookingInput & { product
     hero: input.heroImageUrl ? { imageUrl: input.heroImageUrl, alt: input.productTitle ?? '' } : null,
     intro: input.status === 'pending' ? locale.messages['booking.pending_message']! : undefined,
     facts: guestVisitFacts(input),
-    primaryAction: input.cancelUrl ? { url: input.cancelUrl, label: locale.messages['booking.receipt']! } : undefined,
+    primaryAction: input.receiptUrl ? { url: input.receiptUrl, label: locale.messages['booking.receipt']! } : undefined,
     secondaryAction: accountAction(input.accountUrl, locale.locale),
     sections: contactSection(input),
     category: 'account_security',
@@ -179,6 +183,8 @@ export interface GuestStayInput {
   contactEmail: string | null
   heroImageUrl: string | null
   accountUrl: string | null
+  /** The stay on the business's site. */
+  receiptUrl: string | null
 }
 
 /** The guest's confirmation of a stay they booked and paid for on the site. */
@@ -196,8 +202,9 @@ export function guestStayConfirmedMessage(input: GuestStayInput): NotificationMe
       fact('checkOut', labels['stay.check_out']!, input.checkOut),
       fact('nights', labels['stay.nights']!, input.nights),
       fact('partySize', labels['stay.guests']!, input.guests),
-      fact('total', labels['stay.paid_total']!, input.total),
+      fact('total', labels['payment.paid']!, input.total),
     ),
+    primaryAction: input.receiptUrl ? { url: input.receiptUrl, label: labels['booking.receipt']! } : undefined,
     secondaryAction: accountAction(input.accountUrl, locale.locale),
     sections: [
       ...(input.checkInInstructions ? [{ title: labels['stay.check_in_instructions']!, body: input.checkInInstructions }] : []),

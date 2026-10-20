@@ -19,7 +19,6 @@ import { LOGO_SLOTS, ORIGINAL_LOGO_PRESENTATION, parseLogoPresentation } from '~
 import { refreshSocialCard } from '~/server/utils/social-card'
 import { organizationAdapter } from '~/server/utils/member-access'
 import { linkedAccountOwner, type CloudflareEnv } from '~/server/utils/auth'
-import { listServices } from '~/server/utils/organization-services'
 import { tenantOrganizationOrigin } from '~/utils/tenant-organization-origin'
 
 type SetupEnv = Parameters<typeof createSystemSubdomain>[0]
@@ -239,7 +238,6 @@ async function integrationsSummary(db: DbClient, env: CloudflareEnv, organizatio
     [organizationId],
   )
   return {
-    services: { managed_ads: (await listServices(db, organizationId)).managed_ads !== null },
     google_maps: locations.map(location => ({ ...location, address: formatPostalAddress(parsePostalAddress(location.address)) || null })),
     google_calendar: (() => { const row = integrations.find(row => row.provider === 'google_calendar'); return row ? { account_id: row.account_id, calendar_name: row.target_name, status: row.status, last_error: row.last_error, connected_at: row.created_at, connected_through: owners.get(row.account_id) ?? null } : null })(),
     google_analytics: connected('google_analytics'),

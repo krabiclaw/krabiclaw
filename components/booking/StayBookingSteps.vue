@@ -9,7 +9,7 @@
     />
     <p class="mb-4 text-sm text-muted">{{ t('stay.charged_in_full') }}</p>
     <p v-if="bookingError" role="alert" class="mb-4 rounded-lg border border-red-500/30 bg-red-500/5 px-4 py-3 text-sm text-error">{{ bookingError }}</p>
-    <BookingContactForm :loading="submitting" :submit-text="t('stay.confirm_and_pay')" @submit="submitBooking" />
+    <BookingContactForm :loading="submitting" :submit-text="t('payment.continue_to_pay')" @submit="submitBooking" />
   </div>
 </template>
 

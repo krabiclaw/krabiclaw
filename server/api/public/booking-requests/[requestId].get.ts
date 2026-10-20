@@ -1,5 +1,6 @@
 import { getGuestRequest, getThreadOperationalRecord } from '~/server/domain/requests'
 import { canRetryGuestReservationRefund } from '~/server/domain/payments/visit-refund'
+import { paidOnline } from '~/server/domain/payments'
 import { queryFirst } from '~/server/db'
 import { cloudflareEnv, jsonResponse } from '~/server/utils/api-response'
 import { hashReservationCancelToken, readBearerToken } from '~/server/utils/reservation-cancel-token'
@@ -103,6 +104,7 @@ export default defineHandler(async (event) => {
       location_name: location?.title ?? null,
       location_slug: location?.slug ?? null,
       policy_summary: policy ? renderBookingPolicySummary(policy, locale, productKind) : null,
+      paid: await paidOnline(db, organizationId, record.kind, record.id),
     },
   }, { headers: { 'cache-control': 'private, no-store' } })
 })

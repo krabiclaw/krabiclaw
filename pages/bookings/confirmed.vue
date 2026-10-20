@@ -51,6 +51,7 @@
 import { loadBookingConfirmation, type BookingConfirmation as BookingConfirmationData } from '~/composables/useBookingHandoff'
 import BookingConfirmation from '~/components/booking/BookingConfirmation.vue'
 import { formatTimestamp } from '~/utils/timezone'
+import { paymentMoney } from '~/shared/payment-display'
 import { presentationForProduct } from '~/utils/product-presentation'
 import type { RenderedBookingPolicySummaryItem } from '~/server/utils/reservations'
 
@@ -121,6 +122,7 @@ const receiptRows = computed(() => {
     rows.push({ label: copy.value.guestsLabel, value: String(confirmation.value.guests) })
   }
   if (confirmation.value.requests) rows.push({ label: copy.value.specialRequestsLabel, value: confirmation.value.requests })
+  if (confirmation.value.paid) rows.push({ label: t('payment.paid'), value: paymentMoney(confirmation.value.paid.amount, confirmation.value.paid.currency) })
   return rows
 })
 

@@ -13,7 +13,6 @@
     <IntegrationLeaf
       integration="google-ads"
       :connection="ads && { name: ads.target_name, connectedAt: ads.connected_at, through: ads.connected_through, status: ads.status, lastError: ads.last_error }"
-      :service-on="integrations.summary.value?.services.managed_ads ?? false"
       :disconnecting="disconnecting"
       @disconnect="disconnect"
     >

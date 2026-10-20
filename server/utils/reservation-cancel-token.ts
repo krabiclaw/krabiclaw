@@ -1,4 +1,5 @@
-const TOKEN_TTL_DAYS = 30
+/** How long a guest's emailed link to their booking or stay opens it. */
+export const TOKEN_TTL_DAYS = 30
 
 export async function hashReservationCancelToken(token: string): Promise<string> {
   const bytes = new TextEncoder().encode(token)
