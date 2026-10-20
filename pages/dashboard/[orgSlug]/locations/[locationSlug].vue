@@ -39,7 +39,7 @@
         </p>
         <UAlert v-if="limitError" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="limitError" />
         <UButton v-if="onPaidPlan" label="Add a location to your plan" :loading="limitBusy" @click="addLocationToPlan" />
-        <UButton v-else label="Choose a plan" :to="`/dashboard/${route.params.orgSlug}/payments?tab=plan`" />
+        <UButton v-else label="Choose a plan" :to="`/dashboard/${route.params.orgSlug}/billing/upgrade`" />
       </div>
       <template v-else>
         <UAlert v-if="newLocation.createError.value" class="mb-6" color="error" variant="soft" icon="i-lucide-triangle-alert" :description="newLocation.createError.value" />

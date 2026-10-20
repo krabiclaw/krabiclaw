@@ -443,7 +443,7 @@ campaigns (budgets, creative direction, conversion rate) with a weekly
 meeting, for 10% of its ad spend. Connecting a Google Ads account costs
 nothing and feeds Insights → Google Ads; the fee follows the business's
 agreement, recorded in `organization_services` (`managed_ads`, who agreed,
-when, which terms) from Payments → Plan → Services. Reporting days follow the
+when, which terms) from Plan and billing. Reporting days follow the
 connected Google Ads account's actual timezone, including daylight saving time;
 the day ends at its next local midnight. The daily
 `marketing:ad-spend-daily` task reads, for each business whose agreement was on
@@ -473,7 +473,7 @@ prorations; ending it removes the item. The item's presence is the state
 (`server/utils/strategy-service.ts`); nothing is stored in the application.
 
 Both services are described once, in `SERVICES` (`shared/billing-model.ts`):
-the pricing page's add-ons and its `/pricing.md`, Payments → Plan → Services,
+the pricing page's add-ons and its `/pricing.md`, Plan and billing,
 and the Insights and Today Google Ads cards all read that copy and price. Today
 shows a connected account's last 7 complete days (spend, clicks, conversions)
 and links to Insights → Google Ads; nothing there starts a service.

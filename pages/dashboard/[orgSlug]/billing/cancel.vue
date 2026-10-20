@@ -1,6 +1,7 @@
 <template>
   <!-- Cancelling is Better Auth's move to Basic, which Stripe confirms; access stays until the period ends. -->
-  <DashboardLeafPanel id="organization-plan-cancel" title="Cancel plan" lead="If you cancel, you keep full access to your plan features until the end of your billing period." :saving="busy" :disabled="!cancellable" :error="error" save-label="Cancel plan" @save="cancel">
+  <DashboardLeafPanel id="organization-plan-cancel" title="Cancel plan" lead="If you cancel, you keep full access to your plan features until the end of your billing period." :footer="dashboard.canUpdateBilling.value" :saving="busy" :disabled="!cancellable" :error="error" save-label="Cancel plan" @save="cancel">
+    <p v-if="!dashboard.canUpdateBilling.value" class="mb-6 text-base text-muted">Owners change the plan.</p>
     <p v-if="billing?.currentPeriodEnd && cancellable" class="text-base text-muted">Your {{ currentPlan?.name ?? 'plan' }} continues until {{ formatExactDateTime(billing.currentPeriodEnd) }}. Stripe confirms the change before it is made.</p>
     <p v-else class="text-base text-muted">There is no paid plan to cancel.</p>
   </DashboardLeafPanel>

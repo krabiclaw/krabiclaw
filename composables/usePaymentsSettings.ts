@@ -4,7 +4,7 @@ import { isCurrencyCode } from '~/shared/currencies'
 import type { PaymentMethodRow } from '~/server/utils/billing-customer'
 
 /**
- * What Payments reads: the plan, the services, the usage billing behind the
+ * What Payments and Plan and billing read: the plan, the services, the usage billing behind the
  * fees, the connected Stripe account and the saved cards. The index rows and
  * the leaves beside them read the same keys, so one `useAsyncData` record
  * serves both and a leaf's refresh updates the row it came from.

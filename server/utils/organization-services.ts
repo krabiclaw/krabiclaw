@@ -1,8 +1,8 @@
 import { HTTPError } from 'nitro'
-import { AD_SPEND_RATE } from '~/shared/billing-model'
+import { AD_SPEND_RATE, BUSINESS_PLAN_ID } from '~/shared/billing-model'
 import { execute, queryAll, queryFirst, type DbClient } from '~/server/db'
 import { linkedAccountAccessToken, type CloudflareEnv } from '~/server/utils/auth'
-import { getStripe } from '~/server/utils/billing'
+import { getOrganizationBillingStatus, getStripe } from '~/server/utils/billing'
 import { paymentsBillingPricing } from '~/server/domain/payments/usage'
 import { readIntegration } from '~/server/utils/organization-integrations'
 import { getGoogleAdsCustomer } from '~/server/utils/google-ads'
@@ -29,6 +29,28 @@ export async function listServices(db: DbClient, organizationId: string): Promis
   return Object.fromEntries(SERVICES.map(service => [service, rows.find(row => row.service === service) ?? null])) as Record<Service, ServiceAgreement | null>
 }
 
+/**
+ * What managed ads needs before it can be agreed to, each answered from its
+ * owner: a connected Google Ads account billed in USD, the Business plan, and a
+ * default payment method on the plan's Stripe customer. The leaf shows these
+ * as its ✓/✗ rows and agreeing refuses unless every one holds.
+ */
+export async function managedAdsRequirements(db: DbClient, env: CloudflareEnv, organizationId: string): Promise<{ google_ads_usd: boolean; business_plan: boolean; default_payment_method: boolean }> {
+  const [billing, ads] = await Promise.all([getOrganizationBillingStatus(env, db, organizationId), readIntegration(db, organizationId, 'google_ads')])
+  const business_plan = billing.plan === BUSINESS_PLAN_ID && ['active', 'trialing'].includes(billing.subscriptionStatus ?? '')
+  let default_payment_method = false
+  if (billing.stripeCustomerId) {
+    const customer = await getStripe(env).customers.retrieve(billing.stripeCustomerId)
+    default_payment_method = !customer.deleted && Boolean(customer.invoice_settings.default_payment_method)
+  }
+  let google_ads_usd = false
+  if (ads) {
+    const { accessToken } = await linkedAccountAccessToken(env, ads.account_id)
+    google_ads_usd = (await getGoogleAdsCustomer(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, ads.target_id)).currencyCode === 'USD'
+  }
+  return { google_ads_usd, business_plan, default_payment_method }
+}
+
 export async function agreeToService(db: DbClient, env: CloudflareEnv, organizationId: string, service: Service, userId: string): Promise<ServiceAgreement> {
   const current = await queryFirst<{ id: string }>(db, 'SELECT id FROM organization_services WHERE organization_id=? AND service=? AND ended_at IS NULL', [organizationId, service])
   if (current) throw new HTTPError({ statusCode: 409, statusMessage: 'This service is already on' })
@@ -36,18 +58,15 @@ export async function agreeToService(db: DbClient, env: CloudflareEnv, organizat
   // the native contract, its current rate and its collection customer work.
   const { account, contract, pricing } = await paymentsBillingPricing(db, env, organizationId)
   if (!account || account.status !== 'active' || !contract || contract.ending_before || !pricing) {
-    throw new HTTPError({ statusCode: 409, message: 'Set up active Payments billing in Plan before turning on managed ads. Choose a plan with Payments if your business does not have billing set up.' })
+    throw new HTTPError({ statusCode: 409, message: 'Set up active Payments billing in Plan and billing before turning on managed ads.' })
   }
   if (pricing.ad_spend_rate !== AD_SPEND_RATE) throw new HTTPError({ statusCode: 409, message: 'Your Payments contract does not have the managed ads rate. Contact support to complete billing setup.' })
-  const customer = await getStripe(env).customers.retrieve(account.stripe_billing_customer_id)
-  if (customer.deleted || !customer.invoice_settings.default_payment_method) {
-    throw new HTTPError({ statusCode: 409, message: 'Add a payment method and set it as default in Payments before turning on managed ads.' })
-  }
+  const requirements = await managedAdsRequirements(db, env, organizationId)
+  if (!requirements.business_plan) throw new HTTPError({ statusCode: 409, message: 'Managed ads needs the Business plan. Upgrade to Business in Plan and billing first.' })
+  if (!requirements.default_payment_method) throw new HTTPError({ statusCode: 409, message: 'Add a default payment method in Plan and billing before turning on managed ads.' })
+  if (!requirements.google_ads_usd) throw new HTTPError({ statusCode: 409, message: 'Connect a Google Ads account billed in USD in Integrations → Google Ads before turning on managed ads.' })
   const ads = await readIntegration(db, organizationId, 'google_ads')
-  if (!ads) throw new HTTPError({ statusCode: 409, message: 'Connect a Google Ads account billed in USD in Integrations → Google Ads before turning on managed ads.' })
-  const { accessToken } = await linkedAccountAccessToken(env, ads.account_id)
-  const adsCustomer = await getGoogleAdsCustomer(accessToken, env.GOOGLE_ADS_DEVELOPER_TOKEN, ads.target_id)
-  if (adsCustomer.currencyCode !== 'USD') throw new HTTPError({ statusCode: 409, message: 'Managed ads currently requires a Google Ads account billed in USD. You can keep this account connected for free reporting in Insights.' })
+  if (!ads) throw new Error('Google Ads was disconnected while managed ads was being turned on')
   const now = new Date().toISOString()
   const id = crypto.randomUUID()
   const result = await execute(db, `INSERT INTO organization_services(id,organization_id,service,terms_version,agreed_by_user_id,agreed_at)

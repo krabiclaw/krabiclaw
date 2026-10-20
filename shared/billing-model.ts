@@ -43,7 +43,7 @@ export const AD_SPEND_RATE = 0.1
 /**
  * The services as they are offered everywhere — the pricing page and its
  * Markdown, the plan screen, Insights and Today — each turned on and off only
- * in Payments → Plan → Services.
+ * in Plan and billing.
  */
 export const SERVICES = Object.freeze({
   managed_ads: Object.freeze({

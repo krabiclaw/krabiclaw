@@ -80,8 +80,9 @@ theme:
 | Menu | `O/menu` | a launcher |
 
 **Menu is a launcher, not a parent.** It lists the Earnings and Insights cards,
-then Website, Locations, Team, Integrations, Platform accounts (Better
-Auth admins, inside KrabiClaw's own organization only), Account settings,
+then Website, Locations, Team, Integrations, Plan and billing (owners and
+admins), Platform accounts (Better Auth admins, inside KrabiClaw's own
+organization only), Account settings,
 Switch to Personal and Log out. Each row opens a destination of its own; none
 is nested under Menu. The desktop slideover and the narrow Menu page render the
 one model in `useOrganizationSettingsNavigation`.
@@ -100,7 +101,8 @@ The destinations are files under `O`, and their URLs are their files:
 | Team | `O/team` |
 | Integrations | `O/integrations` |
 | Earnings | `O/earnings` |
-| Payments | `O/payments` — the organization's own Stripe account, payouts and plan |
+| Payments | `O/payments` — the organization's own Stripe account and payouts |
+| Plan and billing | `O/billing` — the plan, Upgrade to Business, the services sold beside it, Stripe's billing portal, Cancel plan |
 | Insights | `O/insights` |
 | Notifications | `O/notifications` |
 | Platform accounts | `O/platform-accounts` |
@@ -178,7 +180,7 @@ Dishes without a section are listed on the Menu page under its sections.
 Every level that narrows its rows does it the same way:
 `DashboardFilterPills`, one row of round pills under the title with the chosen
 one solid, 32px from the title and from the rows — Catalog's kinds, Today's
-range, Insights views, Payments sections, the blog's and posts' states, a
+range, Insights views, the blog's and posts' states, a
 category collection, a photo category. A list carries no sentence explaining
 itself under its title.
 
@@ -237,8 +239,8 @@ Three separate questions, three separate answers. None is derived from another.
   that declares none lights no tab; nothing is inferred from its URL or exit.
 - **A root's exit** is `meta.back` on a standalone destination root only.
   `menu` names the shell's Menu: Website, Locations, Team, Integrations,
-  Insights, Notifications, Earnings, Platform accounts, Account settings and
-  Past activity exit there. A named route is a specific exit: Payments to
+  Insights, Notifications, Earnings, Plan and billing, Platform accounts,
+  Account settings and Past activity exit there. A named route is a specific exit: Payments to
   Earnings. Catalog, Today, Calendar, Messages and Menu are primary
   destinations and have no exit. A nested level never declares one.
 
@@ -486,8 +488,8 @@ left. A leaf that needs more width is a grid editor and says so.
 of a desktop window is never the fourth.** Content that scales — a grid, a
 table, a calendar, a chart, cards — takes the frame: Today, Calendar, Catalog,
 Insights, Photos, Transactions name no column. A settings index pairs with its
-first row where there is a pane, as Account settings, Integrations, Payments
-and Earnings do: its rows are leaves beside it and `autoOpen` names the first.
+first row where there is a pane, as Account settings, Integrations, Payments,
+Plan and billing and Earnings do: its rows are leaves beside it and `autoOpen` names the first.
 Only a list of records with nothing of its own to open — Notifications, Past
 activity, Paid, Platform accounts — or a true single-concern screen (Menu, a
 booking's notes, a calendar day) stands alone as a column, and says which in
@@ -634,7 +636,7 @@ another index.
 
 Destination roots stand alone: Today, Calendar, Catalog, Messages, Menu, and
 each Menu destination — Website, Locations, Team, Integrations, Earnings,
-Payments, Insights, Notifications — as Airbnb's `/hosting/listings` grid does.
+Payments, Plan and billing, Insights, Notifications — as Airbnb's `/hosting/listings` grid does.
 A root that is a grid or a chart uses the frame; a root that is settings opens
 its first row beside it (Leaf width, above). Within a destination, levels pair
 with their parent: Pages, Blog, Reviews and Q&A, and Brand render as
@@ -917,6 +919,11 @@ needs a new visual device needs a reason written beside it.
 Airbnb has no equivalent, so these are additions rather than parity, and each
 one says so where it lives:
 
+- **Plan and billing.** What the organization pays KrabiClaw: its plan, the
+  one-step Upgrade to Business, the services sold beside it with their
+  requirements as ✓/✗ rows, and Stripe's billing portal for cards and
+  invoices. Owners change it, admins read it, members have no row. Airbnb
+  charges hosts no plan, so it has no equivalent.
 - **Platform accounts.** A Menu row no tenant sees: every account on the
   platform, and impersonation. It is shown only to a user whose Better Auth
   role is admin, on any organization, and Better Auth's admin plugin enforces

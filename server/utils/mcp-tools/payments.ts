@@ -94,7 +94,7 @@ export async function handlePaymentsTools(ctx: McpExecutorContext): Promise<unkn
       await assertRoleAllows({ organizationId, role, permissions: { billing: ['read'] } })
       const result = await paymentsUsageStatus(db, env, organizationId)
       return {
-        organization_id: organizationId, configured: result.configured, source: result.source, refreshed_at: result.refreshed_at, dashboard_url: dashboard('/payments/invoices'),
+        organization_id: organizationId, configured: result.configured, source: result.source, refreshed_at: result.refreshed_at, dashboard_url: dashboard('/billing'),
         account: result.account ? { currency: result.account.currency, status: result.account.status, contract_start_at: result.account.contract_start_at } : null,
         pricing: result.pricing ? { currency: result.pricing.currency, units: result.pricing.units, captured_volume_rate: result.pricing.captured_volume_rate, captured_volume_rate_percent: result.pricing.captured_volume_rate_percent, ad_spend_rate: result.pricing.ad_spend_rate, ad_spend_rate_percent: result.pricing.ad_spend_rate_percent, validated_at: result.pricing.validated_at } : null,
         pending: result.pending.map(row => {
@@ -122,7 +122,7 @@ export async function handlePaymentsTools(ctx: McpExecutorContext): Promise<unkn
     }
     case 'get_payments_dashboard_link': {
       await authorizePayments(principal, 'integration')
-      return { organization_id: organizationId, dashboard_url: dashboard('/payments?tab=payouts'), source: 'Authenticated Payments integration dashboard' }
+      return { organization_id: organizationId, dashboard_url: dashboard('/payments'), source: 'Authenticated Payments integration dashboard' }
     }
     default: return NOT_HANDLED
   }
