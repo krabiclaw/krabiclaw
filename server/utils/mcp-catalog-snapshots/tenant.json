@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:78f41a1a6d862dccdf6e2befc49a3c292abfccdaa872171de5946df6ed8865cd",
-  "documentationFingerprint": "sha256:b6b2f01f31485b3a86d3d25a5fd09f07e79999bad73e425f84f6d73091543457",
+  "fingerprint": "sha256:c3667ba3360287c3ee73e391fd74b0c3f7cc2851b7f1a0441f18a97e921e90e9",
+  "documentationFingerprint": "sha256:b5f71ee072a1fd3160000162f10bdadd3addd7096eb6c1f530e04da1a7a5c47e",
   "tools": [
     {
       "name": "add_organization_language",
@@ -983,17 +983,6 @@
                 ]
               },
               "cta_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "edge": {
-                "enum": [
-                  "straight",
-                  "shield",
-                  null
-                ],
                 "type": [
                   "string",
                   "null"
@@ -2844,17 +2833,6 @@
                 ]
               },
               "cta_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "edge": {
-                "enum": [
-                  "straight",
-                  "shield",
-                  null
-                ],
                 "type": [
                   "string",
                   "null"
@@ -12161,17 +12139,6 @@
                   "null"
                 ]
               },
-              "edge": {
-                "enum": [
-                  "straight",
-                  "shield",
-                  null
-                ],
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "eyebrow": {
                 "type": [
                   "string",
@@ -17771,17 +17738,6 @@
                 ]
               },
               "cta_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "edge": {
-                "enum": [
-                  "straight",
-                  "shield",
-                  null
-                ],
                 "type": [
                   "string",
                   "null"
@@ -24258,17 +24214,6 @@
                   "null"
                 ]
               },
-              "edge": {
-                "enum": [
-                  "straight",
-                  "shield",
-                  null
-                ],
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "eyebrow": {
                 "type": [
                   "string",
@@ -27921,17 +27866,6 @@
                 ]
               },
               "cta_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "edge": {
-                "enum": [
-                  "straight",
-                  "shield",
-                  null
-                ],
                 "type": [
                   "string",
                   "null"
@@ -32666,17 +32600,6 @@
                 ]
               },
               "cta_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "edge": {
-                "enum": [
-                  "straight",
-                  "shield",
-                  null
-                ],
                 "type": [
                   "string",
                   "null"
@@ -37456,17 +37379,6 @@
                 ]
               },
               "cta_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "edge": {
-                "enum": [
-                  "straight",
-                  "shield",
-                  null
-                ],
                 "type": [
                   "string",
                   "null"
@@ -49732,17 +49644,6 @@
                   "null"
                 ]
               },
-              "edge": {
-                "enum": [
-                  "straight",
-                  "shield",
-                  null
-                ],
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "eyebrow": {
                 "type": [
                   "string",
@@ -53907,17 +53808,6 @@
                 ]
               },
               "cta_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "edge": {
-                "enum": [
-                  "straight",
-                  "shield",
-                  null
-                ],
                 "type": [
                   "string",
                   "null"
@@ -65450,17 +65340,6 @@
                   "null"
                 ]
               },
-              "edge": {
-                "enum": [
-                  "straight",
-                  "shield",
-                  null
-                ],
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "eyebrow": {
                 "type": [
                   "string",
@@ -69668,17 +69547,6 @@
                   "null"
                 ]
               },
-              "edge": {
-                "enum": [
-                  "straight",
-                  "shield",
-                  null
-                ],
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "eyebrow": {
                 "type": [
                   "string",
@@ -73660,17 +73528,6 @@
                 ]
               },
               "cta_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "edge": {
-                "enum": [
-                  "straight",
-                  "shield",
-                  null
-                ],
                 "type": [
                   "string",
                   "null"
@@ -84330,17 +84187,6 @@
                   "null"
                 ]
               },
-              "edge": {
-                "enum": [
-                  "straight",
-                  "shield",
-                  null
-                ],
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "eyebrow": {
                 "type": [
                   "string",
@@ -86137,17 +85983,6 @@
                 ]
               },
               "cta_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "edge": {
-                "enum": [
-                  "straight",
-                  "shield",
-                  null
-                ],
                 "type": [
                   "string",
                   "null"
@@ -99733,17 +99568,6 @@
                   "null"
                 ]
               },
-              "edge": {
-                "enum": [
-                  "straight",
-                  "shield",
-                  null
-                ],
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "eyebrow": {
                 "type": [
                   "string",
@@ -110773,17 +110597,6 @@
                   "null"
                 ]
               },
-              "edge": {
-                "enum": [
-                  "straight",
-                  "shield",
-                  null
-                ],
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
               "eyebrow": {
                 "type": [
                   "string",
@@ -114443,17 +114256,6 @@
                 ]
               },
               "cta_url": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "edge": {
-                "enum": [
-                  "straight",
-                  "shield",
-                  null
-                ],
                 "type": [
                   "string",
                   "null"
@@ -118731,7 +118533,7 @@
         "text": "Update the catalog from: <items_description> Use get_workspace_context, list_organizations and list_locations to resolve the business and explicit location. Read every relevant list_location_products and list_collections page before matching existing IDs. For a restaurant menu, use update_menu with a stable idempotency_key, the stated sections and prices. Match existing product, variant, price and collection IDs. Omitted items and order remain; use set_collection_products or reorder_collections only when the user requests a complete new order. For other products, use create_product for new entries or update_product for partial edits. Use reconcile_products only when the user requests complete replacement of the supplied entries. Ask for missing prices or booking facts. Use get_product and list_location_products to read back the result, then open the returned public URL before reporting completion."
       },
       "toolContracts": {
-        "create_product": "sha256:532068c75b1fc8e29832f1fb37e98543b39c97667d69d0ebd557ec4648d91c21",
+        "create_product": "sha256:c097f4593e7d1fb17fa5aad6f035f4b84725db3bee2ff2d34da068fe7837852a",
         "get_product": "sha256:b9e0be9c62e11923243eb43b719fe76e3b8b022e719a56ea9654915300dee8cd",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_collections": "sha256:7da3264815db43f62ff868228075e9d0e9b2d79ea2082a361d6ce4563a4bccfd",
@@ -118787,7 +118589,7 @@
       },
       "toolContracts": {
         "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
-        "create_product": "sha256:532068c75b1fc8e29832f1fb37e98543b39c97667d69d0ebd557ec4648d91c21",
+        "create_product": "sha256:c097f4593e7d1fb17fa5aad6f035f4b84725db3bee2ff2d34da068fe7837852a",
         "get_product": "sha256:b9e0be9c62e11923243eb43b719fe76e3b8b022e719a56ea9654915300dee8cd",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -118831,13 +118633,13 @@
       "toolContracts": {
         "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "get_site_page": "sha256:8569f8e685ad9d6671d2b9908ed29c0b34d5ac0c8f5331435c460d21f41a8ed7",
+        "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "remove_media": "sha256:227bb1165062216319751f5570613385e782b0a209e74ed1a47f9022eee1cc0b",
         "reorder_media": "sha256:0e8083651c6b2bcb7484e01be67d001c8b829ce6f4f3b5e4b2f652c9f83dc829",
         "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
-        "update_site_page": "sha256:f7c8737677adc7423ceca224e011d8f2542b7b0f793fa5933e4a86be6f947d0b"
+        "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
       }
     },
     {
@@ -118853,7 +118655,7 @@
         "get_location": "sha256:eed18b3a785d259c3eef6a2c48f68bebd47262e74fcc73188923de5faac2d53c",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_product": "sha256:b9e0be9c62e11923243eb43b719fe76e3b8b022e719a56ea9654915300dee8cd",
-        "get_site_page": "sha256:8569f8e685ad9d6671d2b9908ed29c0b34d5ac0c8f5331435c460d21f41a8ed7",
+        "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "save_media_attachment": "sha256:fd9306458e6552d6a787cd03ff48b1887c648a210fbbd5acc03c7896deaf6a8b",
         "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f"
@@ -118868,9 +118670,9 @@
         "text": "Use get_workspace_context and list_organizations to resolve the business. For an unfinished website use get_website_draft, save_website_draft and publish_website with the returned draft ID and revision. For an existing website use get_organization, list_locations, list_site_pages, get_site_page and list_products to identify the missing facts. Ask for those facts, use update_organization_settings, update_site_page, update_menu or create_product for the requested setup, and read back its public result."
       },
       "toolContracts": {
-        "create_product": "sha256:532068c75b1fc8e29832f1fb37e98543b39c97667d69d0ebd557ec4648d91c21",
+        "create_product": "sha256:c097f4593e7d1fb17fa5aad6f035f4b84725db3bee2ff2d34da068fe7837852a",
         "get_organization": "sha256:236724c4ebd7f873b6113d02ad1a671432489036f7bd8271e3fc07f482626381",
-        "get_site_page": "sha256:8569f8e685ad9d6671d2b9908ed29c0b34d5ac0c8f5331435c460d21f41a8ed7",
+        "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_website_draft": "sha256:fccf7d7281ba30d1e79163929e61abec1893c2e910460c4068364a65784a7bac",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_locations": "sha256:c85b14149d346a32222c5bc0a5e23469d040ebe8d73901823f6c520beefc14b9",
@@ -118881,7 +118683,7 @@
         "save_website_draft": "sha256:84924fc1da727dc5af26fb2ccdffe5e3786f69a5d4ccdf6f96f28d062ec5e1e3",
         "update_menu": "sha256:4ab27009a3a126aed4b328f7f1db8b4cc7e321f720da7e5a16d82f8badb202d8",
         "update_organization_settings": "sha256:25cdf195df01ed62f410cc89e3862f2a8d6e41c4dbbae0770ac9f8a674fe7b7f",
-        "update_site_page": "sha256:f7c8737677adc7423ceca224e011d8f2542b7b0f793fa5933e4a86be6f947d0b"
+        "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
       }
     },
     {
@@ -118917,13 +118719,13 @@
       "toolContracts": {
         "attach_media": "sha256:674651a8fbe046f6b8c11e6a4fa137473f0530e57c0f9d3f5422b0cf5f376434",
         "get_organization_media_assets": "sha256:a7cec9c02f3489164894bbc498405cc3270b0aecb35e3219f04bfdaf6565e799",
-        "get_site_page": "sha256:8569f8e685ad9d6671d2b9908ed29c0b34d5ac0c8f5331435c460d21f41a8ed7",
+        "get_site_page": "sha256:0272fae57193c015243521ed35b49cd622ca7ddee5f66a7041baf7640be2242a",
         "get_workspace_context": "sha256:7bc9bc3cabe5bd4874adabbc4596dce7674a5cf47141a44e85987f9a4bcd2fca",
         "list_products": "sha256:6f0521a923d6e8a7676c361f50038b507722da309055e61cfc723ce1295a6e9a",
         "list_site_pages": "sha256:f3e010472d9f9de3c7cc7cac7251bed4a46e08037823cf0d3399762833ece4a8",
         "set_media": "sha256:2a59b661b0b1201de28a7a4a28ff5ec6c9d18307dcfa4e7c302289b658cb2f0f",
         "update_product": "sha256:a5a3db8edacc990e450e880b738479b7e4ef197e4ff9fcdb7e110d2db1f44851",
-        "update_site_page": "sha256:f7c8737677adc7423ceca224e011d8f2542b7b0f793fa5933e4a86be6f947d0b"
+        "update_site_page": "sha256:1f717373711a774c846b4f8d7a21aa4944c6849bde4c5e978e26763a64d23785"
       }
     },
     {
@@ -119023,12 +118825,12 @@
       "slug": "publish-a-post",
       "contentHash": "sha256:20b71a412abc2f5b707463326e643c5f540dba815c168559b15c3aa3274e44f2",
       "toolContracts": {
-        "create_blog_post": "sha256:1ad1dac27e0b3b1baa834e7dc3df6002c01766db96e48f59232542f715397583",
+        "create_blog_post": "sha256:04ebcf9dff460dd7c58bee894fff23a76431073dc3e2deb1ac1be33be6d37150",
         "create_post": "sha256:b0decae688cb5afe07e26e62b5a46aa28b6e48461256261e0d50c26a973e9566",
         "get_channel_post": "sha256:698bf8872c9dd2a8620b91933ded4589e572e082603730a787b21b53f895d9e8",
         "get_post": "sha256:ee8bfa9e597488ca4f97969d31f8e48b877b5339899309ab5827cca64d59a016",
         "get_social_connections": "sha256:96a2be10163ed07a418b1ff7a6b240307f6129a8ccd172e521fa2cc3af2e14f4",
-        "publish_blog_post": "sha256:880ee97b1327df8456247334ecc0734b8380a4e7f55cc5da9a1d291e9750846f",
+        "publish_blog_post": "sha256:844a8eb04331dba2c4b7e738b192222e3f68e0b3d24ca3555dd7c7b7a5c17440",
         "publish_post": "sha256:9d3838d08b0800aebd354743aa5a2bd07f4a187903e37b0dfd8f545e699b3143",
         "reconcile_post_publication": "sha256:f97049daa773708807be8f9f0a58a5ebbf76c5b38acb2592610a2d997b319843",
         "update_post": "sha256:b186430401e60fb65257100332ce0c4bd01b8e1c531ea8277dcc2910cfe356b0"

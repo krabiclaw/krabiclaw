@@ -272,6 +272,7 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
     },
   }, { accessibility: 'required', seo: 'structured' }),
 
+  // After a hero, a divider closes the hero section with the shield; elsewhere it is a plain break.
   divider: blockDefinitionWithMetadata('divider', 'Divider', 'i-lucide-minus', 'A break between sections.', ALL_RECIPES, {},
     { accessibility: 'inherited', seo: 'none' }),
 
@@ -319,13 +320,6 @@ export const TENANT_PAGE_BLOCK_REGISTRY: Record<TenantPageBlockType, TenantPageB
     // declared, so it could be written and never translated or validated.
     secondary_label: text('Second button label', { section: 'second_button', pairedWith: 'secondary_url' }),
     secondary_url: link('Second button URL', { section: 'second_button', pairedWith: 'secondary_label' }),
-    // How the hero meets the section after it: a straight edge, or the shield
-    // curve, cut from the hero's own picture and band so the next section's
-    // color shows beneath the point.
-    edge: {
-      kind: 'enum', label: 'Bottom edge', translatable: false, section: 'image', default: 'straight',
-      options: [{ value: 'straight', label: 'Straight' }, { value: 'shield', label: 'Shield' }],
-    },
   }, { accessibility: 'required', seo: 'structured' }),
 
   button_group: blockDefinitionWithMetadata('button_group', 'Buttons', 'i-lucide-mouse-pointer-click', 'A row of links.', ALL_RECIPES, {

@@ -72,16 +72,20 @@
   text-underline-offset: 3px;
 }
 
-/* The shield edge: a hero's picture and band end in the shield's curve, and
-   whatever section follows shows beneath its point. The hero grows by the
-   shield's height so its content keeps its own space. */
+/* A hero section ends in the shield's curve, and whatever section follows
+   shows beneath its point. The last block inside it grows by the shield's
+   height, so its words keep their space and a picture hero's picture fills
+   the shield. */
 .tenant-shield-edge {
   --tenant-shield-height: 8.333vw;
-  padding-bottom: var(--tenant-shield-height);
   -webkit-mask: linear-gradient(#000 0 0) top / 100% calc(100% - var(--tenant-shield-height)) no-repeat,
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1920 160' preserveAspectRatio='none'%3E%3Cpath d='M0 0H1920V23.4197C1920 40.325 1907.32 54.2924 1890.45 55.3984C1744.66 64.9576 1103.56 109.281 970.166 157.83C963.441 160.277 956.559 160.277 949.834 157.83C816.436 109.281 175.342 64.9576 29.5456 55.3984C12.6765 54.2924 0 40.325 0 23.4197V0Z'/%3E%3C/svg%3E") bottom / 100% var(--tenant-shield-height) no-repeat;
   mask: linear-gradient(#000 0 0) top / 100% calc(100% - var(--tenant-shield-height)) no-repeat,
     url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1920 160' preserveAspectRatio='none'%3E%3Cpath d='M0 0H1920V23.4197C1920 40.325 1907.32 54.2924 1890.45 55.3984C1744.66 64.9576 1103.56 109.281 970.166 157.83C963.441 160.277 956.559 160.277 949.834 157.83C816.436 109.281 175.342 64.9576 29.5456 55.3984C12.6765 54.2924 0 40.325 0 23.4197V0Z'/%3E%3C/svg%3E") bottom / 100% var(--tenant-shield-height) no-repeat;
+}
+
+.tenant-shield-edge > :nth-last-child(2) > :last-child {
+  padding-bottom: calc(var(--tenant-shield-height) + 2rem);
 }
 
 /* Container */

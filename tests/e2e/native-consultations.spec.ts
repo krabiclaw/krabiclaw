@@ -201,7 +201,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     await openTenantPage(page, new URL('/schedule', baseURL).href, {})
     const scheduleArticle = page.locator('[data-tenant-page]')
     await expect(scheduleArticle).toHaveCount(1)
-    const scheduleBlocks = scheduleArticle.locator(':scope > [data-block-type]')
+    const scheduleBlocks = scheduleArticle.locator('.tenant-page-block')
     expect(await scheduleBlocks.evaluateAll(elements => elements.map(element => element.getAttribute('data-block-type')))).toEqual(authoredSchedule.blocks.map(block => block.type))
     for (const [index, block] of authoredSchedule.blocks.entries()) {
       if (block.type === 'hero' && typeof block.data.title === 'string') {

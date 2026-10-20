@@ -72,11 +72,11 @@ test('unknown sites render an unbranded 404 while resolved tenant errors retain 
 test('Blawby authored contact sections retain their forms and selected locations', async ({ page, request }) => {
   test.skip(Boolean(process.env.PLAYWRIGHT_PREVIEW_URL), 'The local production copy carries these existing contact pages.')
   // Two generated contact pages, and Cedar's, re-authored in the CMS with its own titles and a divider.
-  const generated = (documentId: string) => ({ types: ['hero', 'location_grid', 'contact_form'], locations: { id: `block-contact-locations-${documentId}`, title: 'Our locations', description: 'Contact' }, formId: `block-contact-form-${documentId}` })
+  const generated = (documentId: string) => ({ types: ['hero', 'divider', 'location_grid', 'contact_form'], locations: { id: `block-contact-locations-${documentId}`, title: 'Our locations', description: 'Contact' }, formId: `block-contact-form-${documentId}` })
   for (const tenant of [
     { slug: 'krabiclaw-review-legal', documentId: 'ade2018e-693d-4b0e-8025-daf3143abb8a', locationIds: ['loc-554dde4c-3dcf-406f-ab9d-82038dd1b70c'], ...generated('ade2018e-693d-4b0e-8025-daf3143abb8a') },
     { slug: 'krabiclaw-onboarding-check', documentId: '8780bc6a-6e90-4db6-aac3-2cb1048fbe28', locationIds: ['e151c459-0437-477a-a27e-bb360128b43d', 'loc-5b52502a-0a3e-4410-b14c-d3662f74ae43'], ...generated('8780bc6a-6e90-4db6-aac3-2cb1048fbe28') },
-    { slug: 'cedar-legal', documentId: 'cd961dbe-9250-4878-b05b-b7fe1e95591d', locationIds: ['loc-abce1341-c462-4e8d-ab8c-f4f6657f07cf'], types: ['hero', 'location_grid', 'contact_form'], locations: { id: 'ce64db84-0b72-41e2-a87b-2090c29103d7', title: 'Office Location & Contact Info', description: undefined }, formId: 'a0970094-2071-42a4-8605-2b1ab88b3dcd' },
+    { slug: 'cedar-legal', documentId: 'cd961dbe-9250-4878-b05b-b7fe1e95591d', locationIds: ['loc-abce1341-c462-4e8d-ab8c-f4f6657f07cf'], types: ['hero', 'divider', 'location_grid', 'contact_form'], locations: { id: 'ce64db84-0b72-41e2-a87b-2090c29103d7', title: 'Office Location & Contact Info', description: undefined }, formId: 'a0970094-2071-42a4-8605-2b1ab88b3dcd' },
   ]) {
     const headers = { 'x-preview-tenant': tenant.slug }
     const response = await request.get(`${testBaseUrl()}/api/public/pages`, { headers, params: { path: '/contact' } })

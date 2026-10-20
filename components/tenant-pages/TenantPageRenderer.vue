@@ -9,9 +9,17 @@
       A template's own component names its band; the wrapper only names one for
       the markup below, or both would appear on the same section.
     -->
-    <section v-for="block in renderedBlocks" :key="block.id" :data-block-type="block.type" :data-parity-section="presentationOf(block) ? undefined : sectionKey(block)"
+    <!--
+      A hero section: the hero and every block after it up to a divider share the
+      hero's band, and the divider is the shield its bottom edge is cut to. With
+      a picture hero the shield cuts the picture. Any other run of blocks is not
+      wrapped, and a divider outside a hero section is a plain break.
+    -->
+    <div v-for="group in blockGroups" :key="group.key" :class="group.heroSection ? 'tenant-shield-edge relative bg-[var(--tenant-band)]' : 'contents'" :data-hero-section="group.heroSection ? '' : undefined">
+    <section v-for="block in group.blocks" :key="block.id" :data-block-type="block.type" :data-parity-section="presentationOf(block) ? undefined : sectionKey(block)"
       class="tenant-page-block"
       :class="!presentationOf(block) ? 'mx-auto max-w-7xl px-4 sm:px-6 lg:px-8' : undefined"
+      :aria-hidden="group.heroSection && block.type === 'divider' ? 'true' : undefined"
     >
       <!--
         A template that draws this block its own way draws it; otherwise the
@@ -118,7 +126,7 @@
       </template>
 
       <template v-else-if="block.type === 'divider'">
-        <hr class="my-12 border-default">
+        <hr v-if="!group.heroSection" class="my-12 border-default">
       </template>
 
       <template v-else-if="block.type === 'cta' || block.type === 'contact_cta' || block.type === 'booking_cta'">
@@ -203,6 +211,7 @@
         </section>
       </template>
     </section>
+    </div>
   </article>
 </template>
 
@@ -238,6 +247,24 @@ const { t } = useI18n()
 const renderedBlocks = computed(() => {
   const absorbed = template.value === 'platform' ? null : overviewProseBlockId(props.page)
   return absorbed ? props.page.blocks.filter(block => block.id !== absorbed) : props.page.blocks
+})
+
+/**
+ * The page's blocks in runs: a hero section — the first hero through the next
+ * divider, with no other hero between — and the single blocks around it.
+ */
+const blockGroups = computed(() => {
+  const blocks = renderedBlocks.value
+  const hero = template.value === 'platform' ? -1 : blocks.findIndex(block => block.type === 'hero')
+  const divider = hero < 0 ? -1 : blocks.findIndex((block, index) => index > hero && block.type === 'divider')
+  const closes = divider > hero && !blocks.slice(hero + 1, divider).some(block => block.type === 'hero')
+  const single = (block: TenantPageBlock) => ({ key: block.id, heroSection: false, blocks: [block] })
+  if (!closes) return blocks.map(single)
+  return [
+    ...blocks.slice(0, hero).map(single),
+    { key: `hero-section-${blocks[hero]!.id}`, heroSection: true, blocks: blocks.slice(hero, divider + 1) },
+    ...blocks.slice(divider + 1).map(single),
+  ]
 })
 
 /**

@@ -5,7 +5,6 @@
     data-tenant-critical-hero
     :data-has-background="backgroundSrc ? 'true' : undefined"
     class="relative isolate flex min-h-160 items-center overflow-hidden bg-zinc-900"
-    :class="{ 'tenant-shield-edge': shieldEdge }"
     data-parity-section="hero"
   >
     <div data-tenant-critical-hero-media class="absolute inset-0 opacity-50">
@@ -85,9 +84,9 @@
     </div>
   </section>
 
-  <!-- Every other page opens on the site's band, which a divider beneath it continues -->
+  <!-- Every other page opens on the site's band; a divider closing the hero section cuts the shield from it -->
   <template v-else>
-    <section class="relative overflow-hidden bg-[var(--tenant-band)]" :class="{ 'tenant-shield-edge': shieldEdge }" data-parity-section="page-hero">
+    <section class="relative overflow-hidden bg-[var(--tenant-band)]" data-parity-section="page-hero">
       <div class="tenant-container relative pb-12 pt-16 sm:pb-16 sm:pt-20">
         <div class="mx-auto max-w-4xl text-center">
           <p v-if="eyebrow" class="mb-4 text-sm font-semibold uppercase tracking-wide text-[var(--tenant-accent-strong)]">
@@ -139,7 +138,6 @@ const eyebrow = computed(() => blockText(props.block?.data?.eyebrow))
 const description = computed(() => blockText(props.block?.data?.description) || (isHome.value ? '' : subtitle.value) || (isHome.value ? '' : props.page.summary ?? ''))
 const descriptionParts = computed(() => description.value.split(/\n\s*\n/).map(part => part.trim()).filter(Boolean))
 const splitTitle = computed(() => splitAccent(title.value, blockText(props.block?.data?.accent)))
-const shieldEdge = computed(() => blockText(props.block?.data?.edge) === 'shield')
 
 function destination(url: string): string {
   return url && isInternalRoute(url) ? localePath(url) : url
