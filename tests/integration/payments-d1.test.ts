@@ -1024,6 +1024,8 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
     assert.equal(init?.method, 'GET')
     if (url.pathname === '/v1/account') return Response.json({ id: 'acct_platform', object: 'account', livemode: false })
     if (url.pathname === '/v1/payment_methods/pm_default') return Response.json({ id: 'pm_default', object: 'payment_method', customer: 'cus_operating' })
+    // The Business plan item, on a retired price, so nothing bills rental units.
+    if (url.pathname === '/v1/subscriptions/sub_managed_ads') return Response.json({ id: 'sub_managed_ads', object: 'subscription', status: 'active', customer: 'cus_operating', items: { object: 'list', data: [{ id: 'si_plan', object: 'subscription_item', quantity: 2, price: { id: 'price_business', object: 'price', currency: 'usd', unit_amount: 14900, recurring: { interval: 'month', interval_count: 1 }, product: { id: 'prod_business', object: 'product', metadata: { plan_id: 'business' } } } }] } })
     assert.equal(url.pathname, '/v1/customers/cus_operating')
     return Response.json({ id: 'cus_operating', object: 'customer', invoice_settings: { default_payment_method: defaultCard } })
    }
@@ -1069,8 +1071,11 @@ test('managed ads consent requires live billable USD accounts, preserves its bil
   rate = 0.2
   await assert.rejects(agree, /does not have the managed ads rate/u)
   rate = 0.1
+  await assert.rejects(agree, /Managed ads needs the Business plan/u)
+  await noConsent()
+  await db.prepare("INSERT INTO subscription (id, plan, referenceId, status, seats, stripeSubscriptionId, stripeCustomerId, periodEnd, billingInterval) VALUES ('managed-ads-business','business',?,'active',2,'sub_managed_ads','cus_operating',4102444800,'month')").bind(ORG).run()
   defaultCard = null
-  await assert.rejects(agree, /Add a payment method and set it as default/u)
+  await assert.rejects(agree, /Add a default payment method in Plan and billing/u)
   defaultCard = 'pm_default'
   await assert.rejects(agree, /Connect a Google Ads account billed in USD/u)
   const token = await symmetricEncrypt({ key: env.BETTER_AUTH_SECRET, data: 'managed-ads-token' })

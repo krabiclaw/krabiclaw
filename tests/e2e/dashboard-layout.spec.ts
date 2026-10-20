@@ -1040,20 +1040,16 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page).toHaveURL(`${ORG}/integrations/google-maps`)
     await expectPanes(page, ['organization-integrations', 'integration-google-maps'])
 
-    // Payments is one page with Airbnb's tabs, reached from the Earnings cog; Payments is the first tab.
-    // Beside a pane each tab opens its first row: the plan from its deep link, How you get paid, then the plan again from the tab.
-    await open(page, `${ORG}/payments?tab=plan`)
-    await expect(page).toHaveURL(`${ORG}/payments/plan`)
-    await expectPanes(page, ['organization-payments', 'organization-plan'])
-    await open(page, `${ORG}/payments?tab=payouts`)
+    // Payments is payouts, reached from the Earnings cog; beside a pane it opens How you get paid.
+    await open(page, `${ORG}/payments`)
     await expect(page).toHaveURL(`${ORG}/payments/payout-method`)
     await expectPanes(page, ['organization-payments', 'organization-payout-method'])
     await expect(page.getByRole('heading', { name: 'How you get paid', exact: true })).toBeVisible()
-    await page.getByRole('tab', { name: 'Plan', exact: true }).click()
-    await expect(page).toHaveURL(`${ORG}/payments/plan`)
-    await expectPanes(page, ['organization-payments', 'organization-plan'])
-    // The open leaf lights its tab, whatever the query says.
-    await expect(page.getByRole('tab', { name: 'Plan', exact: true })).toHaveAttribute('aria-selected', 'true')
+    await expect(page.getByRole('tab')).toHaveCount(0)
+    // Plan and billing is a destination of its own; beside a pane it opens the plan.
+    await open(page, `${ORG}/billing`)
+    await expect(page).toHaveURL(`${ORG}/billing/plan`)
+    await expectPanes(page, ['organization-billing', 'organization-plan'])
   })
 
   test('five organization destinations keep tenant management in Menu', async ({ page }) => {
@@ -1102,7 +1098,7 @@ test.describe('dashboard pane hierarchy', () => {
     await expect(page.locator('#dashboard-panel-catalog [data-testid="dashboard-navbar-back"]')).toHaveCount(0)
   })
 
-  test('a Basic business\'s billing tabs show its actual payment methods and Basic plan', async ({ page, baseURL }) => {
+  test('a Basic business\'s Plan and billing shows its Basic plan, Choose a plan and what managed ads needs', async ({ page, baseURL }) => {
     await page.setViewportSize(PHONE)
     const mobileNav = page.getByTestId('dashboard-mobile-nav')
     // KrabiClaw Review Legal is our own fictional Basic business with no billing
@@ -1132,77 +1128,59 @@ test.describe('dashboard pane hierarchy', () => {
       const methods = await page.request.get(`/api/billing/payment-methods?organizationId=${basicId}`)
       expect(methods.status(), await methods.text()).toBe(200)
       expect(await methods.json()).toEqual({ payment_methods: [] })
-      // The column reads the plan and its usage billing on arrival, whichever tab is open.
-      const planBilling = page.waitForResponse(response => {
-        const url = new URL(response.url())
-        return url.pathname === '/api/billing/status' && url.searchParams.get('includePrice') === 'true'
-      })
-      const usageBilling = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/payments/billing')
+
+      // Payments is money in only: no card editor or invoice list for what the business pays KrabiClaw.
       await open(page, `${basic}/payments`)
       const payments = page.locator('#dashboard-panel-organization-payments')
-      // On a phone the tab is rows and nothing opens on its own; the row states the actual cards.
-      await expect(page).toHaveURL(`${basic}/payments`)
-      await expect(payments.getByRole('link', { name: /^Payment methods/ })).toBeVisible()
-      await expect(payments.getByText('No payment methods saved yet.', { exact: true })).toBeVisible()
-      // UAlert renders its message in this slot, including native provider errors.
-      await expect(payments.locator('[data-slot="description"]')).toHaveCount(0)
-      // The row opens the cards as a drawer, with the same actual state and the way to add one.
-      await payments.getByRole('link', { name: /^Payment methods/ }).click()
-      const methodsLeaf = page.getByRole('dialog', { name: 'Payment methods', exact: true })
-      await expect(methodsLeaf.getByText('No payment methods saved yet.', { exact: true })).toBeVisible()
-      await expect(methodsLeaf.getByRole('button', { name: 'Add payment method', exact: true })).toBeVisible()
-      await methodsLeaf.getByTestId('dashboard-navbar-close').click()
-      await expect(page).toHaveURL(`${basic}/payments`)
+      await expect(payments.getByRole('link', { name: /^How you get paid/ })).toBeVisible()
+      await expect(payments.getByRole('link', { name: /^(Payment methods|Your payments)/ })).toHaveCount(0)
       await expect(payments.getByTestId('dashboard-navbar-back')).toHaveAttribute('href', `${basic}/earnings`)
+
+      // Plan and billing is a Menu row of its own for the owner; on a phone the index is the screen.
+      await open(page, `${basic}/menu`)
+      await page.locator('#dashboard-panel-organization-settings').getByRole('link', { name: 'Plan and billing', exact: true }).click()
+      await expect(page).toHaveURL(`${basic}/billing`)
       await expect(mobileNav.getByRole('link')).toHaveText(['Today', 'Calendar', 'Catalog', 'Messages', 'Menu'])
+      const billingIndex = page.locator('#dashboard-panel-organization-billing')
+      await expect(billingIndex.getByTestId('dashboard-navbar-back')).toHaveAttribute('href', `${basic}/menu`)
+      // Basic has no Stripe customer: no portal row and nothing to cancel.
+      await expect(billingIndex.locator('[data-testid^="editor-row-"]')).toHaveCount(4)
+      await expect(billingIndex.getByTestId('editor-row-plan')).toContainText('Basic · Free')
+      await expect(billingIndex.locator('[data-slot="description"]')).toHaveCount(0)
 
-      await payments.getByRole('tab', { name: 'Plan', exact: true }).click()
-      await expect(page).toHaveURL(`${basic}/payments?tab=plan`)
-      const planResponse = await planBilling
-      expect(planResponse.status(), await planResponse.text()).toBe(200)
-      const plan = await planResponse.json()
-      expect(plan).toMatchObject({ success: true, billing: { plan: 'free', organizationId: basicId }, userRole: 'owner' })
-      expect(plan.billing.stripeSubscriptionId).toBeUndefined()
-      expect(plan.billing.subscriptionPrice).toBeUndefined()
-      const usageResponse = await usageBilling
-      expect(usageResponse.status(), await usageResponse.text()).toBe(200)
-      // Basic has no Stripe subscription price: its actual charge is Free, and its row opens the plans as "Choose a plan".
-      await expect(payments.getByText('Basic', { exact: true })).toBeVisible()
-      await expect(payments.getByText('Free', { exact: true })).toBeVisible()
-      await expect(payments.locator('[data-slot="description"]')).toHaveCount(0)
-      await payments.getByRole('link', { name: /^Basic/ }).click()
-      const plans = page.getByRole('dialog', { name: 'Choose a plan', exact: true })
-      await expect(plans).toBeVisible()
-      await expect(plans.getByRole('button', { name: 'Switch to Growth', exact: true })).toBeVisible()
-      await plans.getByTestId('dashboard-navbar-close').click()
-      await expect(page).toHaveURL(`${basic}/payments?tab=plan`)
+      // The plan leaf states the locations in use, then its one way up.
+      await billingIndex.getByTestId('editor-row-plan').click()
+      const planLeaf = page.getByRole('dialog', { name: 'Plan', exact: true })
+      await expect(planLeaf.getByTestId('editor-row-locations')).toContainText('2 included')
+      await planLeaf.getByRole('link', { name: /^Choose a plan/ }).click()
+      await expect(page).toHaveURL(`${basic}/billing/upgrade`)
+      const choose = page.getByRole('dialog', { name: 'Choose a plan', exact: true })
+      await expect(choose.getByRole('radio')).toHaveCount(2)
+      await expect(choose.getByRole('button', { name: 'Continue', exact: true })).toBeDisabled()
+      await choose.getByRole('radio', { name: /^Growth/ }).check()
+      await expect(choose.getByRole('button', { name: 'Continue', exact: true })).toBeEnabled()
+      await choose.getByTestId('dashboard-navbar-close').click()
+      await expect(page).toHaveURL(`${basic}/billing`)
 
-      // A Basic business without an operating billing customer gets the actual
-      // setup action, and cannot record a billable agreement by submitting it.
+      // Managed ads shows each requirement as the agreement checks it, and offers no consent until all hold.
       const servicesBefore = await page.request.get('/api/dashboard/services?org=krabiclaw-review-legal')
       expect(servicesBefore.status(), await servicesBefore.text()).toBe(200)
       expect(await servicesBefore.json()).toEqual({ success: true, services: { managed_ads: null, strategy: null } })
-      await payments.getByRole('link', { name: /^Managed ads/ }).click()
+      await billingIndex.getByTestId('editor-row-managed-ads').click()
       const managedAds = page.getByRole('dialog', { name: 'Managed ads', exact: true })
-      await expect(managedAds.getByText('Before turning it on, connect a Google Ads account billed in USD and set up active Payments billing with a default payment method.', { exact: true })).toBeVisible()
-      await expect(managedAds.getByRole('link', { name: 'Payment methods', exact: true })).toHaveCount(0)
-      await managedAds.getByRole('link', { name: 'Choose a plan with Payments', exact: true }).click()
-      await expect(page).toHaveURL(`${basic}/payments/plan`)
-      await expect(plans).toBeVisible()
-      await plans.getByTestId('dashboard-navbar-close').click()
-      await payments.getByRole('link', { name: /^Managed ads/ }).click()
-      const rejectedAgreement = page.waitForResponse(response => new URL(response.url()).pathname === '/api/dashboard/services' && response.request().method() === 'POST')
-      await managedAds.getByRole('button', { name: 'Agree and turn on', exact: true }).click()
-      const rejected = await rejectedAgreement
+      for (const id of ['google-ads', 'business-plan', 'payment-method']) await expect(managedAds.getByTestId(`editor-row-${id}`)).toContainText('Not yet')
+      await expect(managedAds.getByRole('button', { name: 'Agree and turn on', exact: true })).toBeDisabled()
+      await managedAds.getByTestId('editor-row-business-plan').click()
+      await expect(page).toHaveURL(`${basic}/billing/upgrade`)
+      await page.getByRole('dialog', { name: 'Choose a plan', exact: true }).getByTestId('dashboard-navbar-close').click()
+      await expect(page).toHaveURL(`${basic}/billing`)
+      // The server refuses a consent the page would not offer, and records nothing.
+      const rejected = await page.request.post('/api/dashboard/services?org=krabiclaw-review-legal', { headers: authRequestHeaders(baseURL!), data: { service: 'managed_ads', action: 'agree' } })
       expect(rejected.status(), await rejected.text()).toBe(409)
-      const setupMessage = 'Set up active Payments billing in Plan before turning on managed ads. Choose a plan with Payments if your business does not have billing set up.'
-      await expect(managedAds.getByText(setupMessage, { exact: true })).toBeVisible()
-      await expect(payments.getByText('Managed ads is off.', { exact: true })).toHaveCount(0)
+      expect((await rejected.json() as { message: string }).message).toBe('Set up active Payments billing in Plan and billing before turning on managed ads.')
       const servicesAfter = await page.request.get('/api/dashboard/services?org=krabiclaw-review-legal')
       expect(servicesAfter.status(), await servicesAfter.text()).toBe(200)
       expect(await servicesAfter.json()).toEqual({ success: true, services: { managed_ads: null, strategy: null } })
-      await managedAds.getByTestId('dashboard-navbar-close').click()
-      await expect(page).toHaveURL(`${basic}/payments?tab=plan`)
     } finally {
       try {
         if (impersonated) {

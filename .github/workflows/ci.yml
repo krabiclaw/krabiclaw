@@ -102,8 +102,9 @@ jobs:
       - run: yarn test:e2e
       # Wrangler's own log names why the local Worker stopped serving; run
       # 36298734414 died serving _nuxt chunks with nothing else to read.
+      # Uploaded on success too: specs save screenshots for visual review there.
       - name: Upload Playwright report
-        if: failure()
+        if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         with:
           name: playwright-report-pr
