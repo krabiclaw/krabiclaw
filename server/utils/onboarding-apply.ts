@@ -14,6 +14,7 @@ import { prepareContentDocumentDeletion, prepareContentDocumentWithBlocks } from
 import { parseOpeningHours, parseSpecialHours } from '~/shared/reservation-hours'
 import { getPlaceDetails, googleReviewUpserts } from '~/server/utils/google-places'
 import { execute, executeBatch, queryAll, queryFirst, type BatchQuery } from '~/server/db'
+import { reportBillingUsage } from '~/server/utils/billing'
 import { resourceLocalizationDeletionQueries } from '~/server/utils/localization'
 import { getProduct, planProductCreateWrites, publishStayProducts, slugCandidate } from '~/server/utils/product-management'
 import { updateLocation } from '~/server/utils/location-management'
@@ -568,6 +569,8 @@ export async function applyOnboardingDraft(
     throw batchError
   }
   await publishStayProducts(env, deletedHomes)
+  // The import replaced the previous one's products, homes among them.
+  await reportBillingUsage(env, db, organizationId)
   for (const page of productPages) await refreshTenantPageCard(db, env, page, userId)
   if (input.activate) await activateOrganization(db, organizationId, writeGuard, input.draft)
   return { locationSlug: updatedSlug }

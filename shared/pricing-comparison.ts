@@ -1,6 +1,6 @@
 import { getPlanEntitlements } from '../server/utils/billing-entitlements'
 import { PLATFORM_LOCALES } from './platform-locales'
-import { additionalLocationPrice, additionalRentalUnitPrice, BUSINESS_PLAN_ID, INCLUDED_LOCATIONS, INCLUDED_RENTAL_UNITS, isKnownRecurringPlan } from './billing-model'
+import { additionalLocationPrice, additionalRentalUnitPrice, BUSINESS_PLAN_ID, INCLUDED_LOCATIONS, INCLUDED_RENTAL_UNITS, isKnownRecurringPlan, PAYMENTS_FEE } from './billing-model'
 
 const ADDITIONAL_LANGUAGE_NAMES = new Intl.ListFormat('en', { type: 'conjunction' }).format(
   PLATFORM_LOCALES.filter(({ locale }) => locale !== 'en')
@@ -50,7 +50,7 @@ export const PRICING_COMPARISON: ReadonlyArray<{ title: string; rows: readonly P
     { id: 'bookings.requests', label: 'Bookings and consultation requests', detail: 'Availability depends on your business type and configured offerings.', included: 'Included' },
     { id: 'bookings.member-availability', label: 'Team availability', detail: 'Set working hours and time off, and assign a team member to a service.', included: 'Included' },
     { id: 'catalog.products', label: 'Ticketed experiences', detail: 'For configured experience products. Payment processing terms apply.', included: 'Included' },
-    { id: 'payments.acceptance', label: 'Online payments', detail: 'Payments fees are billed separately. Set up your Stripe account and Payments billing to accept payments.', entitlement: 'payments' },
+    { id: 'payments.acceptance', label: 'Online payments', detail: `${PAYMENTS_FEE}, billed on your subscription at the end of each month. Set up your Stripe account to accept payments.`, entitlement: 'payments' },
     { id: 'notifications.email-dashboard', label: 'Booking email notifications', detail: 'Automatic booking email is separate from an explicit review request.', included: 'Included' },
     { id: 'inbox.submissions', label: 'Guest inquiries', detail: 'Read contact and reservation inquiries for your organization.', included: 'Included' },
     { id: 'reviews.read', label: 'Review records', detail: 'Read available imported and guest reviews. Display and provenance depend on the review source.', included: 'Included' },

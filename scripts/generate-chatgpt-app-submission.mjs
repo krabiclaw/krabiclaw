@@ -52,7 +52,7 @@ const effects = {
   list_payments: 'Reads a bounded page of seller-scoped tenant transactions and immutable purchase snapshots.',
   get_payment: 'Reads one authorized tenant payment, its native refund and dispute projections.',
   get_payment_payouts: 'Reads native Stripe balance and payouts in the selected seller account; moves no funds.',
-  get_payments_usage: 'Reads durable attributable usage delivery state and native Metronome invoices.',
+  get_payments_usage: 'Reads the plan subscription’s metered fee prices from Stripe and undelivered usage in the outbox.',
   get_payments_dashboard_link: 'Reads the selected organization and returns its authenticated payment settings URL; creates no account, onboarding session or financial record.',
 
   list_product_bookings: 'Reads operational Product bookings and guest snapshots within the selected tenant.',
@@ -245,7 +245,7 @@ const openWorldEffects = {
   set_member_busy_calendars: 'Reads free/busy intervals from the member’s selected Google calendars using existing granted scopes; writes no Google events.',
   reassign_product_booking: 'Sends the changed-assignment notice through the existing guest delivery lifecycle after the atomic reassignment.',
   get_payment_payouts: 'The seller-scoped Stripe account is queried for native balance and payouts.',
-  get_payments_usage: 'The separate operating Metronome customer is queried for native invoices.',
+  get_payments_usage: 'The business’s Stripe plan subscription is queried for its metered fee prices.',
   create_product_booking: 'Sends owner alerts and, when requested, an acknowledgement email to the supplied guest address.',
   confirm_product_booking: 'Sends a confirmation email to the booking guest.',
   reject_product_booking: 'Sends a decision email to the booking guest.',

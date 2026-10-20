@@ -735,9 +735,9 @@
         "destructiveHint": false
       },
       "justifications": {
-        "read_only_justification": "Reads durable attributable usage delivery state and native Metronome invoices.",
-        "open_world_justification": "Reads durable attributable usage delivery state and native Metronome invoices. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
-        "destructive_justification": "Reads durable attributable usage delivery state and native Metronome invoices."
+        "read_only_justification": "Reads the plan subscription’s metered fee prices from Stripe and undelivered usage in the outbox.",
+        "open_world_justification": "Reads the plan subscription’s metered fee prices from Stripe and undelivered usage in the outbox. Its scope is the authenticated KrabiClaw workspace, not arbitrary external entities or the public web.",
+        "destructive_justification": "Reads the plan subscription’s metered fee prices from Stripe and undelivered usage in the outbox."
       }
     },
     "get_post": {

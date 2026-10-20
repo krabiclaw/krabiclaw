@@ -86,13 +86,13 @@ test('inbox publication failures are visible and reservation receipts reflect cu
     await db.batch((await generateSQLiteMigration(await generateSQLiteDrizzleJson({}), await generateSQLiteDrizzleJson(schema))).map(statement => db.prepare(statement)))
     await db.prepare("INSERT INTO organization (id,name,slug, default_currency, timezone) VALUES ('healthy','Healthy','healthy', 'USD', 'UTC')").run()
     const notification = {
-      scope: 'organization' as const, organizationId: 'healthy', template: 'payments.usage_invoice_paid',
-      title: 'Payments invoice paid', message: '$1.40 USD paid', idempotencyKey: 'native-invoice-paid',
+      scope: 'organization' as const, organizationId: 'healthy', template: 'payments.payout_paid',
+      title: 'Payout paid', message: '$1.40 USD paid', idempotencyKey: 'native-invoice-paid',
     }
     await assert.rejects(() => createCanonicalNotification(db, { ...notification, publishEnv: {} }), /binding is not configured/)
     const persisted = await db.prepare("SELECT id,scope_kind,organization_id,event_name,body FROM activity_entries WHERE dedupe_key='notification:native-invoice-paid'").first()
     assert(persisted)
-    assert.deepEqual(persisted, { id: 'native-invoice-paid', scope_kind: 'organization', organization_id: 'healthy', event_name: 'payments.usage_invoice_paid', body: '$1.40 USD paid' })
+    assert.deepEqual(persisted, { id: 'native-invoice-paid', scope_kind: 'organization', organization_id: 'healthy', event_name: 'payments.payout_paid', body: '$1.40 USD paid' })
     assert.equal((await (await namespace.get(namespace.idFromName('healthy')).fetch('https://guest-inbox.internal/observed')).json()).type, 'thread.changed')
 
     const replayId = await createCanonicalNotification(db, { ...notification, publishEnv: env })

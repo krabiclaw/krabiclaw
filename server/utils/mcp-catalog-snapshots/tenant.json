@@ -1,7 +1,7 @@
 {
   "surface": "tenant",
-  "fingerprint": "sha256:360b4dc7077d398bddcbe60a702d58ae57b308edf74820347cc083d25ac3c2a5",
-  "documentationFingerprint": "sha256:16a8c632b206d5f690a162488c7ea11e17b93f882bb258388b27aae0fcf67a40",
+  "fingerprint": "sha256:33e39000232ceaec33f200df1b723754ab2c2dfbe3fa2b3f1b75a78feff89764",
+  "documentationFingerprint": "sha256:d2772a671b8bf41145acee170eb3b5f8f7e85ce7da35106dde5f700c64453db1",
   "tools": [
     {
       "name": "add_organization_language",
@@ -45536,7 +45536,7 @@
     {
       "name": "get_payments_usage",
       "title": "Get payments usage",
-      "description": "Read the selected business’s KrabiClaw Payments usage, Metronome invoices, accrued usage and undelivered provider-cost events. These are operating costs, separate from customer payments and platform subscription billing. Requires payment and billing read access. Does not change billing or move money.",
+      "description": "Read the selected business’s KrabiClaw Payments fees: the rates its plan subscription’s metered prices charge for payment volume, Stripe fees and managed ad spend, and usage not yet reported to Stripe. Stripe bills these fees on the subscription invoice at the end of each period, separate from customer payments. Requires payment and billing read access. Does not change billing or move money.",
       "inputSchema": {
         "additionalProperties": false,
         "properties": {
@@ -45552,190 +45552,11 @@
         "$defs": {},
         "additionalProperties": false,
         "properties": {
-          "account": {
-            "properties": {
-              "contract_start_at": {
-                "type": [
-                  "string",
-                  "null"
-                ]
-              },
-              "currency": {
-                "type": "string"
-              },
-              "status": {
-                "type": "string"
-              }
-            },
-            "type": [
-              "object",
-              "null"
-            ]
-          },
           "configured": {
             "type": "boolean"
           },
-          "credits": {
-            "items": {
-              "properties": {
-                "action_required": {
-                  "type": "boolean"
-                },
-                "amount": {
-                  "type": "integer"
-                },
-                "currency": {
-                  "const": "USD"
-                },
-                "fx_quote_id": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "id": {
-                  "type": "string"
-                },
-                "kind": {
-                  "type": "string"
-                },
-                "provider_occurred_at": {
-                  "type": "string"
-                },
-                "source_amount": {
-                  "type": "integer"
-                },
-                "source_currency": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "id",
-                "kind",
-                "currency",
-                "amount",
-                "source_currency",
-                "source_amount",
-                "fx_quote_id",
-                "provider_occurred_at",
-                "action_required"
-              ],
-              "type": "object"
-            },
-            "type": "array"
-          },
           "dashboard_url": {
             "type": "string"
-          },
-          "invoices": {
-            "items": {
-              "properties": {
-                "collection_invoice": {
-                  "properties": {
-                    "amount_due": {
-                      "type": "integer"
-                    },
-                    "amount_paid": {
-                      "type": "integer"
-                    },
-                    "amount_remaining": {
-                      "type": "integer"
-                    },
-                    "currency": {
-                      "type": "string"
-                    },
-                    "hosted_invoice_url": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "id": {
-                      "type": "string"
-                    },
-                    "invoice_pdf": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "status": {
-                      "type": [
-                        "string",
-                        "null"
-                      ]
-                    },
-                    "total": {
-                      "type": "integer"
-                    }
-                  },
-                  "required": [
-                    "id",
-                    "status",
-                    "currency",
-                    "total",
-                    "amount_due",
-                    "amount_paid",
-                    "amount_remaining",
-                    "hosted_invoice_url",
-                    "invoice_pdf"
-                  ],
-                  "type": [
-                    "object",
-                    "null"
-                  ]
-                },
-                "credit_type": {
-                  "properties": {
-                    "name": {
-                      "const": "USD (cents)"
-                    }
-                  },
-                  "required": [
-                    "name"
-                  ],
-                  "type": "object"
-                },
-                "end_timestamp": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "id": {
-                  "type": "string"
-                },
-                "start_timestamp": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "status": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                },
-                "total": {
-                  "type": "number"
-                },
-                "type": {
-                  "type": [
-                    "string",
-                    "null"
-                  ]
-                }
-              },
-              "required": [
-                "id",
-                "total",
-                "credit_type",
-                "collection_invoice"
-              ],
-              "type": "object"
-            },
-            "type": "array"
           },
           "organization_id": {
             "type": "string"
@@ -45801,11 +45622,11 @@
               "currency": {
                 "const": "USD"
               },
+              "stripe_cost_rate": {
+                "type": "number"
+              },
               "units": {
                 "const": "cents"
-              },
-              "validated_at": {
-                "type": "string"
               }
             },
             "required": [
@@ -45813,9 +45634,9 @@
               "units",
               "captured_volume_rate",
               "captured_volume_rate_percent",
+              "stripe_cost_rate",
               "ad_spend_rate",
-              "ad_spend_rate_percent",
-              "validated_at"
+              "ad_spend_rate_percent"
             ],
             "type": [
               "object",
@@ -45838,8 +45659,6 @@
           "source",
           "pricing",
           "pending",
-          "credits",
-          "invoices",
           "dashboard_url"
         ],
         "type": "object"

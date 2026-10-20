@@ -167,7 +167,7 @@ const billingPeriodLabel = computed(() => props.photo && props.plan.id === 'free
 const locationsNote = computed(() => {
   const price = props.plan.prices.find(p => p.interval === ((props.annual ?? false) ? 'year' : 'month'))
   if (!price) return `${INCLUDED_LOCATIONS} locations included`
-  return `${INCLUDED_LOCATIONS} locations included, then ${additionalLocationPrice(price.interval)}`
+  return `${INCLUDED_LOCATIONS} locations included, then ${additionalLocationPrice()}`
 })
 
 const savingsNote = computed(() => {

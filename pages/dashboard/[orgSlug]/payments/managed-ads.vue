@@ -10,11 +10,11 @@
       </template>
       <template v-else>
         <p>{{ SERVICES.managed_ads.description }} Results stay in Insights.</p>
-        <p>The fee is <strong class="text-highlighted">{{ SERVICES.managed_ads.price }}</strong>, read from Google each day and billed with your monthly KrabiClaw fees. Google bills the ad spend itself to your Google Ads account. You can turn it off here at any time.</p>
+        <p>The fee is <strong class="text-highlighted">{{ SERVICES.managed_ads.price }}</strong>, read from Google each day and billed on your Business subscription at the end of each month. Google bills the ad spend itself to your Google Ads account. You can turn it off here at any time.</p>
         <p>Reporting days follow your Google Ads account's time zone. A day's spend is included only if managed ads is on when that day closes.</p>
-        <p>Before turning it on, connect a Google Ads account billed in USD and set up active Payments billing with a default payment method.</p>
+        <p>Before turning it on, choose Business, set a default payment method and connect a Google Ads account billed in USD.</p>
         <div class="flex flex-wrap gap-3">
-          <UButton v-if="billing && (!billing.stripeCustomerId || (usage?.configured === false && !getPlanEntitlements(billing.plan).payments))" label="Choose a plan with Payments" color="neutral" variant="outline" :to="`${parent}/plan`" />
+          <UButton v-if="billing && usage?.configured === false" label="Choose Business" color="neutral" variant="outline" :to="`${parent}/plan`" />
           <UButton v-if="billing?.stripeCustomerId" label="Payment methods" color="neutral" variant="outline" :to="`${parent}/payment-methods`" />
           <UButton label="Google Ads settings" color="neutral" variant="outline" :to="`/dashboard/${route.params.orgSlug}/integrations/google-ads`" />
           <UButton label="Billing setup help" color="neutral" variant="link" to="/help" />
@@ -26,7 +26,6 @@
 
 <script setup lang="ts">
 import { SERVICES } from '~/shared/billing-model'
-import { getPlanEntitlements } from '~/server/utils/billing-entitlements'
 import { isServices, useOrganizationBilling, useOrganizationServices, usePaymentsUsage } from '~/composables/usePaymentsSettings'
 
 definePageMeta({ layout: 'dashboard' })

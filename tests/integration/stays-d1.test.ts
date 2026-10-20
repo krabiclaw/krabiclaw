@@ -264,7 +264,7 @@ test('a place to stay is a Product at exactly one location, priced per night', {
     await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { stay: { location_id: 'lake-site', max_guests: 2 } as never } }), /keeps its location/)
     assert.deepEqual((await getProduct(db, ORG, cabin.id)).locations.map(location => location.location_id), ['cabin-site'])
     await assert.rejects(setProductLocation(db, { organizationId: ORG, productId: cabin.id, locationId: 'lake-site', actor: { actorId: OWNER } }), /exactly one location/)
-    await assert.rejects(removeProductLocation(db, { organizationId: ORG, productId: cabin.id, locationId: 'cabin-site' }), /cannot leave the location/)
+    await assert.rejects(removeProductLocation(db, { organizationId: ORG, productId: cabin.id, locationId: 'cabin-site', env }), /cannot leave the location/)
     await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { kind: 'experience' } }), /keeps its kind/)
     // Guests book a place to stay on the site and pay in full, so it takes no external booking link.
     await assert.rejects(updateProduct(db, { env, organizationId: ORG, productId: cabin.id, actor: { actorId: OWNER }, patch: { order_url: 'https://www.airbnb.com/rooms/1' } }), /takes no external booking link/)

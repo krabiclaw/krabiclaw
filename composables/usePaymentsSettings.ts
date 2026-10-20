@@ -1,5 +1,4 @@
 import { isKnownBillingPlan } from '~/shared/billing-model'
-import { isLocationCount } from '~/composables/useOrganizationSubscription'
 import { isCurrencyCode } from '~/shared/currencies'
 import type { PaymentMethodRow } from '~/server/utils/billing-customer'
 
@@ -10,12 +9,11 @@ import type { PaymentMethodRow } from '~/server/utils/billing-customer'
  * serves both and a leaf's refresh updates the row it came from.
  */
 
-export interface BillingStatus { organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; subscriptionStatus?: string; currentPeriodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month' | 'year'; subscriptionPrice?: { name: string; amount: number; currency: string; interval: 'month' | 'year' }; locations: { used: number; covered: number }; billsRentalUnits: boolean; rentalUnits: { used: number; covered: number } | null; businessUsage: { locations: number; rentalUnits: number }; scheduledPlan?: { plan: string; at: string } | null }
+export interface BillingStatus { organizationId: string; plan: string; stripeCustomerId?: string; stripeSubscriptionId?: string; subscriptionStatus?: string; currentPeriodEnd?: string; cancelAtPeriodEnd?: boolean; billingInterval?: 'month' | 'year'; subscriptionPrice?: { name: string; amount: number; currency: string; interval: 'month' | 'year' }; usage: { billsRentalUnits: boolean; locations: number; rentalUnits: number | null }; scheduledPlan?: { plan: string; at: string } | null }
 const isBillingResponse = (value: unknown): value is { success: true; billing: BillingStatus } =>
   isRecord(value) && value.success === true && isRecord(value.billing) && typeof value.billing.organizationId === 'string' && isKnownBillingPlan(value.billing.plan)
-  && isLocationCount(value.billing.locations)
-  && typeof value.billing.billsRentalUnits === 'boolean' && (value.billing.rentalUnits === null || isLocationCount(value.billing.rentalUnits))
-  && isRecord(value.billing.businessUsage) && Number.isSafeInteger(value.billing.businessUsage.locations) && Number.isSafeInteger(value.billing.businessUsage.rentalUnits)
+  && isRecord(value.billing.usage) && typeof value.billing.usage.billsRentalUnits === 'boolean' && Number.isSafeInteger(value.billing.usage.locations)
+  && (value.billing.usage.rentalUnits === null || Number.isSafeInteger(value.billing.usage.rentalUnits))
   && (value.billing.subscriptionPrice === undefined || (isRecord(value.billing.subscriptionPrice) && typeof value.billing.subscriptionPrice.name === 'string' && Number.isSafeInteger(value.billing.subscriptionPrice.amount) && isCurrencyCode(value.billing.subscriptionPrice.currency) && ['month', 'year'].includes(String(value.billing.subscriptionPrice.interval))))
   && (value.billing.scheduledPlan === undefined || value.billing.scheduledPlan === null || (isRecord(value.billing.scheduledPlan) && isKnownBillingPlan(value.billing.scheduledPlan.plan) && typeof value.billing.scheduledPlan.at === 'string'))
 
@@ -43,18 +41,15 @@ export async function useOrganizationServices() {
 }
 
 export type Pricing = { captured_volume_rate_percent: string; ad_spend_rate_percent: string | null; livemode: boolean }
-export type Credit = { id: string; source_id: string; currency: string; amount: number }
-export type UsageBilling = { configured: boolean; account?: { status: string }; pricing: Pricing | null; credits: Credit[] }
+export type UsageBilling = { configured: boolean; pricing: Pricing | null }
 const isUsageBilling = (value: unknown): value is UsageBilling => isRecord(value) && typeof value.configured === 'boolean'
   && (value.pricing === null || (isRecord(value.pricing) && (value.pricing.ad_spend_rate_percent === null || typeof value.pricing.ad_spend_rate_percent === 'string') && typeof value.pricing.captured_volume_rate_percent === 'string' && typeof value.pricing.livemode === 'boolean'))
-  && (!value.configured || (isRecord(value.account) && typeof value.account.status === 'string'))
-  && Array.isArray(value.credits) && value.credits.every(row => isRecord(row) && typeof row.id === 'string' && typeof row.source_id === 'string' && isCurrencyCode(row.currency) && Number.isSafeInteger(row.amount))
 
 export async function usePaymentsUsage() {
   const route = useRoute()
   const dashboardApi = useDashboardApi()
-  // Lazy on purpose: this reads Metronome's invoices and each one's Stripe collection
-  // invoice, and the plan rows do not wait on that provider round trip.
+  // Lazy on purpose: this reads the plan subscription's metered prices from
+  // Stripe, and the plan rows do not wait on that provider round trip.
   const { data, error, refresh } = await useAsyncData(`payments-billing:${String(route.params.orgSlug)}`, () => dashboardApi<UsageBilling>('/api/dashboard/payments/billing', { validate: isUsageBilling }), { lazy: true })
   return { usage: data, usageError: error, refreshUsage: refresh }
 }

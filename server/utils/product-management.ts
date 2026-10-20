@@ -18,7 +18,7 @@ import { completeChannelPush, requireChannelPush, type ChannelPushCompletion } f
 import type { SuccessfulChannelPush } from '~/shared/channel-push'
 import type { CloudflareEnv } from '~/server/utils/auth'
 import { readStripeCheckoutSetup } from '~/server/utils/stripe-connect'
-import { CAPACITY_GUARD_STATEMENTS, executeWithinCapacity } from '~/server/utils/billing'
+import { CAPACITY_GUARD_STATEMENTS, executeWithinCapacity, reportBillingUsage } from '~/server/utils/billing'
 import { isCurrencyCode, type CurrencyCode } from '~/shared/currencies'
 import {
   assertNoConflictingPrices,
@@ -1987,7 +1987,7 @@ export async function setProductLocation(db: DbClient, input: {
 }
 
 export async function removeProductLocation(db: DbClient, input: {
-  organizationId: string; productId: string; locationId: string
+  organizationId: string; productId: string; locationId: string; env: CloudflareEnv
 }): Promise<void> {
   const organization = await queryFirst<{ organization_id: string }>(db, 'SELECT organization_id FROM business_locations WHERE organization_id = ? AND id = ?', [input.organizationId, input.locationId])
   if (!organization) notFound('Location not found')
@@ -1997,6 +1997,8 @@ export async function removeProductLocation(db: DbClient, input: {
     { query: 'DELETE FROM product_locations WHERE organization_id = ? AND product_id = ? AND location_id = ?', params: [input.organizationId, input.productId, input.locationId] },
     publicResourceCacheInvalidationQuery(input.organizationId, 'product_location_changed'),
   ], { operation: 'Remove product location' })
+  // A location left with only homes is billed by its rental units on Business.
+  await reportBillingUsage(input.env, db, input.organizationId)
 }
 
 // ---------------------------------------------------------------------------

@@ -43,7 +43,7 @@ test('pricing desktop exposes provider details after one reveal and does not rep
   const explanation = payments.locator('details')
   await explanation.locator('summary').click()
   await expect(explanation.locator('p')).toBeVisible()
-  await expect(explanation.locator('p')).toHaveText('Payments fees are billed separately. Set up your Stripe account and Payments billing to accept payments.')
+  await expect(explanation.locator('p')).toHaveText('1.4% of payment volume, plus Stripe fees, billed on your subscription at the end of each month. Set up your Stripe account to accept payments.')
   await explanation.locator('summary').click()
   await expect(page.getByRole('heading', { name: 'Build your online home', exact: true })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Keep it current', exact: true })).toBeVisible()

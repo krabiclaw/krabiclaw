@@ -591,7 +591,7 @@ export async function handleProductsTools(ctx: McpExecutorContext) {
       const locationId = requiredString(args, 'location_id')
       await requireOrganizationProduct(organization.db, { ...scope, productId })
       await authorizeLocation(ctx, locationId)
-      await removeProductLocation(organization.db, { organizationId: organization.organizationId, productId, locationId })
+      await removeProductLocation(organization.db, { organizationId: organization.organizationId, productId, locationId, env: organization.env })
       return await productResponse(ctx, await getProduct(organization.db, organization.organizationId, productId))
     }
     case 'batch_create_products': {

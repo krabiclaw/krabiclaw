@@ -541,7 +541,7 @@ test('native online review uses canonical Products, holds capacity, and releases
     expect(paid.status(), await paid.text()).toBe(200)
     const blocked = await page.request.put(`${editor}/products/${products[0]!.id}/booking`, { data: { online_payment_required: true } })
     expect(blocked.status(), await blocked.text()).toBe(503)
-    expect(await blocked.json()).toMatchObject({ data: { code: 'financial_action_required', dashboard_url: '/dashboard/north-carolina-legal-services/payments', missing: ['payments.entitlement', 'payments.configuration', 'payments.billing', 'payments.account'] } })
+    expect(await blocked.json()).toMatchObject({ data: { code: 'financial_action_required', dashboard_url: '/dashboard/north-carolina-legal-services/payments', missing: ['payments.entitlement', 'payments.configuration', 'payments.account'] } })
     expect(await readConfig()).toMatchObject({ online_payment_required: false })
     const instantPolicy = await page.request.put(`${editor}/products/${products[0]!.id}/booking`, { data: { duration_minutes: 45, default_capacity: 1, confirmation_mode: 'instant', online_payment_required: false } })
     expect(instantPolicy.status(), await instantPolicy.text()).toBe(200)
