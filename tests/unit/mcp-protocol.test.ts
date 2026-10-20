@@ -44,12 +44,12 @@ test('asMcpError falls back to internal for a plain Error', () => {
 
 test('domain failures preserve actions and recovery receipts without private details', () => {
   const error = Object.assign(new Error('Upgrade required'), { statusCode: 402, data: {
-    code: 'LANGUAGE_ENTITLEMENT_REQUIRED', dashboard_url: '/dashboard/kanpai/payments?tab=plan',
+    code: 'LANGUAGE_ENTITLEMENT_REQUIRED', dashboard_url: '/dashboard/kanpai/billing/upgrade',
     credential: 'private-value', customer_email: 'private@example.com',
   } })
   const mapped = asMcpError(error)
   assert.equal(mapped.kind, 'tool_execution')
-  assert.deepEqual(mapped.data, { status: 402, code: 'LANGUAGE_ENTITLEMENT_REQUIRED', dashboard_url: '/dashboard/kanpai/payments?tab=plan' })
+  assert.deepEqual(mapped.data, { status: 402, code: 'LANGUAGE_ENTITLEMENT_REQUIRED', dashboard_url: '/dashboard/kanpai/billing/upgrade' })
 
   const reason = 'Channex rejected part of the update.'
   const details: Record<string, unknown> = {
