@@ -65,7 +65,8 @@ for (const row of rows) {
   // between them left the subscription moved and its organization not, which
   // this finishes rather than leaving billing to refuse the mismatch.
   const existing = await readable(row.stripeSubscriptionId!)
-  if (existing) {
+  // A cancelled one is not the row's billing any more; it is replaced like one that cannot be read.
+  if (existing && existing.status !== 'canceled') {
     // Only the row's own subscription settles its organization's customer.
     if (customerOf(existing) !== row.stripeCustomerId) throw new Error(`Subscription ${existing.id} belongs to ${customerOf(existing)}, not ${row.referenceId}'s customer ${row.stripeCustomerId}`)
     if (row.organizationCustomerId !== row.stripeCustomerId) d1(`UPDATE organization SET stripeCustomerId = ${sqlString(row.stripeCustomerId)} WHERE id = ${sqlString(row.referenceId)}`)
