@@ -1,6 +1,6 @@
 import { FAQ_BLOCK_SOURCES } from '../shared/faq-block'
 import { videoUploadDate, youTubeVideoId } from '../shared/youtube-video'
-import { isSingleMediaPlacement, isSupportedMediaPlacement } from '../shared/media-placement-contract'
+import { isSupportedMediaPlacement } from '../shared/media-placement-contract'
 import { PLATFORM_LOCALES } from '../shared/platform-locales'
 
 export const TENANT_PAGE_SCHEMA_VERSION = 1 as const
@@ -896,9 +896,6 @@ export function normalizeTenantPageBlocks(value: unknown): TenantPageBlock[] {
       const slot = asString(item.slot, `blocks[${index}].media[${mediaIndex}].slot`, true)!
       return { asset_id: assetId, slot, sort_order: mediaIndex }
     })
-    // A slot that is not an ordered list holds one picture.
-    const singleSlots = normalizedMedia.map(item => item.slot).filter(slot => isSingleMediaPlacement({ owner_type: 'content_block', slot }))
-    if (new Set(singleSlots).size !== singleSlots.length) throw new Error(`blocks[${index}].media may hold one asset per single-asset slot.`)
     const canonicalSlot = type === 'gallery' ? 'gallery' : type === 'hero' || type === 'image' ? 'media' : null
     if (canonicalSlot && normalizedMedia.some(item => item.slot !== canonicalSlot && !(type === 'hero' && item.slot.startsWith('parallax_') && isSupportedMediaPlacement({ owner_type: 'content_block', slot: item.slot })))) {
       throw new Error(`blocks[${index}].media must use the ${canonicalSlot} slot for ${type} blocks.`)
