@@ -190,6 +190,7 @@ export default {
   },
   "legal": {
     "powered_by": "Powered by KrabiClaw",
+    "payment_methods": "Payment methods accepted",
     "accept": "Accept",
     "analytics_notice": "We use cookies to improve your experience. By continuing, you agree to our",
     "analytics_notice_link": "Privacy Policy",

@@ -477,6 +477,7 @@
   "booking_policy.reschedule_allowed": "สามารถขอเปลี่ยนเวลาได้",
   "booking_policy.reschedule_disallowed": "ไม่สามารถเปลี่ยนเวลาได้",
   "legal.powered_by": "ขับเคลื่อนโดย KrabiClaw",
+  "legal.payment_methods": "ช่องทางการชำระเงินที่รับ",
   "stay.confirmed_title": "การจองที่พักของคุณได้รับการยืนยันแล้ว",
   "stay.your_stay": "ที่พักของคุณ",
   "stay.check_in": "เช็กอิน",

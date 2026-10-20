@@ -183,6 +183,11 @@ export interface PublicResourceCacheParams {
 const encodeKeyField = (value: string | null | undefined): string =>
   encodeURIComponent(value ?? '').replace(/~/g, '%7E')
 
+/** The site's accepted payment methods, under the site's prefix so its purge clears them. */
+export function buildPublicPaymentMethodsCacheKey(organizationId: string): string {
+  return ['public', encodeKeyField(organizationId), 'v13', 'payment-methods'].join('~')
+}
+
 export function buildPublicResourceCacheKey(organizationId: string, params: PublicResourceCacheParams): string {
   return [
     'public',

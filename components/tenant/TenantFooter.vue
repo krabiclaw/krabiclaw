@@ -1,8 +1,8 @@
 <template>
   <footer class="border-t border-default bg-elevated text-default" aria-labelledby="tenant-footer-heading">
     <h2 id="tenant-footer-heading" class="sr-only">{{ t('site.footer.label') }}</h2>
-    <div class="mx-auto max-w-7xl px-4 pb-8 pt-16 sm:px-6 lg:px-8 lg:pt-20">
-      <div class="grid gap-16 border-b border-default pb-14 lg:grid-cols-[1fr_1.4fr]">
+    <div class="mx-auto max-w-7xl px-4 pb-8 pt-12 sm:px-6 sm:pt-16 lg:px-8 lg:pt-20">
+      <div class="grid gap-10 border-b border-default pb-10 sm:pb-14 lg:grid-cols-[1fr_1.4fr] lg:gap-16">
         <div class="space-y-6">
           <NuxtLink :to="localePath('/')" class="inline-flex no-underline" :aria-label="`${brandName} home`">
             <SiteLogo :alt="brandName" size="md" loading="lazy">
@@ -27,7 +27,7 @@
         >
           {{ t('site.footer.locations_error') }}
         </div>
-        <div v-else-if="showAddresses && locations.length" class="grid gap-8" :class="locations.length > 2 ? 'sm:grid-cols-3' : 'sm:grid-cols-2'">
+        <div v-else-if="showAddresses && locations.length" class="grid gap-8 sm:grid-cols-2" :class="{ 'xl:grid-cols-3': locations.length > 2 }">
           <div v-for="loc in formattedLocations" :key="loc.id">
             <div class="tenant-display text-xl font-normal leading-none text-highlighted">{{ loc.title }}</div>
             <div class="mt-2 text-sm leading-relaxed text-muted">{{ formatLocAddress(loc) }}</div>
@@ -43,7 +43,7 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-2 gap-8 border-b border-default py-12 md:grid-cols-4">
+      <div class="grid grid-cols-2 gap-x-6 gap-y-10 border-b border-default py-10 sm:py-12 md:grid-cols-4">
         <div v-for="group in footerGroups" :key="group.label">
           <h3 class="tenant-eyebrow mb-5 text-dimmed">{{ group.label }}</h3>
           <ul class="space-y-3 text-sm" role="list">

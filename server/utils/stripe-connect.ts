@@ -366,37 +366,76 @@ const STRIPE_CONNECT_ACCOUNT_INCLUDE: Stripe.V2.Core.AccountRetrieveParams.Inclu
   'requirements',
 ]
 
-/** The configured native Stripe account and methods must accept a paid booking before it is offered. */
-export async function requireStripeCheckoutAcceptance(db: DbClient, env: CloudflareEnv, organizationId: string) {
+/** The business's one active Stripe payment method configuration, inheriting the platform's Payments parent. */
+// Stripe's own failures propagate; only a configuration the business must fix is returned as a problem.
+async function connectedMethodConfiguration(stripe: Stripe, stripeAccountId: string, parent: string): Promise<{ configuration: Stripe.PaymentMethodConfiguration } | { problem: string }> {
+  const configurations = await stripe.paymentMethodConfigurations.list({ limit: 100 }, { stripeAccount: stripeAccountId })
+  if (configurations.has_more) return { problem: 'Connected checkout configuration needs bounded operator review' }
+  const matching = configurations.data.filter(configuration => configuration.parent === parent || configuration.id === parent)
+  if (matching.length !== 1 || !matching[0]!.active) return { problem: 'One active connected payment configuration inheriting the Payments parent is required' }
+  return { configuration: matching[0]! }
+}
+
+/**
+ * Whether a business takes payment online now, and if not, why, for whoever
+ * asks: checkout refuses with the reason, the footer shows no methods. Stripe
+ * is read for the account itself, so a capability event not yet projected
+ * still counts.
+ */
+async function checkoutReadiness(db: DbClient, env: CloudflareEnv, organizationId: string) {
   const setup = await readStripeCheckoutSetup(db, organizationId, env)
   const handoff = { code: 'financial_action_required', dashboard_url: `/dashboard/${encodeURIComponent(setup.slug)}/payments`, missing: setup.missing }
   // Native retrieval below can resolve a capability event not yet projected.
-  if (setup.missing.some(field => field !== 'payments.account_ready')) throw new HTTPError({
-    statusCode: setup.missing.includes('payments.configuration') ? 503 : setup.missing.includes('payments.entitlement') ? 403 : 409,
-    statusMessage: 'Complete the business’s Payments setup before accepting online payments', data: handoff,
-  })
+  if (setup.missing.some(field => field !== 'payments.account_ready')) {
+    return { ready: false as const, statusCode: setup.missing.includes('payments.configuration') ? 503 : setup.missing.includes('payments.entitlement') ? 403 : 409, statusMessage: 'Complete the business’s Payments setup before accepting online payments', handoff }
+  }
   // Payments fees are billed only in the platform's mode, on the business's
   // subscription; a demo's test-mode payments carry none.
   if (setup.livemode === platformLivemode(env) && !(await paymentsUsage(db, env, organizationId)).configured) {
-    throw new HTTPError({ statusCode: 409, statusMessage: 'Your plan subscription does not bill Payments fees yet. Choose Business in Plan before accepting online payments', data: { ...handoff, missing: [...handoff.missing, 'payments.billing'] } })
+    return { ready: false as const, statusCode: 409, statusMessage: 'Your plan subscription does not bill Payments fees yet. Choose Business in Plan before accepting online payments', handoff: { ...handoff, missing: [...handoff.missing, 'payments.billing'] } }
   }
   const saved = setup.connected!
   const keys = paymentsStripeKeys(env, setup.livemode!)!
   const stripe = createStripeClient(keys.secretKey, 'payments')
   const account = await stripe.v2.core.accounts.retrieve(saved.stripeAccountId!, { include: STRIPE_CONNECT_ACCOUNT_INCLUDE })
   const connected = await projectStripeConnectedAccount(db, accountProjection(saved, account))
-  if (connected.status !== 'ready' || account.livemode !== saved.livemode) throw new HTTPError({ statusCode: 409, statusMessage: 'Complete the business’s Stripe account setup before requiring online collection', data: handoff })
-  const configurations = await stripe.paymentMethodConfigurations.list({ limit: 100 }, { stripeAccount: account.id })
-  if (configurations.has_more) throw new HTTPError({ statusCode: 409, statusMessage: 'Connected checkout configuration needs bounded operator review', data: handoff })
-  const matching = configurations.data.filter(configuration => configuration.parent === keys.methodConfiguration || configuration.id === keys.methodConfiguration)
-  if (matching.length !== 1 || !matching[0]!.active) throw new HTTPError({ statusCode: 409, statusMessage: 'One active connected payment configuration inheriting the Payments parent is required', data: handoff })
-  // Which methods the business offers is its Stripe payment method configuration's to decide.
-  const methods = matching[0]!
+  if (connected.status !== 'ready' || account.livemode !== saved.livemode) return { ready: false as const, statusCode: 409, statusMessage: 'Complete the business’s Stripe account setup before requiring online collection', handoff }
+  // Stripe Tax is calculated by hosted Checkout only; checkout refuses an on-site payment for a business registered for it.
   const [taxSettings, registrations] = await Promise.all([
     stripe.tax.settings.retrieve({}, { stripeAccount: account.id }),
     stripe.tax.registrations.list({ status: 'active', limit: 1 }, { stripeAccount: account.id }),
   ])
-  return { connected: { ...connected, stripeAccountId: account.id }, methodConfigurationId: methods.id, automaticTax: taxSettings.status === 'active' && registrations.data.length > 0 }
+  return { ready: true as const, stripe, account, connected, parent: keys.methodConfiguration!, handoff, automaticTax: taxSettings.status === 'active' && registrations.data.length > 0 }
+}
+
+/**
+ * The ways a business takes payment on its site, as its Stripe configuration
+ * turns them on: what its footer shows, as a shop's footer shows its cards and
+ * wallets. A business not ready to take payment online takes none here.
+ */
+export async function acceptedPaymentMethods(db: DbClient, env: CloudflareEnv, organizationId: string): Promise<{ types: string[]; country: string | null }> {
+  const readiness = await checkoutReadiness(db, env, organizationId)
+  // Not ready, or registered for Stripe Tax which checkout refuses: it takes no payment on the site.
+  if (!readiness.ready || readiness.automaticTax) return { types: [], country: null }
+  const methods = await connectedMethodConfiguration(readiness.stripe, readiness.account.id, readiness.parent)
+  // A configuration the business must still fix takes no payment, as checkout refuses it.
+  if ('problem' in methods) return { types: [], country: null }
+  const types = Object.entries(methods.configuration as unknown as Record<string, unknown>)
+    .filter(([, value]) => typeof value === 'object' && value !== null && (value as { available?: unknown }).available === true
+      && (value as { display_preference?: { value?: unknown } }).display_preference?.value === 'on')
+    .map(([type]) => type)
+  return { types, country: readiness.connected.country }
+}
+
+/** The configured native Stripe account and methods must accept a paid booking before it is offered. */
+export async function requireStripeCheckoutAcceptance(db: DbClient, env: CloudflareEnv, organizationId: string) {
+  const readiness = await checkoutReadiness(db, env, organizationId)
+  if (!readiness.ready) throw new HTTPError({ statusCode: readiness.statusCode, statusMessage: readiness.statusMessage, data: readiness.handoff })
+  const { stripe, account, connected, handoff } = readiness
+  // Which methods the business offers is its Stripe payment method configuration's to decide.
+  const methods = await connectedMethodConfiguration(stripe, account.id, readiness.parent)
+  if ('problem' in methods) throw new HTTPError({ statusCode: 409, statusMessage: methods.problem, data: handoff })
+  return { connected: { ...connected, stripeAccountId: account.id }, methodConfigurationId: methods.configuration.id, automaticTax: readiness.automaticTax }
 }
 
 export async function refreshStripeConnectedAccount(
